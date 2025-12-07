@@ -32,6 +32,10 @@ jobs:
         mkdir -p home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/win-x64/zh-hans
         mkdir -p home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/linux-x64/zh-hans
         mkdir -p home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/osx-x64/zh-hans
+        mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/win-x64/zh-hans/Languages.resources.dll
+        mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/linux-x64/zh-hans/Languages.resources.dll
+        mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/osx-x64/zh-hans/Languages.resources.dll
+
     - name: Test build
       run: /bin/sh ./build.sh DryRelease
     - name: Test

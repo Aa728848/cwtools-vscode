@@ -25,7 +25,9 @@ jobs:
     - name: Set chmod
       run: chmod +x ./build.sh
     - name: Create dir
-      run: mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/src/Main/bin/Release/net9.0/win-x64/zh-hans
+      run: |
+        mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/src/Main/bin/Release/net9.0/win-x64/zh-hans
+        mkdir -p home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/win-x64/zh-hans
     - name: Test build
       run: /bin/sh ./build.sh DryRelease
     - name: Test

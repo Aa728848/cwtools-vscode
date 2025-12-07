@@ -29,9 +29,6 @@ jobs:
         mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/src/Main/bin/Release/net9.0/win-x64/zh-hans
         mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/src/Main/bin/Release/net9.0/linux-x64/zh-hans
         mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/src/Main/bin/Release/net9.0/osx-x64/zh-hans
-        mkdir -p home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/win-x64/zh-hans
-        mkdir -p home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/linux-x64/zh-hans
-        mkdir -p home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/osx-x64/zh-hans
         mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/win-x64/zh-hans
         mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/linux-x64/zh-hans
         mkdir -p /home/runner/work/cwtools-vscode/cwtools-vscode/release/bin/server/osx-x64/zh-hans

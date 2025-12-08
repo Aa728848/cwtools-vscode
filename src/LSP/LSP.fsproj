@@ -19,5 +19,4 @@
     <PackageReference Include="FSharp.Collections.ParallelSeq" />
     <PackageReference Include="FSharp.Data" />
   </ItemGroup>
-  <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

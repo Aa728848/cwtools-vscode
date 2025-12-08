@@ -1,0 +1,20 @@
+<Solution>
+  <Folder Name="/.paket/">
+    <File Path="paket.dependencies" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="build.cmd" />
+    <File Path="build.sh" />
+    <File Path="Directory.Packages.props" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/CSharpExtensions/CSharpExtensions.csproj" />
+    <Project Path="src/Languages/Languages.csproj" />
+    <Project Path="src/LSP/LSP.fsproj">
+    </Project>
+    <Project Path="src/Main/Main.fsproj">
+    </Project>
+  </Folder>
+  <Folder Name="/tests/" />
+  <Project Path="build/build.fsproj" />
+</Solution>

@@ -5,7 +5,7 @@
   <PropertyGroup>
     <AssemblyName>CWTools Server</AssemblyName>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <PublishReadyToRunComposite>true</PublishReadyToRunComposite>
@@ -17,7 +17,7 @@
     <RuntimeHostConfigurationOption Include="System.GC.NoAffinitize" Value="true" />
 
     <ProjectReference Include="..\LSP\LSP.fsproj" />
-    <ProjectReference Condition="'$(UseLocalCwtools)' != 'True'" Include="..\..\paket-files\git\www.github.com\cwtools\cwtools\CWTools\CWTools.fsproj" />
+    <ProjectReference Condition="'$(UseLocalCwtools)' != 'True'" Include="..\..\submodules\cwtools\CWTools\CWTools.fsproj" />
     <ProjectReference Condition="'$(UseLocalCwtools)' == 'True'" Include="$(CwtoolsPath)" />
   </ItemGroup>
   <ItemGroup>

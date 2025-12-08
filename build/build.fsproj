@@ -8,7 +8,6 @@
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Fake.Core" />
     <PackageReference Include="Fake.Core.Target" />
     <PackageReference Include="Fake.DotNet.Paket" />
     <PackageReference Include="Fake.JavaScript.Npm" />
@@ -16,8 +15,6 @@
     <PackageReference Include="Fake.Tools.Git" />
     <PackageReference Include="Fake.Core.ReleaseNotes" />
     <PackageReference Include="Fake.Api.GitHub" />
-    <PackageReference Include="FSharp.Collections.ParallelSeq" />
     <PackageReference Include="MSBuild.StructuredLogger" />
   </ItemGroup>
-  <Import Project="..\.paket\Paket.Restore.targets" />
 </Project>

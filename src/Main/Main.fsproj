@@ -31,15 +31,6 @@
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="FSharp.Collections.ParallelSeq" />
-    <PackageReference Include="FSharp.Data" />
-    <PackageReference Include="System.Text.Encoding.CodePages" />
-    <PackageReference Include="FParsec" />
-    <PackageReference Include="DotNet.Glob" />
-    <PackageReference Include="FSharpx.Collections" />
-    <PackageReference Include="Sandwych.QuickGraph.Core" />
-    <PackageReference Include="FsPickler" />
-    <PackageReference Include="VDS.Common" />
     <PackageReference Include="LibGit2Sharp" />
   </ItemGroup>
 </Project>

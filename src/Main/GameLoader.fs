@@ -161,11 +161,7 @@ let getConfigFiles cachePath useManualRules manualRulesFolder =
 
 let getFolderList (filename: string, filetext: string) =
     if Path.GetFileName filename = "folders.cwt" then
-        Some(
-            filetext.Split([| "\r\n"; "\r"; "\n" |], StringSplitOptions.None)
-            |> List.ofArray
-            |> List.filter (fun s -> s <> "")
-        )
+        Some(filetext.Split([| "\r\n"; "\r"; "\n" |], StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries))
     else
         None
 
@@ -176,9 +172,9 @@ type ServerSettings =
       isVanillaFolder: bool
       path: string
       workspaceFolders: WorkspaceFolder list
-      dontLoadPatterns: string list
+      dontLoadPatterns: string array
       validateVanilla: bool
-      languages: CWTools.Common.Lang list
+      languages: CWTools.Common.Lang array
       experimental: bool
       debug_mode: bool
       maxFileSize: int }
@@ -231,10 +227,11 @@ let getRootDirectories (serverSettings: ServerSettings) =
             |> List.map (fun wd ->
                 { WorkspaceDirectory.name = wd.name
                   path = wd.uri.LocalPath })
-
-    (rawdirs |> List.map WD)
-    @ (rawdirs |> List.collect (CWTools.Serializer.addDLCs "dlc"))
-    @ (rawdirs |> List.collect (CWTools.Serializer.addDLCs "integrated_dlc"))
+    let rawdirs = rawdirs |> Array.ofList
+    Array.concat
+        [ rawdirs |> Array.map WD;
+            rawdirs |> Array.collect (CWTools.Serializer.addDLCs "dlc");
+            rawdirs |> Array.collect (CWTools.Serializer.addDLCs "integrated_dlc") ]
 
 
 let loadEU4 (serverSettings: ServerSettings) =

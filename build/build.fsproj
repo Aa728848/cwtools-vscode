@@ -1,11 +1,23 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.fs" />
   </ItemGroup>
-  <Import Project="..\.paket\Paket.Restore.targets" />
+  <ItemGroup>
+    <PackageReference Include="Fake.Core.Target" Version="6.1.3"/>
+    <PackageReference Include="Fake.DotNet.Paket" Version="6.1.3"/>
+    <PackageReference Include="Fake.JavaScript.Npm" Version="6.1.3"/>
+    <PackageReference Include="Fake.Core.UserInput" Version="6.1.3"/>
+    <PackageReference Include="Fake.Tools.Git" Version="6.1.3"/>
+    <PackageReference Include="Fake.Core.ReleaseNotes" Version="6.1.3"/>
+    <PackageReference Include="Fake.Api.GitHub" Version="6.1.3"/>
+    <PackageReference Include="MSBuild.StructuredLogger" Version="2.3.113"/>
+  </ItemGroup>
 </Project>

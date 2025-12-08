@@ -1,31 +1,4 @@
-source https://www.nuget.org/api/v2
-storage: none
-nuget System.Text.Encoding.CodePages #
-nuget FParsec 2.0.0-beta2
-nuget FSharp.Data 3.0.1 #
-nuget FSharp.Collections.ParallelSeq #
-nuget DotNet.Glob #
-nuget FSharpx.Collections #
-nuget Sandwych.QuickGraph.Core #
-nuget FsPickler #
-nuget VDS.Common
-nuget LibGit2Sharp 0.31.0
 
 group git
     git https://www.github.com/cwtools/cwtools master
 
-group build
-    source https://api.nuget.org/v3/index.json
-    storage: none
-    framework: net9.0
-
-    nuget Fake.Core
-    nuget Fake.Core.Target
-    nuget Fake.DotNet.Paket
-    nuget Fake.JavaScript.Npm
-    nuget Fake.Core.UserInput
-    nuget Fake.Tools.Git
-    nuget Fake.Core.ReleaseNotes
-    nuget Fake.Api.GitHub
-    nuget FSharp.Collections.ParallelSeq
-    nuget MSBuild.StructuredLogger >= 2.1.784

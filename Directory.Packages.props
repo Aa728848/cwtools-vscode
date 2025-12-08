@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Main dependencies -->
+    <PackageVersion Include="LibGit2Sharp" Version="0.31" />
+    <PackageVersion Include="FSharp.Data" Version="3.3.1"/>
+    <PackageVersion Include="FSharp.Collections.ParallelSeq" Version="1.2.0"/>
+  </ItemGroup>
+</Project>

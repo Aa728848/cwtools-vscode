@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+	<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+		<Metadata>
+			<Identity Language="en-US" Id="cwtools-vscode" Version="0.10.31" Publisher="tboby" />
+			<DisplayName>CWTools - Paradox Language Services</DisplayName>
+			<Description xml:space="preserve">Paradox Interactive scripting file support using CWTools</Description>
+			<Tags>paradox,stellaris,victoria,crusader kings,hearts of iron,snippet,pdxscript,__ext_txt,__ext_gui,__ext_gfx,__ext_asset,__ext_cwt,hoi4,eu4,ck2,__ext_sfx,imperator,vic2,__ext_map,ck3,vic3,eu5</Tags>
+			<Categories>Programming Languages,Linters</Categories>
+			<GalleryFlags>Public Preview</GalleryFlags>
+			
+			<Properties>
+				<Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.83.0" />
+				<Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value="" />
+				<Property Id="Microsoft.VisualStudio.Code.ExtensionPack" Value="tboby.paradox-syntax" />
+				<Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="workspace" />
+				<Property Id="Microsoft.VisualStudio.Code.LocalizedLanguages" Value="" />
+				<Property Id="Microsoft.VisualStudio.Code.EnabledApiProposals" Value="" />
+				
+				<Property Id="Microsoft.VisualStudio.Code.ExecutesCode" Value="true" />
+				
+				<Property Id="Microsoft.VisualStudio.Services.Links.Source" Value="https://github.com/cwtools/cwtools-vscode.git" />
+				<Property Id="Microsoft.VisualStudio.Services.Links.Getstarted" Value="https://github.com/cwtools/cwtools-vscode.git" />
+				<Property Id="Microsoft.VisualStudio.Services.Links.GitHub" Value="https://github.com/cwtools/cwtools-vscode.git" />
+				<Property Id="Microsoft.VisualStudio.Services.Links.Support" Value="https://github.com/cwtools/cwtools-vscode/issues" />
+				<Property Id="Microsoft.VisualStudio.Services.Links.Learn" Value="https://github.com/cwtools/cwtools-vscode#readme" />
+				
+				
+				<Property Id="Microsoft.VisualStudio.Services.GitHubFlavoredMarkdown" Value="true" />
+				<Property Id="Microsoft.VisualStudio.Services.Content.Pricing" Value="Free"/>
+
+				
+				<Property Id="Microsoft.VisualStudio.Services.CustomerQnALink" Value="https://forum.paradoxplaza.com/forum/index.php?threads/tool-cwtools-a-mod-validating-extension-for-vs-code.1066033/" />
+			</Properties>
+			<License>extension/LICENSE.md</License>
+			<Icon>extension/docs/cwtools_logo.png</Icon>
+		</Metadata>
+		<Installation>
+			<InstallationTarget Id="Microsoft.VisualStudio.Code"/>
+		</Installation>
+		<Dependencies/>
+		<Assets>
+			<Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
+			<Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/readme.md" Addressable="true" />
+<Asset Type="Microsoft.VisualStudio.Services.Content.Changelog" Path="extension/changelog.md" Addressable="true" />
+<Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE.md" Addressable="true" />
+<Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/docs/cwtools_logo.png" Addressable="true" />
+		</Assets>
+	</PackageManifest>

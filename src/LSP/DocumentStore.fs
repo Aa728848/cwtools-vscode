@@ -108,6 +108,19 @@ type DocumentStore() =
     member this.OpenFiles() : FileInfo list =
         [ for file in activeDocuments.Keys do
               yield FileInfo(file) ]
+    
+    /// 清理不存在文件的孤儿文档，防止内存泄漏
+    member this.CleanupOrphanedDocuments(existingFiles: Set<string>) : unit =
+        let orphanedFiles =
+            activeDocuments.Keys
+            |> Seq.filter (fun filePath -> not (existingFiles.Contains filePath))
+            |> Seq.toList
+        
+        for filePath in orphanedFiles do
+            activeDocuments.Remove(filePath) |> ignore
+        
+        if orphanedFiles.Length > 0 then
+            dprintfn $"Cleaned up %i{orphanedFiles.Length} orphaned documents"
 
     member this.GetTextAtPosition(fileUri: Uri, position: Position) : string =
         match this.GetText(FileInfo(fileUri.LocalPath)) with

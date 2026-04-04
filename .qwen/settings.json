@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(findstr *)",
+      "Bash(.\\build.cmd *)",
+      "Bash(set *)",
+      "Bash(%path%)",
+      "Bash($env:path *)",
+      "Bash(dotnet *)",
+      "Bash(npm *)",
+      "Bash(dir *)",
+      "Bash(copy *)",
+      "Bash(\"c:\\users\\eddy\\.vscode\\extensions\\tboby.cwtools-vscode-0.10.31\\bin\\server\\win-x64\\cwtools server.exe\" *)",
+      "Bash(\"c:\\users\\eddy\\.vscode\\extensions\\tboby.cwtools-vscode-0.10.31\\bin\\server\\win-x64\\cwtools server.exe\")",
+      "Bash(del *)",
+      "Bash(xcopy *)",
+      "Bash(\"c:\\program files\\dotnet\\dotnet.exe\" *)",
+      "Bash(taskkill *)",
+      "Bash(cmd *)",
+      "Bash(mkdir *)",
+      "Bash(powershell *)",
+      "Read(C:\\Users\\eddy\\Documents\\cwtools-stellaris-config/**)",
+      "Read(C:\\Users\\eddy\\Documents\\cwtools-stellaris-config\\config/**)",
+      "Read(C:\\Users\\eddy\\Documents\\cwtools-stellaris-config\\config\\common/**)",
+      "Read(c:\\Users\\eddy\\Documents\\Paradox Interactive\\Stellaris\\mod\\mymod\\Warshipgirl\\common\\script_values/**)",
+      "Bash(rd *)",
+      "Read(C:\\Users\\eddy\\.vscode\\extensions\\tboby.cwtools-vscode-0.10.31/**)",
+      "Bash(git submodule *)",
+      "Bash(tasklist)",
+      "Bash(robocopy *)",
+      "Bash(npx *)",
+      "Read(C:\\Users\\eddy\\Documents\\Paradox Interactive\\Stellaris\\mod\\mymod\\Warshipgirl\\common\\decisions/**)",
+      "Read(C:\\Users\\eddy\\Documents\\Paradox Interactive\\Stellaris\\mod\\mymod\\Warshipgirl\\common\\scripted_effects/**)"
+    ]
+  },
+  "$version": 3
+}

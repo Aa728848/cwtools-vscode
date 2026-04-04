@@ -235,11 +235,47 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
         else
             s
 
+    /// 计算智能补全范围
+    /// 如果是 script_value 参数输入（value:xxx|yyy），范围应从 | 之后开始
+    let computeSmartCompletionRanges (filetext: string) (line: int) (col: int) =
+        try
+            let lines = filetext.Split('\n')
+            if line >= 0 && line < lines.Length then
+                let currentLine = lines.[line]
+                // 查找 "value:" 关键字
+                // 我们需要找到光标左侧最近的 "value:" 和 "|"
+                let textBefore = currentLine.Substring(0, min col currentLine.Length)
+                let valueIdx = textBefore.LastIndexOf("value:")
+                
+                if valueIdx <> -1 then
+                    // 在 value: 之后查找 |
+                    let afterValue = textBefore.Substring(valueIdx + 6)
+                    let pipeIdx = afterValue.IndexOf('|')
+                    
+                    if pipeIdx <> -1 then
+                        // 找到了 value:...|...
+                        // 插入起点应该是 | 之后的位置
+                        let insertStartCol = valueIdx + 6 + pipeIdx + 1
+                        let insertRange = { start = { line = line; character = insertStartCol }
+                                            ``end`` = { line = line; character = col } }
+                        // 替换范围通常与插入范围相同
+                        insertRange, insertRange
+                    else
+                        // 没找到 |，使用默认范围
+                        computeCompletionRanges filetext line col
+                else
+                    // 没找到 value:，使用默认范围
+                    computeCompletionRanges filetext line col
+            else
+                computeCompletionRanges filetext line col
+        with _ ->
+            computeCompletionRanges filetext line col
+
     /// Create the appropriate textEdit based on client capabilities
     let createTextEdit text =
         if supportsInsertReplaceEdit then
             let (insertRange, replaceRange) =
-                computeCompletionRanges filetext position.Line position.Column
+                computeSmartCompletionRanges filetext position.Line position.Column
 
             Some(
                 { newText = text
@@ -256,8 +292,17 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
             | CompletionResponse.Simple(e, Some score, kind) ->
                 let insertText = createInsertText e
 
+                // 如果是 ScriptValue 参数，添加 "|" 到 filterText 以帮助 VSCode 匹配
+                // 这样如果 VSCode 认为 "|" 是单词一部分，也能匹配
+                let finalFilterText =
+                    if kind = CompletionCategory.Value && e <> "yes" && e <> "no" then
+                        Some($"|{e}")
+                    else
+                        Some e
+
                 { defaultCompletionItemKind (convertKind kind) with
                     label = e
+                    filterText = finalFilterText
                     labelDetails =
                         if debugMode then
                             Some
@@ -271,8 +316,15 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
             | CompletionResponse.Simple(e, None, kind) ->
                 let insertText = createInsertText e
 
+                let finalFilterText =
+                    if kind = CompletionCategory.Value && e <> "yes" && e <> "no" then
+                        Some($"|{e}")
+                    else
+                        Some e
+
                 { defaultCompletionItemKind (convertKind kind) with
                     label = e
+                    filterText = finalFilterText
                     insertText = if supportsInsertReplaceEdit then None else Some insertText
                     textEdit = createTextEdit insertText
                     sortText = Some(maxCompletionScore.ToString()) }
@@ -373,10 +425,26 @@ let completion
         let textBeforeCursor = targetLine.Remove(position.Column)
         logInfo $"{p} {position}"
 
+        // 检测是否处于 script_value 参数输入环境：value:name|...
+        // 如果是，我们只应该匹配最后一个 '|' 之后的文本，而不是整行
+        let isInScriptValueArg = textBeforeCursor.Contains("value:") && textBeforeCursor.Contains("|")
+        
         let prefixSoFar =
-            match textBeforeCursor.Split([||]) |> Array.tryLast with
-            | Some lastWord when not (String.IsNullOrWhiteSpace lastWord) -> lastWord.Split('.') |> Array.last |> Some
-            | _ -> None
+            if isInScriptValueArg then
+                // 提取最后一个 '|' 之后的文本
+                let lastPipeIdx = textBeforeCursor.LastIndexOf('|')
+                let textAfterPipe = textBeforeCursor.Substring(lastPipeIdx + 1)
+                // 获取正在输入的单词
+                match textAfterPipe.Split([| ' '; '\t' |]) |> Array.tryLast with
+                | Some word when not (String.IsNullOrWhiteSpace word) -> Some word
+                | _ -> None
+            else
+                // 恢复原始逻辑：使用 Split([||]) 按单词边界分割
+                match textBeforeCursor.Split([||]) |> Array.tryLast with
+                | Some lastWord when not (String.IsNullOrWhiteSpace lastWord) -> lastWord.Split('.') |> Array.last |> Some
+                | _ -> None
+
+        logInfo $"prefixSoFar: %A{prefixSoFar} isScriptValue: {isInScriptValueArg}"
 
         let partialReturn = items |> Seq.length > 2000
 
@@ -394,36 +462,28 @@ let completion
             |> Seq.filter (fun i -> not (i.label.StartsWith("$", StringComparison.OrdinalIgnoreCase)))
 
         let optimised = optimiseCompletion deduped
+        let itemsList = optimised |> Seq.toList
 
-        // Log completion info only if we have items
-        // if not deduped.IsEmpty then
-        // logInfo $"completion mid %A{prefixSoFar} %A{deduped.Head.sortText} %A{deduped.Head.label}"
-        // else
-        // logInfo $"completion mid %A{prefixSoFar} - no items after filtering"
+        // 检测是否是我们的 script_value 补全（基于 sortText = 1000000）
+        let isScriptValueLike =
+            itemsList
+            |> List.tryHead
+            |> Option.bind (fun i -> i.sortText)
+            |> (function | Some "1000000" -> true | _ -> false)
 
-        //        let docLength =
-        //            optimised
-        //            |> List.sumBy
-        //                (fun i ->
-        //                    if i.documentation.IsSome then
-        //                        i.documentation.Value.value.Length
-        //                    else
-        //                        0)
-        //
-        //        let labelLength =
-        //            optimised |> List.sumBy (fun i -> i.label.Length)
-        //
-        //        logInfo $"Completion items: %i{deduped |> List.length} %i{optimised |> List.length} %i{stopwatch.ElapsedMilliseconds}ms"
-
-        //        let items =
-        //            [ { defaultCompletionItem with
-        //                    label = "test"
-        //                    insertText = Some "test ${1|yes,no,{ test = true }|}"
-        //                    insertTextFormat = Some InsertTextFormat.Snippet } ]
+        // 如果是 script_value 补全，设置 isIncomplete = true 以强制 VSCode 显示所有项，绕过客户端过滤
+        // 同时设置 filterText 为 label，确保匹配
+        // 如果处于 script_value 参数输入环境，也强制设置 isIncomplete = true
+        let finalItemsList =
+            if isScriptValueLike || isInScriptValueArg then
+                itemsList |> List.map (fun i ->
+                    { i with filterText = Some i.label })
+            else
+                itemsList
 
         Some
-            { isIncomplete = partialReturn
-              items = optimised |> Seq.toList }
+            { isIncomplete = partialReturn || isScriptValueLike || isInScriptValueArg
+              items = finalItemsList }
     // |false ->
     //     let extraKeywords = ["yes"; "no";]
     //     let eventIDs = game.References.EventIDs

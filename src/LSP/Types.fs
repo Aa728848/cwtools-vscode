@@ -416,11 +416,11 @@ let writeTextDocumentSyncKind (i: TextDocumentSyncKind) =
 
 type CompletionOptions =
     { resolveProvider: bool
-      triggerCharacters: char list }
+      triggerCharacters: string list }
 
 let defaultCompletionOptions =
     { resolveProvider = false
-      triggerCharacters = [ '.' ] }
+      triggerCharacters = [ "."; "|"; "$" ] }
 
 type SignatureHelpOptions = { triggerCharacters: char list }
 
@@ -478,7 +478,7 @@ type ServerCapabilities =
 let defaultServerCapabilities: ServerCapabilities =
     { textDocumentSync = defaultTextDocumentSyncOptions
       hoverProvider = false
-      completionProvider = None
+      completionProvider = Some defaultCompletionOptions
       signatureHelpProvider = None
       definitionProvider = false
       referencesProvider = false

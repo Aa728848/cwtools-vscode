@@ -52,7 +52,16 @@ export async function activate(context: ExtensionContext) {
 	const cacheDir = isDevDir ? context.globalStorageUri + '/.cwtools' : context.extensionPath + '/.cwtools'
 
 	const init = async function(language : string, isVanillaFolder : boolean) {
-		vs.languages.setLanguageConfiguration(language, { wordPattern : /"?([^\s.]+)"?/ })
+		vs.languages.setLanguageConfiguration(language, {
+			wordPattern: /"?([^\s.]+)"?/,
+			autoClosingPairs: [
+				{ open: '{', close: '}' },
+				{ open: '[', close: ']' },
+				{ open: '(', close: ')' },
+				{ open: '"', close: '"' },
+				{ open: "'", close: "'" }
+			]
+		})
 		// The server is implemented using dotnet core
 		let serverExe: string;
 		if (os.platform() == "win32") {
@@ -167,6 +176,47 @@ export async function activate(context: ExtensionContext) {
 		}
 
 		context.subscriptions.push(window.onDidChangeActiveTextEditor(didChangeActiveTextEditor));
+
+		// 监听文档变化，当在 script_value 环境中输入 | 时自动触发补全
+		let lastCursorLine = -1;
+		let lastCursorChar = -1;
+		context.subscriptions.push(workspace.onDidChangeTextDocument(async (e) => {
+			// 只处理当前活动的文本
+			if (window.activeTextEditor && e.document === window.activeTextEditor.document) {
+				const doc = window.activeTextEditor.document;
+				
+				// 只处理 paradox 语言
+				if (doc.languageId !== language) return;
+				
+				// 获取当前光标位置
+				const cursor = window.activeTextEditor.selection.active;
+				const currentLine = cursor.line;
+				const currentChar = cursor.character;
+				
+				// 检查是否有变化
+				if (currentLine === lastCursorLine && currentChar === lastCursorChar) return;
+				lastCursorLine = currentLine;
+				lastCursorChar = currentChar;
+				
+				// 获取当前行文本
+				const lineText = doc.lineAt(currentLine).text;
+				
+				// 检查是否在 value:xxx| 环境中
+				// 匹配模式：value:xxx| （光标在 | 之后）
+				const textBeforeCursor = lineText.substring(0, currentChar);
+				
+				// 检查是否以 value:xxx| 结尾（允许空格）
+				const scriptValuePattern = /value\s*:\s*\S+\|\s*$/;
+				const isMatch = scriptValuePattern.test(textBeforeCursor);
+				
+				if (isMatch) {
+					// 延迟 150ms 后触发补全，让文档同步完成
+					setTimeout(() => {
+						commands.executeCommand('editor.action.triggerSuggest');
+					}, 150);
+				}
+			}
+		}));
 
 		if (languageId == "paradox") {
 			for (const textDocument of workspace.textDocuments){

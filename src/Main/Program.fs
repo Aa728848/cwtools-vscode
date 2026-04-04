@@ -251,17 +251,25 @@ type Server(client: ILanguageClient) =
                 |> List.map (fun e ->
                     (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
             // logDiag (sprintf "lint le %A" (locCache.TryFind (doc.LocalPath) |> Option.defaultValue []))
+            
+            // 优化：本地化文件（.yml）不需要调用 game.UpdateFile 进行语法验证
+            // 因为本地化错误已经通过 locCache 获取，避免重复处理和内存开销
             let errors =
-                parserErrors
-                @ locErrors
-                @ match gameObj with
-                  | None -> []
-                  | Some game ->
-                      let results = game.UpdateFile shallowAnalyze name filetext
-                      // logDiag (sprintf "lint uf %A" results)
-                      results
-                      |> List.map (fun e ->
-                          (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                if name.EndsWith(".yml") then
+                    // 本地化文件只使用 locCache 的错误，跳过 game.UpdateFile
+                    parserErrors @ locErrors
+                else
+                    // 普通文件需要进行完整的语法验证
+                    parserErrors
+                    @ locErrors
+                    @ match gameObj with
+                      | None -> []
+                      | Some game ->
+                          let results = game.UpdateFile shallowAnalyze name filetext
+                          // logDiag (sprintf "lint uf %A" results)
+                          results
+                          |> List.map (fun e ->
+                              (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
             match errors with
             | [] -> client.PublishDiagnostics { uri = doc; diagnostics = [] }
@@ -281,6 +289,9 @@ type Server(client: ILanguageClient) =
                 game.RefreshLocalisationCaches()
                 delayedLocUpdate <- false
 
+                // 清理旧的 locCache 以释放内存
+                locCache <- Map.empty
+                
                 locCache <-
                     game.LocalisationErrors(true, true)
                     |> List.groupBy _.range.FileName
@@ -289,6 +300,9 @@ type Server(client: ILanguageClient) =
             else
                 logDiag "delayedLocUpdate false"
 
+                // 清理旧的 locCache 以释放内存
+                locCache <- Map.empty
+                
                 locCache <-
                     game.LocalisationErrors(false, true)
                     |> List.groupBy _.range.FileName
@@ -298,7 +312,20 @@ type Server(client: ILanguageClient) =
 
             delayTime <-
                 TimeSpan(Math.Min(TimeSpan(0, 0, 60).Ticks, Math.Max(TimeSpan(0, 0, 10).Ticks, 3L * time.Ticks)))
-        //GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
+            
+            // 定期清理不存在文件的缓存，防止内存泄漏
+            try
+                let existingFiles = 
+                    docs.OpenFiles() 
+                    |> List.map (fun f -> f.FullName) 
+                    |> Set.ofList
+                game.CleanupCache existingFiles
+            with e ->
+                logDiag $"CleanupCache failed: {e.Message}"
+            
+            // 在大量文件处理后触发GC回收旧的不可变Map
+            if locCache.Count > 100 then
+                GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
         | None -> ()
 
     let lintAgent =
@@ -579,42 +606,124 @@ type Server(client: ILanguageClient) =
                 let game =
                     match activeGame with
                     | STL ->
+                        // 释放旧的游戏对象资源
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                // 清理缓存以释放内存
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadSTL serverSettings
                         stlGameObj <- Some(game :> IGame<STLComputedData>)
                         game :> IGame
                     | HOI4 ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadHOI4 serverSettings
                         hoi4GameObj <- Some(game :> IGame<HOI4ComputedData>)
                         game :> IGame
                     | EU4 ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadEU4 serverSettings
                         eu4GameObj <- Some(game :> IGame<EU4ComputedData>)
                         game :> IGame
                     | CK2 ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadCK2 serverSettings
                         ck2GameObj <- Some(game :> IGame<CK2ComputedData>)
                         game :> IGame
                     | IR ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadIR serverSettings
                         irGameObj <- Some(game :> IGame<IRComputedData>)
                         game :> IGame
                     | VIC2 ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadVIC2 serverSettings
                         vic2GameObj <- Some(game :> IGame<VIC2ComputedData>)
                         game :> IGame
                     | CK3 ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadCK3 serverSettings
                         ck3GameObj <- Some(game :> IGame<CK3ComputedData>)
                         game :> IGame
                     | VIC3 ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadVIC3 serverSettings
                         vic3GameObj <- Some(game :> IGame<VIC3ComputedData>)
                         game :> IGame
                     | EU5 ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadEU5 serverSettings
                         eu5GameObj <- Some(game :> IGame<EU5ComputedData>)
                         game :> IGame
                     | Custom ->
+                        match gameObj with
+                        | Some oldGame ->
+                            try
+                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                                oldGame.CleanupCache existingFiles
+                            with _ -> ()
+                        | None -> ()
+                        
                         let game = loadCustom serverSettings
                         customGameObj <- Some(game :> IGame<JominiComputedData>)
                         game :> IGame
@@ -808,7 +917,12 @@ type Server(client: ILanguageClient) =
 
                 | None -> ()
 
-                logInfo $"New init %s{p.ToString()}"
+                logInfo (sprintf "New init %A" p)
+
+                let triggerChars = LSP.Types.defaultCompletionOptions.triggerCharacters
+                logInfo (sprintf "Server initializing. Completion trigger chars configured: %A" triggerChars)
+                let caps = [ "."; "|"; "$" ]
+                logInfo (sprintf "Sending capabilities with completion trigger chars: %A" caps)
 
                 return
                     { capabilities =
@@ -824,9 +938,7 @@ type Server(client: ILanguageClient) =
                                     save = Some { includeText = true }
                                     change = TextDocumentSyncKind.Full }
                             completionProvider =
-                                Some
-                                    { resolveProvider = true
-                                      triggerCharacters = [ '.' ] }
+                                Some defaultCompletionOptions
                             codeActionProvider = true
                             documentSymbolProvider = true
                             executeCommandProvider =

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet *)",
+      "Bash(dir *)",
+      "Bash(copy *)"
+    ]
+  },
+  "$version": 3
+}

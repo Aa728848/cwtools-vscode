@@ -97,10 +97,103 @@ module LanguageServerFeatures =
                     game.ScopesAtPos position path (docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue "")
 
                 let allEffects = game.ScriptedEffects() @ game.ScriptedTriggers()
-                eprintfn $"Looking for effect %s{unescapedWord.ToString()} in the %i{allEffects.Length} effects loaded"
 
                 let hovered =
                     allEffects |> List.tryFind (fun e -> e.Name.GetString() = unescapedWord)
+
+                // Check if hovering over a scripted variable (@variable_name)
+                // Helper to extract variables from file content
+                let extractVarsFromFile (content: string) =
+                    let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
+                    [ for m in pattern.Matches(content) ->
+                        let name = m.Groups.[1].Value.Trim()
+                        let value = m.Groups.[2].Value.Trim()
+                        name, value ]
+
+                // Helper function to extract global scripted variables from file system
+                // Same approach as getGlobalScriptVars() in LanguageFeatures.fs completion
+                let getGlobalScriptedVars (currentFilePath: string) =
+                    try
+                        let currentDir = System.IO.Path.GetDirectoryName(currentFilePath)
+                        // Walk up to find mod root
+                        let rec findModRoot dir =
+                            if System.String.IsNullOrEmpty(dir) then None
+                            else
+                                let dirName = System.IO.Path.GetFileName(dir)
+                                if dirName = "common" || dirName = "events" || dirName = "interface" then
+                                    Some(System.IO.Path.GetDirectoryName(dir))
+                                else
+                                    findModRoot (System.IO.Path.GetDirectoryName(dir))
+                        match findModRoot currentDir with
+                        | None -> []
+                        | Some modRoot ->
+                            let svPath = System.IO.Path.Combine(modRoot, "common", "scripted_variables")
+                            if not (System.IO.Directory.Exists(svPath)) then
+                                let gameRoot = System.IO.Path.GetDirectoryName(modRoot)
+                                if System.String.IsNullOrEmpty(gameRoot) then []
+                                else
+                                    let modDir = System.IO.Path.Combine(gameRoot, "mod")
+                                    if not (System.IO.Directory.Exists(modDir)) then []
+                                    else
+                                        System.IO.Directory.GetDirectories(modDir)
+                                        |> Array.collect (fun modFolder ->
+                                            let modSVPath = System.IO.Path.Combine(modFolder, "common", "scripted_variables")
+                                            if System.IO.Directory.Exists(modSVPath) then
+                                                System.IO.Directory.GetFiles(modSVPath, "*.txt", System.IO.SearchOption.AllDirectories)
+                                            else [||])
+                                        |> Array.collect (fun file ->
+                                            try
+                                                let content = System.IO.File.ReadAllText(file)
+                                                let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
+                                                [| for m in pattern.Matches(content) ->
+                                                    m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() |]
+                                            with _ -> [||])
+                                        |> Array.toList
+                            else
+                                System.IO.Directory.GetFiles(svPath, "*.txt", System.IO.SearchOption.AllDirectories)
+                                |> Array.collect (fun file ->
+                                    try
+                                        let content = System.IO.File.ReadAllText(file)
+                                        let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
+                                        [| for m in pattern.Matches(content) ->
+                                            m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() |]
+                                    with _ -> [||])
+                                |> Array.toList
+                    with _ -> []
+
+                let scriptedVariableInfo =
+                    // Get global scripted variables from file system
+                    let docPath = getPathFromDoc doc
+                    let globalVars = getGlobalScriptedVars docPath
+                    // Get local variables from current file
+                    let fileContent = docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue ""
+                    let localVars = extractVarsFromFile fileContent
+                    // Combine: local vars take precedence
+                    let allVars = localVars @ globalVars
+
+                    let varName =
+                        if unescapedWord.StartsWith('@') then unescapedWord
+                        else "@" + unescapedWord
+                    allVars
+                    |> List.tryFind (fun (name, _) ->
+                        let cleanName = name.TrimStart('@')
+                        let cleanWord = unescapedWord.TrimStart('@')
+                        name = unescapedWord || name = varName ||
+                        cleanName = cleanWord ||
+                        cleanName.Equals(cleanWord, StringComparison.OrdinalIgnoreCase))
+
+                let variableHover =
+                    scriptedVariableInfo
+                    |> Option.map (fun (name, value) ->
+                        let displayName = if name.StartsWith('@') then name else "@" + name
+                        let paramPattern = System.Text.RegularExpressions.Regex(@"\$([A-Za-z_][A-Za-z0-9_]*)\$")
+                        let params_found = paramPattern.Matches(value)
+                        let definedParameters = [ for m in params_found -> m.Groups.[1].Value ] |> List.distinct
+                        if definedParameters.Length > 0 then
+                            let paramsStr = definedParameters |> List.map (fun p -> sprintf "- `$%s$` - Parameter" p) |> String.concat "\n"
+                            sprintf "**Scripted Variable**: `%s`\n\n**Value**: `%s`\n\n**Parameters**:\n%s" displayName value paramsStr
+                        else
+                            sprintf "**Scripted Variable**: `%s`\n\n**Value**: `%s`" displayName value)
 
                 let lochover =
                     lochoverFromInfo (game.References().Localisation) symbolInfo unescapedWord
@@ -152,7 +245,7 @@ module LanguageServerFeatures =
                 let docStringOrEffect = Option.orElse (docstringFromInfo symbolInfo) effect
 
                 let text =
-                    [| docStringOrEffect; lochover; Some scopesExtra |]
+                    [| docStringOrEffect; lochover; Some scopesExtra; variableHover |]
                     |> Array.choose id
                     |> (fun a -> String.Join("\n\n***\n\n", a))
 

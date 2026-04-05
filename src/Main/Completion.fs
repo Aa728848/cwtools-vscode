@@ -41,8 +41,8 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
         return
             match gameObj with
             | Some game ->
+                // First check if it's a scripted effect or trigger
                 let allEffects = game.ScriptedEffects() @ game.ScriptedTriggers()
-
                 let hovered = allEffects |> List.tryFind (fun e -> e.Name.GetString() = item.label)
 
                 match hovered with
@@ -57,8 +57,8 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
 
                         let usage = de.Usage
 
-                        let content = String.Join("\n***\n", [ desc; scopes; usage ]) // TODO: usageeffect.Usage])
-                        //{item with documentation = (MarkupContent ("markdown", content))}
+                        let content = String.Join("\n***\n", [ desc; scopes; usage ])
+
                         { item with
                             documentation =
                                 Some(
@@ -73,7 +73,7 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
                             "Supports scopes: "
                             + String.Join(", ", se.Scopes |> List.map (fun f -> f.ToString()))
 
-                        let content = String.Join("\n***\n", [ desc; comments; scopes ]) // TODO: usageeffect.Usage])
+                        let content = String.Join("\n***\n", [ desc; comments; scopes ])
 
                         { item with
                             documentation =
@@ -88,7 +88,7 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
                             "Supports scopes: "
                             + String.Join(", ", e.Scopes |> List.map (fun f -> f.ToString()))
 
-                        let content = String.Join("\n***\n", [ desc; scopes ]) // TODO: usageeffect.Usage])
+                        let content = String.Join("\n***\n", [ desc; scopes ])
 
                         { item with
                             documentation =
@@ -96,7 +96,106 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
                                     { kind = MarkupKind.Markdown
                                       value = content }
                                 ) }
-                | None -> item
+                | None ->
+                    // Check if it's a scripted variable
+                    let allVars = game.ScriptedVariables()
+                    let varName =
+                        if item.label.StartsWith('@') then item.label
+                        else "@" + item.label
+
+                    // Helper function to extract variable name-value pairs from file content
+                    let extractVarsFromFile (content: string) =
+                        let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
+                        [ for m in pattern.Matches(content) ->
+                            let name = m.Groups.[1].Value.Trim()
+                            let value = m.Groups.[2].Value.Trim()
+                            name, value ]
+
+                    // Combine global and local variables
+                    let effectiveVars =
+                        // Note: We don't have access to file content here, so we use global vars
+                        // For local vars, they would need to be passed from the completion call
+                        allVars
+
+                    let varInfo =
+                        effectiveVars
+                        |> List.tryFind (fun (name, _) ->
+                            let cleanName = name.TrimStart('@')
+                            let cleanLabel = item.label.TrimStart('@')
+                            name = varName || name = item.label ||
+                            cleanName = cleanLabel ||
+                            cleanName.Equals(cleanLabel, StringComparison.OrdinalIgnoreCase))
+
+                    match varInfo with
+                    | Some (name, value) ->
+                        // Extract parameters from value (patterns like $PARAM$ or $PARAM|default$)
+                        let paramPattern = System.Text.RegularExpressions.Regex(@"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$")
+                        let params_found = paramPattern.Matches(value)
+                        let definedParameters =
+                            [ for m in params_found ->
+                                let paramName = m.Groups.[1].Value
+                                let defaultVal = if m.Groups.Count > 2 && m.Groups.[2].Success then m.Groups.[2].Value else ""
+                                paramName, defaultVal ]
+                            |> List.distinctBy fst
+
+                        // Try to extract user-provided parameters from the completion item's insertText or label
+                        let userProvidedParams =
+                            match item.insertText with
+                            | Some text ->
+                                let userParamPattern = System.Text.RegularExpressions.Regex(@"\|([A-Za-z_][A-Za-z0-9_]*)[:=]([^\|]+)")
+                                [ for m in userParamPattern.Matches(text) -> m.Groups.[1].Value, m.Groups.[2].Value ]
+                                |> List.distinctBy fst
+                            | None ->
+                                let userParamPattern = System.Text.RegularExpressions.Regex(@"\|([A-Za-z_][A-Za-z0-9_]*)[:=]([^\|]+)")
+                                [ for m in userParamPattern.Matches(item.label) -> m.Groups.[1].Value, m.Groups.[2].Value ]
+                                |> List.distinctBy fst
+
+                        // Validate parameters: check if user-provided params match defined params
+                        let invalidParams =
+                            userProvidedParams
+                            |> List.filter (fun (p, _) -> not (definedParameters |> List.exists (fun (dp, _) -> dp = p)))
+
+                        let validationWarning =
+                            if invalidParams.Length > 0 then
+                                let invalidList = String.Join(", ", invalidParams |> List.map (fun (p, _) -> sprintf "`%s`" p))
+                                sprintf "\n\n⚠️ **Parameter validation failed**: Parameters not declared in variable definition: %s" invalidList
+                            elif userProvidedParams.Length > 0 && definedParameters.Length > 0 then
+                                "\n\n✅ **Parameter validation passed**: All provided parameters are declared in the variable definition"
+                            else
+                                ""
+
+                        let varDoc =
+                            if definedParameters.Length > 0 then
+                                let paramsStr =
+                                    definedParameters
+                                    |> List.map (fun (p, d) ->
+                                        if d <> "" then
+                                            sprintf "- `$%s$` - Parameter (default: `%s`)" p d
+                                        else
+                                            sprintf "- `$%s$` - Parameter" p)
+                                    |> String.concat "\n"
+
+                                let usageExample =
+                                    if userProvidedParams.Length > 0 then
+                                        sprintf "\n\n**Your usage**:\n%s" (
+                                            userProvidedParams
+                                            |> List.map (fun (p, v) -> sprintf "- `%s` = `%s`" p v)
+                                            |> String.concat "\n")
+                                    else
+                                        ""
+
+                                sprintf "**Scripted Variable**: `%s`\n\n**Value**: `%s`\n\n**Parameters**:\n%s%s%s"
+                                    name value paramsStr usageExample validationWarning
+                            else
+                                sprintf "**Scripted Variable**: `%s`\n\n**Value**: `%s`%s" name value validationWarning
+
+                        { item with
+                            documentation =
+                                Some(
+                                    { kind = MarkupKind.Markdown
+                                      value = varDoc }
+                                ) }
+                    | None -> item
             | None -> item
     }
 

@@ -3,7 +3,17 @@
     "allow": [
       "Bash(dotnet *)",
       "Bash(dir *)",
-      "Bash(copy *)"
+      "Bash(copy *)",
+      "Bash(.\\build.cmd *)",
+      "Bash(xcopy *)",
+      "Bash(robocopy *)",
+      "Bash(copy-item *)",
+      "Bash(powershell *)",
+      "Bash(select-string *)",
+      "Bash(git checkout *)",
+      "Bash(findstr *)",
+      "Bash(r *)",
+      "Bash(@findstr *)"
     ]
   },
   "$version": 3

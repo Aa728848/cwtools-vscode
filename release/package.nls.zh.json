@@ -50,6 +50,7 @@
   "configuration.cwtools.cache.ck3.description": "原版 CK3 安装位置",
   "configuration.cwtools.cache.vic3.description": "原版 VIC3 安装位置",
   "configuration.cwtools.cache.eu5.description": "原版 EU5 安装位置",
+  "configuration.cwtools.scriptedVariablesFallbackPaths.description": "搜索 scripted_variables 文件的额外路径（用于悬停提示和补全）。添加原版或 mod 的 scripted_variables 文件夹路径。",
   // zoom sensitivity in the graph
   "configuration.cwtools.graph.zoomSensitivity.description": "控制滚轮缩放灵敏度，<1 降低灵敏度，>1 增加灵敏度",
   "configuration.cwtools.maxFileSize.description": "加载的最大脚本文件大小（以 MB 为单位）（警告：非常大的文件可能导致不稳定或无效诊断）"

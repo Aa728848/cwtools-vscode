@@ -301,6 +301,15 @@
 					"type": "string",
 					"description": "%configuration.cwtools.cache.eu5.description%"
 				},
+				"cwtools.scriptedVariablesFallbackPaths": {
+					"scope": "application",
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "%configuration.cwtools.scriptedVariablesFallbackPaths.description%",
+					"default": []
+				},
 				"cwtools.graph.zoomSensitivity": {
 					"scope": "resource",
 					"type": "number",

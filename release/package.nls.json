@@ -50,6 +50,7 @@
   "configuration.cwtools.cache.ck3.description": "The location of a vanilla CK3 installation",
   "configuration.cwtools.cache.vic3.description": "The location of a vanilla VIC3 installation",
   "configuration.cwtools.cache.eu5.description": "The location of a vanilla EU5 installation",
+  "configuration.cwtools.scriptedVariablesFallbackPaths.description": "Additional paths to search for scripted_variables files (for hover tooltips and completions). Add paths to vanilla or mod scripted_variables folders.",
   // zoom sensitivity in the graph
   "configuration.cwtools.graph.zoomSensitivity.description": "Control scroll wheel zoom sensitivity, <1 reduces sensitivity, >1 increases sensitivity",
   "configuration.cwtools.maxFileSize.description": "Maximum script file size to load in megabytes (warning, very large files can cause instability or invalid diagnostics)",

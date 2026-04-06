@@ -8,6 +8,9 @@ open CWTools.Games.Files
 open Main.Serialize
 open CWTools.Utilities.Utils
 
+// Store vanilla scripted variables path for hover (set after game load)
+let mutable stlVanillaScriptedVarsPath: string option = None
+
 // let loadSTL() =
 //     let stlLocCommands =
 //         configs |> List.tryFind (fun (fn, _) -> Path.GetFileName fn = "localisation.cwt")
@@ -177,7 +180,8 @@ type ServerSettings =
       languages: CWTools.Common.Lang array
       experimental: bool
       debug_mode: bool
-      maxFileSize: int }
+      maxFileSize: int
+      stlVanillaPath: string option }
 
 type GameLanguage =
     | STL
@@ -261,7 +265,8 @@ let loadEU4 (serverSettings: ServerSettings) =
                   debugMode = serverSettings.debug_mode }
           modFilter = None
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.EU4.EU4Game(eu4settings)
     game
@@ -295,7 +300,8 @@ let loadHOI4 serverSettings =
                   debugMode = serverSettings.debug_mode }
           modFilter = None
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.HOI4.HOI4Game(hoi4settings)
     game
@@ -328,7 +334,8 @@ let loadCK2 serverSettings =
                   debugMode = serverSettings.debug_mode }
           modFilter = None
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.CK2.CK2Game(ck2settings)
     game
@@ -362,7 +369,8 @@ let loadIR serverSettings =
                   debugMode = serverSettings.debug_mode }
           modFilter = None
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.IR.IRGame(irsettings)
     game
@@ -394,7 +402,8 @@ let loadVIC2 serverSettings =
                   debugMode = serverSettings.debug_mode }
           modFilter = None
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.VIC2.VIC2Game(vic2settings)
     game
@@ -410,8 +419,6 @@ let loadSTL serverSettings =
 
     let timer = System.Diagnostics.Stopwatch()
     timer.Start()
-
-
 
     let stlsettings =
         { CWTools.Games.Stellaris.StellarisSettings.rootDirectories = getRootDirectories serverSettings
@@ -430,9 +437,17 @@ let loadSTL serverSettings =
                   debugMode = serverSettings.debug_mode }
           embedded = FromConfig(cachedFiles, cached)
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = serverSettings.stlVanillaPath }
 
     let game = CWTools.Games.Stellaris.STLGame(stlsettings)
+    
+    // Set vanilla scripted variables path for hover
+    match serverSettings.stlVanillaPath with
+    | Some vp ->
+        stlVanillaScriptedVarsPath <- Some(System.IO.Path.Combine(vp, "common", "scripted_variables"))
+    | None -> ()
+    
     game
 
 let loadCK3 serverSettings =
@@ -463,7 +478,8 @@ let loadCK3 serverSettings =
                   debugMode = serverSettings.debug_mode }
           embedded = FromConfig(cachedFiles, cached)
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.CK3.CK3Game(stlsettings)
     game
@@ -498,7 +514,8 @@ let loadVIC3 serverSettings =
                   debugMode = serverSettings.debug_mode }
           embedded = FromConfig(cachedFiles, cached)
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.VIC3.VIC3Game(stlsettings)
     game
@@ -531,7 +548,8 @@ let loadEU5 serverSettings =
                   debugMode = serverSettings.debug_mode }
           embedded = FromConfig(cachedFiles, cached)
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.EU5.EU5Game(stlsettings)
     game
@@ -562,7 +580,8 @@ let loadCustom serverSettings =
                   debugMode = serverSettings.debug_mode }
           embedded = FromConfig([], [])
           debugSettings = DebugSettings.Default
-          maxFileSize = Some serverSettings.maxFileSize }
+          maxFileSize = Some serverSettings.maxFileSize
+          vanillaPath = None }
 
     let game = CWTools.Games.Custom.CustomGame(stlsettings, "custom")
     game

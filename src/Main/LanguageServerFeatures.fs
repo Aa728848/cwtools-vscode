@@ -8,9 +8,11 @@ open CWTools.Utilities.Position
 open CWTools.Games
 open System.IO
 open CWTools.Localisation
-open Main
 
 module LanguageServerFeatures =
+    // User-configured fallback paths for scripted variables hover
+    let mutable scriptedVariablesFallbackPaths: string list = []
+    
     let convRangeToLSPRange (range: range) =
         { start =
             { line = max 0 (int range.StartLine - 1)
@@ -86,7 +88,7 @@ module LanguageServerFeatures =
         =
         async {
             let unescapedWord = docs.GetTextAtPosition(doc, pos)
-            let position = PosHelper.fromZ pos.line pos.character
+            let position = Main.PosHelper.fromZ pos.line pos.character
             let path = getPathFromDoc doc
 
             let hoverFunction (game: IGame<_>) =
@@ -111,46 +113,11 @@ module LanguageServerFeatures =
                         name, value ]
 
                 // Helper function to extract global scripted variables from file system
-                // Same approach as getGlobalScriptVars() in LanguageFeatures.fs completion
                 let getGlobalScriptedVars (currentFilePath: string) =
-                    try
-                        let currentDir = System.IO.Path.GetDirectoryName(currentFilePath)
-                        // Walk up to find mod root
-                        let rec findModRoot dir =
-                            if System.String.IsNullOrEmpty(dir) then None
-                            else
-                                let dirName = System.IO.Path.GetFileName(dir)
-                                if dirName = "common" || dirName = "events" || dirName = "interface" then
-                                    Some(System.IO.Path.GetDirectoryName(dir))
-                                else
-                                    findModRoot (System.IO.Path.GetDirectoryName(dir))
-                        match findModRoot currentDir with
-                        | None -> []
-                        | Some modRoot ->
-                            let svPath = System.IO.Path.Combine(modRoot, "common", "scripted_variables")
-                            if not (System.IO.Directory.Exists(svPath)) then
-                                let gameRoot = System.IO.Path.GetDirectoryName(modRoot)
-                                if System.String.IsNullOrEmpty(gameRoot) then []
-                                else
-                                    let modDir = System.IO.Path.Combine(gameRoot, "mod")
-                                    if not (System.IO.Directory.Exists(modDir)) then []
-                                    else
-                                        System.IO.Directory.GetDirectories(modDir)
-                                        |> Array.collect (fun modFolder ->
-                                            let modSVPath = System.IO.Path.Combine(modFolder, "common", "scripted_variables")
-                                            if System.IO.Directory.Exists(modSVPath) then
-                                                System.IO.Directory.GetFiles(modSVPath, "*.txt", System.IO.SearchOption.AllDirectories)
-                                            else [||])
-                                        |> Array.collect (fun file ->
-                                            try
-                                                let content = System.IO.File.ReadAllText(file)
-                                                let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
-                                                [| for m in pattern.Matches(content) ->
-                                                    m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() |]
-                                            with _ -> [||])
-                                        |> Array.toList
-                            else
-                                System.IO.Directory.GetFiles(svPath, "*.txt", System.IO.SearchOption.AllDirectories)
+                    let extractVarsFromDir dirPath =
+                        try
+                            if System.IO.Directory.Exists(dirPath) then
+                                System.IO.Directory.GetFiles(dirPath, "*.txt", System.IO.SearchOption.AllDirectories)
                                 |> Array.collect (fun file ->
                                     try
                                         let content = System.IO.File.ReadAllText(file)
@@ -158,10 +125,75 @@ module LanguageServerFeatures =
                                         [| for m in pattern.Matches(content) ->
                                             m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() |]
                                     with _ -> [||])
-                                |> Array.toList
+                                |> List.ofArray
+                            else
+                                []
+                        with _ -> []
+
+                    try
+                        let currentDir = System.IO.Path.GetDirectoryName(currentFilePath)
+                        let modVars =
+                            let rec findModRoot dir =
+                                if System.String.IsNullOrEmpty(dir) then None
+                                else
+                                    let dirName = System.IO.Path.GetFileName(dir)
+                                    if dirName = "common" || dirName = "events" || dirName = "interface" then
+                                        Some(System.IO.Path.GetDirectoryName(dir))
+                                    else
+                                        findModRoot (System.IO.Path.GetDirectoryName(dir))
+                            match findModRoot currentDir with
+                            | None -> []
+                            | Some modRoot ->
+                                let svPath = System.IO.Path.Combine(modRoot, "common", "scripted_variables")
+                                extractVarsFromDir svPath
+                                |> function
+                                    | [] ->
+                                        let gameRoot = System.IO.Path.GetDirectoryName(modRoot)
+                                        if System.String.IsNullOrEmpty(gameRoot) then []
+                                        else
+                                            let modDir = System.IO.Path.Combine(gameRoot, "mod")
+                                            if not (System.IO.Directory.Exists(modDir)) then []
+                                            else
+                                                System.IO.Directory.GetDirectories(modDir)
+                                                |> Array.collect (fun modFolder ->
+                                                    let modSVPath = System.IO.Path.Combine(modFolder, "common", "scripted_variables")
+                                                    extractVarsFromDir modSVPath |> List.toArray)
+                                                |> Array.toList
+                                    | vars -> vars
+
+                        // Get vanilla vars from configured path (fallback to user-configured paths)
+                        let vanillaVars =
+                            try
+                                // Use user-configured fallback paths from settings
+                                let fallbackPaths =
+                                    if scriptedVariablesFallbackPaths.Length > 0 then
+                                        scriptedVariablesFallbackPaths
+                                    else
+                                        // Default paths if not configured
+                                        [ @"C:\Program Files (x86)\Steam\steamapps\common\Stellaris\common\scripted_variables"
+                                          @"C:\Program Files\Steam\steamapps\common\Stellaris\common\scripted_variables" ]
+                                
+                                fallbackPaths
+                                |> List.collect (fun p ->
+                                    try
+                                        if System.IO.Directory.Exists(p) then
+                                            System.IO.Directory.GetFiles(p, "*.txt", System.IO.SearchOption.AllDirectories)
+                                            |> Array.collect (fun f ->
+                                                try
+                                                    let content = System.IO.File.ReadAllText(f)
+                                                    let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
+                                                    [| for m in pattern.Matches(content) -> m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() |]
+                                                with _ -> [||])
+                                            |> List.ofArray
+                                        else []
+                                    with _ -> [])
+                            with _ -> []
+
+                        (modVars @ vanillaVars) |> List.distinctBy fst
                     with _ -> []
 
                 let scriptedVariableInfo =
+
                     // Skip @[ array access syntax - this is not a scripted variable
                     if unescapedWord.StartsWith("@[") then
                         None
@@ -349,3 +381,4 @@ module LanguageServerFeatures =
                   edit = docChanges }
             |> Async.RunSynchronously
             |> ignore
+

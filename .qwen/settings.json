@@ -13,7 +13,14 @@
       "Bash(git checkout *)",
       "Bash(findstr *)",
       "Bash(r *)",
-      "Bash(@findstr *)"
+      "Bash(@findstr *)",
+      "Bash(./build.cmd *)",
+      "Bash(cmd *)",
+      "Bash(git submodule *)",
+      "Bash(npm install)",
+      "Bash(rmdir *)",
+      "Read(C:\\Users\\eddy\\.vscode\\extensions\\tboby.cwtools-vscode-0.10.31/**)",
+      "Bash(\"c:\\users\\eddy\\.vscode\\extensions\\tboby.cwtools-vscode-0.10.31\\bin\\server\\win-x64\\cwtools server.exe\" *)"
     ]
   },
   "$version": 3

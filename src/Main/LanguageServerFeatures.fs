@@ -162,25 +162,29 @@ module LanguageServerFeatures =
                     with _ -> []
 
                 let scriptedVariableInfo =
-                    // Get global scripted variables from file system
-                    let docPath = getPathFromDoc doc
-                    let globalVars = getGlobalScriptedVars docPath
-                    // Get local variables from current file
-                    let fileContent = docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue ""
-                    let localVars = extractVarsFromFile fileContent
-                    // Combine: local vars take precedence
-                    let allVars = localVars @ globalVars
+                    // Skip @[ array access syntax - this is not a scripted variable
+                    if unescapedWord.StartsWith("@[") then
+                        None
+                    else
+                        // Get global scripted variables from file system
+                        let docPath = getPathFromDoc doc
+                        let globalVars = getGlobalScriptedVars docPath
+                        // Get local variables from current file
+                        let fileContent = docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue ""
+                        let localVars = extractVarsFromFile fileContent
+                        // Combine: local vars take precedence
+                        let allVars = localVars @ globalVars
 
-                    let varName =
-                        if unescapedWord.StartsWith('@') then unescapedWord
-                        else "@" + unescapedWord
-                    allVars
-                    |> List.tryFind (fun (name, _) ->
-                        let cleanName = name.TrimStart('@')
-                        let cleanWord = unescapedWord.TrimStart('@')
-                        name = unescapedWord || name = varName ||
-                        cleanName = cleanWord ||
-                        cleanName.Equals(cleanWord, StringComparison.OrdinalIgnoreCase))
+                        let varName =
+                            if unescapedWord.StartsWith('@') then unescapedWord
+                            else "@" + unescapedWord
+                        allVars
+                        |> List.tryFind (fun (name, _) ->
+                            let cleanName = name.TrimStart('@')
+                            let cleanWord = unescapedWord.TrimStart('@')
+                            name = unescapedWord || name = varName ||
+                            cleanName = cleanWord ||
+                            cleanName.Equals(cleanWord, StringComparison.OrdinalIgnoreCase))
 
                 let variableHover =
                     scriptedVariableInfo

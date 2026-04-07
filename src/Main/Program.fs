@@ -1,4 +1,4 @@
-﻿module Main.Program
+module Main.Program
 
 open LSP
 open LSP.Types
@@ -109,7 +109,7 @@ type Server(client: ILanguageClient) =
     let getSTLVanillaPath() = stlVanillaPath
 
     // Fallback paths for scripted variables hover (user configurable)
-    let mutable scriptedVariablesFallbackPaths: string list = []
+
     let mutable remoteRepoPath: string option = None
 
     let mutable rulesChannel: string = "stable"
@@ -1186,21 +1186,6 @@ type Server(client: ILanguageClient) =
                 | JsonValue.String s -> eu5VanillaPath <- Some s
                 | _ -> ()
 
-                // Read scripted variables fallback paths
-                try
-                    match config.Item("scriptedVariablesFallbackPaths") with
-                    | JsonValue.Array paths ->
-                        let pathsList =
-                            paths
-                            |> Array.choose (function
-                                | JsonValue.String s when s <> "" -> Some s
-                                | _ -> None)
-                            |> Array.toList
-                        
-                        Lang.LanguageServerFeatures.scriptedVariablesFallbackPaths <- pathsList
-                        CWTools.Validation.Stellaris.STLValidation.fallbackPathsForValidation <- pathsList
-                    | _ -> ()
-                with _ -> ()
 
                 match config.Item("rules_folder") with
                 | JsonValue.String x -> manualRulesFolder <- Some x

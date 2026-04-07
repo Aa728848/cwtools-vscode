@@ -10,8 +10,7 @@ open System.IO
 open CWTools.Localisation
 
 module LanguageServerFeatures =
-    // User-configured fallback paths for scripted variables hover
-    let mutable scriptedVariablesFallbackPaths: string list = []
+
     
     let convRangeToLSPRange (range: range) =
         { start =
@@ -112,95 +111,15 @@ module LanguageServerFeatures =
                         let value = m.Groups.[2].Value.Trim()
                         name, value ]
 
-                // Helper function to extract global scripted variables from file system
-                let getGlobalScriptedVars (currentFilePath: string) =
-                    let extractVarsFromDir dirPath =
-                        try
-                            if System.IO.Directory.Exists(dirPath) then
-                                System.IO.Directory.GetFiles(dirPath, "*.txt", System.IO.SearchOption.AllDirectories)
-                                |> Array.collect (fun file ->
-                                    try
-                                        let content = System.IO.File.ReadAllText(file)
-                                        let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
-                                        [| for m in pattern.Matches(content) ->
-                                            m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() |]
-                                    with _ -> [||])
-                                |> List.ofArray
-                            else
-                                []
-                        with _ -> []
-
-                    try
-                        let currentDir = System.IO.Path.GetDirectoryName(currentFilePath)
-                        let modVars =
-                            let rec findModRoot dir =
-                                if System.String.IsNullOrEmpty(dir) then None
-                                else
-                                    let dirName = System.IO.Path.GetFileName(dir)
-                                    if dirName = "common" || dirName = "events" || dirName = "interface" then
-                                        Some(System.IO.Path.GetDirectoryName(dir))
-                                    else
-                                        findModRoot (System.IO.Path.GetDirectoryName(dir))
-                            match findModRoot currentDir with
-                            | None -> []
-                            | Some modRoot ->
-                                let svPath = System.IO.Path.Combine(modRoot, "common", "scripted_variables")
-                                extractVarsFromDir svPath
-                                |> function
-                                    | [] ->
-                                        let gameRoot = System.IO.Path.GetDirectoryName(modRoot)
-                                        if System.String.IsNullOrEmpty(gameRoot) then []
-                                        else
-                                            let modDir = System.IO.Path.Combine(gameRoot, "mod")
-                                            if not (System.IO.Directory.Exists(modDir)) then []
-                                            else
-                                                System.IO.Directory.GetDirectories(modDir)
-                                                |> Array.collect (fun modFolder ->
-                                                    let modSVPath = System.IO.Path.Combine(modFolder, "common", "scripted_variables")
-                                                    extractVarsFromDir modSVPath |> List.toArray)
-                                                |> Array.toList
-                                    | vars -> vars
-
-                        // Get vanilla vars from configured path (fallback to user-configured paths)
-                        let vanillaVars =
-                            try
-                                // Use user-configured fallback paths from settings
-                                let fallbackPaths =
-                                    if scriptedVariablesFallbackPaths.Length > 0 then
-                                        scriptedVariablesFallbackPaths
-                                    else
-                                        // Default paths if not configured
-                                        [ @"C:\Program Files (x86)\Steam\steamapps\common\Stellaris\common\scripted_variables"
-                                          @"C:\Program Files\Steam\steamapps\common\Stellaris\common\scripted_variables" ]
-                                
-                                fallbackPaths
-                                |> List.collect (fun p ->
-                                    try
-                                        if System.IO.Directory.Exists(p) then
-                                            System.IO.Directory.GetFiles(p, "*.txt", System.IO.SearchOption.AllDirectories)
-                                            |> Array.collect (fun f ->
-                                                try
-                                                    let content = System.IO.File.ReadAllText(f)
-                                                    let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
-                                                    [| for m in pattern.Matches(content) -> m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() |]
-                                                with _ -> [||])
-                                            |> List.ofArray
-                                        else []
-                                    with _ -> [])
-                            with _ -> []
-
-                        (modVars @ vanillaVars) |> List.distinctBy fst
-                    with _ -> []
-
                 let scriptedVariableInfo =
 
                     // Skip @[ array access syntax - this is not a scripted variable
                     if unescapedWord.StartsWith("@[") then
                         None
                     else
-                        // Get global scripted variables from file system
-                        let docPath = getPathFromDoc doc
-                        let globalVars = getGlobalScriptedVars docPath
+                        // Get global scripted variables from game object cache
+                        let globalVars = game.ScriptedVariables()
+
                         // Get local variables from current file
                         let fileContent = docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue ""
                         let localVars = extractVarsFromFile fileContent

@@ -8,14 +8,12 @@
     "autoClosingPairs": [
         ["{", "}"],
         ["\"", "\""],
-        ["'", "'"],
-        ["|", "|"]
+        ["'", "'"]
     ],
     "surroundingPairs": [
         ["{", "}"],
         ["\"", "\""],
-        ["'", "'"],
-        ["|", "|"]
+        ["'", "'"]
     ],
     "indentationRules": {
         "increaseIndentPattern": "((\\{\\s*))$",

@@ -1,4 +1,4 @@
-﻿module Main.Completion
+module Main.Completion
 
 open System
 open System.Collections.Generic
@@ -219,7 +219,7 @@ let computeCompletionRanges (filetext: string) (line: int) (character: int) =
                 ""
 
         //TODO: This needs to handle localisation differently really
-        let isWordChar c = not (Char.IsWhiteSpace(c) || c = '.')
+        let isWordChar c = not (Char.IsWhiteSpace(c) || c = '.' || c = '|')
 
         // Walk backward to find start of word/identifier
         let mutable wordStart = character
@@ -337,33 +337,27 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
     /// 计算智能补全范围
     /// 如果是 script_value 参数输入（value:xxx|yyy），范围应从 | 之后开始
     let computeSmartCompletionRanges (filetext: string) (line: int) (col: int) =
+        // line is 1-based from position.Line; col is 0-based
         try
             let lines = filetext.Split('\n')
-            if line >= 0 && line < lines.Length then
-                let currentLine = lines.[line]
-                // 查找 "value:" 关键字
-                // 我们需要找到光标左侧最近的 "value:" 和 "|"
+            if line > 0 && line <= lines.Length then
+                let currentLine = lines.[line - 1]
                 let textBefore = currentLine.Substring(0, min col currentLine.Length)
                 let valueIdx = textBefore.LastIndexOf("value:")
                 
                 if valueIdx <> -1 then
-                    // 在 value: 之后查找 |
                     let afterValue = textBefore.Substring(valueIdx + 6)
-                    let pipeIdx = afterValue.IndexOf('|')
+                    let pipeIdx = afterValue.LastIndexOf('|')
                     
                     if pipeIdx <> -1 then
-                        // 找到了 value:...|...
-                        // 插入起点应该是 | 之后的位置
+                        // Insert point starts right after the last |
                         let insertStartCol = valueIdx + 6 + pipeIdx + 1
-                        let insertRange = { start = { line = line; character = insertStartCol }
-                                            ``end`` = { line = line; character = col } }
-                        // 替换范围通常与插入范围相同
+                        let insertRange = { start = { line = line - 1; character = insertStartCol }
+                                            ``end`` = { line = line - 1; character = col } }
                         insertRange, insertRange
                     else
-                        // 没找到 |，使用默认范围
                         computeCompletionRanges filetext line col
                 else
-                    // 没找到 value:，使用默认范围
                     computeCompletionRanges filetext line col
             else
                 computeCompletionRanges filetext line col
@@ -391,17 +385,8 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
             | CompletionResponse.Simple(e, Some score, kind) ->
                 let insertText = createInsertText e
 
-                // 如果是 ScriptValue 参数，添加 "|" 到 filterText 以帮助 VSCode 匹配
-                // 这样如果 VSCode 认为 "|" 是单词一部分，也能匹配
-                let finalFilterText =
-                    if kind = CompletionCategory.Value && e <> "yes" && e <> "no" then
-                        Some($"|{e}")
-                    else
-                        Some e
-
                 { defaultCompletionItemKind (convertKind kind) with
                     label = e
-                    filterText = finalFilterText
                     labelDetails =
                         if debugMode then
                             Some
@@ -415,15 +400,8 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
             | CompletionResponse.Simple(e, None, kind) ->
                 let insertText = createInsertText e
 
-                let finalFilterText =
-                    if kind = CompletionCategory.Value && e <> "yes" && e <> "no" then
-                        Some($"|{e}")
-                    else
-                        Some e
-
                 { defaultCompletionItemKind (convertKind kind) with
                     label = e
-                    filterText = finalFilterText
                     insertText = if supportsInsertReplaceEdit then None else Some insertText
                     textEdit = createTextEdit insertText
                     sortText = Some(maxCompletionScore.ToString()) }
@@ -524,65 +502,136 @@ let completion
         let textBeforeCursor = targetLine.Remove(position.Column)
         logInfo $"{p} {position}"
 
-        // 检测是否处于 script_value 参数输入环境：value:name|...
-        // 如果是，我们只应该匹配最后一个 '|' 之后的文本，而不是整行
-        let isInScriptValueArg = textBeforeCursor.Contains("value:") && textBeforeCursor.Contains("|")
-        
-        let prefixSoFar =
+        try
+            let lastPipeIdx = textBeforeCursor.LastIndexOf('|')
+            let potentialToken = 
+                try
+                    if lastPipeIdx > 0 && not (textBeforeCursor.Substring(lastPipeIdx).Contains(" ")) then
+                        let tokenStart = textBeforeCursor.LastIndexOfAny([|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; '\n'; '\r'|])
+                        if tokenStart < lastPipeIdx then
+                            textBeforeCursor.Substring(tokenStart + 1, lastPipeIdx - tokenStart - 1)
+                        else ""
+                    else ""
+                with _ -> ""
+            
+            // Only activate for value:xxx| pattern (script_value parameter input)
+            let isInScriptValueArg = potentialToken.StartsWith("value:", StringComparison.OrdinalIgnoreCase)
+
+            // When in script_value parameter context, compute params FIRST and short-circuit
             if isInScriptValueArg then
-                // 提取最后一个 '|' 之后的文本
-                let lastPipeIdx = textBeforeCursor.LastIndexOf('|')
-                let textAfterPipe = textBeforeCursor.Substring(lastPipeIdx + 1)
-                // 获取正在输入的单词
-                match textAfterPipe.Split([| ' '; '\t' |]) |> Array.tryLast with
-                | Some word when not (String.IsNullOrWhiteSpace word) -> Some word
-                | _ -> None
+                let macroParams = 
+                    try
+                        let cleanToken = if potentialToken.StartsWith("value:") then potentialToken.Substring(6) else potentialToken
+                        let parts = cleanToken.Split('|')
+                        let entityName = if parts.Length > 0 then parts.[0] else ""
+                        
+                        if entityName <> "" then
+                            let typeDefOpt = 
+                                match game.Types() |> Map.tryFind "script_value" with
+                                | Some arr -> 
+                                    arr |> Array.tryFind (fun t -> t.id = entityName)
+                                | None -> None
+                                |> Option.orElseWith (fun () -> 
+                                    match game.Types() |> Map.tryFind "scripted_effect" with
+                                    | Some arr -> arr |> Array.tryFind (fun t -> t.id = entityName)
+                                    | None -> None)
+                            
+                            match typeDefOpt with
+                            | Some t ->
+                                let filePath = t.range.FileName
+                                if not (String.IsNullOrEmpty(filePath)) then
+                                    let fileText = 
+                                        try
+                                            match docs.GetText(FileInfo(filePath)) with
+                                            | Some text -> text
+                                            | None -> if File.Exists(filePath) then File.ReadAllText(filePath) else ""
+                                        with _ -> ""
+                                    
+                                    if fileText <> "" then
+                                        let pattern = System.Text.RegularExpressions.Regex(@"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$")
+                                        [ for m in pattern.Matches(fileText) -> m.Groups.[1].Value ]
+                                        |> List.distinct
+                                        |> List.filter (fun x -> x <> "")
+                                    else []
+                                else []
+                            | None -> []
+                        else []
+                    with _ -> []
+
+                // Compute textEdit range for parameter insertion (right after last |)
+                let paramTextEdit (text: string) =
+                    if supportsInsertReplaceEdit then
+                        let lspLine = position.Line - 1
+                        let insertRange = { start = { line = lspLine; character = position.Column }
+                                            ``end`` = { line = lspLine; character = position.Column } }
+                        Some { newText = text; insert = insertRange; replace = insertRange }
+                    else None
+
+                let paramItems = 
+                    macroParams 
+                    |> List.map (fun p -> 
+                        { defaultCompletionItem with 
+                            label = p
+                            kind = Some CompletionItemKind.Variable
+                            insertText = if supportsInsertReplaceEdit then None else Some p
+                            filterText = Some p
+                            sortText = Some "0000000"
+                            textEdit = paramTextEdit p
+                        })
+
+                if paramItems.Length > 0 then
+                    // Short-circuit: return only parameter items, skip expensive generic completion
+                    Some { isIncomplete = false; items = paramItems }
+                else
+                    // No params found, fall through to generic completion
+                    let itemsList = items |> Seq.toList
+                    let finalItems = itemsList |> List.map (fun i -> { i with filterText = Some i.label })
+                    Some { isIncomplete = true; items = finalItems }
             else
-                // 恢复原始逻辑：使用 Split([||]) 按单词边界分割
-                match textBeforeCursor.Split([||]) |> Array.tryLast with
-                | Some lastWord when not (String.IsNullOrWhiteSpace lastWord) -> lastWord.Split('.') |> Array.last |> Some
-                | _ -> None
+                // Normal (non-script_value) completion path
+                let prefixSoFar =
+                    match textBeforeCursor.Split([||]) |> Array.tryLast with
+                    | Some lastWord when not (String.IsNullOrWhiteSpace lastWord) -> lastWord.Split('.') |> Array.last |> Some
+                    | _ -> None
 
-        logInfo $"prefixSoFar: %A{prefixSoFar} isScriptValue: {isInScriptValueArg}"
+                let itemCount = items |> Seq.length
+                let partialReturn = itemCount > 2000
 
-        let partialReturn = items |> Seq.length > 2000
+                let filtered =
+                    match prefixSoFar, partialReturn with
+                    | None, _ -> items
+                    | _, false -> items
+                    | Some prefix, true ->
+                        items
+                        |> Seq.filter (fun i -> i.label.Contains(prefix, StringComparison.OrdinalIgnoreCase))
 
-        let filtered =
-            match prefixSoFar, partialReturn with
-            | None, _ -> items
-            | _, false -> items
-            | Some prefix, true ->
-                items
-                |> Seq.filter (fun i -> i.label.Contains(prefix, StringComparison.OrdinalIgnoreCase))
+                let deduped =
+                    filtered
+                    |> Seq.distinctBy (fun i -> (i.label, i.documentation))
+                    |> Seq.filter (fun i -> not (i.label.StartsWith("$", StringComparison.OrdinalIgnoreCase)))
 
-        let deduped =
-            filtered
-            |> Seq.distinctBy (fun i -> (i.label, i.documentation))
-            |> Seq.filter (fun i -> not (i.label.StartsWith("$", StringComparison.OrdinalIgnoreCase)))
+                let optimised = optimiseCompletion deduped
+                let itemsList = optimised |> Seq.toList
 
-        let optimised = optimiseCompletion deduped
-        let itemsList = optimised |> Seq.toList
+                let isScriptValueLike =
+                    itemsList
+                    |> List.tryHead
+                    |> Option.bind (fun i -> i.sortText)
+                    |> (function | Some "1000000" -> true | _ -> false)
 
-        // 检测是否是我们的 script_value 补全（基于 sortText = 1000000）
-        let isScriptValueLike =
-            itemsList
-            |> List.tryHead
-            |> Option.bind (fun i -> i.sortText)
-            |> (function | Some "1000000" -> true | _ -> false)
+                let finalItemsList =
+                    if isScriptValueLike then
+                        itemsList |> List.map (fun i -> { i with filterText = Some i.label })
+                    else
+                        itemsList
 
-        // 如果是 script_value 补全，设置 isIncomplete = true 以强制 VSCode 显示所有项，绕过客户端过滤
-        // 同时设置 filterText 为 label，确保匹配
-        // 如果处于 script_value 参数输入环境，也强制设置 isIncomplete = true
-        let finalItemsList =
-            if isScriptValueLike || isInScriptValueArg then
-                itemsList |> List.map (fun i ->
-                    { i with filterText = Some i.label })
-            else
-                itemsList
-
-        Some
-            { isIncomplete = partialReturn || isScriptValueLike || isInScriptValueArg
-              items = finalItemsList }
+                Some
+                    { isIncomplete = partialReturn || isScriptValueLike
+                      items = finalItemsList }
+        with _ ->
+            // Fallback: return raw items without any processing
+            let fallbackItems = items |> Seq.toList
+            Some { isIncomplete = false; items = fallbackItems }
     // |false ->
     //     let extraKeywords = ["yes"; "no";]
     //     let eventIDs = game.References.EventIDs

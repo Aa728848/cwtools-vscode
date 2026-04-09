@@ -199,8 +199,27 @@ module LanguageServerFeatures =
 
                 let docStringOrEffect = Option.orElse (docstringFromInfo symbolInfo) effect
 
+                // Handle inline_script file preview
+                let inlineScriptPreview =
+                    symbolInfo
+                    |> Option.bind (fun info ->
+                        if info.typename = "inline_script_file" && info.name <> "" then
+                            let pathInfo =
+                                info.localisation
+                                |> List.tryFind (fun l -> l.key = "path")
+                                |> Option.map (fun l -> l.value)
+                                |> Option.defaultValue info.name
+                            let preview =
+                                info.localisation
+                                |> List.tryFind (fun l -> l.key = "preview" && l.value <> "")
+                                |> Option.map (fun l -> sprintf "```\n%s\n```" l.value)
+                                |> Option.defaultValue ""
+                            let header = sprintf "**Inline Script**: `%s`" pathInfo
+                            Some (if preview <> "" then header + "\n\n" + preview else header)
+                        else None)
+
                 let text =
-                    [| docStringOrEffect; lochover; Some scopesExtra; variableHover |]
+                    [| inlineScriptPreview |> Option.orElse docStringOrEffect; lochover; Some scopesExtra; variableHover |]
                     |> Array.choose id
                     |> (fun a -> String.Join("\n\n***\n\n", a))
 

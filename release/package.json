@@ -59,6 +59,16 @@
 					"when": "cwtoolsWebview == true",
 					"command": "saveGraphJson",
 					"group": "navigation"
+				},
+				{
+					"command": "cwtools.toggleInlineTextOn",
+					"when": "!config.cwtools.showInlineText",
+					"group": "navigation"
+				},
+				{
+					"command": "cwtools.toggleInlineTextOff",
+					"when": "config.cwtools.showInlineText",
+					"group": "navigation"
 				}
 			]
 		},
@@ -140,6 +150,18 @@
 				"title": "%commands.saveGraphJson.title%",
 				"category": "cwtools",
 				"enablement": "cwtoolsWebview == true"
+			},
+			{
+				"command": "cwtools.toggleInlineTextOn",
+				"title": "Enable Inline Text",
+				"category": "cwtools",
+				"icon": "$(eye-closed)"
+			},
+			{
+				"command": "cwtools.toggleInlineTextOff",
+				"title": "Disable Inline Text",
+				"category": "cwtools",
+				"icon": "$(eye)"
 			}
 		],
 		"configuration": {
@@ -224,6 +246,12 @@
 					"type": "boolean",
 					"default": false,
 					"description": "%configuration.cwtools.debug_mode.description%"
+				},
+				"cwtools.showInlineText": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "Show localisation and references directly above the code instead of hovering."
 				},
 				"cwtools.logging.diagnostic": {
 					"scope": "window",

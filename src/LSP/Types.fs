@@ -486,7 +486,7 @@ let defaultServerCapabilities: ServerCapabilities =
       documentSymbolProvider = false
       workspaceSymbolProvider = false
       codeActionProvider = false
-      codeLensProvider = None
+      codeLensProvider = Some { resolveProvider = false }
       documentFormattingProvider = false
       documentRangeFormattingProvider = false
       documentOnTypeFormattingProvider = None

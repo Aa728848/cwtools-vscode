@@ -121,6 +121,7 @@ type Server(client: ILanguageClient) =
     let mutable maxFileSize: int = 2
     let mutable generatedStrings: string = ":0 \"REPLACE_ME\""
     let mutable clientSupportsInsertReplaceEdit: bool = false
+    let mutable showInlineText: bool = false
 
     let mutable ignoreCodes: string array = [||]
     let mutable ignoreFiles: string array = [||]
@@ -1120,6 +1121,10 @@ type Server(client: ILanguageClient) =
                 | JsonValue.String x -> manualRulesFolder <- Some x
                 | _ -> ()
 
+                match config.Item("showInlineText") with
+                | JsonValue.Boolean x -> showInlineText <- x
+                | _ -> ()
+
                 match config.Item("maxFileSize") with
                 | JsonValue.Number x -> maxFileSize <- int x
                 | _ -> ()
@@ -1423,8 +1428,93 @@ type Server(client: ILanguageClient) =
                     | None -> []
             }
 
-        member this.CodeLens(_: CodeLensParams) = TODO()
-        member this.ResolveCodeLens(_: CodeLens) = TODO()
+        member this.CodeLens(p: CodeLensParams) =
+            async {
+                if not showInlineText then return []
+                else
+                    let codeLensFunction (game: IGame<_>) =
+                        let path = getPathFromDoc p.textDocument.uri
+                        
+                        let entityOpt = 
+                            game.AllEntities() 
+                            |> Seq.tryPick (fun struct (e, _) -> if e.filepath = p.textDocument.uri.LocalPath then Some e else None)
+                        
+                        match entityOpt with
+                        | None -> []
+                        | Some entity ->
+                            let locMap = game.References().Localisation |> Map.ofList
+                            let lenses = ResizeArray<CodeLens>()
+                            let targetPath = entity.filepath
+                            
+                            let formatTitleText (desc: string) =
+                                let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
+                                let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
+                                let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
+                                sprintf "💬 %s" truncated
+
+                            let rec visitNode (n: CWTools.Process.Node) =
+                                n.Leaves |> Seq.iter (fun l ->
+                                    if l.Position.FileName = targetPath then
+                                        let rawVal = l.Value.ToRawString().Trim('\"')
+                                        match Map.tryFind rawVal locMap with
+                                        | Some tr ->
+                                            let range = convRangeToLSPRange l.Position
+                                            let locRange = { start = { line = range.start.line; character = 0 }; ``end`` = { line = range.start.line; character = 0 } }
+                                            lenses.Add {
+                                                range = locRange
+                                                command = Some { title = formatTitleText tr.desc; command = ""; arguments = [] }
+                                                data = JsonValue.Null
+                                            }
+                                        | None -> ()
+                                )
+                                n.LeafValues |> Seq.iter (fun lv ->
+                                    if lv.Position.FileName = targetPath then
+                                        let rawVal = lv.Value.ToRawString().Trim('\"')
+                                        match Map.tryFind rawVal locMap with
+                                        | Some tr ->
+                                            let range = convRangeToLSPRange lv.Position
+                                            let locRange = { start = { line = range.start.line; character = 0 }; ``end`` = { line = range.start.line; character = 0 } }
+                                            lenses.Add {
+                                                range = locRange
+                                                command = Some { title = formatTitleText tr.desc; command = ""; arguments = [] }
+                                                data = JsonValue.Null
+                                            }
+                                        | None -> ()
+                                )
+                                n.Nodes |> Seq.iter visitNode
+
+                            visitNode entity.entity
+                            
+                            lenses 
+                            |> Seq.distinctBy (fun l -> l.range.start.line, l.command.Value.title)
+                            |> Seq.toList
+                        
+                    return
+                        match
+                            stlGameObj,
+                            hoi4GameObj,
+                            eu4GameObj,
+                            ck2GameObj,
+                            irGameObj,
+                            vic2GameObj,
+                            ck3GameObj,
+                            vic3GameObj,
+                            customGameObj
+                        with
+                        | Some game, _, _, _, _, _, _, _, _ -> codeLensFunction game
+                        | _, Some game, _, _, _, _, _, _, _ -> codeLensFunction game
+                        | _, _, Some game, _, _, _, _, _, _ -> codeLensFunction game
+                        | _, _, _, Some game, _, _, _, _, _ -> codeLensFunction game
+                        | _, _, _, _, Some game, _, _, _, _ -> codeLensFunction game
+                        | _, _, _, _, _, Some game, _, _, _ -> codeLensFunction game
+                        | _, _, _, _, _, _, Some game, _, _ -> codeLensFunction game
+                        | _, _, _, _, _, _, _, Some game, _ -> codeLensFunction game
+                        | _, _, _, _, _, _, _, _, Some game -> codeLensFunction game
+                        | _ -> []
+            }
+            |> catchError []
+
+        member this.ResolveCodeLens(p: CodeLens) = async { return p }
         member this.DocumentLink(_: DocumentLinkParams) = TODO()
         member this.ResolveDocumentLink(_: DocumentLink) = TODO()
 

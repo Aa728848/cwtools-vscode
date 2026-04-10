@@ -408,6 +408,22 @@ export async function activate(context: ExtensionContext) {
 		// Push the disposable to the context's subscriptions so that the
 		// client can be deactivated on extension deactivation
 		context.subscriptions.push(new CwtoolsProvider());
+
+		const toggleInlineTextFunc = async () => {
+			const config = vs.workspace.getConfiguration("cwtools");
+			const currentState = config.get<boolean>("showInlineText", false);
+			await config.update("showInlineText", !currentState, vs.ConfigurationTarget.Global);
+			if (!currentState) {
+				vs.window.showInformationMessage("Inline Text is now ON");
+			} else {
+				vs.window.showInformationMessage("Inline Text is now OFF");
+			}
+		};
+
+		// Toggle Inline Text commands for dynamic icon
+		context.subscriptions.push(vs.commands.registerCommand("cwtools.toggleInlineTextOn", toggleInlineTextFunc));
+		context.subscriptions.push(vs.commands.registerCommand("cwtools.toggleInlineTextOff", toggleInlineTextFunc));
+
 		context.subscriptions.push(vs.commands.registerCommand("cwtools.reloadExtension", async () => {
 			for (const sub of context.subscriptions) {
 				try {

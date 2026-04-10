@@ -10,7 +10,10 @@ open Types
 
 type private Version =
     { text: StringBuilder
-      mutable version: int }
+      mutable version: int
+      // 缓存 StringBuilder.ToString() 结果，避免热路径上重复分配字符串
+      mutable cachedText: string
+      mutable cachedVersion: int }
 
 module DocumentStoreUtils =
     let findRange (text: StringBuilder, range: Range) : struct (int * int) =
@@ -44,6 +47,16 @@ type DocumentStore() =
     /// All open documents, organized by absolute path
     let activeDocuments = Dictionary<string, Version>()
 
+    /// 获取或创建文本缓存（同一版本只创建一次字符串）
+    let getCachedText (v: Version) =
+        if v.cachedVersion = v.version then
+            v.cachedText
+        else
+            let text = v.text.ToString()
+            v.cachedText <- text
+            v.cachedVersion <- v.version
+            text
+
     /// Replace a section of an open file
     let patch (doc: VersionedTextDocumentIdentifier, range: Range, text: string) : unit =
         let file = FileInfo(doc.uri.LocalPath)
@@ -67,13 +80,16 @@ type DocumentStore() =
 
         let version =
             { text = text
-              version = doc.textDocument.version }
+              version = doc.textDocument.version
+              cachedText = doc.textDocument.text
+              cachedVersion = doc.textDocument.version }
 
         activeDocuments[file.FullName] <- version
 
     member this.Change(doc: DidChangeTextDocumentParams) : unit =
         let file = FileInfo(doc.textDocument.uri.LocalPath)
-        let existing = activeDocuments[file.FullName]
+        let found, existing = activeDocuments.TryGetValue(file.FullName)
+        if not found then () else
 
         if doc.textDocument.version <= existing.version then
             let oldVersion = existing.version
@@ -85,19 +101,28 @@ type DocumentStore() =
                 | Some range -> patch (doc.textDocument, range, change.text)
                 | None -> replace (doc.textDocument, change.text)
 
+    /// 基于文件路径字符串获取文本（避免创建 FileInfo 对象）
+    member this.GetTextByPath(filePath: string) : string option =
+        let found, value = activeDocuments.TryGetValue(filePath)
+        if found then Some(getCachedText value) else None
+
     member this.GetText(file: FileInfo) : string option =
-        let found, value = activeDocuments.TryGetValue(file.FullName)
-        if found then Some(value.text.ToString()) else None
+        this.GetTextByPath(file.FullName)
 
     member this.GetVersion(file: FileInfo) : int option =
         let found, value = activeDocuments.TryGetValue(file.FullName)
+        if found then Some(value.version) else None
+
+    /// 基于文件路径字符串获取版本号
+    member this.GetVersionByPath(filePath: string) : int option =
+        let found, value = activeDocuments.TryGetValue(filePath)
         if found then Some(value.version) else None
 
     member this.Get(file: FileInfo) : option<string * int> =
         let found, value = activeDocuments.TryGetValue(file.FullName)
 
         if found then
-            Some(value.text.ToString(), value.version)
+            Some(getCachedText value, value.version)
         else
             None
 
@@ -123,6 +148,6 @@ type DocumentStore() =
             dprintfn $"Cleaned up %i{orphanedFiles.Length} orphaned documents"
 
     member this.GetTextAtPosition(fileUri: Uri, position: Position) : string =
-        match this.GetText(FileInfo(fileUri.LocalPath)) with
+        match this.GetTextByPath(FileInfo(fileUri.LocalPath).FullName) with
         | Some(text) -> DocumentStoreHelper.GetTextAtPosition(text, position.line, position.character)
         | None -> String.Empty

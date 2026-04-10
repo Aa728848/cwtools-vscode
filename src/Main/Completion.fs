@@ -12,6 +12,26 @@ open LSP
 open LSP.Types
 open CWTools.Utilities.Utils
 
+// 预编译正则表达式（避免每次补全/resolve 时重新编译）
+let private varExtractPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
+        System.Text.RegularExpressions.RegexOptions.Multiline ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private paramExtractPattern =
+    System.Text.RegularExpressions.Regex(
+        @"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private userParamPattern =
+    System.Text.RegularExpressions.Regex(
+        @"\|([A-Za-z_][A-Za-z0-9_]*)[:=]([^\|]+)",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private macroParamPattern =
+    System.Text.RegularExpressions.Regex(
+        @"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
 
 let completionCache = Dictionary<int, CompletionItem>()
 let mutable private rangeCache: (string * int * int * Range * Range) option = None
@@ -105,8 +125,7 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
 
                     // Helper function to extract variable name-value pairs from file content
                     let extractVarsFromFile (content: string) =
-                        let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
-                        [ for m in pattern.Matches(content) ->
+                        [ for m in varExtractPattern.Matches(content) ->
                             let name = m.Groups.[1].Value.Trim()
                             let value = m.Groups.[2].Value.Trim()
                             name, value ]
@@ -129,8 +148,7 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
                     match varInfo with
                     | Some (name, value) ->
                         // Extract parameters from value (patterns like $PARAM$ or $PARAM|default$)
-                        let paramPattern = System.Text.RegularExpressions.Regex(@"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$")
-                        let params_found = paramPattern.Matches(value)
+                        let params_found = paramExtractPattern.Matches(value)
                         let definedParameters =
                             [ for m in params_found ->
                                 let paramName = m.Groups.[1].Value
@@ -142,11 +160,9 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
                         let userProvidedParams =
                             match item.insertText with
                             | Some text ->
-                                let userParamPattern = System.Text.RegularExpressions.Regex(@"\|([A-Za-z_][A-Za-z0-9_]*)[:=]([^\|]+)")
                                 [ for m in userParamPattern.Matches(text) -> m.Groups.[1].Value, m.Groups.[2].Value ]
                                 |> List.distinctBy fst
                             | None ->
-                                let userParamPattern = System.Text.RegularExpressions.Regex(@"\|([A-Za-z_][A-Za-z0-9_]*)[:=]([^\|]+)")
                                 [ for m in userParamPattern.Matches(item.label) -> m.Groups.[1].Value, m.Groups.[2].Value ]
                                 |> List.distinctBy fst
 
@@ -262,19 +278,20 @@ let optimiseCompletion (completionList: CompletionItem seq) =
     else
         completionCacheCount <- completionCacheCount + 1
 
-    let cachedCompletionList = Seq.cache completionList
+    // 优化：使用 Array 替代 Seq 避免多次遍历
+    let arr = completionList |> Seq.toArray
 
-    match cachedCompletionList |> Seq.length with
-    | x when x > 1000 ->
-        let sorted = cachedCompletionList |> Seq.sortBy (fun c -> c.sortText)
+    if arr.Length > 1000 then
+        Array.sortInPlaceBy (fun (c: CompletionItem) -> c.sortText) arr
 
-        let first = sorted |> Seq.take 1000
+        let first = arr |> Array.take 1000
+        let restLen = min 1000 (arr.Length - 1000)
 
         let rest =
-            sorted
-            |> Seq.skip 1000
-            |> Seq.take (min 1000 (x - 1000))
-            |> Seq.map (fun item ->
+            arr
+            |> Array.skip 1000
+            |> Array.take restLen
+            |> Array.map (fun item ->
                 let key = addToCache item
 
                 { item with
@@ -286,7 +303,7 @@ let optimiseCompletion (completionList: CompletionItem seq) =
             yield! first
             yield! rest
         }
-    | _ -> cachedCompletionList
+    else arr :> seq<_>
 
 let checkPartialCompletionCache (p: CompletionParams) genItems =
     match p.context, completionPartialCache, p.textDocument, p.position with
@@ -548,7 +565,7 @@ let completion
                                         with _ -> ""
                                     
                                     if fileText <> "" then
-                                        let pattern = System.Text.RegularExpressions.Regex(@"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$")
+                                        let pattern = macroParamPattern
                                         [ for m in pattern.Matches(fileText) -> m.Groups.[1].Value ]
                                         |> List.distinct
                                         |> List.filter (fun x -> x <> "")

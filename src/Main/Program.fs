@@ -125,8 +125,8 @@ type Server(client: ILanguageClient) =
     let mutable ignoreCodes: string array = [||]
     let mutable ignoreFiles: string array = [||]
     let mutable dontLoadPatterns: string array = [||]
-    /// key: FileName
-    let mutable locCache: Map<string, CWError list> = Map.empty
+    /// key: FileName (使用 Dictionary 替代不可变 Map 以减少 GC 压力)
+    let locCache = System.Collections.Generic.Dictionary<string, CWError list>()
 
     let mutable lastFocusedFile: string option = None
 
@@ -213,25 +213,17 @@ type Server(client: ILanguageClient) =
 
     let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) : Async<unit> =
         async {
-            let name =
-                if
-                    RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                    && doc.LocalPath.StartsWith '/'
-                then
-                    doc.LocalPath.Substring(1)
-                else
-                    doc.LocalPath
+            let name = getPathFromDoc doc
 
             if name.EndsWith(".yml") then
                 delayedLocUpdate <- true
             else
                 ()
 
+            // 优化：只获取一次文件文本，避免重复 GetText 调用
             let filetext =
-                if forceDisk then
-                    None
-                else
-                    docs.GetText(FileInfo(doc.LocalPath))
+                if forceDisk then None
+                else docs.GetText(FileInfo(doc.LocalPath))
 
             let getRange (start: Position) (endp: Position) =
                 mkRange
@@ -240,7 +232,7 @@ type Server(client: ILanguageClient) =
                     (mkPos (int endp.Line) (int endp.Column))
 
             let parserErrors =
-                match docs.GetText(FileInfo(doc.LocalPath)) with
+                match filetext with
                 | None -> []
                 | Some t ->
                     let parsed = CKParser.parseString t name
@@ -252,8 +244,9 @@ type Server(client: ILanguageClient) =
                         [ ("CW001", Severity.Error, name, msg, (getRange p.Position p.Position), 0, None) ]
 
             let locErrors =
-                locCache.TryFind(doc.LocalPath)
-                |> Option.defaultValue []
+                match locCache.TryGetValue(doc.LocalPath) with
+                | true, errors -> errors
+                | false, _ -> []
                 |> List.map (fun e ->
                     (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
             // logDiag (sprintf "lint le %A" (locCache.TryFind (doc.LocalPath) |> Option.defaultValue []))
@@ -295,25 +288,17 @@ type Server(client: ILanguageClient) =
                 game.RefreshLocalisationCaches()
                 delayedLocUpdate <- false
 
-                // 清理旧的 locCache 以释放内存
-                locCache <- Map.empty
-                
-                locCache <-
-                    game.LocalisationErrors(true, true)
-                    |> List.groupBy _.range.FileName
-                    |> Map.ofList
-            // eprintfn "lc update %A" locCache
+                // 使用 Dictionary: 清空后重新填充
+                locCache.Clear()
+                for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
+                    locCache.[fileName] <- errors
             else
                 logDiag "delayedLocUpdate false"
 
-                // 清理旧的 locCache 以释放内存
-                locCache <- Map.empty
-                
-                locCache <-
-                    game.LocalisationErrors(false, true)
-                    |> List.groupBy _.range.FileName
-                    |> Map.ofList
-            // eprintfn "lc update light %A" locCache
+                locCache.Clear()
+                for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
+                    locCache.[fileName] <- errors
+
             let time = Stopwatch.GetElapsedTime(timestamp)
 
             delayTime <-
@@ -329,7 +314,7 @@ type Server(client: ILanguageClient) =
             with e ->
                 logDiag $"CleanupCache failed: {e.Message}"
             
-            // 在大量文件处理后触发GC回收旧的不可变Map
+            // 在大量文件处理后触发GC回收
             if locCache.Count > 100 then
                 GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
         | None -> ()
@@ -585,14 +570,7 @@ type Server(client: ILanguageClient) =
 
         match uri with
         | Some u ->
-            let path =
-                if
-                    RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                    && u.LocalPath.StartsWith '/'
-                then
-                    u.LocalPath.Substring(1)
-                else
-                    u.LocalPath
+            let path = getPathFromDoc u
 
             try
                 let serverSettings =
@@ -610,127 +588,76 @@ type Server(client: ILanguageClient) =
                       maxFileSize = maxFileSize
                       stlVanillaPath = stlVanillaPath }
 
+                // 加载新游戏前，清理旧的游戏对象引用释放内存
+                let cleanupOldGame () =
+                    match gameObj with
+                    | Some oldGame ->
+                        try
+                            let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
+                            oldGame.CleanupCache existingFiles
+                        with _ -> ()
+                    | None -> ()
+                    // 清除所有旧的类型特定引用
+                    stlGameObj <- None
+                    hoi4GameObj <- None
+                    eu4GameObj <- None
+                    ck2GameObj <- None
+                    irGameObj <- None
+                    vic2GameObj <- None
+                    ck3GameObj <- None
+                    vic3GameObj <- None
+                    eu5GameObj <- None
+                    customGameObj <- None
+
                 let game =
                     match activeGame with
                     | STL ->
-                        // 释放旧的游戏对象资源
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                // 清理缓存以释放内存
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadSTL serverSettings
                         stlGameObj <- Some(game :> IGame<STLComputedData>)
                         game :> IGame
                     | HOI4 ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadHOI4 serverSettings
                         hoi4GameObj <- Some(game :> IGame<HOI4ComputedData>)
                         game :> IGame
                     | EU4 ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadEU4 serverSettings
                         eu4GameObj <- Some(game :> IGame<EU4ComputedData>)
                         game :> IGame
                     | CK2 ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadCK2 serverSettings
                         ck2GameObj <- Some(game :> IGame<CK2ComputedData>)
                         game :> IGame
                     | IR ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadIR serverSettings
                         irGameObj <- Some(game :> IGame<IRComputedData>)
                         game :> IGame
                     | VIC2 ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadVIC2 serverSettings
                         vic2GameObj <- Some(game :> IGame<VIC2ComputedData>)
                         game :> IGame
                     | CK3 ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadCK3 serverSettings
                         ck3GameObj <- Some(game :> IGame<CK3ComputedData>)
                         game :> IGame
                     | VIC3 ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadVIC3 serverSettings
                         vic3GameObj <- Some(game :> IGame<VIC3ComputedData>)
                         game :> IGame
                     | EU5 ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadEU5 serverSettings
                         eu5GameObj <- Some(game :> IGame<EU5ComputedData>)
                         game :> IGame
                     | Custom ->
-                        match gameObj with
-                        | Some oldGame ->
-                            try
-                                let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
-                                oldGame.CleanupCache existingFiles
-                            with _ -> ()
-                        | None -> ()
-                        
+                        cleanupOldGame()
                         let game = loadCustom serverSettings
                         customGameObj <- Some(game :> IGame<JominiComputedData>)
                         game :> IGame
@@ -785,7 +712,9 @@ type Server(client: ILanguageClient) =
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
                 let locRaw = game.LocalisationErrors(true, true)
-                locCache <- locRaw |> List.groupBy _.range.FileName |> Map.ofList
+                locCache.Clear()
+                for fileName, errors in locRaw |> List.groupBy _.range.FileName do
+                    locCache.[fileName] <- errors
 
                 let locErrors =
                     locRaw
@@ -1263,15 +1192,7 @@ type Server(client: ILanguageClient) =
 
         member this.DidFocusFile(p: DidFocusFileParams) =
             async {
-                let path =
-                    if
-                        RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                        && p.uri.LocalPath.StartsWith '/'
-                    then
-                        p.uri.LocalPath.Substring(1)
-                    else
-                        p.uri.LocalPath
-
+                let path = getPathFromDoc p.uri
                 lastFocusedFile <- Some path
                 lintAgent.Post(UpdateRequest({ uri = p.uri; version = 0 }, true))
             }
@@ -1362,17 +1283,7 @@ type Server(client: ILanguageClient) =
                     | Some game ->
                         let position = PosHelper.fromZ p.position.line p.position.character
                         logInfo $"goto fn %A{p.textDocument.uri}"
-
-                        let path =
-                            let u = p.textDocument.uri
-
-                            if
-                                RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                                && u.LocalPath.StartsWith "/"
-                            then
-                                u.LocalPath.Substring(1)
-                            else
-                                u.LocalPath
+                        let path = getPathFromDoc p.textDocument.uri
 
                         let gototype =
                             game.GoToType
@@ -1396,18 +1307,8 @@ type Server(client: ILanguageClient) =
                 return
                     match gameObj with
                     | Some game ->
-                        let position = PosHelper.fromZ p.position.line p.position.character // |> (fun p -> Pos.fromZ)
-
-                        let path =
-                            let u = p.textDocument.uri
-
-                            if
-                                RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                                && u.LocalPath.StartsWith '/'
-                            then
-                                u.LocalPath.Substring(1)
-                            else
-                                u.LocalPath
+                        let position = PosHelper.fromZ p.position.line p.position.character
+                        let path = getPathFromDoc p.textDocument.uri
 
                         let gototype =
                             game.FindAllRefs
@@ -1485,18 +1386,12 @@ type Server(client: ILanguageClient) =
                 return
                     match gameObj with
                     | Some game ->
-                        let es = locCache
+                        let path = getPathFromDoc p.textDocument.uri
 
-                        let path =
-                            if
-                                RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                                && p.textDocument.uri.LocalPath.StartsWith '/'
-                            then
-                                p.textDocument.uri.LocalPath.Substring(1)
-                            else
-                                p.textDocument.uri.LocalPath
-
-                        let les = es.TryFind(path) |> Option.defaultValue []
+                        let les =
+                            match locCache.TryGetValue(path) with
+                            | true, errors -> errors
+                            | false, _ -> []
 
                         let les =
                             les

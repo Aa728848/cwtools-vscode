@@ -11,6 +11,17 @@ open CWTools.Localisation
 
 module LanguageServerFeatures =
 
+    /// 预编译的正则表达式，避免每次 hover 时重新编译
+    let private scriptedVarPattern =
+        System.Text.RegularExpressions.Regex(
+            @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
+            System.Text.RegularExpressions.RegexOptions.Multiline ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+    let private paramPattern =
+        System.Text.RegularExpressions.Regex(
+            @"\$([A-Za-z_][A-Za-z0-9_]*)\$",
+            System.Text.RegularExpressions.RegexOptions.Compiled)
+
     
     let convRangeToLSPRange (range: range) =
         { start =
@@ -20,16 +31,12 @@ module LanguageServerFeatures =
             { line = max 0 (int range.EndLine - 1)
               character = (int range.EndColumn) } }
 
+    /// Windows URI 路径修正工具函数（消除重复代码）
     let getPathFromDoc (doc: Uri) =
-        let u = doc
-
-        if
-            RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            && u.LocalPath.StartsWith '/'
-        then
-            u.LocalPath.Substring(1)
-        else
-            u.LocalPath
+        let p = doc.LocalPath
+        if RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && p.Length > 0 && p.[0] = '/' then
+            p.Substring(1)
+        else p
 
     let lochoverFromInfo (localisation: (string * Entry) list) (infoOption: SymbolInformation option) (word: string) =
         let locToText (loc: SymbolLocalisationInfo) =
@@ -91,39 +98,30 @@ module LanguageServerFeatures =
             let path = getPathFromDoc doc
 
             let hoverFunction (game: IGame<_>) =
-                let symbolInfo =
-                    game.InfoAtPos position path (docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue "")
+                // 优化：只获取一次文件文本，所有后续操作共享同一引用
+                let fileContent = docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue ""
 
-                let scopeContext =
-                    game.ScopesAtPos position path (docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue "")
+                let symbolInfo = game.InfoAtPos position path fileContent
+                let scopeContext = game.ScopesAtPos position path fileContent
 
                 let allEffects = game.ScriptedEffects() @ game.ScriptedTriggers()
 
                 let hovered =
                     allEffects |> List.tryFind (fun e -> e.Name.GetString() = unescapedWord)
 
-                // Check if hovering over a scripted variable (@variable_name)
-                // Helper to extract variables from file content
+                // 使用模块级预编译正则提取变量
                 let extractVarsFromFile (content: string) =
-                    let pattern = System.Text.RegularExpressions.Regex(@"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)", System.Text.RegularExpressions.RegexOptions.Multiline)
-                    [ for m in pattern.Matches(content) ->
+                    [ for m in scriptedVarPattern.Matches(content) ->
                         let name = m.Groups.[1].Value.Trim()
                         let value = m.Groups.[2].Value.Trim()
                         name, value ]
 
                 let scriptedVariableInfo =
-
-                    // Skip @[ array access syntax - this is not a scripted variable
                     if unescapedWord.StartsWith("@[") then
                         None
                     else
-                        // Get global scripted variables from game object cache
                         let globalVars = game.ScriptedVariables()
-
-                        // Get local variables from current file
-                        let fileContent = docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue ""
                         let localVars = extractVarsFromFile fileContent
-                        // Combine: local vars take precedence
                         let allVars = localVars @ globalVars
 
                         let varName =
@@ -141,7 +139,6 @@ module LanguageServerFeatures =
                     scriptedVariableInfo
                     |> Option.map (fun (name, value) ->
                         let displayName = if name.StartsWith('@') then name else "@" + name
-                        let paramPattern = System.Text.RegularExpressions.Regex(@"\$([A-Za-z_][A-Za-z0-9_]*)\$")
                         let params_found = paramPattern.Matches(value)
                         let definedParameters = [ for m in params_found -> m.Groups.[1].Value ] |> List.distinct
                         if definedParameters.Length > 0 then
@@ -154,10 +151,9 @@ module LanguageServerFeatures =
                     lochoverFromInfo (game.References().Localisation) symbolInfo unescapedWord
 
                 let scopesExtra =
-                    if scopeContext.IsNone then
-                        ""
-                    else
-                        let scopes = scopeContext.Value
+                    match scopeContext with
+                    | None -> ""
+                    | Some scopes ->
                         let header = "| Context | Scope |\n| ----- | -----|\n"
                         let root = $"| ROOT | %s{scopes.Root.ToString()} |\n"
 
@@ -190,16 +186,14 @@ module LanguageServerFeatures =
                                 de.Desc.Replace("_", "\\_").Trim()
                                 |> (fun s -> if s = "" then "" else "_" + s + "_")
 
-                            String.Join("\n***\n", [ desc; "Supports scopes: " + scopes ]) // TODO: usageeffect.Usage])
+                            String.Join("\n***\n", [ desc; "Supports scopes: " + scopes ])
                         | e ->
                             let scopes = String.Join(", ", e.Scopes |> List.map (fun f -> f.ToString()))
                             let name = e.Name.GetString().Replace("_", "\\_").Trim()
-                            String.Join("\n***\n", [ "_" + name + "_"; "Supports scopes: " + scopes ]) // TODO: usageeffect.Usage])
-                    )
+                            String.Join("\n***\n", [ "_" + name + "_"; "Supports scopes: " + scopes ]))
 
                 let docStringOrEffect = Option.orElse (docstringFromInfo symbolInfo) effect
 
-                // Handle inline_script file preview
                 let inlineScriptPreview =
                     symbolInfo
                     |> Option.bind (fun info ->
@@ -230,25 +224,7 @@ module LanguageServerFeatures =
                 | text ->
                     { contents = MarkupContent("markdown", text)
                       range = None }
-            // match hovered, lochover, docstringFromInfo symbolInfo with
-            // |Some effect, _, _ ->
-            //     match effect with
-            //     | :? CWTools.Common.DocEffect<'a> as de ->
-            //         let scopes = String.Join(", ", de.Scopes |> List.map (fun f -> f.ToString()))
-            //         let desc = de.Desc.Replace("_", "\\_").Trim() |> (fun s -> if s = "" then "" else "_"+s+"_" )
-            //         let content = String.Join("\n***\n",[desc; "Supports scopes: " + scopes; scopesExtra]) // TODO: usageeffect.Usage])
-            //         {contents = (MarkupContent ("markdown", content)) ; range = None}
-            //     | e ->
-            //         let scopes = String.Join(", ", e.Scopes |> List.map (fun f -> f.ToString()))
-            //         let name = e.Name.Replace("_","\\_").Trim()
-            //         let content = String.Join("\n***\n",["_"+name+"_"; "Supports scopes: " + scopes; scopesExtra]) // TODO: usageeffect.Usage])
-            //         {contents = (MarkupContent ("markdown", content)) ; range = None}
-            // |None, Some loc, _->
-            //     {contents = MarkupContent ("markdown", loc + "\n\n***\n\n" + scopesExtra); range = None}
-            // |None, None, Some ruleDesc ->
-            //     {contents = MarkupContent ("markdown", ruleDesc + "\n\n***\n\n" + scopesExtra); range = None}
-            // |None, None, None ->
-            //     {contents = MarkupContent ("markdown", scopesExtra); range = None}
+
             return
                 match
                     stlGameObj,

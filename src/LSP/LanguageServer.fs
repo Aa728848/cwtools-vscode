@@ -115,23 +115,21 @@ type msg =
 
 let responseAgent =
     MailboxProcessor.Start(fun agent ->
-        let rec loop state =
+        let rec loop (state: Map<int, AsyncReplyChannel<JsonValue>>) =
             async {
                 let! msg = agent.Receive()
 
                 match msg with
-                | Request(id, reply) -> return! loop ((id, reply) :: state)
+                | Request(id, reply) -> return! loop (state |> Map.add id reply)
                 | Response(id, value) ->
-                    let result = state |> List.tryFind (fun (i, _) -> i = id)
-
-                    match result with
-                    | Some(_, reply) -> reply.Reply(value)
+                    match state |> Map.tryFind id with
+                    | Some reply -> reply.Reply(value)
                     | None -> eprintfn $"Unexpected response %i{id}"
 
-                    return! loop (state |> List.filter (fun (i, _) -> i <> id))
+                    return! loop (state |> Map.remove id)
             }
 
-        loop [])
+        loop Map.empty)
 
 let monitor = Lock()
 

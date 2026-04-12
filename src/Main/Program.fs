@@ -893,7 +893,8 @@ type Server(client: ILanguageClient) =
                                           "listAllLocFiles"
                                           "gettech"
                                           "getGraphData"
-                                          "exportTypes" ] } } }
+                                          "exportTypes" ] }
+                            inlayHintProvider = true } }
             }
 
         member this.Initialized() = async { () }
@@ -1428,13 +1429,17 @@ type Server(client: ILanguageClient) =
                     | None -> []
             }
 
-        member this.CodeLens(p: CodeLensParams) =
+        member this.CodeLens(_: CodeLensParams) =
+            async { return [] }
+            |> catchError []
+
+        member this.ResolveCodeLens(p: CodeLens) = async { return p }
+
+        member this.InlayHint(p: InlayHintParams) =
             async {
                 if not showInlineText then return []
                 else
-                    let codeLensFunction (game: IGame<_>) =
-                        let path = getPathFromDoc p.textDocument.uri
-                        
+                    let inlayHintFunction (game: IGame<_>) =
                         let entityOpt = 
                             game.AllEntities() 
                             |> Seq.tryPick (fun struct (e, _) -> if e.filepath = p.textDocument.uri.LocalPath then Some e else None)
@@ -1443,10 +1448,10 @@ type Server(client: ILanguageClient) =
                         | None -> []
                         | Some entity ->
                             let locMap = game.References().Localisation |> Map.ofList
-                            let lenses = ResizeArray<CodeLens>()
+                            let hints = ResizeArray<InlayHint>()
                             let targetPath = entity.filepath
                             
-                            let formatTitleText (desc: string) =
+                            let formatHintLabel (desc: string) =
                                 let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
                                 let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
                                 let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
@@ -1459,11 +1464,11 @@ type Server(client: ILanguageClient) =
                                         match Map.tryFind rawVal locMap with
                                         | Some tr ->
                                             let range = convRangeToLSPRange l.Position
-                                            let locRange = { start = { line = range.start.line; character = 0 }; ``end`` = { line = range.start.line; character = 0 } }
-                                            lenses.Add {
-                                                range = locRange
-                                                command = Some { title = formatTitleText tr.desc; command = ""; arguments = [] }
-                                                data = JsonValue.Null
+                                            hints.Add {
+                                                position = range.``end``
+                                                label = formatHintLabel tr.desc
+                                                paddingLeft = true
+                                                paddingRight = false
                                             }
                                         | None -> ()
                                 )
@@ -1473,11 +1478,11 @@ type Server(client: ILanguageClient) =
                                         match Map.tryFind rawVal locMap with
                                         | Some tr ->
                                             let range = convRangeToLSPRange lv.Position
-                                            let locRange = { start = { line = range.start.line; character = 0 }; ``end`` = { line = range.start.line; character = 0 } }
-                                            lenses.Add {
-                                                range = locRange
-                                                command = Some { title = formatTitleText tr.desc; command = ""; arguments = [] }
-                                                data = JsonValue.Null
+                                            hints.Add {
+                                                position = range.``end``
+                                                label = formatHintLabel tr.desc
+                                                paddingLeft = true
+                                                paddingRight = false
                                             }
                                         | None -> ()
                                 )
@@ -1485,8 +1490,8 @@ type Server(client: ILanguageClient) =
 
                             visitNode entity.entity
                             
-                            lenses 
-                            |> Seq.distinctBy (fun l -> l.range.start.line, l.command.Value.title)
+                            hints 
+                            |> Seq.distinctBy (fun h -> h.position.line, h.label)
                             |> Seq.toList
                         
                     return
@@ -1501,20 +1506,18 @@ type Server(client: ILanguageClient) =
                             vic3GameObj,
                             customGameObj
                         with
-                        | Some game, _, _, _, _, _, _, _, _ -> codeLensFunction game
-                        | _, Some game, _, _, _, _, _, _, _ -> codeLensFunction game
-                        | _, _, Some game, _, _, _, _, _, _ -> codeLensFunction game
-                        | _, _, _, Some game, _, _, _, _, _ -> codeLensFunction game
-                        | _, _, _, _, Some game, _, _, _, _ -> codeLensFunction game
-                        | _, _, _, _, _, Some game, _, _, _ -> codeLensFunction game
-                        | _, _, _, _, _, _, Some game, _, _ -> codeLensFunction game
-                        | _, _, _, _, _, _, _, Some game, _ -> codeLensFunction game
-                        | _, _, _, _, _, _, _, _, Some game -> codeLensFunction game
+                        | Some game, _, _, _, _, _, _, _, _ -> inlayHintFunction game
+                        | _, Some game, _, _, _, _, _, _, _ -> inlayHintFunction game
+                        | _, _, Some game, _, _, _, _, _, _ -> inlayHintFunction game
+                        | _, _, _, Some game, _, _, _, _, _ -> inlayHintFunction game
+                        | _, _, _, _, Some game, _, _, _, _ -> inlayHintFunction game
+                        | _, _, _, _, _, Some game, _, _, _ -> inlayHintFunction game
+                        | _, _, _, _, _, _, Some game, _, _ -> inlayHintFunction game
+                        | _, _, _, _, _, _, _, Some game, _ -> inlayHintFunction game
+                        | _, _, _, _, _, _, _, _, Some game -> inlayHintFunction game
                         | _ -> []
             }
             |> catchError []
-
-        member this.ResolveCodeLens(p: CodeLens) = async { return p }
         member this.DocumentLink(_: DocumentLinkParams) = TODO()
         member this.ResolveDocumentLink(_: DocumentLink) = TODO()
 

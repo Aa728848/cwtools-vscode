@@ -68,6 +68,9 @@ let private serializeCodeLensList =
 
 let private serializeCodeLens = serializerFactory<CodeLens> jsonWriteOptions
 
+let private serializeInlayHintList =
+    serializerFactory<InlayHint list> jsonWriteOptions
+
 let private serializeDocumentLinkList =
     serializerFactory<DocumentLink list> jsonWriteOptions
 
@@ -269,6 +272,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | CodeActions(p) -> server.CodeActions(p) |> thenMap serializeCommandList |> thenSome
         | CodeLens(p) -> server.CodeLens(p) |> thenMap serializeCodeLensList |> thenSome
         | ResolveCodeLens(p) -> server.ResolveCodeLens(p) |> thenMap serializeCodeLens |> thenSome
+        | InlayHint(p) -> server.InlayHint(p) |> thenMap serializeInlayHintList |> thenSome
         | DocumentLink(p) -> server.DocumentLink(p) |> thenMap serializeDocumentLinkList |> thenSome
         | ResolveDocumentLink(p) -> server.ResolveDocumentLink(p) |> thenMap serializeDocumentLink |> thenSome
         | DocumentFormatting(p) -> server.DocumentFormatting(p) |> thenMap serializeTextEditList |> thenSome

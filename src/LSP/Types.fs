@@ -341,6 +341,16 @@ type CodeLens =
       command: Command option
       data: JsonValue }
 
+type InlayHintParams =
+    { textDocument: TextDocumentIdentifier
+      range: Range }
+
+type InlayHint =
+    { position: Position
+      label: string
+      paddingLeft: bool
+      paddingRight: bool }
+
 type DocumentLinkParams =
     { textDocument: TextDocumentIdentifier }
 
@@ -393,6 +403,7 @@ type Request =
     | CodeActions of CodeActionParams
     | CodeLens of CodeLensParams
     | ResolveCodeLens of CodeLens
+    | InlayHint of InlayHintParams
     | DocumentLink of DocumentLinkParams
     | ResolveDocumentLink of DocumentLink
     | DocumentFormatting of DocumentFormattingParams
@@ -473,7 +484,8 @@ type ServerCapabilities =
       documentOnTypeFormattingProvider: DocumentOnTypeFormattingOptions option
       renameProvider: bool
       documentLinkProvider: DocumentLinkOptions option
-      executeCommandProvider: ExecuteCommandOptions option }
+      executeCommandProvider: ExecuteCommandOptions option
+      inlayHintProvider: bool }
 
 let defaultServerCapabilities: ServerCapabilities =
     { textDocumentSync = defaultTextDocumentSyncOptions
@@ -492,7 +504,8 @@ let defaultServerCapabilities: ServerCapabilities =
       documentOnTypeFormattingProvider = None
       renameProvider = false
       documentLinkProvider = None
-      executeCommandProvider = None }
+      executeCommandProvider = None
+      inlayHintProvider = false }
 
 type InitializeResult = { capabilities: ServerCapabilities }
 
@@ -638,6 +651,7 @@ type ILanguageServer =
     abstract member CodeActions: CodeActionParams -> Async<Command list>
     abstract member CodeLens: CodeLensParams -> Async<CodeLens list>
     abstract member ResolveCodeLens: CodeLens -> Async<CodeLens>
+    abstract member InlayHint: InlayHintParams -> Async<InlayHint list>
     abstract member DocumentLink: DocumentLinkParams -> Async<DocumentLink list>
     abstract member ResolveDocumentLink: DocumentLink -> Async<DocumentLink>
     abstract member DocumentFormatting: DocumentFormattingParams -> Async<TextEdit list>

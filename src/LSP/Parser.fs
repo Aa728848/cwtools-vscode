@@ -227,6 +227,8 @@ let parseCodeLensParams = deserializerFactory<CodeLensParams> readOptions
 
 let parseCodeLens = deserializerFactory<CodeLens> readOptions
 
+let parseInlayHintParams = deserializerFactory<InlayHintParams> readOptions
+
 let parseDocumentLinkParams = deserializerFactory<DocumentLinkParams> readOptions
 
 let parseDocumentLink = deserializerFactory<DocumentLink> readOptions
@@ -314,6 +316,7 @@ let parseRequest (method: string, json: JsonValue) : Request =
     | "textDocument/codeAction" -> CodeActions(parseCodeActionParams json)
     | "textDocument/codeLens" -> CodeLens(parseCodeLensParams json)
     | "codeLens/resolve" -> ResolveCodeLens(parseCodeLens json)
+    | "textDocument/inlayHint" -> InlayHint(parseInlayHintParams json)
     | "textDocument/documentLink" -> DocumentLink(parseDocumentLinkParams json)
     | "documentLink/resolve" -> ResolveDocumentLink(parseDocumentLink json)
     | "textDocument/formatting" -> DocumentFormatting(parseDocumentFormattingParams json)

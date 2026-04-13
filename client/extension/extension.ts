@@ -16,7 +16,7 @@ import * as gp from './graphPanel';
 import * as exe from './executable';
 import { getGraphData } from '../common/graphTypes';
 
-const stellarisRemote = `https://github.com/cwtools/cwtools-stellaris-config`;
+const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
 const hoi4Remote = `https://github.com/cwtools/cwtools-hoi4-config`;
 const ck2Remote = `https://github.com/cwtools/cwtools-ck2-config`;
@@ -27,16 +27,15 @@ const ck3Remote = `https://github.com/cwtools/cwtools-ck3-config`;
 const eu5Remote = `https://github.com/kaiser-chris/cwtools-eu5-config`;
 
 export let defaultClient: LanguageClient;
-let fileList : FileListItem[];
-let fileExplorer : FileExplorer;
+let fileList: FileListItem[];
+let fileExplorer: FileExplorer;
 export async function activate(context: ExtensionContext) {
 
 
-	class CwtoolsProvider implements vs.TextDocumentContentProvider
-	{
+	class CwtoolsProvider implements vs.TextDocumentContentProvider {
 		private disposables: Disposable[] = [];
 
-		constructor(){
+		constructor() {
 			workspace.registerTextDocumentContentProvider("cwtools", this)
 		}
 		async provideTextDocumentContent() {
@@ -51,7 +50,7 @@ export async function activate(context: ExtensionContext) {
 	const isDevDir = env.machineId === "someValue.machineId"
 	const cacheDir = isDevDir ? context.globalStorageUri + '/.cwtools' : context.extensionPath + '/.cwtools'
 
-	const init = async function(language : string, isVanillaFolder : boolean) {
+	const init = async function (language: string, isVanillaFolder: boolean) {
 		vs.languages.setLanguageConfiguration(language, {
 			wordPattern: /"?([^\s.]+)"?/,
 			autoClosingPairs: [
@@ -94,7 +93,7 @@ export async function activate(context: ExtensionContext) {
 		// Otherwise the run options are used
 		const serverOptions: ServerOptions = {
 			run: { command: serverExe, transport: TransportKind.stdio },
-			debug : { command: serverExe, transport: TransportKind.stdio }
+			debug: { command: serverExe, transport: TransportKind.stdio }
 		}
 
 		const fileEvents = [
@@ -110,8 +109,8 @@ export async function activate(context: ExtensionContext) {
 		const clientOptions: LanguageClientOptions = {
 			// Register the server for F# documents
 			documentSelector: [{ scheme: 'file', language: 'paradox' }, { scheme: 'file', language: 'yaml' }, { scheme: 'file', language: 'stellaris' },
-				{ scheme: 'file', language: 'hoi4' }, { scheme: 'file', language: 'eu4' }, { scheme: 'file', language: 'ck2' }, { scheme: 'file', language: 'imperator' }
-				, { scheme: 'file', language: 'vic2' }, { scheme: 'file', language: 'vic3' }, { scheme: 'file', language: 'ck3' }, { scheme: 'file', language: 'eu5' }, { scheme: 'file', language: 'paradox'}],
+			{ scheme: 'file', language: 'hoi4' }, { scheme: 'file', language: 'eu4' }, { scheme: 'file', language: 'ck2' }, { scheme: 'file', language: 'imperator' }
+				, { scheme: 'file', language: 'vic2' }, { scheme: 'file', language: 'vic3' }, { scheme: 'file', language: 'ck3' }, { scheme: 'file', language: 'eu5' }, { scheme: 'file', language: 'paradox' }],
 			synchronize: {
 				// Synchronize the setting section 'languageServerExample' to the server
 				configurationSection: 'cwtools',
@@ -125,8 +124,9 @@ export async function activate(context: ExtensionContext) {
 				rulesCache: cacheDir,
 				rules_version: workspace.getConfiguration('cwtools').get('rules_version'),
 				repoPath: repoPath,
-				diagnosticLogging: workspace.getConfiguration('cwtools').get('logging.diagnostic') },
-				revealOutputChannelOn: RevealOutputChannelOn.Error
+				diagnosticLogging: workspace.getConfiguration('cwtools').get('logging.diagnostic')
+			},
+			revealOutputChannelOn: RevealOutputChannelOn.Error
 		}
 
 		const client = new LanguageClient('cwtools', 'Paradox Language Server', serverOptions, clientOptions);
@@ -142,23 +142,22 @@ export async function activate(context: ExtensionContext) {
 		const promptReload = new NotificationType<string>('promptReload')
 		const forceReload = new NotificationType<string>('forceReload')
 		const promptVanillaPath = new NotificationType<string>('promptVanillaPath')
-		interface DidFocusFile { uri : string }
+		interface DidFocusFile { uri: string }
 		const didFocusFile = new NotificationType<DidFocusFile>('didFocusFile')
 		let status: Disposable;
 		interface UpdateFileList { fileList: FileListItem[] }
 		const updateFileList = new NotificationType<UpdateFileList>('updateFileList');
 
-		let latestType : string;
+		let latestType: string;
 
-		async function didChangeActiveTextEditor(editor : vs.TextEditor | undefined): Promise<void> {
-			if (editor){
+		async function didChangeActiveTextEditor(editor: vs.TextEditor | undefined): Promise<void> {
+			if (editor) {
 				const path = editor.document.uri.toString();
 				if (languageId == "paradox" && editor.document.languageId == "plaintext") {
 					await vs.languages.setTextDocumentLanguage(editor.document, "paradox")
 				}
-				if(editor.document.languageId == language)
-				{
-					await client.sendNotification(didFocusFile, {uri: path});
+				if (editor.document.languageId == language) {
+					await client.sendNotification(didFocusFile, { uri: path });
 				}
 				const params: ExecuteCommandParams = {
 					command: "getFileTypes",
@@ -184,31 +183,31 @@ export async function activate(context: ExtensionContext) {
 			// 只处理当前活动的文本
 			if (window.activeTextEditor && e.document === window.activeTextEditor.document) {
 				const doc = window.activeTextEditor.document;
-				
+
 				// 只处理 paradox 语言
 				if (doc.languageId !== language) return;
-				
+
 				// 获取当前光标位置
 				const cursor = window.activeTextEditor.selection.active;
 				const currentLine = cursor.line;
 				const currentChar = cursor.character;
-				
+
 				// 检查是否有变化
 				if (currentLine === lastCursorLine && currentChar === lastCursorChar) return;
 				lastCursorLine = currentLine;
 				lastCursorChar = currentChar;
-				
+
 				// 获取当前行文本
 				const lineText = doc.lineAt(currentLine).text;
-				
+
 				// 检查是否在 value:xxx| 环境中
 				// 匹配模式：value:xxx| （光标在 | 之后）
 				const textBeforeCursor = lineText.substring(0, currentChar);
-				
+
 				// 检查是否以 value:xxx| 结尾（允许空格）
 				const scriptValuePattern = /value\s*:\s*\S+\|\s*$/;
 				const isMatch = scriptValuePattern.test(textBeforeCursor);
-				
+
 				if (isMatch) {
 					// 延迟 150ms 后触发补全，让文档同步完成
 					setTimeout(() => {
@@ -219,8 +218,8 @@ export async function activate(context: ExtensionContext) {
 		}));
 
 		if (languageId == "paradox") {
-			for (const textDocument of workspace.textDocuments){
-				if (textDocument.languageId == "plaintext"){
+			for (const textDocument of workspace.textDocuments) {
+				if (textDocument.languageId == "plaintext") {
 					await vs.languages.setTextDocumentLanguage(textDocument, "paradox")
 				}
 			}
@@ -281,16 +280,16 @@ export async function activate(context: ExtensionContext) {
 				case "eu5": gameDisplay = "Europa Universalis V"; break;
 			}
 			const result = await window.showInformationMessage("Please select the vanilla installation folder for " + gameDisplay, "Select folder");
-			if(!result) {
+			if (!result) {
 				return;
 			}
 			const uri = await window.showOpenDialog({
-						canSelectFiles: false,
-						canSelectFolders: true,
-						canSelectMany: false,
-						openLabel: "Select vanilla installation folder for " + gameDisplay
-					});
-			if(!uri) {
+				canSelectFiles: false,
+				canSelectFolders: true,
+				canSelectMany: false,
+				openLabel: "Select vanilla installation folder for " + gameDisplay
+			});
+			if (!uri) {
 				return;
 			}
 			const directory = uri[0];
@@ -320,10 +319,10 @@ export async function activate(context: ExtensionContext) {
 					game = "imperator";
 					dir = path.join(dir, "game");
 					break;
-                case "Europa Universalis V":
-                    game = "eu5";
-                    dir = path.join(dir, "game");
-                    break;
+				case "Europa Universalis V":
+					game = "eu5";
+					dir = path.join(dir, "game");
+					break;
 			}
 			console.log(path.join(dir, "common"));
 			if (game === "" || !(fs.existsSync(path.join(dir, "common")))) {
@@ -350,7 +349,7 @@ export async function activate(context: ExtensionContext) {
 			await window.showWarningMessage("You have opened a file directly.\n\rFor CWTools to work correctly, the mod folder should be opened using \"File, Open Folder\"")
 		}
 
-/// TODO graph
+		/// TODO graph
 		// let disposable2 = commands.registerCommand('techGraph', () => {
 		// 	commands.executeCommand("gettech").then((t: any) => {
 		// 		//console.log(t);
@@ -369,9 +368,9 @@ export async function activate(context: ExtensionContext) {
 		// });
 
 		let currentGraphDepth = 3;
-		const showGraph = async function() {
+		const showGraph = async function () {
 			const graphData = await getGraphData(latestType, currentGraphDepth);
-			const wheelSensitivity : number = workspace.getConfiguration('cwtools.graph').get('zoomSensitivity') ?? 1;
+			const wheelSensitivity: number = workspace.getConfiguration('cwtools.graph').get('zoomSensitivity') ?? 1;
 			gp.GraphPanel.create(context.extensionPath);
 			gp.GraphPanel.currentPanel!.initialiseGraph(graphData, wheelSensitivity);
 		}
@@ -384,17 +383,16 @@ export async function activate(context: ExtensionContext) {
 					placeHolder: "default: 3",
 					prompt: "Set graph depth (how many connections to go back from this file)",
 					value: currentGraphDepth.toString(),
-					validateInput: (v : string) => Number.isInteger(Number(v)) ? undefined : "Please enter a number"
-			 });
-				if (Number.isInteger(Number(res)))
-			{
+					validateInput: (v: string) => Number.isInteger(Number(v)) ? undefined : "Please enter a number"
+				});
+			if (Number.isInteger(Number(res))) {
 				currentGraphDepth = Number(res)
 				await showGraph()
 			}
 		}));
 		context.subscriptions.push(commands.registerCommand('graphFromJson', async () => {
-			const uri = await window.showOpenDialog({filters: {'Json': ['json']}})
-			if(!uri){
+			const uri = await window.showOpenDialog({ filters: { 'Json': ['json'] } })
+			if (!uri) {
 				return;
 			}
 			const bytes = await vs.workspace.fs.readFile(uri[0]);
@@ -437,9 +435,9 @@ export async function activate(context: ExtensionContext) {
 		await client.start();
 	}
 
-	let languageId : string;
+	let languageId: string;
 	const knownLanguageIds = ["stellaris", "eu4", "hoi4", "ck2", "imperator", "vic2", "vic3", "ck3", "eu5"];
-	const getLanguageIdFallback = async function() {
+	const getLanguageIdFallback = async function () {
 		const markerFiles = await workspace.findFiles("**/*.txt", null, 1);
 		if (markerFiles.length == 1) {
 			return (await workspace.openTextDocument(markerFiles[0])).languageId;
@@ -448,7 +446,7 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	let guessedLanguageId: string | undefined | null = window.activeTextEditor?.document?.languageId;
-	if(guessedLanguageId === undefined || !knownLanguageIds.includes(guessedLanguageId)){
+	if (guessedLanguageId === undefined || !knownLanguageIds.includes(guessedLanguageId)) {
 		guessedLanguageId = await getLanguageIdFallback();
 	}
 
@@ -461,7 +459,7 @@ export async function activate(context: ExtensionContext) {
 		case "vic2": languageId = "vic2"; break;
 		case "vic3": languageId = "vic3"; break;
 		case "ck3": languageId = "ck3"; break;
-        case "eu5": languageId = "eu5"; break;
+		case "eu5": languageId = "eu5"; break;
 		default: languageId = "paradox"; break;
 	}
 	async function findExeInFiles(gameExeName: string, binariesPrefix = false) {
@@ -495,7 +493,7 @@ export async function activate(context: ExtensionContext) {
 		{ id: "vic2", exeName: "v2game", binariesPrefix: false },
 		{ id: "ck3", exeName: "ck3", binariesPrefix: true },
 		{ id: "vic3", exeName: "victoria3", binariesPrefix: true },
-        { id: "eu5", exeName: "eu5", binariesPrefix: true },
+		{ id: "eu5", exeName: "eu5", binariesPrefix: true },
 	];
 
 	const promises = games.map(({ exeName, binariesPrefix }) =>
@@ -526,14 +524,12 @@ export async function activate(context: ExtensionContext) {
 }
 
 
-export async function reloadExtension(prompt: string, buttonText?: string, force? : boolean) {
+export async function reloadExtension(prompt: string, buttonText?: string, force?: boolean) {
 	const restartAction = buttonText || "Restart";
 	const actions = [restartAction];
 	if (force) {
-		const result = await window.showInformationMessage(prompt);
-		if(result){
-			await commands.executeCommand("cwtools.reloadExtension");
-		}
+		window.showInformationMessage(prompt);
+		await commands.executeCommand("cwtools.reloadExtension");
 	}
 	else {
 		const chosenAction = prompt && await window.showInformationMessage(prompt, ...actions);

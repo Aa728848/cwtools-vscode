@@ -1,19 +1,19 @@
 {
-	"name": "cwtools-vscode",
+	"name": "eddy-cwtools-vscode",
 	"displayName": "%extension.displayName%",
 	"private": true,
 	"description": "%extension.description%",
 	"author": "Dayshine",
 	"license": "MIT",
-	"version": "0.10.31",
+	"version": "0.10.315",
 	"preview": true,
-	"publisher": "tboby",
-	"qna": "https://forum.paradoxplaza.com/forum/index.php?threads/tool-cwtools-a-mod-validating-extension-for-vs-code.1066033/",
+	"publisher": "Eddy",
 	"icon": "docs/cwtools_logo.png",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/cwtools/cwtools-vscode"
+		"url": "https://github.com/Aa728848/cwtools-vscode"
 	},
+	"homepage": "https://github.com/cwtools/cwtools-vscode",
 	"engines": {
 		"vscode": "^1.83.0"
 	},

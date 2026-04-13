@@ -1,8 +1,8 @@
 {
   // I'm not sure this works
-  "extension.displayName": "CWTools - Paradox Language Services",
+  "extension.displayName": "Paradox Interactive's Language Services (based on CWT)",
   // I'm not sure this works
-  "extension.description": "Paradox Interactive scripting file support using CWTools",
+  "extension.description": "Paradox Interactive scripting file support using CWTools (Based on cwtools/cwtools-vscode)",
   // The title of the panel under Explorer which contains the extension's list of files it knows about
   "views.cwtools-files.name": "CWTools loaded files",
   "commands.outputerrors.title": "Write errors to file",

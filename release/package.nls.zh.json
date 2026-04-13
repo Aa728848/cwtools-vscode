@@ -1,6 +1,6 @@
 {
   // I'm not sure this works
-  "extension.displayName": "P社语言服务（基于CWT）",
+  "extension.displayName": "Stellaris语言服务（基于CWT）",
   // I'm not sure this works
   "extension.description": "使用 CWTools 为 Paradox Interactive 脚本文件提供支持 (基于 cwtools/cwtools-vscode 开发)",
   // The title of the panel under Explorer which contains the extension's list of files it knows about

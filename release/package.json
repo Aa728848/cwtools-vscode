@@ -1,11 +1,11 @@
 {
-	"name": "eddy-cwtools-vscode",
+	"name": "eddy-stellaris-cwt",
 	"displayName": "%extension.displayName%",
 	"private": true,
 	"description": "%extension.description%",
 	"author": "Dayshine",
 	"license": "MIT",
-	"version": "0.10.315",
+	"version": "1.0.0",
 	"preview": true,
 	"publisher": "Eddy",
 	"icon": "docs/cwtools_logo.png",
@@ -708,10 +708,5 @@
 	},
 	"extensionPack": [
 		"tboby.paradox-syntax"
-	],
-	"__metadata": {
-		"installedTimestamp": 1775296971267,
-		"targetPlatform": "undefined",
-		"size": 209651456
-	}
+	]
 }

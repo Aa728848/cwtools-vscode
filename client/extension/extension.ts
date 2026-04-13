@@ -29,6 +29,18 @@ const eu5Remote = `https://github.com/kaiser-chris/cwtools-eu5-config`;
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
 let fileExplorer: FileExplorer;
+
+const registeredCommands = new Map<string, Disposable>();
+function safeRegisterCommand(context: ExtensionContext, commandId: string, handler: (...args: any[]) => any): void {
+	const existing = registeredCommands.get(commandId);
+	if (existing) {
+		try { existing.dispose(); } catch (_) { /* ignore */ }
+	}
+	const disposable = commands.registerCommand(commandId, handler);
+	registeredCommands.set(commandId, disposable);
+	context.subscriptions.push(disposable);
+}
+
 export async function activate(context: ExtensionContext) {
 
 
@@ -374,10 +386,10 @@ export async function activate(context: ExtensionContext) {
 			gp.GraphPanel.create(context.extensionPath);
 			gp.GraphPanel.currentPanel!.initialiseGraph(graphData, wheelSensitivity);
 		}
-		context.subscriptions.push(commands.registerCommand('showGraph', async () => {
+		safeRegisterCommand(context, 'showGraph', async () => {
 			await showGraph();
-		}));
-		context.subscriptions.push(commands.registerCommand('setGraphDepth', async () => {
+		});
+		safeRegisterCommand(context, 'setGraphDepth', async () => {
 			const res = await window.showInputBox(
 				{
 					placeHolder: "default: 3",
@@ -389,8 +401,8 @@ export async function activate(context: ExtensionContext) {
 				currentGraphDepth = Number(res)
 				await showGraph()
 			}
-		}));
-		context.subscriptions.push(commands.registerCommand('graphFromJson', async () => {
+		});
+		safeRegisterCommand(context, 'graphFromJson', async () => {
 			const uri = await window.showOpenDialog({ filters: { 'Json': ['json'] } })
 			if (!uri) {
 				return;
@@ -400,7 +412,7 @@ export async function activate(context: ExtensionContext) {
 			const wheelSensitivity: number = workspace.getConfiguration('cwtools.graph').get('zoomSensitivity') ?? 1;
 			gp.GraphPanel.create(context.extensionPath);
 			gp.GraphPanel.currentPanel!.initialiseGraph(data, wheelSensitivity);
-		}));
+		});
 		// Create the language client and start the client.
 
 		// Push the disposable to the context's subscriptions so that the
@@ -419,10 +431,10 @@ export async function activate(context: ExtensionContext) {
 		};
 
 		// Toggle Inline Text commands for dynamic icon
-		context.subscriptions.push(vs.commands.registerCommand("cwtools.toggleInlineTextOn", toggleInlineTextFunc));
-		context.subscriptions.push(vs.commands.registerCommand("cwtools.toggleInlineTextOff", toggleInlineTextFunc));
+		safeRegisterCommand(context, "cwtools.toggleInlineTextOn", toggleInlineTextFunc);
+		safeRegisterCommand(context, "cwtools.toggleInlineTextOff", toggleInlineTextFunc);
 
-		context.subscriptions.push(vs.commands.registerCommand("cwtools.reloadExtension", async () => {
+		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {
 			for (const sub of context.subscriptions) {
 				try {
 					sub.dispose();
@@ -431,7 +443,7 @@ export async function activate(context: ExtensionContext) {
 				}
 			}
 			await activate(context);
-		}));
+		});
 		await client.start();
 	}
 

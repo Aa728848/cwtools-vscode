@@ -72,6 +72,24 @@ VS Code extension tests are located in `client/test/suite/` and use the sample S
 4. Test with sample Paradox game mod files in `client/test/sample/`
 5. Run tests with `npm test` before committing changes
 
+## GUI Preview Feature
+
+The extension includes a visual GUI Preview for Stellaris `.gui` files. Architecture:
+
+### Components
+- **Parser** (`client/extension/guiParser.ts`): Tokenizer + recursive-descent parser for PDXScript GUI syntax. Handles `@variable` definitions, `@[expr]` arithmetic, `.gfx` sprite indexing. Produces a `GuiElement` tree.
+- **Panel** (`client/extension/guiPanel.ts`): VS Code webview panel manager. Discovers mod root, loads `.gfx` files, resolves DDS textures → PNG data URIs via `ddsDecoder.ts`, sends resolved `GuiElement` data to webview.
+- **Webview Renderer** (`client/webview/guiPreview.ts` + `guiPreview.css`): Renders `GuiElement` tree as nested absolutely-positioned HTML divs with pan/zoom viewport. Supports sprite display, orientation anchoring, tooltip on hover, click-to-jump-to-line.
+- **DDS Decoder** (`client/extension/ddsDecoder.ts`): Pure Node.js DDS→PNG decoder supporting DXT1/3/5 and uncompressed BGRA/BGR/8bpp.
+
+### Supported GUI Element Types
+`containerWindowType`, `buttonType`, `effectButtonType`, `guiButtonType`, `iconType`, `instantTextBoxType`, `textboxType`, `editBoxType`, `smoothListboxType`, `listBoxType`, `scrollbarType`, `extendedScrollbarType`, `checkboxType`, `spinnerType`, `OverlappingElementsBoxType`, `positionType`, `browserType`, `gridBoxType`, `windowType`, `dropDownBoxType`
+
+### Build Notes
+- `guiParser.ts` is compiled by `tsc` (extension context), NOT by rollup
+- `guiPreview.ts` is compiled by `rollup` (webview context) → `release/bin/client/webview/guiPreview.js`
+- `guiPreview.css` must be manually copied to `release/bin/client/webview/`
+
 ## CWTools Integration
 
 The extension integrates with the CWTools library (F# game script parser/validator) via git submodule. The build system automatically pulls the latest CWTools when building the language server.

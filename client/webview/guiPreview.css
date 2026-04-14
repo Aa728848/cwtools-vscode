@@ -1,0 +1,352 @@
+/* ─── GUI Preview ─── Stellaris-style dark theme ─── */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    font-size: 12px;
+    color: #c8d0dc;
+    background: #141422;
+}
+
+/* ─── Toolbar ─── */
+#toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    height: 34px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px;
+    background: #1e1e34;
+    border-bottom: 1px solid #333358;
+}
+
+#title { font-size: 13px; font-weight: 600; color: #8898b8; }
+
+#controls { display: flex; align-items: center; gap: 5px; }
+#controls button {
+    width: 26px; height: 22px;
+    border: 1px solid #44446a; border-radius: 3px;
+    background: #28284a; color: #99aac8;
+    font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+}
+#controls button:hover { background: #38385e; border-color: #6666a0; }
+#zoom-level { font-size: 11px; color: #7080a0; min-width: 38px; text-align: center; }
+
+/* ─── Main Layout ─── */
+#main-layout {
+    position: absolute; top: 34px; left: 0; right: 0; bottom: 0;
+    display: flex;
+}
+
+/* ─── Viewport ─── */
+#viewport {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(ellipse at 50% 50%, #1a1a30 0%, #121220 100%);
+    background-image:
+        radial-gradient(ellipse at 50% 50%, #1a1a30 0%, #121220 100%),
+        linear-gradient(rgba(50,50,90,0.12) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(50,50,90,0.12) 1px, transparent 1px);
+    background-size: 100% 100%, 20px 20px, 20px 20px;
+}
+
+/* ─── Layers Panel ─── */
+#layers-panel {
+    width: 240px;
+    background: #1a1a30;
+    border-left: 1px solid #333358;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+#layers-panel.hidden { display: none; }
+
+#layers-header {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    background: #1e1e38;
+    border-bottom: 1px solid #333358;
+    font-size: 12px;
+    font-weight: 600;
+    color: #8898b8;
+    gap: 4px;
+}
+#layers-header span { flex: 1; }
+#layers-header button {
+    width: 20px; height: 18px;
+    border: 1px solid #44446a; border-radius: 3px;
+    background: #28284a; color: #99aac8;
+    font-size: 10px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+}
+#layers-header button:hover { background: #38385e; }
+
+#layers-tree {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px 0;
+}
+
+.layer-item {
+    display: flex;
+    align-items: center;
+    padding: 3px 6px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: nowrap;
+    color: #b0b8cc;
+    border-left: 2px solid transparent;
+}
+.layer-item:hover { background: rgba(80,100,160,0.15); }
+.layer-item.active {
+    background: rgba(80,120,200,0.2);
+    border-left-color: #5080c0;
+    color: #d0d8f0;
+}
+.layer-item.hidden-el { opacity: 0.4; }
+
+.layer-toggle {
+    width: 16px; height: 16px;
+    border: none; background: transparent;
+    color: #7888a8; font-size: 10px;
+    cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 2px;
+}
+.layer-toggle:hover { background: rgba(100,120,180,0.2); color: #a0b0d8; }
+
+.layer-expand {
+    width: 14px; height: 14px;
+    border: none; background: transparent;
+    color: #6878a0; font-size: 9px;
+    cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+}
+.layer-expand:hover { color: #a0b0d8; }
+
+.layer-icon {
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    margin: 0 4px;
+}
+
+.layer-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.layer-type {
+    font-size: 11px;
+    color: #5868a0;
+    margin-left: 4px;
+    flex-shrink: 0;
+}
+
+.layer-children {
+    overflow: hidden;
+}
+.layer-children.collapsed { display: none; }
+
+#btn-layers.active {
+    background: rgba(100,160,255,0.3);
+    border-color: #6090e0;
+    color: #a0c0ff;
+}
+
+#canvas-container {
+    transform-origin: 0 0;
+    position: absolute;
+    will-change: transform;
+}
+
+#gui-root {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 8px;
+}
+
+/* ─── Top-level Cards ─── */
+.top-card {
+    border: 1px solid #333358;
+    border-radius: 6px;
+    background: #1a1a30;
+    overflow: visible;
+}
+
+.card-header {
+    padding: 6px 12px;
+    font-size: 12px; font-weight: 600;
+    color: #8898c0;
+    background: #222244;
+    border-bottom: 1px solid #333358;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    user-select: none;
+}
+.card-header:hover { background: #2a2a50; color: #a0b0d8; }
+
+.card-body {
+    position: relative;
+    overflow: visible;
+    border: 1px dashed rgba(80,80,140,0.25);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    min-height: 20px;
+}
+
+/* ─── GUI Elements (nested, absolute-positioned) ─── */
+.el {
+    position: absolute;
+    border: 1px solid;
+    border-radius: 2px;
+    overflow: visible;
+    cursor: pointer;
+    transition: box-shadow 0.12s;
+}
+
+/* alwaysTransparent = yes: mouse events pass through (NOT visual transparency) */
+.el.always-transparent {
+    pointer-events: none;
+}
+
+/* Highlight from layers panel click */
+.el.layer-highlight {
+    box-shadow: 0 0 0 2px #f0c040, 0 0 12px rgba(240,192,64,0.4) !important;
+    z-index: 999 !important;
+}
+
+.el.hover {
+    box-shadow: 0 0 0 1px rgba(120,160,255,0.5), 0 0 10px rgba(100,140,255,0.2) !important;
+    z-index: 100;
+}
+
+/* Background pseudo-element */
+.el-bg {
+    position: absolute;
+    left: 0; top: 0; right: 0; bottom: 0;
+    border: 1px solid;
+    border-radius: 2px;
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* Element with resolved DDS texture (can't display in browser) */
+.el.has-texture {
+    background-image: repeating-linear-gradient(
+        135deg, transparent, transparent 4px, rgba(100,140,200,0.06) 4px, rgba(100,140,200,0.06) 8px
+    ) !important;
+}
+
+/* ─── Labels inside elements ─── */
+.el-name {
+    position: absolute;
+    top: 1px; left: 3px;
+    font-size: 9px; font-weight: 500;
+    line-height: 1.2;
+    max-width: calc(100% - 40px);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.9;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+}
+
+.el-tag {
+    position: absolute;
+    top: 2px; right: 2px;
+    font-size: 7px; font-weight: 600;
+    padding: 0 3px;
+    border: 1px solid;
+    border-radius: 2px;
+    opacity: 0.5;
+    pointer-events: none;
+    white-space: nowrap;
+    background: rgba(0,0,0,0.3);
+}
+
+.el-text {
+    position: absolute;
+    top: 12px; left: 3px; right: 3px;
+    font-size: 10px;
+    color: #d8d0b8;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    pointer-events: none;
+    font-style: italic;
+}
+
+.el-img {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    max-width: none !important;
+    max-height: none !important;
+    object-fit: contain;
+    opacity: 0.75;
+    pointer-events: none;
+}
+
+.sprite-ref {
+    position: absolute;
+    bottom: 1px; left: 3px;
+    font-size: 7px;
+    color: #586880;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: calc(100% - 6px);
+    pointer-events: none;
+}
+
+/* ─── Tooltip ─── */
+#tooltip {
+    position: fixed; z-index: 10000;
+    max-width: 340px; padding: 8px 12px;
+    background: #222244ee;
+    border: 1px solid #4a4a78;
+    border-radius: 5px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    pointer-events: none;
+    font-size: 11px;
+}
+#tooltip.hidden { display: none; }
+
+.tip-type { font-size: 11px; font-weight: 700; margin-bottom: 2px; }
+.tip-name { font-size: 12px; font-weight: 600; color: #d8e0f0; margin-bottom: 6px; border-bottom: 1px solid #3a3a58; padding-bottom: 4px; }
+
+#tooltip table { width: 100%; border-collapse: collapse; }
+#tooltip td { padding: 1px 0; vertical-align: top; }
+#tooltip td:first-child { color: #7888a8; padding-right: 10px; white-space: nowrap; }
+#tooltip td:last-child { color: #b8c4d8; word-break: break-all; }
+
+.tip-line { margin-top: 6px; padding-top: 4px; border-top: 1px solid #3a3a58; font-size: 9px; color: #5868a0; font-style: italic; }
+
+/* ─── Preview Mode (hide all borders/labels) ─── */
+body.preview-mode .el {
+    border-color: transparent !important;
+    background-color: transparent !important;
+}
+body.preview-mode .el-bg {
+    border-color: transparent !important;
+    background-color: transparent !important;
+}
+body.preview-mode .el-name,
+body.preview-mode .el-tag,
+body.preview-mode .sprite-ref {
+    display: none !important;
+}
+body.preview-mode .card-body {
+    border-color: transparent !important;
+    background-color: rgba(20,20,30,0.8) !important;
+}
+/* Preview mode button active state */
+#btn-preview.active {
+    background: rgba(100,160,255,0.3);
+    border-color: #6090e0;
+    color: #a0c0ff;
+}

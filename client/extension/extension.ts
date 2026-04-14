@@ -13,6 +13,7 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, No
 
 import { FileExplorer, FileListItem } from './fileExplorer';
 import * as gp from './graphPanel';
+import { GuiPanel } from './guiPanel';
 import * as exe from './executable';
 import { getGraphData } from '../common/graphTypes';
 
@@ -276,7 +277,8 @@ export async function activate(context: ExtensionContext) {
 			await reloadExtension(param, "Reload")
 		})
 		client.onNotification(forceReload, async (param: string) => {
-			await reloadExtension(param, undefined, true);
+			window.showInformationMessage(param);
+			await commands.executeCommand('workbench.action.reloadWindow');
 		})
 		client.onNotification(promptVanillaPath, async (param: string) => {
 			let gameDisplay = ""
@@ -433,6 +435,22 @@ export async function activate(context: ExtensionContext) {
 		// Toggle Inline Text commands for dynamic icon
 		safeRegisterCommand(context, "cwtools.toggleInlineTextOn", toggleInlineTextFunc);
 		safeRegisterCommand(context, "cwtools.toggleInlineTextOff", toggleInlineTextFunc);
+
+		// GUI Preview command
+		safeRegisterCommand(context, "cwtools.previewGUI", async () => {
+			const editor = vs.window.activeTextEditor;
+			if (!editor) {
+				vs.window.showWarningMessage('No active editor to preview');
+				return;
+			}
+			const doc = editor.document;
+			const fileName = doc.fileName.toLowerCase();
+			if (!fileName.endsWith('.gui')) {
+				vs.window.showWarningMessage('GUI Preview is only available for .gui files');
+				return;
+			}
+			await GuiPanel.create(context.extensionPath, doc);
+		});
 
 		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {
 			for (const sub of context.subscriptions) {

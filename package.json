@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "compile": "tsc -p ./tsconfig.extension.json && rollup -c -o ./release/bin/client/webview/graph.js",
+    "compile": "tsc -p ./tsconfig.extension.json && rollup -c",
     "test": "npm run compile && vscode-test -c ./.vscode-test.js",
     "test:watch": "tsc -w -p . & vscode-test -c ./.vscode-test.js -w"
   },

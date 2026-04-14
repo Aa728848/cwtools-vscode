@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Dayshine",
 	"license": "MIT",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"preview": true,
 	"publisher": "Eddy",
 	"icon": "docs/cwtools_logo.png",
@@ -68,6 +68,11 @@
 				{
 					"command": "cwtools.toggleInlineTextOff",
 					"when": "config.cwtools.showInlineText",
+					"group": "navigation"
+				},
+				{
+					"command": "cwtools.previewGUI",
+					"when": "resourceExtname == .gui",
 					"group": "navigation"
 				}
 			]
@@ -162,6 +167,12 @@
 				"title": "Disable Inline Text",
 				"category": "cwtools",
 				"icon": "$(eye)"
+			},
+			{
+				"command": "cwtools.previewGUI",
+				"title": "Preview GUI Layout",
+				"category": "cwtools",
+				"icon": "$(open-preview)"
 			}
 		],
 		"configuration": {

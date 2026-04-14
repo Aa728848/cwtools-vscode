@@ -25,9 +25,15 @@ npx tsc -p ./tsconfig.extension.json
 
 ## 3. 编译 Webview（图表功能）
 
+```powershell
+npx rollup -c
+```
+
+## 3.1 复制 GUI Preview 样式
+
 // turbo
 ```powershell
-npx rollup -c -o ./release/bin/client/webview/graph.js
+Copy-Item -Path client/webview/guiPreview.css -Destination release/bin/client/webview/guiPreview.css -Force
 ```
 
 ## 4. 安装 release 目录的 npm 依赖
@@ -65,7 +71,7 @@ Copy-Item -Path .\release\bin\client\extension\* -Destination 'C:\Users\A\.vscod
 ## 快速打包（一行命令）
 
 ```powershell
-dotnet publish src/Main/Main.fsproj -c Release -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:UseLocalCwtools=False -o release/bin/server/win-x64; npx tsc -p ./tsconfig.extension.json; npx rollup -c -o ./release/bin/client/webview/graph.js; Push-Location release; npx @vscode/vsce package; Pop-Location
+dotnet publish src/Main/Main.fsproj -c Release -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:UseLocalCwtools=False -o release/bin/server/win-x64; npx tsc -p ./tsconfig.extension.json; npx rollup -c; Copy-Item -Path client/webview/guiPreview.css -Destination release/bin/client/webview/guiPreview.css -Force; Push-Location release; npx @vscode/vsce package; Pop-Location
 ```
 
 ## 注意事项

@@ -399,12 +399,23 @@ type Server(client: ILanguageClient) =
         | Some cp, Some rp, false ->
             let stable = rulesChannel <> "latest"
 
+            client.CustomNotification(
+                "loadingBar",
+                JsonValue.Record
+                    [| "value", JsonValue.String("Updating validation rules...")
+                       "enable", JsonValue.Boolean(true) |]
+            )
+
             match initOrUpdateRules rp cp stable true with
             | true, Some date ->
                 let text = $"Validation rules for {activeGame} have been updated to {date}."
-
-                client.CustomNotification("forceReload", JsonValue.String(text))
+                logInfo text
             | _ -> ()
+
+            client.CustomNotification(
+                "loadingBar",
+                JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
+            )
         | _ -> ()
 
     let checkOrSetGameCache (forceCreate: bool) =
@@ -1142,11 +1153,10 @@ type Server(client: ILanguageClient) =
 
                 let task =
                     new Task(fun () ->
+                        setupRulesCaches ()
                         checkOrSetGameCache false
                         processWorkspace rootUri)
 
-                task.Start()
-                let task = new Task(fun () -> setupRulesCaches ())
                 task.Start()
             }
 

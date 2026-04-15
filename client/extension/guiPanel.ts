@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { parseGuiFile, buildSpriteIndex, type GuiElement } from './guiParser';
-import { decodeDds, type DdsResult } from './ddsDecoder';
+import { decodeDds, decodeTga, type DdsResult } from './ddsDecoder';
 
 export class GuiPanel {
     public static currentPanel: GuiPanel | undefined;
@@ -226,9 +226,32 @@ export class GuiPanel {
                         break;
                     }
 
-                    // Try .tga (show as unresolved placeholder)
+                    // Try .tga
                     if (fs.existsSync(fullTga)) {
-                        textureUri = `tga:${el.spriteTexture}`;
+                        let result: DdsResult | null;
+                        if (this._textureCache.has(fullTga)) {
+                            result = this._textureCache.get(fullTga) ?? null;
+                        } else {
+                            result = decodeTga(fullTga);
+                            const entrySize = result?.dataUri?.length ?? 0;
+                            while (this._textureCacheBytes + entrySize > GuiPanel.MAX_CACHE_BYTES && this._textureCache.size > 0) {
+                                const oldestKey = this._textureCache.keys().next().value;
+                                if (oldestKey) {
+                                    const old = this._textureCache.get(oldestKey);
+                                    this._textureCacheBytes -= old?.dataUri?.length ?? 0;
+                                    this._textureCache.delete(oldestKey);
+                                }
+                            }
+                            this._textureCache.set(fullTga, result);
+                            this._textureCacheBytes += entrySize;
+                        }
+                        if (result) {
+                            textureUri = result.dataUri;
+                            texW = result.width;
+                            texH = result.height;
+                        } else {
+                            textureUri = `tga:${el.spriteTexture}`;
+                        }
                         break;
                     }
                 }

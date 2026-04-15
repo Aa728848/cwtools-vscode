@@ -646,7 +646,9 @@ export function parseGfxFile(content: string): SpriteInfo[] {
                 'flagSpriteType', 'textSpriteType', 'progressbartype', 'portraitType'].includes(node.key);
             if (isSprite && node.children) {
                 const name = strProp(node.children, 'name');
-                const texturefile = strProp(node.children, 'texturefile') ?? strProp(node.children, 'textureFile');
+                const texturefile = strProp(node.children, 'texturefile')
+                    ?? strProp(node.children, 'textureFile')
+                    ?? strProp(node.children, 'masking_texture'); // portraitType uses this
                 if (name) {
                     let borderSize: { x: number; y: number } | undefined;
                     const bsNode = node.children.find(c => c.key === 'borderSize' && c.children);

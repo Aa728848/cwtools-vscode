@@ -570,3 +570,105 @@ export function ddsToDataUri(filePath: string): string | null {
     const result = decodeDds(filePath);
     return result?.dataUri ?? null;
 }
+
+/**
+ * Decode a TGA file to a data URI PNG.
+ * Supports: uncompressed true-color (type 2) and RLE true-color (type 10),
+ * with 24-bit (BGR) and 32-bit (BGRA) pixel formats.
+ */
+export function decodeTga(filePath: string): DdsResult | null {
+    try {
+        const buf = fs.readFileSync(filePath);
+        if (buf.length < 18) return null;
+
+        const idLen = buf[0];
+        const imgType = buf[2]; // 2=uncompressed, 10=RLE
+        const width = buf.readUInt16LE(12);
+        const height = buf.readUInt16LE(14);
+        const bpp = buf[16]; // bits per pixel (24 or 32)
+        const descriptor = buf[17];
+
+        if ((imgType !== 2 && imgType !== 10) || (bpp !== 24 && bpp !== 32)) return null;
+        if (width === 0 || height === 0 || width > 8192 || height > 8192) return null;
+
+        const bytesPerPixel = bpp / 8;
+        const pixelCount = width * height;
+        const rgba = new Uint8Array(pixelCount * 4);
+        let dataOffset = 18 + idLen;
+
+        if (imgType === 2) {
+            // Uncompressed
+            for (let i = 0; i < pixelCount; i++) {
+                const off = dataOffset + i * bytesPerPixel;
+                rgba[i * 4]     = buf[off + 2]; // R
+                rgba[i * 4 + 1] = buf[off + 1]; // G
+                rgba[i * 4 + 2] = buf[off];     // B
+                rgba[i * 4 + 3] = bpp === 32 ? buf[off + 3] : 255; // A
+            }
+        } else {
+            // RLE compressed
+            let pixIdx = 0;
+            let pos = dataOffset;
+            while (pixIdx < pixelCount && pos < buf.length) {
+                const header = buf[pos++];
+                const count = (header & 0x7F) + 1;
+                if (header & 0x80) {
+                    // RLE packet: one pixel repeated
+                    const b = buf[pos], g = buf[pos + 1], r = buf[pos + 2];
+                    const a = bpp === 32 ? buf[pos + 3] : 255;
+                    pos += bytesPerPixel;
+                    for (let j = 0; j < count && pixIdx < pixelCount; j++, pixIdx++) {
+                        rgba[pixIdx * 4]     = r;
+                        rgba[pixIdx * 4 + 1] = g;
+                        rgba[pixIdx * 4 + 2] = b;
+                        rgba[pixIdx * 4 + 3] = a;
+                    }
+                } else {
+                    // Raw packet
+                    for (let j = 0; j < count && pixIdx < pixelCount; j++, pixIdx++) {
+                        rgba[pixIdx * 4]     = buf[pos + 2]; // R
+                        rgba[pixIdx * 4 + 1] = buf[pos + 1]; // G
+                        rgba[pixIdx * 4 + 2] = buf[pos];     // B
+                        rgba[pixIdx * 4 + 3] = bpp === 32 ? buf[pos + 3] : 255;
+                        pos += bytesPerPixel;
+                    }
+                }
+            }
+        }
+
+        // TGA origin: bit 5 of descriptor = 1 means top-left, 0 means bottom-left
+        const topToBottom = (descriptor & 0x20) !== 0;
+        if (!topToBottom) {
+            // Flip vertically
+            const rowBytes = width * 4;
+            const tmp = new Uint8Array(rowBytes);
+            for (let y = 0; y < height / 2; y++) {
+                const topOff = y * rowBytes;
+                const botOff = (height - 1 - y) * rowBytes;
+                tmp.set(rgba.subarray(topOff, topOff + rowBytes));
+                rgba.set(rgba.subarray(botOff, botOff + rowBytes), topOff);
+                rgba.set(tmp, botOff);
+            }
+        }
+
+        // Downscale large textures
+        let outW = width, outH = height;
+        let outRgba: Uint8Array = rgba;
+        const MAX_DIM = 512;
+        if (width > MAX_DIM || height > MAX_DIM) {
+            const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+            outW = Math.max(1, Math.round(width * ratio));
+            outH = Math.max(1, Math.round(height * ratio));
+            outRgba = new Uint8Array(downscale(rgba, width, height, outW, outH));
+        }
+
+        const png = encodePng(outW, outH, outRgba);
+        return {
+            dataUri: `data:image/png;base64,${png.toString('base64')}`,
+            width,
+            height,
+        };
+    } catch {
+        return null;
+    }
+}

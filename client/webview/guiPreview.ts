@@ -284,7 +284,6 @@ const DEFAULT_SIZE: Record<string, [number, number]> = {
 function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h: number } {
     let w = el.size.width;
     let h = el.size.height;
-    const elScale = el.scale ?? 1;
 
     // Handle percentage sizes (e.g. width = 100% → parent width)
     if (el.percentWidth && parentW > 0) {
@@ -305,15 +304,16 @@ function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h
     }
 
     // Determine render mode:
-    // 1. spriteType attribute → ALWAYS fixed (natural size × scale), ignore widget size
+    // 1. spriteType attribute → fixed (natural image size), ignore widget size
     // 2. quadTextureSprite → check GFX registry:
-    //    - corneredTileSpriteType / textSpriteType → 9-patch at widget size
-    //    - spriteType in GFX → fixed (natural size × scale)
-    // Special: corneredTileSpriteType ALWAYS uses widget size (9-patch), even when called via spriteType attr
+    //    - corneredTileSpriteType / textSpriteType → widget size
+    //    - spriteType in GFX → fixed (natural image size)
+    // NOTE: scale is NOT applied here — it's purely visual (CSS transform)
+    // Special: corneredTileSpriteType ALWAYS uses widget size, even when called via spriteType attr
     const isCorneredTile = el.spriteDefType === 'corneredTileSpriteType';
     const isFixedSprite = !isCorneredTile && (
-        el.spriteAttr === 'spriteType' ||  // spriteType attribute always means fixed
-        (el.spriteAttr === 'quadTextureSprite' &&  // quadTexture referencing a plain sprite
+        el.spriteAttr === 'spriteType' ||
+        (el.spriteAttr === 'quadTextureSprite' &&
          el.spriteDefType === 'spriteType')
     );
     if (isFixedSprite && el.textureWidth && el.textureHeight) {
@@ -321,7 +321,7 @@ function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h
         if (el.noOfFrames && el.noOfFrames > 1) {
             tw = Math.round(tw / el.noOfFrames);
         }
-        return { w: Math.round(tw * elScale), h: Math.round(el.textureHeight * elScale) };
+        return { w: tw, h: el.textureHeight };
     }
 
     // instantTextBoxType uses maxWidth/maxHeight as its actual dimensions
@@ -354,10 +354,9 @@ function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h
                 if (ch.type === 'background') continue;
                 if (Math.abs(ch.position.x) > 5000 || Math.abs(ch.position.y) > 5000) continue;
                 const cs = effectiveSize(ch);
-                const cScale = ch.scale ?? 1;
                 // Simple estimate using raw position for first pass
-                const r = Math.max(0, ch.position.x) + cs.w * cScale;
-                const b = Math.max(0, ch.position.y) + cs.h * cScale;
+                const r = Math.max(0, ch.position.x) + cs.w;
+                const b = Math.max(0, ch.position.y) + cs.h;
                 if (r > maxR) maxR = r;
                 if (b > maxB) maxB = b;
             }
@@ -469,9 +468,11 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     div.style.height = `${h}px`;
 
     // Scale and rotation (visual only, doesn't affect layout position)
+    // PDX: scale does NOT apply to containerWindowType/windowType, only to controls within
     const transforms: string[] = [];
+    const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
     const elScale = el.scale ?? 1;
-    if (elScale !== 1) {
+    if (elScale !== 1 && !isContainer) {
         transforms.push(`scale(${elScale})`);
     }
     // PDX rotation: radians, negative sign convention (negate for CSS)
@@ -483,9 +484,8 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     if (transforms.length > 0) {
         div.style.transform = transforms.join(' ');
     }
-    // PDX: scale from top-left, but rotation from center
-    // Use center origin when rotation is present, top-left otherwise
-    if (el.rotation && el.rotation !== 0) {
+    // PDX: scale from top-left normally, but center when centerPosition or rotation
+    if ((el.rotation && el.rotation !== 0) || (el.centerPosition && elScale !== 1)) {
         div.style.transformOrigin = 'center center';
     } else {
         div.style.transformOrigin = '0 0';

@@ -11,6 +11,8 @@ export interface GuiElement {
     position: { x: number; y: number };
     size: { width: number; height: number };
     sizeExplicit?: boolean;
+    percentWidth?: boolean;   // true when width was specified as e.g. "100%"
+    percentHeight?: boolean;  // true when height was specified as e.g. "100%"
     orientation?: string;
     origo?: string;
     moveable?: boolean;
@@ -34,6 +36,9 @@ export interface GuiElement {
     alpha?: number;
     centerPosition?: boolean;
     borderSize?: { x: number; y: number };
+    margin?: { top: number; bottom: number; left: number; right: number };
+    spacing?: number;
+    slotSize?: { width: number; height: number };
     children: GuiElement[];
     properties: Record<string, unknown>;
     line: number;
@@ -92,10 +97,12 @@ function tokenize(input: string): Token[] {
         }
 
         // Numbers: must be a sign followed by digit, or a digit
+        // Also consume trailing % for percentage values (e.g. 100%)
         if ((ch >= '0' && ch <= '9') || ((ch === '-' || ch === '+') && i + 1 < input.length && input[i + 1] >= '0' && input[i + 1] <= '9')) {
             const start = i;
             if (ch === '-' || ch === '+') i++;
             while (i < input.length && ((input[i] >= '0' && input[i] <= '9') || input[i] === '.')) i++;
+            if (i < input.length && input[i] === '%') i++; // consume trailing %
             tokens.push({ type: TokenType.Number, value: input.slice(start, i), line });
             continue;
         }
@@ -226,6 +233,10 @@ class Parser {
 
     private resolveValue(token: Token): string | number {
         if (token.type === TokenType.Number) {
+            // Preserve percentage values as strings (e.g. "100%") for size parsing
+            if (token.value.endsWith('%')) {
+                return token.value;
+            }
             return parseFloat(token.value);
         }
         if (token.value.startsWith('@[')) {
@@ -286,7 +297,38 @@ const GUI_ELEMENT_TYPES = new Set([
     'OverlappingElementsBoxType', 'overlappingElementsBoxType',
     'positionType', 'browserType', 'gridBoxType', 'windowType',
     'dropDownBoxType', 'expandButton', 'expandedWindow',
+    // Case-insensitive aliases found in real game/mod files
+    'ButtonType', 'IconType', 'ContainerWindowType',
 ]);
+
+/** Normalize a GUI element type key to its canonical form */
+function normalizeTypeKey(key: string): string {
+    const lower = key.toLowerCase();
+    const TYPE_MAP: Record<string, string> = {
+        'buttontype': 'buttonType',
+        'icontype': 'iconType',
+        'containerwindowtype': 'containerWindowType',
+        'effectbuttontype': 'effectButtonType',
+        'guibuttontype': 'guiButtonType',
+        'instanttextboxtype': 'instantTextBoxType',
+        'textboxtype': 'textboxType',
+        'editboxtype': 'editBoxType',
+        'smoothlistboxtype': 'smoothListboxType',
+        'listboxtype': 'listBoxType',
+        'scrollbartype': 'scrollbarType',
+        'extendedscrollbartype': 'extendedScrollbarType',
+        'scrollareatype': 'scrollAreaType',
+        'checkboxtype': 'checkboxType',
+        'spinnertype': 'spinnerType',
+        'overlappingelementsboxtype': 'OverlappingElementsBoxType',
+        'positiontype': 'positionType',
+        'browsertype': 'browserType',
+        'gridboxtype': 'gridBoxType',
+        'windowtype': 'windowType',
+        'dropdownboxtype': 'dropDownBoxType',
+    };
+    return TYPE_MAP[lower] ?? key;
+}
 
 function numProp(nodes: PdxNode[], key: string): number | undefined {
     const n = nodes.find(n => n.key === key && typeof n.value === 'number');
@@ -306,29 +348,82 @@ function getPos(nodes: PdxNode[]): { x: number; y: number } {
     return { x, y };
 }
 
-function getSize(nodes: PdxNode[]): { width: number; height: number; explicit: boolean; usesWidthHeight: boolean } {
+function getSize(nodes: PdxNode[]): { width: number; height: number; explicit: boolean; usesWidthHeight: boolean; percentW: boolean; percentH: boolean } {
     const s = nodes.find(n => n.key === 'size' && n.children);
-    if (!s?.children) return { width: 0, height: 0, explicit: false, usesWidthHeight: false };
-    const hasWidth = numProp(s.children, 'width') !== undefined;
-    const hasHeight = numProp(s.children, 'height') !== undefined;
+    if (!s?.children) return { width: 0, height: 0, explicit: false, usesWidthHeight: false, percentW: false, percentH: false };
+    const hasWidth = numProp(s.children, 'width') !== undefined || strProp(s.children, 'width') !== undefined;
+    const hasHeight = numProp(s.children, 'height') !== undefined || strProp(s.children, 'height') !== undefined;
+
+    // Handle percentage values like "100%"
+    let percentW = false, percentH = false;
+    let w = numProp(s.children, 'width') ?? 0;
+    let h = numProp(s.children, 'height') ?? 0;
+
+    const wStr = strProp(s.children, 'width');
+    const hStr = strProp(s.children, 'height');
+    if (wStr && String(wStr).endsWith('%')) {
+        w = parseFloat(String(wStr)) || 100;
+        percentW = true;
+    }
+    if (hStr && String(hStr).endsWith('%')) {
+        h = parseFloat(String(hStr)) || 100;
+        percentH = true;
+    }
+
+    // Fallback to x/y keys
+    if (w === 0 && !percentW) w = numProp(s.children, 'x') ?? 0;
+    if (h === 0 && !percentH) h = numProp(s.children, 'y') ?? 0;
+
+    return { width: w, height: h, explicit: true, usesWidthHeight: hasWidth || hasHeight, percentW, percentH };
+}
+
+function getMargin(nodes: PdxNode[]): { top: number; bottom: number; left: number; right: number } | undefined {
+    const m = nodes.find(n => n.key === 'margin' && n.children);
+    if (!m?.children) return undefined;
+    const top = numProp(m.children, 'top') ?? 0;
+    const bottom = numProp(m.children, 'bottom') ?? 0;
+    const left = numProp(m.children, 'left') ?? 0;
+    const right = numProp(m.children, 'right') ?? 0;
+    if (top === 0 && bottom === 0 && left === 0 && right === 0) return undefined;
+    return { top, bottom, left, right };
+}
+
+function getSlotSize(nodes: PdxNode[]): { width: number; height: number } | undefined {
+    const s = nodes.find(n => n.key === 'slotSize' && n.children);
+    if (!s?.children) return undefined;
     const w = numProp(s.children, 'width') ?? numProp(s.children, 'x') ?? 0;
     const h = numProp(s.children, 'height') ?? numProp(s.children, 'y') ?? 0;
-    return { width: w, height: h, explicit: true, usesWidthHeight: hasWidth || hasHeight };
+    return { width: w, height: h };
 }
 
 function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex: Map<string, SpriteInfo>): GuiElement {
+    // Normalize the type to canonical form
+    const normalizedType = normalizeTypeKey(type);
+
     const name = strProp(nodes, 'name') ?? '';
     const position = getPos(nodes);
     const sizeResult = getSize(nodes);
     const size = { width: sizeResult.width, height: sizeResult.height };
     // Only mark as explicitly sized (for hiding 0x0) when using width/height format
     const sizeExplicit = sizeResult.explicit && sizeResult.usesWidthHeight;
+    const percentWidth = sizeResult.percentW || undefined;
+    const percentHeight = sizeResult.percentH || undefined;
     const orientation = strProp(nodes, 'orientation') ?? strProp(nodes, 'Orientation');
     const origo = strProp(nodes, 'origo');
     const alwaysTransparentStr = strProp(nodes, 'alwaystransparent') ?? strProp(nodes, 'alwaysTransparent');
     const alwaysTransparent = alwaysTransparentStr === 'yes';
     const clippingStr = strProp(nodes, 'clipping');
     const clipping = clippingStr === 'yes';
+
+    // Margin support
+    const margin = getMargin(nodes);
+
+    // Spacing for OverlappingElementsBoxType and lists
+    const spacingVal = numProp(nodes, 'spacing');
+    const spacing = spacingVal !== undefined ? spacingVal : undefined;
+
+    // SlotSize for gridBoxType
+    const slotSize = getSlotSize(nodes);
 
     // Sprite reference — track which attribute was used
     // spriteType attr: fixed size = natural image × scale (size property IGNORED)
@@ -362,8 +457,9 @@ function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex:
         'name', 'position', 'size', 'orientation', 'Orientation', 'origo',
         'alwaystransparent', 'alwaysTransparent', 'clipping',
         'quadTextureSprite', 'spriteType', 'text', 'font', 'format',
-        'maxWidth', 'maxHeight', 'background',
+        'maxWidth', 'maxHeight', 'background', 'backGround',
         'scale', 'rotation', 'alpha', 'centerPosition',
+        'margin', 'spacing', 'slotSize',
         ...GUI_ELEMENT_TYPES,
     ]);
     const properties: Record<string, unknown> = {};
@@ -377,8 +473,9 @@ function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex:
     const children: GuiElement[] = [];
 
     // Background pseudo-element first (so it renders behind)
+    // Case-insensitive: support both "background" and "backGround"
     for (const n of nodes) {
-        if (n.key === 'background' && n.children) {
+        if ((n.key === 'background' || n.key === 'backGround') && n.children) {
             const bgSprite = strProp(n.children, 'quadTextureSprite') ?? strProp(n.children, 'spriteType');
             const bgSpriteInfo = bgSprite ? spriteIndex.get(bgSprite) : undefined;
             const bgFrame = numProp(n.children, 'frame');
@@ -401,18 +498,26 @@ function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex:
         }
     }
 
-    // Real child elements
+    // Real child elements (with case-normalized type check)
     for (const n of nodes) {
         if (GUI_ELEMENT_TYPES.has(n.key) && n.children) {
             children.push(buildElement(n.key, n.children, n.line, spriteIndex));
+        } else if (n.children && !['background', 'backGround', 'position', 'size', 'margin', 'slotSize'].includes(n.key)) {
+            // Check if the key is a GUI element type with different casing
+            const normalized = normalizeTypeKey(n.key);
+            if (GUI_ELEMENT_TYPES.has(normalized) || normalized !== n.key) {
+                children.push(buildElement(normalized, n.children, n.line, spriteIndex));
+            }
         }
     }
 
     return {
-        type, name, position, size, sizeExplicit, orientation, origo, clipping, alwaysTransparent,
+        type: normalizedType, name, position, size, sizeExplicit, percentWidth, percentHeight,
+        orientation, origo, clipping, alwaysTransparent,
         spriteKey, spriteAttr, spriteTexture, spriteDefType, noOfFrames, frame, text, font, format,
         maxWidth, maxHeight, scale, rotation, alpha, centerPosition,
         borderSize: spriteInfo?.borderSize,
+        margin, spacing, slotSize,
         children, properties, line,
     };
 }
@@ -429,12 +534,18 @@ export function parseGuiFile(content: string, spriteIndex: Map<string, SpriteInf
     for (const node of rootNodes) {
         if (node.key === 'guiTypes' && node.children) {
             for (const child of node.children) {
-                if (GUI_ELEMENT_TYPES.has(child.key) && child.children) {
+                const childNorm = normalizeTypeKey(child.key);
+                if ((GUI_ELEMENT_TYPES.has(child.key) || GUI_ELEMENT_TYPES.has(childNorm)) && child.children) {
                     elements.push(buildElement(child.key, child.children, child.line, spriteIndex));
                 }
             }
         } else if (GUI_ELEMENT_TYPES.has(node.key) && node.children) {
             elements.push(buildElement(node.key, node.children, node.line, spriteIndex));
+        } else if (node.children) {
+            const nodeNorm = normalizeTypeKey(node.key);
+            if (GUI_ELEMENT_TYPES.has(nodeNorm)) {
+                elements.push(buildElement(node.key, node.children, node.line, spriteIndex));
+            }
         }
     }
 
@@ -532,7 +643,7 @@ export function parseGfxFile(content: string): SpriteInfo[] {
     function findSprites(nodes: PdxNode[]) {
         for (const node of nodes) {
             const isSprite = ['spriteType', 'corneredTileSpriteType', 'frameAnimatedSpriteType',
-                'flagSpriteType', 'textSpriteType', 'progressbartype'].includes(node.key);
+                'flagSpriteType', 'textSpriteType', 'progressbartype', 'portraitType'].includes(node.key);
             if (isSprite && node.children) {
                 const name = strProp(node.children, 'name');
                 const texturefile = strProp(node.children, 'texturefile') ?? strProp(node.children, 'textureFile');

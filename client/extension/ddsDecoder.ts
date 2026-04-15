@@ -1,6 +1,6 @@
 /**
  * DDS texture decoder for Stellaris/Paradox game assets.
- * Supports: DXT1 (BC1), DXT3 (BC2), DXT5 (BC3), uncompressed BGRA/BGR.
+ * Supports: DXT1 (BC1), DXT3 (BC2), DXT5 (BC3), BC7, uncompressed BGRA/BGR.
  * Uses only Node.js built-in modules.
  */
 import * as fs from 'fs';
@@ -14,6 +14,11 @@ const DDPF_ALPHAPIXELS = 0x1;
 const FOURCC_DXT1 = 0x31545844;
 const FOURCC_DXT3 = 0x33545844;
 const FOURCC_DXT5 = 0x35545844;
+const FOURCC_DX10 = 0x30315844;
+
+// DXGI formats for BC7
+const DXGI_FORMAT_BC7_UNORM = 98;
+const DXGI_FORMAT_BC7_UNORM_SRGB = 99;
 
 // Max texture size for preview (larger textures are downscaled)
 const MAX_TEX_DIM = 512;
@@ -172,6 +177,254 @@ function decodeDxt3(view: DataView, off: number, out: Uint8Array, ox: number, oy
     }
 }
 
+// ─── BC7 Decoder ────────────────────────────────────────────────────────────
+// BC7 has 8 modes (0-7). Each 128-bit block starts with 1-8 mode bits.
+// This is a simplified decoder that handles the most common modes used in Stellaris.
+
+/** BC7 partition tables for 2-subset modes (subset count = 2, 64 entries) */
+const BC7_PARTITION2: number[][] = [
+    [0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1],[0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1],
+    [0,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1],[0,0,0,1,0,0,1,1,0,0,1,1,0,1,1,1],
+    [0,0,0,0,0,0,0,1,0,0,0,1,0,0,1,1],[0,0,1,1,0,1,1,1,0,1,1,1,1,1,1,1],
+    [0,0,0,1,0,0,1,1,0,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1,0,0,1,1,0,1,1,1],
+    [0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1],[0,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1],
+    [0,0,0,0,0,0,0,1,0,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,1],
+    [0,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1],
+    [0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1],
+    [0,0,0,0,1,0,0,0,1,1,1,0,1,1,1,1],[0,1,1,1,0,0,0,1,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,1,0,0,0,1,1,1,0],[0,1,1,1,0,0,1,1,0,0,0,1,0,0,0,0],
+    [0,0,1,1,0,0,0,1,0,0,0,0,0,0,0,0],[0,0,0,0,1,0,0,0,1,1,0,0,1,1,1,0],
+    [0,0,0,0,0,0,0,0,1,0,0,0,1,1,0,0],[0,1,1,1,0,0,1,1,0,0,1,1,0,0,0,1],
+    [0,0,1,1,0,0,0,1,0,0,0,1,0,0,0,0],[0,0,0,0,1,0,0,0,1,0,0,0,1,1,0,0],
+    [0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0],[0,0,1,1,0,1,1,0,0,1,1,0,1,1,0,0],
+    [0,0,0,1,0,1,1,1,1,1,1,0,1,0,0,0],[0,0,0,0,1,1,1,1,1,1,1,1,0,0,0,0],
+    [0,1,1,1,0,0,0,1,1,0,0,0,1,1,1,0],[0,0,1,1,1,0,0,1,1,0,0,1,1,1,0,0],
+    [0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1],[0,0,0,0,1,1,1,1,0,0,0,0,1,1,1,1],
+    [0,1,0,1,1,0,1,0,0,1,0,1,1,0,1,0],[0,0,1,1,0,0,1,1,1,1,0,0,1,1,0,0],
+    [0,0,1,1,1,1,0,0,0,0,1,1,1,1,0,0],[0,1,0,1,0,1,0,1,1,0,1,0,1,0,1,0],
+    [0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1],[0,1,0,1,1,0,1,0,1,0,1,0,0,1,0,1],
+    [0,1,1,1,0,0,1,1,1,1,0,0,1,1,1,0],[0,0,0,1,0,0,1,1,1,1,0,0,1,0,0,0],
+    [0,0,1,1,0,0,1,0,0,1,0,0,1,1,0,0],[0,0,1,1,1,0,1,1,1,1,0,1,1,1,0,0],
+    [0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0],[0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
+    [0,1,0,0,1,1,1,0,0,1,0,0,0,0,0,0],[0,0,1,0,0,1,1,1,0,0,1,0,0,0,0,0],
+    [0,0,0,0,0,0,1,0,0,1,1,1,0,0,1,0],[0,0,0,0,0,1,0,0,1,1,1,0,0,1,0,0],
+    [0,1,1,0,1,1,0,0,1,0,0,1,0,0,1,1],[0,0,1,1,0,1,1,0,1,1,0,0,1,0,0,1],
+    [0,1,1,0,0,0,1,1,1,0,0,1,1,1,0,0],[0,0,1,1,1,0,0,1,1,1,0,0,0,1,1,0],
+    [0,1,1,0,1,1,0,0,1,1,0,0,1,0,0,1],[0,1,1,0,0,0,1,1,0,0,1,1,1,0,0,1],
+    [0,1,1,1,1,1,1,0,1,0,0,0,0,0,0,1],[0,0,0,1,1,0,0,0,1,1,1,0,0,1,1,1],
+    [0,0,0,0,1,1,1,1,0,0,1,1,0,0,1,1],[0,0,1,1,0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,1,0,0,0,1,0,1,1,1,0,1,1,1,0],[0,1,0,0,0,1,0,0,0,1,1,1,0,1,1,1],
+];
+
+class BC7BitReader {
+    private data: DataView;
+    private off: number;
+    private bitPos = 0;
+
+    constructor(data: DataView, off: number) {
+        this.data = data;
+        this.off = off;
+    }
+
+    read(bits: number): number {
+        let val = 0;
+        for (let i = 0; i < bits; i++) {
+            const byteIdx = this.off + ((this.bitPos) >> 3);
+            const bitIdx = (this.bitPos) & 7;
+            if (byteIdx < this.data.byteLength) {
+                val |= ((this.data.getUint8(byteIdx) >> bitIdx) & 1) << i;
+            }
+            this.bitPos++;
+        }
+        return val;
+    }
+}
+
+function decodeBc7Block(view: DataView, off: number, out: Uint8Array, ox: number, oy: number, w: number, h: number) {
+    if (off + 16 > view.byteLength) return;
+
+    // Determine mode from leading bits
+    const firstByte = view.getUint8(off);
+    let mode = -1;
+    for (let i = 0; i < 8; i++) {
+        if (firstByte & (1 << i)) { mode = i; break; }
+    }
+    if (mode < 0 || mode > 7) {
+        // Invalid or reserved mode — fill transparent
+        for (let py = oy; py < oy + 4 && py < h; py++)
+            for (let px = ox; px < ox + 4 && px < w; px++)
+                putPx(out, (py * w + px) * 4, 0, 0, 0, 0);
+        return;
+    }
+
+    const reader = new BC7BitReader(view, off);
+    reader.read(mode + 1); // consume mode bits
+
+    // Mode definitions: [numSubsets, partBits, rotBits, idxSelBit, colorBits, alphaBits, pBits, idxBits, idx2Bits]
+    const MODES: number[][] = [
+        [3, 4, 0, 0, 4, 0, 1, 3, 0],  // mode 0
+        [2, 6, 0, 0, 6, 0, 1, 3, 0],  // mode 1
+        [3, 6, 0, 0, 5, 0, 0, 2, 0],  // mode 2
+        [2, 6, 0, 0, 7, 0, 1, 2, 0],  // mode 3
+        [1, 0, 2, 1, 5, 6, 0, 2, 3],  // mode 4
+        [1, 0, 2, 0, 7, 8, 0, 2, 2],  // mode 5
+        [1, 0, 0, 0, 7, 7, 1, 4, 0],  // mode 6
+        [2, 6, 0, 0, 5, 5, 1, 2, 0],  // mode 7
+    ];
+
+    const md = MODES[mode];
+    const numSubsets = md[0];
+    const partBits = md[1];
+    const rotBits = md[2];
+    const idxSelBit = md[3];
+    const colorBits = md[4];
+    const alphaBits = md[5];
+    const hasPBits = md[6];
+    const idxBits1 = md[7];
+    const idxBits2 = md[8];
+    const hasAlpha = alphaBits > 0;
+
+    const partition = partBits > 0 ? reader.read(partBits) : 0;
+    const rotation = rotBits > 0 ? reader.read(rotBits) : 0;
+    const idxSel = idxSelBit > 0 ? reader.read(1) : 0;
+
+    // Read endpoints: numSubsets * 2 endpoints, each with R, G, B, [A] components
+    const numEndpoints = numSubsets * 2;
+    const endR: number[] = [], endG: number[] = [], endB: number[] = [], endA: number[] = [];
+    for (let i = 0; i < numEndpoints; i++) endR.push(reader.read(colorBits));
+    for (let i = 0; i < numEndpoints; i++) endG.push(reader.read(colorBits));
+    for (let i = 0; i < numEndpoints; i++) endB.push(reader.read(colorBits));
+    if (hasAlpha) {
+        for (let i = 0; i < numEndpoints; i++) endA.push(reader.read(alphaBits));
+    } else {
+        for (let i = 0; i < numEndpoints; i++) endA.push((1 << colorBits) - 1);
+    }
+
+    // P-bits
+    if (hasPBits) {
+        if (mode === 1) {
+            // Shared p-bits (one per subset)
+            for (let s = 0; s < numSubsets; s++) {
+                const pb = reader.read(1);
+                for (let e = 0; e < 2; e++) {
+                    const idx = s * 2 + e;
+                    endR[idx] = (endR[idx] << 1) | pb;
+                    endG[idx] = (endG[idx] << 1) | pb;
+                    endB[idx] = (endB[idx] << 1) | pb;
+                    if (hasAlpha) endA[idx] = (endA[idx] << 1) | pb;
+                }
+            }
+        } else {
+            // Unique p-bits (one per endpoint)
+            for (let i = 0; i < numEndpoints; i++) {
+                const pb = reader.read(1);
+                endR[i] = (endR[i] << 1) | pb;
+                endG[i] = (endG[i] << 1) | pb;
+                endB[i] = (endB[i] << 1) | pb;
+                if (hasAlpha) endA[i] = (endA[i] << 1) | pb;
+            }
+        }
+    }
+
+    // Expand endpoints to 8 bits
+    const cPrec = colorBits + (hasPBits ? 1 : 0);
+    const aPrec = (hasAlpha ? alphaBits : colorBits) + (hasPBits ? 1 : 0);
+    for (let i = 0; i < numEndpoints; i++) {
+        endR[i] = (endR[i] << (8 - cPrec)) | (endR[i] >> (2 * cPrec - 8));
+        endG[i] = (endG[i] << (8 - cPrec)) | (endG[i] >> (2 * cPrec - 8));
+        endB[i] = (endB[i] << (8 - cPrec)) | (endB[i] >> (2 * cPrec - 8));
+        endA[i] = hasAlpha
+            ? (endA[i] << (8 - aPrec)) | (endA[i] >> (2 * aPrec - 8))
+            : 255;
+    }
+
+    // Read color indices
+    const useIdx2 = idxBits2 > 0;
+    const colorIdxBits = (useIdx2 && idxSel) ? idxBits2 : idxBits1;
+    const alphaIdxBits = (useIdx2 && !idxSel) ? idxBits2 : idxBits1;
+
+    // First read primary indices (16 pixels)
+    const indices1: number[] = [];
+    // Anchor pixels get one less bit
+    const anchors1 = getAnchors(numSubsets, partition);
+    for (let i = 0; i < 16; i++) {
+        const isAnchor = anchors1.includes(i);
+        indices1.push(reader.read(idxBits1 - (isAnchor ? 1 : 0)));
+    }
+
+    // Read secondary indices if present
+    const indices2: number[] = [];
+    if (useIdx2) {
+        for (let i = 0; i < 16; i++) {
+            const isAnchor = (i === 0); // only pixel 0 is anchor for single-subset 2nd index
+            indices2.push(reader.read(idxBits2 - (isAnchor ? 1 : 0)));
+        }
+    }
+
+    // Interpolation weights tables
+    const weights2 = [0, 21, 43, 64];
+    const weights3 = [0, 9, 18, 27, 37, 46, 55, 64];
+    const weights4 = [0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64];
+    function getWeights(bits: number): number[] {
+        if (bits === 2) return weights2;
+        if (bits === 3) return weights3;
+        return weights4;
+    }
+
+    const cWeights = getWeights(colorIdxBits);
+    const aWeights = (useIdx2) ? getWeights(alphaIdxBits) : cWeights;
+
+    // Get partition subset for each pixel
+    const partTable = numSubsets > 1 ? (numSubsets === 2 ? BC7_PARTITION2[partition % 64] : null) : null;
+
+    for (let py = 0; py < 4; py++) {
+        if (oy + py >= h) continue;
+        for (let px = 0; px < 4; px++) {
+            if (ox + px >= w) continue;
+            const pi = py * 4 + px;
+            const subset = partTable ? partTable[pi] : 0;
+
+            const cIdx = (useIdx2 && idxSel) ? indices2[pi] : indices1[pi];
+            const aIdx = (useIdx2 && !idxSel) ? indices2[pi] : indices1[pi];
+
+            const ep0 = subset * 2;
+            const ep1 = subset * 2 + 1;
+            const cw = cWeights[cIdx] ?? 0;
+            const aw = aWeights[aIdx] ?? 0;
+
+            let r = ((64 - cw) * endR[ep0] + cw * endR[ep1] + 32) >> 6;
+            let g = ((64 - cw) * endG[ep0] + cw * endG[ep1] + 32) >> 6;
+            let b = ((64 - cw) * endB[ep0] + cw * endB[ep1] + 32) >> 6;
+            let a = ((64 - aw) * endA[ep0] + aw * endA[ep1] + 32) >> 6;
+
+            // Apply rotation
+            if (rotation === 1) { const t = a; a = r; r = t; }
+            else if (rotation === 2) { const t = a; a = g; g = t; }
+            else if (rotation === 3) { const t = a; a = b; b = t; }
+
+            putPx(out, ((oy + py) * w + (ox + px)) * 4,
+                Math.min(255, Math.max(0, r)),
+                Math.min(255, Math.max(0, g)),
+                Math.min(255, Math.max(0, b)),
+                Math.min(255, Math.max(0, a)));
+        }
+    }
+}
+
+/** Get anchor indices for BC7 partition (simplified for 1 and 2 subsets) */
+function getAnchors(numSubsets: number, partition: number): number[] {
+    if (numSubsets === 1) return [0];
+    // For 2 subsets: anchor for subset 0 is always pixel 0
+    // Anchor for subset 1 is the first pixel in subset 1
+    const ANCHOR2: number[] = [
+        15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,
+        15, 2, 8, 2, 2, 8, 8,15, 2, 8, 2, 2, 8, 8, 2, 2,
+        15,15, 6, 8, 2, 8,15,15, 2, 8, 2, 2, 2,15,15, 6,
+        6, 2, 6, 8,15,15, 2, 2,15,15,15,15, 3, 6, 6, 8,
+    ];
+    return [0, ANCHOR2[partition % 64]];
+}
+
 // ─── Downscale ──────────────────────────────────────────────────────────────
 
 function downscale(rgba: Uint8Array, w: number, h: number, tw: number, th: number): Uint8Array {
@@ -234,6 +487,23 @@ export function decodeDds(filePath: string): DdsResult | null {
                         if (o + 16 <= buf.length) decodeDxt3(view, o, rgba, xr * 4, yr * 4, width, height);
                     }
                 decoded = true;
+            } else if (fourCC === FOURCC_DX10) {
+                // DX10 extended header: 20 extra bytes after standard 128-byte header
+                if (buf.length < 148) return null;
+                const dxgiFormat = view.getUint32(128, true);
+                const dx10DataOff = 148; // 128 (standard) + 20 (DX10 header)
+
+                if (dxgiFormat === DXGI_FORMAT_BC7_UNORM || dxgiFormat === DXGI_FORMAT_BC7_UNORM_SRGB) {
+                    const bc7Rgba = new Uint8Array(width * height * 4);
+                    for (let yr = 0; yr < by; yr++)
+                        for (let xr = 0; xr < bx; xr++) {
+                            const o = dx10DataOff + (yr * bx + xr) * 16;
+                            if (o + 16 <= buf.length) decodeBc7Block(view, o, bc7Rgba, xr * 4, yr * 4, width, height);
+                        }
+                    // Copy to rgba output
+                    for (let i = 0; i < bc7Rgba.length; i++) rgba[i] = bc7Rgba[i];
+                    decoded = true;
+                }
             }
         }
 
@@ -281,7 +551,7 @@ export function decodeDds(filePath: string): DdsResult | null {
             const scale = Math.min(MAX_TEX_DIM / width, MAX_TEX_DIM / height);
             outW = Math.max(1, Math.floor(width * scale));
             outH = Math.max(1, Math.floor(height * scale));
-            outRgba = downscale(rgba, width, height, outW, outH) as unknown as Uint8Array;
+            outRgba = new Uint8Array(downscale(rgba, width, height, outW, outH));
         }
 
         const png = encodePng(outW, outH, outRgba);

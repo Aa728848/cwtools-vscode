@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 	<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
 		<Metadata>
-			<Identity Language="en-US" Id="cwtools-vscode" Version="0.10.315" Publisher="Eddy" />
+			<Identity Language="en-US" Id="cwtools-vscode" Version="1.1.0" Publisher="Eddy" />
 			<DisplayName>CWTools - Paradox Language Services</DisplayName>
 			<Description xml:space="preserve">Paradox Interactive scripting file support using CWTools</Description>
 			<Tags>paradox,stellaris,victoria,crusader kings,hearts of iron,snippet,pdxscript,__ext_txt,__ext_gui,__ext_gfx,__ext_asset,__ext_cwt,hoi4,eu4,ck2,__ext_sfx,imperator,vic2,__ext_map,ck3,vic3,eu5</Tags>

@@ -14,6 +14,10 @@ export class GuiPanel {
     private _disposables: vscode.Disposable[] = [];
     private readonly _webviewRootPath: string;
     private _textureCache: Map<string, DdsResult | null> = new Map();
+    private _textureCacheBytes = 0;
+    private static readonly MAX_CACHE_BYTES = 50 * 1024 * 1024; // 50 MB limit
+    private _document: vscode.TextDocument | undefined;
+    private _searchRoots: string[] = [];
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
@@ -26,6 +30,7 @@ export class GuiPanel {
 
     private constructor(extensionPath: string, column: vscode.ViewColumn, document: vscode.TextDocument) {
         this._webviewRootPath = path.join(extensionPath, 'bin/client/webview');
+        this._document = document;
 
         // Build resource roots: webview assets + all workspace folders
         const localResourceRoots: vscode.Uri[] = [vscode.Uri.file(this._webviewRootPath)];
@@ -36,6 +41,10 @@ export class GuiPanel {
         const docDir = path.dirname(document.uri.fsPath);
         const modRoot = this._findModRoot(docDir);
         if (modRoot) localResourceRoots.push(vscode.Uri.file(modRoot));
+
+        // Add Stellaris game directory as resource root for vanilla textures
+        const gamePath = this._getGamePath();
+        if (gamePath) localResourceRoots.push(vscode.Uri.file(gamePath));
 
         this._panel = vscode.window.createWebviewPanel(
             GuiPanel.viewType,
@@ -56,6 +65,28 @@ export class GuiPanel {
                 }
             }, null, this._disposables),
         );
+
+        // Watch for document saves to auto-refresh preview
+        this._disposables.push(
+            vscode.workspace.onDidSaveTextDocument(async savedDoc => {
+                if (savedDoc.uri.fsPath === document.uri.fsPath) {
+                    this._textureCache.clear();
+                    this._textureCacheBytes = 0;
+                    await this._loadAndRender(savedDoc);
+                }
+            }),
+        );
+    }
+
+    /**
+     * Get Stellaris game installation path from the plugin's existing configuration.
+     * Uses `cwtools.cache.stellaris` which is set by the user via the "Select vanilla folder" prompt.
+     */
+    private _getGamePath(): string | null {
+        const config = vscode.workspace.getConfiguration('cwtools');
+        const configPath = config.get<string>('cache.stellaris');
+        if (configPath && fs.existsSync(configPath)) return configPath;
+        return null;
     }
 
     /**
@@ -81,12 +112,17 @@ export class GuiPanel {
         const docDir = path.dirname(document.uri.fsPath);
         const modRoot = this._findModRoot(docDir);
 
-        // Collect all search roots (mod root + workspace folders)
+        // Collect all search roots (mod root + workspace folders + game path)
         const searchRoots: string[] = [];
         if (modRoot) searchRoots.push(modRoot);
         for (const wf of vscode.workspace.workspaceFolders ?? []) {
             if (!searchRoots.includes(wf.uri.fsPath)) searchRoots.push(wf.uri.fsPath);
         }
+        // Add Stellaris vanilla game path as fallback for GFX and textures
+        const gamePath = this._getGamePath();
+        if (gamePath && !searchRoots.includes(gamePath)) searchRoots.push(gamePath);
+
+        this._searchRoots = searchRoots;
 
         // Build sprite index from .gfx files in all search roots
         const spriteIndex = await this._buildSpriteIndex(searchRoots);
@@ -108,11 +144,16 @@ export class GuiPanel {
         const gfxContents: Array<{ path: string; content: string }> = [];
 
         for (const root of searchRoots) {
-            const interfaceDir = path.join(root, 'interface');
-            if (!fs.existsSync(interfaceDir)) continue;
+            // Search both interface/ and gfx/ directories for .gfx files
+            const searchDirs = [
+                path.join(root, 'interface'),
+                path.join(root, 'gfx'),
+            ];
 
-            // Recursively find .gfx files
-            this._findGfxFiles(interfaceDir, gfxContents);
+            for (const dir of searchDirs) {
+                if (!fs.existsSync(dir)) continue;
+                this._findGfxFiles(dir, gfxContents);
+            }
         }
 
         return buildSpriteIndex(gfxContents);
@@ -149,6 +190,7 @@ export class GuiPanel {
                 for (const root of searchRoots) {
                     const fullDds = path.join(root, relPath);
                     const fullPng = fullDds.replace(/\.dds$/i, '.png');
+                    const fullTga = fullDds.replace(/\.dds$/i, '.tga');
 
                     if (fs.existsSync(fullPng)) {
                         textureUri = this._panel.webview.asWebviewUri(vscode.Uri.file(fullPng)).toString();
@@ -161,7 +203,18 @@ export class GuiPanel {
                             result = this._textureCache.get(fullDds) ?? null;
                         } else {
                             result = decodeDds(fullDds);
+                            const entrySize = result?.dataUri?.length ?? 0;
+                            // Evict oldest entries if cache is too large
+                            while (this._textureCacheBytes + entrySize > GuiPanel.MAX_CACHE_BYTES && this._textureCache.size > 0) {
+                                const oldestKey = this._textureCache.keys().next().value;
+                                if (oldestKey) {
+                                    const old = this._textureCache.get(oldestKey);
+                                    this._textureCacheBytes -= old?.dataUri?.length ?? 0;
+                                    this._textureCache.delete(oldestKey);
+                                }
+                            }
                             this._textureCache.set(fullDds, result);
+                            this._textureCacheBytes += entrySize;
                         }
                         if (result) {
                             textureUri = result.dataUri;
@@ -170,6 +223,12 @@ export class GuiPanel {
                         } else {
                             textureUri = `dds:${el.spriteTexture}`;
                         }
+                        break;
+                    }
+
+                    // Try .tga (show as unresolved placeholder)
+                    if (fs.existsSync(fullTga)) {
+                        textureUri = `tga:${el.spriteTexture}`;
                         break;
                     }
                 }
@@ -188,6 +247,11 @@ export class GuiPanel {
 
     public dispose() {
         GuiPanel.currentPanel = undefined;
+        // Release texture cache memory
+        this._textureCache.clear();
+        this._textureCacheBytes = 0;
+        this._document = undefined;
+        this._searchRoots = [];
         this._panel.dispose();
         while (this._disposables.length) {
             const d = this._disposables.pop();
@@ -218,8 +282,16 @@ export class GuiPanel {
             <button id="btn-fit" title="Fit">⊡</button>
             <button id="btn-reset" title="Reset">↻</button>
             <button id="btn-preview" title="Toggle Preview Mode (hide borders)">👁</button>
+            <button id="btn-search" title="Search elements (Ctrl+F)">🔍</button>
             <button id="btn-layers" title="Toggle Layers Panel">☰</button>
         </div>
+    </div>
+    <div id="search-bar" class="hidden">
+        <input id="search-input" type="text" placeholder="Search element name..." />
+        <span id="search-count"></span>
+        <button id="search-prev" title="Previous">↑</button>
+        <button id="search-next" title="Next">↓</button>
+        <button id="search-close" title="Close">✕</button>
     </div>
     <div id="main-layout">
         <div id="viewport">

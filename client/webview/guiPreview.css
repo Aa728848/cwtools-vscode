@@ -289,7 +289,7 @@ html, body {
     max-width: none !important;
     max-height: none !important;
     object-fit: contain;
-    opacity: 0.75;
+    opacity: 0.90;
     pointer-events: none;
 }
 
@@ -349,4 +349,47 @@ body.preview-mode .card-body {
     background: rgba(100,160,255,0.3);
     border-color: #6090e0;
     color: #a0c0ff;
+}
+
+/* ─── Search Bar ─── */
+#search-bar {
+    position: fixed; top: 34px; left: 0; right: 0; z-index: 999;
+    height: 32px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 12px;
+    background: #1e1e38;
+    border-bottom: 1px solid #333358;
+}
+#search-bar.hidden { display: none; }
+
+#search-input {
+    flex: 1; max-width: 300px;
+    height: 22px; padding: 0 8px;
+    background: #28284a; color: #d0d8f0;
+    border: 1px solid #44446a; border-radius: 3px;
+    font-size: 12px; outline: none;
+}
+#search-input:focus { border-color: #6090e0; }
+
+#search-count {
+    font-size: 11px; color: #7080a0;
+    min-width: 60px;
+}
+
+#search-bar button {
+    width: 22px; height: 20px;
+    border: 1px solid #44446a; border-radius: 3px;
+    background: #28284a; color: #99aac8;
+    font-size: 11px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+}
+#search-bar button:hover { background: #38385e; border-color: #6666a0; }
+
+/* ─── Search Highlights ─── */
+.el.search-highlight {
+    box-shadow: 0 0 0 2px #e0a030, 0 0 8px rgba(224,160,48,0.3) !important;
+}
+.el.search-active {
+    box-shadow: 0 0 0 2px #40c0ff, 0 0 12px rgba(64,192,255,0.5) !important;
+    z-index: 998 !important;
 }

@@ -453,6 +453,15 @@ export async function activate(context: ExtensionContext) {
 		});
 
 		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {
+			// Stop the language server client first
+			if (defaultClient) {
+				try { await defaultClient.stop(); } catch (_) { /* ignore */ }
+			}
+			// Dispose GUI panel if open
+			if (GuiPanel.currentPanel) {
+				try { GuiPanel.currentPanel.dispose(); } catch (_) { /* ignore */ }
+			}
+			// Dispose all subscriptions
 			for (const sub of context.subscriptions) {
 				try {
 					sub.dispose();
@@ -460,6 +469,8 @@ export async function activate(context: ExtensionContext) {
 					console.error(e);
 				}
 			}
+			// Clear the array to prevent accumulation
+			context.subscriptions.length = 0;
 			await activate(context);
 		});
 		await client.start();

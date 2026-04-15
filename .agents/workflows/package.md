@@ -62,8 +62,8 @@ cd ..
 
 ```powershell
 # 将编译产物部署到已安装的插件目录，无需重新安装 vsix
-Copy-Item -Path .\release\bin\server\win-x64\* -Destination 'C:\Users\A\.vscode\extensions\eddy.eddy-stellaris-cwt-1.0.0\bin\server\win-x64' -Recurse -Force
-Copy-Item -Path .\release\bin\client\extension\* -Destination 'C:\Users\A\.vscode\extensions\eddy.eddy-stellaris-cwt-1.0.0\bin\client\extension' -Recurse -Force
+Copy-Item -Path .\release\bin\server\win-x64\* -Destination 'C:\Users\A\.vscode\extensions\eddy.eddy-stellaris-cwt-1.1.0\bin\server\win-x64' -Recurse -Force
+Copy-Item -Path .\release\bin\client\extension\* -Destination 'C:\Users\A\.vscode\extensions\eddy.eddy-stellaris-cwt-1.1.0\bin\client\extension' -Recurse -Force
 ```
 
 部署后重启 VSCode 生效。

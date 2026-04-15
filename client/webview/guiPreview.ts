@@ -15,6 +15,8 @@ interface GuiElement {
     position: { x: number; y: number };
     size: { width: number; height: number };
     sizeExplicit?: boolean;
+    percentWidth?: boolean;
+    percentHeight?: boolean;
     orientation?: string;
     origo?: string;
     clipping?: boolean;
@@ -37,6 +39,9 @@ interface GuiElement {
     alpha?: number;
     centerPosition?: boolean;
     borderSize?: { x: number; y: number };
+    margin?: { top: number; bottom: number; left: number; right: number };
+    spacing?: number;
+    slotSize?: { width: number; height: number };
     children: GuiElement[];
     properties: Record<string, unknown>;
     line: number;
@@ -97,22 +102,84 @@ function applyImageStyles(img: HTMLImageElement, div: HTMLElement, el: GuiElemen
     img.style.maxHeight = 'none';
 
     if (el.spriteDefType === 'corneredTileSpriteType') {
-        // Approximate 9-slice: stretch image to fill container
-        // (True 9-slice with CSS border-image doesn't work in VSCode webviews)
-        img.style.width = '100%';
-        img.style.height = '100%';
-        img.style.objectFit = 'fill';
+        const bx = el.borderSize?.x ?? 0;
+        const by = el.borderSize?.y ?? 0;
+
+        if (bx > 0 || by > 0) {
+            // Canvas-based 9-slice (CSS border-image unreliable with data: URIs in webview)
+            img.style.display = 'none';
+
+            const drawNineSlice = () => {
+                const canvas = document.createElement('canvas');
+                canvas.style.position = 'absolute';
+                canvas.style.top = '0';
+                canvas.style.left = '0';
+                canvas.style.width = '100%';
+                canvas.style.height = '100%';
+                canvas.style.pointerEvents = 'none';
+                canvas.style.opacity = '0.90';
+
+                const dw = div.offsetWidth || parseInt(div.style.width) || 200;
+                const dh = div.offsetHeight || parseInt(div.style.height) || 200;
+                canvas.width = dw;
+                canvas.height = dh;
+
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                const sw = img.naturalWidth;
+                const sh = img.naturalHeight;
+                if (sw === 0 || sh === 0) return;
+
+                const sl = Math.min(bx, sw / 2);
+                const sr = Math.min(bx, sw / 2);
+                const st = Math.min(by, sh / 2);
+                const sb = Math.min(by, sh / 2);
+                const scw = sw - sl - sr;
+                const sch = sh - st - sb;
+
+                const dl = Math.min(bx, dw / 2);
+                const dr = Math.min(bx, dw / 2);
+                const dt = Math.min(by, dh / 2);
+                const db = Math.min(by, dh / 2);
+                const dcw = dw - dl - dr;
+                const dch = dh - dt - db;
+
+                // Top-left, top-center, top-right
+                if (sl > 0 && st > 0) ctx.drawImage(img, 0, 0, sl, st, 0, 0, dl, dt);
+                if (scw > 0 && st > 0) ctx.drawImage(img, sl, 0, scw, st, dl, 0, dcw, dt);
+                if (sr > 0 && st > 0) ctx.drawImage(img, sw - sr, 0, sr, st, dw - dr, 0, dr, dt);
+                // Mid-left, center, mid-right
+                if (sl > 0 && sch > 0) ctx.drawImage(img, 0, st, sl, sch, 0, dt, dl, dch);
+                if (scw > 0 && sch > 0) ctx.drawImage(img, sl, st, scw, sch, dl, dt, dcw, dch);
+                if (sr > 0 && sch > 0) ctx.drawImage(img, sw - sr, st, sr, sch, dw - dr, dt, dr, dch);
+                // Bot-left, bot-center, bot-right
+                if (sl > 0 && sb > 0) ctx.drawImage(img, 0, sh - sb, sl, sb, 0, dh - db, dl, db);
+                if (scw > 0 && sb > 0) ctx.drawImage(img, sl, sh - sb, scw, sb, dl, dh - db, dcw, db);
+                if (sr > 0 && sb > 0) ctx.drawImage(img, sw - sr, sh - sb, sr, sb, dw - dr, dh - db, dr, db);
+
+                div.appendChild(canvas);
+            };
+
+            if (img.complete && img.naturalWidth > 0) {
+                requestAnimationFrame(() => drawNineSlice());
+            } else {
+                img.onload = () => requestAnimationFrame(() => drawNineSlice());
+            }
+        } else {
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'fill';
+        }
     } else if (el.noOfFrames && el.noOfFrames > 1) {
         img.style.width = `${el.noOfFrames * 100}%`;
         img.style.height = '100%';
         img.style.objectFit = 'fill';
         let f = 0;
         if (el.frame !== undefined && el.frame > 0) {
-            f = el.frame - 1; // PDX frame is 1-indexed
+            f = el.frame - 1;
         }
         f = Math.max(0, Math.min(f, el.noOfFrames - 1));
-        // Slide the enlarged image to the left by f * 100% of the parent's width 
-        // to show the f-th frame within the parent's clipping window.
         img.style.left = `-${f * 100}%`; 
         div.style.overflow = 'hidden';
     }
@@ -219,16 +286,32 @@ function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h
     let h = el.size.height;
     const elScale = el.scale ?? 1;
 
+    // Handle percentage sizes (e.g. width = 100% → parent width)
+    if (el.percentWidth && parentW > 0) {
+        w = Math.round(parentW * w / 100);
+    }
+    if (el.percentHeight && parentH > 0) {
+        h = Math.round(parentH * h / 100);
+    }
+
     // Handle negative size (parent - N)
     if (w < 0 && parentW > 0) w = parentW + w;
     if (h < 0 && parentH > 0) h = parentH + h;
+
+    // Apply margin reduction
+    if (el.margin) {
+        if (w > 0) w = w - el.margin.left - el.margin.right;
+        if (h > 0) h = h - el.margin.top - el.margin.bottom;
+    }
 
     // Determine render mode:
     // 1. spriteType attribute → ALWAYS fixed (natural size × scale), ignore widget size
     // 2. quadTextureSprite → check GFX registry:
     //    - corneredTileSpriteType / textSpriteType → 9-patch at widget size
     //    - spriteType in GFX → fixed (natural size × scale)
-    const isFixedSprite = (
+    // Special: corneredTileSpriteType ALWAYS uses widget size (9-patch), even when called via spriteType attr
+    const isCorneredTile = el.spriteDefType === 'corneredTileSpriteType';
+    const isFixedSprite = !isCorneredTile && (
         el.spriteAttr === 'spriteType' ||  // spriteType attribute always means fixed
         (el.spriteAttr === 'quadTextureSprite' &&  // quadTexture referencing a plain sprite
          el.spriteDefType === 'spriteType')
@@ -299,6 +382,14 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     const c = COLORS[el.type] ?? DEFAULT_COLOR;
     const { w, h } = effectiveSize(el, parentW, parentH);
 
+    // Skip elements with position > 5000 (off-screen, used for game logic)
+    if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) {
+        const placeholder = document.createElement('div');
+        placeholder.style.display = 'none';
+        parent.appendChild(placeholder);
+        return placeholder;
+    }
+
     // size = { width = 0 height = 0 } on containerWindowType means hidden in PDX
     if (el.sizeExplicit && el.size.width === 0 && el.size.height === 0
         && (el.type === 'containerWindowType' || el.type === 'windowType')) {
@@ -332,15 +423,16 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
             const img = document.createElement('img');
             img.className = 'el-img';
             img.src = el.spriteTexture;
-            // Background: corneredTileSpriteType stretches to fill (9-patch),
-            // other sprites fill while maintaining aspect ratio
+            // Background: corneredTileSpriteType stretches to fill parent (simple stretch)
             if (el.spriteDefType === 'corneredTileSpriteType') {
                 img.style.objectFit = 'fill';
+                img.style.maxWidth = 'none';
+                img.style.maxHeight = 'none';
             } else {
                 img.style.objectFit = 'contain';
             }
             img.style.objectPosition = 'top left';
-            applyImageStyles(img, div, el);
+            // Don't run applyImageStyles for background — simple fill is sufficient
             div.appendChild(img);
             div.style.backgroundColor = c.bg;
             div.style.borderColor = c.border;
@@ -361,10 +453,13 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     }
 
     // ── PDX Layout: compute pixel-accurate top-left ──
+    // Apply margin offset to position
+    const marginLeft = el.margin?.left ?? 0;
+    const marginTop = el.margin?.top ?? 0;
     const tl = computeTopLeft(
         parentW, parentH, w, h,
         el.orientation ?? '', el.origo ?? '',
-        el.position.x, el.position.y,
+        el.position.x + marginLeft, el.position.y + marginTop,
         el.centerPosition ?? false,
     );
 
@@ -646,6 +741,12 @@ let activeLayerLine: number | null = null;
 
 function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 0) {
     for (const el of elements) {
+        // Skip off-screen elements (position > 5000)
+        if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) continue;
+        // Skip hidden containerWindowType (explicit size 0x0)
+        if (el.sizeExplicit && el.size.width === 0 && el.size.height === 0
+            && (el.type === 'containerWindowType' || el.type === 'windowType')) continue;
+
         const hasChildren = el.children.length > 0;
         const c = COLORS[el.type] ?? DEFAULT_COLOR;
 
@@ -759,6 +860,118 @@ function updateLayersPanel(elements: GuiElement[]) {
     buildLayerTree(elements, tree);
 }
 
+// ─── Search ─────────────────────────────────────────────────────────────────
+
+let searchResults: HTMLElement[] = [];
+let searchIndex = -1;
+
+function setupSearch() {
+    const searchBar = document.getElementById('search-bar');
+    const searchInput = document.getElementById('search-input') as HTMLInputElement;
+    const searchCount = document.getElementById('search-count')!;
+    const btnSearch = document.getElementById('btn-search');
+    const btnClose = document.getElementById('search-close');
+    const btnPrev = document.getElementById('search-prev');
+    const btnNext = document.getElementById('search-next');
+
+    if (!searchBar || !searchInput || !btnSearch) return;
+
+    function toggleSearch() {
+        searchBar!.classList.toggle('hidden');
+        if (!searchBar!.classList.contains('hidden')) {
+            searchInput!.focus();
+            searchInput!.select();
+        } else {
+            clearSearch();
+        }
+    }
+
+    function clearSearch() {
+        document.querySelectorAll('.el.search-highlight').forEach(el => el.classList.remove('search-highlight'));
+        searchResults = [];
+        searchIndex = -1;
+        searchCount!.textContent = '';
+    }
+
+    function doSearch() {
+        clearSearch();
+        const query = searchInput!.value.trim().toLowerCase();
+        if (!query) return;
+
+        const allEls = document.querySelectorAll('.el[data-line]');
+        allEls.forEach(el => {
+            const nameEl = el.querySelector('.el-name');
+            if (nameEl && nameEl.textContent?.toLowerCase().includes(query)) {
+                (el as HTMLElement).classList.add('search-highlight');
+                searchResults.push(el as HTMLElement);
+            }
+        });
+
+        searchCount!.textContent = searchResults.length > 0 ? `${searchResults.length} found` : 'No match';
+        if (searchResults.length > 0) {
+            searchIndex = 0;
+            scrollToResult();
+        }
+    }
+
+    function scrollToResult() {
+        if (searchResults.length === 0) return;
+        // Remove previous active
+        document.querySelectorAll('.el.search-active').forEach(el => el.classList.remove('search-active'));
+        const el = searchResults[searchIndex];
+        el.classList.add('search-active');
+        searchCount!.textContent = `${searchIndex + 1}/${searchResults.length}`;
+
+        // Pan viewport to element
+        const vp = document.getElementById('viewport')!;
+        const vpRect = vp.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const cx = elRect.left + elRect.width / 2;
+        const cy = elRect.top + elRect.height / 2;
+        const vpCx = vpRect.left + vpRect.width / 2;
+        const vpCy = vpRect.top + vpRect.height / 2;
+        if (cx < vpRect.left || cx > vpRect.right || cy < vpRect.top || cy > vpRect.bottom) {
+            panX += vpCx - cx;
+            panY += vpCy - cy;
+            updateTransform();
+        }
+    }
+
+    btnSearch!.onclick = toggleSearch;
+    btnClose!.onclick = toggleSearch;
+    btnPrev!.onclick = () => {
+        if (searchResults.length === 0) return;
+        searchIndex = (searchIndex - 1 + searchResults.length) % searchResults.length;
+        scrollToResult();
+    };
+    btnNext!.onclick = () => {
+        if (searchResults.length === 0) return;
+        searchIndex = (searchIndex + 1) % searchResults.length;
+        scrollToResult();
+    };
+    searchInput!.addEventListener('input', doSearch);
+    searchInput!.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            if (e.shiftKey) {
+                searchIndex = (searchIndex - 1 + searchResults.length) % searchResults.length;
+            } else {
+                searchIndex = (searchIndex + 1) % searchResults.length;
+            }
+            scrollToResult();
+        } else if (e.key === 'Escape') {
+            toggleSearch();
+        }
+    });
+
+    // Ctrl+F shortcut
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+            e.preventDefault();
+            toggleSearch();
+        }
+    });
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────────
 
 window.addEventListener('message', e => {
@@ -769,5 +982,6 @@ window.addEventListener('message', e => {
 });
 
 setupControls();
+setupSearch();
 updateTransform();
 vscode.postMessage({ command: 'ready' });

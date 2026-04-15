@@ -342,19 +342,20 @@ function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h
     }
     if (h <= 0 && el.textureHeight) h = el.textureHeight;
 
-    // Container auto-size from children bounding box
-    // Uses computeTopLeft for accurate child position calculation
+    // Container sizing: PDX containers without explicit size inherit parent dimensions
     const isContainerType = el.type === 'containerWindowType' || el.type === 'windowType'
         || el.type === 'scrollAreaType' || el.type === 'dropDownBoxType' || el.type === 'expandedWindow';
     if (isContainerType && (w <= 0 || h <= 0)) {
-        if (el.children.length > 0) {
+        // First try: inherit parent size
+        if (w <= 0 && parentW > 0) w = parentW;
+        if (h <= 0 && parentH > 0) h = parentH;
+        // Fallback: auto-size from children bounding box (when parent size unknown)
+        if ((w <= 0 || h <= 0) && el.children.length > 0) {
             let maxR = 0, maxB = 0;
-            // First pass to get a rough parent size for orientation calculations
             for (const ch of el.children) {
                 if (ch.type === 'background') continue;
                 if (Math.abs(ch.position.x) > 5000 || Math.abs(ch.position.y) > 5000) continue;
                 const cs = effectiveSize(ch);
-                // Simple estimate using raw position for first pass
                 const r = Math.max(0, ch.position.x) + cs.w;
                 const b = Math.max(0, ch.position.y) + cs.h;
                 if (r > maxR) maxR = r;
@@ -422,15 +423,19 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
             const img = document.createElement('img');
             img.className = 'el-img';
             img.src = el.spriteTexture;
-            // Background: corneredTileSpriteType stretches to fill parent (simple stretch)
             if (el.spriteDefType === 'corneredTileSpriteType') {
+                // corneredTileSpriteType: stretch to fill parent container
                 img.style.objectFit = 'fill';
                 img.style.maxWidth = 'none';
                 img.style.maxHeight = 'none';
             } else {
-                img.style.objectFit = 'contain';
+                // spriteType: display at original texture dimensions
+                if (el.textureWidth && el.textureHeight) {
+                    img.style.width = `${el.textureWidth}px`;
+                    img.style.height = `${el.textureHeight}px`;
+                    img.style.objectFit = 'fill';
+                }
             }
-            img.style.objectPosition = 'top left';
             // Don't run applyImageStyles for background — simple fill is sufficient
             div.appendChild(img);
             div.style.backgroundColor = c.bg;

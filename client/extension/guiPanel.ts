@@ -163,11 +163,15 @@ export class GuiPanel {
         // Collect sprite names for the webview dropdown
         const spriteNames = Array.from(spriteIndex.keys()).sort();
 
+        // Collect button effect names for effectButtonType dropdown
+        const effectNames = this._collectButtonEffects(searchRoots);
+
         this._panel.webview.postMessage({
             command: 'render',
             data: resolved,
             fileName: path.basename(document.fileName),
             spriteNames,
+            effectNames,
         });
     }
 
@@ -203,6 +207,33 @@ export class GuiPanel {
                 }
             }
         } catch { /* skip inaccessible dirs */ }
+    }
+
+    /**
+     * Collect button effect names from common/button_effects/*.txt in all search roots.
+     * Extracts top-level keys (e.g. `my_effect = { ... }`) from these files.
+     */
+    private _collectButtonEffects(searchRoots: string[]): string[] {
+        const names = new Set<string>();
+        for (const root of searchRoots) {
+            const dir = path.join(root, 'common', 'button_effects');
+            if (!fs.existsSync(dir)) continue;
+            try {
+                for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                    if (!entry.isFile() || !entry.name.endsWith('.txt')) continue;
+                    try {
+                        const content = fs.readFileSync(path.join(dir, entry.name), 'utf-8');
+                        // Match only top-level keys: no leading whitespace
+                        const regex = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{/gm;
+                        let m;
+                        while ((m = regex.exec(content)) !== null) {
+                            names.add(m[1]);
+                        }
+                    } catch { /* skip unreadable */ }
+                }
+            } catch { /* skip inaccessible */ }
+        }
+        return Array.from(names).sort();
     }
 
     /**
@@ -371,12 +402,17 @@ export class GuiPanel {
     private async _handleUpdateProperty(msg: { line: number; property: string; value: unknown; propertyLine?: number }) {
         if (!this._document) return;
         const doc = this._document;
-        const hasExistingLine = msg.propertyLine !== undefined && msg.propertyLine !== null && msg.propertyLine !== msg.line;
+
+        // Save snapshot for undo
+        this._contentSnapshots.push(doc.getText());
+
+        const propLine = msg.propertyLine ?? msg.line;
+        const hasOwnLine = propLine !== msg.line;
 
         if (msg.property === 'position') {
             const val = msg.value as { x: number; y: number };
-            if (hasExistingLine) {
-                const line = doc.lineAt(msg.propertyLine! - 1);
+            if (hasOwnLine) {
+                const line = doc.lineAt(propLine - 1);
                 const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
                 const newText = `${indent}${serializePosition(val.x, val.y)}`;
                 const edit = new vscode.WorkspaceEdit();
@@ -385,17 +421,27 @@ export class GuiPanel {
                 await vscode.workspace.applyEdit(edit);
                 await doc.save();
             } else {
-                const openLine = doc.lineAt(msg.line - 1);
-                const indent = openLine.text.match(/^(\s*)/)?.[1] ?? '';
-                const childIndent = indent + '\t';
-                await this._insertAfterLine(msg.line, `${childIndent}${serializePosition(val.x, val.y)}`);
-                // Re-render to refresh line numbers so subsequent edits won't re-insert
-                await this._loadAndRender(doc);
+                // Check if position exists inline on the same line
+                const line = doc.lineAt(msg.line - 1);
+                const posRegex = /position\s*=\s*\{\s*x\s*=\s*-?\d+\s+y\s*=\s*-?\d+\s*\}/;
+                if (posRegex.test(line.text)) {
+                    const newText = line.text.replace(posRegex, `position = { x = ${val.x} y = ${val.y} }`);
+                    const edit = new vscode.WorkspaceEdit();
+                    edit.replace(doc.uri, line.range, newText);
+                    this._skipNextReload = true;
+                    await vscode.workspace.applyEdit(edit);
+                    await doc.save();
+                } else {
+                    const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
+                    const childIndent = indent + '\t';
+                    await this._insertAfterLine(msg.line, `${childIndent}${serializePosition(val.x, val.y)}`);
+                    await this._loadAndRender(doc);
+                }
             }
         } else if (msg.property === 'size') {
             const val = msg.value as { width: number; height: number };
-            if (hasExistingLine) {
-                const line = doc.lineAt(msg.propertyLine! - 1);
+            if (hasOwnLine) {
+                const line = doc.lineAt(propLine - 1);
                 const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
                 const newText = `${indent}${serializeSize(val.width, val.height)}`;
                 const edit = new vscode.WorkspaceEdit();
@@ -404,15 +450,26 @@ export class GuiPanel {
                 await vscode.workspace.applyEdit(edit);
                 await doc.save();
             } else {
-                const openLine = doc.lineAt(msg.line - 1);
-                const indent = openLine.text.match(/^(\s*)/)?.[1] ?? '';
-                const childIndent = indent + '\t';
-                await this._insertAfterLine(msg.line, `${childIndent}${serializeSize(val.width, val.height)}`);
-                await this._loadAndRender(doc);
+                const line = doc.lineAt(msg.line - 1);
+                const sizeRegex = /size\s*=\s*\{\s*x\s*=\s*-?\d+\s+y\s*=\s*-?\d+\s*\}/;
+                if (sizeRegex.test(line.text)) {
+                    const newText = line.text.replace(sizeRegex, `size = { x = ${val.width} y = ${val.height} }`);
+                    const edit = new vscode.WorkspaceEdit();
+                    edit.replace(doc.uri, line.range, newText);
+                    this._skipNextReload = true;
+                    await vscode.workspace.applyEdit(edit);
+                    await doc.save();
+                } else {
+                    const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
+                    const childIndent = indent + '\t';
+                    await this._insertAfterLine(msg.line, `${childIndent}${serializeSize(val.width, val.height)}`);
+                    await this._loadAndRender(doc);
+                }
             }
         } else {
-            if (hasExistingLine) {
-                const line = doc.lineAt(msg.propertyLine! - 1);
+            // Generic property (frame, name, spriteType, etc.)
+            if (hasOwnLine) {
+                const line = doc.lineAt(propLine - 1);
                 const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
                 const newText = `${indent}${serializeProperty(msg.property, msg.value)}`;
                 const edit = new vscode.WorkspaceEdit();
@@ -421,11 +478,27 @@ export class GuiPanel {
                 await vscode.workspace.applyEdit(edit);
                 await doc.save();
             } else {
-                const openLine = doc.lineAt(msg.line - 1);
-                const indent = openLine.text.match(/^(\s*)/)?.[1] ?? '';
-                const childIndent = indent + '\t';
-                await this._insertAfterLine(msg.line, `${childIndent}${serializeProperty(msg.property, msg.value)}`);
-                await this._loadAndRender(doc);
+                // Check if property exists inline on the element's line
+                const line = doc.lineAt(msg.line - 1);
+                const propVal = String(msg.value);
+                // Match property = value patterns (quoted or unquoted)
+                const inlineRegex = new RegExp(`(${msg.property}\\s*=\\s*)(?:"[^"]*"|\\S+)`);
+                if (inlineRegex.test(line.text)) {
+                    const serializedVal = typeof msg.value === 'number'
+                        ? (Number.isInteger(msg.value) ? String(msg.value) : (msg.value as number).toFixed(3))
+                        : (/\s/.test(propVal) || propVal.length === 0 ? `"${propVal}"` : propVal);
+                    const newText = line.text.replace(inlineRegex, `$1${serializedVal}`);
+                    const edit = new vscode.WorkspaceEdit();
+                    edit.replace(doc.uri, line.range, newText);
+                    this._skipNextReload = true;
+                    await vscode.workspace.applyEdit(edit);
+                    await doc.save();
+                } else {
+                    const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
+                    const childIndent = indent + '\t';
+                    await this._insertAfterLine(msg.line, `${childIndent}${serializeProperty(msg.property, msg.value)}`);
+                    await this._loadAndRender(doc);
+                }
             }
         }
     }

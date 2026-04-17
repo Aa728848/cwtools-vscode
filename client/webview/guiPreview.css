@@ -647,16 +647,13 @@ body.edit-mode .el.always-transparent { pointer-events: auto; cursor: move; }
 .sprite-picker { position: relative; }
 .sprite-picker .prop-input { width: 100%; box-sizing: border-box; }
 .sprite-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    max-height: 180px;
+    position: fixed;
+    max-height: 200px;
     overflow-y: auto;
     background: #1e1e3a;
     border: 1px solid #4060a0;
     border-radius: 0 0 4px 4px;
-    z-index: 9999;
+    z-index: 99999;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
 }
 .sprite-dropdown.hidden { display: none; }

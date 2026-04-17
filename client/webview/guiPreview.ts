@@ -1042,6 +1042,7 @@ function setupSearch() {
 let editMode = false;
 let allElements: GuiElement[] = [];
 let spriteNames: string[] = [];
+let effectNames: string[] = [];
 const elMap = new Map<number, { el: GuiElement; div: HTMLElement }>();
 let selectedElements: Array<{ el: GuiElement; div: HTMLElement }> = [];
 
@@ -1608,9 +1609,17 @@ function updatePropertiesPanel() {
     html += `<div class="prop-group"><div class="prop-group-title">贴图</div>`;
     const spriteAttr = el.spriteAttr ?? 'spriteType';
     const currentSprite = el.spriteKey ?? '';
-    html += `<div class="prop-row"><span class="prop-label">贴图</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(currentSprite)}" placeholder="输入或选择贴图..." autocomplete="off" /><div id="sprite-dropdown" class="sprite-dropdown hidden"></div></div></div>`;
+    html += `<div class="prop-row"><span class="prop-label">贴图</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(currentSprite)}" placeholder="输入或选择贴图..." autocomplete="off" /></div></div>`;
     if (el.frame !== undefined) html += propRow('帧', `<input class="prop-input" type="number" data-prop="frame" value="${el.frame}" step="1" min="0" />`);
     html += `</div>`;
+
+    // Effect (only for effectButtonType)
+    if (el.type === 'effectButtonType') {
+        const currentEffect = (el.properties['effect'] as string) ?? '';
+        html += `<div class="prop-group"><div class="prop-group-title">效果</div>`;
+        html += `<div class="prop-row"><span class="prop-label">effect</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="effect-search" data-prop="effect-select" value="${escHtml(currentEffect)}" placeholder="输入或选择效果..." autocomplete="off" /></div></div>`;
+        html += `</div>`;
+    }
 
     // Info
     html += `<div class="prop-group"><div class="prop-group-title">源码</div>`;
@@ -1638,48 +1647,70 @@ function updatePropertiesPanel() {
     });
 
     // Setup custom sprite autocomplete dropdown
-    const spriteInput = content.querySelector('#sprite-search') as HTMLInputElement;
-    const spriteDropdown = content.querySelector('#sprite-dropdown') as HTMLElement;
-    if (spriteInput && spriteDropdown) {
-        let ddIndex = -1;
-        const showDropdown = (query: string) => {
-            const q = query.toLowerCase();
-            const matches = q ? spriteNames.filter(s => s.toLowerCase().includes(q)).slice(0, 50) : [];
-            if (matches.length === 0) { spriteDropdown.classList.add('hidden'); return; }
-            ddIndex = -1;
-            spriteDropdown.innerHTML = matches.map(s =>
-                `<div class="sprite-option">${escHtml(s)}</div>`
-            ).join('');
-            spriteDropdown.classList.remove('hidden');
-            spriteDropdown.querySelectorAll('.sprite-option').forEach((opt, i) => {
-                opt.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    spriteInput.value = matches[i];
-                    spriteDropdown.classList.add('hidden');
-                    spriteInput.dispatchEvent(new Event('change'));
-                });
-            });
-        };
-        spriteInput.addEventListener('input', () => showDropdown(spriteInput.value));
-        spriteInput.addEventListener('focus', () => { if (spriteInput.value) showDropdown(spriteInput.value); });
-        spriteInput.addEventListener('blur', () => spriteDropdown.classList.add('hidden'));
-        spriteInput.addEventListener('keydown', (e) => {
-            const items = spriteDropdown.querySelectorAll('.sprite-option');
-            if (items.length === 0 || spriteDropdown.classList.contains('hidden')) return;
-            if (e.key === 'ArrowDown') { e.preventDefault(); ddIndex = Math.min(ddIndex + 1, items.length - 1); }
-            else if (e.key === 'ArrowUp') { e.preventDefault(); ddIndex = Math.max(ddIndex - 1, 0); }
-            else if (e.key === 'Enter' && ddIndex >= 0) {
-                e.preventDefault();
-                spriteInput.value = (items[ddIndex] as HTMLElement).textContent!;
-                spriteDropdown.classList.add('hidden');
-                spriteInput.dispatchEvent(new Event('change'));
-                return;
-            } else if (e.key === 'Escape') { spriteDropdown.classList.add('hidden'); return; }
-            else return;
-            items.forEach((it, i) => it.classList.toggle('active', i === ddIndex));
-            if (ddIndex >= 0) items[ddIndex].scrollIntoView({ block: 'nearest' });
-        });
+    setupAutocomplete(content, '#sprite-search', 'sprite-dropdown-global', spriteNames);
+
+    // Setup custom effect autocomplete dropdown
+    setupAutocomplete(content, '#effect-search', 'effect-dropdown-global', effectNames);
+}
+
+/** Reusable autocomplete dropdown for input fields */
+function setupAutocomplete(content: HTMLElement, inputSelector: string, dropdownId: string, dataSource: string[]) {
+    const inputEl = content.querySelector(inputSelector) as HTMLInputElement;
+    if (!inputEl) return;
+    // Create dropdown on body to avoid being clipped by overflow
+    let dropdown = document.getElementById(dropdownId) as HTMLElement;
+    if (!dropdown) {
+        dropdown = document.createElement('div');
+        dropdown.id = dropdownId;
+        dropdown.className = 'sprite-dropdown hidden';
+        document.body.appendChild(dropdown);
     }
+    let ddIndex = -1;
+    const positionDropdown = () => {
+        const rect = inputEl.getBoundingClientRect();
+        dropdown.style.position = 'fixed';
+        dropdown.style.top = `${rect.bottom}px`;
+        dropdown.style.left = `${rect.left}px`;
+        dropdown.style.width = `${rect.width}px`;
+    };
+    const showDropdown = (query: string) => {
+        const q = query.toLowerCase();
+        const matches = q ? dataSource.filter(s => s.toLowerCase().includes(q)).slice(0, 50) : [];
+        if (matches.length === 0) { dropdown.classList.add('hidden'); return; }
+        ddIndex = -1;
+        dropdown.innerHTML = matches.map(s =>
+            `<div class="sprite-option">${escHtml(s)}</div>`
+        ).join('');
+        positionDropdown();
+        dropdown.classList.remove('hidden');
+        dropdown.querySelectorAll('.sprite-option').forEach((opt, i) => {
+            opt.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                inputEl.value = matches[i];
+                dropdown.classList.add('hidden');
+                inputEl.dispatchEvent(new Event('change'));
+            });
+        });
+    };
+    inputEl.addEventListener('input', () => showDropdown(inputEl.value));
+    inputEl.addEventListener('focus', () => { if (inputEl.value) showDropdown(inputEl.value); });
+    inputEl.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 150));
+    inputEl.addEventListener('keydown', (e) => {
+        const items = dropdown.querySelectorAll('.sprite-option');
+        if (items.length === 0 || dropdown.classList.contains('hidden')) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); ddIndex = Math.min(ddIndex + 1, items.length - 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); ddIndex = Math.max(ddIndex - 1, 0); }
+        else if (e.key === 'Enter' && ddIndex >= 0) {
+            e.preventDefault();
+            inputEl.value = (items[ddIndex] as HTMLElement).textContent!;
+            dropdown.classList.add('hidden');
+            inputEl.dispatchEvent(new Event('change'));
+            return;
+        } else if (e.key === 'Escape') { dropdown.classList.add('hidden'); return; }
+        else return;
+        items.forEach((it, i) => it.classList.toggle('active', i === ddIndex));
+        if (ddIndex >= 0) items[ddIndex].scrollIntoView({ block: 'nearest' });
+    });
 }
 
 function propRow(label: string, control: string): string {
@@ -1693,6 +1724,9 @@ function escHtml(s: string): string {
 function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
     const entry = elMap.get(el.line);
     if (!entry) return;
+
+    // Push undo entry so property changes can be undone via snapshot
+    pushUndo({ type: 'structural' });
 
     if (prop === 'pos-x' || prop === 'pos-y') {
         if (prop === 'pos-x') el.position.x = value as number;
@@ -1739,6 +1773,13 @@ function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
             command: 'updateProperty', line: el.line,
             property: spriteAttr, value,
             propertyLine: el.propertyLines?.[spriteAttr] ?? el.line,
+        });
+    } else if (prop === 'effect-select') {
+        el.properties['effect'] = value;
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line,
+            property: 'effect', value,
+            propertyLine: el.propertyLines?.['effect'] ?? el.line,
         });
     } else {
         (el as unknown as Record<string, unknown>)[prop] = value;
@@ -1999,6 +2040,7 @@ window.addEventListener('message', e => {
         elMap.clear();
         allElements = e.data.data;
         spriteNames = e.data.spriteNames ?? [];
+        effectNames = e.data.effectNames ?? [];
         renderAll(e.data.data, e.data.fileName);
         updateLayersPanel(e.data.data);
         clearSelection();

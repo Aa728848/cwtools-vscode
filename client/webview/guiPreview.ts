@@ -474,13 +474,17 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     div.style.width = `${w}px`;
     div.style.height = `${h}px`;
 
-    // Scale and rotation (visual only, doesn't affect layout position)
+    // Scale: apply directly to dimensions (NOT via CSS transform) so resize handles stay normally sized
     // PDX: scale does NOT apply to containerWindowType/windowType, only to controls within
     const transforms: string[] = [];
     const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
     const elScale = el.scale ?? 1;
     if (elScale !== 1 && !isContainer) {
-        transforms.push(`scale(${elScale})`);
+        // Apply scale to the div's actual dimensions
+        const scaledW = Math.round(w * elScale);
+        const scaledH = Math.round(h * elScale);
+        div.style.width = `${scaledW}px`;
+        div.style.height = `${scaledH}px`;
     }
     // PDX rotation: radians, negative sign convention (negate for CSS)
     // Rotation pivot: center of widget rect (matching game engine behavior)
@@ -690,7 +694,11 @@ function renderAll(elements: GuiElement[], fileName: string) {
     }
     
     root.appendChild(canvas);
-    requestAnimationFrame(fitToView);
+    // Only fit to view on first render; preserve pan/zoom on re-renders
+    if (!hasRendered) {
+        hasRendered = true;
+        requestAnimationFrame(fitToView);
+    }
 }
 
 // ─── Viewport ───────────────────────────────────────────────────────────────
@@ -1043,6 +1051,7 @@ let editMode = false;
 let allElements: GuiElement[] = [];
 let spriteNames: string[] = [];
 let effectNames: string[] = [];
+let hasRendered = false;  // track whether first render has occurred
 const elMap = new Map<number, { el: GuiElement; div: HTMLElement }>();
 let selectedElements: Array<{ el: GuiElement; div: HTMLElement }> = [];
 
@@ -1235,62 +1244,127 @@ window.addEventListener('mouseup', () => {
 });
 
 // ── Resize Engine ──
-interface ResizeState {
+interface ResizeItemState {
     el: GuiElement;
     div: HTMLElement;
-    dir: string;
-    startX: number;
-    startY: number;
     origW: number;
     origH: number;
     origPosX: number;
     origPosY: number;
+    useScale: boolean;    // true for texture-sized elements (iconType etc.)
+    origScale: number;    // original scale value when useScale is true
+}
+interface ResizeState {
+    items: ResizeItemState[];
+    dir: string;
+    startX: number;
+    startY: number;
 }
 let resizeState: ResizeState | null = null;
 
+/** Check if element should use scale (not size) for resizing.
+ *  Only container types (containerWindowType, windowType) use size.
+ *  All other child controls (buttonType, iconType, effectButtonType, etc.) use scale. */
+function shouldUseScale(el: GuiElement): boolean {
+    const containerTypes = new Set(['containerWindowType', 'windowType', 'scrollAreaType', 'dropDownBoxType', 'expandedWindow']);
+    return !containerTypes.has(el.type);
+}
+
 function startResize(el: GuiElement, div: HTMLElement, dir: string, e: MouseEvent) {
-    const { w, h } = effectiveSize(el);
-    pushUndo({ type: 'resize', el, origX: el.position.x, origY: el.position.y, origW: el.size.width, origH: el.size.height });
-    resizeState = { el, div, dir, startX: e.clientX, startY: e.clientY, origW: w, origH: h, origPosX: el.position.x, origPosY: el.position.y };
+    // Use structural undo so all elements can be restored via snapshot
+    pushUndo({ type: 'structural' });
+
+    // Build items from all selected elements (or just the one if not in selection)
+    const items: ResizeItemState[] = [];
+    const makeItem = (itemEl: GuiElement, itemDiv: HTMLElement): ResizeItemState => {
+        const { w, h } = effectiveSize(itemEl);
+        const useScale = shouldUseScale(itemEl);
+        const origScale = itemEl.scale ?? 1;
+        const isContainerEl = itemEl.type === 'containerWindowType' || itemEl.type === 'windowType';
+        // origW/origH must be the VISUAL size (including scale), since div dimensions are base*scale
+        const visualW = (useScale && !isContainerEl) ? w * origScale : w;
+        const visualH = (useScale && !isContainerEl) ? h * origScale : h;
+        return { el: itemEl, div: itemDiv, origW: visualW, origH: visualH, origPosX: itemEl.position.x, origPosY: itemEl.position.y, useScale, origScale };
+    };
+
+    if (selectedElements.length > 1 && selectedElements.some(s => s.el.line === el.line)) {
+        for (const sel of selectedElements) {
+            items.push(makeItem(sel.el, sel.div));
+        }
+    } else {
+        items.push(makeItem(el, div));
+    }
+    resizeState = { items, dir, startX: e.clientX, startY: e.clientY };
 }
 
 function handleResizeMove(e: MouseEvent) {
     if (!resizeState) return;
     const dx = (e.clientX - resizeState.startX) / scale;
     const dy = (e.clientY - resizeState.startY) / scale;
-    const s = resizeState;
-    let newW = s.origW, newH = s.origH, newX = s.origPosX, newY = s.origPosY;
-    if (s.dir.includes('e')) newW = Math.max(10, s.origW + dx);
-    if (s.dir.includes('w')) { newW = Math.max(10, s.origW - dx); newX = s.origPosX + (s.origW - newW); }
-    if (s.dir.includes('s')) newH = Math.max(10, s.origH + dy);
-    if (s.dir.includes('n')) { newH = Math.max(10, s.origH - dy); newY = s.origPosY + (s.origH - newH); }
-    s.el.size.width = Math.round(newW);
-    s.el.size.height = Math.round(newH);
-    s.el.position.x = Math.round(newX);
-    s.el.position.y = Math.round(newY);
-    s.div.style.width = `${s.el.size.width}px`;
-    s.div.style.height = `${s.el.size.height}px`;
-    s.div.style.left = `${s.el.position.x}px`;
-    s.div.style.top = `${s.el.position.y}px`;
-    showDragTooltip(e.clientX, e.clientY, s.el.size.width, s.el.size.height, true);
+    const dir = resizeState.dir;
+
+    for (const s of resizeState.items) {
+        let newW = s.origW, newH = s.origH, newX = s.origPosX, newY = s.origPosY;
+        if (dir.includes('e')) newW = Math.max(10, s.origW + dx);
+        if (dir.includes('w')) { newW = Math.max(10, s.origW - dx); newX = s.origPosX + (s.origW - newW); }
+        if (dir.includes('s')) newH = Math.max(10, s.origH + dy);
+        if (dir.includes('n')) { newH = Math.max(10, s.origH - dy); newY = s.origPosY + (s.origH - newH); }
+
+        if (s.useScale) {
+            // Scale-based resize: compute new scale from size ratio
+            const baseW = s.origW / s.origScale;
+            const baseH = s.origH / s.origScale;
+            const scaleX = newW / baseW;
+            const scaleY = newH / baseH;
+            const newScale = Math.max(0.01, Math.round(((scaleX + scaleY) / 2) * 1000) / 1000);
+            s.el.scale = newScale;
+            // Set div to visual size directly (consistent with renderElement)
+            const visualW = Math.round(baseW * newScale);
+            const visualH = Math.round(baseH * newScale);
+            s.div.style.width = `${visualW}px`;
+            s.div.style.height = `${visualH}px`;
+        } else {
+            s.el.size.width = Math.round(newW);
+            s.el.size.height = Math.round(newH);
+            s.div.style.width = `${s.el.size.width}px`;
+            s.div.style.height = `${s.el.size.height}px`;
+        }
+        s.el.position.x = Math.round(newX);
+        s.el.position.y = Math.round(newY);
+        s.div.style.left = `${s.el.position.x}px`;
+        s.div.style.top = `${s.el.position.y}px`;
+    }
+    const primary = resizeState.items[0];
+    const displayW = primary.useScale ? Math.round((primary.origW / primary.origScale) * (primary.el.scale ?? 1)) : primary.el.size.width;
+    const displayH = primary.useScale ? Math.round((primary.origH / primary.origScale) * (primary.el.scale ?? 1)) : primary.el.size.height;
+    showDragTooltip(e.clientX, e.clientY, displayW, displayH, true);
     updatePropertiesPanel();
 }
 
 function finishResize() {
     if (!resizeState) return;
-    const s = resizeState;
-    if (s.origPosX !== s.el.position.x || s.origPosY !== s.el.position.y) {
-        vscode.postMessage({
-            command: 'updateProperty', line: s.el.line, property: 'position',
-            value: { x: s.el.position.x, y: s.el.position.y },
-            propertyLine: s.el.propertyLines?.['position'] ?? s.el.line,
-        });
+    for (const s of resizeState.items) {
+        if (s.origPosX !== s.el.position.x || s.origPosY !== s.el.position.y) {
+            vscode.postMessage({
+                command: 'updateProperty', line: s.el.line, property: 'position',
+                value: { x: s.el.position.x, y: s.el.position.y },
+                propertyLine: s.el.propertyLines?.['position'] ?? s.el.line,
+            });
+        }
+        if (s.useScale) {
+            vscode.postMessage({
+                command: 'updateProperty', line: s.el.line, property: 'scale',
+                value: s.el.scale ?? 1,
+                propertyLine: s.el.propertyLines?.['scale'] ?? s.el.line,
+            });
+        } else {
+            vscode.postMessage({
+                command: 'updateProperty', line: s.el.line, property: 'size',
+                value: { width: s.el.size.width, height: s.el.size.height },
+                propertyLine: s.el.propertyLines?.['size'] ?? s.el.line,
+            });
+        }
     }
-    vscode.postMessage({
-        command: 'updateProperty', line: s.el.line, property: 'size',
-        value: { width: s.el.size.width, height: s.el.size.height },
-        propertyLine: s.el.propertyLines?.['size'] ?? s.el.line,
-    });
     resizeState = null;
     hideDragTooltip();
 }
@@ -1640,8 +1714,8 @@ function updatePropertiesPanel() {
             applyPropertyChange(el, prop, val);
         };
         input.addEventListener('change', handler);
-        // Only add real-time 'input' handler for position/size fields (need live feedback during drag)
-        if ((input as HTMLInputElement).type === 'number' && ['pos-x', 'pos-y', 'size-w', 'size-h'].includes(prop)) {
+        // Only add real-time 'input' handler for position fields (need live feedback during drag)
+        if ((input as HTMLInputElement).type === 'number' && ['pos-x', 'pos-y'].includes(prop)) {
             input.addEventListener('input', handler);
         }
     });
@@ -1781,6 +1855,20 @@ function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
             property: 'effect', value,
             propertyLine: el.propertyLines?.['effect'] ?? el.line,
         });
+    } else if (prop === 'scale') {
+        const newScale = value as number;
+        el.scale = newScale;
+        // Apply scale to dimensions directly (consistent with renderElement)
+        const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
+        if (!isContainer) {
+            const { w, h } = effectiveSize(el);
+            entry.div.style.width = `${Math.round(w * newScale)}px`;
+            entry.div.style.height = `${Math.round(h * newScale)}px`;
+        }
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line, property: 'scale', value: newScale,
+            propertyLine: el.propertyLines?.['scale'] ?? el.line,
+        });
     } else {
         (el as unknown as Record<string, unknown>)[prop] = value;
         vscode.postMessage({
@@ -1861,6 +1949,8 @@ function handleContextAction(action: string) {
             'add-container': 'containerWindowType',
             'add-icon': 'iconType',
             'add-button': 'buttonType',
+            'add-effectbutton': 'effectButtonType',
+            'add-guibutton': 'guiButtonType',
             'add-text': 'instantTextBoxType',
         };
         const type = typeMap[action];

@@ -724,12 +724,16 @@ export function serializeProperty(key: string, value: unknown): string {
 
 /** Build a full element block for inserting new elements */
 export function serializeNewElement(type: string, name: string, x: number, y: number, w: number, h: number, indent: string): string {
+    const containerTypes = new Set(['containerWindowType', 'windowType', 'scrollAreaType', 'dropDownBoxType', 'expandedWindow']);
     const lines = [
         `${indent}${type} = {`,
         `${indent}\tname = "${name}"`,
         `${indent}\t${serializePosition(x, y)}`,
-        `${indent}\t${serializeSize(w, h)}`,
-        `${indent}}`,
     ];
+    // Only container types use size; child controls use scale
+    if (containerTypes.has(type)) {
+        lines.push(`${indent}\t${serializeSize(w, h)}`);
+    }
+    lines.push(`${indent}}`);
     return lines.join('\n');
 }

@@ -20,6 +20,8 @@ export class GuiPanel {
     private _searchRoots: string[] = [];
     private _skipNextReload = false;   // skip reload after programmatic edit
     private _contentSnapshots: string[] = [];  // content snapshots for structural undo
+    private _lastSnapshotTime = 0;  // debounce: only save one snapshot per 500ms batch
+    private _messageQueue: Promise<void> = Promise.resolve();  // serial queue for property updates
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
@@ -68,7 +70,7 @@ export class GuiPanel {
                         break;
                     }
                     case 'updateProperty':
-                        await this._handleUpdateProperty(msg);
+                        this._messageQueue = this._messageQueue.then(() => this._handleUpdateProperty(msg));
                         break;
                     case 'addElement':
                         await this._handleAddElement(msg);
@@ -403,8 +405,12 @@ export class GuiPanel {
         if (!this._document) return;
         const doc = this._document;
 
-        // Save snapshot for undo
-        this._contentSnapshots.push(doc.getText());
+        // Save snapshot for undo (debounce: only save if last snapshot was >500ms ago)
+        const now = Date.now();
+        if (now - this._lastSnapshotTime > 500) {
+            this._contentSnapshots.push(doc.getText());
+            this._lastSnapshotTime = now;
+        }
 
         const propLine = msg.propertyLine ?? msg.line;
         const hasOwnLine = propLine !== msg.line;
@@ -432,10 +438,27 @@ export class GuiPanel {
                     await vscode.workspace.applyEdit(edit);
                     await doc.save();
                 } else {
-                    const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
-                    const childIndent = indent + '\t';
-                    await this._insertAfterLine(msg.line, `${childIndent}${serializePosition(val.x, val.y)}`);
-                    await this._loadAndRender(doc);
+                    // Scan forward for existing position on nearby lines
+                    const posRegexScan = /position\s*=\s*\{\s*x\s*=\s*-?\d+\s+y\s*=\s*-?\d+\s*\}/;
+                    let foundLine = -1;
+                    for (let i = msg.line; i < Math.min(msg.line + 20, doc.lineCount); i++) {
+                        if (posRegexScan.test(doc.lineAt(i).text)) { foundLine = i; break; }
+                        if (doc.lineAt(i).text.trim() === '}') break;
+                    }
+                    if (foundLine >= 0) {
+                        const existingLine = doc.lineAt(foundLine);
+                        const newText = existingLine.text.replace(posRegexScan, `position = { x = ${val.x} y = ${val.y} }`);
+                        const edit = new vscode.WorkspaceEdit();
+                        edit.replace(doc.uri, existingLine.range, newText);
+                        this._skipNextReload = true;
+                        await vscode.workspace.applyEdit(edit);
+                        await doc.save();
+                    } else {
+                        const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
+                        const childIndent = indent + '\t';
+                        await this._insertAfterLine(msg.line, `${childIndent}${serializePosition(val.x, val.y)}`);
+                        await this._loadAndRender(doc);
+                    }
                 }
             }
         } else if (msg.property === 'size') {
@@ -460,10 +483,27 @@ export class GuiPanel {
                     await vscode.workspace.applyEdit(edit);
                     await doc.save();
                 } else {
-                    const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
-                    const childIndent = indent + '\t';
-                    await this._insertAfterLine(msg.line, `${childIndent}${serializeSize(val.width, val.height)}`);
-                    await this._loadAndRender(doc);
+                    // Scan forward for existing size on nearby lines
+                    const sizeRegexScan = /size\s*=\s*\{\s*(?:x\s*=\s*-?\d+\s+y\s*=\s*-?\d+|width\s*=\s*-?\d+\s+height\s*=\s*-?\d+)\s*\}/;
+                    let foundLine = -1;
+                    for (let i = msg.line; i < Math.min(msg.line + 20, doc.lineCount); i++) {
+                        if (sizeRegexScan.test(doc.lineAt(i).text)) { foundLine = i; break; }
+                        if (doc.lineAt(i).text.trim() === '}') break;
+                    }
+                    if (foundLine >= 0) {
+                        const existingLine = doc.lineAt(foundLine);
+                        const newText = existingLine.text.replace(sizeRegexScan, `size = { width = ${val.width} height = ${val.height} }`);
+                        const edit = new vscode.WorkspaceEdit();
+                        edit.replace(doc.uri, existingLine.range, newText);
+                        this._skipNextReload = true;
+                        await vscode.workspace.applyEdit(edit);
+                        await doc.save();
+                    } else {
+                        const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
+                        const childIndent = indent + '\t';
+                        await this._insertAfterLine(msg.line, `${childIndent}${serializeSize(val.width, val.height)}`);
+                        await this._loadAndRender(doc);
+                    }
                 }
             }
         } else {
@@ -494,10 +534,37 @@ export class GuiPanel {
                     await vscode.workspace.applyEdit(edit);
                     await doc.save();
                 } else {
-                    const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
-                    const childIndent = indent + '\t';
-                    await this._insertAfterLine(msg.line, `${childIndent}${serializeProperty(msg.property, msg.value)}`);
-                    await this._loadAndRender(doc);
+                    // Scan forward from element line to find existing property on nearby lines
+                    const propRegex = new RegExp(`(${msg.property}\\s*=\\s*)(?:"[^"]*"|\\S+)`);
+                    let foundLine = -1;
+                    for (let i = msg.line; i < Math.min(msg.line + 20, doc.lineCount); i++) {
+                        const scanLine = doc.lineAt(i);
+                        if (propRegex.test(scanLine.text)) {
+                            foundLine = i;
+                            break;
+                        }
+                        // Stop at closing brace (end of element block)
+                        if (scanLine.text.trim() === '}') break;
+                    }
+                    if (foundLine >= 0) {
+                        // Property exists on a nearby line — replace it
+                        const existingLine = doc.lineAt(foundLine);
+                        const serializedVal = typeof msg.value === 'number'
+                            ? (Number.isInteger(msg.value) ? String(msg.value) : (msg.value as number).toFixed(3))
+                            : (/\s/.test(String(msg.value)) || String(msg.value).length === 0 ? `"${msg.value}"` : String(msg.value));
+                        const newText = existingLine.text.replace(propRegex, `$1${serializedVal}`);
+                        const edit = new vscode.WorkspaceEdit();
+                        edit.replace(doc.uri, existingLine.range, newText);
+                        this._skipNextReload = true;
+                        await vscode.workspace.applyEdit(edit);
+                        await doc.save();
+                    } else {
+                        // Property truly doesn't exist — insert it
+                        const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
+                        const childIndent = indent + '\t';
+                        await this._insertAfterLine(msg.line, `${childIndent}${serializeProperty(msg.property, msg.value)}`);
+                        await this._loadAndRender(doc);
+                    }
                 }
             }
         }
@@ -673,6 +740,8 @@ export class GuiPanel {
         <button data-action="add-container">+ 容器窗口</button>
         <button data-action="add-icon">+ 图标</button>
         <button data-action="add-button">+ 按钮</button>
+        <button data-action="add-effectbutton">+ 效果按钮</button>
+        <button data-action="add-guibutton">+ GUI按钮</button>
         <button data-action="add-text">+ 文本框</button>
         <hr />
         <button data-action="duplicate">复制 (Ctrl+D)</button>

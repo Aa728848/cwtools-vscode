@@ -45,6 +45,8 @@ interface GuiElement {
     children: GuiElement[];
     properties: Record<string, unknown>;
     line: number;
+    endLine: number;
+    propertyLines: Record<string, number>;
 }
 
 // ─── Colors ─────────────────────────────────────────────────────────────────
@@ -565,10 +567,39 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
         div.appendChild(sl);
     }
 
-    // Hover tooltip
-    div.addEventListener('mouseenter', (e) => { e.stopPropagation(); showTip(el, e); div.classList.add('hover'); });
-    div.addEventListener('mouseleave', (e) => { e.stopPropagation(); hideTip(); div.classList.remove('hover'); });
-    div.addEventListener('click', (e) => { e.stopPropagation(); vscode.postMessage({ command: 'goToLine', line: el.line }); });
+    // Hover tooltip (only in non-edit mode)
+    div.addEventListener('mouseenter', (e) => {
+        if (editMode) return;
+        e.stopPropagation(); showTip(el, e); div.classList.add('hover');
+    });
+    div.addEventListener('mouseleave', (e) => {
+        if (editMode) return;
+        e.stopPropagation(); hideTip(); div.classList.remove('hover');
+    });
+    div.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (editMode) {
+            if (e.ctrlKey) {
+                toggleSelection(el, div);
+            } else {
+                selectElement(el, div);
+            }
+        } else {
+            vscode.postMessage({ command: 'goToLine', line: el.line });
+        }
+    });
+
+    // Edit mode: drag to move (skip if Ctrl held — Ctrl is for multi-select)
+    div.addEventListener('mousedown', (e) => {
+        if (!editMode || e.button !== 0 || e.altKey || e.ctrlKey) return;
+        if ((e.target as HTMLElement).classList.contains('resize-handle')) return;
+        e.stopPropagation();
+        e.preventDefault();
+        startDrag(el, div, e);
+    });
+
+    // Store DOM ↔ data mapping
+    elMap.set(el.line, { el, div });
 
     // Render children (pass this element's size as parent dimensions)
     for (const child of el.children) {
@@ -692,6 +723,10 @@ function setupControls() {
             vp.style.cursor = 'grabbing';
             e.preventDefault();
         }
+        // Click on empty area in edit mode → deselect
+        if (editMode && e.button === 0 && !e.altKey && (e.target === vp || (e.target as HTMLElement).id === 'canvas-container' || (e.target as HTMLElement).id === 'gui-root' || (e.target as HTMLElement).classList.contains('card-body'))) {
+            clearSelection();
+        }
     });
     window.addEventListener('mousemove', (e) => {
         if (!isDragging) return;
@@ -726,8 +761,10 @@ function setupControls() {
         document.body.classList.toggle('preview-mode');
         document.getElementById('btn-preview')!.classList.toggle('active');
     };
+    document.getElementById('btn-edit')!.onclick = toggleEditMode;
     document.getElementById('btn-layers')!.onclick = () => {
-        document.getElementById('layers-panel')!.classList.toggle('hidden');
+        const sp = document.getElementById('side-panel')!;
+        sp.classList.toggle('hidden');
         document.getElementById('btn-layers')!.classList.toggle('active');
     };
     document.getElementById('layers-collapse-all')!.onclick = () => {
@@ -783,15 +820,28 @@ function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 
         const toggle = document.createElement('button');
         toggle.className = 'layer-toggle';
         toggle.textContent = '👁';
-        toggle.title = 'Toggle visibility';
+        toggle.title = '切换可见性';
         toggle.onclick = (e) => {
             e.stopPropagation();
-            const elDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement;
-            if (elDiv) {
-                const isHidden = elDiv.style.display === 'none';
-                elDiv.style.display = isHidden ? '' : 'none';
-                toggle.textContent = isHidden ? '👁' : '🚫';
-                item.classList.toggle('hidden-el', !isHidden);
+            // Determine which elements to toggle: all selected if this is part of selection, else just this one
+            const isInSelection = editMode && selectedElements.some(s => s.el.line === el.line) && selectedElements.length > 1;
+            const targetLines = isInSelection ? selectedElements.map(s => s.el.line) : [el.line];
+
+            // Decide new state based on the clicked element
+            const clickedDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement;
+            const willShow = clickedDiv?.style.display === 'none';
+
+            for (const line of targetLines) {
+                const elDiv = document.querySelector(`.el[data-line="${line}"]`) as HTMLElement;
+                const layerItem = document.querySelector(`.layer-item[data-line="${line}"]`) as HTMLElement;
+                if (elDiv) {
+                    elDiv.style.display = willShow ? '' : 'none';
+                }
+                if (layerItem) {
+                    layerItem.classList.toggle('hidden-el', !willShow);
+                    const btn = layerItem.querySelector('.layer-toggle');
+                    if (btn) btn.textContent = willShow ? '👁' : '🚫';
+                }
             }
         };
         item.appendChild(toggle);
@@ -815,35 +865,45 @@ function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 
         typeSpan.textContent = c.tag;
         item.appendChild(typeSpan);
 
-        // Click to locate
-        item.onclick = () => {
-            // Highlight in layers
-            document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
-            item.classList.add('active');
-            activeLayerLine = el.line;
+        // Click to locate / select
+        item.onclick = (e) => {
+            if (editMode) {
+                const entry = elMap.get(el.line);
+                if (!entry) return;
 
-            // Highlight element in preview
-            document.querySelectorAll('.el.layer-highlight').forEach(i => i.classList.remove('layer-highlight'));
-            const elDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement;
-            if (elDiv) {
-                elDiv.classList.add('layer-highlight');
-                // Scroll element into view by panning the canvas
-                const vp = document.getElementById('viewport')!;
-                const vpRect = vp.getBoundingClientRect();
-                const elRect = elDiv.getBoundingClientRect();
-                const cx = elRect.left + elRect.width / 2;
-                const cy = elRect.top + elRect.height / 2;
-                const vpCx = vpRect.left + vpRect.width / 2;
-                const vpCy = vpRect.top + vpRect.height / 2;
-                // Only pan if element is mostly off-screen
-                if (cx < vpRect.left || cx > vpRect.right || cy < vpRect.top || cy > vpRect.bottom) {
-                    panX += vpCx - cx;
-                    panY += vpCy - cy;
-                    updateTransform();
+                if (e.ctrlKey) {
+                    // Ctrl+Click: toggle this item in the multi-selection
+                    toggleSelection(entry.el, entry.div);
+                } else {
+                    // Plain click: single select
+                    selectElement(entry.el, entry.div);
                 }
+                activeLayerLine = el.line;
+            } else {
+                // Preview mode: highlight + jump to line
+                document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                activeLayerLine = el.line;
+
+                document.querySelectorAll('.el.layer-highlight').forEach(i => i.classList.remove('layer-highlight'));
+                const elDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement;
+                if (elDiv) {
+                    elDiv.classList.add('layer-highlight');
+                    const vp = document.getElementById('viewport')!;
+                    const vpRect = vp.getBoundingClientRect();
+                    const elRect = elDiv.getBoundingClientRect();
+                    const cx = elRect.left + elRect.width / 2;
+                    const cy = elRect.top + elRect.height / 2;
+                    const vpCx = vpRect.left + vpRect.width / 2;
+                    const vpCy = vpRect.top + vpRect.height / 2;
+                    if (cx < vpRect.left || cx > vpRect.right || cy < vpRect.top || cy > vpRect.bottom) {
+                        panX += vpCx - cx;
+                        panY += vpCy - cy;
+                        updateTransform();
+                    }
+                }
+                vscode.postMessage({ command: 'goToLine', line: el.line });
             }
-            // Also jump to line in editor
-            vscode.postMessage({ command: 'goToLine', line: el.line });
         };
 
         container.appendChild(item);
@@ -912,7 +972,7 @@ function setupSearch() {
             }
         });
 
-        searchCount!.textContent = searchResults.length > 0 ? `${searchResults.length} found` : 'No match';
+        searchCount!.textContent = searchResults.length > 0 ? `找到 ${searchResults.length} 个` : '无匹配';
         if (searchResults.length > 0) {
             searchIndex = 0;
             scrollToResult();
@@ -977,16 +1037,979 @@ function setupSearch() {
     });
 }
 
+// ─── Visual Editor ──────────────────────────────────────────────────────────
+
+let editMode = false;
+let allElements: GuiElement[] = [];
+let spriteNames: string[] = [];
+const elMap = new Map<number, { el: GuiElement; div: HTMLElement }>();
+let selectedElements: Array<{ el: GuiElement; div: HTMLElement }> = [];
+
+// ── Edit Mode Toggle ──
+function toggleEditMode() {
+    editMode = !editMode;
+    document.body.classList.toggle('edit-mode', editMode);
+    document.getElementById('btn-edit')!.classList.toggle('active', editMode);
+    if (!editMode) {
+        clearSelection();
+        hideContextMenu();
+        clearSnapGuides();
+    }
+}
+
+// ── Selection ──
+function selectElement(el: GuiElement, div: HTMLElement) {
+    clearSelection();
+    selectedElements = [{ el, div }];
+    div.classList.add('selected');
+    addResizeHandles(div, el);
+    updatePropertiesPanel();
+    updateAlignButtons();
+    // Highlight in layers
+    document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
+    const layerItem = document.querySelector(`.layer-item[data-line="${el.line}"]`);
+    if (layerItem) layerItem.classList.add('active');
+}
+
+function toggleSelection(el: GuiElement, div: HTMLElement) {
+    const idx = selectedElements.findIndex(s => s.el.line === el.line);
+    if (idx >= 0) {
+        selectedElements[idx].div.classList.remove('selected');
+        removeResizeHandles(selectedElements[idx].div);
+        selectedElements.splice(idx, 1);
+        // Unhighlight in layers
+        const layerItem = document.querySelector(`.layer-item[data-line="${el.line}"]`);
+        if (layerItem) layerItem.classList.remove('active');
+    } else {
+        selectedElements.push({ el, div });
+        div.classList.add('selected');
+        if (selectedElements.length === 1) addResizeHandles(div, el);
+        // Highlight in layers
+        const layerItem = document.querySelector(`.layer-item[data-line="${el.line}"]`);
+        if (layerItem) layerItem.classList.add('active');
+    }
+    updatePropertiesPanel();
+    updateAlignButtons();
+}
+
+function clearSelection() {
+    for (const s of selectedElements) {
+        s.div.classList.remove('selected');
+        removeResizeHandles(s.div);
+    }
+    selectedElements = [];
+    // Clear all layer highlights
+    document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
+    updatePropertiesPanel();
+    updateAlignButtons();
+}
+
+// ── Resize Handles ──
+function addResizeHandles(div: HTMLElement, el: GuiElement) {
+    removeResizeHandles(div);
+    const dirs = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+    for (const d of dirs) {
+        const h = document.createElement('div');
+        h.className = `resize-handle ${d}`;
+        h.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            startResize(el, div, d, e);
+        });
+        div.appendChild(h);
+    }
+}
+
+function removeResizeHandles(div: HTMLElement) {
+    div.querySelectorAll('.resize-handle').forEach(h => h.remove());
+}
+
+// ── Drag Engine ──
+interface DragState {
+    el: GuiElement;
+    div: HTMLElement;
+    startX: number;
+    startY: number;
+    origPosX: number;
+    origPosY: number;
+    // For multi-select: offsets for all other selected items
+    others: Array<{ el: GuiElement; div: HTMLElement; origPosX: number; origPosY: number }>;
+}
+let dragState: DragState | null = null;
+
+function startDrag(el: GuiElement, div: HTMLElement, e: MouseEvent) {
+    // If clicking an unselected element, select it first
+    if (!selectedElements.find(s => s.el.line === el.line)) {
+        selectElement(el, div);
+    }
+    const others = selectedElements
+        .filter(s => s.el.line !== el.line)
+        .map(s => ({ el: s.el, div: s.div, origPosX: s.el.position.x, origPosY: s.el.position.y }));
+    dragState = {
+        el, div,
+        startX: e.clientX,
+        startY: e.clientY,
+        origPosX: el.position.x,
+        origPosY: el.position.y,
+        others,
+    };
+    // Push undo for drag start — track whether position property existed in source
+    const hadPos = (prop: string, elem: GuiElement) => {
+        const pl = elem.propertyLines?.[prop];
+        return pl !== undefined && pl !== elem.line;
+    };
+    pushUndo({ type: 'move', items: [
+        { el, origX: el.position.x, origY: el.position.y, hadPositionLine: hadPos('position', el) },
+        ...others.map(o => ({ el: o.el, origX: o.origPosX, origY: o.origPosY, hadPositionLine: hadPos('position', o.el) })),
+    ] });
+}
+
+window.addEventListener('mousemove', (e) => {
+    if (dragState) {
+        const dx = (e.clientX - dragState.startX) / scale;
+        const dy = (e.clientY - dragState.startY) / scale;
+        let newX = Math.round(dragState.origPosX + dx);
+        let newY = Math.round(dragState.origPosY + dy);
+
+        // Snap
+        const snapResult = computeSnap(dragState.el, newX, newY);
+        newX = snapResult.x;
+        newY = snapResult.y;
+        showSnapGuides(snapResult.guides);
+
+        dragState.el.position.x = newX;
+        dragState.el.position.y = newY;
+        dragState.div.style.left = `${newX}px`;
+        dragState.div.style.top = `${newY}px`;
+
+        // Move others by same delta
+        const finalDx = newX - dragState.origPosX;
+        const finalDy = newY - dragState.origPosY;
+        for (const o of dragState.others) {
+            o.el.position.x = o.origPosX + finalDx;
+            o.el.position.y = o.origPosY + finalDy;
+            o.div.style.left = `${o.el.position.x}px`;
+            o.div.style.top = `${o.el.position.y}px`;
+        }
+
+        // Show coordinate tooltip
+        showDragTooltip(e.clientX, e.clientY, newX, newY);
+        updatePropertiesPanel();
+        e.preventDefault();
+    }
+
+    if (resizeState) {
+        handleResizeMove(e);
+        e.preventDefault();
+    }
+});
+
+window.addEventListener('mouseup', () => {
+    if (dragState) {
+        // Only send position updates if the element actually moved
+        const moved = dragState.el.position.x !== dragState.origPosX ||
+                      dragState.el.position.y !== dragState.origPosY;
+        if (moved) {
+            const items = [dragState, ...dragState.others.map(o => ({ el: o.el, div: o.div }))];
+            for (const item of items) {
+                vscode.postMessage({
+                    command: 'updateProperty',
+                    line: item.el.line,
+                    property: 'position',
+                    value: { x: item.el.position.x, y: item.el.position.y },
+                    propertyLine: item.el.propertyLines?.['position'] ?? item.el.line,
+                });
+            }
+        } else {
+            // No movement — remove the undo entry that was pushed in startDrag
+            undoStack.pop();
+        }
+        dragState = null;
+        hideDragTooltip();
+        clearSnapGuides();
+    }
+    if (resizeState) {
+        finishResize();
+    }
+});
+
+// ── Resize Engine ──
+interface ResizeState {
+    el: GuiElement;
+    div: HTMLElement;
+    dir: string;
+    startX: number;
+    startY: number;
+    origW: number;
+    origH: number;
+    origPosX: number;
+    origPosY: number;
+}
+let resizeState: ResizeState | null = null;
+
+function startResize(el: GuiElement, div: HTMLElement, dir: string, e: MouseEvent) {
+    const { w, h } = effectiveSize(el);
+    pushUndo({ type: 'resize', el, origX: el.position.x, origY: el.position.y, origW: el.size.width, origH: el.size.height });
+    resizeState = { el, div, dir, startX: e.clientX, startY: e.clientY, origW: w, origH: h, origPosX: el.position.x, origPosY: el.position.y };
+}
+
+function handleResizeMove(e: MouseEvent) {
+    if (!resizeState) return;
+    const dx = (e.clientX - resizeState.startX) / scale;
+    const dy = (e.clientY - resizeState.startY) / scale;
+    const s = resizeState;
+    let newW = s.origW, newH = s.origH, newX = s.origPosX, newY = s.origPosY;
+    if (s.dir.includes('e')) newW = Math.max(10, s.origW + dx);
+    if (s.dir.includes('w')) { newW = Math.max(10, s.origW - dx); newX = s.origPosX + (s.origW - newW); }
+    if (s.dir.includes('s')) newH = Math.max(10, s.origH + dy);
+    if (s.dir.includes('n')) { newH = Math.max(10, s.origH - dy); newY = s.origPosY + (s.origH - newH); }
+    s.el.size.width = Math.round(newW);
+    s.el.size.height = Math.round(newH);
+    s.el.position.x = Math.round(newX);
+    s.el.position.y = Math.round(newY);
+    s.div.style.width = `${s.el.size.width}px`;
+    s.div.style.height = `${s.el.size.height}px`;
+    s.div.style.left = `${s.el.position.x}px`;
+    s.div.style.top = `${s.el.position.y}px`;
+    showDragTooltip(e.clientX, e.clientY, s.el.size.width, s.el.size.height, true);
+    updatePropertiesPanel();
+}
+
+function finishResize() {
+    if (!resizeState) return;
+    const s = resizeState;
+    if (s.origPosX !== s.el.position.x || s.origPosY !== s.el.position.y) {
+        vscode.postMessage({
+            command: 'updateProperty', line: s.el.line, property: 'position',
+            value: { x: s.el.position.x, y: s.el.position.y },
+            propertyLine: s.el.propertyLines?.['position'] ?? s.el.line,
+        });
+    }
+    vscode.postMessage({
+        command: 'updateProperty', line: s.el.line, property: 'size',
+        value: { width: s.el.size.width, height: s.el.size.height },
+        propertyLine: s.el.propertyLines?.['size'] ?? s.el.line,
+    });
+    resizeState = null;
+    hideDragTooltip();
+}
+
+// ── Drag Coordinate Tooltip ──
+function showDragTooltip(mx: number, my: number, valX: number, valY: number, isSize = false) {
+    let tip = document.getElementById('drag-tooltip');
+    if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'drag-tooltip';
+        document.body.appendChild(tip);
+    }
+    tip.textContent = isSize ? `${valX} × ${valY}` : `(${valX}, ${valY})`;
+    tip.style.left = `${mx + 14}px`;
+    tip.style.top = `${my + 14}px`;
+    tip.style.display = 'block';
+}
+
+function hideDragTooltip() {
+    const tip = document.getElementById('drag-tooltip');
+    if (tip) tip.style.display = 'none';
+}
+
+// ── Undo/Redo ──
+type UndoEntry =
+    | { type: 'move'; items: Array<{ el: GuiElement; origX: number; origY: number; hadPositionLine: boolean }> }
+    | { type: 'resize'; el: GuiElement; origX: number; origY: number; origW: number; origH: number }
+    | { type: 'property'; el: GuiElement; property: string; oldValue: unknown; newValue: unknown }
+    | { type: 'structural' };  // add/delete/duplicate — use VS Code’s native undo
+
+const undoStack: UndoEntry[] = [];
+const redoStack: UndoEntry[] = [];
+const MAX_UNDO = 100;
+
+function pushUndo(entry: UndoEntry) {
+    undoStack.push(entry);
+    if (undoStack.length > MAX_UNDO) undoStack.shift();
+    redoStack.length = 0;
+}
+
+function undo() {
+    const entry = undoStack.pop();
+    if (!entry) return;
+    if (entry.type === 'move') {
+        const nowPositions = entry.items.map(i => ({
+            el: i.el, origX: i.el.position.x, origY: i.el.position.y,
+            hadPositionLine: true, // now it exists in source
+        }));
+        for (const item of entry.items) {
+            // Look up the CURRENT element from elMap (undo entry's el may be stale after re-render)
+            const current = elMap.get(item.el.line);
+            const currentEl = current?.el ?? item.el;
+            const currentPropLines = currentEl.propertyLines;
+
+            currentEl.position.x = item.origX;
+            currentEl.position.y = item.origY;
+            if (current) { current.div.style.left = `${item.origX}px`; current.div.style.top = `${item.origY}px`; }
+            if (!item.hadPositionLine) {
+                // Property didn't exist before — remove the inserted line
+                const posLine = currentPropLines?.['position'];
+                if (posLine && posLine !== currentEl.line) {
+                    vscode.postMessage({
+                        command: 'removePropertyLine',
+                        line: currentEl.line,
+                        property: 'position',
+                        propertyLine: posLine,
+                    });
+                }
+            } else {
+                vscode.postMessage({
+                    command: 'updateProperty', line: currentEl.line, property: 'position',
+                    value: { x: item.origX, y: item.origY },
+                    propertyLine: currentPropLines?.['position'] ?? currentEl.line,
+                });
+            }
+        }
+        redoStack.push({ type: 'move', items: nowPositions });
+    } else if (entry.type === 'resize') {
+        const nowW = entry.el.size.width, nowH = entry.el.size.height;
+        const nowX = entry.el.position.x, nowY = entry.el.position.y;
+        entry.el.size.width = entry.origW;
+        entry.el.size.height = entry.origH;
+        entry.el.position.x = entry.origX;
+        entry.el.position.y = entry.origY;
+        const m = elMap.get(entry.el.line);
+        if (m) {
+            m.div.style.width = `${entry.origW}px`;
+            m.div.style.height = `${entry.origH}px`;
+            m.div.style.left = `${entry.origX}px`;
+            m.div.style.top = `${entry.origY}px`;
+        }
+        vscode.postMessage({ command: 'updateProperty', line: entry.el.line, property: 'size', value: { width: entry.origW, height: entry.origH }, propertyLine: entry.el.propertyLines?.['size'] ?? entry.el.line });
+        vscode.postMessage({ command: 'updateProperty', line: entry.el.line, property: 'position', value: { x: entry.origX, y: entry.origY }, propertyLine: entry.el.propertyLines?.['position'] ?? entry.el.line });
+        redoStack.push({ type: 'resize', el: entry.el, origX: nowX, origY: nowY, origW: nowW, origH: nowH });
+    } else if (entry.type === 'structural') {
+        // Delegate to VS Code's native document undo
+        vscode.postMessage({ command: 'vscodeUndo' });
+        // Don't push to redo — VS Code manages its own redo
+    }
+    updatePropertiesPanel();
+}
+
+function redo() {
+    const entry = redoStack.pop();
+    if (!entry) return;
+    pushUndo(entry); // this also clears redo, but that's fine since we popped
+    // Re-apply (same logic as original action)
+    if (entry.type === 'move') {
+        for (const item of entry.items) {
+            item.el.position.x = item.origX;
+            item.el.position.y = item.origY;
+            const m = elMap.get(item.el.line);
+            if (m) { m.div.style.left = `${item.origX}px`; m.div.style.top = `${item.origY}px`; }
+            vscode.postMessage({
+                command: 'updateProperty', line: item.el.line, property: 'position',
+                value: { x: item.origX, y: item.origY },
+                propertyLine: item.el.propertyLines?.['position'] ?? item.el.line,
+            });
+        }
+    } else if (entry.type === 'resize') {
+        entry.el.size.width = entry.origW;
+        entry.el.size.height = entry.origH;
+        entry.el.position.x = entry.origX;
+        entry.el.position.y = entry.origY;
+        const m = elMap.get(entry.el.line);
+        if (m) {
+            m.div.style.width = `${entry.origW}px`;
+            m.div.style.height = `${entry.origH}px`;
+            m.div.style.left = `${entry.origX}px`;
+            m.div.style.top = `${entry.origY}px`;
+        }
+        vscode.postMessage({ command: 'updateProperty', line: entry.el.line, property: 'size', value: { width: entry.origW, height: entry.origH }, propertyLine: entry.el.propertyLines?.['size'] ?? entry.el.line });
+        vscode.postMessage({ command: 'updateProperty', line: entry.el.line, property: 'position', value: { x: entry.origX, y: entry.origY }, propertyLine: entry.el.propertyLines?.['position'] ?? entry.el.line });
+    }
+}
+
+// ── Snap Engine ──
+const SNAP_THRESHOLD = 5;
+
+interface SnapGuide { type: 'h' | 'v'; pos: number; }
+interface SnapResult { x: number; y: number; guides: SnapGuide[]; }
+
+function computeSnap(el: GuiElement, newX: number, newY: number): SnapResult {
+    const { w, h } = effectiveSize(el);
+    const guides: SnapGuide[] = [];
+    let snappedX = newX, snappedY = newY;
+    const parentDiv = elMap.get(el.line)?.div.parentElement;
+    if (!parentDiv) return { x: newX, y: newY, guides: [] };
+
+    // Collect sibling edges
+    const siblings: Array<{ left: number; top: number; right: number; bottom: number; cx: number; cy: number }> = [];
+    for (const [line, entry] of elMap) {
+        if (line === el.line) continue;
+        if (entry.div.parentElement !== parentDiv) continue;
+        const sw = entry.div.offsetWidth || entry.el.size.width;
+        const sh = entry.div.offsetHeight || entry.el.size.height;
+        const sl = entry.el.position.x;
+        const st = entry.el.position.y;
+        siblings.push({ left: sl, top: st, right: sl + sw, bottom: st + sh, cx: sl + sw / 2, cy: st + sh / 2 });
+    }
+
+    const myEdges = { left: newX, top: newY, right: newX + w, bottom: newY + h, cx: newX + w / 2, cy: newY + h / 2 };
+
+    // Snap X
+    let bestDx = SNAP_THRESHOLD + 1;
+    for (const s of siblings) {
+        for (const [myVal, sVal] of [[myEdges.left, s.left], [myEdges.left, s.right], [myEdges.right, s.left], [myEdges.right, s.right], [myEdges.cx, s.cx]]) {
+            const d = Math.abs(myVal - sVal);
+            if (d < bestDx) {
+                bestDx = d;
+                snappedX = newX + (sVal - myVal);
+                guides.push({ type: 'v', pos: sVal });
+            }
+        }
+    }
+    // Snap Y
+    let bestDy = SNAP_THRESHOLD + 1;
+    for (const s of siblings) {
+        for (const [myVal, sVal] of [[myEdges.top, s.top], [myEdges.top, s.bottom], [myEdges.bottom, s.top], [myEdges.bottom, s.bottom], [myEdges.cy, s.cy]]) {
+            const d = Math.abs(myVal - sVal);
+            if (d < bestDy) {
+                bestDy = d;
+                snappedY = newY + (sVal - myVal);
+                guides.push({ type: 'h', pos: sVal });
+            }
+        }
+    }
+
+    // Only keep active guides
+    const finalGuides: SnapGuide[] = [];
+    if (bestDx <= SNAP_THRESHOLD) finalGuides.push(...guides.filter(g => g.type === 'v'));
+    else snappedX = newX;
+    if (bestDy <= SNAP_THRESHOLD) finalGuides.push(...guides.filter(g => g.type === 'h'));
+    else snappedY = newY;
+
+    return { x: snappedX, y: snappedY, guides: finalGuides };
+}
+
+function showSnapGuides(guides: SnapGuide[]) {
+    const container = document.getElementById('snap-guides');
+    if (!container) return;
+    container.innerHTML = '';
+    for (const g of guides) {
+        const line = document.createElement('div');
+        line.className = `snap-line ${g.type === 'h' ? 'horizontal' : 'vertical'}`;
+        if (g.type === 'h') line.style.top = `${g.pos}px`;
+        else line.style.left = `${g.pos}px`;
+        container.appendChild(line);
+    }
+}
+
+function clearSnapGuides() {
+    const container = document.getElementById('snap-guides');
+    if (container) container.innerHTML = '';
+}
+
+// ── Alignment Tools ──
+function updateAlignButtons() {
+    const btns = document.querySelectorAll('.align-btn') as NodeListOf<HTMLButtonElement>;
+    const enabled = selectedElements.length >= 2;
+    btns.forEach(b => b.disabled = !enabled);
+}
+
+function alignSelected(mode: string) {
+    if (selectedElements.length < 2) return;
+    const items = selectedElements.map(s => {
+        const { w, h } = effectiveSize(s.el);
+        return { ...s, w, h };
+    });
+    pushUndo({ type: 'move', items: items.map(i => ({ el: i.el, origX: i.el.position.x, origY: i.el.position.y, hadPositionLine: true })) });
+
+    switch (mode) {
+        case 'left': {
+            const min = Math.min(...items.map(i => i.el.position.x));
+            items.forEach(i => { i.el.position.x = min; i.div.style.left = `${min}px`; });
+            break;
+        }
+        case 'right': {
+            const max = Math.max(...items.map(i => i.el.position.x + i.w));
+            items.forEach(i => { i.el.position.x = max - i.w; i.div.style.left = `${i.el.position.x}px`; });
+            break;
+        }
+        case 'top': {
+            const min = Math.min(...items.map(i => i.el.position.y));
+            items.forEach(i => { i.el.position.y = min; i.div.style.top = `${min}px`; });
+            break;
+        }
+        case 'bottom': {
+            const max = Math.max(...items.map(i => i.el.position.y + i.h));
+            items.forEach(i => { i.el.position.y = max - i.h; i.div.style.top = `${i.el.position.y}px`; });
+            break;
+        }
+        case 'hcenter': {
+            const cx = items.reduce((s, i) => s + i.el.position.x + i.w / 2, 0) / items.length;
+            items.forEach(i => { i.el.position.x = Math.round(cx - i.w / 2); i.div.style.left = `${i.el.position.x}px`; });
+            break;
+        }
+        case 'vcenter': {
+            const cy = items.reduce((s, i) => s + i.el.position.y + i.h / 2, 0) / items.length;
+            items.forEach(i => { i.el.position.y = Math.round(cy - i.h / 2); i.div.style.top = `${i.el.position.y}px`; });
+            break;
+        }
+    }
+    // Send updates
+    for (const item of items) {
+        vscode.postMessage({
+            command: 'updateProperty', line: item.el.line, property: 'position',
+            value: { x: item.el.position.x, y: item.el.position.y },
+            propertyLine: item.el.propertyLines?.['position'] ?? item.el.line,
+        });
+    }
+    updatePropertiesPanel();
+}
+
+// ── Properties Panel ──
+function updatePropertiesPanel() {
+    const content = document.getElementById('props-content');
+    if (!content) return;
+    if (selectedElements.length === 0) {
+        content.innerHTML = '<div style="padding:20px;text-align:center;color:#5868a0">选择一个元素以编辑属性</div>';
+        return;
+    }
+    if (selectedElements.length > 1) {
+        content.innerHTML = `<div style="padding:20px;text-align:center;color:#5868a0">已选择 ${selectedElements.length} 个元素</div>`;
+        return;
+    }
+    const { el } = selectedElements[0];
+    const c = COLORS[el.type] ?? DEFAULT_COLOR;
+    let html = '';
+
+    // Identity
+    html += `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">${c.tag}</div>`;
+    html += propRow('name', `<input class="prop-input" data-prop="name" value="${escHtml(el.name)}" />`);
+    html += `</div>`;
+
+    // Transform
+    html += `<div class="prop-group"><div class="prop-group-title">变换</div>`;
+    html += propRow('position', `<div class="prop-half"><input class="prop-input" type="number" data-prop="pos-x" value="${el.position.x}" step="1" /><input class="prop-input" type="number" data-prop="pos-y" value="${el.position.y}" step="1" /></div>`);
+    html += propRow('size', `<div class="prop-half"><input class="prop-input" type="number" data-prop="size-w" value="${el.size.width}" step="1" /><input class="prop-input" type="number" data-prop="size-h" value="${el.size.height}" step="1" /></div>`);
+
+    const orientations = ['', 'UPPER_LEFT', 'UPPER_RIGHT', 'LOWER_LEFT', 'LOWER_RIGHT', 'CENTER', 'CENTER_UP', 'CENTER_DOWN', 'CENTER_LEFT', 'CENTER_RIGHT'];
+    html += propRow('orientation', `<select class="prop-select" data-prop="orientation">${orientations.map(o => `<option value="${o}" ${o === (el.orientation ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
+    html += propRow('origo', `<select class="prop-select" data-prop="origo">${orientations.map(o => `<option value="${o}" ${o === (el.origo ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
+    html += `</div>`;
+
+    // Visual
+    html += `<div class="prop-group"><div class="prop-group-title">视觉</div>`;
+    html += propRow('缩放', `<input class="prop-input" type="number" data-prop="scale" value="${el.scale ?? 1}" step="0.1" min="0.1" max="10" />`);
+    html += propRow('透明度', `<input class="prop-input" type="number" data-prop="alpha" value="${el.alpha ?? 1}" step="0.1" min="0" max="1" />`);
+    html += propRow('旋转', `<input class="prop-input" type="number" data-prop="rotation" value="${el.rotation ?? 0}" step="0.1" />`);
+    html += propRow('居中', `<input class="prop-checkbox" type="checkbox" data-prop="centerPosition" ${el.centerPosition ? 'checked' : ''} />`);
+    html += propRow('裁剪', `<input class="prop-checkbox" type="checkbox" data-prop="clipping" ${el.clipping ? 'checked' : ''} />`);
+    html += `</div>`;
+
+    // Sprite
+    html += `<div class="prop-group"><div class="prop-group-title">贴图</div>`;
+    const spriteAttr = el.spriteAttr ?? 'spriteType';
+    const currentSprite = el.spriteKey ?? '';
+    html += `<div class="prop-row"><span class="prop-label">贴图</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(currentSprite)}" placeholder="输入或选择贴图..." autocomplete="off" /><div id="sprite-dropdown" class="sprite-dropdown hidden"></div></div></div>`;
+    if (el.frame !== undefined) html += propRow('帧', `<input class="prop-input" type="number" data-prop="frame" value="${el.frame}" step="1" min="0" />`);
+    html += `</div>`;
+
+    // Info
+    html += `<div class="prop-group"><div class="prop-group-title">源码</div>`;
+    html += propRow('行号', `<span style="font-size:11px;color:#7888a8">${el.line} — ${el.endLine}</span>`);
+    html += `</div>`;
+
+    content.innerHTML = html;
+
+    // Attach input handlers
+    content.querySelectorAll('[data-prop]').forEach(input => {
+        const prop = (input as HTMLElement).dataset.prop!;
+        const handler = () => {
+            const val = (input as HTMLInputElement).type === 'checkbox'
+                ? (input as HTMLInputElement).checked
+                : (input as HTMLInputElement).type === 'number'
+                    ? parseFloat((input as HTMLInputElement).value)
+                    : (input as HTMLInputElement).value;
+            applyPropertyChange(el, prop, val);
+        };
+        input.addEventListener('change', handler);
+        // Only add real-time 'input' handler for position/size fields (need live feedback during drag)
+        if ((input as HTMLInputElement).type === 'number' && ['pos-x', 'pos-y', 'size-w', 'size-h'].includes(prop)) {
+            input.addEventListener('input', handler);
+        }
+    });
+
+    // Setup custom sprite autocomplete dropdown
+    const spriteInput = content.querySelector('#sprite-search') as HTMLInputElement;
+    const spriteDropdown = content.querySelector('#sprite-dropdown') as HTMLElement;
+    if (spriteInput && spriteDropdown) {
+        let ddIndex = -1;
+        const showDropdown = (query: string) => {
+            const q = query.toLowerCase();
+            const matches = q ? spriteNames.filter(s => s.toLowerCase().includes(q)).slice(0, 50) : [];
+            if (matches.length === 0) { spriteDropdown.classList.add('hidden'); return; }
+            ddIndex = -1;
+            spriteDropdown.innerHTML = matches.map(s =>
+                `<div class="sprite-option">${escHtml(s)}</div>`
+            ).join('');
+            spriteDropdown.classList.remove('hidden');
+            spriteDropdown.querySelectorAll('.sprite-option').forEach((opt, i) => {
+                opt.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    spriteInput.value = matches[i];
+                    spriteDropdown.classList.add('hidden');
+                    spriteInput.dispatchEvent(new Event('change'));
+                });
+            });
+        };
+        spriteInput.addEventListener('input', () => showDropdown(spriteInput.value));
+        spriteInput.addEventListener('focus', () => { if (spriteInput.value) showDropdown(spriteInput.value); });
+        spriteInput.addEventListener('blur', () => spriteDropdown.classList.add('hidden'));
+        spriteInput.addEventListener('keydown', (e) => {
+            const items = spriteDropdown.querySelectorAll('.sprite-option');
+            if (items.length === 0 || spriteDropdown.classList.contains('hidden')) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); ddIndex = Math.min(ddIndex + 1, items.length - 1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); ddIndex = Math.max(ddIndex - 1, 0); }
+            else if (e.key === 'Enter' && ddIndex >= 0) {
+                e.preventDefault();
+                spriteInput.value = (items[ddIndex] as HTMLElement).textContent!;
+                spriteDropdown.classList.add('hidden');
+                spriteInput.dispatchEvent(new Event('change'));
+                return;
+            } else if (e.key === 'Escape') { spriteDropdown.classList.add('hidden'); return; }
+            else return;
+            items.forEach((it, i) => it.classList.toggle('active', i === ddIndex));
+            if (ddIndex >= 0) items[ddIndex].scrollIntoView({ block: 'nearest' });
+        });
+    }
+}
+
+function propRow(label: string, control: string): string {
+    return `<div class="prop-row"><span class="prop-label">${label}</span>${control}</div>`;
+}
+
+function escHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
+    const entry = elMap.get(el.line);
+    if (!entry) return;
+
+    if (prop === 'pos-x' || prop === 'pos-y') {
+        if (prop === 'pos-x') el.position.x = value as number;
+        else el.position.y = value as number;
+        entry.div.style.left = `${el.position.x}px`;
+        entry.div.style.top = `${el.position.y}px`;
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line, property: 'position',
+            value: { x: el.position.x, y: el.position.y },
+            propertyLine: el.propertyLines?.['position'] ?? el.line,
+        });
+    } else if (prop === 'size-w' || prop === 'size-h') {
+        if (prop === 'size-w') el.size.width = value as number;
+        else el.size.height = value as number;
+        entry.div.style.width = `${el.size.width}px`;
+        entry.div.style.height = `${el.size.height}px`;
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line, property: 'size',
+            value: { width: el.size.width, height: el.size.height },
+            propertyLine: el.propertyLines?.['size'] ?? el.line,
+        });
+    } else if (prop === 'name') {
+        el.name = value as string;
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line, property: 'name', value,
+            propertyLine: el.propertyLines?.['name'] ?? el.line,
+        });
+    } else if (prop === 'orientation' || prop === 'origo') {
+        (el as unknown as Record<string, unknown>)[prop] = (value as string) || undefined;
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line, property: prop, value: value || 'UPPER_LEFT',
+            propertyLine: el.propertyLines?.[prop] ?? el.line,
+        });
+    } else if (prop === 'centerPosition' || prop === 'clipping') {
+        (el as unknown as Record<string, unknown>)[prop] = value;
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line, property: prop, value: value ? 'yes' : 'no',
+            propertyLine: el.propertyLines?.[prop] ?? el.line,
+        });
+    } else if (prop === 'sprite-select') {
+        const spriteAttr = el.spriteAttr ?? 'spriteType';
+        el.spriteKey = (value as string) || undefined;
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line,
+            property: spriteAttr, value,
+            propertyLine: el.propertyLines?.[spriteAttr] ?? el.line,
+        });
+    } else {
+        (el as unknown as Record<string, unknown>)[prop] = value;
+        vscode.postMessage({
+            command: 'updateProperty', line: el.line, property: prop, value,
+            propertyLine: el.propertyLines?.[prop] ?? el.line,
+        });
+    }
+}
+
+// ── Context Menu ──
+let contextMenuTarget: { el: GuiElement; div: HTMLElement } | null = null;
+
+function showContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    const menu = document.getElementById('edit-context-menu')!;
+    menu.classList.remove('hidden');
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+    // Adjust if off-screen
+    requestAnimationFrame(() => {
+        const r = menu.getBoundingClientRect();
+        if (r.right > window.innerWidth) menu.style.left = `${e.clientX - r.width}px`;
+        if (r.bottom > window.innerHeight) menu.style.top = `${e.clientY - r.height}px`;
+    });
+}
+
+function hideContextMenu() {
+    document.getElementById('edit-context-menu')!.classList.add('hidden');
+}
+
+function setupContextMenu() {
+    const menu = document.getElementById('edit-context-menu')!;
+
+    // Right-click on viewport in edit mode
+    document.getElementById('viewport')!.addEventListener('contextmenu', (e) => {
+        if (!editMode) return;
+        e.preventDefault();
+        // Find which element was right-clicked
+        const target = (e.target as HTMLElement).closest('.el') as HTMLElement;
+        if (target) {
+            const line = parseInt(target.dataset.line ?? '0');
+            const entry = elMap.get(line);
+            if (entry) {
+                contextMenuTarget = entry;
+                if (!selectedElements.find(s => s.el.line === line)) {
+                    selectElement(entry.el, entry.div);
+                }
+            }
+        } else {
+            contextMenuTarget = null;
+            clearSelection();
+        }
+        showContextMenu(e);
+    });
+
+    // Menu button actions
+    menu.querySelectorAll('button[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const action = (btn as HTMLElement).dataset.action;
+            hideContextMenu();
+            handleContextAction(action!);
+        });
+    });
+
+    // Close menu on click outside
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target as Node)) hideContextMenu();
+    });
+}
+
+function handleContextAction(action: string) {
+    if (action === 'delete') {
+        deleteSelected();
+    } else if (action === 'duplicate') {
+        duplicateSelected();
+    } else if (action.startsWith('add-')) {
+        const typeMap: Record<string, string> = {
+            'add-container': 'containerWindowType',
+            'add-icon': 'iconType',
+            'add-button': 'buttonType',
+            'add-text': 'instantTextBoxType',
+        };
+        const type = typeMap[action];
+        if (!type) return;
+        // Find parent — use context target or first top-level element
+        let parentEl: GuiElement | null = null;
+        if (contextMenuTarget) {
+            // If target is a container, add inside it; otherwise add to its parent
+            const isContainer = contextMenuTarget.el.type === 'containerWindowType' || contextMenuTarget.el.type === 'windowType';
+            if (isContainer) {
+                parentEl = contextMenuTarget.el;
+            } else {
+                // Find parent by looking up the tree
+                for (const el of allElements) {
+                    if (findChild(el, contextMenuTarget.el.line)) { parentEl = el; break; }
+                }
+            }
+        }
+        if (!parentEl && allElements.length > 0) parentEl = allElements[0];
+        if (!parentEl) return;
+        const newName = `new_${type.replace('Type', '')}_${Date.now() % 10000}`;
+        vscode.postMessage({
+            command: 'addElement',
+            parentEndLine: parentEl.endLine,
+            type, name: newName,
+            x: 0, y: 0, w: 100, h: 50,
+        });
+        pushUndo({ type: 'structural' });
+    }
+}
+
+function findChild(parent: GuiElement, line: number): boolean {
+    for (const c of parent.children) {
+        if (c.line === line) return true;
+        if (findChild(c, line)) return true;
+    }
+    return false;
+}
+
+function deleteSelected() {
+    if (selectedElements.length === 0) return;
+    pushUndo({ type: 'structural' });
+    for (const s of selectedElements) {
+        vscode.postMessage({
+            command: 'deleteElement',
+            startLine: s.el.line,
+            endLine: s.el.endLine,
+        });
+    }
+    clearSelection();
+}
+
+function duplicateSelected() {
+    if (selectedElements.length === 0) return;
+    pushUndo({ type: 'structural' });
+    for (const s of selectedElements) {
+        const newName = s.el.name + '_copy';
+        vscode.postMessage({
+            command: 'duplicateElement',
+            startLine: s.el.line,
+            endLine: s.el.endLine,
+            newName,
+        });
+    }
+}
+
+// ── Keyboard Shortcuts ──
+function setupEditorKeyboard() {
+    document.addEventListener('keydown', (e) => {
+        // Don't intercept keys when focus is in an input/select/textarea
+        const tag = (document.activeElement?.tagName ?? '').toLowerCase();
+        if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+
+        if (!editMode) {
+            if (e.key === 'e' || e.key === 'E') {
+                toggleEditMode();
+                e.preventDefault();
+            }
+            return;
+        }
+
+        if (e.key === 'e' || e.key === 'E') {
+            toggleEditMode();
+            e.preventDefault();
+            return;
+        }
+
+        if (e.key === 'Escape') {
+            clearSelection();
+            hideContextMenu();
+            e.preventDefault();
+            return;
+        }
+
+        if (e.key === 'Delete') {
+            deleteSelected();
+            e.preventDefault();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+            e.preventDefault();
+            duplicateSelected();
+            return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            undo();
+            return;
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+            e.preventDefault();
+            redo();
+            return;
+        }
+
+        // Arrow keys move selected elements by 1px (or 10px with Shift)
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && selectedElements.length > 0) {
+            e.preventDefault();
+            const step = e.shiftKey ? 10 : 1;
+            pushUndo({ type: 'move', items: selectedElements.map(s => ({ el: s.el, origX: s.el.position.x, origY: s.el.position.y, hadPositionLine: true })) });
+            for (const s of selectedElements) {
+                if (e.key === 'ArrowLeft') s.el.position.x -= step;
+                if (e.key === 'ArrowRight') s.el.position.x += step;
+                if (e.key === 'ArrowUp') s.el.position.y -= step;
+                if (e.key === 'ArrowDown') s.el.position.y += step;
+                s.div.style.left = `${s.el.position.x}px`;
+                s.div.style.top = `${s.el.position.y}px`;
+                vscode.postMessage({
+                    command: 'updateProperty', line: s.el.line, property: 'position',
+                    value: { x: s.el.position.x, y: s.el.position.y },
+                    propertyLine: s.el.propertyLines?.['position'] ?? s.el.line,
+                });
+            }
+            updatePropertiesPanel();
+        }
+    });
+}
+
+// ── Side Panel Tabs ──
+function setupSidePanelTabs() {
+    const tabLayers = document.getElementById('tab-layers');
+    const tabProps = document.getElementById('tab-properties');
+    const layersPanel = document.getElementById('layers-panel');
+    const propsPanel = document.getElementById('properties-panel');
+    if (!tabLayers || !tabProps || !layersPanel || !propsPanel) return;
+
+    tabLayers.onclick = () => {
+        tabLayers.classList.add('active');
+        tabProps.classList.remove('active');
+        layersPanel.classList.remove('hidden');
+        propsPanel.classList.add('hidden');
+    };
+    tabProps.onclick = () => {
+        tabProps.classList.add('active');
+        tabLayers.classList.remove('active');
+        propsPanel.classList.remove('hidden');
+        layersPanel.classList.add('hidden');
+    };
+}
+
+// ── Setup Alignment Buttons ──
+function setupAlignButtons() {
+    document.getElementById('btn-align-left')?.addEventListener('click', () => alignSelected('left'));
+    document.getElementById('btn-align-right')?.addEventListener('click', () => alignSelected('right'));
+    document.getElementById('btn-align-top')?.addEventListener('click', () => alignSelected('top'));
+    document.getElementById('btn-align-bottom')?.addEventListener('click', () => alignSelected('bottom'));
+    document.getElementById('btn-align-hcenter')?.addEventListener('click', () => alignSelected('hcenter'));
+    document.getElementById('btn-align-vcenter')?.addEventListener('click', () => alignSelected('vcenter'));
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────────
 
 window.addEventListener('message', e => {
     if (e.data.command === 'render') {
+        elMap.clear();
+        allElements = e.data.data;
+        spriteNames = e.data.spriteNames ?? [];
         renderAll(e.data.data, e.data.fileName);
         updateLayersPanel(e.data.data);
+        clearSelection();
     }
 });
 
 setupControls();
 setupSearch();
+setupEditorKeyboard();
+setupContextMenu();
+setupSidePanelTabs();
+setupAlignButtons();
 updateTransform();
 vscode.postMessage({ command: 'ready' });

@@ -42,6 +42,8 @@ export interface GuiElement {
     children: GuiElement[];
     properties: Record<string, unknown>;
     line: number;
+    endLine: number;                          // closing brace line
+    propertyLines: Record<string, number>;    // property name → source line number
 }
 
 export interface SpriteInfo {
@@ -153,6 +155,7 @@ function isIdentCont(ch: string): boolean {
 interface PdxNode {
     key: string;
     line: number;
+    endLine?: number;  // line of closing brace for block nodes
     value?: string | number;
     children?: PdxNode[];
 }
@@ -185,14 +188,15 @@ class Parser {
         return nodes;
     }
 
-    parseBlock(): PdxNode[] {
+    parseBlock(): { nodes: PdxNode[]; endLine: number } {
         const nodes: PdxNode[] = [];
         while (this.peek().type !== TokenType.RBrace && this.peek().type !== TokenType.EOF) {
             const node = this.parseStatement();
             if (node) nodes.push(node);
         }
+        let endLine = this.peek().line;
         if (this.peek().type === TokenType.RBrace) this.advance();
-        return nodes;
+        return { nodes, endLine };
     }
 
     private parseStatement(): PdxNode | null {
@@ -217,8 +221,8 @@ class Parser {
             this.advance(); // skip =
             if (this.peek().type === TokenType.LBrace) {
                 this.advance(); // skip {
-                const children = this.parseBlock();
-                return { key: keyToken.value, line: keyToken.line, children };
+                const block = this.parseBlock();
+                return { key: keyToken.value, line: keyToken.line, endLine: block.endLine, children: block.nodes };
             } else {
                 const valToken = this.advance();
                 const resolved = this.resolveValue(valToken);
@@ -396,7 +400,7 @@ function getSlotSize(nodes: PdxNode[]): { width: number; height: number } | unde
     return { width: w, height: h };
 }
 
-function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex: Map<string, SpriteInfo>): GuiElement {
+function buildElement(type: string, nodes: PdxNode[], line: number, endLine: number, spriteIndex: Map<string, SpriteInfo>): GuiElement {
     // Normalize the type to canonical form
     const normalizedType = normalizeTypeKey(type);
 
@@ -463,11 +467,19 @@ function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex:
         ...GUI_ELEMENT_TYPES,
     ]);
     const properties: Record<string, unknown> = {};
+    const propertyLines: Record<string, number> = {};
     for (const n of nodes) {
+        // Build propertyLines for ALL known properties (not just extras)
+        propertyLines[n.key] = n.line;
         if (!skipKeys.has(n.key) && n.value !== undefined && !n.children) {
             properties[n.key] = n.value;
         }
     }
+    // Also record compound property lines (position, size blocks)
+    const posNode = nodes.find(n => n.key === 'position' && n.children);
+    if (posNode) propertyLines['position'] = posNode.line;
+    const sizeNode = nodes.find(n => n.key === 'size' && n.children);
+    if (sizeNode) propertyLines['size'] = sizeNode.line;
 
     // Children
     const children: GuiElement[] = [];
@@ -494,6 +506,8 @@ function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex:
                 children: [],
                 properties: {},
                 line: n.line,
+                endLine: n.endLine ?? n.line,
+                propertyLines: {},
             });
         }
     }
@@ -501,12 +515,12 @@ function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex:
     // Real child elements (with case-normalized type check)
     for (const n of nodes) {
         if (GUI_ELEMENT_TYPES.has(n.key) && n.children) {
-            children.push(buildElement(n.key, n.children, n.line, spriteIndex));
+            children.push(buildElement(n.key, n.children, n.line, n.endLine ?? n.line, spriteIndex));
         } else if (n.children && !['background', 'backGround', 'position', 'size', 'margin', 'slotSize'].includes(n.key)) {
             // Check if the key is a GUI element type with different casing
             const normalized = normalizeTypeKey(n.key);
             if (GUI_ELEMENT_TYPES.has(normalized) || normalized !== n.key) {
-                children.push(buildElement(normalized, n.children, n.line, spriteIndex));
+                children.push(buildElement(normalized, n.children, n.line, n.endLine ?? n.line, spriteIndex));
             }
         }
     }
@@ -518,7 +532,7 @@ function buildElement(type: string, nodes: PdxNode[], line: number, spriteIndex:
         maxWidth, maxHeight, scale, rotation, alpha, centerPosition,
         borderSize: spriteInfo?.borderSize,
         margin, spacing, slotSize,
-        children, properties, line,
+        children, properties, line, endLine, propertyLines,
     };
 }
 
@@ -536,15 +550,15 @@ export function parseGuiFile(content: string, spriteIndex: Map<string, SpriteInf
             for (const child of node.children) {
                 const childNorm = normalizeTypeKey(child.key);
                 if ((GUI_ELEMENT_TYPES.has(child.key) || GUI_ELEMENT_TYPES.has(childNorm)) && child.children) {
-                    elements.push(buildElement(child.key, child.children, child.line, spriteIndex));
+                    elements.push(buildElement(child.key, child.children, child.line, child.endLine ?? child.line, spriteIndex));
                 }
             }
         } else if (GUI_ELEMENT_TYPES.has(node.key) && node.children) {
-            elements.push(buildElement(node.key, node.children, node.line, spriteIndex));
+            elements.push(buildElement(node.key, node.children, node.line, node.endLine ?? node.line, spriteIndex));
         } else if (node.children) {
             const nodeNorm = normalizeTypeKey(node.key);
             if (GUI_ELEMENT_TYPES.has(nodeNorm)) {
-                elements.push(buildElement(node.key, node.children, node.line, spriteIndex));
+                elements.push(buildElement(node.key, node.children, node.line, node.endLine ?? node.line, spriteIndex));
             }
         }
     }
@@ -592,6 +606,8 @@ export function parseGuiFile(content: string, spriteIndex: Map<string, SpriteInf
                         children: [],
                         properties: {},
                         line: el.line,
+                        endLine: el.line,
+                        propertyLines: {},
                     });
                 }
             }
@@ -675,4 +691,45 @@ export function buildSpriteIndex(gfxContents: Array<{ path: string; content: str
         }
     }
     return index;
+}
+
+// ─── PDX Serialization (for visual editor write-back) ───────────────────────
+
+/** Format a position value for PDX script: `position = { x = 10 y = 20 }` */
+export function serializePosition(x: number, y: number): string {
+    return `position = { x = ${Math.round(x)} y = ${Math.round(y)} }`;
+}
+
+/** Format a size value for PDX script: `size = { width = 100 height = 50 }` */
+export function serializeSize(w: number, h: number): string {
+    return `size = { width = ${Math.round(w)} height = ${Math.round(h)} }`;
+}
+
+/** Format a simple key = value for PDX script */
+export function serializeProperty(key: string, value: unknown): string {
+    if (typeof value === 'number') {
+        // Use integer if whole, else 3 decimal places
+        return `${key} = ${Number.isInteger(value) ? value : value.toFixed(3)}`;
+    }
+    if (typeof value === 'boolean') {
+        return `${key} = ${value ? 'yes' : 'no'}`;
+    }
+    // String: quote if contains spaces or special chars, otherwise bare
+    const str = String(value);
+    if (/\s/.test(str) || str.length === 0) {
+        return `${key} = "${str}"`;
+    }
+    return `${key} = ${str}`;
+}
+
+/** Build a full element block for inserting new elements */
+export function serializeNewElement(type: string, name: string, x: number, y: number, w: number, h: number, indent: string): string {
+    const lines = [
+        `${indent}${type} = {`,
+        `${indent}\tname = "${name}"`,
+        `${indent}\t${serializePosition(x, y)}`,
+        `${indent}\t${serializeSize(w, h)}`,
+        `${indent}}`,
+    ];
+    return lines.join('\n');
 }

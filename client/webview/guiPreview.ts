@@ -1142,8 +1142,10 @@ interface DragState {
     startY: number;
     origPosX: number;
     origPosY: number;
+    origVisualLeft: number;
+    origVisualTop: number;
     // For multi-select: offsets for all other selected items
-    others: Array<{ el: GuiElement; div: HTMLElement; origPosX: number; origPosY: number }>;
+    others: Array<{ el: GuiElement; div: HTMLElement; origPosX: number; origPosY: number; origVisualLeft: number; origVisualTop: number }>;
 }
 let dragState: DragState | null = null;
 
@@ -1152,15 +1154,18 @@ function startDrag(el: GuiElement, div: HTMLElement, e: MouseEvent) {
     if (!selectedElements.find(s => s.el.line === el.line)) {
         selectElement(el, div);
     }
+    const parsePx = (s: string) => parseInt(s.replace('px', '')) || 0;
     const others = selectedElements
         .filter(s => s.el.line !== el.line)
-        .map(s => ({ el: s.el, div: s.div, origPosX: s.el.position.x, origPosY: s.el.position.y }));
+        .map(s => ({ el: s.el, div: s.div, origPosX: s.el.position.x, origPosY: s.el.position.y, origVisualLeft: parsePx(s.div.style.left), origVisualTop: parsePx(s.div.style.top) }));
     dragState = {
         el, div,
         startX: e.clientX,
         startY: e.clientY,
         origPosX: el.position.x,
         origPosY: el.position.y,
+        origVisualLeft: parsePx(div.style.left),
+        origVisualTop: parsePx(div.style.top),
         others,
     };
     // Push undo for drag start — track whether position property existed in source
@@ -1187,19 +1192,20 @@ window.addEventListener('mousemove', (e) => {
         newY = snapResult.y;
         showSnapGuides(snapResult.guides);
 
-        dragState.el.position.x = newX;
-        dragState.el.position.y = newY;
-        dragState.div.style.left = `${newX}px`;
-        dragState.div.style.top = `${newY}px`;
-
-        // Move others by same delta
         const finalDx = newX - dragState.origPosX;
         const finalDy = newY - dragState.origPosY;
+
+        dragState.el.position.x = newX;
+        dragState.el.position.y = newY;
+        dragState.div.style.left = `${dragState.origVisualLeft + finalDx}px`;
+        dragState.div.style.top = `${dragState.origVisualTop + finalDy}px`;
+
+        // Move others by same delta
         for (const o of dragState.others) {
             o.el.position.x = o.origPosX + finalDx;
             o.el.position.y = o.origPosY + finalDy;
-            o.div.style.left = `${o.el.position.x}px`;
-            o.div.style.top = `${o.el.position.y}px`;
+            o.div.style.left = `${o.origVisualLeft + finalDx}px`;
+            o.div.style.top = `${o.origVisualTop + finalDy}px`;
         }
 
         // Show coordinate tooltip
@@ -1666,8 +1672,8 @@ function updatePropertiesPanel() {
     html += propRow('size', `<div class="prop-half"><input class="prop-input" type="number" data-prop="size-w" value="${el.size.width}" step="1" /><input class="prop-input" type="number" data-prop="size-h" value="${el.size.height}" step="1" /></div>`);
 
     const orientations = ['', 'UPPER_LEFT', 'UPPER_RIGHT', 'LOWER_LEFT', 'LOWER_RIGHT', 'CENTER', 'CENTER_UP', 'CENTER_DOWN', 'CENTER_LEFT', 'CENTER_RIGHT'];
-    html += propRow('orientation', `<select class="prop-select" data-prop="orientation">${orientations.map(o => `<option value="${o}" ${o === (el.orientation ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
-    html += propRow('origo', `<select class="prop-select" data-prop="origo">${orientations.map(o => `<option value="${o}" ${o === (el.origo ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
+    html += propRow('orientation', `<select class="prop-select" data-prop="orientation">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.orientation ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
+    html += propRow('origo', `<select class="prop-select" data-prop="origo">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.origo ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
     html += `</div>`;
 
     // Visual

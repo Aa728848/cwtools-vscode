@@ -6,17 +6,19 @@ open Microsoft.FSharp.Reflection
 open System.Text.RegularExpressions
 open FSharp.Data
 
-let private escapeChars = Regex("[\t\n\r\"\\\\]", RegexOptions.Compiled)
+let private escapeChars = Regex("[\x00-\x1F\"\\\\]", RegexOptions.Compiled)
 
 let private replaceChars =
     MatchEvaluator(fun m ->
         match m.Value with
         | "\\" -> "\\\\"
+        | "\"" -> "\\\""
+        | "\b" -> "\\b"
+        | "\f" -> "\\f"
         | "\t" -> "\\t"
         | "\n" -> "\\n"
         | "\r" -> "\\r"
-        | "\"" -> "\\\""
-        | v -> v)
+        | v -> sprintf "\\u%04x" (int v[0]))
 
 let private escapeStr (text: string) =
     let escaped = escapeChars.Replace(text, replaceChars)

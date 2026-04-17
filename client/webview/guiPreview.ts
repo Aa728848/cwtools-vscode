@@ -459,11 +459,17 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     }
 
     // ── PDX Layout: compute pixel-accurate top-left ──
+    // PDX uses SCALED dimensions for origo/centerPosition offset
+    const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
+    const elScale = el.scale ?? 1;
+    const layoutW = (!isContainer && elScale !== 1) ? Math.round(w * elScale) : w;
+    const layoutH = (!isContainer && elScale !== 1) ? Math.round(h * elScale) : h;
+
     // Apply margin offset to position
     const marginLeft = el.margin?.left ?? 0;
     const marginTop = el.margin?.top ?? 0;
     const tl = computeTopLeft(
-        parentW, parentH, w, h,
+        parentW, parentH, layoutW, layoutH,
         el.orientation ?? '', el.origo ?? '',
         el.position.x + marginLeft, el.position.y + marginTop,
         el.centerPosition ?? false,
@@ -471,22 +477,10 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
 
     div.style.left = `${tl.x}px`;
     div.style.top = `${tl.y}px`;
-    div.style.width = `${w}px`;
-    div.style.height = `${h}px`;
-
-    // Scale: apply directly to dimensions (NOT via CSS transform) so resize handles stay normally sized
-    // PDX: scale does NOT apply to containerWindowType/windowType, only to controls within
-    const transforms: string[] = [];
-    const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
-    const elScale = el.scale ?? 1;
-    if (elScale !== 1 && !isContainer) {
-        // Apply scale to the div's actual dimensions
-        const scaledW = Math.round(w * elScale);
-        const scaledH = Math.round(h * elScale);
-        div.style.width = `${scaledW}px`;
-        div.style.height = `${scaledH}px`;
-    }
+    div.style.width = `${layoutW}px`;
+    div.style.height = `${layoutH}px`;
     // PDX rotation: radians, negative sign convention (negate for CSS)
+    const transforms: string[] = [];
     // Rotation pivot: center of widget rect (matching game engine behavior)
     if (el.rotation && el.rotation !== 0) {
         const degrees = -(el.rotation * 180 / Math.PI);
@@ -1687,9 +1681,17 @@ function updatePropertiesPanel() {
 
     // Sprite
     html += `<div class="prop-group"><div class="prop-group-title">贴图</div>`;
-    const spriteAttr = el.spriteAttr ?? 'spriteType';
-    const currentSprite = el.spriteKey ?? '';
-    html += `<div class="prop-row"><span class="prop-label">贴图</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(currentSprite)}" placeholder="输入或选择贴图..." autocomplete="off" /></div></div>`;
+    const isContainerType = el.type === 'containerWindowType' || el.type === 'windowType';
+    if (isContainerType) {
+        // For containers, show the background child's sprite
+        const bgChild = el.children.find(c => c.type === 'background');
+        const bgSprite = bgChild?.spriteKey ?? '';
+        html += `<div class="prop-row"><span class="prop-label">背景</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(bgSprite)}" placeholder="输入或选择背景贴图..." autocomplete="off" /></div></div>`;
+    } else {
+        const spriteAttr = el.spriteAttr ?? 'spriteType';
+        const currentSprite = el.spriteKey ?? '';
+        html += `<div class="prop-row"><span class="prop-label">贴图</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(currentSprite)}" placeholder="输入或选择贴图..." autocomplete="off" /></div></div>`;
+    }
     if (el.frame !== undefined) html += propRow('帧', `<input class="prop-input" type="number" data-prop="frame" value="${el.frame}" step="1" min="0" />`);
     html += `</div>`;
 
@@ -1847,13 +1849,35 @@ function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
             propertyLine: el.propertyLines?.[prop] ?? el.line,
         });
     } else if (prop === 'sprite-select') {
-        const spriteAttr = el.spriteAttr ?? 'spriteType';
-        el.spriteKey = (value as string) || undefined;
-        vscode.postMessage({
-            command: 'updateProperty', line: el.line,
-            property: spriteAttr, value,
-            propertyLine: el.propertyLines?.[spriteAttr] ?? el.line,
-        });
+        const isContainerType = el.type === 'containerWindowType' || el.type === 'windowType';
+        if (isContainerType) {
+            // For containers, update the background child's quadTextureSprite
+            const bgChild = el.children.find(c => c.type === 'background');
+            if (bgChild) {
+                const bgAttr = bgChild.spriteAttr ?? 'quadTextureSprite';
+                bgChild.spriteKey = (value as string) || undefined;
+                vscode.postMessage({
+                    command: 'updateProperty', line: bgChild.line,
+                    property: bgAttr, value,
+                    propertyLine: bgChild.propertyLines?.[bgAttr] ?? bgChild.line,
+                });
+            } else {
+                // No background yet — create one with the selected sprite
+                vscode.postMessage({
+                    command: 'addBackground',
+                    parentEndLine: el.endLine,
+                    sprite: value,
+                });
+            }
+        } else {
+            const spriteAttr = el.spriteAttr ?? 'spriteType';
+            el.spriteKey = (value as string) || undefined;
+            vscode.postMessage({
+                command: 'updateProperty', line: el.line,
+                property: spriteAttr, value,
+                propertyLine: el.propertyLines?.[spriteAttr] ?? el.line,
+            });
+        }
     } else if (prop === 'effect-select') {
         el.properties['effect'] = value;
         vscode.postMessage({
@@ -1886,6 +1910,8 @@ function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
 
 // ── Context Menu ──
 let contextMenuTarget: { el: GuiElement; div: HTMLElement } | null = null;
+let contextMenuCanvasX = 0;
+let contextMenuCanvasY = 0;
 
 function showContextMenu(e: MouseEvent) {
     e.preventDefault();
@@ -1912,6 +1938,10 @@ function setupContextMenu() {
     document.getElementById('viewport')!.addEventListener('contextmenu', (e) => {
         if (!editMode) return;
         e.preventDefault();
+        // Convert screen coordinates to canvas-local coordinates
+        const vpRect = document.getElementById('viewport')!.getBoundingClientRect();
+        contextMenuCanvasX = Math.round((e.clientX - vpRect.left - panX) / scale);
+        contextMenuCanvasY = Math.round((e.clientY - vpRect.top - panY) / scale);
         // Find which element was right-clicked
         const target = (e.target as HTMLElement).closest('.el') as HTMLElement;
         if (target) {
@@ -1950,6 +1980,26 @@ function handleContextAction(action: string) {
         deleteSelected();
     } else if (action === 'duplicate') {
         duplicateSelected();
+    } else if (action === 'add-background') {
+        // Add a background child to the target container
+        let parentEl: GuiElement | null = null;
+        if (contextMenuTarget) {
+            const isContainer = contextMenuTarget.el.type === 'containerWindowType' || contextMenuTarget.el.type === 'windowType';
+            if (isContainer) {
+                parentEl = contextMenuTarget.el;
+            } else {
+                for (const el of allElements) {
+                    if (findChild(el, contextMenuTarget.el.line)) { parentEl = el; break; }
+                }
+            }
+        }
+        if (!parentEl && allElements.length > 0) parentEl = allElements[0];
+        if (!parentEl) return;
+        vscode.postMessage({
+            command: 'addBackground',
+            parentEndLine: parentEl.endLine,
+        });
+        pushUndo({ type: 'structural' });
     } else if (action.startsWith('add-')) {
         const typeMap: Record<string, string> = {
             'add-container': 'containerWindowType',
@@ -1978,11 +2028,26 @@ function handleContextAction(action: string) {
         if (!parentEl && allElements.length > 0) parentEl = allElements[0];
         if (!parentEl) return;
         const newName = `new_${type.replace('Type', '')}_${Date.now() % 10000}`;
+        // Compute position relative to the parent container
+        let relX = contextMenuCanvasX;
+        let relY = contextMenuCanvasY;
+        if (parentEl) {
+            // Subtract parent's absolute position on canvas
+            const parentEntry = elMap.get(parentEl.line);
+            if (parentEntry) {
+                const parentRect = parentEntry.div.getBoundingClientRect();
+                const vpRect = document.getElementById('viewport')!.getBoundingClientRect();
+                const parentCanvasX = (parentRect.left - vpRect.left - panX) / scale;
+                const parentCanvasY = (parentRect.top - vpRect.top - panY) / scale;
+                relX = Math.round(contextMenuCanvasX - parentCanvasX);
+                relY = Math.round(contextMenuCanvasY - parentCanvasY);
+            }
+        }
         vscode.postMessage({
             command: 'addElement',
             parentEndLine: parentEl.endLine,
             type, name: newName,
-            x: 0, y: 0, w: 100, h: 50,
+            x: relX, y: relY, w: 100, h: 50,
         });
         pushUndo({ type: 'structural' });
     }

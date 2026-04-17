@@ -84,6 +84,9 @@ export class GuiPanel {
                     case 'removePropertyLine':
                         await this._handleRemovePropertyLine(msg);
                         break;
+                    case 'addBackground':
+                        await this._handleAddBackground(msg);
+                        break;
                     case 'vscodeUndo':
                         await this._handleVscodeUndo();
                         break;
@@ -508,6 +511,7 @@ export class GuiPanel {
             }
         } else {
             // Generic property (frame, name, spriteType, etc.)
+            const isSpriteChange = msg.property === 'spriteType' || msg.property === 'quadTextureSprite';
             if (hasOwnLine) {
                 const line = doc.lineAt(propLine - 1);
                 const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
@@ -517,6 +521,12 @@ export class GuiPanel {
                 this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
                 await doc.save();
+                // Sprite changes need full re-render to resolve new texture
+                if (isSpriteChange) {
+                    this._textureCache.clear();
+                    this._textureCacheBytes = 0;
+                    await this._loadAndRender(doc);
+                }
             } else {
                 // Check if property exists inline on the element's line
                 const line = doc.lineAt(msg.line - 1);
@@ -533,6 +543,11 @@ export class GuiPanel {
                     this._skipNextReload = true;
                     await vscode.workspace.applyEdit(edit);
                     await doc.save();
+                    if (isSpriteChange) {
+                        this._textureCache.clear();
+                        this._textureCacheBytes = 0;
+                        await this._loadAndRender(doc);
+                    }
                 } else {
                     // Scan forward from element line to find existing property on nearby lines
                     const propRegex = new RegExp(`(${msg.property}\\s*=\\s*)(?:"[^"]*"|\\S+)`);
@@ -558,6 +573,11 @@ export class GuiPanel {
                         this._skipNextReload = true;
                         await vscode.workspace.applyEdit(edit);
                         await doc.save();
+                        if (isSpriteChange) {
+                            this._textureCache.clear();
+                            this._textureCacheBytes = 0;
+                            await this._loadAndRender(doc);
+                        }
                     } else {
                         // Property truly doesn't exist — insert it
                         const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
@@ -608,6 +628,34 @@ export class GuiPanel {
             doc.lineAt(doc.lineCount - 1).range.end,
         );
         edit.replace(doc.uri, fullRange, snapshot);
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+        await this._loadAndRender(doc);
+    }
+
+    /**
+     * Handle addBackground message from webview.
+     * Adds a background = { name = "background" quadTextureSprite = "GFX_xxx" } to a container.
+     */
+    private async _handleAddBackground(msg: { parentEndLine: number; sprite?: string }) {
+        if (!this._document) return;
+        const doc = this._document;
+        this._contentSnapshots.push(doc.getText());
+        const closingLine = doc.lineAt(msg.parentEndLine - 1);
+        const parentIndent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
+        const childIndent = parentIndent + '\t';
+        const spriteName = msg.sprite || 'GFX_tile_outliner_bg';
+        const bgCode = [
+            `${childIndent}background = {`,
+            `${childIndent}\tname = "background"`,
+            `${childIndent}\tquadTextureSprite = "${spriteName}"`,
+            `${childIndent}}`,
+        ].join('\n');
+        const edit = new vscode.WorkspaceEdit();
+        // Insert before the container's closing brace
+        const insertPos = new vscode.Position(msg.parentEndLine - 1, 0);
+        edit.insert(doc.uri, insertPos, bgCode + '\n');
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
         await doc.save();
@@ -738,6 +786,7 @@ export class GuiPanel {
     </div>
     <div id="edit-context-menu" class="hidden">
         <button data-action="add-container">+ 容器窗口</button>
+        <button data-action="add-background">+ 背景</button>
         <button data-action="add-icon">+ 图标</button>
         <button data-action="add-button">+ 按钮</button>
         <button data-action="add-effectbutton">+ 效果按钮</button>

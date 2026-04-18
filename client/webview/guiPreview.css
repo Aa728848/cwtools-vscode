@@ -33,6 +33,22 @@ html, body {
 #controls button:hover { background: #38385e; border-color: #6666a0; }
 #zoom-level { font-size: 11px; color: #7080a0; min-width: 38px; text-align: center; }
 
+#resolution-select {
+    height: 22px;
+    padding: 0 4px;
+    background: #28284a; color: #99aac8;
+    border: 1px solid #44446a; border-radius: 3px;
+    font-size: 11px; cursor: pointer; outline: none;
+}
+#resolution-select:hover { border-color: #6666a0; }
+#resolution-select:focus { border-color: #6090e0; }
+
+#btn-anim.active {
+    background: rgba(100,200,160,0.3);
+    border-color: #50c878;
+    color: #80e8a0;
+}
+
 /* ─── Main Layout ─── */
 #main-layout {
     position: absolute; top: 34px; left: 0; right: 0; bottom: 0;

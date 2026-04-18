@@ -888,7 +888,9 @@ type Server(client: ILanguageClient) =
                             completionProvider =
                                 Some defaultCompletionOptions
                             codeActionProvider = true
+                            codeLensProvider = Some { resolveProvider = true }
                             documentSymbolProvider = true
+                            workspaceSymbolProvider = true
                             executeCommandProvider =
                                 Some
                                     { commands =
@@ -905,7 +907,17 @@ type Server(client: ILanguageClient) =
                                           "gettech"
                                           "getGraphData"
                                           "exportTypes" ] }
-                            inlayHintProvider = true } }
+                            inlayHintProvider = true
+                            renameProvider = false
+                            semanticTokensProvider =
+                                Some
+                                    { legend =
+                                        { tokenTypes =
+                                            [ "namespace"; "type"; "function"; "variable"; "parameter"
+                                              "property"; "enumMember"; "keyword"; "number"; "string"
+                                              "comment"; "operator" ]
+                                          tokenModifiers = [ "declaration"; "definition"; "readonly" ] }
+                                      full = true } } }
             }
 
         member this.Initialized() = async { () }
@@ -1290,7 +1302,91 @@ type Server(client: ILanguageClient) =
             async { return completionResolveItem gameObj p |> Async.RunSynchronously }
             |> catchError p
 
-        member this.SignatureHelp(_: TextDocumentPositionParams) = TODO()
+        member this.SignatureHelp(p: TextDocumentPositionParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let allEffects = game.ScriptedEffects() @ game.ScriptedTriggers()
+                        let effectNames = allEffects |> List.map (fun e -> e.Name.GetString()) |> Set.ofList
+
+                        // Try word under cursor first
+                        let word = docs.GetTextAtPosition(p.textDocument.uri, p.position)
+                        let directMatch =
+                            if String.IsNullOrWhiteSpace word then None
+                            else allEffects |> List.tryFind (fun e -> e.Name.GetString() = word)
+
+                        // Walk source backwards to find enclosing effect block
+                        let findEnclosing () =
+                            let fileContent = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
+                            let lines = fileContent.Split('\n')
+                            let cursorLine = min p.position.line (lines.Length - 1)
+                            let mutable found: string option = None
+                            let mutable depth = 0
+                            for i in cursorLine .. -1 .. 0 do
+                                if found.IsNone then
+                                    for ch in lines.[i] do
+                                        if ch = '}' then depth <- depth + 1
+                                        elif ch = '{' then depth <- depth - 1
+                                    if depth < 0 then
+                                        let parts = lines.[i].TrimStart().Split([|' '; '='; '\t'|], StringSplitOptions.RemoveEmptyEntries)
+                                        if parts.Length > 0 && Set.contains parts.[0] effectNames then
+                                            found <- Some parts.[0]
+                            found
+
+                        let effectName =
+                            match directMatch with
+                            | Some e -> Some(e.Name.GetString())
+                            | None -> findEnclosing ()
+
+                        match effectName with
+                        | Some name ->
+                            let effect = allEffects |> List.tryFind (fun e -> e.Name.GetString() = name)
+                            match effect with
+                            | Some effect ->
+                                let paramRegex =
+                                    System.Text.RegularExpressions.Regex(
+                                        @"\$([A-Za-z_][A-Za-z0-9_]*)\$",
+                                        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+                                let comments =
+                                    match effect with
+                                    | :? ScriptedEffect as se -> se.Comments
+                                    | _ -> ""
+
+                                let paramMatches = paramRegex.Matches(comments)
+                                let paramNames =
+                                    [ for m in paramMatches -> m.Groups.[1].Value ]
+                                    |> List.distinct
+
+                                if paramNames.IsEmpty then None
+                                else
+                                    let parameters =
+                                        paramNames
+                                        |> List.map (fun pname ->
+                                            { label = "$" + pname + "$"
+                                              documentation = Some(sprintf "Parameter: %s" pname) })
+
+                                    let scopes =
+                                        String.Join(", ", effect.Scopes |> List.map (fun s -> s.ToString()))
+
+                                    let label = name + "(" + String.Join(", ", paramNames) + ")"
+                                    let doc =
+                                        if String.IsNullOrWhiteSpace scopes then None
+                                        else Some(sprintf "Scopes: %s" scopes)
+
+                                    Some
+                                        { signatures =
+                                            [ { label = label
+                                                documentation = doc
+                                                parameters = parameters } ]
+                                          activeSignature = Some 0
+                                          activeParameter = None }
+                            | None -> None
+                        | None -> None
+                    | None -> None
+            }
+            |> catchError None
 
         member this.GotoDefinition(p: TextDocumentPositionParams) =
             async {
@@ -1346,13 +1442,27 @@ type Server(client: ILanguageClient) =
         member this.DocumentHighlight(_: TextDocumentPositionParams) = TODO()
 
         member this.DocumentSymbols(p: DocumentSymbolParams) =
-            let createDocumentSymbol name detail range =
+            let symbolKindForType (typeName: string) =
+                let t = typeName.ToLowerInvariant()
+                if t.Contains("event") then SymbolKind.Interface
+                elif t.Contains("trigger") then SymbolKind.Function
+                elif t.Contains("effect") then SymbolKind.Method
+                elif t.Contains("variable") then SymbolKind.Variable
+                elif t.Contains("modifier") then SymbolKind.Property
+                elif t.Contains("namespace") then SymbolKind.Namespace
+                elif t.Contains("decision") || t.Contains("edict") || t.Contains("policy") then SymbolKind.Enum
+                elif t.Contains("technology") || t.Contains("component") then SymbolKind.Module
+                elif t.Contains("building") || t.Contains("district") then SymbolKind.Constructor
+                elif t.Contains("flag") || t.Contains("value") then SymbolKind.Constant
+                else SymbolKind.Class
+
+            let createDocumentSymbol name detail kind range =
                 let range = convRangeToLSPRange range
                 let name = if String.IsNullOrWhiteSpace name then "unnamed" else name
 
                 { name = name
                   detail = detail
-                  kind = SymbolKind.Class
+                  kind = kind
                   deprecated = false
                   range = range
                   selectionRange = range
@@ -1370,7 +1480,7 @@ type Server(client: ILanguageClient) =
                             |> Seq.collect (fun (k, vs) ->
                                 vs
                                 |> Seq.filter (fun tdi -> tdi.range.FileName = p.textDocument.uri.LocalPath)
-                                |> Seq.map (fun tdi -> createDocumentSymbol tdi.id k tdi.range))
+                                |> Seq.map (fun tdi -> createDocumentSymbol tdi.id k (symbolKindForType k) tdi.range))
                             |> Seq.rev
                             |> Seq.filter (fun ds -> not (ds.detail.Contains(".")))
 
@@ -1395,7 +1505,36 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        member this.WorkspaceSymbols(_: WorkspaceSymbolParams) = TODO()
+        member this.WorkspaceSymbols(p: WorkspaceSymbolParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let types = game.Types()
+                        let query = p.query.ToLowerInvariant()
+
+                        types
+                        |> Map.toList
+                        |> List.collect (fun (typeName, vs) ->
+                            if typeName.Contains(".") then []
+                            else
+                                vs
+                                |> Array.toList
+                                |> List.filter (fun tdi ->
+                                    query.Length = 0
+                                    || tdi.id.ToLowerInvariant().Contains(query)
+                                    || typeName.ToLowerInvariant().Contains(query))
+                                |> List.map (fun tdi ->
+                                    { name = tdi.id
+                                      kind = SymbolKind.Class
+                                      location =
+                                        { uri = Uri(tdi.range.FileName)
+                                          range = convRangeToLSPRange tdi.range }
+                                      containerName = Some typeName }))
+                        |> List.truncate 200
+                    | None -> []
+            }
+            |> catchError []
 
         member this.CodeActions(p: CodeActionParams) =
             async {
@@ -1439,11 +1578,96 @@ type Server(client: ILanguageClient) =
                     | None -> []
             }
 
-        member this.CodeLens(_: CodeLensParams) =
-            async { return [] }
+        member this.CodeLens(p: CodeLensParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let types = game.Types()
+                        let filePath = p.textDocument.uri.LocalPath
+
+                        types
+                        |> Map.toList
+                        |> List.collect (fun (typeName, vs) ->
+                            vs
+                            |> Array.toList
+                            |> List.filter (fun tdi -> tdi.range.FileName = filePath && not (typeName.Contains(".")))
+                            |> List.map (fun tdi ->
+                                let range = convRangeToLSPRange tdi.range
+                                { range = range
+                                  command = None
+                                  data =
+                                    JsonValue.Record
+                                        [| "typeName", JsonValue.String typeName
+                                           "id", JsonValue.String tdi.id
+                                           "filePath", JsonValue.String filePath
+                                           "line", JsonValue.Number(decimal range.start.line)
+                                           "character", JsonValue.Number(decimal range.start.character) |] }))
+                    | None -> []
+            }
             |> catchError []
 
-        member this.ResolveCodeLens(p: CodeLens) = async { return p }
+        member this.ResolveCodeLens(p: CodeLens) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        try
+                            let typeName = p.data.Item("typeName").AsString()
+                            let id = p.data.Item("id").AsString()
+                            let filePath = p.data.Item("filePath").AsString()
+                            let line = p.data.Item("line").AsInteger()
+                            let character = p.data.Item("character").AsInteger()
+                            let position = PosHelper.fromZ line character
+
+                            let refs =
+                                game.FindAllRefs
+                                    position
+                                    filePath
+                                    (docs.GetText(FileInfo(filePath)) |> Option.defaultValue "")
+
+                            let refCount =
+                                match refs with
+                                | Some gotos -> gotos.Length
+                                | None -> 0
+
+                            let title =
+                                if refCount = 0 then $"%s{typeName}: %s{id} — no references"
+                                elif refCount = 1 then $"%s{typeName}: %s{id} — 1 reference"
+                                else $"%s{typeName}: %s{id} — %d{refCount} references"
+
+                            let refLocations =
+                                match refs with
+                                | Some gotos ->
+                                    gotos |> List.map (fun r ->
+                                        let range = convRangeToLSPRange r
+                                        JsonValue.Record
+                                            [| "uri", JsonValue.String(Uri(r.FileName).ToString())
+                                               "range", JsonValue.Record
+                                                   [| "start", JsonValue.Record
+                                                          [| "line", JsonValue.Number(decimal range.start.line)
+                                                             "character", JsonValue.Number(decimal range.start.character) |]
+                                                      "end", JsonValue.Record
+                                                          [| "line", JsonValue.Number(decimal range.``end``.line)
+                                                             "character", JsonValue.Number(decimal range.``end``.character) |] |] |])
+                                    |> Array.ofList
+                                | None -> [||]
+
+                            { p with
+                                command =
+                                    Some
+                                        { title = title
+                                          command = "cwtools.showReferences"
+                                          arguments =
+                                            [ JsonValue.String(Uri(filePath).ToString())
+                                              JsonValue.Record
+                                                  [| "line", JsonValue.Number(decimal line)
+                                                     "character", JsonValue.Number(decimal character) |]
+                                              JsonValue.Array(refLocations) ] } }
+                        with _ -> p
+                    | None -> p
+            }
+            |> catchError p
 
         member this.InlayHint(p: InlayHintParams) =
             async {
@@ -1460,17 +1684,45 @@ type Server(client: ILanguageClient) =
                             let locMap = game.References().Localisation |> Map.ofList
                             let hints = ResizeArray<InlayHint>()
                             let targetPath = entity.filepath
+
+                            // Build scripted variable lookup map
+                            let globalVars = game.ScriptedVariables()
+                            let fileContent = docs.GetText(FileInfo(targetPath)) |> Option.defaultValue ""
+                            let localVarPattern =
+                                System.Text.RegularExpressions.Regex(
+                                    @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
+                                    System.Text.RegularExpressions.RegexOptions.Multiline)
+                            let localVars =
+                                [ for m in localVarPattern.Matches(fileContent) ->
+                                    m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() ]
+                            let varMap = (localVars @ globalVars) |> Map.ofList
                             
                             let formatHintLabel (desc: string) =
                                 let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
                                 let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
+                                // Strip Paradox color codes §X
+                                let clean = System.Text.RegularExpressions.Regex.Replace(clean, "§[RGBYWHETLMSP!]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
                                 let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
                                 sprintf "💬 %s" truncated
+
+                            let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
+                                if rawVal.StartsWith("@") && not (rawVal.StartsWith("@[")) then
+                                    match Map.tryFind rawVal varMap with
+                                    | Some value ->
+                                        let range = convRangeToLSPRange position
+                                        hints.Add {
+                                            position = range.``end``
+                                            label = sprintf "= %s" value
+                                            paddingLeft = true
+                                            paddingRight = false
+                                        }
+                                    | None -> ()
 
                             let rec visitNode (n: CWTools.Process.Node) =
                                 n.Leaves |> Seq.iter (fun l ->
                                     if l.Position.FileName = targetPath then
                                         let rawVal = l.Value.ToRawString().Trim('\"')
+                                        // Localization hint
                                         match Map.tryFind rawVal locMap with
                                         | Some tr ->
                                             let range = convRangeToLSPRange l.Position
@@ -1481,6 +1733,8 @@ type Server(client: ILanguageClient) =
                                                 paddingRight = false
                                             }
                                         | None -> ()
+                                        // Scripted variable hint
+                                        tryAddVarHint rawVal l.Position
                                 )
                                 n.LeafValues |> Seq.iter (fun lv ->
                                     if lv.Position.FileName = targetPath then
@@ -1495,6 +1749,7 @@ type Server(client: ILanguageClient) =
                                                 paddingRight = false
                                             }
                                         | None -> ()
+                                        tryAddVarHint rawVal lv.Position
                                 )
                                 n.Nodes |> Seq.iter visitNode
 
@@ -1531,6 +1786,173 @@ type Server(client: ILanguageClient) =
         member this.DocumentLink(_: DocumentLinkParams) = TODO()
         member this.ResolveDocumentLink(_: DocumentLink) = TODO()
 
+        member this.SemanticTokensFull(p: SemanticTokensParams) =
+            // Token type indices (must match legend in capabilities):
+            // 0=namespace, 1=type, 2=function, 3=variable, 4=parameter,
+            // 5=property, 6=enumMember, 7=keyword, 8=number, 9=string,
+            // 10=comment, 11=operator
+            async {
+                let semanticTokensFunction (game: IGame<_>) =
+                    let filePath = p.textDocument.uri.LocalPath
+                    let entityOpt =
+                        game.AllEntities()
+                        |> Seq.tryPick (fun struct (e, _) ->
+                            if e.filepath = filePath then Some e else None)
+
+                    match entityOpt with
+                    | None -> None
+                    | Some entity ->
+                        let tokens = ResizeArray<struct (int * int * int * int * int)>()
+                        let fileContent = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                        let lines = fileContent.Split('\n')
+
+                        // Collect known names for classification
+                        let allEffects = game.ScriptedEffects() |> List.map (fun e -> e.Name.GetString()) |> Set.ofList
+                        let allTriggers = game.ScriptedTriggers() |> List.map (fun e -> e.Name.GetString()) |> Set.ofList
+
+                        // Walk AST — only classify Leaves and LeafValues
+                        // Verify against source text to avoid position mismatches
+                        let verifyAndAdd (line: int) (col: int) (len: int) (tokenType: int) =
+                            if line >= 0 && line < lines.Length then
+                                let srcLine = lines.[line]
+                                if col >= 0 && col + len <= srcLine.Length then
+                                    tokens.Add(struct (line, col, len, tokenType, 0))
+
+                        let rec visitNode (n: CWTools.Process.Node) =
+
+                            n.Leaves |> Seq.iter (fun l ->
+                                if l.Position.FileName = filePath then
+                                    let line = max 0 (int l.Position.StartLine - 1)
+                                    let col = int l.Position.StartColumn
+                                    let key = l.Key
+                                    let rawVal = l.Value.ToRawString()
+
+                                    // Verify key against source, find actual position
+                                    if key.Length > 0 && line < lines.Length then
+                                        let srcLine = lines.[line]
+                                        // Find key in source starting from col
+                                        let actualCol =
+                                            if col >= 0 && col + key.Length <= srcLine.Length && srcLine.Substring(col, key.Length) = key then
+                                                col
+                                            else
+                                                let idx = srcLine.IndexOf(key)
+                                                if idx >= 0 then idx else -1
+                                        if actualCol >= 0 then
+                                            let keyType =
+                                                if key.StartsWith("@") then 3
+                                                elif key.StartsWith("$") && key.EndsWith("$") then 4
+                                                elif Set.contains key allEffects then 2
+                                                elif Set.contains key allTriggers then 2
+                                                elif key = "if" || key = "else" || key = "else_if"
+                                                    || key = "AND" || key = "OR" || key = "NOT"
+                                                    || key = "NOR" || key = "NAND"
+                                                    || key = "limit" || key = "trigger"
+                                                    || key = "modifier" || key = "while"
+                                                    || key = "switch" || key = "every"
+                                                    || key = "random" || key = "random_list"
+                                                    || key = "inline_script" then 7
+                                                else 5
+                                            verifyAndAdd line actualCol key.Length keyType
+
+                                    // Value: find in source text on the end line
+                                    let valLine = max 0 (int l.Position.EndLine - 1)
+                                    if valLine < lines.Length && rawVal.Length > 0 then
+                                        let cleanVal = rawVal.Trim('"')
+                                        let srcLine = lines.[valLine]
+                                        // Find value text in the source line
+                                        let mutable dummy = 0.0
+                                        let valType =
+                                            if rawVal.StartsWith("@") then 3
+                                            elif rawVal.StartsWith("$") && rawVal.EndsWith("$") then 4
+                                            elif rawVal = "yes" || rawVal = "no" then 7
+                                            elif System.Double.TryParse(rawVal, &dummy) then 8
+                                            else 6
+                                        // Find the actual position of the value
+                                        let searchVal = if rawVal.StartsWith("\"") then cleanVal else rawVal
+                                        let eqIdx = srcLine.IndexOf('=')
+                                        if eqIdx >= 0 then
+                                            let afterEq = srcLine.Substring(eqIdx + 1)
+                                            let valIdx = afterEq.IndexOf(searchVal)
+                                            if valIdx >= 0 && searchVal.Length > 0 then
+                                                let actualValCol = eqIdx + 1 + valIdx
+                                                verifyAndAdd valLine actualValCol searchVal.Length valType
+                            )
+
+                            n.LeafValues |> Seq.iter (fun lv ->
+                                if lv.Position.FileName = filePath then
+                                    let line = max 0 (int lv.Position.StartLine - 1)
+                                    let col = int lv.Position.StartColumn
+                                    let rawVal = lv.Value.ToRawString()
+                                    let valLen = rawVal.Trim('"').Length
+                                    if valLen > 0 then
+                                        let valType =
+                                            if rawVal.StartsWith("@") then 3
+                                            elif rawVal.StartsWith("$") && rawVal.EndsWith("$") then 4
+                                            elif rawVal = "yes" || rawVal = "no" then 7
+                                            else 6
+                                        verifyAndAdd line col valLen valType
+                            )
+
+                            n.Nodes |> Seq.iter visitNode
+
+                        visitNode entity.entity
+
+                        // Scan for comments
+                        lines |> Array.iteri (fun lineIdx lineText ->
+                            let trimmed = lineText.TrimStart()
+                            if trimmed.StartsWith("#") then
+                                let col = lineText.Length - trimmed.Length
+                                tokens.Add(struct (lineIdx, col, lineText.Length - col, 10, 0))
+                        )
+
+                        // Sort and encode as delta format
+                        let sorted =
+                            tokens
+                            |> Seq.toArray
+                            |> Array.sortBy (fun struct (l, c, _, _, _) -> l, c)
+
+                        let data = ResizeArray<int>()
+                        let mutable prevLine = 0
+                        let mutable prevChar = 0
+
+                        for struct (line, col, len, tokenType, mods) in sorted do
+                            let deltaLine = line - prevLine
+                            let deltaChar = if deltaLine = 0 then col - prevChar else col
+                            data.Add(deltaLine)
+                            data.Add(deltaChar)
+                            data.Add(len)
+                            data.Add(tokenType)
+                            data.Add(mods)
+                            prevLine <- line
+                            prevChar <- col
+
+                        Some { data = data |> Seq.toList }
+
+                return
+                    match
+                        stlGameObj,
+                        hoi4GameObj,
+                        eu4GameObj,
+                        ck2GameObj,
+                        irGameObj,
+                        vic2GameObj,
+                        ck3GameObj,
+                        vic3GameObj,
+                        customGameObj
+                    with
+                    | Some game, _, _, _, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, Some game, _, _, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, Some game, _, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, Some game, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, Some game, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, Some game, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, _, Some game, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, _, _, Some game, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, _, _, _, Some game -> semanticTokensFunction game
+                    | _ -> None
+            }
+            |> catchError None
+
         member this.DocumentFormatting(p: DocumentFormattingParams) =
             async {
                 let path =
@@ -1565,7 +1987,40 @@ type Server(client: ILanguageClient) =
         member this.DocumentRangeFormatting(_: DocumentRangeFormattingParams) = TODO()
         member this.DocumentOnTypeFormatting(_: DocumentOnTypeFormattingParams) = TODO()
         member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = TODO()
-        member this.Rename(_: RenameParams) = TODO()
+        member this.Rename(p: RenameParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let position = PosHelper.fromZ p.position.line p.position.character
+                        let path = getPathFromDoc p.textDocument.uri
+
+                        let refs =
+                            game.FindAllRefs
+                                position
+                                path
+                                (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
+
+                        match refs with
+                        | Some gotos when gotos.Length > 0 ->
+                            let changes =
+                                gotos
+                                |> List.groupBy (fun r -> r.FileName)
+                                |> List.map (fun (fileName, ranges) ->
+                                    let uri = Uri(fileName).ToString()
+                                    let edits =
+                                        ranges
+                                        |> List.map (fun r ->
+                                            { range = convRangeToLSPRange r
+                                              newText = p.newName })
+                                    uri, edits)
+                                |> Map.ofList
+
+                            { documentChanges = []; changes = changes }
+                        | _ -> { documentChanges = []; changes = Map.empty }
+                    | None -> { documentChanges = []; changes = Map.empty }
+            }
+            |> catchError { documentChanges = []; changes = Map.empty }
 
         member this.ExecuteCommand(p: ExecuteCommandParams) : Async<ExecuteCommandResponse option> =
             async {

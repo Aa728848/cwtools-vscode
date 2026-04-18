@@ -134,7 +134,8 @@ type TextDocumentEdit =
       edits: TextEdit list }
 
 type WorkspaceEdit =
-    { documentChanges: TextDocumentEdit list }
+    { documentChanges: TextDocumentEdit list
+      changes: Map<string, TextEdit list> }
 
 type TextDocumentPositionParams =
     { textDocument: TextDocumentIdentifier
@@ -387,6 +388,8 @@ type ExecuteCommandParams =
 
 type ExecuteCommandResponse = JsonValue
 
+type SemanticTokensParams = { textDocument: TextDocumentIdentifier }
+
 type Request =
     | Initialize of InitializeParams
     | Shutdown
@@ -412,6 +415,7 @@ type Request =
     | Rename of RenameParams
     | ExecuteCommand of ExecuteCommandParams
     | DidChangeWorkspaceFolders of DidChangeWorkspaceFoldersParams
+    | SemanticTokensFull of SemanticTokensParams
 
 [<RequireQualifiedAccess>]
 type TextDocumentSyncKind =
@@ -449,6 +453,16 @@ type DocumentLinkOptions = { resolveProvider: bool }
 
 let defaultDocumentLinkOptions = { resolveProvider = false }
 
+type SemanticTokens = { data: int list }
+
+type SemanticTokensLegend =
+    { tokenTypes: string list
+      tokenModifiers: string list }
+
+type SemanticTokensOptions =
+    { legend: SemanticTokensLegend
+      full: bool }
+
 type ExecuteCommandOptions = { commands: string list }
 
 type SaveOptions = { includeText: bool }
@@ -485,7 +499,8 @@ type ServerCapabilities =
       renameProvider: bool
       documentLinkProvider: DocumentLinkOptions option
       executeCommandProvider: ExecuteCommandOptions option
-      inlayHintProvider: bool }
+      inlayHintProvider: bool
+      semanticTokensProvider: SemanticTokensOptions option }
 
 let defaultServerCapabilities: ServerCapabilities =
     { textDocumentSync = defaultTextDocumentSyncOptions
@@ -505,7 +520,8 @@ let defaultServerCapabilities: ServerCapabilities =
       renameProvider = false
       documentLinkProvider = None
       executeCommandProvider = None
-      inlayHintProvider = false }
+      inlayHintProvider = false
+      semanticTokensProvider = None }
 
 type InitializeResult = { capabilities: ServerCapabilities }
 
@@ -661,6 +677,7 @@ type ILanguageServer =
     abstract member ExecuteCommand: ExecuteCommandParams -> Async<ExecuteCommandResponse option>
     abstract member DidChangeWorkspaceFolders: DidChangeWorkspaceFoldersParams -> Async<unit>
     abstract member DidFocusFile: DidFocusFileParams -> Async<unit>
+    abstract member SemanticTokensFull: SemanticTokensParams -> Async<SemanticTokens option>
 
 type PublishDiagnosticsParams =
     { uri: Uri

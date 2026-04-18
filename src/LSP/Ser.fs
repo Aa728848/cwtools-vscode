@@ -122,6 +122,22 @@ let rec private serializer (depth: int, options: JsonWriteOptions, t: Type) : ob
 
             let innerString = String.concat "," fieldStrings
             $"{{%s{innerString}}}"
+    elif isMap t then
+        let arguments = t.GetGenericArguments()
+        let valueType = arguments[1]
+        let serializeValue = serializer (depth, options, valueType)
+
+        fun outer ->
+            let asEnum = outer :?> System.Collections.IEnumerable
+            let kvPairs =
+                Seq.cast<obj> asEnum
+                |> Seq.map (fun kv ->
+                    let kvType = kv.GetType()
+                    let key = kvType.GetProperty("Key").GetValue(kv) :?> string
+                    let value = kvType.GetProperty("Value").GetValue(kv)
+                    $"{escapeStr key}:{serializeValue value}")
+            let join = String.Join(",", kvPairs)
+            $"{{{join}}}"
     elif implementsSeq t then
         let innerType = t.GetGenericArguments()
         let serializeInner = serializer (depth, options, innerType[0])

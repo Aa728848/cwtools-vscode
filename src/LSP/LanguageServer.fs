@@ -79,6 +79,11 @@ let private serializeDocumentLink = serializerFactory<DocumentLink> jsonWriteOpt
 let private serializeWorkspaceEdit =
     serializerFactory<WorkspaceEdit> jsonWriteOptions
 
+let private serializeSemanticTokens =
+    serializerFactory<SemanticTokens> jsonWriteOptions
+
+let private serializeSemanticTokensOption = Option.map serializeSemanticTokens
+
 let private serializePublishDiagnostics =
     serializerFactory<PublishDiagnosticsParams> jsonWriteOptions
 
@@ -281,6 +286,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | Rename(p) -> server.Rename(p) |> thenMap serializeWorkspaceEdit |> thenSome
         | ExecuteCommand(p) -> server.ExecuteCommand p |> thenMap serializeExecuteCommandResponseOption
         | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenNone
+        | SemanticTokensFull(p) ->
+            server.SemanticTokensFull(p)
+            |> thenMap serializeSemanticTokensOption
+            |> thenMap (Option.defaultValue "null")
+            |> thenSome
 
     let processNotification (n: Notification) =
         match n with

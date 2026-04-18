@@ -288,7 +288,7 @@ module LanguageServerFeatures =
                 { textDocument = docIdentifier
                   edits = textedits }
 
-            let docChanges = { documentChanges = [ changes ] }
+            let docChanges = { documentChanges = [ changes ]; changes = Map.empty }
 
             client.ApplyWorkspaceEdit
                 { label = Some $"Pretriggers %s{fileInfo.Name}"

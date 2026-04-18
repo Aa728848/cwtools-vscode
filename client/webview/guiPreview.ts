@@ -89,6 +89,8 @@ let panX = 20;
 let panY = 60;
 let isDragging = false;
 let lastMX = 0, lastMY = 0;
+let currentResolution: string = 'auto';
+let animatingSprites = false;
 
 function updateTransform() {
     const c = document.getElementById('canvas-container')!;
@@ -184,7 +186,39 @@ function applyImageStyles(img: HTMLImageElement, div: HTMLElement, el: GuiElemen
         f = Math.max(0, Math.min(f, el.noOfFrames - 1));
         img.style.left = `-${f * 100}%`; 
         div.style.overflow = 'hidden';
+        // Mark for animation
+        img.dataset.animFrames = String(el.noOfFrames);
+        img.dataset.animCurrent = String(f);
     }
+}
+
+// ─── Sprite Animation ─────────────────────────────────────────────────────
+
+let animInterval: ReturnType<typeof setInterval> | null = null;
+
+function toggleSpriteAnimations(play: boolean) {
+    if (animInterval) {
+        clearInterval(animInterval);
+        animInterval = null;
+    }
+    if (!play) {
+        // Reset all animated sprites to their original frame
+        document.querySelectorAll<HTMLImageElement>('img[data-anim-frames]').forEach(img => {
+            const orig = parseInt(img.dataset.animCurrent || '0');
+            img.style.left = `-${orig * 100}%`;
+        });
+        return;
+    }
+    // Cycle through frames every 200ms
+    animInterval = setInterval(() => {
+        document.querySelectorAll<HTMLImageElement>('img[data-anim-frames]').forEach(img => {
+            const frames = parseInt(img.dataset.animFrames || '1');
+            const current = parseInt(img.dataset.animFrame || '0');
+            const next = (current + 1) % frames;
+            img.dataset.animFrame = String(next);
+            img.style.left = `-${next * 100}%`;
+        });
+    }, 200);
 }
 
 // ─── PDX Layout Engine ──────────────────────────────────────────────────────
@@ -670,8 +704,16 @@ function renderAll(elements: GuiElement[], fileName: string) {
         if (b > maxB) maxB = b;
     }
 
-    const screenW = Math.max(800, maxR + 50);
-    const screenH = Math.max(600, maxB + 50);
+    // Resolution override
+    let screenW: number, screenH: number;
+    if (currentResolution !== 'auto') {
+        const [rw, rh] = currentResolution.split('x').map(Number);
+        screenW = rw;
+        screenH = rh;
+    } else {
+        screenW = Math.max(800, maxR + 50);
+        screenH = Math.max(600, maxB + 50);
+    }
 
     const canvas = document.createElement('div');
     canvas.className = 'card-body';
@@ -682,6 +724,14 @@ function renderAll(elements: GuiElement[], fileName: string) {
     canvas.style.border = '1px solid #444';
     canvas.style.margin = '20px auto';
     canvas.style.overflow = 'visible';
+
+    // Resolution label
+    if (currentResolution !== 'auto') {
+        const resLabel = document.createElement('div');
+        resLabel.style.cssText = 'position:absolute;top:-22px;right:4px;font-size:11px;color:#888;pointer-events:none;';
+        resLabel.textContent = `${screenW}×${screenH}`;
+        canvas.appendChild(resLabel);
+    }
 
     for (const el of elements) {
         renderElement(el, canvas, screenW, screenH);
@@ -763,6 +813,31 @@ function setupControls() {
         document.body.classList.toggle('preview-mode');
         document.getElementById('btn-preview')!.classList.toggle('active');
     };
+
+    // Resolution selector
+    const resSel = document.getElementById('resolution-select') as HTMLSelectElement | null;
+    if (resSel) {
+        resSel.onchange = () => {
+            currentResolution = resSel.value;
+            hasRendered = false; // force fitToView on re-render
+            if (allElements.length > 0) {
+                renderAll(allElements, document.getElementById('title')?.textContent?.replace('GUI Preview: ', '') || '');
+                updateLayersPanel(allElements);
+                requestAnimationFrame(fitToView);
+            }
+        };
+    }
+
+    // Animation toggle
+    const animBtn = document.getElementById('btn-anim');
+    if (animBtn) {
+        animBtn.onclick = () => {
+            animatingSprites = !animatingSprites;
+            animBtn.textContent = animatingSprites ? '⏸' : '▶';
+            animBtn.classList.toggle('active', animatingSprites);
+            toggleSpriteAnimations(animatingSprites);
+        };
+    }
     document.getElementById('btn-edit')!.onclick = toggleEditMode;
     document.getElementById('btn-layers')!.onclick = () => {
         const sp = document.getElementById('side-panel')!;

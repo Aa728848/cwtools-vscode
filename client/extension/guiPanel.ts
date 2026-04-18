@@ -766,6 +766,13 @@ export class GuiPanel {
             <button id="btn-fit" title="适应窗口">⊡</button>
             <button id="btn-reset" title="重置">↻</button>
             <button id="btn-preview" title="预览模式 (隐藏边框)">👁</button>
+            <button id="btn-anim" title="播放精灵动画">▶</button>
+            <select id="resolution-select" title="预览分辨率">
+                <option value="auto">自适应</option>
+                <option value="1920x1080">1080p</option>
+                <option value="2560x1440">1440p</option>
+                <option value="3840x2160">4K</option>
+            </select>
             <button id="btn-search" title="搜索元素 (Ctrl+F)">🔍</button>
             <button id="btn-layers" title="切换图层面板">☰</button>
             <span class="separator edit-only">|</span>

@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Dayshine",
 	"license": "MIT",
-	"version": "1.1.5",
+	"version": "1.2.0",
 	"preview": true,
 	"publisher": "Eddy",
 	"icon": "docs/stellaris.png",
@@ -40,26 +40,6 @@
 		},
 		"menus": {
 			"editor/title": [
-				{
-					"when": "cwtoolsGraphFile == true && cwtoolsWebview == false",
-					"command": "showGraph",
-					"group": "navigation"
-				},
-				{
-					"when": "cwtoolsWebview == true",
-					"command": "saveGraphImage",
-					"group": "navigation"
-				},
-				{
-					"when": "cwtoolsWebview == true",
-					"command": "setGraphDepth",
-					"group": "navigation"
-				},
-				{
-					"when": "cwtoolsWebview == true",
-					"command": "saveGraphJson",
-					"group": "navigation"
-				},
 				{
 					"command": "cwtools.toggleInlineTextOn",
 					"when": "!config.cwtools.showInlineText",
@@ -124,37 +104,9 @@
 				"category": "cwtools"
 			},
 			{
-				"command": "showGraph",
-				"title": "%commands.showGraph.title%",
-				"category": "cwtools"
-			},
-			{
-				"command": "graphFromJson",
-				"title": "%commands.graphFromJson.title%",
-				"category": "cwtools"
-			},
-			{
 				"command": "exportTypes",
 				"title": "%commands.exportTypes.title%",
 				"category": "cwtools"
-			},
-			{
-				"command": "saveGraphImage",
-				"title": "%commands.saveGraphImage.title%",
-				"category": "cwtools",
-				"enablement": "cwtoolsWebview == true"
-			},
-			{
-				"command": "setGraphDepth",
-				"title": "%commands.setGraphDepth.title%",
-				"category": "cwtools",
-				"enablement": "cwtoolsWebview == true"
-			},
-			{
-				"command": "saveGraphJson",
-				"title": "%commands.saveGraphJson.title%",
-				"category": "cwtools",
-				"enablement": "cwtoolsWebview == true"
 			},
 			{
 				"command": "cwtools.toggleInlineTextOn",
@@ -339,14 +291,6 @@
 					"scope": "application",
 					"type": "string",
 					"description": "%configuration.cwtools.cache.eu5.description%"
-				},
-				"cwtools.graph.zoomSensitivity": {
-					"scope": "resource",
-					"type": "number",
-					"maximum": 2,
-					"minimum": 0,
-					"description": "%configuration.cwtools.graph.zoomSensitivity.description%",
-					"default": 1
 				},
 				"cwtools.maxFileSize": {
 					"scope": "resource",

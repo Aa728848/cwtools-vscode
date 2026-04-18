@@ -12,10 +12,9 @@ import { workspace, ExtensionContext, window, Disposable, Uri, WorkspaceEdit, Te
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, NotificationType, ExecuteCommandRequest, ExecuteCommandParams, RevealOutputChannelOn } from 'vscode-languageclient/node';
 
 import { FileExplorer, FileListItem } from './fileExplorer';
-import * as gp from './graphPanel';
 import { GuiPanel } from './guiPanel';
 import * as exe from './executable';
-import { getGraphData } from '../common/graphTypes';
+import { registerLocalizationFeatures } from './locDecorations';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
@@ -43,6 +42,96 @@ function safeRegisterCommand(context: ExtensionContext, commandId: string, handl
 }
 
 export async function activate(context: ExtensionContext) {
+
+	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
+	registerLocalizationFeatures(context);
+
+	// Client-side Rename Provider — uses VSCode's built-in reference finding
+	const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
+	const docSelector = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
+
+	context.subscriptions.push(
+		vs.languages.registerRenameProvider(docSelector, {
+			async provideRenameEdits(document, position, newName, _token) {
+				const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z0-9_@$]+/);
+				const oldName = wordRange ? document.getText(wordRange) : '';
+				if (!oldName) {
+					throw new Error('No symbol found at cursor');
+				}
+
+				const edit = new WorkspaceEdit();
+				const editMeta: vs.WorkspaceEditEntryMetadata = {
+					needsConfirmation: true,
+					label: 'Rename Symbol'
+				};
+
+				// First try LSP references (works for type definitions)
+				const refs: vs.Location[] = await vs.commands.executeCommand(
+					'vscode.executeReferenceProvider', document.uri, position
+				) || [];
+
+				if (refs.length > 0) {
+					for (const ref of refs) {
+						const refDoc = await vs.workspace.openTextDocument(ref.uri);
+						const refText = refDoc.getText(ref.range);
+						if (refText === oldName) {
+							edit.replace(ref.uri, ref.range, newName, editMeta);
+						} else {
+							const lineText = refDoc.lineAt(ref.range.start.line).text;
+							const idx = lineText.indexOf(oldName, ref.range.start.character);
+							if (idx >= 0) {
+								edit.replace(ref.uri, new vs.Range(
+									ref.range.start.line, idx,
+									ref.range.start.line, idx + oldName.length
+								), newName, editMeta);
+							}
+						}
+					}
+				} else {
+					// Fallback: search all .txt files in workspace for exact word match
+					const files = await vs.workspace.findFiles('**/*.txt', '**/.*/**');
+					const wordBoundary = new RegExp(`(?<![A-Za-z0-9_])${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_])`, 'g');
+					for (const fileUri of files) {
+						const doc = await vs.workspace.openTextDocument(fileUri);
+						const text = doc.getText();
+						let match: RegExpExecArray | null;
+						while ((match = wordBoundary.exec(text)) !== null) {
+							const startPos = doc.positionAt(match.index);
+							const endPos = doc.positionAt(match.index + oldName.length);
+							edit.replace(fileUri, new vs.Range(startPos, endPos), newName, editMeta);
+						}
+					}
+				}
+
+				if (edit.size === 0) {
+					throw new Error('No occurrences found for rename');
+				}
+				return edit;
+			},
+			async prepareRename(document, position, _token) {
+				const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z0-9_@$]+/);
+				if (!wordRange) {
+					throw new Error('Cannot rename this element');
+				}
+				return { range: wordRange, placeholder: document.getText(wordRange) };
+			}
+		})
+	);
+
+	// CodeLens click command — properly converts JSON args to VSCode types
+	safeRegisterCommand(context, 'cwtools.showReferences', async (uriStr: string, pos: any, locs: any[]) => {
+		const uri = vs.Uri.parse(uriStr);
+		const position = new vs.Position(pos.line || 0, pos.character || 0);
+		const locations = (locs || []).map((loc: any) => {
+			const locUri = vs.Uri.parse(loc.uri);
+			const range = new vs.Range(
+				new vs.Position(loc.range?.start?.line || 0, loc.range?.start?.character || 0),
+				new vs.Position(loc.range?.end?.line || 0, loc.range?.end?.character || 0)
+			);
+			return new vs.Location(locUri, range);
+		});
+		await vs.commands.executeCommand('editor.action.showReferences', uri, position, locations);
+	});
 
 
 	class CwtoolsProvider implements vs.TextDocumentContentProvider {
@@ -161,8 +250,6 @@ export async function activate(context: ExtensionContext) {
 		interface UpdateFileList { fileList: FileListItem[] }
 		const updateFileList = new NotificationType<UpdateFileList>('updateFileList');
 
-		let latestType: string;
-
 		async function didChangeActiveTextEditor(editor: vs.TextEditor | undefined): Promise<void> {
 			if (editor) {
 				const path = editor.document.uri.toString();
@@ -171,18 +258,6 @@ export async function activate(context: ExtensionContext) {
 				}
 				if (editor.document.languageId == language) {
 					await client.sendNotification(didFocusFile, { uri: path });
-				}
-				const params: ExecuteCommandParams = {
-					command: "getFileTypes",
-					arguments: [path]
-				};
-				const data = await client.sendRequest(ExecuteCommandRequest.type, params);
-				if (data !== undefined && data && data[0]) {
-					latestType = data[0];
-					await commands.executeCommand('setContext', 'cwtoolsGraphFile', true);
-				}
-				else {
-					await commands.executeCommand('setContext', 'cwtoolsGraphFile', false);
 				}
 			}
 		}
@@ -363,58 +438,7 @@ export async function activate(context: ExtensionContext) {
 			await window.showWarningMessage("You have opened a file directly.\n\rFor CWTools to work correctly, the mod folder should be opened using \"File, Open Folder\"")
 		}
 
-		/// TODO graph
-		// let disposable2 = commands.registerCommand('techGraph', () => {
-		// 	commands.executeCommand("gettech").then((t: any) => {
-		// 		//console.log(t);
-		// 		let uri = Uri.parse("cwgraph://test.html")
 
-		// 		workspace.openTextDocument(uri).then(_ => {
-		// 			// let exponentPage = vscode.window.createWebviewPanel("Expo QR Code", "Expo QR Code", vscode.ViewColumn.Two, {});
-		// 			// exponentPage.webview.html = this.qrCodeContentProvider.provideTextDocumentContent(vscode.Uri.parse(exponentUrl));
-
-		// 			// vscode.commands.executeCommand("vscode.previewHtml", vscode.Uri.parse(exponentUrl), 1, "Expo QR code");
-		// 			// commands.executeCommand('vscode.previewHtml', uri, ViewColumn.Active, "test")
-		// 			let graphPage = window.createWebviewPanel("CWTools graph", "Technology graph", ViewColumn.Active, { enableScripts: true, localResourceRoots: [Uri.file(context.extensionPath)]});
-		// 			graphPage.webview.html = graphProvider.provideTextDocumentContent(uri);
-		// 		})
-		// 	});
-		// });
-
-		let currentGraphDepth = 3;
-		const showGraph = async function () {
-			const graphData = await getGraphData(latestType, currentGraphDepth);
-			const wheelSensitivity: number = workspace.getConfiguration('cwtools.graph').get('zoomSensitivity') ?? 1;
-			gp.GraphPanel.create(context.extensionPath);
-			gp.GraphPanel.currentPanel!.initialiseGraph(graphData, wheelSensitivity);
-		}
-		safeRegisterCommand(context, 'showGraph', async () => {
-			await showGraph();
-		});
-		safeRegisterCommand(context, 'setGraphDepth', async () => {
-			const res = await window.showInputBox(
-				{
-					placeHolder: "default: 3",
-					prompt: "Set graph depth (how many connections to go back from this file)",
-					value: currentGraphDepth.toString(),
-					validateInput: (v: string) => Number.isInteger(Number(v)) ? undefined : "Please enter a number"
-				});
-			if (Number.isInteger(Number(res))) {
-				currentGraphDepth = Number(res)
-				await showGraph()
-			}
-		});
-		safeRegisterCommand(context, 'graphFromJson', async () => {
-			const uri = await window.showOpenDialog({ filters: { 'Json': ['json'] } })
-			if (!uri) {
-				return;
-			}
-			const bytes = await vs.workspace.fs.readFile(uri[0]);
-			const data = new TextDecoder('utf-8').decode(bytes);
-			const wheelSensitivity: number = workspace.getConfiguration('cwtools.graph').get('zoomSensitivity') ?? 1;
-			gp.GraphPanel.create(context.extensionPath);
-			gp.GraphPanel.currentPanel!.initialiseGraph(data, wheelSensitivity);
-		});
 		// Create the language client and start the client.
 
 		// Push the disposable to the context's subscriptions so that the

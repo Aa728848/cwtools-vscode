@@ -142,10 +142,10 @@ module LanguageServerFeatures =
                         let params_found = paramPattern.Matches(value)
                         let definedParameters = [ for m in params_found -> m.Groups.[1].Value ] |> List.distinct
                         if definedParameters.Length > 0 then
-                            let paramsStr = definedParameters |> List.map (fun p -> sprintf "- `$%s$` - Parameter" p) |> String.concat "\n"
-                            sprintf "**Scripted Variable**: `%s`\n\n**Value**: `%s`\n\n**Parameters**:\n%s" displayName value paramsStr
+                            let paramsStr = definedParameters |> List.map (fun p -> sprintf "`$%s$`" p) |> String.concat ", "
+                            sprintf "`%s` = `%s`\n\nParameters: %s" displayName value paramsStr
                         else
-                            sprintf "**Scripted Variable**: `%s`\n\n**Value**: `%s`" displayName value)
+                            sprintf "`%s` = `%s`" displayName value)
 
                 let lochover =
                     lochoverFromInfo (game.References().Localisation) symbolInfo unescapedWord

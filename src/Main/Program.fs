@@ -915,7 +915,7 @@ type Server(client: ILanguageClient) =
                                         { tokenTypes =
                                             [ "namespace"; "type"; "function"; "variable"; "parameter"
                                               "property"; "enumMember"; "keyword"; "number"; "string"
-                                              "comment"; "operator" ]
+                                              "comment"; "operator"; "macro"; "decorator" ]
                                           tokenModifiers = [ "declaration"; "definition"; "readonly" ] }
                                       full = true } } }
             }
@@ -1790,7 +1790,8 @@ type Server(client: ILanguageClient) =
             // Token type indices (must match legend in capabilities):
             // 0=namespace, 1=type, 2=function, 3=variable, 4=parameter,
             // 5=property, 6=enumMember, 7=keyword, 8=number, 9=string,
-            // 10=comment, 11=operator
+            // 10=comment, 11=operator, 12=macro, 13=decorator
+            // Effect keys -> 2(function), Trigger keys -> 1(type)
             async {
                 let semanticTokensFunction (game: IGame<_>) =
                     let filePath = p.textDocument.uri.LocalPath
@@ -1835,14 +1836,18 @@ type Server(client: ILanguageClient) =
                                             if col >= 0 && col + key.Length <= srcLine.Length && srcLine.Substring(col, key.Length) = key then
                                                 col
                                             else
-                                                let idx = srcLine.IndexOf(key)
-                                                if idx >= 0 then idx else -1
+                                                // Search from AST column position, not from line start
+                                                let idx = srcLine.IndexOf(key, max 0 col)
+                                                if idx >= 0 then idx
+                                                else
+                                                    let idx2 = srcLine.IndexOf(key)
+                                                    if idx2 >= 0 then idx2 else -1
                                         if actualCol >= 0 then
                                             let keyType =
                                                 if key.StartsWith("@") then 3
                                                 elif key.StartsWith("$") && key.EndsWith("$") then 4
                                                 elif Set.contains key allEffects then 2
-                                                elif Set.contains key allTriggers then 2
+                                                elif Set.contains key allTriggers then 1
                                                 elif key = "if" || key = "else" || key = "else_if"
                                                     || key = "AND" || key = "OR" || key = "NOT"
                                                     || key = "NOR" || key = "NAND"
@@ -1867,14 +1872,21 @@ type Server(client: ILanguageClient) =
                                             elif rawVal = "yes" || rawVal = "no" then 7
                                             elif System.Double.TryParse(rawVal, &dummy) then 8
                                             else 6
-                                        // Find the actual position of the value
+                                        // Find the actual position of the value using AST end position hint
                                         let searchVal = if rawVal.StartsWith("\"") then cleanVal else rawVal
-                                        let eqIdx = srcLine.IndexOf('=')
-                                        if eqIdx >= 0 then
-                                            let afterEq = srcLine.Substring(eqIdx + 1)
-                                            let valIdx = afterEq.IndexOf(searchVal)
-                                            if valIdx >= 0 && searchVal.Length > 0 then
-                                                let actualValCol = eqIdx + 1 + valIdx
+                                        if searchVal.Length > 0 then
+                                            let endCol = int l.Position.EndColumn
+                                            // Try AST-provided end position first (value ends at EndColumn)
+                                            let valStartHint = max 0 (endCol - searchVal.Length)
+                                            let actualValCol =
+                                                if valStartHint >= 0 && valStartHint + searchVal.Length <= srcLine.Length && srcLine.Substring(valStartHint, searchVal.Length) = searchVal then
+                                                    valStartHint
+                                                else
+                                                    // Fallback: search from after the key position
+                                                    let searchFrom = max 0 (col + key.Length)
+                                                    let idx = srcLine.IndexOf(searchVal, searchFrom)
+                                                    if idx >= 0 then idx else -1
+                                            if actualValCol >= 0 then
                                                 verifyAndAdd valLine actualValCol searchVal.Length valType
                             )
 
@@ -1893,7 +1905,41 @@ type Server(client: ILanguageClient) =
                                         verifyAndAdd line col valLen valType
                             )
 
-                            n.Nodes |> Seq.iter visitNode
+                            // Generate tokens for Node keys (e.g. effect = { ... }, trigger = { ... })
+                            n.Nodes |> Seq.iter (fun childNode ->
+                                if childNode.Position.FileName = filePath then
+                                    let nLine = max 0 (int childNode.Position.StartLine - 1)
+                                    let nCol = int childNode.Position.StartColumn
+                                    let nKey = childNode.Key
+                                    if nKey.Length > 0 && nLine < lines.Length then
+                                        let srcLine = lines.[nLine]
+                                        let actualCol =
+                                            if nCol >= 0 && nCol + nKey.Length <= srcLine.Length && srcLine.Substring(nCol, nKey.Length) = nKey then
+                                                nCol
+                                            else
+                                                let idx = srcLine.IndexOf(nKey, max 0 nCol)
+                                                if idx >= 0 then idx
+                                                else
+                                                    let idx2 = srcLine.IndexOf(nKey)
+                                                    if idx2 >= 0 then idx2 else -1
+                                        if actualCol >= 0 then
+                                            let keyType =
+                                                if nKey.StartsWith("@") then 3
+                                                elif nKey.StartsWith("$") && nKey.EndsWith("$") then 4
+                                                elif Set.contains nKey allEffects then 2
+                                                elif Set.contains nKey allTriggers then 1
+                                                elif nKey = "if" || nKey = "else" || nKey = "else_if"
+                                                    || nKey = "AND" || nKey = "OR" || nKey = "NOT"
+                                                    || nKey = "NOR" || nKey = "NAND"
+                                                    || nKey = "limit" || nKey = "trigger"
+                                                    || nKey = "modifier" || nKey = "while"
+                                                    || nKey = "switch" || nKey = "every"
+                                                    || nKey = "random" || nKey = "random_list"
+                                                    || nKey = "inline_script" then 7
+                                                else 5
+                                            verifyAndAdd nLine actualCol nKey.Length keyType
+                                visitNode childNode
+                            )
 
                         visitNode entity.entity
 

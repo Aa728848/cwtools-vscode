@@ -70,8 +70,17 @@ export class SolarSystemPanel {
                     case 'addPlanet':
                         this._messageQueue = this._messageQueue.then(() => this._handleAddPlanet(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addPlanet: ${e}`));
                         break;
+                    case 'addStar':
+                        this._messageQueue = this._messageQueue.then(() => this._handleAddStar(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addStar: ${e}`));
+                        break;
+                    case 'addMoon':
+                        this._messageQueue = this._messageQueue.then(() => this._handleAddMoon(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addMoon: ${e}`));
+                        break;
                     case 'addRingWorld':
                         this._messageQueue = this._messageQueue.then(() => this._handleAddRingWorld(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addRingWorld: ${e}`));
+                        break;
+                    case 'addSibling':
+                        this._messageQueue = this._messageQueue.then(() => this._handleAddSibling(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addSibling: ${e}`));
                         break;
                     case 'deletePlanet':
                         this._messageQueue = this._messageQueue.then(() => this._handleDeletePlanet(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR deletePlanet: ${e}`));
@@ -295,6 +304,128 @@ export class SolarSystemPanel {
     }
 
     /**
+     * Handle adding a star (first body with orbit_distance = 0).
+     */
+    private async _handleAddStar(msg: {
+        systemLine: number;
+        systemEndLine: number;
+        firstBodyLine: number; // 0 if no bodies exist
+        planetClass: string;
+        size: number;
+    }) {
+        if (!this._document) return;
+        const doc = this._document;
+
+        this._contentSnapshots.push(doc.getText());
+        this._lastSnapshotTime = Date.now();
+
+        // Insert before the first body, or before system closing brace
+        const insertLineIdx = msg.firstBodyLine > 0 ? msg.firstBodyLine - 1 : msg.systemEndLine - 1;
+        const refLine = doc.lineAt(insertLineIdx);
+        const indent = refLine.text.match(/^(\s*)/)?.[1] ?? '';
+        const starIndent = msg.firstBodyLine > 0 ? indent : indent + '\t';
+
+        const starCode = `${starIndent}planet = { class = ${msg.planetClass} orbit_distance = 0 size = ${msg.size} }\n`;
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), starCode);
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+        await this._loadAndRender(doc);
+    }
+
+    /**
+     * Handle adding a moon inside a parent planet block.
+     */
+    private async _handleAddMoon(msg: {
+        parentLine: number;
+        parentEndLine: number;
+        planetClass: string;
+        size: number;
+        orbitDistance: number;
+        orbitAngle: number;
+    }) {
+        if (!this._document) return;
+        const doc = this._document;
+
+        this._contentSnapshots.push(doc.getText());
+        this._lastSnapshotTime = Date.now();
+
+        const edit = new vscode.WorkspaceEdit();
+
+        if (msg.parentLine === msg.parentEndLine) {
+            // Single-line parent: expand it and add moon
+            const lineIdx = msg.parentLine - 1;
+            const lineText = doc.lineAt(lineIdx).text;
+            const indent = lineText.match(/^(\s*)/)?.[1] ?? '';
+            const moonIndent = indent + '\t';
+
+            // Remove trailing } and expand to multi-line with proper indentation
+            const openBrace = lineText.indexOf('{');
+            const lastBrace = lineText.lastIndexOf('}');
+            if (openBrace >= 0 && lastBrace > openBrace) {
+                const prefix = lineText.substring(0, openBrace + 1); // e.g. "\tmoon = {"
+                const innerContent = lineText.substring(openBrace + 1, lastBrace).trim(); // properties
+                const moonLine = `${moonIndent}moon = { class = ${msg.planetClass} orbit_distance = ${msg.orbitDistance} orbit_angle = ${msg.orbitAngle} size = ${msg.size} }`;
+                const newContent = `${prefix}\n${moonIndent}${innerContent}\n${moonLine}\n${indent}}`;
+                edit.replace(doc.uri, new vscode.Range(lineIdx, 0, lineIdx, lineText.length), newContent);
+            }
+        } else {
+            // Multi-line parent: insert before closing brace
+            const insertLineIdx = msg.parentEndLine - 1;
+            const closingLine = doc.lineAt(insertLineIdx);
+            const indent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
+            const moonIndent = indent + '\t';
+            const moonCode = `${moonIndent}moon = { class = ${msg.planetClass} orbit_distance = ${msg.orbitDistance} orbit_angle = ${msg.orbitAngle} size = ${msg.size} }\n`;
+            edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), moonCode);
+        }
+
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+        await this._loadAndRender(doc);
+    }
+    /**
+     * Handle adding a sibling body at the same orbit as the clicked body.
+     * Inserts the new body right after the sibling with orbit_distance = 0.
+     */
+    private async _handleAddSibling(msg: {
+        siblingLine: number;
+        siblingEndLine: number;
+        bodyType: string;
+        planetClass: string;
+        size: number;
+        orbitAngle: number;
+    }) {
+        if (!this._document) return;
+        const doc = this._document;
+
+        this._contentSnapshots.push(doc.getText());
+        this._lastSnapshotTime = Date.now();
+
+        const edit = new vscode.WorkspaceEdit();
+
+        // Determine the keyword based on body type
+        const keyword = msg.bodyType === 'moon' ? 'moon' : 'planet';
+
+        // Find the indentation of the sibling line
+        const sibLineIdx = msg.siblingLine - 1;
+        const sibLineText = doc.lineAt(sibLineIdx).text;
+        const indent = sibLineText.match(/^(\s*)/)?.[1] ?? '';
+
+        // Insert right after the sibling's end line
+        const insertLineIdx = msg.siblingEndLine; // 0-based: line AFTER the sibling end
+        const newBody = `${indent}${keyword} = { class = ${msg.planetClass} orbit_distance = 0 orbit_angle = ${msg.orbitAngle} size = ${msg.size} }\n`;
+        edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), newBody);
+
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+        await this._loadAndRender(doc);
+    }
+
+    /**
      * Handle adding a complete ring world (change_orbit + ring segments).
      */
     private async _handleAddRingWorld(msg: {
@@ -302,6 +433,8 @@ export class SolarSystemPanel {
         orbitDistance: number;
         segmentCount: number;
         segmentAngle: number;
+        parentLine?: number;
+        parentEndLine?: number;
     }) {
         if (!this._document) return;
         const doc = this._document;
@@ -310,48 +443,84 @@ export class SolarSystemPanel {
         this._contentSnapshots.push(doc.getText());
         this._lastSnapshotTime = Date.now();
 
-        // Parse to find cumulative orbit at insertion point (end of system)
-        const content = doc.getText();
-        const systems = parseSolarSystemFile(content);
-        let cumulativeOrbit = 0;
-        for (const sys of systems) {
-            if (sys.endLine === msg.systemEndLine) {
-                // Find last body's cumulative orbit
-                for (const b of sys.bodies) {
-                    const bodyEndOrbit = b.resolvedOrbitRadius + b.changeOrbit;
-                    if (bodyEndOrbit > cumulativeOrbit) {
-                        cumulativeOrbit = bodyEndOrbit;
-                    }
-                }
-                break;
-            }
-        }
-
-        // change_orbit = desired_absolute_orbit - current_cumulative
-        // Ring world should be at absolute orbit 30 from star
-        const changeOrbitValue = msg.orbitDistance - cumulativeOrbit;
-        log.appendLine(`  RING CREATE: cumOrbit=${cumulativeOrbit} desired=${msg.orbitDistance} change_orbit=${changeOrbitValue}`);
-
-        const insertLineIdx = msg.systemEndLine - 1;
-        const closingLine = doc.lineAt(insertLineIdx);
-        const indent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
-        const pi = indent + '\t';
-
-        // Build the ring world block: change_orbit + segments
-        // Pattern: habitable, seam, tech (repeating) → 4 habitable in 12 segments
+        // Build segment classes: habitable, seam, tech (repeating)
         const segClasses = [];
         const pattern = ['pc_ringworld_habitable', 'pc_ringworld_seam', 'pc_ringworld_tech'];
         for (let i = 0; i < msg.segmentCount; i++) {
             segClasses.push(pattern[i % pattern.length]);
         }
 
-        let code = `${pi}change_orbit = ${changeOrbitValue}\n`;
-        for (const cls of segClasses) {
-            code += `${pi}planet = { class = ${cls} orbit_angle = ${msg.segmentAngle} orbit_distance = 0 }\n`;
+        const edit = new vscode.WorkspaceEdit();
+
+        if (msg.parentLine && msg.parentEndLine) {
+            // Nested inside a planet block as moons
+            // Inside a planet, cumulative orbit starts from 0. change_orbit is just the orbit distance.
+            const changeOrbitValue = msg.orbitDistance;
+            log.appendLine(`  RING CREATE (moon): parent L${msg.parentLine}-${msg.parentEndLine} change_orbit=${changeOrbitValue}`);
+
+            if (msg.parentLine === msg.parentEndLine) {
+                // Single-line parent star: expand it
+                const lineIdx = msg.parentLine - 1;
+                const lineText = doc.lineAt(lineIdx).text;
+                const indent = lineText.match(/^(\s*)/)?.[1] ?? '';
+                const pi = indent + '\t';
+
+                const openBrace = lineText.indexOf('{');
+                const lastBrace = lineText.lastIndexOf('}');
+                if (openBrace >= 0 && lastBrace > openBrace) {
+                    const prefix = lineText.substring(0, openBrace + 1);
+                    const innerContent = lineText.substring(openBrace + 1, lastBrace).trim();
+                    let inner = `\n${pi}${innerContent}\n${pi}change_orbit = ${changeOrbitValue}`;
+                    for (const cls of segClasses) {
+                        inner += `\n${pi}moon = { class = ${cls} orbit_angle = ${msg.segmentAngle} orbit_distance = 0 }`;
+                    }
+                    const newContent = `${prefix}${inner}\n${indent}}`;
+                    edit.replace(doc.uri, new vscode.Range(lineIdx, 0, lineIdx, lineText.length), newContent);
+                }
+            } else {
+                // Multi-line parent: insert before closing brace
+                const insertLineIdx = msg.parentEndLine - 1;
+                const closingLine = doc.lineAt(insertLineIdx);
+                const indent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
+                const pi = indent + '\t';
+
+                let code = `${pi}change_orbit = ${changeOrbitValue}\n`;
+                for (const cls of segClasses) {
+                    code += `${pi}moon = { class = ${cls} orbit_angle = ${msg.segmentAngle} orbit_distance = 0 }\n`;
+                }
+                edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), code);
+            }
+        } else {
+            // System-level ring world (legacy path)
+            const content = doc.getText();
+            const systems = parseSolarSystemFile(content);
+            let cumulativeOrbit = 0;
+            for (const sys of systems) {
+                if (sys.endLine === msg.systemEndLine) {
+                    for (const b of sys.bodies) {
+                        const bodyEndOrbit = b.resolvedOrbitRadius + b.changeOrbit;
+                        if (bodyEndOrbit > cumulativeOrbit) {
+                            cumulativeOrbit = bodyEndOrbit;
+                        }
+                    }
+                    break;
+                }
+            }
+            const changeOrbitValue = msg.orbitDistance - cumulativeOrbit;
+            log.appendLine(`  RING CREATE (system): cumOrbit=${cumulativeOrbit} change_orbit=${changeOrbitValue}`);
+
+            const insertLineIdx = msg.systemEndLine - 1;
+            const closingLine = doc.lineAt(insertLineIdx);
+            const indent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
+            const pi = indent + '\t';
+
+            let code = `${pi}change_orbit = ${changeOrbitValue}\n`;
+            for (const cls of segClasses) {
+                code += `${pi}planet = { class = ${cls} orbit_angle = ${msg.segmentAngle} orbit_distance = 0 }\n`;
+            }
+            edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), code);
         }
 
-        const edit = new vscode.WorkspaceEdit();
-        edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), code);
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
         await doc.save();
@@ -406,6 +575,43 @@ export class SolarSystemPanel {
         }
 
         if (foundDist || foundAngle) {
+            this._skipNextReload = true;
+            await vscode.workspace.applyEdit(edit);
+            await doc.save();
+        }
+        await this._loadAndRender(doc);
+    }
+
+    /**
+     * Update only the orbit_angle of a body (used for orbit_distance=0 same-orbit siblings).
+     */
+    private async _handleUpdateOrbitAngleOnly(msg: {
+        line: number;
+        orbitAngle: number;
+    }) {
+        if (!this._document) return;
+        const doc = this._document;
+
+        const angleStr = this._formatValue('orbit_angle', msg.orbitAngle, 'fixed');
+        const edit = new vscode.WorkspaceEdit();
+        let found = false;
+
+        for (let i = msg.line - 1; i < Math.min(msg.line + 30, doc.lineCount); i++) {
+            const lineText = doc.lineAt(i).text;
+            if (!found) {
+                const anglePattern = /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
+                const m = anglePattern.exec(lineText);
+                if (m) {
+                    const startCol = m.index + m[1].length;
+                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2].length), angleStr);
+                    found = true;
+                }
+            }
+            if (found) break;
+            if (lineText.trim() === '}' && i > msg.line - 1) break;
+        }
+
+        if (found) {
             this._skipNextReload = true;
             await vscode.workspace.applyEdit(edit);
             await doc.save();
@@ -478,6 +684,7 @@ export class SolarSystemPanel {
         ringTargetSegCount?: number;
         ringNewAngle?: number;
         ringOrigSegCount?: number;
+        isLockedOrbit?: boolean;
     }) {
         const log = SolarSystemPanel._getLog();
         log.appendLine(`--- movePlanetOrbit msg: bodyLine=${msg.bodyLine} endLine=${msg.bodyEndLine} targetOrbit=${msg.targetResolvedOrbit} angle=${msg.targetOrbitAngle} isRing=${msg.isRingWorld}`);
@@ -487,6 +694,16 @@ export class SolarSystemPanel {
 
         this._contentSnapshots.push(doc.getText());
         this._lastSnapshotTime = Date.now();
+
+        // ── Locked orbit (orbit_distance=0): only update angle ──────────────
+        if (msg.isLockedOrbit) {
+            log.appendLine(`  LOCKED ORBIT: only updating angle to ${msg.targetOrbitAngle}`);
+            await this._handleUpdateOrbitAngleOnly({
+                line: msg.bodyLine,
+                orbitAngle: Math.round(msg.targetOrbitAngle),
+            });
+            return;
+        }
 
         // ── Ring world move: modify the change_orbit before the ring ─────────
         if (msg.isRingWorld && msg.ringChangeOrbitLine && msg.ringChangeOrbitLine > 0) {
@@ -499,13 +716,20 @@ export class SolarSystemPanel {
             // Compute the delta
             const systems = parseSolarSystemFile(content);
             let ringGroup: any = null;
-            for (const s of systems) {
-                for (const b of s.bodies) {
+            const searchRingGroup = (bodies: CelestialBody[]) => {
+                for (const b of bodies) {
                     if (b.ringGroup && b.line === msg.bodyLine) {
                         ringGroup = b.ringGroup;
-                        break;
+                        return;
                     }
+                    searchRingGroup(b.moons);
+                    if (ringGroup) return;
+                    searchRingGroup(b.subPlanets);
+                    if (ringGroup) return;
                 }
+            };
+            for (const s of systems) {
+                searchRingGroup(s.bodies);
                 if (ringGroup) break;
             }
             const oldRadius = ringGroup?.orbitRadius ?? msg.ringOldOrbitRadius ?? 0;
@@ -551,9 +775,13 @@ export class SolarSystemPanel {
                     const newSegsToAdd = targetSegCount - origSegCount;
                     const newSegLines: string[] = [];
                     const expandPattern = ['pc_ringworld_seam', 'pc_ringworld_tech', 'pc_ringworld_habitable'];
+                    // Determine keyword: if ring is nested inside a planet (moon syntax)
+                    const ringLine = lines[ringGroup.segments[0].line - 1] || '';
+                    const useMoon = /^\s*moon\s*=/.test(ringLine);
+                    const keyword = useMoon ? 'moon' : 'planet';
                     for (let i = 0; i < newSegsToAdd; i++) {
                         const cls = expandPattern[i % expandPattern.length];
-                        newSegLines.push(`${indent}planet = { class = ${cls} orbit_angle = ${newAngle} orbit_distance = 0 }`);
+                        newSegLines.push(`${indent}${keyword} = { class = ${cls} orbit_angle = ${newAngle} orbit_distance = 0 }`);
                     }
 
                     // 4. Insert after the last existing ring segment
@@ -612,19 +840,22 @@ export class SolarSystemPanel {
         const systems = parseSolarSystemFile(content);
         log.appendLine(`  parsed ${systems.length} systems`);
 
-        // Find the system and body (search bodies AND moons)
+        // Find the system and body (search recursively through all nesting levels)
         let system: SolarSystem | undefined;
         let movedBody: CelestialBody | undefined;
         let isMoon = false;
-        for (const s of systems) {
-            for (const b of s.bodies) {
-                if (b.line === msg.bodyLine) { movedBody = b; system = s; break; }
-                for (const m of b.moons) {
-                    if (m.line === msg.bodyLine) { movedBody = m; system = s; isMoon = true; break; }
-                }
-                if (system) break;
+        const searchBody = (bodies: CelestialBody[], asMoon: boolean) => {
+            for (const b of bodies) {
+                if (b.line === msg.bodyLine) { movedBody = b; isMoon = asMoon; return; }
+                searchBody(b.moons, true);
+                if (movedBody) return;
+                searchBody(b.subPlanets, asMoon);
+                if (movedBody) return;
             }
-            if (system) break;
+        };
+        for (const s of systems) {
+            searchBody(s.bodies, false);
+            if (movedBody) { system = s; break; }
         }
 
         if (!system || !movedBody) {
@@ -896,21 +1127,65 @@ export class SolarSystemPanel {
     </div>
     <div id="tooltip" class="hidden"></div>
     <div id="context-menu" class="hidden">
-        <div class="ctx-title">添加天体</div>
-        <button data-action="add-continental">🌍 大陆星球</button>
-        <button data-action="add-ocean">🌊 海洋星球</button>
-        <button data-action="add-tropical">🌴 热带星球</button>
-        <button data-action="add-desert">🏜️ 沙漠星球</button>
-        <button data-action="add-arctic">❄️ 极地星球</button>
-        <button data-action="add-arid">☀️ 干旱星球</button>
-        <button data-action="add-gas_giant">🪐 气态巨行星</button>
-        <button data-action="add-barren">🪨 贫瘠星球</button>
-        <button data-action="add-frozen">🧊 冰冻星球</button>
-        <button data-action="add-molten">🔥 熔融星球</button>
-        <button data-action="add-toxic">☣️ 剧毒星球</button>
-        <button data-action="add-asteroid">💫 小行星</button>
+        <div id="ctx-stars">
+            <div class="ctx-title">添加恒星</div>
+            <button data-action="star-g_star">⭐ G型星 (黄)</button>
+            <button data-action="star-b_star">💠 B型星 (蓝白)</button>
+            <button data-action="star-a_star">🔷 A型星 (白)</button>
+            <button data-action="star-f_star">🌟 F型星 (黄白)</button>
+            <button data-action="star-k_star">🟠 K型星 (橙)</button>
+            <button data-action="star-m_star">🔴 M型星 (红)</button>
+            <button data-action="star-t_star">🟤 T型星 (褐)</button>
+            <button data-action="star-black_hole">🕳️ 黑洞</button>
+            <button data-action="star-neutron_star">⚡ 中子星</button>
+            <button data-action="star-pulsar">💜 脉冲星</button>
+        </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0"></div>
-        <button data-action="add-ringworld">💍 环形世界</button>
+        <div id="ctx-planets">
+            <div class="ctx-title">添加天体</div>
+            <button data-action="add-continental">🌍 大陆星球</button>
+            <button data-action="add-ocean">🌊 海洋星球</button>
+            <button data-action="add-tropical">🌴 热带星球</button>
+            <button data-action="add-desert">🏜️ 沙漠星球</button>
+            <button data-action="add-arctic">❄️ 极地星球</button>
+            <button data-action="add-arid">☀️ 干旱星球</button>
+            <button data-action="add-gas_giant">🪐 气态巨行星</button>
+            <button data-action="add-barren">🪨 贫瘠星球</button>
+            <button data-action="add-frozen">🧊 冰冻星球</button>
+            <button data-action="add-molten">🔥 熔融星球</button>
+            <button data-action="add-toxic">☣️ 剧毒星球</button>
+            <button data-action="add-asteroid">💫 小行星</button>
+        </div>
+        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0" id="ctx-ring-sep"></div>
+        <div id="ctx-ringworld"><button data-action="add-ringworld">💍 环形世界</button></div>
+        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-moon-sep"></div>
+        <div id="ctx-moons" style="display:none">
+            <div class="ctx-title" id="ctx-moon-title">添加卫星</div>
+            <button data-action="moon-barren">🪨 贫瘠卫星</button>
+            <button data-action="moon-barren_cold">🌑 寒冷贫瘠卫星</button>
+            <button data-action="moon-frozen">🧊 冰冻卫星</button>
+            <button data-action="moon-continental">🌍 大陆卫星</button>
+            <button data-action="moon-ocean">🌊 海洋卫星</button>
+            <button data-action="moon-tropical">🌴 热带卫星</button>
+            <button data-action="moon-desert">🏜️ 沙漠卫星</button>
+            <button data-action="moon-toxic">☣️ 剧毒卫星</button>
+        </div>
+        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-sibling-sep"></div>
+        <div id="ctx-sibling" style="display:none">
+            <div class="ctx-title" id="ctx-sibling-title">在同轨道创建</div>
+            <button data-action="sib-continental">🌍 大陆</button>
+            <button data-action="sib-ocean">🌊 海洋</button>
+            <button data-action="sib-tropical">🌴 热带</button>
+            <button data-action="sib-desert">🏜️ 沙漠</button>
+            <button data-action="sib-arctic">❄️ 极地</button>
+            <button data-action="sib-arid">☀️ 干旱</button>
+            <button data-action="sib-gas_giant">🪐 气态巨行星</button>
+            <button data-action="sib-barren">🪨 贫瘠</button>
+            <button data-action="sib-frozen">🧊 冰冻</button>
+            <button data-action="sib-molten">🔥 熔融</button>
+            <button data-action="sib-toxic">☣️ 剧毒</button>
+            <button data-action="sib-ice_asteroid">💫 冰晶小行星</button>
+        </div>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

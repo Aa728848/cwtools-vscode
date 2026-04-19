@@ -59,6 +59,7 @@ interface CelestialBody {
     line: number;
     endLine: number;
     changeOrbit: number;
+    moonChangeOrbitOffsets: number[];
     resolvedOrbitRadius: number;
     resolvedOrbitAngle: number;
     resolvedSize: number;
@@ -510,7 +511,8 @@ function drawRingWorld(
         const midWy = parentWorldY + Math.sin(midAngle) * orbitR;
         const midP = project(midWx, midWy, 0);
         const system = allSystems[currentSystemIndex];
-        const segBody = system?.bodies.find(b => b.line === seg.line);
+        // Search recursively through all bodies, moons, and sub-planets
+        const segBody = system ? findBodyByLine(system.bodies, seg.line) : undefined;
         if (segBody) {
             renderedBodies.push({
                 body: segBody,
@@ -883,11 +885,76 @@ function setupControls() {
         ctxMenu?.classList.add('hidden');
     }
 
+    let ctxTargetBody: CelestialBody | null = null;
+
     canvas.addEventListener('contextmenu', (e: MouseEvent) => {
         e.preventDefault();
-        if (editMode) {
-            showCtxMenu(e);
+        if (!editMode) return;
+
+        const system = allSystems[currentSystemIndex];
+        if (!system) return;
+
+        // Hit detect: did user right-click on a body?
+        const hit = hitTest(e.clientX, e.clientY);
+        ctxTargetBody = hit?.body ?? null;
+
+        const starsDiv = document.getElementById('ctx-stars');
+        const planetsDiv = document.getElementById('ctx-planets');
+        const moonsDiv = document.getElementById('ctx-moons');
+        const moonSep = document.getElementById('ctx-moon-sep');
+        const ringDiv = document.getElementById('ctx-ringworld');
+        const ringSep = document.getElementById('ctx-ring-sep');
+        const moonTitle = document.getElementById('ctx-moon-title');
+        const siblingDiv = document.getElementById('ctx-sibling');
+        const siblingSep = document.getElementById('ctx-sibling-sep');
+        const siblingTitle = document.getElementById('ctx-sibling-title');
+
+        // Hide all sections first
+        if (starsDiv) starsDiv.style.display = 'none';
+        if (planetsDiv) planetsDiv.style.display = 'none';
+        if (moonsDiv) moonsDiv.style.display = 'none';
+        if (moonSep) moonSep.style.display = 'none';
+        if (ringDiv) ringDiv.style.display = 'none';
+        if (ringSep) ringSep.style.display = 'none';
+        if (siblingDiv) siblingDiv.style.display = 'none';
+        if (siblingSep) siblingSep.style.display = 'none';
+
+        // Check if target is a ring world segment
+        const isRingBody = ctxTargetBody?.planetClass?.includes('ringworld') ?? false;
+
+        // System-level ring world check
+        const hasRing = system.bodies.some(b => b.planetClass?.includes('ringworld'));
+
+        if (!ctxTargetBody || ctxTargetBody.bodyType === 'star') {
+            // Empty space or star: show stars + planets + ring world (all system level)
+            if (starsDiv) starsDiv.style.display = '';
+            if (planetsDiv) planetsDiv.style.display = '';
+            if (!hasRing) {
+                if (ringSep) ringSep.style.display = '';
+                if (ringDiv) ringDiv.style.display = '';
+            }
+        } else if ((ctxTargetBody.bodyType === 'planet' || ctxTargetBody.bodyType === 'moon') && !isRingBody) {
+            // Planet or moon (NOT ring world): show add-moon options + ring world (as moon)
+            if (moonsDiv) moonsDiv.style.display = '';
+            if (moonSep) moonSep.style.display = '';
+            if (moonTitle) {
+                moonTitle.textContent = `添加卫星 → ${ctxTargetBody.name || ctxTargetBody.planetClass}`;
+            }
+            // Ring world as moon
+            const bodyHasRing = ctxTargetBody.moons.some(m => m.planetClass?.includes('ringworld'));
+            if (!bodyHasRing) {
+                if (ringSep) ringSep.style.display = '';
+                if (ringDiv) ringDiv.style.display = '';
+            }
+            // Same-orbit sibling creation (not for ring worlds)
+            if (siblingSep) siblingSep.style.display = '';
+            if (siblingDiv) siblingDiv.style.display = '';
+            if (siblingTitle) {
+                siblingTitle.textContent = `在同轨道创建 (${ctxTargetBody.name || ctxTargetBody.planetClass})`;
+            }
         }
+
+        showCtxMenu(e);
     });
 
     // Context menu button clicks
@@ -895,25 +962,49 @@ function setupControls() {
         btn.addEventListener('click', () => {
             const action = btn.dataset.action ?? '';
             hideCtxMenu();
-            if (action === 'add-ringworld') {
-                const system = allSystems[currentSystemIndex];
-                if (!system) return;
-                // Don't create if system already has a ring world
-                const hasRing = system.bodies.some(b => b.planetClass?.includes('ringworld'));
-                if (hasRing) {
-                    return; // already has ring world
+
+            const system = allSystems[currentSystemIndex];
+            if (!system) return;
+
+            // ── Star creation (system level) ──
+            if (action.startsWith('star-')) {
+                const starClass = 'pc_' + action.slice(5);
+                const existingStar = system.bodies.find(b => b.bodyType === 'star');
+                const sizeMap: Record<string, number> = {
+                    'pc_black_hole': 20, 'pc_neutron_star': 15, 'pc_pulsar': 15,
+                };
+                const size = sizeMap[starClass] || 30;
+
+                if (!existingStar) {
+                    // No star yet: create primary at orbit 0
+                    vscode.postMessage({
+                        command: 'addStar',
+                        systemLine: system.line,
+                        systemEndLine: system.endLine,
+                        firstBodyLine: system.bodies.length > 0 ? system.bodies[0].line : 0,
+                        planetClass: starClass,
+                        size: size,
+                    });
+                } else {
+                    // Star exists: create secondary at click position
+                    const dpr = window.devicePixelRatio || 1;
+                    const rect = canvas.getBoundingClientRect();
+                    const world = screenToWorld((ctxClickX - rect.left) * dpr, (ctxClickY - rect.top) * dpr);
+                    const dist = Math.round(Math.sqrt(world.x * world.x + world.y * world.y));
+                    const angle = Math.round(Math.atan2(world.y, world.x) * 180 / Math.PI);
+                    vscode.postMessage({
+                        command: 'addPlanet',
+                        systemEndLine: system.endLine,
+                        orbitDistance: Math.max(20, dist),
+                        orbitAngle: ((angle % 360) + 360) % 360,
+                        planetClass: starClass,
+                        size: size,
+                    });
                 }
-                vscode.postMessage({
-                    command: 'addRingWorld',
-                    systemEndLine: system.endLine,
-                    orbitDistance: 30,
-                    segmentCount: 12,
-                    segmentAngle: 30,
-                });
-            } else if (action.startsWith('add-')) {
+            }
+            // ── Planet creation (system level, sibling of star) ──
+            else if (action.startsWith('add-') && action !== 'add-ringworld') {
                 const planetClass = 'pc_' + action.slice(4);
-                const system = allSystems[currentSystemIndex];
-                if (!system) return;
 
                 const dpr = window.devicePixelRatio || 1;
                 const rect = canvas.getBoundingClientRect();
@@ -930,6 +1021,51 @@ function setupControls() {
                     orbitAngle: ((angle % 360) + 360) % 360,
                     planetClass: planetClass,
                     size: planetClass === 'pc_gas_giant' ? 25 : 15,
+                });
+            }
+            // ── Ring world creation ──
+            else if (action === 'add-ringworld') {
+                const ringMsg: any = {
+                    command: 'addRingWorld',
+                    systemEndLine: system.endLine,
+                    orbitDistance: 30,
+                    segmentCount: 12,
+                    segmentAngle: 30,
+                };
+                // If right-clicked on a planet, create ring world as moons inside it
+                if (ctxTargetBody && (ctxTargetBody.bodyType === 'planet' || ctxTargetBody.bodyType === 'moon')) {
+                    ringMsg.parentLine = ctxTargetBody.line;
+                    ringMsg.parentEndLine = ctxTargetBody.endLine;
+                }
+                vscode.postMessage(ringMsg);
+            }
+            // ── Moon creation (nested inside planet) ──
+            else if (action.startsWith('moon-')) {
+                if (!ctxTargetBody) return;
+                const moonClass = 'pc_' + action.slice(5);
+                const moonCount = ctxTargetBody.moons.length;
+                vscode.postMessage({
+                    command: 'addMoon',
+                    parentLine: ctxTargetBody.line,
+                    parentEndLine: ctxTargetBody.endLine,
+                    planetClass: moonClass,
+                    size: 5,
+                    orbitDistance: 10 + moonCount * 5,
+                    orbitAngle: Math.round(Math.random() * 360),
+                });
+            }
+            // ── Same-orbit sibling creation ──
+            else if (action.startsWith('sib-')) {
+                if (!ctxTargetBody) return;
+                const sibClass = 'pc_' + action.slice(4);
+                vscode.postMessage({
+                    command: 'addSibling',
+                    siblingLine: ctxTargetBody.line,
+                    siblingEndLine: ctxTargetBody.endLine,
+                    bodyType: ctxTargetBody.bodyType,
+                    planetClass: sibClass,
+                    size: sibClass === 'pc_gas_giant' ? 25 : (ctxTargetBody.bodyType === 'moon' ? 5 : 15),
+                    orbitAngle: Math.round(Math.random() * 360),
                 });
             }
         });
@@ -979,7 +1115,7 @@ function setupControls() {
                 if (body.isRingSegment) {
                     const system = allSystems[currentSystemIndex];
                     const anchorLine = body.ringGroupAnchorLine ?? body.line;
-                    const anchor = system?.bodies.find(b => b.line === anchorLine && b.ringGroup);
+                    const anchor = system ? findBodyByLine(system.bodies, anchorLine) : null;
                     if (anchor && anchor.ringGroup) {
                         body = anchor;
                         dragRingGroup = anchor.ringGroup;
@@ -1041,7 +1177,7 @@ function setupControls() {
             const dx = e.clientX - lastMX;
             const dy = e.clientY - lastMY;
             viewRotation = (viewRotation - dx * 0.5) % 360;
-            tiltAngle = Math.max(5, Math.min(85, tiltAngle + dy * 0.5));
+            tiltAngle = Math.max(5, Math.min(175, tiltAngle + dy * 0.5));
             lastMX = e.clientX;
             lastMY = e.clientY;
             updateTiltDisplay();
@@ -1075,8 +1211,15 @@ function setupControls() {
             const orbitDist = Math.sqrt(dx * dx + dy * dy);
             const orbitAngle = Math.atan2(dy, dx) * 180 / Math.PI;
 
-            dragBody.resolvedOrbitRadius = Math.max(0, Math.round(orbitDist));
-            dragBody.resolvedOrbitAngle = ((Math.round(orbitAngle) % 360) + 360) % 360;
+            // If orbit_distance = 0 (same-orbit sibling), lock radius and only change angle
+            const isLockedOrbit = dragBody.orbitDistance.type === 'fixed' && dragBody.orbitDistance.value === 0;
+            if (isLockedOrbit) {
+                // Only update angle, keep radius frozen
+                dragBody.resolvedOrbitAngle = ((Math.round(orbitAngle) % 360) + 360) % 360;
+            } else {
+                dragBody.resolvedOrbitRadius = Math.max(0, Math.round(orbitDist));
+                dragBody.resolvedOrbitAngle = ((Math.round(orbitAngle) % 360) + 360) % 360;
+            }
 
             // If dragging a ring world group, snap to valid radii and update all segments
             if (dragRingGroup) {
@@ -1108,7 +1251,7 @@ function setupControls() {
                 const system = allSystems[currentSystemIndex];
                 if (system) {
                     for (const seg of dragRingGroup.segments) {
-                        const segBody = system.bodies.find(b => b.line === seg.line);
+                        const segBody = findBodyByLine(system.bodies, seg.line);
                         if (segBody && segBody !== dragBody) {
                             segBody.resolvedOrbitRadius = dragBody.resolvedOrbitRadius;
                         }
@@ -1163,6 +1306,8 @@ function setupControls() {
                     bodyEndLine: ringGroup ? ringGroup.lastEndLine : body.endLine,
                     targetResolvedOrbit: body.resolvedOrbitRadius,
                     targetOrbitAngle: Math.round(body.resolvedOrbitAngle),
+                    // Orbit lock: orbit_distance=0 bodies only change angle (but NOT ring worlds)
+                    isLockedOrbit: !ringGroup && body.orbitDistance.type === 'fixed' && body.orbitDistance.value === 0,
                     // Ring world specific data
                     isRingWorld: !!ringGroup,
                     ringChangeOrbitLine: ringGroup?.changeOrbitLine ?? -1,

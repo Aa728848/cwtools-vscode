@@ -55,6 +55,10 @@ export interface CelestialBody {
     line: number;
     endLine: number;
     changeOrbit: number;
+    /** Per-moon cumulative change_orbit offsets from parent block */
+    moonChangeOrbitOffsets: number[];
+    /** Line numbers of the last change_orbit before each moon */
+    moonChangeOrbitLines: number[];
     // Resolved values for rendering
     resolvedOrbitRadius: number;   // cumulative distance from parent center
     resolvedOrbitAngle: number;    // degrees
@@ -387,18 +391,23 @@ function buildBody(
     const changeOrbit = numProp(nodes, 'change_orbit') ?? 0;
     const flags = parseFlags(nodes);
 
-    // Parse moons
+    // Parse moons and sub-planets with inter-body change_orbit tracking
+    // (change_orbit between moon/planet declarations offsets subsequent bodies)
     const moons: CelestialBody[] = [];
-    for (const n of nodes) {
-        if (n.key === 'moon' && n.children) {
-            moons.push(buildBody('moon', n.children, n.line, n.endLine ?? n.line));
-        }
-    }
-
-    // Parse nested planets (for binary/trinary sub-systems)
     const subPlanets: CelestialBody[] = [];
+    const moonChangeOrbitOffsets: number[] = [];
+    const moonChangeOrbitLines: number[] = [];
+    let interBodyChangeOrbit = 0;
+    let lastChangeOrbitLine = -1;
     for (const n of nodes) {
-        if (n.key === 'planet' && n.children) {
+        if (n.key === 'change_orbit') {
+            interBodyChangeOrbit += Number(n.value) || 0;
+            lastChangeOrbitLine = n.line;
+        } else if (n.key === 'moon' && n.children) {
+            moons.push(buildBody('moon', n.children, n.line, n.endLine ?? n.line));
+            moonChangeOrbitOffsets.push(interBodyChangeOrbit);
+            moonChangeOrbitLines.push(lastChangeOrbitLine);
+        } else if (n.key === 'planet' && n.children) {
             subPlanets.push(buildBody('planet', n.children, n.line, n.endLine ?? n.line));
         }
     }
@@ -420,11 +429,75 @@ function buildBody(
         line,
         endLine,
         changeOrbit,
+        moonChangeOrbitOffsets,
+        moonChangeOrbitLines,
         resolvedOrbitRadius: 0,
         resolvedOrbitAngle: 0,
         resolvedSize: 0,
         resolvedCount: 1,
     };
+}
+
+// ─── Recursive Moon Resolution ─────────────────────────────────────────────
+
+/**
+ * Resolve orbit, angle, size for all moons of a parent body, recursively.
+ * Handles change_orbit offsets from the parent block (moonChangeOrbitOffsets).
+ */
+function resolveMoonsRecursive(parent: CelestialBody): void {
+    let moonCumulativeOrbit = 0;
+    for (let mi = 0; mi < parent.moons.length; mi++) {
+        const moon = parent.moons[mi];
+        // Apply parent-block change_orbit that precedes this moon (delta from cumulative offsets)
+        const parentOffset = (parent.moonChangeOrbitOffsets[mi] ?? 0)
+            - (mi > 0 ? (parent.moonChangeOrbitOffsets[mi - 1] ?? 0) : 0);
+        moonCumulativeOrbit += parentOffset;
+        const moonDist = resolveValue(moon.orbitDistance);
+        moon.resolvedOrbitRadius = moonCumulativeOrbit + moonDist;
+        moon.resolvedOrbitAngle = moon.orbitAngle.type === 'random'
+            ? Math.random() * 360
+            : resolveValue(moon.orbitAngle);
+        moon.resolvedSize = resolveValue(moon.size);
+        moon.resolvedCount = resolveCount(moon.count);
+        moonCumulativeOrbit = moon.resolvedOrbitRadius + moon.changeOrbit;
+
+        // Recursively resolve sub-moons
+        if (moon.moons.length > 0) {
+            resolveMoonsRecursive(moon);
+        }
+    }
+}
+
+/**
+ * Recursively detect and group ring world segments inside moons at any depth.
+ */
+function groupRingWorldsRecursive(bodies: CelestialBody[]): void {
+    for (const body of bodies) {
+        if (body.moons.length >= 2) {
+            const moonChangeOrbitMap = body.moons.map((m, i) => ({
+                line: body.moonChangeOrbitLines[i] ?? m.line,
+                value: body.moonChangeOrbitOffsets[i] ?? m.changeOrbit,
+            }));
+            groupRingWorlds(body.moons, moonChangeOrbitMap);
+        }
+        // Recurse into moons (for sub-moons that might be ring worlds)
+        if (body.moons.length > 0) {
+            groupRingWorldsRecursive(body.moons);
+        }
+        // Recurse into sub-planets
+        for (const sub of body.subPlanets) {
+            if (sub.moons.length >= 2) {
+                const subMoonMap = sub.moons.map((m, i) => ({
+                    line: sub.moonChangeOrbitLines[i] ?? m.line,
+                    value: sub.moonChangeOrbitOffsets[i] ?? m.changeOrbit,
+                }));
+                groupRingWorlds(sub.moons, subMoonMap);
+            }
+            if (sub.moons.length > 0) {
+                groupRingWorldsRecursive(sub.moons);
+            }
+        }
+    }
 }
 
 // ─── Build Solar System ─────────────────────────────────────────────────────
@@ -480,18 +553,8 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
             // Handle per-body change_orbit for next sibling
             cumulativeOrbit = body.resolvedOrbitRadius + body.changeOrbit;
 
-            // Resolve moons
-            let moonCumulativeOrbit = 0;
-            for (const moon of body.moons) {
-                const moonDist = resolveValue(moon.orbitDistance);
-                moon.resolvedOrbitRadius = moonCumulativeOrbit + moonDist;
-                moon.resolvedOrbitAngle = moon.orbitAngle.type === 'random'
-                    ? Math.random() * 360
-                    : resolveValue(moon.orbitAngle);
-                moon.resolvedSize = resolveValue(moon.size);
-                moon.resolvedCount = resolveCount(moon.count);
-                moonCumulativeOrbit = moon.resolvedOrbitRadius + moon.changeOrbit;
-            }
+            // Resolve moons recursively (handles sub-moons, ring worlds at any depth)
+            resolveMoonsRecursive(body);
 
             // Resolve sub-planets (binary star companions)
             let subCumulativeOrbit = 0;
@@ -505,18 +568,8 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
                 sub.resolvedCount = resolveCount(sub.count);
                 subCumulativeOrbit = sub.resolvedOrbitRadius + sub.changeOrbit;
 
-                // Resolve sub-planet moons
-                let subMoonCumulativeOrbit = 0;
-                for (const moon of sub.moons) {
-                    const moonDist = resolveValue(moon.orbitDistance);
-                    moon.resolvedOrbitRadius = subMoonCumulativeOrbit + moonDist;
-                    moon.resolvedOrbitAngle = moon.orbitAngle.type === 'random'
-                        ? Math.random() * 360
-                        : resolveValue(moon.orbitAngle);
-                    moon.resolvedSize = resolveValue(moon.size);
-                    moon.resolvedCount = resolveCount(moon.count);
-                    subMoonCumulativeOrbit = moon.resolvedOrbitRadius + moon.changeOrbit;
-                }
+                // Resolve sub-planet moons recursively
+                resolveMoonsRecursive(sub);
             }
 
             bodies.push(body);
@@ -524,8 +577,9 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
         }
     }
 
-    // ── Post-process: detect ring world groups ────────────────────────────
+    // ── Post-process: detect ring world groups at all levels ──────────────
     groupRingWorlds(bodies, bodyChangeOrbitMap);
+    groupRingWorldsRecursive(bodies);
 
     return {
         key,

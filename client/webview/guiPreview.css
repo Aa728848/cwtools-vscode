@@ -643,21 +643,8 @@ body.edit-mode .el.always-transparent { pointer-events: auto; cursor: move; }
     margin: 4px 0;
 }
 
-/* ─── Snap Guide Lines ─── */
-#snap-guides {
-    position: absolute;
-    top: 0; left: 0;
-    pointer-events: none;
-    z-index: 1500;
-}
-.snap-line {
-    position: absolute;
-    background: #ff6040;
-    opacity: 0.6;
-    z-index: 1500;
-}
-.snap-line.horizontal { height: 1px; left: 0; right: 0; }
-.snap-line.vertical { width: 1px; top: 0; bottom: 0; }
+/* ─── Snap Guide Lines (disabled) ─── */
+#snap-guides { display: none; }
 
 /* Sprite autocomplete dropdown */
 .sprite-picker { position: relative; }

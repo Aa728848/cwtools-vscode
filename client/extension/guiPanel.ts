@@ -22,6 +22,8 @@ export class GuiPanel {
     private _contentSnapshots: string[] = [];  // content snapshots for structural undo
     private _lastSnapshotTime = 0;  // debounce: only save one snapshot per 500ms batch
     private _messageQueue: Promise<void> = Promise.resolve();  // serial queue for property updates
+    private _spriteIndexCache: Map<string, import('./guiParser').SpriteInfo> | null = null;
+    private _effectNamesCache: string[] | null = null;
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
@@ -108,6 +110,14 @@ export class GuiPanel {
                 }
             }),
         );
+
+        // Watch .gfx files for sprite index invalidation
+        const gfxWatcher = vscode.workspace.createFileSystemWatcher('**/*.gfx');
+        const invalidateSpriteCache = () => { this._spriteIndexCache = null; };
+        gfxWatcher.onDidChange(invalidateSpriteCache);
+        gfxWatcher.onDidCreate(invalidateSpriteCache);
+        gfxWatcher.onDidDelete(invalidateSpriteCache);
+        this._disposables.push(gfxWatcher);
     }
 
     /**
@@ -156,8 +166,11 @@ export class GuiPanel {
 
         this._searchRoots = searchRoots;
 
-        // Build sprite index from .gfx files in all search roots
-        const spriteIndex = await this._buildSpriteIndex(searchRoots);
+        // Build sprite index from .gfx files (cached)
+        if (!this._spriteIndexCache) {
+            this._spriteIndexCache = await this._buildSpriteIndex(searchRoots);
+        }
+        const spriteIndex = this._spriteIndexCache;
 
         // Parse the GUI file
         const elements = parseGuiFile(content, spriteIndex);
@@ -168,8 +181,11 @@ export class GuiPanel {
         // Collect sprite names for the webview dropdown
         const spriteNames = Array.from(spriteIndex.keys()).sort();
 
-        // Collect button effect names for effectButtonType dropdown
-        const effectNames = this._collectButtonEffects(searchRoots);
+        // Collect button effect names (cached)
+        if (!this._effectNamesCache) {
+            this._effectNamesCache = this._collectButtonEffects(searchRoots);
+        }
+        const effectNames = this._effectNamesCache;
 
         this._panel.webview.postMessage({
             command: 'render',

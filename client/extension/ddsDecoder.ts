@@ -1,6 +1,7 @@
 /**
  * DDS texture decoder for Stellaris/Paradox game assets.
- * Supports: DXT1 (BC1), DXT3 (BC2), DXT5 (BC3), BC7, uncompressed BGRA/BGR.
+ * Supports: DXT1 (BC1), DXT3 (BC2), DXT5 (BC3), BC4 (single-channel), BC5 (normal map), BC7,
+ * and uncompressed BGRA/BGR/Luminance.
  * Uses only Node.js built-in modules.
  */
 import * as fs from 'fs';
@@ -16,7 +17,11 @@ const FOURCC_DXT3 = 0x33545844;
 const FOURCC_DXT5 = 0x35545844;
 const FOURCC_DX10 = 0x30315844;
 
-// DXGI formats for BC7
+// DXGI formats for DX10 extended header
+const DXGI_FORMAT_BC4_UNORM = 80;
+const DXGI_FORMAT_BC4_SNORM = 81;
+const DXGI_FORMAT_BC5_UNORM = 83;
+const DXGI_FORMAT_BC5_SNORM = 84;
 const DXGI_FORMAT_BC7_UNORM = 98;
 const DXGI_FORMAT_BC7_UNORM_SRGB = 99;
 
@@ -173,6 +178,65 @@ function decodeDxt3(view: DataView, off: number, out: Uint8Array, ox: number, oy
             const pi = 4 * r + c;
             const ci = (bits >> (2 * pi)) & 3;
             putPx(out, (py * w + px) * 4, pal[ci][0], pal[ci][1], pal[ci][2], alphas[pi]);
+        }
+    }
+}
+
+// ─── BC4/BC5 Decoders ───────────────────────────────────────────────────────
+// BC4: Single-channel block compression. Same alpha block encoding as DXT5.
+// BC5: Two BC4 blocks — one for red, one for green. Blue is reconstructed for normal maps.
+
+function decodeAlphaBlock(view: DataView, off: number): number[] {
+    const a0 = view.getUint8(off), a1 = view.getUint8(off + 1);
+    let aBits = 0n;
+    for (let i = 0; i < 6; i++) aBits |= BigInt(view.getUint8(off + 2 + i)) << BigInt(i * 8);
+    const lut: number[] = [a0, a1, 0, 0, 0, 0, 0, 0];
+    if (a0 > a1) {
+        for (let i = 2; i < 8; i++) lut[i] = ((8 - i) * a0 + (i - 1) * a1) / 7 | 0;
+    } else {
+        for (let i = 2; i < 6; i++) lut[i] = ((6 - i) * a0 + (i - 1) * a1) / 5 | 0;
+        lut[6] = 0; lut[7] = 255;
+    }
+    const values: number[] = [];
+    for (let i = 0; i < 16; i++) {
+        const idx = Number((aBits >> BigInt(i * 3)) & 7n);
+        values.push(lut[idx]);
+    }
+    return values;
+}
+
+function decodeBc4Block(view: DataView, off: number, out: Uint8Array, ox: number, oy: number, w: number, h: number) {
+    const values = decodeAlphaBlock(view, off);
+    for (let r = 0; r < 4; r++) {
+        const py = oy + r;
+        if (py >= h) continue;
+        for (let c = 0; c < 4; c++) {
+            const px = ox + c;
+            if (px >= w) continue;
+            const v = values[r * 4 + c];
+            putPx(out, (py * w + px) * 4, v, v, v, 255);
+        }
+    }
+}
+
+function decodeBc5Block(view: DataView, off: number, out: Uint8Array, ox: number, oy: number, w: number, h: number) {
+    const redValues = decodeAlphaBlock(view, off);
+    const greenValues = decodeAlphaBlock(view, off + 8);
+    for (let r = 0; r < 4; r++) {
+        const py = oy + r;
+        if (py >= h) continue;
+        for (let c = 0; c < 4; c++) {
+            const px = ox + c;
+            if (px >= w) continue;
+            const pi = r * 4 + c;
+            const rv = redValues[pi];
+            const gv = greenValues[pi];
+            // Reconstruct blue for normal maps: b = sqrt(1 - r² - g²)
+            const nx = (rv / 255) * 2 - 1;
+            const ny = (gv / 255) * 2 - 1;
+            const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+            const bv = Math.round((nz * 0.5 + 0.5) * 255);
+            putPx(out, (py * w + px) * 4, rv, gv, bv, 255);
         }
     }
 }
@@ -500,8 +564,21 @@ export function decodeDds(filePath: string): DdsResult | null {
                             const o = dx10DataOff + (yr * bx + xr) * 16;
                             if (o + 16 <= buf.length) decodeBc7Block(view, o, bc7Rgba, xr * 4, yr * 4, width, height);
                         }
-                    // Copy to rgba output
                     for (let i = 0; i < bc7Rgba.length; i++) rgba[i] = bc7Rgba[i];
+                    decoded = true;
+                } else if (dxgiFormat === DXGI_FORMAT_BC4_UNORM || dxgiFormat === DXGI_FORMAT_BC4_SNORM) {
+                    for (let yr = 0; yr < by; yr++)
+                        for (let xr = 0; xr < bx; xr++) {
+                            const o = dx10DataOff + (yr * bx + xr) * 8;
+                            if (o + 8 <= buf.length) decodeBc4Block(view, o, rgba, xr * 4, yr * 4, width, height);
+                        }
+                    decoded = true;
+                } else if (dxgiFormat === DXGI_FORMAT_BC5_UNORM || dxgiFormat === DXGI_FORMAT_BC5_SNORM) {
+                    for (let yr = 0; yr < by; yr++)
+                        for (let xr = 0; xr < bx; xr++) {
+                            const o = dx10DataOff + (yr * bx + xr) * 16;
+                            if (o + 16 <= buf.length) decodeBc5Block(view, o, rgba, xr * 4, yr * 4, width, height);
+                        }
                     decoded = true;
                 }
             }

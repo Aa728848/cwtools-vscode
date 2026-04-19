@@ -1723,7 +1723,46 @@ function updatePropertiesPanel() {
         return;
     }
     if (selectedElements.length > 1) {
-        content.innerHTML = `<div style="padding:20px;text-align:center;color:#5868a0">已选择 ${selectedElements.length} 个元素</div>`;
+        // Batch edit: show shared properties for multi-selection
+        const elems = selectedElements.map(s => s.el);
+        const allSameType = elems.every(e => e.type === elems[0].type);
+        const c = allSameType ? (COLORS[elems[0].type] ?? DEFAULT_COLOR) : DEFAULT_COLOR;
+        let html = `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">已选择 ${selectedElements.length} 个元素</div>`;
+        html += `<div style="padding:4px 8px;font-size:11px;color:#6878b0">修改值将应用到所有选中元素（偏移量模式）</div>`;
+        html += propRow('偏移 X', `<input class="prop-input" type="number" data-prop="batch-offset-x" value="0" step="1" />`);
+        html += propRow('偏移 Y', `<input class="prop-input" type="number" data-prop="batch-offset-y" value="0" step="1" />`);
+        html += `</div>`;
+        content.innerHTML = html;
+
+        // Batch offset handlers
+        content.querySelectorAll('.prop-input[type="number"]').forEach(input => {
+            input.addEventListener('change', () => {
+                const prop = (input as HTMLInputElement).dataset.prop;
+                const val = parseInt((input as HTMLInputElement).value) || 0;
+                if (val === 0) return;
+                const axis = prop === 'batch-offset-x' ? 'x' : 'y';
+                pushUndo({ type: 'move', items: selectedElements.map(s => ({
+                    el: s.el, origX: s.el.position.x, origY: s.el.position.y, hadPositionLine: true,
+                }))});
+                for (const s of selectedElements) {
+                    if (axis === 'x') {
+                        s.el.position.x += val;
+                        s.div.style.left = `${parseInt(s.div.style.left) + val}px`;
+                    } else {
+                        s.el.position.y += val;
+                        s.div.style.top = `${parseInt(s.div.style.top) + val}px`;
+                    }
+                    vscode.postMessage({
+                        command: 'updateProperty',
+                        line: s.el.line,
+                        property: 'position',
+                        value: { x: s.el.position.x, y: s.el.position.y },
+                        propertyLine: s.el.propertyLines?.['position'] ?? s.el.line,
+                    });
+                }
+                (input as HTMLInputElement).value = '0';
+            });
+        });
         return;
     }
     const { el } = selectedElements[0];

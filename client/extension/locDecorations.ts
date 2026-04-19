@@ -47,9 +47,16 @@ const colorPattern = /§([RGBYWHETLMSP!])/gi;
 const refPattern = /\$([A-Za-z_][A-Za-z0-9_.:]*)\$/g;
 
 /**
- * Build a map of localization keys to their values from all open .yml files
+ * Cached localization map — rebuilt lazily on document changes.
  */
-function buildLocMap(): Map<string, { value: string; uri: vs.Uri; line: number }> {
+let _locMapCache: Map<string, { value: string; uri: vs.Uri; line: number }> | null = null;
+let _locMapDirty = true;
+
+function markLocMapDirty() { _locMapDirty = true; _locMapCache = null; }
+
+function getLocMap(): Map<string, { value: string; uri: vs.Uri; line: number }> {
+    if (_locMapCache && !_locMapDirty) return _locMapCache;
+
     const locMap = new Map<string, { value: string; uri: vs.Uri; line: number }>();
     const locPattern = /^\s*([a-zA-Z0-9_.:]+)\s*:\d*\s*"(.*)"\s*$/;
 
@@ -68,6 +75,8 @@ function buildLocMap(): Map<string, { value: string; uri: vs.Uri; line: number }
             }
         }
     }
+    _locMapCache = locMap;
+    _locMapDirty = false;
     return locMap;
 }
 
@@ -146,7 +155,7 @@ class LocRefHoverProvider implements vs.HoverProvider {
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const locMap = buildLocMap();
+        const locMap = getLocMap();
         const entry = locMap.get(refName);
         if (!entry) return null;
 
@@ -173,7 +182,7 @@ class LocRefDefinitionProvider implements vs.DefinitionProvider {
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const locMap = buildLocMap();
+        const locMap = getLocMap();
         const entry = locMap.get(refName);
         if (!entry) return null;
 
@@ -203,10 +212,22 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
     // Apply decorations on document change
     context.subscriptions.push(
         vs.workspace.onDidChangeTextDocument(event => {
+            // Invalidate loc cache when .yml files change
+            if (event.document.fileName.endsWith('.yml')) markLocMapDirty();
             const editor = vs.window.activeTextEditor;
             if (editor && event.document === editor.document) {
                 updateColorDecorations(editor);
             }
+        }),
+    );
+
+    // Invalidate loc cache when .yml files open/close
+    context.subscriptions.push(
+        vs.workspace.onDidOpenTextDocument(doc => {
+            if (doc.fileName.endsWith('.yml')) markLocMapDirty();
+        }),
+        vs.workspace.onDidCloseTextDocument(doc => {
+            if (doc.fileName.endsWith('.yml')) markLocMapDirty();
         }),
     );
 

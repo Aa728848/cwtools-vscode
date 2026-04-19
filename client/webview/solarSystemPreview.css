@@ -469,6 +469,8 @@ body {
     border-radius: 8px;
     padding: 4px;
     min-width: 180px;
+    max-height: 80vh;
+    overflow-y: auto;
     z-index: 2000;
     backdrop-filter: blur(12px);
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
@@ -487,6 +489,14 @@ body {
     letter-spacing: 0.5px;
     border-bottom: 1px solid var(--border-subtle);
     margin-bottom: 2px;
+    grid-column: 1 / -1;
+}
+
+/* Grid layout for button groups */
+#ctx-planets, #ctx-moons, #ctx-sibling {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
 }
 
 #context-menu button {
@@ -496,11 +506,14 @@ body {
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    padding: 6px 12px;
-    font-size: 12px;
+    padding: 5px 10px;
+    font-size: 11px;
     cursor: pointer;
     border-radius: 4px;
     transition: all 0.1s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #context-menu button:hover {

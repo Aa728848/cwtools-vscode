@@ -898,7 +898,6 @@ function setupControls() {
         const hit = hitTest(e.clientX, e.clientY);
         ctxTargetBody = hit?.body ?? null;
 
-        const starsDiv = document.getElementById('ctx-stars');
         const planetsDiv = document.getElementById('ctx-planets');
         const moonsDiv = document.getElementById('ctx-moons');
         const moonSep = document.getElementById('ctx-moon-sep');
@@ -910,7 +909,6 @@ function setupControls() {
         const siblingTitle = document.getElementById('ctx-sibling-title');
 
         // Hide all sections first
-        if (starsDiv) starsDiv.style.display = 'none';
         if (planetsDiv) planetsDiv.style.display = 'none';
         if (moonsDiv) moonsDiv.style.display = 'none';
         if (moonSep) moonSep.style.display = 'none';
@@ -926,8 +924,7 @@ function setupControls() {
         const hasRing = system.bodies.some(b => b.planetClass?.includes('ringworld'));
 
         if (!ctxTargetBody || ctxTargetBody.bodyType === 'star') {
-            // Empty space or star: show stars + planets + ring world (all system level)
-            if (starsDiv) starsDiv.style.display = '';
+            // Empty space or star: show planets + ring world (all system level)
             if (planetsDiv) planetsDiv.style.display = '';
             if (!hasRing) {
                 if (ringSep) ringSep.style.display = '';
@@ -966,44 +963,8 @@ function setupControls() {
             const system = allSystems[currentSystemIndex];
             if (!system) return;
 
-            // ── Star creation (system level) ──
-            if (action.startsWith('star-')) {
-                const starClass = 'pc_' + action.slice(5);
-                const existingStar = system.bodies.find(b => b.bodyType === 'star');
-                const sizeMap: Record<string, number> = {
-                    'pc_black_hole': 20, 'pc_neutron_star': 15, 'pc_pulsar': 15,
-                };
-                const size = sizeMap[starClass] || 30;
-
-                if (!existingStar) {
-                    // No star yet: create primary at orbit 0
-                    vscode.postMessage({
-                        command: 'addStar',
-                        systemLine: system.line,
-                        systemEndLine: system.endLine,
-                        firstBodyLine: system.bodies.length > 0 ? system.bodies[0].line : 0,
-                        planetClass: starClass,
-                        size: size,
-                    });
-                } else {
-                    // Star exists: create secondary at click position
-                    const dpr = window.devicePixelRatio || 1;
-                    const rect = canvas.getBoundingClientRect();
-                    const world = screenToWorld((ctxClickX - rect.left) * dpr, (ctxClickY - rect.top) * dpr);
-                    const dist = Math.round(Math.sqrt(world.x * world.x + world.y * world.y));
-                    const angle = Math.round(Math.atan2(world.y, world.x) * 180 / Math.PI);
-                    vscode.postMessage({
-                        command: 'addPlanet',
-                        systemEndLine: system.endLine,
-                        orbitDistance: Math.max(20, dist),
-                        orbitAngle: ((angle % 360) + 360) % 360,
-                        planetClass: starClass,
-                        size: size,
-                    });
-                }
-            }
-            // ── Planet creation (system level, sibling of star) ──
-            else if (action.startsWith('add-') && action !== 'add-ringworld') {
+            // ── Planet/Star creation (system level) ──
+            if (action.startsWith('add-') && action !== 'add-ringworld') {
                 const planetClass = 'pc_' + action.slice(4);
 
                 const dpr = window.devicePixelRatio || 1;
@@ -1014,13 +975,20 @@ function setupControls() {
                 const dist = Math.round(Math.sqrt(world.x * world.x + world.y * world.y));
                 const angle = Math.round(Math.atan2(world.y, world.x) * 180 / Math.PI);
 
+                const sizeMap: Record<string, number> = {
+                    'pc_gas_giant': 25,
+                    'pc_black_hole': 20, 'pc_neutron_star': 15, 'pc_pulsar': 15,
+                    'pc_g_star': 30, 'pc_b_star': 30, 'pc_a_star': 30,
+                    'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
+                };
+
                 vscode.postMessage({
                     command: 'addPlanet',
                     systemEndLine: system.endLine,
                     orbitDistance: Math.max(20, dist),
                     orbitAngle: ((angle % 360) + 360) % 360,
                     planetClass: planetClass,
-                    size: planetClass === 'pc_gas_giant' ? 25 : 15,
+                    size: sizeMap[planetClass] || 15,
                 });
             }
             // ── Ring world creation ──
@@ -1058,13 +1026,19 @@ function setupControls() {
             else if (action.startsWith('sib-')) {
                 if (!ctxTargetBody) return;
                 const sibClass = 'pc_' + action.slice(4);
+                const sibSizeMap: Record<string, number> = {
+                    'pc_gas_giant': 25,
+                    'pc_black_hole': 20, 'pc_neutron_star': 15, 'pc_pulsar': 15,
+                    'pc_g_star': 30, 'pc_b_star': 30, 'pc_a_star': 30,
+                    'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
+                };
                 vscode.postMessage({
                     command: 'addSibling',
                     siblingLine: ctxTargetBody.line,
                     siblingEndLine: ctxTargetBody.endLine,
                     bodyType: ctxTargetBody.bodyType,
                     planetClass: sibClass,
-                    size: sibClass === 'pc_gas_giant' ? 25 : (ctxTargetBody.bodyType === 'moon' ? 5 : 15),
+                    size: sibSizeMap[sibClass] || (ctxTargetBody.bodyType === 'moon' ? 5 : 15),
                     orbitAngle: Math.round(Math.random() * 360),
                 });
             }

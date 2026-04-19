@@ -900,8 +900,17 @@ export class SolarSystemPanel {
         const inPlaceNewDist = Math.max(0, Math.round(msg.targetResolvedOrbit - cumAtCurrentPos));
 
         // Check if reorder is needed: use the RAW target (not the clamped value)
+        // Skip orbit_distance=0 siblings for reorder check (they follow cumulative orbit automatically)
         const prevBody = currentIdx > 0 ? planets[currentIdx - 1] : null;
-        const nextBody = currentIdx < planets.length - 1 ? planets[currentIdx + 1] : null;
+        let nextBody: CelestialBody | null = null;
+        for (let ni = currentIdx + 1; ni < planets.length; ni++) {
+            const candidate = planets[ni];
+            const candDist = candidate.orbitDistance.type === 'fixed' ? candidate.orbitDistance.value : -1;
+            if (candDist !== 0) {
+                nextBody = candidate;
+                break;
+            }
+        }
         const needsReorder =
             (msg.targetResolvedOrbit < cumAtCurrentPos) ||  // target below cumulative → can't achieve with non-negative orbit_distance
             (prevBody && msg.targetResolvedOrbit < prevBody.resolvedOrbitRadius) ||
@@ -1127,20 +1136,6 @@ export class SolarSystemPanel {
     </div>
     <div id="tooltip" class="hidden"></div>
     <div id="context-menu" class="hidden">
-        <div id="ctx-stars">
-            <div class="ctx-title">添加恒星</div>
-            <button data-action="star-g_star">⭐ G型星 (黄)</button>
-            <button data-action="star-b_star">💠 B型星 (蓝白)</button>
-            <button data-action="star-a_star">🔷 A型星 (白)</button>
-            <button data-action="star-f_star">🌟 F型星 (黄白)</button>
-            <button data-action="star-k_star">🟠 K型星 (橙)</button>
-            <button data-action="star-m_star">🔴 M型星 (红)</button>
-            <button data-action="star-t_star">🟤 T型星 (褐)</button>
-            <button data-action="star-black_hole">🕳️ 黑洞</button>
-            <button data-action="star-neutron_star">⚡ 中子星</button>
-            <button data-action="star-pulsar">💜 脉冲星</button>
-        </div>
-        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0"></div>
         <div id="ctx-planets">
             <div class="ctx-title">添加天体</div>
             <button data-action="add-continental">🌍 大陆星球</button>
@@ -1155,6 +1150,16 @@ export class SolarSystemPanel {
             <button data-action="add-molten">🔥 熔融星球</button>
             <button data-action="add-toxic">☣️ 剧毒星球</button>
             <button data-action="add-asteroid">💫 小行星</button>
+            <button data-action="add-g_star">⭐ G型星 (黄)</button>
+            <button data-action="add-b_star">💠 B型星 (蓝白)</button>
+            <button data-action="add-a_star">🔷 A型星 (白)</button>
+            <button data-action="add-f_star">🌟 F型星 (黄白)</button>
+            <button data-action="add-k_star">🟠 K型星 (橙)</button>
+            <button data-action="add-m_star">🔴 M型星 (红)</button>
+            <button data-action="add-t_star">🟤 T型星 (褐)</button>
+            <button data-action="add-black_hole">🕳️ 黑洞</button>
+            <button data-action="add-neutron_star">⚡ 中子星</button>
+            <button data-action="add-pulsar">💜 脉冲星</button>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0" id="ctx-ring-sep"></div>
         <div id="ctx-ringworld"><button data-action="add-ringworld">💍 环形世界</button></div>
@@ -1184,7 +1189,18 @@ export class SolarSystemPanel {
             <button data-action="sib-frozen">🧊 冰冻</button>
             <button data-action="sib-molten">🔥 熔融</button>
             <button data-action="sib-toxic">☣️ 剧毒</button>
+            <button data-action="sib-barren_cold">🌑 寒冷贫瘠</button>
             <button data-action="sib-ice_asteroid">💫 冰晶小行星</button>
+            <button data-action="sib-g_star">⭐ G型星</button>
+            <button data-action="sib-b_star">💠 B型星</button>
+            <button data-action="sib-a_star">🔷 A型星</button>
+            <button data-action="sib-f_star">🌟 F型星</button>
+            <button data-action="sib-k_star">🟠 K型星</button>
+            <button data-action="sib-m_star">🔴 M型星</button>
+            <button data-action="sib-t_star">🟤 T型星</button>
+            <button data-action="sib-black_hole">🕳️ 黑洞</button>
+            <button data-action="sib-neutron_star">⚡ 中子星</button>
+            <button data-action="sib-pulsar">💜 脉冲星</button>
         </div>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>

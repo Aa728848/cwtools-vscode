@@ -408,6 +408,9 @@ export class SolarSystemPanel {
         ringOldOrbitRadius?: number;
         ringFirstLine?: number;
         ringLastEndLine?: number;
+        ringTargetSegCount?: number;
+        ringNewAngle?: number;
+        ringOrigSegCount?: number;
     }) {
         const log = SolarSystemPanel._getLog();
         log.appendLine(`--- movePlanetOrbit msg: bodyLine=${msg.bodyLine} endLine=${msg.bodyEndLine} targetOrbit=${msg.targetResolvedOrbit} angle=${msg.targetOrbitAngle} isRing=${msg.isRingWorld}`);
@@ -449,6 +452,50 @@ export class SolarSystemPanel {
                 const newLine = oldLine.replace(/change_orbit\s*=\s*-?\d+/, `change_orbit = ${newValue}`);
                 lines[changeOrbitIdx] = newLine;
                 log.appendLine(`  RING: oldValue=${oldValue} delta=${Math.round(delta)} newValue=${newValue}`);
+
+                // ── Ring expansion: update orbit_angles and add new segments ──
+                const origSegCount = msg.ringOrigSegCount ?? ringGroup?.segments?.length ?? 0;
+                const targetSegCount = msg.ringTargetSegCount ?? origSegCount;
+                const newAngle = msg.ringNewAngle ?? (origSegCount > 0 ? 360 / origSegCount : 30);
+
+                log.appendLine(`  RING EXPAND: origSegs=${origSegCount} targetSegs=${targetSegCount} newAngle=${newAngle}`);
+
+                if (targetSegCount > origSegCount && ringGroup?.segments) {
+                    // 1. Update all existing segments' orbit_angle
+                    //    Must search all lines within each segment's block (multi-line planets)
+                    for (const seg of ringGroup.segments) {
+                        for (let li = seg.line - 1; li < seg.endLine && li < lines.length; li++) {
+                            if (/orbit_angle\s*=/.test(lines[li])) {
+                                lines[li] = lines[li].replace(
+                                    /orbit_angle\s*=\s*\S+/,
+                                    `orbit_angle = ${newAngle}`,
+                                );
+                                break;
+                            }
+                        }
+                    }
+
+                    // 2. Determine indentation from last segment
+                    const lastSeg = ringGroup.segments[ringGroup.segments.length - 1];
+                    const lastSegLine = lines[lastSeg.endLine - 1] || '';
+                    const indent = lastSegLine.match(/^(\s*)/)?.[1] ?? '\t';
+
+                    // 3. Build new segment lines
+                    const newSegsToAdd = targetSegCount - origSegCount;
+                    const newSegLines: string[] = [];
+                    for (let i = 0; i < newSegsToAdd; i++) {
+                        newSegLines.push(`${indent}planet = { class = pc_ringworld_seam orbit_angle = ${newAngle} orbit_distance = 0 }`);
+                    }
+
+                    // 4. Insert after the last existing ring segment
+                    const insertAt = lastSeg.endLine; // 1-indexed endLine → insert at this 0-indexed position
+                    lines.splice(insertAt, 0, ...newSegLines);
+
+                    log.appendLine(`  RING EXPAND: added ${newSegsToAdd} seam segments after line ${lastSeg.endLine}`);
+                } else if (targetSegCount === origSegCount && ringGroup?.segments) {
+                    // Same segment count but orbit changed, just update orbit_angles in case they changed
+                    // (no-op if angles are the same)
+                }
 
                 const newContent = lines.join('\n');
                 const fullRange = new vscode.Range(

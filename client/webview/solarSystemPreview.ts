@@ -441,17 +441,28 @@ function drawRingWorld(
     // Draw the orbit circle for the ring
     drawOrbitEllipse(ctx, parentWorldX, parentWorldY, orbitR, 'rgba(80,100,140,0.2)');
 
+    // Arc scaling: segments have fixed physical length, so their angular span
+    // shrinks as orbit radius increases. Use changeOrbitValue as the design radius.
+    const designRadius = ringGroup.changeOrbitValue || orbitR;
+    const arcScale = designRadius / Math.max(1, orbitR);
+
     // Draw each segment as a colored arc band
     for (const seg of ringGroup.segments) {
-        // Convert angles to radians (Stellaris uses degrees, canvas uses radians)
-        // We need to apply view rotation for the arc
-        const startRad = (seg.startAngle) * Math.PI / 180;
-        const endRad = (seg.endAngle) * Math.PI / 180;
+        // Calculate the center and span of this segment
+        const originalSpan = seg.endAngle - seg.startAngle;
+        const center = (seg.startAngle + seg.endAngle) / 2;
+        // Scale the span while keeping the center fixed
+        const scaledSpan = originalSpan * Math.min(1, arcScale);
+        const scaledStart = center - scaledSpan / 2;
+        const scaledEnd = center + scaledSpan / 2;
+
+        const startRad = scaledStart * Math.PI / 180;
+        const endRad = scaledEnd * Math.PI / 180;
 
         // Draw arc band by sampling points along inner and outer edge
         const innerR = orbitR - bandWidth / 2;
         const outerR = orbitR + bandWidth / 2;
-        const steps = Math.max(8, Math.ceil(Math.abs(seg.endAngle - seg.startAngle) / 3));
+        const steps = Math.max(8, Math.ceil(Math.abs(scaledSpan) / 3));
 
         ctx.save();
         ctx.beginPath();
@@ -493,12 +504,11 @@ function drawRingWorld(
         ctx.stroke();
         ctx.restore();
 
-        // Store for hit testing: find the body by line number
+        // Store for hit testing: use midpoint of arc
         const midAngle = (startRad + endRad) / 2;
         const midWx = parentWorldX + Math.cos(midAngle) * orbitR;
         const midWy = parentWorldY + Math.sin(midAngle) * orbitR;
         const midP = project(midWx, midWy, 0);
-        // Find the actual body object for hit testing
         const system = allSystems[currentSystemIndex];
         const segBody = system?.bodies.find(b => b.line === seg.line);
         if (segBody) {
@@ -515,6 +525,7 @@ function drawRingWorld(
 
     // Label for the ring group
     if (showLabels) {
+        const coverage = ringGroup.totalAngle * Math.min(1, arcScale);
         const labelAngle = ringGroup.segments[0].startAngle * Math.PI / 180;
         const labelWx = parentWorldX + Math.cos(labelAngle) * (orbitR + bandWidth);
         const labelWy = parentWorldY + Math.sin(labelAngle) * (orbitR + bandWidth);
@@ -524,7 +535,19 @@ function drawRingWorld(
         ctx.font = `${fontSize}px "Segoe UI", sans-serif`;
         ctx.textAlign = 'center';
         ctx.fillStyle = 'rgba(224,192,96,0.85)';
-        const arcText = ringGroup.totalAngle >= 360 ? '完整环世界' : `环世界 (${Math.round(ringGroup.totalAngle)}°)`;
+
+        // Show snap info during drag
+        const snapN = (ringGroup as any)._snapN as number | undefined;
+        const snapAngle = (ringGroup as any)._snapAngle as number | undefined;
+        let arcText: string;
+        if (snapN && snapN > ringGroup.segments.length) {
+            const newSegs = snapN - ringGroup.segments.length;
+            arcText = `环世界 ${snapN}段×${snapAngle}° (+${newSegs}段)`;
+        } else if (coverage >= 358) {
+            arcText = '完整环世界';
+        } else {
+            arcText = `环世界 (${Math.round(coverage)}°/${ringGroup.segments.length}段)`;
+        }
         ctx.fillText(arcText, lp.x, lp.y - fontSize);
         ctx.restore();
     }
@@ -1028,8 +1051,32 @@ function setupControls() {
             dragBody.resolvedOrbitRadius = Math.max(0, Math.round(orbitDist));
             dragBody.resolvedOrbitAngle = ((Math.round(orbitAngle) % 360) + 360) % 360;
 
-            // If dragging a ring world group, update all segment bodies
+            // If dragging a ring world group, snap to valid radii and update all segments
             if (dragRingGroup) {
+                const R0 = dragRingGroup.changeOrbitValue || dragRingGroup.orbitRadius;
+                const N0 = dragRingGroup.segments.length;
+
+                // Divisors of 360 that are >= N0 (valid segment counts for integer orbit_angles)
+                const divisors360 = [1,2,3,4,5,6,8,9,10,12,15,18,20,24,30,36,40,45,60,72,90,120,180,360];
+                const validN = divisors360.filter(d => d >= N0);
+
+                // Find closest valid segment count to the raw orbit
+                const rawN = N0 * orbitDist / R0;
+                let bestN = N0;
+                let bestDiff = Infinity;
+                for (const n of validN) {
+                    const diff = Math.abs(n - rawN);
+                    if (diff < bestDiff) { bestDiff = diff; bestN = n; }
+                }
+
+                // Snap orbit radius: R = R0 * N / N0
+                const snappedR = Math.round(R0 * bestN / N0);
+                dragBody.resolvedOrbitRadius = Math.max(Math.round(R0), snappedR);
+
+                // Store snap info for label display
+                (dragRingGroup as any)._snapN = bestN;
+                (dragRingGroup as any)._snapAngle = 360 / bestN;
+
                 dragRingGroup.orbitRadius = dragBody.resolvedOrbitRadius;
                 const system = allSystems[currentSystemIndex];
                 if (system) {
@@ -1092,9 +1139,13 @@ function setupControls() {
                     // Ring world specific data
                     isRingWorld: !!ringGroup,
                     ringChangeOrbitLine: ringGroup?.changeOrbitLine ?? -1,
-                    ringOldOrbitRadius: ringGroup ? (ringGroup.orbitRadius) : 0,
+                    ringOldOrbitRadius: ringGroup ? (ringGroup.changeOrbitValue || ringGroup.orbitRadius) : 0,
                     ringFirstLine: ringGroup?.firstLine ?? 0,
                     ringLastEndLine: ringGroup?.lastEndLine ?? 0,
+                    // Ring expansion data
+                    ringTargetSegCount: ringGroup ? ((ringGroup as any)._snapN || ringGroup.segments.length) : 0,
+                    ringNewAngle: ringGroup ? ((ringGroup as any)._snapAngle || (360 / ringGroup.segments.length)) : 0,
+                    ringOrigSegCount: ringGroup ? ringGroup.segments.length : 0,
                 });
             } else {
                 selectBody(body);
@@ -1431,7 +1482,7 @@ function updatePropertiesPanel() {
     // Actions
     html += `<div class="prop-group">`;
     html += `<div class="prop-group-title">操作</div>`;
-    html += `<div class="prop-row"><button class="prop-input" style="width:100%;text-align:center;cursor:pointer;padding:4px 8px" onclick="jumpToLine(${body.line})">跳转到源码 (行 ${body.line})</button></div>`;
+    html += `<div class="prop-row"><button class="prop-input btn-jump-to-line" data-jump-line="${body.line}" style="width:100%;text-align:center;cursor:pointer;padding:4px 8px">跳转到源码 (行 ${body.line})</button></div>`;
     if (editMode) {
         html += `<div class="prop-row" style="justify-content:center;margin-top:4px"><span style="font-size:10px;color:var(--text-muted)">💡 右键画布可添加新行星</span></div>`;
     }
@@ -1501,6 +1552,14 @@ function updatePropertiesPanel() {
         };
         input.addEventListener('change', handler);
         input.addEventListener('keydown', (e) => { if (e.key === 'Enter') handler(); });
+    });
+
+    // Jump-to-line buttons (cannot use inline onclick due to CSP)
+    panel.querySelectorAll<HTMLButtonElement>('.btn-jump-to-line').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const line = parseInt(btn.getAttribute('data-jump-line') ?? '0');
+            if (line > 0) vscode.postMessage({ command: 'goToLine', line });
+        });
     });
 }
 

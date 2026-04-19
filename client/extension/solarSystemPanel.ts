@@ -70,6 +70,9 @@ export class SolarSystemPanel {
                     case 'addPlanet':
                         this._messageQueue = this._messageQueue.then(() => this._handleAddPlanet(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addPlanet: ${e}`));
                         break;
+                    case 'addRingWorld':
+                        this._messageQueue = this._messageQueue.then(() => this._handleAddRingWorld(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR addRingWorld: ${e}`));
+                        break;
                     case 'deletePlanet':
                         this._messageQueue = this._messageQueue.then(() => this._handleDeletePlanet(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR deletePlanet: ${e}`));
                         break;
@@ -292,6 +295,70 @@ export class SolarSystemPanel {
     }
 
     /**
+     * Handle adding a complete ring world (change_orbit + ring segments).
+     */
+    private async _handleAddRingWorld(msg: {
+        systemEndLine: number;
+        orbitDistance: number;
+        segmentCount: number;
+        segmentAngle: number;
+    }) {
+        if (!this._document) return;
+        const doc = this._document;
+        const log = SolarSystemPanel._getLog();
+
+        this._contentSnapshots.push(doc.getText());
+        this._lastSnapshotTime = Date.now();
+
+        // Parse to find cumulative orbit at insertion point (end of system)
+        const content = doc.getText();
+        const systems = parseSolarSystemFile(content);
+        let cumulativeOrbit = 0;
+        for (const sys of systems) {
+            if (sys.endLine === msg.systemEndLine) {
+                // Find last body's cumulative orbit
+                for (const b of sys.bodies) {
+                    const bodyEndOrbit = b.resolvedOrbitRadius + b.changeOrbit;
+                    if (bodyEndOrbit > cumulativeOrbit) {
+                        cumulativeOrbit = bodyEndOrbit;
+                    }
+                }
+                break;
+            }
+        }
+
+        // change_orbit = desired_absolute_orbit - current_cumulative
+        // Ring world should be at absolute orbit 30 from star
+        const changeOrbitValue = msg.orbitDistance - cumulativeOrbit;
+        log.appendLine(`  RING CREATE: cumOrbit=${cumulativeOrbit} desired=${msg.orbitDistance} change_orbit=${changeOrbitValue}`);
+
+        const insertLineIdx = msg.systemEndLine - 1;
+        const closingLine = doc.lineAt(insertLineIdx);
+        const indent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
+        const pi = indent + '\t';
+
+        // Build the ring world block: change_orbit + segments
+        // Pattern: habitable, seam, tech (repeating) → 4 habitable in 12 segments
+        const segClasses = [];
+        const pattern = ['pc_ringworld_habitable', 'pc_ringworld_seam', 'pc_ringworld_tech'];
+        for (let i = 0; i < msg.segmentCount; i++) {
+            segClasses.push(pattern[i % pattern.length]);
+        }
+
+        let code = `${pi}change_orbit = ${changeOrbitValue}\n`;
+        for (const cls of segClasses) {
+            code += `${pi}planet = { class = ${cls} orbit_angle = ${msg.segmentAngle} orbit_distance = 0 }\n`;
+        }
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), code);
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+        await this._loadAndRender(doc);
+    }
+
+    /**
      * Handle batch orbit update (distance + angle in a single edit).
      */
     private async _handleUpdateOrbit(msg: {
@@ -480,11 +547,13 @@ export class SolarSystemPanel {
                     const lastSegLine = lines[lastSeg.endLine - 1] || '';
                     const indent = lastSegLine.match(/^(\s*)/)?.[1] ?? '\t';
 
-                    // 3. Build new segment lines
+                    // 3. Build new segment lines (cycle: seam, tech, habitable)
                     const newSegsToAdd = targetSegCount - origSegCount;
                     const newSegLines: string[] = [];
+                    const expandPattern = ['pc_ringworld_seam', 'pc_ringworld_tech', 'pc_ringworld_habitable'];
                     for (let i = 0; i < newSegsToAdd; i++) {
-                        newSegLines.push(`${indent}planet = { class = pc_ringworld_seam orbit_angle = ${newAngle} orbit_distance = 0 }`);
+                        const cls = expandPattern[i % expandPattern.length];
+                        newSegLines.push(`${indent}planet = { class = ${cls} orbit_angle = ${newAngle} orbit_distance = 0 }`);
                     }
 
                     // 4. Insert after the last existing ring segment
@@ -492,9 +561,33 @@ export class SolarSystemPanel {
                     lines.splice(insertAt, 0, ...newSegLines);
 
                     log.appendLine(`  RING EXPAND: added ${newSegsToAdd} seam segments after line ${lastSeg.endLine}`);
-                } else if (targetSegCount === origSegCount && ringGroup?.segments) {
-                    // Same segment count but orbit changed, just update orbit_angles in case they changed
-                    // (no-op if angles are the same)
+                } else if (targetSegCount < origSegCount && ringGroup?.segments) {
+                    // SHRINK: remove excess segments from the end and update orbit_angles
+                    const segsToRemove = origSegCount - targetSegCount;
+                    log.appendLine(`  RING SHRINK: removing ${segsToRemove} segments from end`);
+
+                    // 1. Update all remaining segments' orbit_angle
+                    for (let si = 0; si < targetSegCount; si++) {
+                        const seg = ringGroup.segments[si];
+                        for (let li = seg.line - 1; li < seg.endLine && li < lines.length; li++) {
+                            if (/orbit_angle\s*=/.test(lines[li])) {
+                                lines[li] = lines[li].replace(
+                                    /orbit_angle\s*=\s*\S+/,
+                                    `orbit_angle = ${newAngle}`,
+                                );
+                                break;
+                            }
+                        }
+                    }
+
+                    // 2. Remove segments from end (reverse order to preserve line numbers)
+                    for (let si = origSegCount - 1; si >= targetSegCount; si--) {
+                        const seg = ringGroup.segments[si];
+                        const startIdx = seg.line - 1;
+                        const endIdx = seg.endLine - 1;
+                        lines.splice(startIdx, endIdx - startIdx + 1);
+                        log.appendLine(`  RING SHRINK: removed segment at lines ${seg.line}-${seg.endLine}`);
+                    }
                 }
 
                 const newContent = lines.join('\n');
@@ -587,7 +680,6 @@ export class SolarSystemPanel {
         log.appendLine(`  inPlaceNewDist=${inPlaceNewDist} target=${msg.targetResolvedOrbit}`);
         log.appendLine(`  prev=${prevBody?.resolvedOrbitRadius ?? 'none'} next=${nextBody?.resolvedOrbitRadius ?? 'none'}`);
         log.appendLine(`  needsReorder=${needsReorder}`);
-        log.show(true);
 
         if (!needsReorder) {
             // Simple in-place update
@@ -817,6 +909,8 @@ export class SolarSystemPanel {
         <button data-action="add-molten">🔥 熔融星球</button>
         <button data-action="add-toxic">☣️ 剧毒星球</button>
         <button data-action="add-asteroid">💫 小行星</button>
+        <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0"></div>
+        <button data-action="add-ringworld">💍 环形世界</button>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

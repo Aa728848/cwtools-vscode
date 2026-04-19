@@ -441,10 +441,10 @@ function drawRingWorld(
     // Draw the orbit circle for the ring
     drawOrbitEllipse(ctx, parentWorldX, parentWorldY, orbitR, 'rgba(80,100,140,0.2)');
 
-    // Arc scaling: segments have fixed physical length, so their angular span
-    // shrinks as orbit radius increases. Use changeOrbitValue as the design radius.
-    const designRadius = ringGroup.changeOrbitValue || orbitR;
-    const arcScale = designRadius / Math.max(1, orbitR);
+    // Arc scaling: only during drag. _dragOrigRadius is set at drag start.
+    // When not dragging, arcScale = 1 (segments render at their defined angles).
+    const dragOrigR = (ringGroup as any)._dragOrigRadius as number | undefined;
+    const arcScale = dragOrigR ? (dragOrigR / Math.max(1, orbitR)) : 1;
 
     // Draw each segment as a colored arc band
     for (const seg of ringGroup.segments) {
@@ -895,12 +895,26 @@ function setupControls() {
         btn.addEventListener('click', () => {
             const action = btn.dataset.action ?? '';
             hideCtxMenu();
-            if (action.startsWith('add-')) {
-                const planetClass = 'pc_' + action.slice(4); // e.g. "add-continental" → "pc_continental"
+            if (action === 'add-ringworld') {
+                const system = allSystems[currentSystemIndex];
+                if (!system) return;
+                // Don't create if system already has a ring world
+                const hasRing = system.bodies.some(b => b.planetClass?.includes('ringworld'));
+                if (hasRing) {
+                    return; // already has ring world
+                }
+                vscode.postMessage({
+                    command: 'addRingWorld',
+                    systemEndLine: system.endLine,
+                    orbitDistance: 30,
+                    segmentCount: 12,
+                    segmentAngle: 30,
+                });
+            } else if (action.startsWith('add-')) {
+                const planetClass = 'pc_' + action.slice(4);
                 const system = allSystems[currentSystemIndex];
                 if (!system) return;
 
-                // Convert click to world coordinates using full inverse projection
                 const dpr = window.devicePixelRatio || 1;
                 const rect = canvas.getBoundingClientRect();
                 const clickScreenX = (ctxClickX - rect.left) * dpr;
@@ -921,15 +935,26 @@ function setupControls() {
         });
     });
 
-    // Close context menu on click outside
-    document.addEventListener('mousedown', (e: MouseEvent) => {
+    // Close context menu on click outside or Escape
+    document.addEventListener('pointerdown', (e: PointerEvent) => {
         if (ctxMenu && !ctxMenu.contains(e.target as Node) && !ctxMenu.classList.contains('hidden')) {
             hideCtxMenu();
+        }
+    });
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            hideCtxMenu();
+            // Also close any autocomplete dropdown
+                const dd = document.getElementById('class-dropdown'); if (dd) dd.style.display = 'none';
         }
     });
 
     // ── Canvas mouse events ────────────────────────────────────────────────
     canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+        // Close menus/dropdowns on any canvas interaction
+        hideCtxMenu();
+            const dd = document.getElementById('class-dropdown'); if (dd) dd.style.display = 'none';
+
         // Middle-click or Alt+left-click → pan
         if (e.button === 1 || (e.button === 0 && e.altKey)) {
             isPanning = true;
@@ -958,6 +983,8 @@ function setupControls() {
                     if (anchor && anchor.ringGroup) {
                         body = anchor;
                         dragRingGroup = anchor.ringGroup;
+                        // Store original orbit radius for arc scaling during drag
+                        (dragRingGroup as any)._dragOrigRadius = dragRingGroup.orbitRadius;
                     }
                 }
 
@@ -1053,12 +1080,12 @@ function setupControls() {
 
             // If dragging a ring world group, snap to valid radii and update all segments
             if (dragRingGroup) {
-                const R0 = dragRingGroup.changeOrbitValue || dragRingGroup.orbitRadius;
+                const R0 = (dragRingGroup as any)._dragOrigRadius || dragRingGroup.orbitRadius;
                 const N0 = dragRingGroup.segments.length;
 
-                // Divisors of 360 that are >= N0 (valid segment counts for integer orbit_angles)
-                const divisors360 = [1,2,3,4,5,6,8,9,10,12,15,18,20,24,30,36,40,45,60,72,90,120,180,360];
-                const validN = divisors360.filter(d => d >= N0);
+                // Divisors of 360 that are valid segment counts for integer orbit_angles
+                const divisors360 = [3,4,5,6,8,9,10,12,15,18,20,24,30,36,40,45,60,72,90,120,180,360];
+                const validN = divisors360.filter(d => d >= 3);
 
                 // Find closest valid segment count to the raw orbit
                 const rawN = N0 * orbitDist / R0;
@@ -1071,7 +1098,7 @@ function setupControls() {
 
                 // Snap orbit radius: R = R0 * N / N0
                 const snappedR = Math.round(R0 * bestN / N0);
-                dragBody.resolvedOrbitRadius = Math.max(Math.round(R0), snappedR);
+                dragBody.resolvedOrbitRadius = Math.max(Math.round(R0 * 3 / N0), snappedR);
 
                 // Store snap info for label display
                 (dragRingGroup as any)._snapN = bestN;
@@ -1139,7 +1166,7 @@ function setupControls() {
                     // Ring world specific data
                     isRingWorld: !!ringGroup,
                     ringChangeOrbitLine: ringGroup?.changeOrbitLine ?? -1,
-                    ringOldOrbitRadius: ringGroup ? (ringGroup.changeOrbitValue || ringGroup.orbitRadius) : 0,
+                    ringOldOrbitRadius: ringGroup ? ((ringGroup as any)._dragOrigRadius || ringGroup.orbitRadius) : 0,
                     ringFirstLine: ringGroup?.firstLine ?? 0,
                     ringLastEndLine: ringGroup?.lastEndLine ?? 0,
                     // Ring expansion data
@@ -1431,6 +1458,8 @@ function findBodyByLine(bodies: CelestialBody[], line: number): CelestialBody | 
 // ─── Properties Panel ───────────────────────────────────────────────────────
 
 function updatePropertiesPanel() {
+    // Close any open autocomplete dropdown before rebuilding panel
+        const dd = document.getElementById('class-dropdown'); if (dd) dd.style.display = 'none';
     const panel = document.getElementById('props-content')!;
     if (!selectedBody) {
         panel.innerHTML = '选择一个天体以编辑属性';
@@ -1458,7 +1487,7 @@ function updatePropertiesPanel() {
         html += propRow('名称', `<input class="prop-input" type="text" value="${body.name}" data-prop="name" data-line="${body.line}" style="width:120px;text-align:left" />`);
     }
     html += propRow('星球类型', `<span class="prop-value" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}">${pc.name}</span>`);
-    html += propRow('类型代码', `<input class="prop-input" type="text" value="${body.planetClass}" data-prop="class" data-line="${body.line}" style="width:140px;text-align:left" />`);
+    html += propRow('类型代码', `<div class="class-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="class-search" type="text" value="${body.planetClass}" data-prop="class" data-line="${body.line}" autocomplete="off" style="width:100%;text-align:left" /></div>`);
     html += `</div>`;
 
     // Orbit
@@ -1561,10 +1590,109 @@ function updatePropertiesPanel() {
             if (line > 0) vscode.postMessage({ command: 'goToLine', line });
         });
     });
+
+    // Planet class autocomplete
+    const classInput = panel.querySelector<HTMLInputElement>('#class-search');
+    if (classInput) {
+        const allClasses = Object.keys(PLANET_COLORS);
+        setupClassAutocomplete(classInput, allClasses);
+    }
 }
 
 function propRow(label: string, valueHtml: string): string {
     return `<div class="prop-row"><span class="prop-label">${label}</span>${valueHtml}</div>`;
+}
+
+/** Autocomplete dropdown for planet class input */
+function setupClassAutocomplete(inputEl: HTMLInputElement, dataSource: string[]) {
+    let dropdown = document.getElementById('class-dropdown') as HTMLElement;
+    if (!dropdown) {
+        dropdown = document.createElement('div');
+        dropdown.id = 'class-dropdown';
+        Object.assign(dropdown.style, {
+            position: 'fixed', zIndex: '10000',
+            background: 'var(--bg-surface, #252525)', border: '1px solid var(--border, #555)',
+            borderRadius: '4px', maxHeight: '200px', overflowY: 'auto',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)', fontSize: '12px',
+            display: 'none',
+        });
+        document.body.appendChild(dropdown);
+    }
+    let ddIndex = -1;
+
+    const hideDD = () => { dropdown.style.display = 'none'; };
+    const isHidden = () => dropdown.style.display === 'none';
+
+    const positionDropdown = () => {
+        const rect = inputEl.getBoundingClientRect();
+        dropdown.style.top = `${rect.bottom + 2}px`;
+        dropdown.style.left = `${rect.left}px`;
+        dropdown.style.width = `${Math.max(rect.width, 200)}px`;
+    };
+
+    const showDropdown = (query: string) => {
+        const q = query.toLowerCase();
+        const matches = q
+            ? dataSource.filter(s => s.toLowerCase().includes(q)).slice(0, 30)
+            : dataSource.slice(0, 30);
+        if (matches.length === 0) { hideDD(); return; }
+        ddIndex = -1;
+        dropdown.innerHTML = matches.map(s => {
+            const pc = PLANET_COLORS[s];
+            const colorDot = pc ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pc.fill};margin-right:6px"></span>` : '';
+            const label = pc ? `${colorDot}${s} <span style="color:var(--text-muted,#888);font-size:10px">${pc.name}</span>` : s;
+            return `<div class="class-option" style="padding:4px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>`;
+        }).join('');
+        positionDropdown();
+        dropdown.style.display = 'block';
+        dropdown.querySelectorAll('.class-option').forEach((opt, i) => {
+            (opt as HTMLElement).addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                inputEl.value = matches[i];
+                hideDD();
+                inputEl.dispatchEvent(new Event('change'));
+            });
+            (opt as HTMLElement).addEventListener('mouseenter', () => {
+                dropdown.querySelectorAll('.class-option').forEach(o => (o as HTMLElement).style.background = '');
+                (opt as HTMLElement).style.background = 'var(--accent, #0078d4)';
+                ddIndex = i;
+            });
+            (opt as HTMLElement).addEventListener('mouseleave', () => {
+                (opt as HTMLElement).style.background = '';
+            });
+        });
+    };
+
+    inputEl.addEventListener('input', () => showDropdown(inputEl.value));
+    inputEl.addEventListener('focus', () => showDropdown(inputEl.value));
+    inputEl.addEventListener('blur', () => setTimeout(hideDD, 150));
+    // Close dropdown when clicking anywhere outside
+    document.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (!dropdown.contains(e.target as Node) && e.target !== inputEl && !isHidden()) {
+            hideDD();
+        }
+    });
+    inputEl.addEventListener('keydown', (e) => {
+        const items = dropdown.querySelectorAll('.class-option');
+        if (items.length === 0 || isHidden()) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault(); ddIndex = Math.min(ddIndex + 1, items.length - 1);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault(); ddIndex = Math.max(ddIndex - 1, 0);
+        } else if (e.key === 'Enter' && ddIndex >= 0) {
+            e.preventDefault();
+            inputEl.value = (items[ddIndex] as HTMLElement).textContent!.split(' ')[0].trim();
+            hideDD();
+            inputEl.dispatchEvent(new Event('change'));
+            return;
+        } else if (e.key === 'Escape') {
+            hideDD(); return;
+        } else return;
+        items.forEach((it, i) => {
+            (it as HTMLElement).style.background = i === ddIndex ? 'var(--accent, #0078d4)' : '';
+        });
+        if (ddIndex >= 0) items[ddIndex].scrollIntoView({ block: 'nearest' });
+    });
 }
 
 function propRowVOR(label: string, prop: string, vor: ValueOrRange, line: number): string {

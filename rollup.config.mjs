@@ -20,4 +20,23 @@ export default [
             }),
         ],
     },
-];
+    // Solar System Preview webview bundle
+    {
+        input: './client/webview/solarSystemPreview.ts',
+        output: {
+            file: './release/bin/client/webview/solarSystemPreview.js',
+            format: "iife",
+            name: "cwtoolssolarsystem",
+            indent: false,
+        },
+        plugins: [
+            typescript({
+                tsconfig: "tsconfig.webview-solar.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
+        ],
+    },
+];

@@ -54,6 +54,11 @@
 					"command": "cwtools.previewGUI",
 					"when": "resourceExtname == .gui",
 					"group": "navigation"
+				},
+				{
+					"command": "cwtools.previewSolarSystem",
+					"when": "resourceExtname == .txt && resourcePath =~ /solar_system_initializers/",
+					"group": "navigation"
 				}
 			]
 		},
@@ -125,6 +130,12 @@
 				"title": "Preview GUI Layout",
 				"category": "cwtools",
 				"icon": "$(open-preview)"
+			},
+			{
+				"command": "cwtools.previewSolarSystem",
+				"title": "Preview Solar System",
+				"category": "cwtools",
+				"icon": "$(telescope)"
 			}
 		],
 		"configuration": {

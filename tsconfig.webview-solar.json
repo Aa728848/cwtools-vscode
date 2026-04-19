@@ -4,11 +4,11 @@
     },
     "extends": "./tsconfig.json",
     "include": [
-        "client/webview/guiPreview.ts"
+        "client/webview/solarSystemPreview.ts"
     ],
     "exclude": [
         "client/extension/**",
         "client/test/**",
-        "client/webview/solarSystemPreview.ts"
+        "client/webview/guiPreview.ts"
     ]
 }

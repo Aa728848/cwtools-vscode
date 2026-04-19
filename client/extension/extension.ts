@@ -13,6 +13,7 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, No
 
 import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
+import { SolarSystemPanel } from './solarSystemPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
 
@@ -474,6 +475,31 @@ export async function activate(context: ExtensionContext) {
 				return;
 			}
 			await GuiPanel.create(context.extensionPath, doc);
+		});
+
+		// Solar System Preview command
+		safeRegisterCommand(context, "cwtools.previewSolarSystem", async () => {
+			const editor = vs.window.activeTextEditor;
+			if (!editor) {
+				vs.window.showWarningMessage('No active editor to preview');
+				return;
+			}
+			const doc = editor.document;
+			const fileName = doc.fileName.toLowerCase();
+			if (!fileName.endsWith('.txt')) {
+				vs.window.showWarningMessage('Solar System Preview is only available for .txt files');
+				return;
+			}
+			// Check if file is in solar_system_initializers directory
+			const normalizedPath = fileName.replace(/\\/g, '/');
+			if (!normalizedPath.includes('solar_system_initializers')) {
+				const result = await vs.window.showWarningMessage(
+					'This file is not in a solar_system_initializers directory. Preview anyway?',
+					'Preview', 'Cancel'
+				);
+				if (result !== 'Preview') return;
+			}
+			await SolarSystemPanel.create(context.extensionPath, doc);
 		});
 
 		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {

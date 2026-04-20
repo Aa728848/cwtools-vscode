@@ -20,6 +20,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsStreaming: true,
         maxContextTokens: 400000,
         isOpenAICompatible: true,
+        toolCallStyle: 'openai',
     },
     claude: {
         id: 'claude',
@@ -35,7 +36,8 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsToolUse: true,
         supportsStreaming: true,
         maxContextTokens: 1000000,
-        isOpenAICompatible: false,  // needs adapter
+        isOpenAICompatible: false,   // needs adapter
+        toolCallStyle: 'openai',     // adapter normalises to openai format
     },
     deepseek: {
         id: 'deepseek',
@@ -47,6 +49,9 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsStreaming: true,
         maxContextTokens: 128000,
         isOpenAICompatible: true,
+        // Official API → standard openai tool_calls JSON.
+        // Raw/local via vLLM → <｜DSML｜function_calls> (handled as fallback).
+        toolCallStyle: 'openai',
     },
     minimax: {
         id: 'minimax',
@@ -58,6 +63,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsStreaming: true,
         maxContextTokens: 204800,
         isOpenAICompatible: true,
+        toolCallStyle: 'openai',
     },
     glm: {
         id: 'glm',
@@ -69,6 +75,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsStreaming: true,
         maxContextTokens: 200000,
         isOpenAICompatible: true,
+        toolCallStyle: 'openai',
     },
     qwen: {
         id: 'qwen',
@@ -80,6 +87,9 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsStreaming: true,
         maxContextTokens: 1000000,
         isOpenAICompatible: true,
+        // DashScope OpenAI-compat endpoint → standard tool_calls JSON.
+        // Local Qwen3 via Ollama → <tool_call>{JSON}</tool_call> (Hermes, handled as fallback).
+        toolCallStyle: 'openai',
     },
     ollama: {
         id: 'ollama',
@@ -91,6 +101,9 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsStreaming: true,
         maxContextTokens: 32768,
         isOpenAICompatible: true,
+        // Ollama normalises tool_calls to openai format for most models.
+        // If the model outputs raw <tool_call> text, fallback parser handles it.
+        toolCallStyle: 'openai',
     },
     custom: {
         id: 'custom',
@@ -102,6 +115,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsStreaming: true,
         maxContextTokens: 32000,
         isOpenAICompatible: true,
+        toolCallStyle: 'openai',
     },
 };
 

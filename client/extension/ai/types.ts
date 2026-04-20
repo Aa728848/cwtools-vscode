@@ -31,6 +31,14 @@ export interface AIProviderConfig {
     maxContextTokens: number;
     /** Whether this provider uses OpenAI-compatible API format natively */
     isOpenAICompatible: boolean;
+    /**
+     * Expected tool call OUTPUT format from the model.
+     * 'openai'    – standard JSON tool_calls field (all major official APIs)
+     * 'dsml'      – DeepSeek <｜DSML｜function_calls> (raw/local DeepSeek V3+)
+     * 'tool_call' – Qwen/Hermes <tool_call>{JSON}</tool_call> (Ollama local models)
+     * Default: 'openai'
+     */
+    toolCallStyle?: 'openai' | 'dsml' | 'tool_call';
 }
 
 export interface AIUserConfig {

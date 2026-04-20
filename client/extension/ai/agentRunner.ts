@@ -377,64 +377,153 @@ export class AgentRunner {
     }
 
     /**
-     * Parse DSML/XML-format tool calls from model response text.
-     * Some models (e.g. DeepSeek on certain configs) output tool calls as:
-     *   <function_calls><invoke name="..."><parameter name="...">value</parameter></invoke></function_calls>
-     * or Claude-style or similar XML variants.
+     * Parse text-format tool calls from a model response.
+     * Handles multiple real-world formats:
+     *
+     * 1. DeepSeek DSML (V3.2+, local/vLLM/SGLang):
+     *    <｜DSML｜function_calls>\n  <｜DSML｜invoke name="fn">\n    <｜DSML｜parameter name="p" string="true">val</｜DSML｜parameter>\n  </｜DSML｜invoke>\n</｜DSML｜function_calls>
+     *    (｜ is the FULL-WIDTH VERTICAL LINE U+FF5C)
+     *
+     * 2. Qwen / Hermes style:
+     *    <tool_call>\n{"name": "fn", "arguments": {...}}\n</tool_call>
+     *
+     * 3. Qwen-Coder style:
+     *    <tool_call><function=fn><parameter=p>val</parameter></function></tool_call>
+     *
+     * 4. Generic XML (Claude antml_, simple <invoke>):
+     *    <function_calls><invoke name="fn"><parameter name="p">val</parameter></invoke></function_calls>
      */
     private parseDsmlToolCalls(content: string): import('./types').ToolCall[] {
         const calls: import('./types').ToolCall[] = [];
+        let callIndex = 0;
 
-        // Pattern 1: <function_calls><invoke name="tool">...
-        // Pattern 2: <antml_function_calls><antml_invoke name="tool">...
-        const invokePattern = /<(?:antml_)?invoke\s+name=["']([^"']+)["']>(.*?)<\/(?:antml_)?invoke>/gs;
-        const paramPattern = /<parameter\s+name=["']([^"']+)["'][^>]*>(.*?)<\/parameter>/gs;
+        // ── Pre-normalize: full-width ｜ (U+FF5C) → | (U+007C) ───────────────
+        // DeepSeek actual output: <｜DSML｜function_calls>  (full-width pipes)
+        // Normalizing to ASCII lets us use simple, reliable regexes.
+        const norm = content.replace(/\uFF5C/g, '|');
 
-        // Check if content contains any function call block
-        if (!/<(?:antml_)?function_calls>/i.test(content) && 
-            !/<(?:antml_)?invoke\s+name=/i.test(content)) {
-            return [];
+        // ── Format 1: DeepSeek DSML  <|DSML|function_calls> ──────────────────
+        const hasDsml = /<\|DSML\|function_calls>/i.test(norm) ||
+                        /<\|DSML\|invoke\s+name=/i.test(norm);
+
+        if (hasDsml) {
+            const invokeRe = /<\|DSML\|invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/\|DSML\|invoke>/gi;
+            const paramRe  = /<\|DSML\|parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/\|DSML\|parameter>/gi;
+            invokeRe.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = invokeRe.exec(norm)) !== null) {
+                const toolName = m[1];
+                const inner = m[2];
+                const args: Record<string, unknown> = {};
+                paramRe.lastIndex = 0;
+                let pm: RegExpExecArray | null;
+                while ((pm = paramRe.exec(inner)) !== null) {
+                    const val = pm[2].trim();
+                    try { args[pm[1]] = JSON.parse(val); } catch { args[pm[1]] = val; }
+                }
+                calls.push({ id: `dsml_${Date.now()}_${callIndex++}`, type: 'function',
+                    function: { name: toolName, arguments: JSON.stringify(args) } });
+            }
+            if (calls.length > 0) return calls;
         }
 
-        let invokeMatch: RegExpExecArray | null;
-        let callIndex = 0;
-        while ((invokeMatch = invokePattern.exec(content)) !== null) {
-            const toolName = invokeMatch[1];
-            const innerContent = invokeMatch[2];
-
-            const args: Record<string, unknown> = {};
-            let paramMatch: RegExpExecArray | null;
-            paramPattern.lastIndex = 0;
-            while ((paramMatch = paramPattern.exec(innerContent)) !== null) {
-                const paramName = paramMatch[1];
-                const paramValue = paramMatch[2].trim();
-                // Try to parse JSON values, fall back to string
+        // ── Format 2: Qwen / Hermes <tool_call>{JSON}</tool_call> ─────────────
+        const toolCallJsonRe = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
+        toolCallJsonRe.lastIndex = 0;
+        let tm: RegExpExecArray | null;
+        const toolCallMatches: string[] = [];
+        while ((tm = toolCallJsonRe.exec(content)) !== null) {
+            toolCallMatches.push(tm[1]);
+        }
+        for (const raw of toolCallMatches) {
+            // might be plain JSON or <function=...><parameter=...> inside
+            if (raw.trimStart().startsWith('<function=') || raw.trimStart().startsWith('<function ')) {
+                // Format 3 inside tool_call wrapper — fall through to format 3
+                const parsed = this.parseQwenCoderBlock(raw, callIndex);
+                calls.push(...parsed); callIndex += parsed.length;
+            } else {
                 try {
-                    args[paramName] = JSON.parse(paramValue);
-                } catch {
-                    args[paramName] = paramValue;
-                }
+                    const obj = JSON.parse(raw) as { name?: string; arguments?: unknown };
+                    if (obj.name) {
+                        calls.push({ id: `tc_${Date.now()}_${callIndex++}`, type: 'function',
+                            function: { name: obj.name,
+                                arguments: typeof obj.arguments === 'string'
+                                    ? obj.arguments : JSON.stringify(obj.arguments ?? {}) } });
+                    }
+                } catch { /* not valid JSON, ignore */ }
             }
+        }
+        if (calls.length > 0) return calls;
 
-            calls.push({
-                id: `dsml_${Date.now()}_${callIndex++}`,
-                type: 'function',
-                function: {
-                    name: toolName,
-                    arguments: JSON.stringify(args),
-                },
-            });
+        // ── Format 3: Qwen-Coder (no outer tool_call wrapper) ─────────────────
+        if (/<function[= ]/.test(content)) {
+            const qwenCalls = this.parseQwenCoderBlock(content, callIndex);
+            calls.push(...qwenCalls); callIndex += qwenCalls.length;
+            if (calls.length > 0) return calls;
+        }
+
+        // ── Format 4: Generic XML <function_calls><invoke ...> ────────────────
+        // (also handles Claude antml_ prefix)
+        const hasGeneric = /< *(?:antml_)?function_calls *>/i.test(content) ||
+                           /< *(?:antml_)?invoke\s+name=/i.test(content);
+        if (hasGeneric) {
+            const invokeRe2 = /< *(?:antml_)?invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/ *(?:antml_)?invoke *>/gi;
+            const paramRe2 = /< *(?:antml_)?parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/ *(?:antml_)?parameter *>/gi;
+            invokeRe2.lastIndex = 0;
+            let m2: RegExpExecArray | null;
+            while ((m2 = invokeRe2.exec(content)) !== null) {
+                const toolName = m2[1], inner = m2[2];
+                const args: Record<string, unknown> = {};
+                paramRe2.lastIndex = 0;
+                let pm2: RegExpExecArray | null;
+                while ((pm2 = paramRe2.exec(inner)) !== null) {
+                    const val = pm2[2].trim();
+                    try { args[pm2[1]] = JSON.parse(val); } catch { args[pm2[1]] = val; }
+                }
+                calls.push({ id: `gen_${Date.now()}_${callIndex++}`, type: 'function',
+                    function: { name: toolName, arguments: JSON.stringify(args) } });
+            }
         }
 
         return calls;
     }
 
-    /** Remove DSML/XML function call blocks from the response text */
+    /** Parse Qwen-Coder style <function=fn><parameter=key>val</parameter></function> blocks */
+    private parseQwenCoderBlock(content: string, startIndex: number): import('./types').ToolCall[] {
+        const calls: import('./types').ToolCall[] = [];
+        const fnRe = /<function[= ]["']?([\w.-]+)["']?>([\s\S]*?)<\/function>/gi;
+        const paramRe2 = /<parameter[= ]["']?([\w.-]+)["']?>([\s\S]*?)<\/parameter>/gi;
+        fnRe.lastIndex = 0;
+        let fm: RegExpExecArray | null;
+        while ((fm = fnRe.exec(content)) !== null) {
+            const toolName = fm[1], inner = fm[2];
+            const args: Record<string, unknown> = {};
+            paramRe2.lastIndex = 0;
+            let pm: RegExpExecArray | null;
+            while ((pm = paramRe2.exec(inner)) !== null) {
+                const val = pm[2].trim();
+                try { args[pm[1]] = JSON.parse(val); } catch { args[pm[1]] = val; }
+            }
+            calls.push({ id: `qc_${Date.now()}_${startIndex++}`, type: 'function',
+                function: { name: toolName, arguments: JSON.stringify(args) } });
+        }
+        return calls;
+    }
+
+    /** Strip all known text-format tool call markup from text */
     private stripDsmlMarkup(content: string): string {
-        // Remove <function_calls>...</function_calls> and <antml_function_calls>...</antml_function_calls>
-        return content
-            .replace(/<(?:antml_)?function_calls>.*?<\/(?:antml_)?function_calls>/gs, '')
-            .replace(/<(?:antml_)?invoke[^>]*>.*?<\/(?:antml_)?invoke>/gs, '')
+        // Normalize full-width ｜ first (DeepSeek DSML uses U+FF5C)
+        const norm = content.replace(/\uFF5C/g, '|');
+        return norm
+            // DeepSeek DSML: <|DSML|function_calls>...</|DSML|function_calls>
+            .replace(/<\|DSML\|function_calls>[\s\S]*?<\/\|DSML\|function_calls>/gi, '')
+            .replace(/<\|DSML\|invoke(?:\s[^>]*)?>[\s\S]*?<\/\|DSML\|invoke>/gi, '')
+            // Qwen / Hermes: <tool_call>...</tool_call>
+            .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+            // Generic XML / Claude antml_
+            .replace(/< *(?:antml_)?function_calls *>[\s\S]*?<\/ *(?:antml_)?function_calls *>/gi, '')
+            .replace(/< *(?:antml_)?invoke(?:\s[^>]*)? *>[\s\S]*?<\/ *(?:antml_)?invoke *>/gi, '')
+            .replace(/\n{3,}/g, '\n\n')
             .trim();
     }
 
@@ -615,10 +704,7 @@ export class AgentRunner {
     private extractExplanation(text: string): string {
         if (!text) return '';
 
-        // Remove DSML/XML function call blocks (DeepSeek / Claude XML format)
-        let explanation = text
-            .replace(/<(?:antml_)?function_calls>[\s\S]*?<\/(?:antml_)?function_calls>/g, '')
-            .replace(/<(?:antml_)?invoke[^>]*>[\s\S]*?<\/(?:antml_)?invoke>/g, '');
+        let explanation = this.stripDsmlMarkup(text);
 
         // Remove code blocks
         explanation = explanation.replace(/```[\s\S]*?```/g, '').trim();

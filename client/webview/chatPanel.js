@@ -111,10 +111,6 @@
     bindBtn('btnTopics',        () => topicsPanel.classList.toggle('show'));
     bindBtn('btnNewTopicPanel', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); });
     bindBtn('btnSettings',      () => vscode.postMessage({ type: 'openSettings' }));
-    bindBtn('buildModeBtn',     () => switchMode('build'));
-    bindBtn('planModeBtn',      () => switchMode('plan'));
-    bindBtn('exploreModeBtn',   () => switchMode('explore'));
-    bindBtn('generalModeBtn',   () => switchMode('general'));
     bindBtn('settingsBackBtn',  closeSettings);
     bindBtn('testConnBtn',      testConnection);
     bindBtn('saveSettingsBtn',  saveSettings);
@@ -123,6 +119,14 @@
     bindBtn('accChat',          () => toggleAccordion('chatModelSection'));
     bindBtn('accInline',        () => toggleAccordion('inlineSection'));
     bindBtn('accAgent',         () => toggleAccordion('agentSection'));
+
+    // ── Mode dropdown ──────────────────────────────────────────────────────────
+    const modeSel = document.getElementById('modeSel');
+    if (modeSel) {
+        modeSel.addEventListener('change', () => {
+            switchMode(modeSel.value, /* fromUI */ true);
+        });
+    }
 
     // ── Slash command popup ────────────────────────────────────────────────────
     const SLASH_COMMANDS = [
@@ -192,19 +196,24 @@
         general: { icon: '💬', label: '💬 General Mode — 通用问答',        bodyClass: 'general-mode' },
     };
 
-    function switchMode(mode) {
+    /**
+     * switchMode(mode, fromUI)
+     * fromUI=true  → user clicked dropdown → send message to backend + update UI
+     * fromUI=false → backend sent modeChanged message → only update UI (no echo back)
+     */
+    function switchMode(mode, fromUI) {
+        if (currentMode === mode && !fromUI) return; // avoid redundant update
         currentMode = mode;
-        vscode.postMessage({ type: 'switchMode', mode });
-        const ids = { build: 'buildModeBtn', plan: 'planModeBtn', explore: 'exploreModeBtn', general: 'generalModeBtn' };
-        for (const [m, id] of Object.entries(ids)) {
-            const btn = document.getElementById(id);
-            if (btn) btn.classList.toggle('active', m === mode);
-        }
+        // Sync dropdown value without re-triggering change event
+        const sel = document.getElementById('modeSel');
+        if (sel && sel.value !== mode) sel.value = mode;
+        // Only post to backend when user initiated (avoids ping-pong)
+        if (fromUI) vscode.postMessage({ type: 'switchMode', mode });
         // Remove all mode body classes, add correct one
         document.body.classList.remove('plan-mode', 'explore-mode', 'general-mode');
         const meta = MODE_META[mode];
         if (meta && meta.bodyClass) document.body.classList.add(meta.bodyClass);
-        // Update mode indicator text
+        // Update inline mode indicator text
         const ind = document.getElementById('modeIndicator');
         if (ind) ind.textContent = meta && meta.label ? meta.label : '';
     }
@@ -831,7 +840,7 @@
                 break;
 
             case 'modeChanged':
-                switchMode(msg.mode);
+                switchMode(msg.mode, /* fromUI */ false);
                 break;
 
             case 'todoUpdate': renderTodos(msg.todos); break;

@@ -1,5 +1,5 @@
 /**
- * CWTools AI Module — Agent Tools
+ * Eddy CWTool Code Module — Agent Tools
  *
  * Each tool maps to a CWTools engine capability via the LanguageClient.
  * The Agent can invoke these tools during its reasoning loop to query
@@ -53,13 +53,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_types',
-            description: 'Query all defined instances of a specific type in the current mod and vanilla game files. For example, query all technology IDs, building IDs, trait IDs, etc. Use this to verify that a type reference actually exists before using it in generated code.',
+            description: 'Query defined instances of a specific Stellaris type. Searches BOTH the current mod AND the vanilla game cache loaded by the CWTools language server. Use this to look up vanilla technology IDs, building IDs, trait IDs, etc. BEFORE using any identifier in generated code. Always prefer this over reading vanilla files directly — the cache is already indexed. Set filter to narrow results and avoid token waste.',
             parameters: {
                 type: 'object',
                 properties: {
-                    typeName: { type: 'string', description: 'Type name, e.g. "technology", "building", "trait", "ethic", "authority", "pop_job", "static_modifier"' },
-                    filter: { type: 'string', description: 'Optional prefix filter, e.g. "tech_" to only return matching instances' },
-                    limit: { type: 'number', description: 'Max results to return (default 50)' },
+                    typeName: { type: 'string', description: 'Type name, e.g. "technology", "building", "trait", "ethic", "authority", "pop_job", "static_modifier", "scripted_trigger", "scripted_effect", "event", "archaeological_site"' },
+                    filter: { type: 'string', description: 'Prefix or substring filter, e.g. "tech_" to return only matching results. ALWAYS use when looking up a specific vanilla ID to avoid getting hundreds of unrelated results.' },
+                    limit: { type: 'number', description: 'Max results to return (default 30, keep low for token efficiency)' },
+                    vanilla: { type: 'boolean', description: 'If true, return ONLY vanilla game definitions. If false (default), return mod + vanilla combined.' },
                 },
                 required: ['typeName'],
             },
@@ -147,11 +148,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_completion_at',
-            description: 'Get CWTools auto-completion suggestions for a specific position. Returns what keywords, values, or types are valid at that position according to the rule engine.',
+            description: 'Get auto-completion suggestions at a specific position. The CWTools language server returns completions from BOTH the current mod AND the vanilla game cache — this is the most token-efficient way to discover valid vanilla identifiers at a given position. Use it to answer "what values can go here?"',
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path' },
+                    file: { type: 'string', description: 'Absolute file path (must be in the workspace)' },
                     line: { type: 'number', description: 'Line number (0-based)' },
                     column: { type: 'number', description: 'Column number (0-based)' },
                 },
@@ -177,12 +178,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'workspace_symbols',
-            description: 'Search for symbol definitions across the entire workspace by name. Returns matching symbols with their file location. Use this to find where an event, trigger, building, etc. is defined in a large mod project.',
+            description: 'Search for symbol definitions by name, across the ENTIRE workspace including the vanilla game cache loaded by CWTools. Use this to locate where any vanilla event, decision, starbase module, ship section, etc. is defined. For token efficiency, always use a specific query (e.g. "tech_energy_grid" not "tech"). Results include the origin file path — vanilla files will show their game install path.',
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Symbol name or partial name to search for' },
-                    limit: { type: 'number', description: 'Max results (default 30)' },
+                    query: { type: 'string', description: 'Symbol name or partial name to search for. Be specific to avoid large result sets.' },
+                    limit: { type: 'number', description: 'Max results (default 20, keep low for vanilla searches to avoid token waste)' },
                 },
                 required: ['query'],
             },
@@ -219,13 +220,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'read_file',
-            description: 'Read the full content of a file, with optional line range. Returns content with line numbers prepended. Large files are automatically truncated with a notice. Prefer this over get_file_context when you need to read a whole file.',
+            description: 'Read file content with optional line range. Always returns line numbers. **For large files (>150 lines), you MUST use startLine+endLine to read only the section you need.** Recommended workflow for unknown files: (1) call document_symbols to get structure and line ranges, (2) call read_file with the specific startLine/endLine for the symbol you want. Never read the entire file just to find one function. Max output is ~12000 chars; if truncated, the response includes totalLines and a hint telling you how to read the next section.',
             parameters: {
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
-                    startLine: { type: 'number', description: 'Start line (1-based, optional)' },
-                    endLine: { type: 'number', description: 'End line (1-based inclusive, optional)' },
+                    startLine: { type: 'number', description: 'Start line (1-based). Required for large files.' },
+                    endLine: { type: 'number', description: 'End line (1-based inclusive). Keep the range under 150 lines where possible.' },
                 },
                 required: ['file'],
             },
@@ -235,12 +236,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_file',
-            description: 'Write content to a file, replacing its entire content. If agentFileWriteMode is "confirm", the write will be queued for user confirmation via a diff view. If "auto", writes immediately.',
+            description: 'Write content to a file, replacing its entire content. Use this for creating brand-new files (do NOT use validate_code for this). If agentFileWriteMode is "confirm", shows a diff view for user approval.',
             parameters: {
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
                     content: { type: 'string', description: 'New file content' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Use utf8bom if sibling files in the same directory have a BOM header (\uFEFF). Default: utf8bom (Stellaris files typically use UTF-8 BOM).' },
                 },
                 required: ['file', 'content'],
             },
@@ -250,14 +252,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'edit_file',
-            description: 'Make precise string substitutions in files using oldString→newString replacement. Uses a cascade of 8 fuzzy-matching strategies that tolerate minor whitespace/indentation differences in the AI output. If oldString is empty, creates the file with newString as content. After writing, returns real-time LSP diagnostics so errors are detected immediately. Subject to agentFileWriteMode: confirm mode shows VSCode diff viewer and waits for approval; auto mode writes immediately.',
+            description: 'Make precise string substitutions in files. **To create a new file, set oldString to empty string ""** — this writes newString as the entire file content directly (no temp files). To edit existing files, provide exact oldString to replace. After writing, returns real-time LSP diagnostics. Subject to agentFileWriteMode.',
             parameters: {
                 type: 'object',
                 properties: {
                     filePath: { type: 'string', description: 'Absolute path to the file to modify' },
-                    oldString: { type: 'string', description: 'The exact text to replace. Empty string = create new file with newString.' },
+                    oldString: { type: 'string', description: 'The exact text to replace. **Use empty string "" to create a new file.**' },
                     newString: { type: 'string', description: 'The replacement text (must differ from oldString)' },
-                    replaceAll: { type: 'boolean', description: 'If true, replace all occurrences. Default: false. Fails if multiple matches found and replaceAll is false.' },
+                    replaceAll: { type: 'boolean', description: 'If true, replace all occurrences. Default: false.' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding for new files. Use utf8bom if sibling files have BOM. Default: utf8bom.' },
                 },
                 required: ['filePath', 'oldString', 'newString'],
             },
@@ -1090,8 +1093,21 @@ export class AgentToolExecutor {
             const lines = content.split('\n');
             const totalLines = lines.length;
 
+            // ── Large-file guard: warn if no range given and file is large ──
+            const LARGE_FILE_THRESHOLD = 150;
+            if (totalLines > LARGE_FILE_THRESHOLD && !args.startLine && !args.endLine) {
+                return {
+                    content: '',
+                    totalLines,
+                    truncated: true,
+                    _hint: `File has ${totalLines} lines — too large to read in full. ` +
+                        `Recommended: call document_symbols("${args.file}") first to identify the section you need, ` +
+                        `then re-call read_file with startLine and endLine (max 150 lines per call).`,
+                };
+            }
+
             const start = args.startLine ? Math.max(1, args.startLine) - 1 : 0;
-            const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
+            const end   = args.endLine   ? Math.min(totalLines, args.endLine) : totalLines;
             const slice = lines.slice(start, end);
 
             // Prepend line numbers
@@ -1099,17 +1115,33 @@ export class AgentToolExecutor {
 
             const MAX_READ_CHARS = 12000;
             const truncated = numbered.length > MAX_READ_CHARS;
+            const resultContent = truncated
+                ? numbered.substring(0, MAX_READ_CHARS)
+                : numbered;
+
+            // Calculate the last line actually returned
+            const lastLineReturned = start + (truncated
+                ? resultContent.split('\n').length
+                : slice.length);
+
             return {
-                content: truncated ? numbered.substring(0, MAX_READ_CHARS) + '\n[... truncated ...]' : numbered,
+                content: truncated
+                    ? resultContent + `\n[... truncated at char ${MAX_READ_CHARS} ...]`
+                    : resultContent,
                 totalLines,
                 truncated,
+                ...(truncated ? {
+                    _hint: `Output truncated. File has ${totalLines} lines total. ` +
+                        `Last line shown: ~${lastLineReturned}. ` +
+                        `To read the next section, call read_file with startLine=${lastLineReturned + 1}.`,
+                } : {}),
             };
         } catch (e) {
             return { content: `Error reading file: ${String(e)}`, totalLines: 0, truncated: false };
         }
     }
 
-    private async writeFile(args: { file: string; content: string }): Promise<import('./types').WriteFileResult> {
+    private async writeFile(args: { file: string; content: string; encoding?: string }): Promise<import('./types').WriteFileResult> {
         try {
             // Generate diff for display / confirmation
             let originalContent = '';
@@ -1130,7 +1162,11 @@ export class AgentToolExecutor {
             if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, { recursive: true });
             }
-            fs.writeFileSync(args.file, args.content, 'utf-8');
+
+            // Write with optional UTF-8 BOM (default: utf8bom for Stellaris compatibility)
+            const useBom = (args.encoding ?? 'utf8bom') !== 'utf8';
+            const writeContent = useBom ? '\uFEFF' + args.content : args.content;
+            fs.writeFileSync(args.file, writeContent, 'utf-8');
             return { success: true, message: `文件已写入: ${args.file}` };
         } catch (e) {
             return { success: false, message: `写入失败: ${String(e)}` };
@@ -1149,6 +1185,7 @@ export class AgentToolExecutor {
         oldString: string;
         newString: string;
         replaceAll?: boolean;
+        encoding?: string;
     }): Promise<import('./types').EditFileResult> {
         const filePath = args.filePath;
         let originalContent = '';
@@ -1192,7 +1229,10 @@ export class AgentToolExecutor {
         try {
             const dir = path.dirname(filePath);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(filePath, newContent, 'utf-8');
+            // Write with optional UTF-8 BOM (default: utf8bom for Stellaris compatibility)
+            const useBom = (args.encoding ?? 'utf8bom') !== 'utf8';
+            const writeContent = (useBom && args.oldString === '') ? '\uFEFF' + newContent : newContent;
+            fs.writeFileSync(filePath, writeContent, 'utf-8');
         } catch (e) {
             return { success: false, message: `写入失败: ${String(e)}` };
         }

@@ -394,6 +394,8 @@ export interface ReadFileResult {
     content: string;
     totalLines: number;
     truncated: boolean;
+    /** Guidance message returned when file is too large or content is truncated */
+    _hint?: string;
 }
 
 export interface WriteFileArgs {

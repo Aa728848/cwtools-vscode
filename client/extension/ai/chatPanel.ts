@@ -171,6 +171,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'permissionResponse':
                 this.resolvePermissionRequest(msg.permissionId, msg.allowed);
                 break;
+            case 'submitPlanAnnotations':
+                await this.submitPlanAnnotations(msg.annotations);
+                break;
+            case 'openPlanFile':
+                void vs.commands.executeCommand('vscode.open', vs.Uri.file(msg.filePath));
+                break;
         }
     }
 
@@ -397,6 +403,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             this.saveTopics();
 
+            // ── Plan file: save MD and notify webview ────────────────────────────
+            if (this.currentMode === 'plan' && result.explanation) {
+                this.savePlanFile(result.explanation, text);
+            }
+
             // ── Auto-title: generate a short AI title after the first exchange ─
             // Matches OpenCode's title-agent pattern: fire-and-forget, no blocking
             const isFirstExchange = this.currentTopic &&
@@ -436,6 +447,65 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         this.postMessage({ type: 'messageRetracted', messageIndex });
         this.saveTopics();
+    }
+
+    // ─── Plan File ───────────────────────────────────────────────────────────
+
+    /**
+     * Save plan as .md for export, and emit renderPlan so the webview can
+     * display an interactive inline annotation interface.
+     */
+    private savePlanFile(planText: string, userPrompt: string): void {
+        // ── Persist .md export ──────────────────────────────────────────────
+        const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        let filePath = '';
+        let relPath = '';
+        if (wsRoot) {
+            const planDir = path.join(wsRoot, '.cwtools-ai');
+            if (!fs.existsSync(planDir)) fs.mkdirSync(planDir, { recursive: true });
+            const slug = userPrompt
+                .replace(/[^\u4e00-\u9fa5a-z0-9]/gi, '_')
+                .substring(0, 30)
+                .replace(/_+/g, '_')
+                .replace(/^_|_$/g, '');
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+            const fileName = `plan_${slug}_${timestamp}.md`;
+            filePath = path.join(planDir, fileName);
+            relPath = path.relative(wsRoot, filePath).replace(/\\/g, '/');
+            fs.writeFileSync(filePath, '\uFEFF' + planText, 'utf-8');
+        }
+        // ── Notify webview: show file card (open button) ────────────────────
+        if (filePath) {
+            this.postMessage({ type: 'planFileSaved', filePath, relPath });
+        }
+        // ── Send plan sections for interactive annotation view ──────────────
+        // Split on double-newline (paragraph) or heading lines
+        const sections = planText
+            .split(/\n{2,}/)
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+        this.postMessage({ type: 'renderPlan', sections, planText });
+    }
+
+    /**
+     * Receive inline annotations collected in the webview and generate
+     * a follow-up AI message requesting plan revisions.
+     */
+    private async submitPlanAnnotations(
+        annotations: Array<{ section: string; note: string }>
+    ): Promise<void> {
+        if (!annotations || annotations.length === 0) {
+            vs.window.showInformationMessage('没有批注需要提交');
+            return;
+        }
+        const followUp = [
+            '请根据以下批注修改计划：',
+            ...annotations.map((a, i) => {
+                const ctx = a.section.replace(/^#+\s*/, '').substring(0, 60);
+                return `${i + 1}. 在"${ctx}"处：${a.note}`;
+            }),
+        ].join('\n');
+        await this.handleUserMessage(followUp);
     }
 
     // ─── File Write Confirmation ──────────────────────────────────────────────
@@ -1230,6 +1300,54 @@ body.plan-mode .plan-indicator { display: block; }
 .permission-card-actions { padding: 7px 10px; display: flex; gap: 6px; background: var(--bg); border-top: 1px solid rgba(255,255,255,0.07); }
 .permission-allow-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
 .permission-deny-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
+
+/* ── Plan file card ── */
+.plan-file-card { display: flex; align-items: flex-start; gap: 10px; background: rgba(100,149,237,0.07); border: 1px solid rgba(100,149,237,0.25); border-radius: 8px; padding: 10px 12px; margin: 6px 0; }
+.plan-file-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.plan-file-info { flex: 1; min-width: 0; }
+.plan-file-title { font-size: 12px; font-weight: 600; color: cornflowerblue; margin-bottom: 2px; }
+.plan-file-path { font-size: 11px; font-family: var(--vscode-editor-font-family, monospace); opacity: 0.65; word-break: break-all; margin-bottom: 4px; }
+.plan-file-hint { font-size: 11px; opacity: 0.5; }
+.plan-file-hint code { background: rgba(255,255,255,0.08); border-radius: 3px; padding: 1px 4px; font-family: inherit; }
+.plan-file-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+.plan-open-btn, .plan-submit-btn { font-size: 11px; border-radius: 5px; padding: 4px 10px; cursor: pointer; border: none; font-family: inherit; white-space: nowrap; transition: opacity 0.15s; }
+.plan-open-btn { background: rgba(100,149,237,0.2); color: cornflowerblue; border: 1px solid rgba(100,149,237,0.3); }
+.plan-open-btn:hover { background: rgba(100,149,237,0.35); }
+.plan-submit-btn { background: var(--accent); color: #1a1a1a; font-weight: 600; }
+.plan-submit-btn:hover { opacity: 0.85; }
+
+/* ── Annotatable plan view ── */
+.annotatable-plan { border: 1px solid rgba(100,149,237,0.2); border-radius: 8px; overflow: hidden; margin: 8px 0; font-size: 12px; }
+.ap-header { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: rgba(100,149,237,0.08); border-bottom: 1px solid rgba(100,149,237,0.15); }
+.ap-header-title { font-weight: 600; color: cornflowerblue; font-size: 12px; }
+.ap-header-hint { flex: 1; font-size: 11px; opacity: 0.5; }
+.ap-submit-btn { font-size: 11px; border-radius: 5px; padding: 4px 12px; cursor: pointer; border: none; background: var(--accent); color: #1a1a1a; font-weight: 600; font-family: inherit; transition: opacity 0.15s; }
+.ap-submit-btn:disabled { opacity: 0.35; cursor: default; }
+.ap-submit-btn:not(:disabled):hover { opacity: 0.85; }
+.ap-sections { display: flex; flex-direction: column; }
+.ap-row { position: relative; padding: 7px 36px 7px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; transition: background 0.12s; }
+.ap-row:last-child { border-bottom: none; }
+.ap-row:hover, .ap-row-active { background: rgba(100,149,237,0.06); }
+.ap-row-annotated { background: rgba(255,200,50,0.05); }
+.ap-section-text { font-size: 12px; line-height: 1.55; color: var(--fg); opacity: 0.9; pointer-events: none; }
+.ap-heading { display: block; margin-bottom: 2px; }
+.ap-h1 { font-size: 13px; color: var(--fg); }
+.ap-h2 { font-size: 12px; opacity: 0.9; }
+.ap-h3 { font-size: 11px; opacity: 0.75; }
+.ap-add-btn { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 14px; opacity: 0; transition: opacity 0.15s; line-height: 1; padding: 2px; }
+.ap-row:hover .ap-add-btn, .ap-row-active .ap-add-btn { opacity: 0.6; }
+.ap-row.ap-row-annotated .ap-add-btn { opacity: 0; }
+.ap-bubble { display: flex; align-items: flex-start; gap: 5px; margin-top: 5px; padding: 5px 8px; background: rgba(255,200,50,0.1); border-left: 2px solid #ffc832; border-radius: 0 4px 4px 0; font-size: 11px; }
+.ap-bubble-icon { flex-shrink: 0; font-size: 12px; }
+.ap-bubble-text { flex: 1; color: var(--fg); opacity: 0.85; word-break: break-word; }
+.ap-bubble-edit { flex-shrink: 0; background: none; border: none; color: cornflowerblue; cursor: pointer; font-size: 10px; opacity: 0.7; padding: 0 2px; font-family: inherit; }
+.ap-bubble-edit:hover { opacity: 1; }
+.ap-input-box { margin-top: 6px; border: 1px solid rgba(100,149,237,0.3); border-radius: 6px; overflow: hidden; background: var(--input-bg); }
+.ap-textarea { display: block; width: 100%; box-sizing: border-box; background: transparent; border: none; color: var(--fg); font-size: 12px; font-family: inherit; padding: 7px 10px; resize: vertical; outline: none; min-height: 56px; line-height: 1.5; }
+.ap-input-actions { display: flex; gap: 5px; padding: 5px 8px; border-top: 1px solid rgba(100,149,237,0.15); background: rgba(0,0,0,0.1); }
+.ap-confirm-btn { background: var(--accent); color: #1a1a1a; border: none; border-radius: 4px; padding: 3px 14px; font-size: 11px; cursor: pointer; font-family: inherit; font-weight: 600; }
+.ap-confirm-btn:hover { opacity: 0.85; }
+.ap-cancel-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: inherit; }
 
 /* ── Streaming text cursor ── */
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }

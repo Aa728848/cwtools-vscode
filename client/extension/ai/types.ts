@@ -556,7 +556,11 @@ export type WebViewMessage =
     | { type: 'cancelWriteFile'; messageId: string }
     | { type: 'quickChangeModel'; model: string }
     | { type: 'slashCommand'; command: string }
-    | { type: 'permissionResponse'; permissionId: string; allowed: boolean; always: boolean };
+    | { type: 'permissionResponse'; permissionId: string; allowed: boolean; always: boolean }
+    /** Submit inline annotations collected in the webview back to AI for revision */
+    | { type: 'submitPlanAnnotations'; annotations: Array<{ section: string; note: string }> }
+    /** Open the plan .md file in the VS Code editor */
+    | { type: 'openPlanFile'; filePath: string };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number }
@@ -580,7 +584,11 @@ export type HostMessage =
     /** Restore mode state after webview rebuild (panel visibility change) */
     | { type: 'setMode'; mode: AgentMode }
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */
-    | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean };
+    | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
+    /** Plan file saved to disk — tells webview to show the Open/Submit card */
+    | { type: 'planFileSaved'; filePath: string; relPath: string }
+    /** Send plan sections to webview for interactive inline annotation */
+    | { type: 'renderPlan'; sections: string[]; planText: string };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

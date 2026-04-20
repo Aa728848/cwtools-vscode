@@ -893,6 +893,166 @@
                 tr.textContent = msg.message;
                 break;
             }
+
+            case 'planFileSaved': {
+                // Compact card — just "open file" button; annotation is handled by renderPlan below
+                const card = document.createElement('div');
+                card.className = 'plan-file-card';
+                card.innerHTML = `
+                    <div class="plan-file-icon">📋</div>
+                    <div class="plan-file-info">
+                        <div class="plan-file-title">计划已导出</div>
+                        <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
+                    </div>
+                    <div class="plan-file-actions">
+                        <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">📂 打开文件</button>
+                    </div>`;
+                card.querySelector('.plan-open-btn').addEventListener('click', e => {
+                    vscode.postMessage({ type: 'openPlanFile', filePath: e.currentTarget.dataset.path });
+                });
+                chatArea.appendChild(card);
+                scrollBottom();
+                break;
+            }
+
+            case 'renderPlan': {
+                // ── Interactive inline annotation view ──────────────────────────
+                const annotations = [];   // { sectionIdx, section, note }
+
+                const wrap = document.createElement('div');
+                wrap.className = 'annotatable-plan';
+
+                // Header row
+                const header = document.createElement('div');
+                header.className = 'ap-header';
+                header.innerHTML = `<span class="ap-header-title">✏️ 在线批注</span>
+                    <span class="ap-header-hint">点击段落添加批注</span>
+                    <button class="ap-submit-btn" disabled>📤 提交批注 (0)</button>`;
+                wrap.appendChild(header);
+
+                const submitBtn = header.querySelector('.ap-submit-btn');
+
+                function updateSubmitBtn() {
+                    submitBtn.textContent = `📤 提交批注 (${annotations.length})`;
+                    submitBtn.disabled = annotations.length === 0;
+                }
+
+                submitBtn.addEventListener('click', () => {
+                    if (annotations.length === 0) return;
+                    vscode.postMessage({
+                        type: 'submitPlanAnnotations',
+                        annotations: annotations.map(a => ({ section: a.section, note: a.note }))
+                    });
+                    // Visual feedback
+                    submitBtn.textContent = '✅ 已提交';
+                    submitBtn.disabled = true;
+                });
+
+                // Sections
+                const sectionsWrap = document.createElement('div');
+                sectionsWrap.className = 'ap-sections';
+
+                msg.sections.forEach((section, idx) => {
+                    const row = document.createElement('div');
+                    row.className = 'ap-row';
+                    row.dataset.idx = idx;
+
+                    // Section text (rendered as simple markdown-lite)
+                    const textDiv = document.createElement('div');
+                    textDiv.className = 'ap-section-text';
+                    // Basic heading/bold rendering
+                    const html = section
+                        .replace(/^(#{1,3})\s+(.+)$/m, (_, hashes, text) =>
+                            `<strong class="ap-heading ap-h${hashes.length}">${escapeHtml(text)}</strong>`)
+                        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/`(.+?)`/g, '<code>$1</code>')
+                        .replace(/\n/g, '<br>');
+                    textDiv.innerHTML = html === section ? escapeHtml(section).replace(/\n/g, '<br>') : html;
+
+                    // Add-comment button (shows on hover)
+                    const addBtn = document.createElement('button');
+                    addBtn.className = 'ap-add-btn';
+                    addBtn.title = '添加批注';
+                    addBtn.textContent = '💬';
+
+                    // Annotation bubble (hidden until annotated)
+                    const bubble = document.createElement('div');
+                    bubble.className = 'ap-bubble';
+                    bubble.style.display = 'none';
+
+                    // Inline input box (hidden until add-btn clicked)
+                    const inputBox = document.createElement('div');
+                    inputBox.className = 'ap-input-box';
+                    inputBox.style.display = 'none';
+                    inputBox.innerHTML = `
+                        <textarea class="ap-textarea" rows="3" placeholder="输入批注内容…"></textarea>
+                        <div class="ap-input-actions">
+                            <button class="ap-confirm-btn">确定</button>
+                            <button class="ap-cancel-btn">取消</button>
+                        </div>`;
+
+                    function openInput() {
+                        const existingEntry = annotations.find(a => a.sectionIdx === idx);
+                        const ta = inputBox.querySelector('.ap-textarea');
+                        ta.value = existingEntry ? existingEntry.note : '';
+                        inputBox.style.display = 'block';
+                        ta.focus();
+                        row.classList.add('ap-row-active');
+                    }
+
+                    function closeInput() {
+                        inputBox.style.display = 'none';
+                        row.classList.remove('ap-row-active');
+                    }
+
+                    function confirmAnnotation() {
+                        const val = inputBox.querySelector('.ap-textarea').value.trim();
+                        closeInput();
+                        if (!val) {
+                            // Remove annotation if cleared
+                            const i = annotations.findIndex(a => a.sectionIdx === idx);
+                            if (i >= 0) annotations.splice(i, 1);
+                            bubble.style.display = 'none';
+                            row.classList.remove('ap-row-annotated');
+                        } else {
+                            const existing = annotations.find(a => a.sectionIdx === idx);
+                            if (existing) existing.note = val;
+                            else annotations.push({ sectionIdx: idx, section, note: val });
+                            bubble.innerHTML = `<span class="ap-bubble-icon">💬</span><span class="ap-bubble-text">${escapeHtml(val)}</span><button class="ap-bubble-edit">编辑</button>`;
+                            bubble.querySelector('.ap-bubble-edit').addEventListener('click', e => {
+                                e.stopPropagation(); openInput();
+                            });
+                            bubble.style.display = 'flex';
+                            row.classList.add('ap-row-annotated');
+                        }
+                        updateSubmitBtn();
+                    }
+
+                    addBtn.addEventListener('click', e => { e.stopPropagation(); openInput(); });
+                    row.addEventListener('click', () => {
+                        if (inputBox.style.display === 'none') openInput();
+                    });
+                    inputBox.querySelector('.ap-confirm-btn').addEventListener('click', confirmAnnotation);
+                    inputBox.querySelector('.ap-cancel-btn').addEventListener('click', closeInput);
+                    inputBox.querySelector('.ap-textarea').addEventListener('keydown', e => {
+                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) confirmAnnotation();
+                        if (e.key === 'Escape') closeInput();
+                    });
+                    // Prevent row click from triggering when clicking inside input
+                    inputBox.addEventListener('click', e => e.stopPropagation());
+
+                    row.appendChild(textDiv);
+                    row.appendChild(addBtn);
+                    row.appendChild(bubble);
+                    row.appendChild(inputBox);
+                    sectionsWrap.appendChild(row);
+                });
+
+                wrap.appendChild(sectionsWrap);
+                chatArea.appendChild(wrap);
+                scrollBottom();
+                break;
+            }
         }
     });
 

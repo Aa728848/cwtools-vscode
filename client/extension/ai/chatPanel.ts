@@ -65,6 +65,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Send topic list on load
         this.sendTopicList();
+        // Restore current conversation if any
+        if (this.currentTopic && this.currentTopic.messages.length > 0) {
+            this.postMessage({ type: 'loadTopicMessages', messages: this.currentTopic.messages });
+        }
     }
 
     // ─── Message Handling ────────────────────────────────────────────────────
@@ -199,6 +203,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             await cfg.update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs, vs.ConfigurationTarget.Global);
         }
         vs.window.showInformationMessage('CWTools AI 设置已保存');
+        // Immediately push fresh settings data (with updated hasKey) back to the WebView
+        await this.openSettingsPage();
     }
 
     private async detectOllamaModels(endpoint: string): Promise<void> {
@@ -597,6 +603,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     --error: #f44336;
     --warning: #ff9800;
     --code-bg: var(--vscode-textCodeBlock-background, #1a1a1a);
+    --thinking-bg: rgba(100,149,237,0.06);
+    --thinking-border: rgba(100,149,237,0.25);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
@@ -611,14 +619,18 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size:
 .icon-btn:hover { opacity: 1; background: var(--btn-hover); }
 
 /* ── Topics panel ── */
-.topics-panel { display: none; position: absolute; top: 41px; left: 0; right: 0; bottom: 70px; background: var(--bg); border: 1px solid var(--border); z-index: 100; overflow-y: auto; padding: 8px; }
-.topics-panel.show { display: block; }
+.topics-panel { display: none; position: absolute; top: 41px; left: 0; right: 0; bottom: 70px; background: var(--bg); border: 1px solid var(--border); z-index: 100; overflow-y: auto; }
+.topics-panel.show { display: flex; flex-direction: column; }
+.topics-panel-header { padding: 8px 8px 4px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.new-topic-btn { width: 100%; background: none; border: 1px dashed var(--border); border-radius: 5px; color: var(--fg); cursor: pointer; padding: 6px 10px; font-size: 12px; text-align: left; opacity: 0.7; display: flex; align-items: center; gap: 5px; transition: opacity 0.15s, background 0.15s; }
+.new-topic-btn:hover { opacity: 1; background: var(--btn-hover); border-color: var(--accent); }
+.topics-list { flex: 1; overflow-y: auto; padding: 6px 8px 8px; }
 .topic-item { padding: 8px; cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
 .topic-item:hover { background: var(--btn-hover); }
 .topic-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.topic-delete { opacity: 0; cursor: pointer; color: var(--error); padding: 2px 5px; font-size: 12px; }
+.topic-delete { opacity: 0; cursor: pointer; color: var(--error); padding: 2px 6px; font-size: 12px; border-radius: 3px; background: none; border: none; }
 .topic-item:hover .topic-delete { opacity: 0.7; }
-.topic-delete:hover { opacity: 1 !important; }
+.topic-delete:hover { opacity: 1 !important; background: rgba(244,67,54,0.1); }
 
 /* ── Indicators ── */
 .plan-indicator { display: none; padding: 5px 16px; font-size: 11px; color: cornflowerblue; background: rgba(100,149,237,0.07); border-bottom: 1px solid var(--border); text-align: center; }
@@ -645,6 +657,14 @@ body.plan-mode .plan-indicator { display: block; }
 .message.retracted .msg-bubble { opacity: 0.4; font-style: italic; pointer-events: none; }
 .message.retracted .retract-btn { display: none !important; }
 
+/* ── Thinking block ── */
+.thinking-block { margin: 4px 0; border: 1px solid var(--thinking-border); border-radius: 6px; overflow: hidden; font-size: 11px; background: var(--thinking-bg); }
+.thinking-block > summary { cursor: pointer; padding: 5px 10px; user-select: none; display: flex; align-items: center; gap: 6px; list-style: none; color: cornflowerblue; opacity: 0.85; }
+.thinking-block > summary::-webkit-details-marker { display: none; }
+.thinking-block > summary::before { content: '▶'; font-size: 9px; opacity: 0.5; transition: transform 0.15s; flex-shrink: 0; }
+.thinking-block[open] > summary::before { transform: rotate(90deg); }
+.thinking-body { padding: 8px 10px; border-top: 1px solid var(--thinking-border); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; white-space: pre-wrap; word-break: break-word; opacity: 0.75; max-height: 300px; overflow-y: auto; }
+
 /* ── Tool group ── */
 .tool-group { margin: 4px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-size: 11px; }
 .tool-group > summary { cursor: pointer; padding: 5px 10px; background: rgba(255,255,255,0.03); user-select: none; display: flex; align-items: center; gap: 6px; list-style: none; }
@@ -655,6 +675,7 @@ body.plan-mode .plan-indicator { display: block; }
 .step { font-size: 11px; padding: 2px 0; opacity: 0.7; display: flex; align-items: flex-start; gap: 5px; }
 .step.tool_call .step-icon { color: var(--accent); }
 .step.error .step-icon { color: var(--error); }
+.step.validation .step-icon { color: var(--success); }
 
 /* ── Code block ── */
 .code-block { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; margin: 6px 0; overflow: hidden; }
@@ -693,9 +714,9 @@ body.plan-mode .plan-indicator { display: block; }
 .send-btn:hover { background: var(--btn-hover); }
 .send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .cancel-btn { color: var(--error); border-color: var(--error); }
-.mode-btn { background: none; border: none; color: var(--fg); cursor: pointer; padding: 3px 8px; font-size: 11px; border-radius: 3px; opacity: 0.5; display: flex; align-items: center; gap: 3px; }
+.mode-btn { background: none; border: 1px solid transparent; color: var(--fg); cursor: pointer; padding: 3px 8px; font-size: 11px; border-radius: 3px; opacity: 0.5; display: flex; align-items: center; gap: 3px; transition: all 0.15s; }
 .mode-btn:hover { opacity: 0.85; background: var(--btn-hover); }
-.mode-btn.active { opacity: 1; }
+.mode-btn.active { opacity: 1; border-color: var(--border); background: var(--btn-hover); }
 
 /* ── Settings page ── */
 .settings-page { display: none; flex-direction: column; height: 100%; overflow: hidden; }
@@ -748,7 +769,7 @@ body.plan-mode .plan-indicator { display: block; }
 <div class="header">
     <div class="header-title">
         <span class="asterisk">✳</span>
-        <span class="brand-text">Claude Code</span>
+        <span class="brand-text">CWTools AI</span>
     </div>
     <div class="header-actions">
         <button class="icon-btn" id="btnTopics" title="历史话题">☰</button>
@@ -756,7 +777,12 @@ body.plan-mode .plan-indicator { display: block; }
     </div>
 </div>
 
-<div class="topics-panel" id="topicsPanel"></div>
+<div class="topics-panel" id="topicsPanel">
+    <div class="topics-panel-header">
+        <button class="new-topic-btn" id="btnNewTopicPanel">＋ 新话题</button>
+    </div>
+    <div class="topics-list" id="topicsList"></div>
+</div>
 <div class="plan-indicator" id="planIndicator">📋 Plan Mode — 只读分析，不修改文件</div>
 <div class="todo-panel" id="todoPanel">
     <div class="todo-panel-title">Tasks</div>
@@ -778,9 +804,8 @@ body.plan-mode .plan-indicator { display: block; }
         </div>
         <div class="input-controls">
             <div class="ctrl-group">
-                <button class="icon-btn" id="btnNewTopic" title="新话题" style="font-size:16px;padding:2px 7px;">+</button>
-                <button class="mode-btn active" id="buildModeBtn">📝 Build</button>
-                <button class="mode-btn" id="planModeBtn" style="display:none;">📋 Plan</button>
+                <button class="mode-btn active" id="buildModeBtn" title="Build 模式 — 生成并修改代码">📝 Build</button>
+                <button class="mode-btn" id="planModeBtn" title="Plan 模式 — 只读分析">📋 Plan</button>
             </div>
             <button class="send-btn" id="sendBtn">↑</button>
         </div>
@@ -897,10 +922,13 @@ body.plan-mode .plan-indicator { display: block; }
 
     // ── Button bindings ──
     document.getElementById('btnTopics').addEventListener('click', () => topicsPanel.classList.toggle('show'));
-    document.getElementById('btnNewTopic').addEventListener('click', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); });
+    document.getElementById('btnNewTopicPanel').addEventListener('click', () => {
+        vscode.postMessage({ type: 'newTopic' });
+        topicsPanel.classList.remove('show');
+    });
     document.getElementById('btnSettings').addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
-    document.getElementById('buildModeBtn').addEventListener('click', () => switchMode('plan'));
-    document.getElementById('planModeBtn').addEventListener('click', () => switchMode('build'));
+    document.getElementById('buildModeBtn').addEventListener('click', () => switchMode('build'));
+    document.getElementById('planModeBtn').addEventListener('click', () => switchMode('plan'));
     sendBtn.addEventListener('click', sendMessage);
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 150) + 'px'; });
@@ -928,8 +956,8 @@ body.plan-mode .plan-indicator { display: block; }
         vscode.postMessage({ type: 'switchMode', mode });
         const build = document.getElementById('buildModeBtn');
         const plan = document.getElementById('planModeBtn');
-        if (mode === 'plan') { plan.classList.add('active'); plan.style.display = ''; build.classList.remove('active'); build.style.display = 'none'; }
-        else { build.classList.add('active'); build.style.display = ''; plan.classList.remove('active'); plan.style.display = 'none'; }
+        build.classList.toggle('active', mode === 'build');
+        plan.classList.toggle('active', mode === 'plan');
         document.body.classList.toggle('plan-mode', mode === 'plan');
     }
 
@@ -944,8 +972,9 @@ body.plan-mode .plan-indicator { display: block; }
 
     function renderMarkdown(text) {
         let h = escapeHtml(text);
-        h = h.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
-        h = h.split('\\n').join('<br>');
+        h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        h = h.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        h = h.split('\n').join('<br>');
         return h;
     }
 
@@ -978,35 +1007,60 @@ body.plan-mode .plan-indicator { display: block; }
         return div;
     }
 
+    const STEP_ICONS = {
+        tool_call: '⚙', tool_result: '📦', thinking: '💭',
+        thinking_content: '🧠', validation: '✅', error: '❌',
+        code_generated: '📝', compaction: '🗄', todo_update: '📝'
+    };
+
     function addAssistantMessage(content, code, isValid, steps) {
         const div = document.createElement('div');
         div.className = 'message assistant';
         const hdr = document.createElement('div');
         hdr.className = 'msg-header';
-        hdr.innerHTML = '<span style="color:#d95a43;font-size:15px;">✳</span><span style="font-family:Georgia,serif;">Claude</span>';
+        hdr.innerHTML = '<span style="color:#d95a43;font-size:15px;">✳</span><span style="font-family:Georgia,serif;">CWTools AI</span>';
         div.appendChild(hdr);
+
         if (steps && steps.length > 0) {
-            const toolSteps = steps.filter(s => s.type === 'tool_call' || s.type === 'tool_result');
+            // Thinking block (thinking_content steps)
+            const thinkSteps = steps.filter(s => s.type === 'thinking_content');
+            if (thinkSteps.length > 0) {
+                const det = document.createElement('details');
+                det.className = 'thinking-block';
+                const sum = document.createElement('summary');
+                sum.textContent = '🧠 Thinking · ' + thinkSteps.length + ' block(s)';
+                det.appendChild(sum);
+                const body = document.createElement('div');
+                body.className = 'thinking-body';
+                body.textContent = thinkSteps.map(s => s.content).join('\n\n---\n\n');
+                det.appendChild(body);
+                div.appendChild(det);
+            }
+
+            // Tool calls group (all non-thinking steps)
+            const toolSteps = steps.filter(s => s.type !== 'thinking_content');
             if (toolSteps.length > 0) {
-                const cnt = toolSteps.filter(s => s.type === 'tool_call').length;
+                const toolCallCount = toolSteps.filter(s => s.type === 'tool_call').length;
                 const det = document.createElement('details');
                 det.className = 'tool-group';
                 const sum = document.createElement('summary');
-                sum.textContent = '🔧 Tool calls · ' + cnt;
+                sum.textContent = toolCallCount > 0
+                    ? '🔧 工具调用 · ' + toolCallCount
+                    : '📋 Agent 步骤';
                 det.appendChild(sum);
                 const body = document.createElement('div');
                 body.className = 'tool-group-body';
-                const icons = { tool_call:'⚙', tool_result:'📦', thinking:'💭', validation:'✅', error:'❌', code_generated:'📝', compaction:'🗄', todo_update:'📝' };
                 for (const s of toolSteps) {
                     const el = document.createElement('div');
                     el.className = 'step ' + s.type;
-                    el.innerHTML = '<span class="step-icon">' + (icons[s.type]||'·') + '</span>' + escapeHtml(s.content);
+                    el.innerHTML = '<span class="step-icon">' + (STEP_ICONS[s.type] || '·') + '</span>' + escapeHtml(s.content);
                     body.appendChild(el);
                 }
                 det.appendChild(body);
                 div.appendChild(det);
             }
         }
+
         if (content && content.trim()) {
             const b = document.createElement('div');
             b.className = 'msg-bubble';
@@ -1042,33 +1096,37 @@ body.plan-mode .plan-indicator { display: block; }
 
     function showDiffCard(file, diff, messageId) {
         const div = document.createElement('div');
-        const fileName = (file || '').split(/[\\\\/]/).pop() || file;
-        const diffHtml = (diff || '').split('\\n').map(line => {
+        const fileName = (file || '').split(/[\\\/]/).pop() || file;
+        const lines = (diff || '').split('\n');
+        const diffHtml = lines.map(line => {
             if (line.startsWith('+') && !line.startsWith('+++')) return '<span class="diff-add">' + escapeHtml(line) + '</span>';
             if (line.startsWith('-') && !line.startsWith('---')) return '<span class="diff-del">' + escapeHtml(line) + '</span>';
             return escapeHtml(line);
-        }).join('\\n');
-        div.innerHTML = '<div class="diff-card">' +
+        }).join('\n');
+        const safeId = escapeHtml(messageId);
+        const card = document.createElement('div');
+        card.className = 'diff-card';
+        card.innerHTML =
             '<div class="diff-card-header">Requesting to modify: ' + escapeHtml(fileName) + '</div>' +
             '<div class="diff-card-body">' + diffHtml + '</div>' +
             '<div class="diff-card-actions">' +
-            '<button class="diff-accept-btn" onclick="window._confirmWrite(\\'' + messageId + '\\',this)">Accept</button>' +
-            '<button class="diff-reject-btn" onclick="window._cancelWrite(\\'' + messageId + '\\',this)">Reject</button>' +
-            '</div></div>';
+            '<button class="diff-accept-btn" data-msgid="' + safeId + '">Accept</button>' +
+            '<button class="diff-reject-btn" data-msgid="' + safeId + '">Reject</button>' +
+            '</div>';
+        card.querySelector('.diff-accept-btn').addEventListener('click', function() {
+            card.querySelectorAll('button').forEach(b => b.disabled = true);
+            this.textContent = 'Accepted';
+            vscode.postMessage({ type: 'confirmWriteFile', messageId });
+        });
+        card.querySelector('.diff-reject-btn').addEventListener('click', function() {
+            card.querySelectorAll('button').forEach(b => b.disabled = true);
+            this.textContent = 'Rejected';
+            vscode.postMessage({ type: 'cancelWriteFile', messageId });
+        });
+        div.appendChild(card);
         chatArea.appendChild(div);
         scrollBottom();
     }
-
-    window._confirmWrite = function(messageId, btn) {
-        btn.closest('.diff-card-actions').querySelectorAll('button').forEach(b => b.disabled = true);
-        btn.textContent = 'Accepted';
-        vscode.postMessage({ type: 'confirmWriteFile', messageId });
-    };
-    window._cancelWrite = function(messageId, btn) {
-        btn.closest('.diff-card-actions').querySelectorAll('button').forEach(b => b.disabled = true);
-        btn.textContent = 'Rejected';
-        vscode.postMessage({ type: 'cancelWriteFile', messageId });
-    };
 
     // ── Messages from host ──
     window.addEventListener('message', event => {
@@ -1080,66 +1138,99 @@ body.plan-mode .plan-indicator { display: block; }
                 currentAssistantDiv = document.createElement('div');
                 currentAssistantDiv.className = 'message assistant';
                 currentAssistantDiv.innerHTML =
-                    '<div class="msg-header"><span style="color:#d95a43;font-size:15px;">✳</span><span style="font-family:Georgia,serif;">Claude</span></div>' +
-                    '<details class="tool-group" id="liveToolGroup" style="display:none"><summary>thinking...</summary><div class="tool-group-body" id="liveToolBody"></div></details>';
+                    '<div class="msg-header"><span style="color:#d95a43;font-size:15px;">✳</span><span style="font-family:Georgia,serif;">CWTools AI</span></div>' +
+                    '<details class="thinking-block" id="liveThinkingBlock" style="display:none"><summary>🧠 Thinking...</summary><div class="thinking-body" id="liveThinkingBody"></div></details>' +
+                    '<details class="tool-group" id="liveToolGroup" style="display:none"><summary id="liveToolSummary">💭 처리중...</summary><div class="tool-group-body" id="liveToolBody"></div></details>';
                 chatArea.appendChild(currentAssistantDiv);
                 scrollBottom();
                 break;
+
             case 'agentStep': {
                 if (!currentAssistantDiv) break;
                 const s = msg.step;
-                if (s.type === 'tool_call' || s.type === 'tool_result') {
+
+                if (s.type === 'thinking_content') {
+                    // Show in dedicated thinking block
+                    const tb = currentAssistantDiv.querySelector('#liveThinkingBlock');
+                    const tbd = currentAssistantDiv.querySelector('#liveThinkingBody');
+                    if (tb) tb.style.display = '';
+                    if (tbd) {
+                        if (tbd.textContent) tbd.textContent += '\n\n---\n\n' + s.content;
+                        else tbd.textContent = s.content;
+                    }
+                } else {
+                    // All other steps go in tool group
                     const tg = currentAssistantDiv.querySelector('#liveToolGroup');
                     const tb = currentAssistantDiv.querySelector('#liveToolBody');
+                    const ts = currentAssistantDiv.querySelector('#liveToolSummary');
                     if (tg) tg.style.display = '';
+                    if (ts) {
+                        // Update summary with most recent step type
+                        const toolCallCount = currentAssistantDiv.querySelectorAll('.step.tool_call').length
+                            + (s.type === 'tool_call' ? 1 : 0);
+                        ts.textContent = toolCallCount > 0
+                            ? '🔧 工具调用 · ' + toolCallCount
+                            : '📋 处理中...';
+                    }
                     if (tb) {
-                        const icons = { tool_call:'⚙', tool_result:'📦', thinking:'💭', validation:'✅', error:'❌', code_generated:'📝', compaction:'🗄', todo_update:'📝' };
                         const el = document.createElement('div');
                         el.className = 'step ' + s.type;
-                        el.innerHTML = '<span class="step-icon">' + (icons[s.type]||'·') + '</span>' + escapeHtml(s.content);
+                        el.innerHTML = '<span class="step-icon">' + (STEP_ICONS[s.type] || '·') + '</span>' + escapeHtml(s.content);
                         tb.appendChild(el);
                     }
                 }
                 scrollBottom();
                 break;
             }
+
             case 'generationComplete':
                 setGenerating(false);
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 { const r = msg.result; addAssistantMessage(r.explanation || '完成', r.code, r.isValid, r.steps); }
                 break;
+
             case 'generationError':
                 setGenerating(false);
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 addAssistantMessage('❌ ' + msg.error);
                 break;
+
             case 'clearChat':
                 chatArea.innerHTML = '';
                 emptyState.style.display = '';
                 chatArea.appendChild(emptyState);
                 messageIndexMap.clear();
                 break;
+
             case 'topicList': renderTopics(msg.topics); break;
+
             case 'loadTopicMessages':
                 for (const m of msg.messages) {
                     if (m.role === 'user') addUserMessage(m.content);
                     else addAssistantMessage(m.content, m.code, m.isValid, m.steps);
                 }
                 break;
+
             case 'messageRetracted': {
                 const rd = messageIndexMap.get(msg.messageIndex);
                 if (rd) { rd.classList.add('retracted'); const b = rd.querySelector('.msg-bubble'); if (b) b.textContent = '(已撤回)'; }
-                const nx = rd?.nextElementSibling;
+                const nx = rd ? rd.nextElementSibling : null;
                 if (nx && nx.classList.contains('assistant')) nx.remove();
                 break;
             }
+
             case 'pendingWriteFile': showDiffCard(msg.file, msg.diff, msg.messageId); break;
+
             case 'modeChanged':
                 currentMode = msg.mode;
+                document.getElementById('buildModeBtn').classList.toggle('active', msg.mode === 'build');
+                document.getElementById('planModeBtn').classList.toggle('active', msg.mode === 'plan');
                 document.body.classList.toggle('plan-mode', msg.mode === 'plan');
                 break;
+
             case 'todoUpdate': renderTodos(msg.todos); break;
             case 'settingsData': showSettingsPage(msg.providers, msg.current, msg.ollamaModels); break;
+
             case 'ollamaModels': {
                 const db = document.getElementById('detectBtn');
                 db.disabled = false; db.textContent = '🔍 检测';
@@ -1147,6 +1238,7 @@ body.plan-mode .plan-indicator { display: block; }
                 else { settingsOllamaModels = msg.models; updateModelUI(document.getElementById('settingsProvider').value, '', msg.models); }
                 break;
             }
+
             case 'testConnectionResult': {
                 const tr = document.getElementById('testResult');
                 tr.className = 'test-result ' + (msg.ok ? 'ok' : 'fail');
@@ -1157,16 +1249,35 @@ body.plan-mode .plan-indicator { display: block; }
     });
 
     function renderTopics(topics) {
-        if (!topics.length) { topicsPanel.innerHTML = '<div style="text-align:center;opacity:0.5;padding:20px;font-size:12px;">暂无历史话题</div>'; return; }
-        topicsPanel.innerHTML = topics.map(t =>
-            '<div class="topic-item" onclick="window._loadTopic(\\'' + t.id + '\\')">' +
-            '<span class="topic-title">' + escapeHtml(t.title) + '</span>' +
-            '<span class="topic-delete" onclick="event.stopPropagation();window._deleteTopic(\\'' + t.id + '\\')">✕</span>' +
-            '</div>'
-        ).join('');
+        const list = document.getElementById('topicsList');
+        if (!topics.length) {
+            list.innerHTML = '<div style="text-align:center;opacity:0.5;padding:20px;font-size:12px;">暂无历史话题</div>';
+            return;
+        }
+        list.innerHTML = '';
+        for (const t of topics) {
+            const item = document.createElement('div');
+            item.className = 'topic-item';
+            const title = document.createElement('span');
+            title.className = 'topic-title';
+            title.textContent = t.title;
+            const del = document.createElement('button');
+            del.className = 'topic-delete';
+            del.textContent = '✕';
+            del.title = '删除此话题';
+            del.addEventListener('click', e => {
+                e.stopPropagation();
+                vscode.postMessage({ type: 'deleteTopic', topicId: t.id });
+            });
+            item.appendChild(title);
+            item.appendChild(del);
+            item.addEventListener('click', () => {
+                vscode.postMessage({ type: 'loadTopic', topicId: t.id });
+                topicsPanel.classList.remove('show');
+            });
+            list.appendChild(item);
+        }
     }
-    window._loadTopic = id => { vscode.postMessage({ type: 'loadTopic', topicId: id }); topicsPanel.classList.remove('show'); };
-    window._deleteTopic = id => vscode.postMessage({ type: 'deleteTopic', topicId: id });
 
     function renderTodos(todos) {
         if (!todos || !todos.length) { todoPanel.classList.remove('has-items'); document.getElementById('todoList').innerHTML = ''; return; }
@@ -1185,8 +1296,6 @@ body.plan-mode .plan-indicator { display: block; }
         sel.innerHTML = providers.map(p => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const inlineSel = document.getElementById('inlineProvider');
         inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map(p => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
-        const hasKey = providers.find(p => p.id === current.provider)?.hasKey;
-        document.getElementById('apiKeyStatus').textContent = hasKey ? '✅ 已配置 API Key' : '';
         document.getElementById('settingsApiKey').value = '';
         document.getElementById('settingsEndpoint').value = current.endpoint || '';
         document.getElementById('settingsCtx').value = current.maxContextTokens || 0;
@@ -1196,6 +1305,7 @@ body.plan-mode .plan-indicator { display: block; }
         document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs || 1500;
         document.getElementById('agentWriteMode').value = current.agentFileWriteMode || 'confirm';
         updateModelUI(current.provider, current.model, ollamaModels);
+        updateApiKeyStatus(current.provider, providers);
         chatHeader.style.display = 'none';
         document.getElementById('chatArea').style.display = 'none';
         if (inputWrapper) inputWrapper.style.display = 'none';
@@ -1215,17 +1325,40 @@ body.plan-mode .plan-indicator { display: block; }
         if (todoPanel) todoPanel.style.display = '';
     }
 
-    function onProviderChange() { const id = document.getElementById('settingsProvider').value; updateModelUI(id, '', settingsOllamaModels); updateEndpointHint(id); }
+    /** Update the API key status label for the given provider */
+    function updateApiKeyStatus(providerId, providers) {
+        const p = (providers || settingsProviders).find(x => x.id === providerId);
+        const status = document.getElementById('apiKeyStatus');
+        const group = document.getElementById('apiKeyGroup');
+        if (providerId === 'ollama') {
+            group.style.display = 'none';
+            return;
+        }
+        group.style.display = '';
+        if (p && p.hasKey) {
+            status.textContent = '✅ 已配置 API Key';
+            status.style.color = '#4caf50';
+        } else {
+            status.textContent = '⚠️ 尚未配置 API Key';
+            status.style.color = '#ff9800';
+        }
+    }
+
+    function onProviderChange() {
+        const id = document.getElementById('settingsProvider').value;
+        updateModelUI(id, '', settingsOllamaModels);
+        updateEndpointHint(id);
+        updateApiKeyStatus(id, settingsProviders);
+    }
 
     function updateModelUI(providerId, currentModel, ollamaModels) {
         const provider = settingsProviders.find(p => p.id === providerId);
         const modelSel = document.getElementById('settingsModelSelect');
         const modelInput = document.getElementById('settingsModelInput');
         const detectBtn = document.getElementById('detectBtn');
-        const apiKeyGroup = document.getElementById('apiKeyGroup');
         const modelHint = document.getElementById('modelHint');
-        apiKeyGroup.style.display = providerId === 'ollama' ? 'none' : '';
         if (providerId === 'ollama') {
+            document.getElementById('apiKeyGroup').style.display = 'none';
             if (ollamaModels && ollamaModels.length > 0) {
                 modelSel.innerHTML = ollamaModels.map(m => '<option value="' + escapeHtml(m.name) + '"' + (m.name === currentModel ? ' selected' : '') + '>' + escapeHtml(m.name) + (m.parameterSize ? ' (' + m.parameterSize + ')' : '') + ' — ' + m.size + '</option>').join('');
                 modelSel.style.display = ''; modelInput.style.display = 'none';
@@ -1302,7 +1435,7 @@ body.plan-mode .plan-indicator { display: block; }
                 debounceMs: parseInt(document.getElementById('inlineDebounce').value) || 1500,
             },
         }});
-        closeSettings();
+        // Don't close — backend will push fresh settingsData with updated hasKey
     }
 
     function testConnection() {

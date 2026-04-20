@@ -290,6 +290,30 @@ export class AgentRunner {
             // Save raw content for DSML parsing BEFORE stripping markup
             const rawContent = assistantMessage.content ?? '';
 
+            // ── Extract thinking/reasoning content ──────────────────────
+            // 1. reasoning_content field (DeepSeek-R1 / some OpenAI-compat providers)
+            const rawMsg = (choice as unknown as Record<string, unknown>);
+            const reasoningField = (rawMsg.message as Record<string, unknown>)?.reasoning_content as string | undefined;
+            // 2. <think>...</think> blocks in text (Qwen3 /think, local models)
+            const thinkBlockRe = /<think>([\s\S]*?)<\/think>/gi;
+            let thinkContent = reasoningField || '';
+            if (!thinkContent) {
+                const thinkMatches: string[] = [];
+                let tm: RegExpExecArray | null;
+                thinkBlockRe.lastIndex = 0;
+                while ((tm = thinkBlockRe.exec(rawContent)) !== null) {
+                    thinkMatches.push(tm[1].trim());
+                }
+                thinkContent = thinkMatches.join('\n\n');
+            }
+            if (thinkContent.trim()) {
+                emitStep({
+                    type: 'thinking_content',
+                    content: thinkContent.trim(),
+                    timestamp: Date.now(),
+                });
+            }
+
             // Try OpenAI-style tool_calls first, then fall back to DSML/XML parsing
             // (must happen before stripping, since strip removes the DSML tags we need)
             let toolCalls = assistantMessage.tool_calls;
@@ -297,9 +321,11 @@ export class AgentRunner {
                 toolCalls = this.parseDsmlToolCalls(rawContent);
             }
 
-            // Strip DSML/XML markup from content for clean display
+            // Strip DSML/XML markup AND <think> blocks from content for clean display
             if (assistantMessage.content) {
-                assistantMessage.content = this.stripDsmlMarkup(assistantMessage.content);
+                assistantMessage.content = this.stripThinkBlocks(
+                    this.stripDsmlMarkup(assistantMessage.content)
+                );
             }
 
             // Add assistant response (cleaned) to conversation history
@@ -544,6 +570,14 @@ export class AgentRunner {
             // Generic XML / Claude antml_
             .replace(/< *(?:antml_)?function_calls *>[\s\S]*?<\/ *(?:antml_)?function_calls *>/gi, '')
             .replace(/< *(?:antml_)?invoke(?:\s[^>]*)? *>[\s\S]*?<\/ *(?:antml_)?invoke *>/gi, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    }
+
+    /** Strip <think>...</think> blocks from text (already emitted as thinking_content steps) */
+    private stripThinkBlocks(content: string): string {
+        return content
+            .replace(/<think>[\s\S]*?<\/think>/gi, '')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
     }

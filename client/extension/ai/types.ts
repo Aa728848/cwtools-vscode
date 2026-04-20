@@ -425,7 +425,7 @@ export interface ListDirectoryResult {
 // ─── Agent Execution ─────────────────────────────────────────────────────────
 
 export interface AgentStep {
-    type: 'thinking' | 'tool_call' | 'tool_result' | 'code_generated' | 'validation' | 'error' | 'compaction' | 'todo_update';
+    type: 'thinking' | 'thinking_content' | 'tool_call' | 'tool_result' | 'code_generated' | 'validation' | 'error' | 'compaction' | 'todo_update';
     content: string;
     toolName?: AgentToolName;
     toolArgs?: Record<string, unknown>;

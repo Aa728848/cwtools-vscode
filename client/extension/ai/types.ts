@@ -480,7 +480,8 @@ export type WebViewMessage =
     | { type: 'testConnection'; settings: PanelSettings }
     | { type: 'retractMessage'; messageIndex: number }
     | { type: 'confirmWriteFile'; file: string; content: string; messageId: string }
-    | { type: 'cancelWriteFile'; messageId: string };
+    | { type: 'cancelWriteFile'; messageId: string }
+    | { type: 'quickChangeModel'; model: string };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number }
@@ -493,7 +494,7 @@ export type HostMessage =
     | { type: 'clearChat' }
     | { type: 'modeChanged'; mode: AgentMode }
     | { type: 'todoUpdate'; todos: TodoItem[] }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[] }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }

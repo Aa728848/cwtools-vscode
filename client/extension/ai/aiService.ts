@@ -81,6 +81,8 @@ export class ApiKeyManager {
 export class AIService {
     private keyManager: ApiKeyManager;
     private abortController: AbortController | null = null;
+    /** In-memory model override — avoids writing to workspace config (which triggers LS restart) */
+    private modelOverride: string | null = null;
 
     constructor(private context: vs.ExtensionContext) {
         this.keyManager = new ApiKeyManager(context.secrets);
@@ -90,19 +92,27 @@ export class AIService {
         return this.keyManager;
     }
 
+    /** Set model without persisting to workspace config (no LS restart side-effect) */
+    setModelOverride(model: string): void {
+        this.modelOverride = model || null;
+    }
+
+    getModelOverride(): string | null {
+        return this.modelOverride;
+    }
+
     /**
      * Read the current user configuration for AI.
      */
     getConfig(): AIUserConfig {
         const cfg = vs.workspace.getConfiguration('cwtools.ai');
-        // NOTE: apiKey is intentionally empty here — keys live in SecretStorage.
-        // The legacy cfg key is read ONLY during migration (handled in chatCompletion).
         return {
             enabled: cfg.get<boolean>('enabled', false),
             provider: cfg.get<string>('provider', 'openai'),
-            model: cfg.get<string>('model', ''),
+            // In-memory override wins over persisted setting (avoids LS restart on quick-switch)
+            model: this.modelOverride ?? cfg.get<string>('model', ''),
             endpoint: cfg.get<string>('endpoint', ''),
-            apiKey: '',   // never expose plaintext; use getKeyForProvider() instead
+            apiKey: '',
             maxRetries: cfg.get<number>('maxRetries', 3),
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm'),

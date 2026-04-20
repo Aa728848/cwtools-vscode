@@ -154,6 +154,35 @@ export async function activate(context: ExtensionContext) {
 	const isDevDir = env.machineId === "someValue.machineId"
 	const cacheDir = isDevDir ? context.globalStorageUri + '/.cwtools' : context.extensionPath + '/.cwtools'
 
+	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
+	const aiService = new AIService(context);
+	const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+	// AgentToolExecutor gets a lazy getter so it can be registered before client starts
+	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot);
+	const promptBuilder = new PromptBuilder(workspaceRoot);
+	const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder);
+	const chatPanelProvider = new AIChatPanelProvider(
+		context.extensionUri,
+		agentRunner,
+		aiService,
+		context.globalStorageUri
+	);
+	context.subscriptions.push(
+		vs.window.registerWebviewViewProvider(AIChatPanelProvider.viewType, chatPanelProvider)
+	);
+	const gameLanguages2 = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
+	const docSelector2 = gameLanguages2.map(lang => ({ scheme: 'file', language: lang }));
+	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder);
+	context.subscriptions.push(
+		vs.languages.registerInlineCompletionItemProvider(docSelector2, inlineProvider)
+	);
+	safeRegisterCommand(context, "cwtools.ai.configure", async () => {
+		await aiService.quickConfigureProvider();
+	});
+	safeRegisterCommand(context, "cwtools.ai.openChat", async () => {
+		await vs.commands.executeCommand('cwtools.aiChat.focus');
+	});
+
 	const init = async function (language: string, isVanillaFolder: boolean) {
 		vs.languages.setLanguageConfiguration(language, {
 			wordPattern: /"?([^\s.]+)"?/,
@@ -523,41 +552,6 @@ export async function activate(context: ExtensionContext) {
 			// Clear the array to prevent accumulation
 			context.subscriptions.length = 0;
 			await activate(context);
-		});
-
-		// ─── AI Module Integration ────────────────────────────────────────────────
-		const aiService = new AIService(context);
-		const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-		const toolExecutor = new AgentToolExecutor(client, workspaceRoot);
-		const promptBuilder = new PromptBuilder(workspaceRoot);
-		const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder);
-
-		// Register AI Chat Panel (sidebar WebView)
-		const chatPanelProvider = new AIChatPanelProvider(
-			context.extensionUri,
-			agentRunner,
-			aiService,
-			context.globalStorageUri
-		);
-		context.subscriptions.push(
-			vs.window.registerWebviewViewProvider(AIChatPanelProvider.viewType, chatPanelProvider)
-		);
-
-		// Register AI Inline Completion Provider
-		const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder);
-		context.subscriptions.push(
-			vs.languages.registerInlineCompletionItemProvider(
-				docSelector,
-				inlineProvider
-			)
-		);
-
-		// AI Commands
-		safeRegisterCommand(context, "cwtools.ai.configure", async () => {
-			await aiService.quickConfigureProvider();
-		});
-		safeRegisterCommand(context, "cwtools.ai.openChat", async () => {
-			await vs.commands.executeCommand('cwtools.aiChat.focus');
 		});
 
 		await client.start();

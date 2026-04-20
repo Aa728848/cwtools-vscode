@@ -299,10 +299,21 @@ export class AgentToolExecutor {
     /** Agent file write mode from config */
     public fileWriteMode: 'confirm' | 'auto' = 'confirm';
 
+    private readonly clientGetter: () => LanguageClient;
+
     constructor(
-        private client: LanguageClient,
+        clientOrGetter: LanguageClient | (() => LanguageClient),
         private workspaceRoot: string
-    ) {}
+    ) {
+        // Accept either a direct client or a lazy getter (for early registration before LSP starts)
+        this.clientGetter = typeof clientOrGetter === 'function'
+            ? clientOrGetter
+            : () => clientOrGetter;
+    }
+
+    private get client(): LanguageClient {
+        return this.clientGetter();
+    }
 
     /**
      * Execute a tool by name with the given arguments.

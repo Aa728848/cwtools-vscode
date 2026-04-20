@@ -50,7 +50,7 @@
 				{
 					"id": "cwtools-ai-panel",
 					"title": "CWTools AI",
-					"icon": "$(robot)"
+					"icon": "$(sparkle)"
 				}
 			]
 		},

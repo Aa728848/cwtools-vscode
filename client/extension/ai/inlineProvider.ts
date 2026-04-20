@@ -47,6 +47,13 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             return undefined;
         }
 
+        // For automatic trigger, only fire when cursor is at column 0
+        // (i.e. the user just pressed Enter and started a new line).
+        // Explicit trigger (e.g. editor.action.inlineSuggest.trigger) always proceeds.
+        if (context.triggerKind === vs.InlineCompletionTriggerKind.Automatic) {
+            if (position.character !== 0) return undefined;
+        }
+
         // Don't complete in comments
         const lineText = document.lineAt(position.line).text;
         const textBeforeCursor = lineText.substring(0, position.character).trimStart();

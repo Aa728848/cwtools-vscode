@@ -576,7 +576,11 @@ export type HostMessage =
     | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean }
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
-    | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string };
+    | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string }
+    /** Restore mode state after webview rebuild (panel visibility change) */
+    | { type: 'setMode'; mode: AgentMode }
+    /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */
+    | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

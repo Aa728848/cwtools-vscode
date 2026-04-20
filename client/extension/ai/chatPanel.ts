@@ -34,6 +34,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private conversationMessages: ChatMessage[] = [];
     private abortController: AbortController | null = null;
     private currentMode: AgentMode = 'build';
+    /** Live snapshot of agent steps emitted during the current generation */
+    private _liveSteps: AgentStep[] = [];
+    /** Whether an AI generation is currently running */
+    private _isGenerating = false;
 
     constructor(
         private extensionUri: vs.Uri,
@@ -63,13 +67,38 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.handleWebViewMessage(msg);
         });
 
+        // ── Restore state when panel becomes visible again ────────────────────
+        webviewView.onDidChangeVisibility(() => {
+            if (webviewView.visible) {
+                this._restoreViewState();
+            }
+        });
+
         // Send topic list and initial model data on load
         this.sendTopicList();
         // Push provider/model list immediately so the quick selector is populated
         this.buildAndSendSettingsData().catch(() => { /* ignore on startup */ });
         // Restore current conversation if any
+        this._restoreViewState();
+    }
+
+    // ─── View State Restoration ───────────────────────────────────────────────
+
+    /**
+     * Restore the full panel state after the WebView is (re)created or becomes
+     * visible again. Called on initial load and on every onDidChangeVisibility(true).
+     */
+    private _restoreViewState(): void {
+        // 1. Restore persisted topic messages
         if (this.currentTopic && this.currentTopic.messages.length > 0) {
             this.postMessage({ type: 'loadTopicMessages', messages: this.currentTopic.messages });
+        }
+        // 2. Restore current mode
+        this.postMessage({ type: 'setMode', mode: this.currentMode });
+        // 3. If a generation was running when the panel was hidden, replay steps
+        //    so the user can see what the AI has done so far and cancel if needed
+        if (this._isGenerating && this._liveSteps.length > 0) {
+            this.postMessage({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
         }
     }
 
@@ -324,6 +353,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Create abort controller
         this.abortController = new AbortController();
+        this._isGenerating = true;
+        this._liveSteps = [];
 
         try {
             const result = await this.agentRunner.run(
@@ -332,7 +363,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.conversationMessages,
                 {
                     mode: this.currentMode,
-                    onStep: (step) => this.postMessage({ type: 'agentStep', step }),
+                    onStep: (step) => {
+                        this._liveSteps.push(step);
+                        this.postMessage({ type: 'agentStep', step });
+                    },
                     abortSignal: this.abortController.signal,
                     // Permission callback for run_command tool (OpenCode strategy)
                     onPermissionRequest: (id, tool, description, command) =>
@@ -386,6 +420,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'generationError', error: errorMsg });
         } finally {
             this.abortController = null;
+            this._isGenerating = false;
+            this._liveSteps = [];
         }
     }
 

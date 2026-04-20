@@ -843,6 +843,35 @@
                 switchMode(msg.mode, /* fromUI */ false);
                 break;
 
+            case 'setMode':
+                // Restore mode selector state after panel rebuild (no backend call needed)
+                switchMode(msg.mode, /* fromUI */ false);
+                break;
+
+            case 'replaySteps': {
+                // Panel was hidden while AI was running — replay accumulated steps
+                // Show a banner so user knows the AI is/was running in the background
+                const banner = document.createElement('div');
+                banner.className = 'special-step';
+                banner.style.cssText = 'padding:6px 8px;background:rgba(255,200,50,0.08);border-left:2px solid #ffc832;font-size:11px;opacity:0.8;margin:4px 0;';
+                banner.textContent = msg.isGenerating
+                    ? '⚡ AI 正在后台运行（面板重新打开时恢复显示）'
+                    : '📋 以下为 AI 上次运行记录';
+                chatArea.appendChild(banner);
+                // Replay each step
+                for (const step of msg.steps) {
+                    applyLiveStep(step);
+                }
+                if (msg.isGenerating) {
+                    // Show generating indicator
+                    sendBtn.classList.add('cancel-mode');
+                    sendBtn.querySelector('.send-icon') && (sendBtn.querySelector('.send-icon').style.display = 'none');
+                    sendBtn.querySelector('.stop-icon') && (sendBtn.querySelector('.stop-icon').style.display = 'inline-block');
+                }
+                scrollBottom();
+                break;
+            }
+
             case 'todoUpdate': renderTodos(msg.todos); break;
 
             case 'settingsData':

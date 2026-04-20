@@ -38,6 +38,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private _liveSteps: AgentStep[] = [];
     /** Whether an AI generation is currently running */
     private _isGenerating = false;
+    /** Pending plan file that hasn't been submitted yet (shown as a persistent card) */
+    private _pendingPlanFile: { filePath: string; relPath: string } | null = null;
 
     constructor(
         private extensionUri: vs.Uri,
@@ -99,6 +101,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         //    so the user can see what the AI has done so far and cancel if needed
         if (this._isGenerating && this._liveSteps.length > 0) {
             this.postMessage({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
+        }
+        // 4. If a plan is pending approval, re-show the plan card so it's always visible
+        if (this._pendingPlanFile) {
+            this.postMessage({ type: 'planFileSaved', ...this._pendingPlanFile });
         }
     }
 
@@ -175,7 +181,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.submitPlanAnnotations(msg.annotations);
                 break;
             case 'openPlanFile':
-                void vs.commands.executeCommand('vscode.open', vs.Uri.file(msg.filePath));
+                this.openPlanAnnotationPanel(msg.filePath);
                 break;
         }
     }
@@ -380,33 +386,38 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 }
             );
 
-            this.postMessage({ type: 'generationComplete', result });
-
-            // Update conversation history
+            // ── Update conversation history ────────────────────────────────────────
             const assistantContent = result.code
                 ? `${result.explanation}\n\`\`\`pdx\n${result.code}\n\`\`\``
                 : result.explanation;
-
             this.conversationMessages.push(
                 { role: 'user', content: text },
                 { role: 'assistant', content: assistantContent }
             );
 
-            this.addHistoryMessage({
-                role: 'assistant',
-                content: result.explanation,
-                code: result.code || undefined,
-                isValid: result.isValid,
-                timestamp: Date.now(),
-                steps: result.steps,
-            });
-
-            this.saveTopics();
-
-            // ── Plan file: save MD and notify webview ────────────────────────────
+            // ── Plan mode: suppress explanation in chat, auto-open annotation panel ──
             if (this.currentMode === 'plan' && result.explanation) {
+                // Chat shows only tool-call steps (no full plan text)
+                this.postMessage({ type: 'generationComplete', result: { ...result, explanation: '', code: '' } });
+                this.addHistoryMessage({
+                    role: 'assistant',
+                    content: '📋 计划已生成，已在批注视图中打开',
+                    timestamp: Date.now(),
+                    steps: result.steps,
+                });
                 this.savePlanFile(result.explanation, text);
+            } else {
+                this.postMessage({ type: 'generationComplete', result });
+                this.addHistoryMessage({
+                    role: 'assistant',
+                    content: result.explanation,
+                    code: result.code || undefined,
+                    isValid: result.isValid,
+                    timestamp: Date.now(),
+                    steps: result.steps,
+                });
             }
+            this.saveTopics();
 
             // ── Auto-title: generate a short AI title after the first exchange ─
             // Matches OpenCode's title-agent pattern: fire-and-forget, no blocking
@@ -476,16 +487,261 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         // ── Notify webview: show file card (open button) ────────────────────
         if (filePath) {
+            this._pendingPlanFile = { filePath, relPath };
             this.postMessage({ type: 'planFileSaved', filePath, relPath });
         }
-        // ── Send plan sections for interactive annotation view ──────────────
-        // Split on double-newline (paragraph) or heading lines
-        const sections = planText
-            .split(/\n{2,}/)
-            .map(s => s.trim())
-            .filter(s => s.length > 0);
-        this.postMessage({ type: 'renderPlan', sections, planText });
+        // ── Auto-open annotation WebviewPanel ───────────────────────────────
+        this.openPlanAnnotationPanel(filePath, planText);
     }
+
+    /**
+     * Open the plan file in a dedicated WebviewPanel that renders
+     * the markdown with an interactive inline annotation interface.
+     * When the user submits annotations, they're sent back to the AI.
+     */
+    private openPlanAnnotationPanel(filePath: string, planContent?: string): void {
+        const content = planContent
+            ?? (fs.existsSync(filePath)
+                ? fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '')
+                : null);
+        if (!content) {
+            vs.window.showErrorMessage(`计划文件不存在: ${filePath}`);
+            return;
+        }
+        const fileName = path.basename(filePath);
+        const panel = vs.window.createWebviewPanel(
+            'eddyPlanAnnotation',
+            `批注 — ${fileName}`,
+            vs.ViewColumn.One,
+            { enableScripts: true, localResourceRoots: [] }
+        );
+        panel.webview.html = this.getPlanAnnotationHtml(content, fileName);
+        panel.webview.onDidReceiveMessage(async (msg) => {
+            if (msg.type === 'submitAnnotations' && msg.annotations?.length > 0) {
+                panel.dispose();
+                await new Promise<void>(r => setTimeout(r, 120));
+                await this.submitPlanAnnotations(msg.annotations);
+            } else if (msg.type === 'openRawFile') {
+                vs.commands.executeCommand('vscode.open', vs.Uri.file(filePath));
+            }
+        });
+    }
+
+    /** Generate the HTML for the plan annotation WebviewPanel */
+    /** Generate the HTML for the plan annotation WebviewPanel */
+    private getPlanAnnotationHtml(content: string, fileName: string): string {
+        const escTitle = fileName.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // Escape </script> to prevent premature script-tag termination
+        const safeJson = JSON.stringify(content).replace(/<\/script>/gi, '<\\/script>');
+        const css = `
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'Segoe UI',sans-serif;background:#1e1e2e;color:#cdd6f4;font-size:14px;line-height:1.7;}
+.toolbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:10px;padding:9px 20px;background:#181825;border-bottom:1px solid rgba(255,255,255,0.08);}
+.toolbar-title{flex:1;font-size:13px;font-weight:600;opacity:0.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.raw-btn{background:none;border:1px solid rgba(255,255,255,0.12);color:#cdd6f4;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit;opacity:0.6;transition:opacity .15s;}
+.raw-btn:hover{opacity:1;}
+.submit-btn{background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;padding:5px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:opacity .15s;}
+.submit-btn:disabled{opacity:0.3;cursor:default;}
+.submit-btn:not(:disabled):hover{opacity:0.85;}
+.content{max-width:800px;margin:0 auto;padding:28px 24px 80px;}
+.block{position:relative;margin:2px 0;padding:6px 44px 6px 14px;border-radius:6px;cursor:pointer;transition:background .12s;border-left:3px solid transparent;}
+.block:hover{background:rgba(137,220,235,0.06);}
+.block.annotated{background:rgba(249,226,175,0.05);border-left-color:#f9e2af;}
+.block.active{background:rgba(137,220,235,0.07);}
+.add-btn{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:1px solid rgba(137,220,235,0.35);color:#89dceb;border-radius:4px;width:26px;height:26px;font-size:14px;cursor:pointer;opacity:0;transition:opacity .15s;display:flex;align-items:center;justify-content:center;}
+.block:hover .add-btn,.block.active .add-btn{opacity:1;}
+.block.annotated .add-btn{display:none;}
+.block h1{color:#cba6f7;font-size:22px;font-weight:700;margin-bottom:2px;}
+.block h2{color:#89b4fa;font-size:18px;font-weight:600;padding-top:6px;margin-bottom:2px;}
+.block h3{color:#94e2d5;font-size:15px;font-weight:600;}
+.block h4{font-size:14px;font-weight:600;opacity:0.85;}
+.block code{background:rgba(255,255,255,0.07);border-radius:3px;padding:1px 5px;font-family:monospace;font-size:12px;}
+.block pre{background:rgba(0,0,0,0.3);border-radius:6px;padding:12px;overflow-x:auto;margin:4px 0;}
+.block pre code{background:none;padding:0;}
+.block ul,.block ol{padding-left:20px;}
+.block li{margin:2px 0;}
+.block strong{color:#fab387;}
+.block hr{border:none;border-top:1px solid rgba(255,255,255,0.08);margin:6px 0;}
+.ann-input{margin-top:6px;border:1px solid rgba(137,220,235,0.3);border-radius:8px;overflow:hidden;background:#313244;}
+.ann-textarea{display:block;width:100%;background:transparent;border:none;color:#cdd6f4;font-size:13px;font-family:inherit;padding:10px 12px;resize:none;outline:none;min-height:66px;line-height:1.5;}
+.ann-actions{display:flex;gap:6px;padding:6px 10px;border-top:1px solid rgba(137,220,235,0.15);background:rgba(0,0,0,0.15);align-items:center;}
+.ann-hint{flex:1;font-size:11px;opacity:0.4;}
+.ann-confirm{background:#89dceb;color:#1e1e2e;border:none;border-radius:4px;padding:4px 14px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit;}
+.ann-cancel{background:none;border:1px solid rgba(255,255,255,0.12);color:#cdd6f4;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit;}
+.ann-bubble{display:flex;align-items:flex-start;gap:6px;margin-top:6px;padding:8px 10px;background:rgba(249,226,175,0.07);border-left:3px solid #f9e2af;border-radius:0 6px 6px 0;}
+.ann-bubble-icon{font-size:13px;flex-shrink:0;}
+.ann-bubble-text{flex:1;font-size:12px;opacity:0.9;word-break:break-word;line-height:1.5;}
+.ann-bubble-edit{background:none;border:none;color:#89b4fa;cursor:pointer;font-size:11px;opacity:0.7;font-family:inherit;padding:0 2px;}
+.ann-bubble-edit:hover{opacity:1;}`.trim();
+
+        // JS is kept as a separate string to avoid template literal nesting issues
+        const js = `
+(function(){
+try {
+  var vscode = acquireVsCodeApi();
+  var annotations = {};
+  var PLAN = ${safeJson};
+
+  function parseBlocks(md) {
+    var lines = md.split('\n'), blocks = [], buf = [];
+    function flush() { var s = buf.join('\n').trim(); if (s) blocks.push(s); buf = []; }
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      if (/^#{1,6}\s/.test(l)) { flush(); blocks.push(l); }
+      else if (l.trim() === '') { flush(); }
+      else buf.push(l);
+    }
+    flush();
+    return blocks;
+  }
+
+  function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function mdHtml(t) {
+    var h = esc(t);
+    // headings
+    h = h.replace(/^(#{1,4}) (.+)$/gm, function(_, hh, tx) {
+      return '<h' + hh.length + '>' + tx + '</h' + hh.length + '>';
+    });
+    // bold
+    h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // list items
+    h = h.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+    h = h.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    // hr
+    h = h.replace(/^---+$/gm, '<hr>');
+    // line breaks
+    h = h.replace(/\n/g, '<br>');
+    return h;
+  }
+
+  var blocks = parseBlocks(PLAN);
+  var contentEl = document.getElementById('content');
+  var submitBtn = document.getElementById('submitBtn');
+
+  function updateSubmit() {
+    var n = Object.keys(annotations).length;
+    submitBtn.textContent = '\uD83D\uDCE4 \u63D0\u4EA4\u6279\u6CE8\u7ED9 AI (' + n + ')';
+    submitBtn.disabled = n === 0;
+  }
+
+  blocks.forEach(function(block, idx) {
+    var el = document.createElement('div');
+    el.className = 'block';
+
+    var txt = document.createElement('div');
+    txt.innerHTML = mdHtml(block);
+    el.appendChild(txt);
+
+    var addBtn = document.createElement('button');
+    addBtn.className = 'add-btn';
+    addBtn.title = '\u6DFB\u52A0\u6279\u6CE8';
+    addBtn.textContent = '\uD83D\uDCAC';
+    el.appendChild(addBtn);
+
+    var bubble = document.createElement('div');
+    bubble.className = 'ann-bubble';
+    bubble.style.display = 'none';
+    el.appendChild(bubble);
+
+    var box = document.createElement('div');
+    box.className = 'ann-input';
+    box.style.display = 'none';
+    box.innerHTML = '<textarea class="ann-textarea" placeholder="\u8F93\u5165\u6279\u6CE8\u5185\u5BB9\u2026"></textarea>'
+      + '<div class="ann-actions"><span class="ann-hint">Ctrl+Enter \u786E\u8BA4\uFF0CEsc \u53D6\u6D88</span>'
+      + '<button class="ann-cancel">\u53D6\u6D88</button><button class="ann-confirm">\u786E\u5B9A</button></div>';
+    el.appendChild(box);
+
+    function openInput() {
+      box.querySelector('.ann-textarea').value = annotations[idx] || '';
+      box.style.display = 'block'; bubble.style.display = 'none';
+      el.classList.add('active');
+      setTimeout(function() { box.querySelector('.ann-textarea').focus(); }, 0);
+    }
+    function closeInput() { box.style.display = 'none'; el.classList.remove('active'); }
+    function confirmAnnotation() {
+      var v = box.querySelector('.ann-textarea').value.trim();
+      closeInput();
+      if (!v) {
+        delete annotations[idx];
+        bubble.style.display = 'none'; el.classList.remove('annotated');
+      } else {
+        annotations[idx] = v;
+        bubble.innerHTML = '<span class="ann-bubble-icon">\uD83D\uDCAC</span>'
+          + '<span class="ann-bubble-text">' + esc(v) + '</span>'
+          + '<button class="ann-bubble-edit">\u7F16\u8F91</button>';
+        bubble.querySelector('.ann-bubble-edit').addEventListener('click', function(e) {
+          e.stopPropagation(); openInput();
+        });
+        bubble.style.display = 'flex'; el.classList.add('annotated');
+      }
+      updateSubmit();
+    }
+
+    el.addEventListener('click', function() {
+      if (box.style.display === 'none' && bubble.style.display === 'none') openInput();
+    });
+    addBtn.addEventListener('click', function(e) { e.stopPropagation(); openInput(); });
+    box.addEventListener('click', function(e) { e.stopPropagation(); });
+    box.querySelector('.ann-confirm').addEventListener('click', confirmAnnotation);
+    box.querySelector('.ann-cancel').addEventListener('click', closeInput);
+    box.querySelector('.ann-textarea').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) confirmAnnotation();
+      if (e.key === 'Escape') closeInput();
+    });
+
+    contentEl.appendChild(el);
+  });
+
+  submitBtn.addEventListener('click', function() {
+    var keys = Object.keys(annotations);
+    if (!keys.length) return;
+    var data = keys.map(function(k) { return { section: blocks[+k], note: annotations[k] }; });
+    vscode.postMessage({ type: 'submitAnnotations', annotations: data });
+    submitBtn.textContent = '\u2705 \u5DF2\u63D0\u4EA4\u7ED9 AI';
+    submitBtn.disabled = true;
+  });
+
+  document.getElementById('rawBtn').addEventListener('click', function() {
+    vscode.postMessage({ type: 'openRawFile' });
+  });
+
+  document.addEventListener('click', function() {
+    document.querySelectorAll('.ann-input').forEach(function(el) {
+      if (el.style.display !== 'none') {
+        el.style.display = 'none';
+        var b = el.closest('.block');
+        if (b) b.classList.remove('active');
+      }
+    });
+  });
+
+} catch(err) {
+  document.getElementById('content').innerHTML =
+    '<div style="color:#f38ba8;padding:20px;font-family:monospace">Error: ' + err.message + '</div>';
+}
+})();`.trim();
+
+        return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+<title>\u6279\u6CE8 \u2014 ${escTitle}</title>
+<style>${css}</style>
+</head>
+<body>
+<div class="toolbar">
+  <span class="toolbar-title">&#x270F;&#xFE0F; \u8BA1\u5212\u6279\u6CE8 \u2014 ${escTitle}</span>
+  <button class="raw-btn" id="rawBtn">&#x1F4C4; \u67E5\u770B\u539F\u59CB\u6587\u4EF6</button>
+  <button class="submit-btn" id="submitBtn" disabled>&#x1F4E4; \u63D0\u4EA4\u6279\u6CE8\u7ED9 AI (0)</button>
+</div>
+<div class="content" id="content"></div>
+<script>${js}</script>
+</body>
+</html>`;
+    }
+
 
     /**
      * Receive inline annotations collected in the webview and generate
@@ -505,6 +761,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 return `${i + 1}. 在"${ctx}"处：${a.note}`;
             }),
         ].join('\n');
+        // Plan has been reviewed — clear the pending state so the card stops persisting
+        this._pendingPlanFile = null;
         await this.handleUserMessage(followUp);
     }
 

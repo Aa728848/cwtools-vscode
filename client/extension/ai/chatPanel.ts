@@ -347,6 +347,25 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             });
 
             this.saveTopics();
+
+            // ── Auto-title: generate a short AI title after the first exchange ─
+            // Matches OpenCode's title-agent pattern: fire-and-forget, no blocking
+            const isFirstExchange = this.currentTopic &&
+                this.currentTopic.messages.filter(m => m.role === 'user').length === 1;
+            if (isFirstExchange && this.currentTopic) {
+                const topicId = this.currentTopic.id;
+                const replyText = result.explanation || (result.code ? result.code.substring(0, 400) : '');
+                // Non-blocking: run in background, update UI when done
+                this.agentRunner.generateTopicTitle(text, replyText).then(title => {
+                    if (!title) return;
+                    const topic = this.topics.find(t => t.id === topicId);
+                    if (topic) {
+                        topic.title = title;
+                        this.saveTopics();
+                        this.postMessage({ type: 'topicTitleGenerated', topicId, title });
+                    }
+                }).catch(() => { /* ignore title generation failures silently */ });
+            }
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
             this.postMessage({ type: 'generationError', error: errorMsg });

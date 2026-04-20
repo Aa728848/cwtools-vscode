@@ -23,12 +23,12 @@ import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder } from './promptBuilder';
 import { getProvider } from './providers';
 
-// Maximum tool-call iterations per generation (prevent infinite loops)
-const MAX_TOOL_ITERATIONS = 20;
-// How many consecutive identical tool calls before we stop
-const MAX_REPEATED_CALLS = 3;
-// Maximum validation-retry rounds
-const MAX_VALIDATION_RETRIES = 3;
+// Maximum tool-call iterations per generation (matches OpenCode's permissive default)
+const MAX_TOOL_ITERATIONS = 50;
+// Doom-loop detection threshold: N consecutive identical call-signatures = loop (OpenCode: DOOM_LOOP_THRESHOLD)
+const DOOM_LOOP_THRESHOLD = 3;
+// Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
+const MAX_VALIDATION_RETRIES = 2;
 // Token estimation: ~4 chars per token (rough approximation)
 const CHARS_PER_TOKEN = 4;
 // Compact when conversation exceeds this fraction of provider context
@@ -265,8 +265,9 @@ export class AgentRunner {
         options?: AgentRunnerOptions
     ): Promise<string> {
         let iteration = 0;
-        // Loop detection: track last N tool signatures to detect repetition
+        // Doom loop detection: sliding window of call signatures
         const recentCallSignatures: string[] = [];
+        let consecutiveErrorCount = 0;
 
         // Filter tools by mode
         const availableTools = mode === 'plan'
@@ -336,13 +337,15 @@ export class AgentRunner {
                 return this.cleanFinalContent(assistantMessage.content ?? '');
             }
 
-            // Loop detection: check if we're repeating the same tool calls
+            // ── Doom loop detection (OpenCode DOOM_LOOP_THRESHOLD) ─────────────
+            // Track a sliding window of the last DOOM_LOOP_THRESHOLD call signatures.
+            // If they are all identical, the agent is stuck in a loop.
             const callSignature = toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`).join('|');
             recentCallSignatures.push(callSignature);
-            if (recentCallSignatures.length > MAX_REPEATED_CALLS) {
+            if (recentCallSignatures.length > DOOM_LOOP_THRESHOLD) {
                 recentCallSignatures.shift();
             }
-            const allSame = recentCallSignatures.length >= MAX_REPEATED_CALLS &&
+            const allSame = recentCallSignatures.length >= DOOM_LOOP_THRESHOLD &&
                 recentCallSignatures.every(s => s === recentCallSignatures[0]);
             if (allSame) {
                 emitStep({
@@ -354,16 +357,16 @@ export class AgentRunner {
             }
 
             // ── Deduplicate file-write calls ──────────────────────────────────
-            // If the model emitted multiple write_file/patch_file calls targeting
+            // If the model emitted multiple write_file/edit_file calls targeting
             // the same file in one response, only keep the LAST one for each file.
-            // Earlier ones would overwrite later ones and cause stuck confirm dialogs.
-            const WRITE_TOOLS = new Set(['write_file', 'patch_file']);
+            const WRITE_TOOLS = new Set(['write_file', 'edit_file']);
             const lastWriteIndexByFile = new Map<string, number>();
             for (let i = 0; i < toolCalls.length; i++) {
                 if (!WRITE_TOOLS.has(toolCalls[i].function.name)) continue;
                 try {
                     const a = JSON.parse(toolCalls[i].function.arguments);
-                    const filePath: string = a.file ?? '';
+                    // edit_file uses filePath, write_file uses file
+                    const filePath: string = a.filePath ?? a.file ?? '';
                     if (filePath) lastWriteIndexByFile.set(filePath, i);
                 } catch { /* ignore */ }
             }
@@ -392,7 +395,7 @@ export class AgentRunner {
                 try {
                     // Skip duplicate write calls: if a later call writes to the same file, skip this one
                     const callIndex = toolCalls.indexOf(toolCall);
-                    const filePath = (toolArgs['file'] as string) ?? '';
+                    const filePath = (toolArgs['filePath'] as string) ?? (toolArgs['file'] as string) ?? '';
                     const isSupersededWrite = WRITE_TOOLS.has(toolName) && filePath &&
                         lastWriteIndexByFile.get(filePath) !== callIndex;
 
@@ -413,6 +416,22 @@ export class AgentRunner {
                     toolResult,
                     timestamp: Date.now(),
                 });
+
+                // Track consecutive tool errors for early abort
+                if (typeof toolResult === 'object' && toolResult !== null &&
+                    'error' in toolResult && !('success' in toolResult)) {
+                    consecutiveErrorCount++;
+                    if (consecutiveErrorCount >= 5) {
+                        emitStep({
+                            type: 'error',
+                            content: '工具连续失败 5 次，已强制停止',
+                            timestamp: Date.now(),
+                        });
+                        break;
+                    }
+                } else {
+                    consecutiveErrorCount = 0;
+                }
 
                 // Feed tool result back to AI
                 // DeepSeek and some models in DSML mode require tool results as user messages
@@ -816,5 +835,50 @@ export class AgentRunner {
         // Clean up excess blank lines
         explanation = explanation.replace(/\n{3,}/g, '\n\n').trim();
         return explanation;
+    }
+
+    /**
+     * Generate a short AI topic title from a user message + assistant reply.
+     * Called after the first exchange in a new topic (OpenCode-style title agent).
+     * Returns null if generation fails or produces nothing useful.
+     */
+    async generateTopicTitle(
+        userMessage: string,
+        assistantReply: string,
+        options?: Pick<AgentRunnerOptions, 'providerId' | 'model'>
+    ): Promise<string | null> {
+        try {
+            const context = [userMessage, assistantReply]
+                .map(s => s.substring(0, 400))
+                .join('\n\n---\n\n');
+
+            const response = await this.aiService.chatCompletion([
+                {
+                    role: 'system',
+                    content: 'You are a conversation title generator. Generate a concise title (max 50 characters) in the same language as the user message. Output ONLY the title text, no quotes, no punctuation at the end, no preamble.',
+                },
+                {
+                    role: 'user',
+                    content: `Generate a short title for this conversation:\n\n${context}`,
+                },
+            ], {
+                maxTokens: 60,
+                temperature: 0.3,
+                providerId: options?.providerId,
+                model: options?.model,
+            });
+
+            const raw = (response.choices[0]?.message?.content ?? '').trim();
+            // Clean up think blocks and extra quotes
+            const cleaned = raw
+                .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                .replace(/^["'\u300c\u300e]|["'\u300d\u300f]$/g, '')
+                .trim();
+
+            if (!cleaned || cleaned.length < 2 || cleaned.length > 80) return null;
+            return cleaned;
+        } catch {
+            return null;
+        }
     }
 }

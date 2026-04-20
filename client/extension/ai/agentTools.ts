@@ -249,17 +249,17 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
-            name: 'patch_file',
-            description: 'Replace a specific range of lines in a file with new content. More surgical than write_file for small edits. Lines are 1-based. Subject to the same confirmation rules as write_file.',
+            name: 'edit_file',
+            description: 'Make precise string substitutions in files using oldString→newString replacement. Uses a cascade of 8 fuzzy-matching strategies that tolerate minor whitespace/indentation differences in the AI output. If oldString is empty, creates the file with newString as content. After writing, returns real-time LSP diagnostics so errors are detected immediately. Subject to agentFileWriteMode: confirm mode shows VSCode diff viewer and waits for approval; auto mode writes immediately.',
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path' },
-                    startLine: { type: 'number', description: 'First line to replace (1-based)' },
-                    endLine: { type: 'number', description: 'Last line to replace (1-based, inclusive)' },
-                    newContent: { type: 'string', description: 'Replacement content for the specified line range' },
+                    filePath: { type: 'string', description: 'Absolute path to the file to modify' },
+                    oldString: { type: 'string', description: 'The exact text to replace. Empty string = create new file with newString.' },
+                    newString: { type: 'string', description: 'The replacement text (must differ from oldString)' },
+                    replaceAll: { type: 'boolean', description: 'If true, replace all occurrences. Default: false. Fails if multiple matches found and replaceAll is false.' },
                 },
-                required: ['file', 'startLine', 'endLine', 'newContent'],
+                required: ['filePath', 'oldString', 'newString'],
             },
         },
     },
@@ -368,8 +368,8 @@ export class AgentToolExecutor {
                 result = await this.readFile(args as any); break;
             case 'write_file':
                 result = await this.writeFile(args as any); break;
-            case 'patch_file':
-                result = await this.patchFile(args as any); break;
+            case 'edit_file':
+                result = await this.editFile(args as any); break;
             case 'list_directory':
                 result = await this.listDirectory(args as any); break;
             default:
@@ -1035,37 +1035,282 @@ export class AgentToolExecutor {
         }
     }
 
-    private async patchFile(args: { file: string; startLine: number; endLine: number; newContent: string }): Promise<import('./types').PatchFileResult> {
+    // ─── OpenCode-style edit_file tool ───────────────────────────────────────
+
+    /**
+     * Performs an exact string substitution in a file, falling back through 8
+     * Replacer strategies to tolerate minor AI-produced whitespace differences.
+     * After writing, pulls real-time LSP diagnostics for the file.
+     */
+    private async editFile(args: {
+        filePath: string;
+        oldString: string;
+        newString: string;
+        replaceAll?: boolean;
+    }): Promise<import('./types').EditFileResult> {
+        const filePath = args.filePath;
+        let originalContent = '';
         try {
-            const content = fs.readFileSync(args.file, 'utf-8');
-            const lines = content.split('\n');
-
-            const start = Math.max(0, args.startLine - 1);
-            const end = Math.min(lines.length, args.endLine);
-
-            const newLines = args.newContent.split('\n');
-            const patchedLines = [
-                ...lines.slice(0, start),
-                ...newLines,
-                ...lines.slice(end),
-            ];
-            const patchedContent = patchedLines.join('\n');
-
-            const diff = this.generateSimpleDiff(args.file, content, patchedContent);
-
-            if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
-                const messageId = `patch_${Date.now()}`;
-                const confirmed = await this.onPendingWrite(args.file, patchedContent, messageId);
-                if (!confirmed) {
-                    return { success: false, message: '用户取消了修改操作' };
-                }
+            if (fs.existsSync(filePath)) {
+                originalContent = fs.readFileSync(filePath, 'utf-8');
             }
-
-            fs.writeFileSync(args.file, patchedContent, 'utf-8');
-            return { success: true, message: `文件第 ${args.startLine}-${args.endLine} 行已更新` };
         } catch (e) {
-            return { success: false, message: `修改失败: ${String(e)}` };
+            return { success: false, message: `无法读取文件: ${String(e)}` };
         }
+
+        // ── Create new file (oldString === '') ──────────────────────────────
+        let newContent: string;
+        if (args.oldString === '') {
+            newContent = args.newString;
+        } else {
+            if (args.oldString === args.newString) {
+                return { success: false, message: 'oldString 与 newString 完全相同，无需修改' };
+            }
+            const ending = this.detectLineEnding(originalContent);
+            const old = this.convertLineEnding(this.normalizeLineEndings(args.oldString), ending);
+            const next = this.convertLineEnding(this.normalizeLineEndings(args.newString), ending);
+            try {
+                newContent = this.replace(originalContent, old, next, args.replaceAll ?? false);
+            } catch (e) {
+                return { success: false, message: String(e) };
+            }
+        }
+
+        const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
+
+        // ── Confirm mode: show diff viewer and wait for user ────────────────
+        if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
+            const confirmed = await this.onPendingWrite(filePath, newContent, `edit_${Date.now()}`);
+            if (!confirmed) {
+                return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
+            }
+        }
+
+        // ── Write file ─────────────────────────────────────────────────────
+        try {
+            const dir = path.dirname(filePath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(filePath, newContent, 'utf-8');
+        } catch (e) {
+            return { success: false, message: `写入失败: ${String(e)}` };
+        }
+
+        // ── Pull LSP diagnostics for this file ─────────────────────────────
+        const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+        let message = `文件已更新: ${path.basename(filePath)}`;
+        const errors = diagnostics.filter(d => d.severity === 'error');
+        if (errors.length > 0) {
+            message += `\n\nLSP 检测到 ${errors.length} 个错误，请修复：\n` +
+                errors.slice(0, 5).map(e => `  第 ${e.line + 1} 行: ${e.message}`).join('\n');
+        }
+        return { success: true, message, diff, diagnostics };
+    }
+
+    /** Wait (up to 2s) for LSP to process a file, then return its diagnostics */
+    private async getLspDiagnosticsForFile(filePath: string): Promise<import('./types').ValidationError[]> {
+        try {
+            const uri = vs.Uri.file(filePath);
+            try { void vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
+            await new Promise<void>((resolve) => {
+                const t = setTimeout(resolve, 2000);
+                const sub = vs.languages.onDidChangeDiagnostics((e) => {
+                    if (e.uris.some(u => u.fsPath === uri.fsPath)) {
+                        clearTimeout(t); sub.dispose(); resolve();
+                    }
+                });
+            });
+            return vs.languages.getDiagnostics(uri).map(d => ({
+                code: String(d.code ?? ''),
+                severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                    : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                    : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+                message: d.message,
+                line: d.range.start.line,
+                column: d.range.start.character,
+            } as import('./types').ValidationError));
+        } catch { return []; }
+    }
+
+    // ─── OpenCode Replacer Suite ─────────────────────────────────────────────
+    // Ported from: opencode/packages/opencode/src/tool/edit.ts
+
+    private normalizeLineEndings(text: string): string { return text.split('\r\n').join('\n'); }
+    private detectLineEnding(text: string): '\n' | '\r\n' { return text.includes('\r\n') ? '\r\n' : '\n'; }
+    private convertLineEnding(text: string, ending: '\n' | '\r\n'): string {
+        return ending === '\n' ? text : text.split('\n').join('\r\n');
+    }
+
+    private levenshtein(a: string, b: string): number {
+        if (!a.length || !b.length) return Math.max(a.length, b.length);
+        const m = Array.from({ length: a.length + 1 }, (_, i) =>
+            Array.from({ length: b.length + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0));
+        for (let i = 1; i <= a.length; i++)
+            for (let j = 1; j <= b.length; j++) {
+                const c = a[i-1] === b[j-1] ? 0 : 1;
+                m[i][j] = Math.min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+c);
+            }
+        return m[a.length][b.length];
+    }
+
+    private *simpleReplacer(_c: string, find: string): Generator<string> { yield find; }
+
+    private *lineTrimmedReplacer(content: string, find: string): Generator<string> {
+        const oL = content.split('\n'), sL = find.split('\n');
+        if (sL[sL.length-1] === '') sL.pop();
+        for (let i = 0; i <= oL.length - sL.length; i++) {
+            if (sL.every((s, j) => oL[i+j].trim() === s.trim())) {
+                let st = 0; for (let k=0;k<i;k++) st += oL[k].length+1;
+                let en = st; for (let k=0;k<sL.length;k++) { en += oL[i+k].length; if (k<sL.length-1) en+=1; }
+                yield content.substring(st, en);
+            }
+        }
+    }
+
+    private *blockAnchorReplacer(content: string, find: string): Generator<string> {
+        const oL = content.split('\n'), sL = find.split('\n');
+        if (sL.length < 3) return;
+        if (sL[sL.length-1] === '') sL.pop();
+        const first = sL[0].trim(), last = sL[sL.length-1].trim();
+        const cands: {s:number; e:number}[] = [];
+        for (let i=0; i<oL.length; i++) {
+            if (oL[i].trim() !== first) continue;
+            for (let j=i+2; j<oL.length; j++) { if (oL[j].trim() === last) { cands.push({s:i,e:j}); break; } }
+        }
+        if (!cands.length) return;
+        const score = (s: number, e: number) => {
+            const check = Math.min(sL.length-2, e-s-1);
+            if (check <= 0) return 1.0;
+            let sim = 0;
+            for (let j=1; j<sL.length-1 && j<e-s; j++) {
+                const mx = Math.max(oL[s+j].trim().length, sL[j].trim().length);
+                if (mx) sim += (1 - this.levenshtein(oL[s+j].trim(), sL[j].trim()) / mx) / check;
+            }
+            return sim;
+        };
+        const extract = (s: number, e: number) => {
+            let st=0; for (let k=0;k<s;k++) st+=oL[k].length+1;
+            let en=st; for (let k=s;k<=e;k++) { en+=oL[k].length; if (k<e) en+=1; }
+            return content.substring(st, en);
+        };
+        if (cands.length === 1) { if (score(cands[0].s, cands[0].e) >= 0) yield extract(cands[0].s, cands[0].e); return; }
+        let best=cands[0], bestSim=-1;
+        for (const {s,e} of cands) { const sim=score(s,e); if (sim>bestSim) { bestSim=sim; best={s,e}; } }
+        if (bestSim >= 0.3) yield extract(best.s, best.e);
+    }
+
+    private *whitespaceNormalizedReplacer(content: string, find: string): Generator<string> {
+        const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
+        const nF = norm(find), lns = content.split('\n'), fL = find.split('\n');
+        if (fL.length === 1) { for (const l of lns) { if (norm(l) === nF) yield l; } return; }
+        for (let i=0; i<=lns.length-fL.length; i++)
+            if (norm(lns.slice(i, i+fL.length).join('\n')) === nF) yield lns.slice(i, i+fL.length).join('\n');
+    }
+
+    private *indentationFlexibleReplacer(content: string, find: string): Generator<string> {
+        const strip = (text: string) => {
+            const lns = text.split('\n'), ne = lns.filter(l => l.trim().length > 0);
+            if (!ne.length) return text;
+            const min = Math.min(...ne.map(l => { const m=l.match(/^(\s*)/); return m?m[1].length:0; }));
+            return lns.map(l => l.trim().length === 0 ? l : l.slice(min)).join('\n');
+        };
+        const nF = strip(find), lns = content.split('\n'), fL = find.split('\n');
+        for (let i=0; i<=lns.length-fL.length; i++) {
+            const b = lns.slice(i, i+fL.length).join('\n');
+            if (strip(b) === nF) yield b;
+        }
+    }
+
+    private *escapeNormalizedReplacer(content: string, find: string): Generator<string> {
+        const un = (s: string) => s.replace(/\\(n|t|r|'|"|`|\\|\n|\$)/g, (_m, c: string) =>
+            ({n:'\n',t:'\t',r:'\r',"'":"'",'"':'"','`':'`','\\':'\\','\n':'\n','$':'$'}[c] ?? _m));
+        const uF = un(find);
+        if (content.includes(uF)) { yield uF; return; }
+        const lns = content.split('\n'), fL = uF.split('\n');
+        if (fL.length > 1) for (let i=0; i<=lns.length-fL.length; i++) {
+            const b = lns.slice(i, i+fL.length).join('\n');
+            if (un(b) === uF) yield b;
+        }
+    }
+
+    private *trimmedBoundaryReplacer(content: string, find: string): Generator<string> {
+        const trimmed = find.trim();
+        if (trimmed === find) return;
+        if (content.includes(trimmed)) { yield trimmed; return; }
+        const lns = content.split('\n'), fL = find.split('\n');
+        for (let i=0; i<=lns.length-fL.length; i++) {
+            const b = lns.slice(i, i+fL.length).join('\n');
+            if (b.trim() === trimmed) yield b;
+        }
+    }
+
+    private *contextAwareReplacer(content: string, find: string): Generator<string> {
+        const fL = find.split('\n');
+        if (fL.length < 3) return;
+        if (fL[fL.length-1] === '') fL.pop();
+        const cL = content.split('\n');
+        const fl = fL[0].trim(), ll = fL[fL.length-1].trim();
+        for (let i=0; i<cL.length; i++) {
+            if (cL[i].trim() !== fl) continue;
+            for (let j=i+2; j<cL.length; j++) {
+                if (cL[j].trim() !== ll) continue;
+                const b = cL.slice(i, j+1);
+                if (b.length !== fL.length) break;
+                let hit=0, tot=0;
+                for (let k=1; k<b.length-1; k++) {
+                    if (b[k].trim().length || fL[k].trim().length) { tot++; if (b[k].trim()===fL[k].trim()) hit++; }
+                }
+                if (tot===0 || hit/tot >= 0.5) { yield b.join('\n'); break; }
+                break;
+            }
+        }
+    }
+
+    /** Main replace: try each of the 8 Replacers in order, first match wins */
+    private replace(content: string, oldString: string, newString: string, replaceAll: boolean): string {
+        if (oldString === newString) throw new Error('oldString 与 newString 完全相同，无需修改');
+        const replacers = [
+            this.simpleReplacer.bind(this),
+            this.lineTrimmedReplacer.bind(this),
+            this.blockAnchorReplacer.bind(this),
+            this.whitespaceNormalizedReplacer.bind(this),
+            this.indentationFlexibleReplacer.bind(this),
+            this.escapeNormalizedReplacer.bind(this),
+            this.trimmedBoundaryReplacer.bind(this),
+            this.contextAwareReplacer.bind(this),
+        ] as const;
+        for (const replacer of replacers) {
+            for (const search of replacer(content, oldString)) {
+                const idx = content.indexOf(search);
+                if (idx === -1) continue;
+                if (replaceAll) return search.length > 0 ? content.split(search).join(newString) : content;
+                const lastIdx = content.lastIndexOf(search);
+                if (idx !== lastIdx) throw new Error(
+                    '在文件中找到多个匹配项。请在 oldString 中提供更多上下文使其唯一，或使用 replaceAll=true。'
+                );
+                return content.substring(0, idx) + newString + content.substring(idx + search.length);
+            }
+        }
+        throw new Error(
+            '在文件中找不到 oldString。必须精确匹配（包括空白符、缩进和行尾符）。\n' +
+            '提示：先使用 read_file 读取文件内容，再将读取到的确切文本作为 oldString。'
+        );
+    }
+
+    private buildUnifiedDiff(filePath: string, original: string, modified: string): string {
+        const name = path.basename(filePath);
+        const oL = original.split('\n'), mL = modified.split('\n');
+        let diff = `--- ${name}\n+++ ${name}\n`, changed = 0;
+        let i=0, j=0;
+        while ((i < oL.length || j < mL.length) && changed < 80) {
+            if (oL[i] === mL[j]) { i++; j++; }
+            else { changed++; if (i<oL.length) { diff += `- ${oL[i++]}\n`; } if (j<mL.length) { diff += `+ ${mL[j++]}\n`; } }
+        }
+        return changed === 0 ? diff + '(无变更)\n' : diff;
+    }
+
+    /** @deprecated kept for compatibility with writeFile's existing call */
+    private generateSimpleDiff(filePath: string, original: string, modified: string): string {
+        return this.buildUnifiedDiff(filePath, original, modified);
     }
 
     private async listDirectory(args: { directory: string; recursive?: boolean }): Promise<import('./types').ListDirectoryResult> {
@@ -1112,29 +1357,6 @@ export class AgentToolExecutor {
                 results.push({ name: relPath, type: 'file', size: stat.size });
             }
         }
-    }
-
-    /** Generate a simple unified-diff-style string for display */
-    private generateSimpleDiff(filePath: string, original: string, modified: string): string {
-        const origLines = original.split('\n');
-        const modLines = modified.split('\n');
-        const fileName = path.basename(filePath);
-        let diff = `--- ${fileName} (原始)\n+++ ${fileName} (修改后)\n`;
-
-        // Simple line-by-line diff (highlight changed regions)
-        const maxLines = Math.max(origLines.length, modLines.length);
-        let changedCount = 0;
-        for (let i = 0; i < maxLines && changedCount < 50; i++) {
-            const o = origLines[i] ?? '';
-            const m = modLines[i] ?? '';
-            if (o !== m) {
-                changedCount++;
-                if (o) diff += `- ${o}\n`;
-                if (m) diff += `+ ${m}\n`;
-            }
-        }
-        if (changedCount === 0) diff += '(无变更)\n';
-        return diff;
     }
 
     // ─── Helper Methods ──────────────────────────────────────────────────────

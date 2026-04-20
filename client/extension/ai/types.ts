@@ -334,7 +334,11 @@ export type ToolArgs =
     | GetCompletionAtArgs
     | DocumentSymbolsArgs
     | WorkspaceSymbolsArgs
-    | TodoWriteArgs;
+    | TodoWriteArgs
+    | ReadFileArgs
+    | WriteFileArgs
+    | EditFileArgs
+    | ListDirectoryArgs;
 
 export type ToolResult =
     | QueryScopeResult
@@ -347,7 +351,11 @@ export type ToolResult =
     | GetCompletionAtResult
     | DocumentSymbolsResult
     | WorkspaceSymbolsResult
-    | TodoWriteResult;
+    | TodoWriteResult
+    | ReadFileResult
+    | WriteFileResult
+    | EditFileResult
+    | ListDirectoryResult;
 
 export type AgentToolName =
     | 'query_scope'
@@ -364,7 +372,7 @@ export type AgentToolName =
     | 'todo_write'
     | 'read_file'
     | 'write_file'
-    | 'patch_file'
+    | 'edit_file'
     | 'list_directory';
 
 // ─── File Tool Types ─────────────────────────────────────────────────────────
@@ -393,19 +401,25 @@ export interface WriteFileResult {
     pendingDiff?: string;
 }
 
-export interface PatchFileArgs {
-    file: string;
-    /** Start line (1-based, inclusive) */
-    startLine: number;
-    /** End line (1-based, inclusive) - lines to replace */
-    endLine: number;
-    /** New content to replace the specified line range */
-    newContent: string;
+export interface EditFileArgs {
+    /** Absolute path to the file to modify */
+    filePath: string;
+    /** The exact text to find and replace (empty string = create new file) */
+    oldString: string;
+    /** The replacement text */
+    newString: string;
+    /** If true, replace all occurrences; default false */
+    replaceAll?: boolean;
 }
 
-export interface PatchFileResult {
+export interface EditFileResult {
     success: boolean;
     message: string;
+    /** Unified diff of the change */
+    diff?: string;
+    /** LSP diagnostics detected after the edit */
+    diagnostics?: ValidationError[];
+    /** If agentFileWriteMode === 'confirm', write was queued, not yet applied */
     pendingDiff?: string;
 }
 
@@ -520,7 +534,8 @@ export type HostMessage =
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }
-    | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean };
+    | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean }
+    | { type: 'topicTitleGenerated'; topicId: string; title: string };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

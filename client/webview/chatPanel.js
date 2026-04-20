@@ -458,6 +458,23 @@
 
             case 'topicList': renderTopics(msg.topics); break;
 
+            case 'topicTitleGenerated': {
+                // Update the matching topic title in the sidebar without full re-render
+                const list = document.getElementById('topicsList');
+                if (list) {
+                    const items = list.querySelectorAll('.topic-item');
+                    // Topics are rendered in order; find by dataset or position matching
+                    // Re-render the list to ensure consistency
+                    const titleSpans = list.querySelectorAll('.topic-title');
+                    // Store the topicId→title mapping in a WeakMap-friendly way via data attrs
+                    for (const item of list.querySelectorAll('.topic-item[data-topic-id="' + escapeHtml(msg.topicId) + '"]')) {
+                        const span = item.querySelector('.topic-title');
+                        if (span) span.textContent = msg.title;
+                    }
+                }
+                break;
+            }
+
             case 'loadTopicMessages':
                 for (const m of msg.messages) {
                     if (m.role === 'user') addUserMessage(m.content);
@@ -519,6 +536,7 @@
         for (const t of topics) {
             const item = document.createElement('div');
             item.className = 'topic-item';
+            item.dataset.topicId = t.id;
             const title = document.createElement('span');
             title.className = 'topic-title';
             title.textContent = t.title;

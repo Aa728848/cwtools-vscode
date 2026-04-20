@@ -99,6 +99,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'deleteTopic':
                 this.deleteTopic(msg.topicId);
                 break;
+            case 'forkTopic':
+                this.forkTopic(msg.topicId, msg.messageIndex);
+                break;
+            case 'archiveTopic':
+                this.archiveTopic(msg.topicId);
+                break;
             case 'configureProvider':
             case 'openSettings':
                 await this.openSettingsPage();
@@ -129,6 +135,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'quickChangeModel':
                 await this.quickChangeModel(msg.model);
+                break;
+            case 'slashCommand':
+                await this.handleSlashCommand(msg.command);
+                break;
+            case 'permissionResponse':
+                this.resolvePermissionRequest(msg.permissionId, msg.allowed);
                 break;
         }
     }
@@ -322,6 +334,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     mode: this.currentMode,
                     onStep: (step) => this.postMessage({ type: 'agentStep', step }),
                     abortSignal: this.abortController.signal,
+                    // Permission callback for run_command tool (OpenCode strategy)
+                    onPermissionRequest: (id, tool, description, command) =>
+                        this.requestPermission(id, tool, description, command),
                 }
             );
 
@@ -387,15 +402,31 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.saveTopics();
     }
 
-    // ─── File Write Confirmation (提供给 AgentToolExecutor onPendingWrite) ───────────
+    // ─── File Write Confirmation ──────────────────────────────────────────────
 
     private pendingWriteResolvers = new Map<string, (confirmed: boolean) => void>();
     /** Maps messageId → temp file path used for the diff view (for cleanup) */
     private pendingDiffTempFiles = new Map<string, string>();
+    /** Auto-confirm timeout (120 s) — prevents hangs if WebView is hidden */
+    private static readonly WRITE_CONFIRM_TIMEOUT_MS = 120_000;
 
     handlePendingWrite(file: string, newContent: string, messageId: string): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
-            this.pendingWriteResolvers.set(messageId, resolve);
+            // ── Timeout guard: auto-confirm after 120 s ───────────────────────
+            // Prevents the agent reasoning loop from hanging indefinitely if the
+            // WebView is hidden or the user ignores the confirmation card.
+            const timeout = setTimeout(() => {
+                if (this.pendingWriteResolvers.has(messageId)) {
+                    console.warn(`[CWTools AI] Write confirm timeout for ${file} — auto-confirming`);
+                    this.resolveWriteConfirmation(messageId, true);
+                }
+            }, AIChatPanelProvider.WRITE_CONFIRM_TIMEOUT_MS);
+
+            // Wrap resolver to clear timeout on response
+            this.pendingWriteResolvers.set(messageId, (confirmed: boolean) => {
+                clearTimeout(timeout);
+                resolve(confirmed);
+            });
 
             const isNewFile = !fs.existsSync(file);
 
@@ -414,13 +445,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const label = `AI Changes → ${path.basename(file)}`;
 
                 if (isNewFile) {
-                    // New file: open proposed content in a preview column
                     vs.commands.executeCommand('vscode.open', tempUri, {
                         preview: true,
                         viewColumn: vs.ViewColumn.Beside,
                     });
                 } else {
-                    // Existing file: full diff view
                     vs.commands.executeCommand('vscode.diff',
                         vs.Uri.file(file), tempUri,
                         label,
@@ -428,11 +457,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     );
                 }
             } catch (e) {
-                // Diff failed — still show the WebView card so user can decide
                 console.error('[CWTools AI] Failed to open diff view:', e);
             }
 
-            // Tell the WebView to show a simple Accept/Reject card (no diff HTML)
+            // Tell the WebView to show a simple Accept/Reject card
             this.postMessage({ type: 'pendingWriteFile', file, messageId, isNewFile });
         });
     }
@@ -586,6 +614,52 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.sendTopicList();
     }
 
+    /**
+     * Fork a topic at a specific message index (OpenCode-style session fork).
+     * Creates a new topic with messages[0..messageIndex], switches to it.
+     */
+    private forkTopic(topicId: string, messageIndex: number): void {
+        const source = this.topics.find(t => t.id === topicId);
+        if (!source) return;
+
+        const forkedMessages = source.messages.slice(0, messageIndex + 1);
+        const titlePreview = source.title + ' [分支]';
+
+        const forked: ChatTopic = {
+            id: `topic_${Date.now()}`,
+            title: titlePreview,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            messages: forkedMessages,
+            parentTopicId: topicId,
+            forkedFromMessageIndex: messageIndex,
+        };
+
+        this.topics.unshift(forked);
+        this.currentTopic = forked;
+        this.conversationMessages = forkedMessages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({ role: m.role, content: m.code ? `${m.content}\n\`\`\`pdx\n${m.code}\n\`\`\`` : m.content }));
+
+        this.postMessage({ type: 'clearChat' });
+        this.postMessage({ type: 'loadTopicMessages', messages: forkedMessages });
+        this.postMessage({ type: 'topicForked', newTopicId: forked.id, title: forked.title });
+        this.saveTopics();
+        this.sendTopicList();
+    }
+
+    /** Archive/unarchive a topic (hidden from main list but not deleted) */
+    private archiveTopic(topicId: string): void {
+        const topic = this.topics.find(t => t.id === topicId);
+        if (!topic) return;
+        topic.archived = !topic.archived;
+        if (this.currentTopic?.id === topicId && topic.archived) {
+            this.startNewTopic();
+        }
+        this.saveTopics();
+        this.sendTopicList();
+    }
+
     private addHistoryMessage(msg: ChatHistoryMessage): void {
         if (this.currentTopic) {
             this.currentTopic.messages.push(msg);
@@ -618,6 +692,70 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.abortController = null;
         }
         this.aiService.cancel();
+    }
+
+    /**
+     * Handle slash commands from the WebView e.g. /clear, /fork, /mode:build.
+     */
+    private async handleSlashCommand(command: string): Promise<void> {
+        const cmd = command.trim().toLowerCase();
+        if (cmd === 'clear' || cmd === '/clear') {
+            this.startNewTopic();
+        } else if (cmd.startsWith('mode:') || cmd.startsWith('/mode:')) {
+            const mode = cmd.split(':')[1] as AgentMode;
+            if (['build', 'plan', 'explore', 'general'].includes(mode)) {
+                this.switchMode(mode);
+            }
+        } else if (cmd === 'fork' || cmd === '/fork') {
+            if (this.currentTopic && this.currentTopic.messages.length > 0) {
+                this.forkTopic(this.currentTopic.id, this.currentTopic.messages.length - 1);
+            }
+        } else if (cmd === 'archive' || cmd === '/archive') {
+            if (this.currentTopic) {
+                this.archiveTopic(this.currentTopic.id);
+            }
+        }
+    }
+
+    // ─── Permission System (OpenCode-aligned) ────────────────────────────────────
+
+    private pendingPermissionResolvers = new Map<string, (allowed: boolean) => void>();
+
+    /**
+     * Request permission from the user (for run_command tool).
+     * Shows a WebView permission card and suspends until user responds.
+     * Includes a 60-second timeout that auto-denies.
+     */
+    private requestPermission(
+        id: string,
+        tool: string,
+        description: string,
+        command?: string
+    ): Promise<boolean> {
+        return new Promise<boolean>((resolve) => {
+            // Auto-deny after 60s to prevent hangs
+            const timeout = setTimeout(() => {
+                if (this.pendingPermissionResolvers.has(id)) {
+                    this.pendingPermissionResolvers.delete(id);
+                    resolve(false);
+                }
+            }, 60_000);
+
+            this.pendingPermissionResolvers.set(id, (allowed: boolean) => {
+                clearTimeout(timeout);
+                resolve(allowed);
+            });
+
+            this.postMessage({ type: 'permissionRequest', permissionId: id, tool, description, command });
+        });
+    }
+
+    private resolvePermissionRequest(permissionId: string, allowed: boolean): void {
+        const resolver = this.pendingPermissionResolvers.get(permissionId);
+        if (resolver) {
+            this.pendingPermissionResolvers.delete(permissionId);
+            resolver(allowed);
+        }
     }
 
     private switchMode(mode: AgentMode): void {
@@ -660,11 +798,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private sendTopicList(): void {
         this.postMessage({
             type: 'topicList',
-            topics: this.topics.map(t => ({
-                id: t.id,
-                title: t.title,
-                updatedAt: t.updatedAt,
-            })),
+            topics: this.topics
+                .filter(t => !t.archived)
+                .map(t => ({
+                    id: t.id,
+                    title: t.title,
+                    updatedAt: t.updatedAt,
+                    archived: t.archived,
+                })),
         });
     }
 
@@ -880,6 +1021,46 @@ body.plan-mode .plan-indicator { display: block; }
 .retract-ok { background: var(--error); color: #fff; border: none; border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }
 .retract-cancel { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }
 
+/* ── Permission request card ── */
+.permission-card { border: 1px solid #d9a020; border-radius: 8px; overflow: hidden; margin: 6px 0; }
+.permission-card-header { background: rgba(217,160,32,0.12); padding: 9px 13px; font-size: 12px; display: flex; align-items: flex-start; gap: 8px; }
+.permission-card-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+.permission-card-body { flex: 1; }
+.permission-card-title { font-weight: 600; margin-bottom: 3px; }
+.permission-card-cmd { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; background: rgba(0,0,0,0.25); border-radius: 4px; padding: 3px 6px; margin-top: 4px; opacity: 0.9; word-break: break-all; }
+.permission-card-actions { padding: 7px 10px; display: flex; gap: 6px; background: var(--bg); border-top: 1px solid rgba(255,255,255,0.07); }
+.permission-allow-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
+.permission-deny-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
+
+/* ── Streaming text cursor ── */
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.stream-cursor::after { content: '|'; display: inline-block; animation: blink 0.8s ease-in-out infinite; color: var(--accent); margin-left: 1px; font-weight: 300; }
+
+/* ── Topic action buttons ── */
+.topic-actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s; }
+.topic-item:hover .topic-actions { opacity: 1; }
+.topic-action-btn { padding: 2px 5px; font-size: 11px; border-radius: 3px; background: none; border: none; cursor: pointer; color: var(--fg); opacity: 0.55; }
+.topic-action-btn:hover { opacity: 1; background: var(--btn-hover); }
+.topic-fork-btn:hover { color: cornflowerblue; }
+.topic-archive-btn:hover { color: var(--warning); }
+
+/* ── Mode indicator (replaces plan-indicator) ── */
+.mode-indicator { display: none; padding: 4px 16px; font-size: 11px; background: rgba(100,149,237,0.07); border-bottom: 1px solid var(--border); text-align: center; }
+body.plan-mode .mode-indicator,
+body.explore-mode .mode-indicator,
+body.general-mode .mode-indicator { display: block; }
+body.plan-mode .mode-indicator { color: cornflowerblue; }
+body.explore-mode .mode-indicator { color: #7dbb7d; }
+body.general-mode .mode-indicator { color: #c792ea; }
+
+/* ── Slash command popup ── */
+.slash-popup { display: none; position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+.slash-popup.show { display: block; }
+.slash-popup-item { padding: 7px 12px; cursor: pointer; display: flex; gap: 10px; align-items: center; font-size: 12px; }
+.slash-popup-item:hover { background: var(--btn-hover); }
+.slash-popup-cmd { font-family: var(--vscode-editor-font-family, monospace); color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.slash-popup-desc { opacity: 0.55; font-size: 11px; }
+
 /* ── Settings page ── */
 .settings-page { display: none; flex-direction: column; height: 100%; overflow: hidden; }
 .settings-page.active { display: flex; }
@@ -949,7 +1130,7 @@ body.plan-mode .plan-indicator { display: block; }
     </div>
     <div class="topics-list" id="topicsList"></div>
 </div>
-<div class="plan-indicator" id="planIndicator">📋 Plan Mode — 只读分析，不修改文件</div>
+<div class="mode-indicator" id="modeIndicator">📋 Plan Mode — 只读分析，不修改文件</div>
 <div class="todo-panel" id="todoPanel">
     <div class="todo-panel-title">Tasks</div>
     <div id="todoList"></div>
@@ -969,10 +1150,11 @@ body.plan-mode .plan-indicator { display: block; }
     </div>
 </div>
 
-<div class="input-wrapper">
+<div class="input-wrapper" style="position:relative">
+    <div id="slashPopup" class="slash-popup"></div>
     <div class="input-container">
         <div class="input-row">
-            <textarea id="input" placeholder="描述你的需求..." rows="1"></textarea>
+            <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1"></textarea>
         </div>
         <div id="tokenUsageBar" style="display:none">
             <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
@@ -980,8 +1162,10 @@ body.plan-mode .plan-indicator { display: block; }
         </div>
         <div class="input-controls">
             <div class="ctrl-group">
-                <button class="mode-btn active" id="buildModeBtn" title="Build 模式 — 生成并修改代码">📝 Build</button>
-                <button class="mode-btn" id="planModeBtn" title="Plan 模式 — 只读分析">📋 Plan</button>
+                <button class="mode-btn active" id="buildModeBtn" title="Build — 生成并修改代码">📝</button>
+                <button class="mode-btn" id="planModeBtn" title="Plan — 只读分析规划">📋</button>
+                <button class="mode-btn" id="exploreModeBtn" title="Explore — 探索代码库">🔭</button>
+                <button class="mode-btn" id="generalModeBtn" title="General — 通用问答">💬</button>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
             </div>
             <button class="send-btn" id="sendBtn" title="发送 (Enter)">↑</button>

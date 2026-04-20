@@ -294,6 +294,70 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    {
+        type: 'function',
+        function: {
+            name: 'glob_files',
+            description: 'Find files in the workspace using glob patterns (e.g. "**/*.txt", "common/scripted_triggers/*.txt"). Faster than list_directory for targeted file discovery. Returns absolute paths.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    pattern: { type: 'string', description: 'Glob pattern relative to workspace root, e.g. "events/**/*.txt" or "common/scripted_triggers/*.txt"' },
+                    limit: { type: 'number', description: 'Max files to return (default 200)' },
+                },
+                required: ['pattern'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'lsp_operation',
+            description: 'Perform a Language Server Protocol (LSP) operation on a file position. Supports: goToDefinition (find where an identifier is defined), findReferences (find all usages), hover (get type/scope info at position), rename (preview rename refactor). Requires an open or cached file.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    operation: { type: 'string', enum: ['goToDefinition', 'findReferences', 'hover', 'rename'], description: 'LSP operation to perform' },
+                    file: { type: 'string', description: 'Absolute file path' },
+                    line: { type: 'number', description: 'Line number (0-based)' },
+                    column: { type: 'number', description: 'Column number (0-based)' },
+                    newName: { type: 'string', description: 'For rename operation: the new identifier name' },
+                },
+                required: ['operation', 'file', 'line', 'column'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'web_fetch',
+            description: 'Fetch the text content of a public URL (e.g. Stellaris wiki pages, GitHub raw files). Converts HTML to plain text. Use for looking up game mechanics, modding documentation, or locating vanilla definitions online.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    url: { type: 'string', description: 'URL to fetch (must be http:// or https://)' },
+                    maxChars: { type: 'number', description: 'Max characters to return (default 8000)' },
+                },
+                required: ['url'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'run_command',
+            description: 'Run a shell command in the workspace directory. REQUIRES user permission for each new command. Safe commands (e.g. npm run lint, git status) are allowed; destructive commands are denied. Always explain what the command does before running it.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    command: { type: 'string', description: 'The shell command to execute' },
+                    cwd: { type: 'string', description: 'Working directory (defaults to workspace root)' },
+                    timeoutMs: { type: 'number', description: 'Timeout in milliseconds (default 15000, max 60000)' },
+                },
+                required: ['command'],
+            },
+        },
+    },
 ];
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
@@ -337,9 +401,9 @@ export class AgentToolExecutor {
      * Execute a tool by name with the given arguments.
      * Results are automatically truncated if too large.
      */
-    async execute(toolName: AgentToolName, args: Record<string, unknown>): Promise<unknown> {
+    async execute(toolName: string, args: Record<string, unknown>): Promise<unknown> {
         let result: unknown;
-        switch (toolName) {
+        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command') {
             case 'query_scope':
                 result = await this.queryScope(args as any); break;
             case 'query_types':
@@ -372,6 +436,15 @@ export class AgentToolExecutor {
                 result = await this.editFile(args as any); break;
             case 'list_directory':
                 result = await this.listDirectory(args as any); break;
+            // ── New OpenCode-ported tools ─────────────────────────────────────
+            case 'glob_files':
+                result = await this.globFiles(args as any); break;
+            case 'lsp_operation':
+                result = await this.lspOperation(args as any); break;
+            case 'web_fetch':
+                result = await this.webFetch(args as any); break;
+            case 'run_command':
+                result = await this.runCommand(args as any); break;
             default:
                 throw new Error(`Unknown tool: ${toolName}`);
         }
@@ -522,18 +595,19 @@ export class AgentToolExecutor {
     }
 
     private async queryRules(args: { category: string; name?: string; scope?: string }): Promise<QueryRulesResult> {
-        // Load and parse CWT rule files
+        // Load and parse CWT rule files (lazy cache)
         if (!this.cwtRulesCache) {
-            this.cwtRulesCache = await this.loadCWTRules();
+            this.cwtRulesCache = await this._loadCWTRules();
         }
 
+        const cache = this.cwtRulesCache;
         let rules: RuleInfo[];
         if (args.category === 'trigger') {
-            rules = this.cwtRulesCache.triggers;
+            rules = cache.triggers;
         } else if (args.category === 'effect') {
-            rules = this.cwtRulesCache.effects;
+            rules = cache.effects;
         } else {
-            rules = [...this.cwtRulesCache.triggers, ...this.cwtRulesCache.effects];
+            rules = [...cache.triggers, ...cache.effects];
         }
 
         // Apply filters
@@ -550,6 +624,34 @@ export class AgentToolExecutor {
         // Limit results
         return { rules: rules.slice(0, 80) };
     }
+
+    /** Load and parse CWT rule definitions from the config directory. */
+    private async _loadCWTRules(): Promise<{ triggers: RuleInfo[]; effects: RuleInfo[] }> {
+        const triggers: RuleInfo[] = [];
+        const effects: RuleInfo[] = [];
+
+        const configPaths: string[] = [
+            path.join(this.workspaceRoot, 'submodules', 'cwtools-stellaris-config', 'config'),
+        ];
+
+        // Also check the extension's own config directory
+        const ext = vs.extensions.getExtension('tboby.cwtools-vscode') ??
+                    vs.extensions.getExtension('cwtools.cwtools-vscode');
+        if (ext) {
+            configPaths.push(path.join(ext.extensionPath, 'config'));
+        }
+
+        for (const configPath of configPaths) {
+            const triggersFile = path.join(configPath, 'triggers.cwt');
+            const effectsFile  = path.join(configPath, 'effects.cwt');
+            if (fs.existsSync(triggersFile)) { this.parseCWTFile(triggersFile, triggers); }
+            if (fs.existsSync(effectsFile))  { this.parseCWTFile(effectsFile, effects); }
+            if (triggers.length > 0 || effects.length > 0) break;
+        }
+
+        return { triggers, effects };
+    }
+
 
     private async queryReferences(args: { identifier: string; file?: string }): Promise<QueryReferencesResult> {
         const references: Array<{ file: string; line: number; context: string }> = [];
@@ -1389,43 +1491,6 @@ export class AgentToolExecutor {
     }
 
     /**
-     * Load and parse CWT rule definitions from the config directory.
-     */
-    private async loadCWTRules(): Promise<{ triggers: RuleInfo[]; effects: RuleInfo[] }> {
-        const triggers: RuleInfo[] = [];
-        const effects: RuleInfo[] = [];
-
-        // Find config directory (in submodules or workspace)
-        const configPaths = [
-            path.join(this.workspaceRoot, 'submodules', 'cwtools-stellaris-config', 'config'),
-            // Also check common extension installation paths
-        ];
-
-        // Try to find the extension's own config
-        const ext = vs.extensions.getExtension('tboby.cwtools-vscode') ??
-                    vs.extensions.getExtension('cwtools.cwtools-vscode');
-        if (ext) {
-            configPaths.push(path.join(ext.extensionPath, 'config'));
-        }
-
-        for (const configPath of configPaths) {
-            const triggersFile = path.join(configPath, 'triggers.cwt');
-            const effectsFile = path.join(configPath, 'effects.cwt');
-
-            if (fs.existsSync(triggersFile)) {
-                this.parseCWTFile(triggersFile, triggers);
-            }
-            if (fs.existsSync(effectsFile)) {
-                this.parseCWTFile(effectsFile, effects);
-            }
-
-            if (triggers.length > 0 || effects.length > 0) break;
-        }
-
-        return { triggers, effects };
-    }
-
-    /**
      * Simple CWT file parser that extracts alias definitions.
      * Parses lines like: alias[trigger:xxx] = { ... }
      */
@@ -1436,7 +1501,7 @@ export class AgentToolExecutor {
 
             // Pattern: alias[trigger:name] or alias[effect:name]
             const aliasPattern = /^##\s*scope\s*=\s*\{?\s*([^}]*)\}?\s*$/i;
-            const namePattern = /^alias\[(?:trigger|effect):(\w+)\]\s*=\s*(.*)/;
+            const namePattern = /^alias\[(?:trigger|effect):(\w+)\]\s*=\s*(.*)/ ;
 
             let currentScopes: string[] = [];
             let currentDesc = '';
@@ -1472,5 +1537,221 @@ export class AgentToolExecutor {
                 }
             }
         } catch { /* skip */ }
+    }
+
+    // ─── New OpenCode-Ported Tools ────────────────────────────────────────────
+
+    /**
+     * glob_files: find files matching a glob pattern across the workspace.
+     * Mirrors OpenCode's glob tool but scoped to the mod workspace.
+     */
+    private async globFiles(args: { pattern: string; limit?: number }): Promise<{ files: string[]; total: number }> {
+        try {
+            const limit = Math.min(args.limit ?? 200, 500);
+            const uris = await vs.workspace.findFiles(args.pattern, '**/node_modules/**', limit);
+            const files = uris.map(u => u.fsPath);
+            return { files, total: files.length };
+        } catch (e) {
+            return { files: [], total: 0 };
+        }
+    }
+
+    /**
+     * lsp_operation: perform LSP operations (goToDefinition, findReferences, hover, rename).
+     * Mirrors OpenCode's lsp.ts tool, adapted for VSCode command API.
+     */
+    private async lspOperation(args: {
+        operation: 'goToDefinition' | 'findReferences' | 'hover' | 'rename';
+        file: string;
+        line: number;
+        column: number;
+        newName?: string;
+    }): Promise<unknown> {
+        const uri = vs.Uri.file(args.file);
+        const position = new vs.Position(args.line, args.column);
+
+        try {
+            switch (args.operation) {
+                case 'goToDefinition': {
+                    const defs = await vs.commands.executeCommand<vs.Location[]>(
+                        'vscode.executeDefinitionProvider', uri, position
+                    );
+                    if (!defs || defs.length === 0) return { locations: [], message: 'No definition found' };
+                    return {
+                        locations: defs.map(d => ({
+                            file: d.uri.fsPath,
+                            range: {
+                                startLine: d.range.start.line,
+                                startColumn: d.range.start.character,
+                                endLine: d.range.end.line,
+                                endColumn: d.range.end.character,
+                            },
+                        })),
+                    };
+                }
+                case 'findReferences': {
+                    const refs = await vs.commands.executeCommand<vs.Location[]>(
+                        'vscode.executeReferenceProvider', uri, position
+                    );
+                    if (!refs || refs.length === 0) return { references: [], message: 'No references found' };
+                    return {
+                        references: refs.slice(0, 50).map(r => ({
+                            file: path.relative(this.workspaceRoot, r.uri.fsPath).replace(/\\/g, '/'),
+                            line: r.range.start.line,
+                            column: r.range.start.character,
+                        })),
+                        total: refs.length,
+                    };
+                }
+                case 'hover': {
+                    const hovers = await vs.commands.executeCommand<vs.Hover[]>(
+                        'vscode.executeHoverProvider', uri, position
+                    );
+                    if (!hovers || hovers.length === 0) return { text: '', message: 'No hover info' };
+                    const text = hovers.flatMap(h =>
+                        h.contents.map(c => typeof c === 'string' ? c : (c as vs.MarkdownString).value)
+                    ).join('\n\n');
+                    return { text };
+                }
+                case 'rename': {
+                    if (!args.newName) return { error: 'newName required for rename operation' };
+                    const edit = await vs.commands.executeCommand<vs.WorkspaceEdit>(
+                        'vscode.executeDocumentRenameProvider', uri, position, args.newName
+                    );
+                    if (!edit) return { error: 'Rename not supported at this position' };
+                    const changes: Array<{ file: string; edits: number }> = [];
+                    edit.entries().forEach(([u, edits]) => {
+                        changes.push({ file: path.relative(this.workspaceRoot, u.fsPath).replace(/\\/g, '/'), edits: edits.length });
+                    });
+                    return { changes, message: `Rename preview: ${changes.length} files affected` };
+                }
+                default:
+                    return { error: `Unknown LSP operation: ${args.operation}` };
+            }
+        } catch (e) {
+            return { error: `LSP operation failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+    }
+
+    /**
+     * web_fetch: fetch a public URL and return its text content.
+     * Mirrors OpenCode's webfetch tool. HTML → plain text via regex stripping.
+     */
+    private async webFetch(args: { url: string; maxChars?: number }): Promise<{ content: string; url: string; truncated: boolean }> {
+        const maxChars = Math.min(args.maxChars ?? 8000, 16000);
+
+        if (!args.url.startsWith('http://') && !args.url.startsWith('https://')) {
+            return { content: 'Error: only http/https URLs are supported', url: args.url, truncated: false };
+        }
+
+        try {
+            const response = await fetch(args.url, {
+                headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
+            });
+            if (!response.ok) {
+                return { content: `HTTP ${response.status}: ${response.statusText}`, url: args.url, truncated: false };
+            }
+
+            const contentType = response.headers.get('content-type') ?? '';
+            let text = await response.text();
+
+            // Strip HTML tags for readability
+            if (contentType.includes('html')) {
+                text = text
+                    .replace(/<script[\s\S]*?<\/script>/gi, '')
+                    .replace(/<style[\s\S]*?<\/style>/gi, '')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&quot;/g, '"')
+                    .replace(/\s{3,}/g, '\n\n')
+                    .trim();
+            }
+
+            const truncated = text.length > maxChars;
+            return {
+                content: truncated ? text.substring(0, maxChars) + '\n... [truncated]' : text,
+                url: args.url,
+                truncated,
+            };
+        } catch (e) {
+            return {
+                content: `Fetch error: ${e instanceof Error ? e.message : String(e)}`,
+                url: args.url,
+                truncated: false,
+            };
+        }
+    }
+
+    /**
+     * run_command: execute a shell command in the workspace.
+     * OpenCode strategy: every command requires explicit user permission.
+     * The onPermissionRequest callback suspends execution until the user responds.
+     */
+    public onPermissionRequest?: (
+        id: string,
+        tool: string,
+        description: string,
+        command?: string
+    ) => Promise<boolean>;
+
+    private async runCommand(args: { command: string; cwd?: string; timeoutMs?: number }): Promise<{
+        stdout: string;
+        stderr: string;
+        exitCode: number;
+        timedOut?: boolean;
+    }> {
+        // Safety: deny obviously dangerous commands
+        const BLOCKED_PATTERNS = [
+            /\brm\s+-rf\b/i, /\bdel\s+\/[fqs]/i, /\bformat\b/i,
+            /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
+            /\bpowershell\b.*-enc/i, /\bcurl\b.*\|\s*bash/i,
+            /\bwget\b.*\|\s*sh/i,
+        ];
+        for (const pat of BLOCKED_PATTERNS) {
+            if (pat.test(args.command)) {
+                return { stdout: '', stderr: `Blocked: command matched safety pattern (${pat.source})`, exitCode: 1 };
+            }
+        }
+
+        // Request user permission (OpenCode strategy: ask for every new command)
+        if (this.onPermissionRequest) {
+            const permId = `perm_${Date.now()}`;
+            const allowed = await this.onPermissionRequest(
+                permId,
+                'run_command',
+                `AI wants to run: ${args.command}`,
+                args.command
+            );
+            if (!allowed) {
+                return { stdout: '', stderr: '用户拒绝了此命令的执行权限', exitCode: 1 };
+            }
+        } else {
+            // No permission handler = deny by default
+            return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
+        }
+
+        // Execute
+        const cwd = args.cwd ?? this.workspaceRoot;
+        const timeoutMs = Math.min(args.timeoutMs ?? 15000, 60000);
+        const { exec } = await import('child_process');
+
+        return new Promise(resolve => {
+            const proc = exec(
+                args.command,
+                { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+                (error, stdout, stderr) => {
+                    resolve({
+                        stdout: stdout.substring(0, 4000),
+                        stderr: stderr.substring(0, 2000),
+                        exitCode: error?.code ?? 0,
+                        timedOut: error?.signal === 'SIGTERM',
+                    });
+                }
+            );
+            void proc;
+        });
     }
 }

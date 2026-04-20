@@ -41,12 +41,19 @@ export interface AgentRunnerOptions {
     providerId?: string;
     /** Override model for this run */
     model?: string;
-    /** Agent mode: build (default) or plan (read-only) */
+    /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
     mode?: AgentMode;
     /** Callback for real-time step updates (for UI) */
     onStep?: (step: AgentStep) => void;
     /** Abort signal */
     abortSignal?: AbortSignal;
+    /** Enable streaming text tokens (emits text_delta steps) */
+    streaming?: boolean;
+    /**
+     * Permission callback for bash/run_command tool (OpenCode strategy).
+     * Resolve with true=allow, false=deny.
+     */
+    onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
 }
 
 /** Tools allowed in Plan mode (read-only, no validate_code / write operations) */
@@ -56,6 +63,17 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
     'document_symbols', 'workspace_symbols', 'todo_write',
     'read_file', 'list_directory', 'get_diagnostics',
 ];
+
+/** Explore mode: same as plan, plus workspace_symbols — no writes (OpenCode explore agent) */
+const EXPLORE_MODE_TOOLS: AgentToolName[] = [
+    'query_scope', 'query_types', 'query_rules', 'query_references',
+    'get_file_context', 'search_mod_files', 'get_completion_at',
+    'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
+    'get_diagnostics', 'query_references',
+];
+
+/** General mode: all tools EXCEPT todo_write (research without task tracking) */
+const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
 
 export class AgentRunner {
     constructor(
@@ -94,15 +112,21 @@ export class AgentRunner {
 
         // Build the message array
         const messages: ChatMessage[] = [
-            { role: 'system', content: this.promptBuilder.buildSystemPrompt(mode) },
+            { role: 'system', content: this.promptBuilder.buildSystemPromptForMode(mode, this.aiService.getConfig().provider) },
             ...this.promptBuilder.buildContextMessages(context),
             ...compactedHistory,
             { role: 'user', content: userMessage },
         ];
 
+        const modeLabel: Record<string, string> = {
+            build: '分析需求中...',
+            plan: '分析中（Plan 模式 — 只读）...',
+            explore: '探索代码库中（Explore 模式）...',
+            general: '处理请求中（General 模式）...',
+        };
         emitStep({
             type: 'thinking',
-            content: mode === 'plan' ? '分析中（Plan 模式 — 只读）...' : '分析需求中...',
+            content: modeLabel[mode] ?? '分析中...',
             timestamp: Date.now(),
         });
 
@@ -113,8 +137,8 @@ export class AgentRunner {
             // Phase 2: Extract code from the response
             const code = this.extractCode(finalMessage);
 
-            if (!code || mode === 'plan') {
-                // Plan mode or no code generated — just an explanation
+            // Plan / Explore / General mode — or no code generated — just an explanation
+            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general') {
                 return {
                     code: '',
                     explanation: finalMessage,
@@ -271,11 +295,20 @@ export class AgentRunner {
         // Track files confirmed-written this session — prevents duplicate confirm cards
         // if the AI calls write_file after edit_file for the same file (cross-iteration)
         const confirmedWrittenFiles = new Set<string>();
+        // Track permanently allowed tool calls (OpenCode 'always' permission)
+        const alwaysAllowedTools = new Set<string>();
 
         // Filter tools by mode
-        const availableTools = mode === 'plan'
-            ? TOOL_DEFINITIONS.filter(t => PLAN_MODE_TOOLS.includes(t.function.name as AgentToolName))
-            : TOOL_DEFINITIONS;
+        let availableTools: typeof TOOL_DEFINITIONS;
+        if (mode === 'plan') {
+            availableTools = TOOL_DEFINITIONS.filter(t => PLAN_MODE_TOOLS.includes(t.function.name as AgentToolName));
+        } else if (mode === 'explore') {
+            availableTools = TOOL_DEFINITIONS.filter(t => EXPLORE_MODE_TOOLS.includes(t.function.name as AgentToolName));
+        } else if (mode === 'general') {
+            availableTools = TOOL_DEFINITIONS.filter(t => !GENERAL_EXCLUDED_TOOLS.includes(t.function.name as AgentToolName));
+        } else {
+            availableTools = TOOL_DEFINITIONS;
+        }
 
         while (iteration < MAX_TOOL_ITERATIONS) {
             options?.abortSignal?.throwIfAborted();

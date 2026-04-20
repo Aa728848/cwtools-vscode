@@ -4,7 +4,14 @@
 
 // ─── Agent Modes ─────────────────────────────────────────────────────────────
 
-export type AgentMode = 'build' | 'plan';
+/**
+ * Agent modes — aligned with OpenCode's agent configuration.
+ * - build:   Full tool access including file writes + validation loop (default)
+ * - plan:    Read-only analysis, no writes, structured plan output
+ * - explore: Parallel read-only exploration; focuses on understanding codebase, no validation
+ * - general: Full tool access like build, but no todo_write; suited for research tasks
+ */
+export type AgentMode = 'build' | 'plan' | 'explore' | 'general';
 
 export interface AgentModeConfig {
     mode: AgentMode;
@@ -461,12 +468,32 @@ export interface GetDiagnosticsResult {
 // ─── Agent Execution ─────────────────────────────────────────────────────────
 
 export interface AgentStep {
-    type: 'thinking' | 'thinking_content' | 'tool_call' | 'tool_result' | 'code_generated' | 'validation' | 'error' | 'compaction' | 'todo_update';
+    /**
+     * Step types (OpenCode-aligned):
+     * - thinking          : narrative step description (non-blocking)
+     * - thinking_content  : extended reasoning / <think> block content
+     * - tool_call         : agent is invoking a tool
+     * - tool_result       : tool returned a result
+     * - text_delta        : streaming text token (for live render)
+     * - step_finish       : agent step completed (mirrors OpenCode finish-step event)
+     * - code_generated    : code extraction complete
+     * - validation        : inline validation result
+     * - error             : recoverable or terminal error
+     * - compaction        : context history was compressed
+     * - todo_update       : todo list was updated
+     * - permission_request: agent is asking user for permission (bash/write)
+     */
+    type: 'thinking' | 'thinking_content' | 'tool_call' | 'tool_result'
+        | 'text_delta' | 'step_finish'
+        | 'code_generated' | 'validation' | 'error' | 'compaction'
+        | 'todo_update' | 'permission_request';
     content: string;
-    toolName?: AgentToolName;
+    toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;
     toolResult?: unknown;
     timestamp: number;
+    /** For permission_request: identifier so UI can respond */
+    permissionId?: string;
 }
 
 export interface GenerationResult {
@@ -486,6 +513,12 @@ export interface ChatTopic {
     createdAt: number;
     updatedAt: number;
     messages: ChatHistoryMessage[];
+    /** If this topic was forked from another, the parent topic ID */
+    parentTopicId?: string;
+    /** The message index in the parent topic where the fork occurred */
+    forkedFromMessageIndex?: number;
+    /** Whether this session is archived (hidden from main list) */
+    archived?: boolean;
 }
 
 export interface ChatHistoryMessage {
@@ -507,6 +540,8 @@ export type WebViewMessage =
     | { type: 'newTopic' }
     | { type: 'loadTopic'; topicId: string }
     | { type: 'deleteTopic'; topicId: string }
+    | { type: 'forkTopic'; topicId: string; messageIndex: number }
+    | { type: 'archiveTopic'; topicId: string }
     | { type: 'configureProvider' }
     | { type: 'cancelGeneration' }
     | { type: 'switchMode'; mode: AgentMode }
@@ -517,25 +552,29 @@ export type WebViewMessage =
     | { type: 'retractMessage'; messageIndex: number }
     | { type: 'confirmWriteFile'; messageId: string }
     | { type: 'cancelWriteFile'; messageId: string }
-    | { type: 'quickChangeModel'; model: string };
+    | { type: 'quickChangeModel'; model: string }
+    | { type: 'slashCommand'; command: string }
+    | { type: 'permissionResponse'; permissionId: string; allowed: boolean; always: boolean };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number }
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string }
-    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number }> }
+    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; archived?: boolean }> }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[] }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat' }
-    | { type: 'modeChanged'; mode: AgentMode }
+    | { type: 'modeChanged'; mode: AgentMode; label?: string }
     | { type: 'todoUpdate'; todos: TodoItem[] }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }
     | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean }
-    | { type: 'topicTitleGenerated'; topicId: string; title: string };
+    | { type: 'topicTitleGenerated'; topicId: string; title: string }
+    | { type: 'topicForked'; newTopicId: string; title: string }
+    | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

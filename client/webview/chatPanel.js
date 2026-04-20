@@ -113,6 +113,8 @@
     bindBtn('btnSettings',      () => vscode.postMessage({ type: 'openSettings' }));
     bindBtn('buildModeBtn',     () => switchMode('build'));
     bindBtn('planModeBtn',      () => switchMode('plan'));
+    bindBtn('exploreModeBtn',   () => switchMode('explore'));
+    bindBtn('generalModeBtn',   () => switchMode('general'));
     bindBtn('settingsBackBtn',  closeSettings);
     bindBtn('testConnBtn',      testConnection);
     bindBtn('saveSettingsBtn',  saveSettings);
@@ -121,6 +123,52 @@
     bindBtn('accChat',          () => toggleAccordion('chatModelSection'));
     bindBtn('accInline',        () => toggleAccordion('inlineSection'));
     bindBtn('accAgent',         () => toggleAccordion('agentSection'));
+
+    // ── Slash command popup ────────────────────────────────────────────────────
+    const SLASH_COMMANDS = [
+        { cmd: '/clear',    desc: '清空当前对话，开始新话题' },
+        { cmd: '/fork',     desc: '从当前位置分叉对话' },
+        { cmd: '/archive',  desc: '归档当前话题' },
+        { cmd: '/mode:build',   desc: '切换到 Build 模式（生成代码）' },
+        { cmd: '/mode:plan',    desc: '切换到 Plan 模式（只读规划）' },
+        { cmd: '/mode:explore', desc: '切换到 Explore 模式（分析代码库）' },
+        { cmd: '/mode:general', desc: '切换到 General 模式（通用问答）' },
+    ];
+    const slashPopup = document.getElementById('slashPopup');
+
+    function showSlashPopup(filter) {
+        if (!slashPopup) return;
+        const q = filter.toLowerCase();
+        const matches = SLASH_COMMANDS.filter(c => c.cmd.includes(q));
+        if (!matches.length) { slashPopup.classList.remove('show'); return; }
+        slashPopup.innerHTML = matches.map(c =>
+            `<div class="slash-popup-item" data-cmd="${c.cmd}"><span class="slash-popup-cmd">${c.cmd}</span><span class="slash-popup-desc">${c.desc}</span></div>`
+        ).join('');
+        slashPopup.querySelectorAll('.slash-popup-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const cmd = el.dataset.cmd;
+                slashPopup.classList.remove('show');
+                vscode.postMessage({ type: 'slashCommand', command: cmd });
+                input.value = '';
+                input.style.height = 'auto';
+            });
+        });
+        slashPopup.classList.add('show');
+    }
+
+    input.addEventListener('input', () => {
+        autoResizeInput();
+        const v = input.value;
+        if (v.startsWith('/') && v.length > 0) showSlashPopup(v);
+        else slashPopup && slashPopup.classList.remove('show');
+    });
+    document.addEventListener('click', e => { if (slashPopup && !slashPopup.contains(e.target) && e.target !== input) slashPopup.classList.remove('show'); });
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && slashPopup && slashPopup.classList.contains('show')) {
+            e.stopPropagation();
+            slashPopup.classList.remove('show');
+        }
+    });
 
     const providerSel = document.getElementById('settingsProvider');
     if (providerSel) providerSel.addEventListener('change', onProviderChange);
@@ -136,14 +184,28 @@
         stopPlaceholderRotation();
     }
 
+    const MODE_META = {
+        build:   { icon: '📝', label: null,             bodyClass: null },
+        plan:    { icon: '📋', label: '📋 Plan Mode — 只读分析，不修改文件', bodyClass: 'plan-mode' },
+        explore: { icon: '🔭', label: '🔭 Explore Mode — 探索代码库结构', bodyClass: 'explore-mode' },
+        general: { icon: '💬', label: '💬 General Mode — 通用问答',        bodyClass: 'general-mode' },
+    };
+
     function switchMode(mode) {
         currentMode = mode;
         vscode.postMessage({ type: 'switchMode', mode });
-        const build = document.getElementById('buildModeBtn');
-        const plan  = document.getElementById('planModeBtn');
-        if (build) build.classList.toggle('active', mode === 'build');
-        if (plan)  plan.classList.toggle('active', mode === 'plan');
-        document.body.classList.toggle('plan-mode', mode === 'plan');
+        const ids = { build: 'buildModeBtn', plan: 'planModeBtn', explore: 'exploreModeBtn', general: 'generalModeBtn' };
+        for (const [m, id] of Object.entries(ids)) {
+            const btn = document.getElementById(id);
+            if (btn) btn.classList.toggle('active', m === mode);
+        }
+        // Remove all mode body classes, add correct one
+        document.body.classList.remove('plan-mode', 'explore-mode', 'general-mode');
+        const meta = MODE_META[mode];
+        if (meta && meta.bodyClass) document.body.classList.add(meta.bodyClass);
+        // Update mode indicator text
+        const ind = document.getElementById('modeIndicator');
+        if (ind) ind.textContent = meta && meta.label ? meta.label : '';
     }
 
     function setGenerating(val) {
@@ -435,8 +497,46 @@
         return div;
     }
 
+    // ── Streaming text-delta live bubble ──────────────────────────────────────
+    let liveTextBubble = null;
+    let liveTextContent = '';
+
+    function ensureLiveTextBubble() {
+        if (!currentAssistantDiv) return null;
+        if (!liveTextBubble) {
+            liveTextBubble = document.createElement('div');
+            liveTextBubble.className = 'msg-bubble stream-cursor';
+            currentAssistantDiv.appendChild(liveTextBubble);
+        }
+        return liveTextBubble;
+    }
+
+    function flushLiveText() {
+        if (liveTextBubble) {
+            liveTextBubble.classList.remove('stream-cursor');
+            liveTextBubble.innerHTML = renderMarkdown(liveTextContent);
+        }
+        liveTextBubble = null;
+        liveTextContent = '';
+    }
+
     function applyLiveStep(s) {
         if (!currentAssistantDiv) return;
+
+        // ── text_delta: streaming token ────────────────────────────────────────
+        if (s.type === 'text_delta') {
+            const bubble = ensureLiveTextBubble();
+            if (bubble) {
+                liveTextContent += s.content || '';
+                // Show raw text with cursor while streaming (fast path, no markdown parse)
+                bubble.textContent = liveTextContent;
+            }
+            scrollBottom();
+            return;
+        }
+
+        // Non-text-delta: flush any pending streaming text first
+        if (liveTextContent) flushLiveText();
 
         if (s.type === 'thinking_content' || s.type === 'thinking') {
             const tb = document.getElementById('liveThink');
@@ -577,6 +677,37 @@
         scrollBottom();
     }
 
+    // ── Permission request card ─────────────────────────────────────────────────
+    function showPermissionCard(permissionId, tool, description, command) {
+        const div = document.createElement('div');
+        div.className = 'permission-card';
+        div.dataset.permId = permissionId;
+        const safeId = escapeHtml(permissionId);
+        div.innerHTML =
+            `<div class="permission-card-header">` +
+            `<span class="permission-card-icon">🔑</span>` +
+            `<div class="permission-card-body">` +
+            `<div class="permission-card-title">${escapeHtml(description)}</div>` +
+            (command ? `<div class="permission-card-cmd">${escapeHtml(command)}</div>` : '') +
+            `</div></div>` +
+            `<div class="permission-card-actions">` +
+            `<button class="permission-allow-btn" data-permid="${safeId}">✅ 允许</button>` +
+            `<button class="permission-deny-btn" data-permid="${safeId}">❌ 拒绝</button>` +
+            `</div>`;
+        div.querySelector('.permission-allow-btn').addEventListener('click', function() {
+            this.disabled = true; div.querySelector('.permission-deny-btn').disabled = true;
+            this.textContent = '已允许 ✅';
+            vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
+        });
+        div.querySelector('.permission-deny-btn').addEventListener('click', function() {
+            this.disabled = true; div.querySelector('.permission-allow-btn').disabled = true;
+            this.textContent = '已拒绝';
+            vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
+        });
+        chatArea.appendChild(div);
+        scrollBottom();
+    }
+
     // ── Message handler ────────────────────────────────────────────────────────
     window.addEventListener('message', event => {
         const msg = event.data;
@@ -584,6 +715,7 @@
 
             case 'addUserMessage':
                 setGenerating(true);
+                liveTextBubble = null; liveTextContent = '';
                 addUserMessage(msg.text, msg.messageIndex);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
@@ -596,16 +728,15 @@
 
             case 'generationComplete': {
                 setGenerating(false);
+                flushLiveText();
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 const r = msg.result;
-                // Finalise thinking block: remove the spinning class
                 const completedMsg = buildAssistantMessage(
                     r.explanation || (r.steps && r.steps.length ? '' : '完成'),
                     r.steps,
                     formatTime(Date.now())
                 );
                 chatArea.appendChild(completedMsg);
-                // Update token estimate
                 const stepTokens = r.steps ? r.steps.reduce((sum, s) => {
                     if (s.type === 'thinking_content' || s.type === 'thinking')
                         return sum + Math.ceil((s.content || '').length / 4);
@@ -619,11 +750,9 @@
 
             case 'generationError':
                 setGenerating(false);
+                liveTextBubble = null; liveTextContent = '';
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
-                {
-                    const errDiv = buildAssistantMessage('❌ ' + msg.error, [], formatTime(Date.now()));
-                    chatArea.appendChild(errDiv);
-                }
+                chatArea.appendChild(buildAssistantMessage('❌ ' + msg.error, [], formatTime(Date.now())));
                 scrollBottom();
                 break;
 
@@ -634,9 +763,9 @@
                 messageIndexMap.clear();
                 setGenerating(false);
                 currentAssistantDiv = null;
+                liveTextBubble = null; liveTextContent = '';
                 totalConversationTokens = 0;
-                const bar = document.getElementById('tokenUsageBar');
-                if (bar) bar.style.display = 'none';
+                { const bar = document.getElementById('tokenUsageBar'); if (bar) bar.style.display = 'none'; }
                 startPlaceholderRotation();
                 break;
 
@@ -645,7 +774,7 @@
             case 'topicTitleGenerated': {
                 const list = document.getElementById('topicsList');
                 if (list) {
-                    for (const item of list.querySelectorAll('.topic-item[data-topic-id="' + escapeHtml(msg.topicId) + '"]')) {
+                    for (const item of list.querySelectorAll(`.topic-item[data-topic-id="${escapeHtml(msg.topicId)}"]`)) {
                         const span = item.querySelector('.topic-title');
                         if (span) span.textContent = msg.title;
                     }
@@ -653,13 +782,22 @@
                 break;
             }
 
+            case 'topicForked': {
+                // Close the topics panel and show a notification
+                topicsPanel.classList.remove('show');
+                const notif = document.createElement('div');
+                notif.className = 'special-step';
+                notif.style.cssText = 'padding:6px 0;opacity:0.6;font-size:11px;';
+                notif.textContent = `🔀 已从此处分叉为新话题: ${msg.title}`;
+                chatArea.appendChild(notif);
+                scrollBottom();
+                break;
+            }
+
             case 'loadTopicMessages':
                 for (const m of msg.messages) {
                     if (m.role === 'user') addUserMessage(m.content);
-                    else {
-                        chatArea.appendChild(buildAssistantMessage(m.content, m.steps, ''));
-                        scrollBottom();
-                    }
+                    else { chatArea.appendChild(buildAssistantMessage(m.content, m.steps, '')); scrollBottom(); }
                 }
                 break;
 
@@ -673,11 +811,12 @@
 
             case 'pendingWriteFile': showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile); break;
 
+            case 'permissionRequest':
+                showPermissionCard(msg.permissionId, msg.tool, msg.description, msg.command);
+                break;
+
             case 'modeChanged':
-                currentMode = msg.mode;
-                document.getElementById('buildModeBtn').classList.toggle('active', msg.mode === 'build');
-                document.getElementById('planModeBtn').classList.toggle('active', msg.mode === 'plan');
-                document.body.classList.toggle('plan-mode', msg.mode === 'plan');
+                switchMode(msg.mode);
                 break;
 
             case 'todoUpdate': renderTodos(msg.todos); break;
@@ -735,9 +874,19 @@
                 const item = document.createElement('div');
                 item.className = 'topic-item'; item.dataset.topicId = t.id;
                 const title = document.createElement('span'); title.className = 'topic-title'; title.textContent = t.title;
-                const del = document.createElement('button'); del.className = 'topic-delete'; del.textContent = '✕'; del.title = '删除';
+                // Action buttons: fork, archive, delete
+                const actions = document.createElement('div'); actions.className = 'topic-actions';
+                const forkBtn = document.createElement('button');
+                forkBtn.className = 'topic-action-btn topic-fork-btn'; forkBtn.textContent = '⑂'; forkBtn.title = '分叉话题';
+                forkBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'forkTopic', topicId: t.id, messageIndex: 999 }); });
+                const archBtn = document.createElement('button');
+                archBtn.className = 'topic-action-btn topic-archive-btn'; archBtn.textContent = '📦'; archBtn.title = '归档';
+                archBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'archiveTopic', topicId: t.id }); });
+                const del = document.createElement('button');
+                del.className = 'topic-action-btn topic-delete'; del.textContent = '✕'; del.title = '删除';
                 del.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'deleteTopic', topicId: t.id }); });
-                item.appendChild(title); item.appendChild(del);
+                actions.appendChild(forkBtn); actions.appendChild(archBtn); actions.appendChild(del);
+                item.appendChild(title); item.appendChild(actions);
                 item.addEventListener('click', () => { vscode.postMessage({ type: 'loadTopic', topicId: t.id }); topicsPanel.classList.remove('show'); });
                 list.appendChild(item);
             }
@@ -795,7 +944,8 @@
         chatHeader.style.display = 'none';
         document.getElementById('chatArea').style.display = 'none';
         if (inputWrapper) inputWrapper.style.display = 'none';
-        if (planIndicator) planIndicator.style.display = 'none';
+        const mi = document.getElementById('modeIndicator');
+        if (mi) mi.style.display = 'none';
         if (todoPanel) todoPanel.style.display = 'none';
         settingsPage.classList.add('active');
         document.getElementById('testResult').className = 'test-result';
@@ -807,7 +957,8 @@
         chatHeader.style.display = '';
         document.getElementById('chatArea').style.display = 'flex';
         if (inputWrapper) inputWrapper.style.display = '';
-        if (planIndicator) planIndicator.style.display = '';
+        const mi = document.getElementById('modeIndicator');
+        if (mi) mi.style.display = '';
         if (todoPanel) todoPanel.style.display = '';
     }
 

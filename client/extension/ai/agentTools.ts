@@ -1015,7 +1015,7 @@ export class AgentToolExecutor {
 
             const diff = this.generateSimpleDiff(args.file, originalContent, args.content);
 
-            if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
+            if (this.fileWriteMode === 'confirm' && this.onPendingWrite && !(args as any)._autoApply) {
                 const messageId = `write_${Date.now()}`;
                 const confirmed = await this.onPendingWrite(args.file, args.content, messageId);
                 if (!confirmed) {
@@ -1079,7 +1079,7 @@ export class AgentToolExecutor {
         const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
 
         // ── Confirm mode: show diff viewer and wait for user ────────────────
-        if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
+        if (this.fileWriteMode === 'confirm' && this.onPendingWrite && !(args as any)._autoApply) {
             const confirmed = await this.onPendingWrite(filePath, newContent, `edit_${Date.now()}`);
             if (!confirmed) {
                 return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };

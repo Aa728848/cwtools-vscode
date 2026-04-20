@@ -268,6 +268,9 @@ export class AgentRunner {
         // Doom loop detection: sliding window of call signatures
         const recentCallSignatures: string[] = [];
         let consecutiveErrorCount = 0;
+        // Track files confirmed-written this session — prevents duplicate confirm cards
+        // if the AI calls write_file after edit_file for the same file (cross-iteration)
+        const confirmedWrittenFiles = new Set<string>();
 
         // Filter tools by mode
         const availableTools = mode === 'plan'
@@ -402,8 +405,20 @@ export class AgentRunner {
                     if (isSupersededWrite) {
                         // Silently skip — the later write for this file takes precedence
                         toolResult = { skipped: true, message: `已被后续对 ${filePath} 的写入操作覆盖，跳过本次写入` };
+                    } else if (WRITE_TOOLS.has(toolName) && filePath && confirmedWrittenFiles.has(filePath)) {
+                        // File was already written-and-confirmed in a PREVIOUS iteration:
+                        // apply this write silently (treat as auto mode) to avoid a second confirm card
+                        const origArgs = { ...toolArgs, _autoApply: true };
+                        toolResult = await this.toolExecutor.execute(toolName, origArgs);
                     } else {
                         toolResult = await this.toolExecutor.execute(toolName, toolArgs);
+                        // Mark file as confirmed-written so future iterations skip the confirm card
+                        if (WRITE_TOOLS.has(toolName) && filePath) {
+                            const r = toolResult as Record<string, unknown>;
+                            if (r && (r.success || r.confirmed)) {
+                                confirmedWrittenFiles.add(filePath);
+                            }
+                        }
                     }
                 } catch (e) {
                     toolResult = { error: e instanceof Error ? e.message : String(e) };

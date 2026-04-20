@@ -49,11 +49,12 @@ export interface AgentRunnerOptions {
     abortSignal?: AbortSignal;
 }
 
-/** Tools allowed in Plan mode (read-only, no validate_code) */
+/** Tools allowed in Plan mode (read-only, no validate_code / write operations) */
 const PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'todo_write',
+    'read_file', 'list_directory',
 ];
 
 export class AgentRunner {
@@ -286,19 +287,23 @@ export class AgentRunner {
             if (!choice) throw new Error('No response from AI');
 
             const assistantMessage = choice.message;
-
-            // Add assistant response to conversation
-            messages.push(assistantMessage);
+            // Save raw content for DSML parsing BEFORE stripping markup
+            const rawContent = assistantMessage.content ?? '';
 
             // Try OpenAI-style tool_calls first, then fall back to DSML/XML parsing
+            // (must happen before stripping, since strip removes the DSML tags we need)
             let toolCalls = assistantMessage.tool_calls;
-            if ((!toolCalls || toolCalls.length === 0) && assistantMessage.content) {
-                toolCalls = this.parseDsmlToolCalls(assistantMessage.content);
-                if (toolCalls && toolCalls.length > 0) {
-                    // Strip the DSML markup from the message content for clean display
-                    assistantMessage.content = this.stripDsmlMarkup(assistantMessage.content);
-                }
+            if (!toolCalls || toolCalls.length === 0) {
+                toolCalls = this.parseDsmlToolCalls(rawContent);
             }
+
+            // Strip DSML/XML markup from content for clean display
+            if (assistantMessage.content) {
+                assistantMessage.content = this.stripDsmlMarkup(assistantMessage.content);
+            }
+
+            // Add assistant response (cleaned) to conversation history
+            messages.push(assistantMessage);
 
             // If no tool calls (either format), we're done
             if (!toolCalls || toolCalls.length === 0) {
@@ -358,12 +363,28 @@ export class AgentRunner {
                 });
 
                 // Feed tool result back to AI
-                messages.push({
-                    role: 'tool',
-                    content: JSON.stringify(toolResult, null, 2),
-                    tool_call_id: toolCall.id,
-                    name: toolName,
-                });
+                // DeepSeek and some models in DSML mode require tool results as user messages
+                // Check if provider uses DSML-style (tool role not well supported)
+                const { getProvider } = await import('./providers');
+                const config = this.aiService.getConfig();
+                const providerId = options?.providerId ?? config.provider;
+                const providerDef = getProvider(providerId);
+                const useDsmlToolRole = providerDef.toolCallStyle === 'dsml';
+
+                if (useDsmlToolRole) {
+                    // DeepSeek DSML mode: wrap tool result as a user message
+                    messages.push({
+                        role: 'user',
+                        content: `[Tool Result for ${toolCall.function.name} (id=${toolCall.id})]:\n${JSON.stringify(toolResult, null, 2)}`,
+                    });
+                } else {
+                    messages.push({
+                        role: 'tool',
+                        content: JSON.stringify(toolResult, null, 2),
+                        tool_call_id: toolCall.id,
+                        name: toolName,
+                    });
+                }
             }
         }
 

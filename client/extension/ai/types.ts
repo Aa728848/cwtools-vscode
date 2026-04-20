@@ -41,21 +41,35 @@ export interface AIProviderConfig {
     toolCallStyle?: 'openai' | 'dsml' | 'tool_call';
 }
 
+export interface AIProviderUserConfig {
+    /** Provider ID, e.g. 'deepseek', 'openai' */
+    providerId: string;
+    /** User-specified model override */
+    model: string;
+    /** User-specified endpoint override */
+    endpoint: string;
+    /** Whether a key is stored in SecretStorage (never stored here in plaintext) */
+    hasKey?: boolean;
+}
+
 export interface AIUserConfig {
     enabled: boolean;
     provider: string;
     model: string;
     endpoint: string;
-    /** API key stored in settings.json (plain text, user's choice) */
+    /** Legacy plaintext key — only read for migration; write via SecretStorage */
     apiKey: string;
     maxRetries: number;
     /** User override for context window size (0 = use provider default) */
     maxContextTokens: number;
+    /** Agent file write mode */
+    agentFileWriteMode: 'confirm' | 'auto';
     inlineCompletion: {
         enabled: boolean;
         debounceMs: number;
         provider: string;
         model: string;
+        endpoint: string;
     };
 }
 
@@ -346,7 +360,67 @@ export type AgentToolName =
     | 'get_completion_at'
     | 'document_symbols'
     | 'workspace_symbols'
-    | 'todo_write';
+    | 'todo_write'
+    | 'read_file'
+    | 'write_file'
+    | 'patch_file'
+    | 'list_directory';
+
+// ─── File Tool Types ─────────────────────────────────────────────────────────
+
+export interface ReadFileArgs {
+    file: string;
+    startLine?: number;
+    endLine?: number;
+}
+
+export interface ReadFileResult {
+    content: string;
+    totalLines: number;
+    truncated: boolean;
+}
+
+export interface WriteFileArgs {
+    file: string;
+    content: string;
+}
+
+export interface WriteFileResult {
+    success: boolean;
+    message: string;
+    /** If agentFileWriteMode === 'confirm', this is a pending diff, not yet applied */
+    pendingDiff?: string;
+}
+
+export interface PatchFileArgs {
+    file: string;
+    /** Start line (1-based, inclusive) */
+    startLine: number;
+    /** End line (1-based, inclusive) - lines to replace */
+    endLine: number;
+    /** New content to replace the specified line range */
+    newContent: string;
+}
+
+export interface PatchFileResult {
+    success: boolean;
+    message: string;
+    pendingDiff?: string;
+}
+
+export interface ListDirectoryArgs {
+    directory: string;
+    recursive?: boolean;
+}
+
+export interface ListDirectoryResult {
+    entries: Array<{
+        name: string;
+        type: 'file' | 'directory';
+        size?: number;
+    }>;
+    path: string;
+}
 
 // ─── Agent Execution ─────────────────────────────────────────────────────────
 
@@ -403,10 +477,13 @@ export type WebViewMessage =
     | { type: 'openSettings' }
     | { type: 'saveSettings'; settings: PanelSettings }
     | { type: 'detectOllamaModels'; endpoint: string }
-    | { type: 'testConnection'; settings: PanelSettings };
+    | { type: 'testConnection'; settings: PanelSettings }
+    | { type: 'retractMessage'; messageIndex: number }
+    | { type: 'confirmWriteFile'; file: string; content: string; messageId: string }
+    | { type: 'cancelWriteFile'; messageId: string };
 
 export type HostMessage =
-    | { type: 'addUserMessage'; text: string }
+    | { type: 'addUserMessage'; text: string; messageIndex: number }
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string }
@@ -418,7 +495,9 @@ export type HostMessage =
     | { type: 'todoUpdate'; todos: TodoItem[] }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[] }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
-    | { type: 'testConnectionResult'; ok: boolean; message: string };
+    | { type: 'testConnectionResult'; ok: boolean; message: string }
+    | { type: 'messageRetracted'; messageIndex: number }
+    | { type: 'pendingWriteFile'; file: string; diff: string; messageId: string };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {
@@ -444,4 +523,12 @@ export interface PanelSettings {
     apiKey: string;
     endpoint: string;
     maxContextTokens: number;
+    agentFileWriteMode: 'confirm' | 'auto';
+    inlineCompletion: {
+        enabled: boolean;
+        provider: string;
+        model: string;
+        endpoint: string;
+        debounceMs: number;
+    };
 }

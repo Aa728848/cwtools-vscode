@@ -112,12 +112,20 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'switchMode':
                 this.switchMode(msg.mode);
                 break;
+            case 'retractMessage':
+                this.retractMessage(msg.messageIndex);
+                break;
+            case 'confirmWriteFile':
+                this.resolveWriteConfirmation(msg.messageId, true);
+                break;
+            case 'cancelWriteFile':
+                this.resolveWriteConfirmation(msg.messageId, false);
+                break;
         }
     }
 
     private async openSettingsPage(): Promise<void> {
-        const { BUILTIN_PROVIDERS } = await import('./providers');
-        const { fetchOllamaModels } = await import('./providers');
+        const { BUILTIN_PROVIDERS, fetchOllamaModels } = await import('./providers');
         const config = this.aiService.getConfig();
 
         // Build provider metadata list for WebView
@@ -130,33 +138,67 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             defaultEndpoint: p.endpoint,
         }));
 
-        // Current settings to pre-fill the form
-        const current = {
+        // Build hasKey map: never send plaintext keys to WebView
+        const hasKeyMap: Record<string, boolean> = {};
+        for (const p of providers) {
+            hasKeyMap[p.id] = !!(await this.aiService.getKeyForProvider(p.id));
+        }
+
+        // Current settings to pre-fill the form (apiKey is never sent)
+        const current: import('./types').PanelSettings = {
             provider: config.provider,
             model: config.model,
-            apiKey: config.apiKey || '',
+            apiKey: '',  // NEVER send actual key to WebView
             endpoint: config.endpoint || '',
             maxContextTokens: config.maxContextTokens,
+            agentFileWriteMode: config.agentFileWriteMode,
+            inlineCompletion: {
+                enabled: config.inlineCompletion.enabled,
+                provider: config.inlineCompletion.provider,
+                model: config.inlineCompletion.model,
+                endpoint: config.inlineCompletion.endpoint,
+                debounceMs: config.inlineCompletion.debounceMs,
+            },
         };
 
         // If Ollama is selected, prefetch models
         let ollamaModels: Array<{ name: string; size: string; parameterSize?: string }> | undefined;
         if (config.provider === 'ollama') {
-            const ep = config.endpoint || BUILTIN_PROVIDERS['ollama'].endpoint;
-            ollamaModels = await fetchOllamaModels(ep);
+            const ep = config.endpoint || BUILTIN_PROVIDERS['ollama']?.endpoint;
+            if (ep) ollamaModels = await fetchOllamaModels(ep);
         }
 
-        this.postMessage({ type: 'settingsData', providers, current, ollamaModels });
+        this.postMessage({
+            type: 'settingsData', providers: providers.map(p => ({
+                ...p,
+                hasKey: hasKeyMap[p.id] ?? false,
+            })) as any, current, ollamaModels
+        });
     }
 
     private async saveSettings(settings: import('./types').PanelSettings): Promise<void> {
         const cfg = vs.workspace.getConfiguration('cwtools.ai');
         await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
         await cfg.update('model', settings.model, vs.ConfigurationTarget.Global);
-        await cfg.update('apiKey', settings.apiKey, vs.ConfigurationTarget.Global);
+        // API key: store in SecretStorage, NEVER in settings.json
+        if (settings.apiKey && settings.apiKey.trim().length > 0) {
+            await this.aiService.getKeyManager().setKey(settings.provider, settings.apiKey.trim());
+            // Ensure plaintext key is cleared from settings.json
+            await cfg.update('apiKey', '', vs.ConfigurationTarget.Global);
+        }
         await cfg.update('endpoint', settings.endpoint, vs.ConfigurationTarget.Global);
         await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);
+        await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
         await cfg.update('enabled', true, vs.ConfigurationTarget.Global);
+        // Inline completion settings
+        if (settings.inlineCompletion) {
+            await cfg.update('inlineCompletion.enabled', settings.inlineCompletion.enabled, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.provider', settings.inlineCompletion.provider, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.model', settings.inlineCompletion.model, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.endpoint', settings.inlineCompletion.endpoint, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs, vs.ConfigurationTarget.Global);
+        }
+        vs.window.showInformationMessage('CWTools AI 设置已保存');
     }
 
     private async detectOllamaModels(endpoint: string): Promise<void> {
@@ -228,8 +270,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.createNewTopic(text);
         }
 
-        // Add user message to UI
-        this.postMessage({ type: 'addUserMessage', text });
+        // Track message index for retract support
+        const messageIndex = this.currentTopic!.messages.length;
+
+        // Add user message to UI (with message index for retract)
+        this.postMessage({ type: 'addUserMessage', text, messageIndex });
 
         // Add to history
         this.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now() });
@@ -286,6 +331,38 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'generationError', error: errorMsg });
         } finally {
             this.abortController = null;
+        }
+    }
+
+    /** Retract a user message and its subsequent AI response */
+    private retractMessage(messageIndex: number): void {
+        if (!this.currentTopic) return;
+
+        // Remove messages from messageIndex onwards in the topic
+        this.currentTopic.messages = this.currentTopic.messages.slice(0, messageIndex);
+        // Also roll back conversationMessages
+        this.conversationMessages = this.conversationMessages.slice(0, messageIndex);
+
+        this.postMessage({ type: 'messageRetracted', messageIndex });
+        this.saveTopics();
+    }
+
+    // ─── File Write Confirmation (提供给 AgentToolExecutor onPendingWrite) ───────────
+
+    private pendingWriteResolvers = new Map<string, (confirmed: boolean) => void>();
+
+    handlePendingWrite(file: string, diff: string, messageId: string): Promise<boolean> {
+        return new Promise<boolean>((resolve) => {
+            this.pendingWriteResolvers.set(messageId, resolve);
+            this.postMessage({ type: 'pendingWriteFile', file, diff, messageId });
+        });
+    }
+
+    resolveWriteConfirmation(messageId: string, confirmed: boolean): void {
+        const resolver = this.pendingWriteResolvers.get(messageId);
+        if (resolver) {
+            this.pendingWriteResolvers.delete(messageId);
+            resolver(confirmed);
         }
     }
 
@@ -493,964 +570,755 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // ─── HTML Content ────────────────────────────────────────────────────────
 
     private getHtmlContent(webview: vs.Webview): string {
-        return /* html */ `<!DOCTYPE html>
+        const nonce = (() => {
+            let t = '';
+            const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            for (let i = 0; i < 32; i++) t += c.charAt(Math.floor(Math.random() * c.length));
+            return t;
+        })();
+        const csp = webview.cspSource;
+        return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CWTools AI</title>
-    <style>
-        :root {
-            --bg: var(--vscode-editor-background);
-            --fg: var(--vscode-editor-foreground);
-            --border: var(--vscode-panel-border, #3c3c3c);
-            --input-bg: var(--vscode-input-background);
-            --input-fg: var(--vscode-input-foreground);
-            --input-border: var(--vscode-input-border, #3c3c3c);
-            --btn-bg: var(--vscode-button-background);
-            --btn-fg: var(--vscode-button-foreground);
-            --btn-hover: var(--vscode-button-hoverBackground);
-            --accent: var(--vscode-focusBorder, #007acc);
-            --success: #4caf50;
-            --error: #f44336;
-            --warning: #ff9800;
-            --code-bg: var(--vscode-textCodeBlock-background, #1e1e1e);
-            --plan-bg: rgba(100, 149, 237, 0.15);
-            --plan-border: rgba(100, 149, 237, 0.5);
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<title>CWTools AI</title>
+<style nonce="${nonce}">
+:root {
+    --bg: var(--vscode-editor-background, #1e1e1e);
+    --fg: var(--vscode-editor-foreground, #cccccc);
+    --border: var(--vscode-panel-border, #333);
+    --input-bg: var(--vscode-input-background, #252525);
+    --input-fg: var(--vscode-input-foreground, #ccc);
+    --btn-hover: var(--vscode-list-hoverBackground, #2a2d2e);
+    --accent: #d95a43;
+    --success: #4caf50;
+    --error: #f44336;
+    --warning: #ff9800;
+    --code-bg: var(--vscode-textCodeBlock-background, #1a1a1a);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+/* ── Header ── */
+.header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.header-title { display: flex; align-items: center; gap: 6px; }
+.asterisk { color: var(--accent); font-size: 18px; line-height: 1; }
+.brand-text { font-family: Georgia, Cambria, serif; font-size: 14px; font-weight: 500; letter-spacing: 0.5px; color: #ececec; }
+.header-actions { display: flex; gap: 2px; }
+.icon-btn { background: none; border: none; color: var(--fg); cursor: pointer; padding: 4px 7px; border-radius: 4px; font-size: 13px; opacity: 0.6; transition: opacity 0.15s, background 0.15s; }
+.icon-btn:hover { opacity: 1; background: var(--btn-hover); }
 
-        body {
-            font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, sans-serif);
-            font-size: var(--vscode-font-size, 13px);
-            color: var(--fg);
-            background: var(--bg);
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
+/* ── Topics panel ── */
+.topics-panel { display: none; position: absolute; top: 41px; left: 0; right: 0; bottom: 70px; background: var(--bg); border: 1px solid var(--border); z-index: 100; overflow-y: auto; padding: 8px; }
+.topics-panel.show { display: block; }
+.topic-item { padding: 8px; cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+.topic-item:hover { background: var(--btn-hover); }
+.topic-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.topic-delete { opacity: 0; cursor: pointer; color: var(--error); padding: 2px 5px; font-size: 12px; }
+.topic-item:hover .topic-delete { opacity: 0.7; }
+.topic-delete:hover { opacity: 1 !important; }
 
-        /* Header */
-        .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            border-bottom: 1px solid var(--border);
-            flex-shrink: 0;
-        }
-        .header-title {
-            font-weight: 600;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .header-actions {
-            display: flex;
-            gap: 4px;
-        }
-        .header-btn {
-            background: none;
-            border: none;
-            color: var(--fg);
-            cursor: pointer;
-            padding: 4px 6px;
-            border-radius: 4px;
-            font-size: 14px;
-            opacity: 0.7;
-        }
-        .header-btn:hover { opacity: 1; background: var(--input-bg); }
+/* ── Indicators ── */
+.plan-indicator { display: none; padding: 5px 16px; font-size: 11px; color: cornflowerblue; background: rgba(100,149,237,0.07); border-bottom: 1px solid var(--border); text-align: center; }
+body.plan-mode .plan-indicator { display: block; }
+.todo-panel { display: none; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.todo-panel.has-items { display: block; }
+.todo-panel-title { font-size: 10px; font-weight: 600; opacity: 0.5; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+.todo-item { font-size: 12px; padding: 2px 0; display: flex; align-items: flex-start; gap: 6px; }
+.todo-item.done { opacity: 0.4; text-decoration: line-through; }
+.todo-item.in_progress { color: var(--accent); }
 
-        /* Topics sidebar */
-        .topics-panel {
-            display: none;
-            position: absolute;
-            top: 36px;
-            left: 0;
-            right: 0;
-            bottom: 48px;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            z-index: 100;
-            overflow-y: auto;
-            padding: 8px;
-        }
-        .topics-panel.show { display: block; }
-        .topic-item {
-            padding: 8px;
-            cursor: pointer;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2px;
-        }
-        .topic-item:hover { background: var(--input-bg); }
-        .topic-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .topic-delete {
-            opacity: 0;
-            cursor: pointer;
-            color: var(--error);
-            padding: 2px 4px;
-        }
-        .topic-item:hover .topic-delete { opacity: 0.7; }
-        .topic-delete:hover { opacity: 1 !important; }
+/* ── Chat area ── */
+.chat-area { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.message { display: flex; flex-direction: column; animation: fadeIn 0.2s ease; }
+.msg-header { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; font-size: 12px; font-family: Georgia, serif; opacity: 0.8; }
+.msg-bubble { line-height: 1.6; word-break: break-word; }
+.msg-bubble code { background: rgba(255,255,255,0.1); border-radius: 3px; padding: 0 3px; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
+.msg-bubble pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 6px 0; font-size: 12px; font-family: var(--vscode-editor-font-family, monospace); }
+.msg-bubble pre code { background: none; padding: 0; }
+.retract-btn { display: none; background: none; border: none; cursor: pointer; font-size: 11px; opacity: 0.4; padding: 2px 5px; border-radius: 3px; color: var(--fg); margin-top: 3px; }
+.message.user:hover .retract-btn { display: inline-flex; }
+.retract-btn:hover { opacity: 1; background: var(--btn-hover); }
+.message.retracted .msg-bubble { opacity: 0.4; font-style: italic; pointer-events: none; }
+.message.retracted .retract-btn { display: none !important; }
 
-        /* Chat area */
-        .chat-area {
-            flex: 1;
-            overflow-y: auto;
-            padding: 12px;
-        }
+/* ── Tool group ── */
+.tool-group { margin: 4px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-size: 11px; }
+.tool-group > summary { cursor: pointer; padding: 5px 10px; background: rgba(255,255,255,0.03); user-select: none; display: flex; align-items: center; gap: 6px; list-style: none; }
+.tool-group > summary::-webkit-details-marker { display: none; }
+.tool-group > summary::before { content: '▶'; font-size: 9px; opacity: 0.4; transition: transform 0.15s; flex-shrink: 0; }
+.tool-group[open] > summary::before { transform: rotate(90deg); }
+.tool-group-body { padding: 6px 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
+.step { font-size: 11px; padding: 2px 0; opacity: 0.7; display: flex; align-items: flex-start; gap: 5px; }
+.step.tool_call .step-icon { color: var(--accent); }
+.step.error .step-icon { color: var(--error); }
 
-        .message {
-            margin-bottom: 16px;
-            animation: fadeIn 0.2s ease;
-        }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+/* ── Code block ── */
+.code-block { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; margin: 6px 0; overflow: hidden; }
+.code-header { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.04); border-bottom: 1px solid var(--border); font-size: 11px; }
+.code-status.valid { color: var(--success); }
+.code-status.invalid { color: var(--error); }
+.code-actions { display: flex; gap: 4px; }
+.code-btn { background: none; color: var(--fg); border: 1px solid var(--border); padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px; opacity: 0.7; }
+.code-btn:hover { opacity: 1; background: var(--btn-hover); }
+.code-content { padding: 8px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; overflow-x: auto; white-space: pre; }
 
-        .msg-role {
-            font-size: 11px;
-            font-weight: 600;
-            margin-bottom: 4px;
-            opacity: 0.7;
-        }
-        .msg-role.user { color: var(--accent); }
-        .msg-role.assistant { color: var(--success); }
+/* ── Diff card ── */
+.diff-card { border: 1px solid var(--warning); border-radius: 6px; overflow: hidden; margin: 4px 0; font-size: 11px; }
+.diff-card-header { background: rgba(255,152,0,0.12); padding: 6px 10px; font-size: 11px; font-family: Georgia, serif; opacity: 0.85; }
+.diff-card-body { padding: 8px 10px; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; background: var(--code-bg); max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
+.diff-add { color: #4caf50; }
+.diff-del { color: #f44336; }
+.diff-card-actions { padding: 6px 10px; display: flex; gap: 6px; background: var(--bg); }
+.diff-accept-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 11px; }
+.diff-reject-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 11px; }
 
-        .msg-content {
-            line-height: 1.5;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
+/* ── Empty state ── */
+.empty-state { margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; opacity: 0.65; padding: 40px 20px; gap: 6px; }
+.empty-icon { font-size: 40px; color: var(--accent); margin-bottom: 12px; }
 
-        /* Code block */
-        .code-block {
-            background: var(--code-bg);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            margin: 8px 0;
-            overflow: hidden;
-        }
-        .code-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 4px 8px;
-            background: rgba(255,255,255,0.05);
-            border-bottom: 1px solid var(--border);
-            font-size: 11px;
-        }
-        .code-status { font-size: 11px; }
-        .code-status.valid { color: var(--success); }
-        .code-status.invalid { color: var(--error); }
-        .code-actions { display: flex; gap: 4px; }
-        .code-btn {
-            background: var(--btn-bg);
-            color: var(--btn-fg);
-            border: none;
-            padding: 2px 8px;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 11px;
-        }
-        .code-btn:hover { background: var(--btn-hover); }
-        .code-content {
-            padding: 8px;
-            font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
-            font-size: 12px;
-            overflow-x: auto;
-            white-space: pre;
-        }
+/* ── Input area ── */
+.input-wrapper { padding: 10px 12px; flex-shrink: 0; }
+.input-container { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; transition: border-color 0.15s; }
+.input-container:focus-within { border-color: #555; }
+.input-row { display: flex; padding: 6px 10px 2px; }
+.input-row textarea { flex: 1; background: transparent; color: var(--input-fg); border: none; padding: 4px 0; font-family: inherit; font-size: 13px; resize: none; min-height: 22px; max-height: 150px; outline: none; line-height: 1.5; }
+.input-row textarea::placeholder { opacity: 0.35; }
+.input-controls { display: flex; justify-content: space-between; align-items: center; padding: 2px 8px 8px; }
+.ctrl-group { display: flex; align-items: center; gap: 2px; }
+.send-btn { background: none; color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 15px; line-height: 1; transition: background 0.1s; }
+.send-btn:hover { background: var(--btn-hover); }
+.send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.cancel-btn { color: var(--error); border-color: var(--error); }
+.mode-btn { background: none; border: none; color: var(--fg); cursor: pointer; padding: 3px 8px; font-size: 11px; border-radius: 3px; opacity: 0.5; display: flex; align-items: center; gap: 3px; }
+.mode-btn:hover { opacity: 0.85; background: var(--btn-hover); }
+.mode-btn.active { opacity: 1; }
 
-        /* Agent steps */
-        .step {
-            font-size: 11px;
-            padding: 2px 0;
-            opacity: 0.6;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .step-icon { font-size: 12px; }
-        .step.tool_call .step-icon { color: var(--accent); }
-        .step.validation .step-icon { color: var(--warning); }
-        .step.error .step-icon { color: var(--error); }
-
-        /* Input area */
-        .input-area {
-            padding: 8px 12px;
-            border-top: 1px solid var(--border);
-            display: flex;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-        .input-area textarea {
-            flex: 1;
-            background: var(--input-bg);
-            color: var(--input-fg);
-            border: 1px solid var(--input-border);
-            border-radius: 4px;
-            padding: 6px 8px;
-            font-family: inherit;
-            font-size: 12px;
-            resize: none;
-            min-height: 32px;
-            max-height: 120px;
-            outline: none;
-        }
-        .input-area textarea:focus { border-color: var(--accent); }
-        .send-btn {
-            background: var(--btn-bg);
-            color: var(--btn-fg);
-            border: none;
-            border-radius: 4px;
-            padding: 6px 12px;
-            cursor: pointer;
-            font-size: 12px;
-            align-self: flex-end;
-        }
-        .send-btn:hover { background: var(--btn-hover); }
-        .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .cancel-btn {
-            background: var(--error);
-            color: white;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            opacity: 0.5;
-        }
-        .empty-state .icon { font-size: 32px; margin-bottom: 8px; }
-
-        /* Mode toggle */
-        .mode-toggle {
-            display: flex;
-            align-items: center;
-            gap: 0;
-            background: var(--input-bg);
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            overflow: hidden;
-        }
-        .mode-btn {
-            background: none;
-            border: none;
-            color: var(--fg);
-            cursor: pointer;
-            padding: 3px 10px;
-            font-size: 11px;
-            font-weight: 500;
-            opacity: 0.5;
-            transition: all 0.15s ease;
-        }
-        .mode-btn.active {
-            opacity: 1;
-            background: var(--btn-bg);
-            color: var(--btn-fg);
-        }
-        .mode-btn:hover:not(.active) { opacity: 0.8; }
-        .plan-indicator {
-            display: none;
-            padding: 4px 12px;
-            background: var(--plan-bg);
-            border: 1px solid var(--plan-border);
-            border-radius: 4px;
-            font-size: 11px;
-            text-align: center;
-            color: cornflowerblue;
-        }
-        body.plan-mode .plan-indicator { display: block; }
-
-        /* Todo panel */
-        .todo-panel {
-            display: none;
-            padding: 6px 12px;
-            border-bottom: 1px solid var(--border);
-        }
-        .todo-panel.has-items { display: block; }
-        .todo-panel-title {
-            font-size: 11px;
-            font-weight: 600;
-            margin-bottom: 4px;
-            opacity: 0.7;
-        }
-        .todo-item {
-            font-size: 11px;
-            padding: 2px 0;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .todo-item.done { opacity: 0.5; text-decoration: line-through; }
-        .todo-item.in_progress { color: var(--accent); }
-        .todo-status { font-size: 10px; }
-
-        /* ── Settings Page ─────────────────────────────────── */
-        .settings-page {
-            display: none;
-            flex-direction: column;
-            height: 100%;
-            overflow-y: auto;
-        }
-        .settings-page.active { display: flex; }
-        .settings-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 12px;
-            border-bottom: 1px solid var(--border);
-            font-weight: 600;
-            font-size: 13px;
-        }
-        .settings-back-btn {
-            background: none;
-            border: none;
-            color: var(--fg);
-            cursor: pointer;
-            font-size: 16px;
-            padding: 0 4px;
-            opacity: 0.7;
-            line-height: 1;
-        }
-        .settings-back-btn:hover { opacity: 1; }
-        .settings-body {
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 14px;
-            flex: 1;
-        }
-        .settings-group {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        .settings-label {
-            font-size: 11px;
-            font-weight: 600;
-            opacity: 0.8;
-            letter-spacing: 0.03em;
-        }
-        .settings-input, .settings-select {
-            background: var(--input-bg);
-            border: 1px solid var(--border);
-            color: var(--fg);
-            border-radius: 5px;
-            padding: 6px 8px;
-            font-size: 12px;
-            width: 100%;
-            box-sizing: border-box;
-            outline: none;
-            font-family: inherit;
-        }
-        .settings-input:focus, .settings-select:focus {
-            border-color: var(--accent);
-        }
-        .settings-select option { background: var(--bg); }
-        .settings-key-row {
-            display: flex;
-            gap: 6px;
-        }
-        .settings-key-row .settings-input { flex: 1; }
-        .key-toggle-btn {
-            background: var(--input-bg);
-            border: 1px solid var(--border);
-            color: var(--fg);
-            border-radius: 5px;
-            padding: 0 8px;
-            cursor: pointer;
-            font-size: 14px;
-            flex-shrink: 0;
-        }
-        .model-row {
-            display: flex;
-            gap: 6px;
-        }
-        .model-row .settings-input,
-        .model-row .settings-select { flex: 1; }
-        .detect-btn {
-            background: var(--btn-bg);
-            color: var(--btn-fg);
-            border: none;
-            border-radius: 5px;
-            padding: 0 10px;
-            cursor: pointer;
-            font-size: 11px;
-            flex-shrink: 0;
-            white-space: nowrap;
-        }
-        .detect-btn:hover { opacity: 0.85; }
-        .detect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-        .settings-hint {
-            font-size: 10px;
-            opacity: 0.5;
-            margin-top: 2px;
-        }
-        .settings-footer {
-            padding: 10px 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 7px;
-            border-top: 1px solid var(--border);
-        }
-        .settings-save-btn {
-            background: var(--accent);
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            padding: 8px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
-            width: 100%;
-        }
-        .settings-save-btn:hover { opacity: 0.9; }
-        .settings-test-btn {
-            background: var(--input-bg);
-            color: var(--fg);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 7px;
-            cursor: pointer;
-            font-size: 12px;
-            width: 100%;
-        }
-        .settings-test-btn:hover { border-color: var(--accent); }
-        .test-result {
-            font-size: 11px;
-            text-align: center;
-            padding: 4px;
-            border-radius: 4px;
-            display: none;
-        }
-        .test-result.ok { background: rgba(80,200,80,0.15); color: #5c5; display: block; }
-        .test-result.fail { background: rgba(200,80,80,0.15); color: #e66; display: block; }
-    </style>
+/* ── Settings page ── */
+.settings-page { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+.settings-page.active { display: flex; }
+.settings-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.settings-back-btn { background: none; border: none; color: var(--fg); cursor: pointer; font-size: 16px; padding: 0 4px; opacity: 0.7; line-height: 1; }
+.settings-back-btn:hover { opacity: 1; }
+.settings-body { padding: 12px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow-y: auto; }
+.settings-title { font-size: 13px; font-weight: 600; }
+.settings-group { display: flex; flex-direction: column; gap: 5px; }
+.settings-label { font-size: 11px; font-weight: 600; opacity: 0.75; letter-spacing: 0.03em; }
+.settings-input, .settings-select { background: var(--input-bg); border: 1px solid var(--border); color: var(--fg); border-radius: 5px; padding: 6px 8px; font-size: 12px; width: 100%; outline: none; font-family: inherit; }
+.settings-input:focus, .settings-select:focus { border-color: var(--accent); }
+.settings-select option { background: var(--bg); }
+.settings-key-row { display: flex; gap: 6px; }
+.settings-key-row .settings-input { flex: 1; }
+.key-toggle-btn { background: var(--input-bg); border: 1px solid var(--border); color: var(--fg); border-radius: 5px; padding: 0 8px; cursor: pointer; font-size: 13px; flex-shrink: 0; }
+.model-row { display: flex; gap: 6px; }
+.model-row .settings-input, .model-row .settings-select { flex: 1; }
+.detect-btn { background: none; color: var(--fg); border: 1px solid var(--border); border-radius: 5px; padding: 0 10px; cursor: pointer; font-size: 11px; flex-shrink: 0; white-space: nowrap; }
+.detect-btn:hover { background: var(--btn-hover); }
+.detect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.settings-hint { font-size: 10px; opacity: 0.45; margin-top: 2px; }
+.settings-footer { padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.settings-save-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px; cursor: pointer; font-size: 13px; font-weight: 600; width: 100%; }
+.settings-save-btn:hover { opacity: 0.9; }
+.settings-test-btn { background: none; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 7px; cursor: pointer; font-size: 12px; width: 100%; }
+.settings-test-btn:hover { border-color: var(--accent); }
+.test-result { font-size: 11px; text-align: center; padding: 4px; border-radius: 4px; display: none; }
+.test-result.ok { background: rgba(80,200,80,0.15); color: #5c5; display: block; }
+.test-result.fail { background: rgba(200,80,80,0.15); color: #e66; display: block; }
+.accordion-section { border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.accordion-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; cursor: pointer; font-size: 12px; font-weight: 600; user-select: none; background: rgba(255,255,255,0.02); }
+.accordion-header:hover { background: rgba(255,255,255,0.05); }
+.accordion-arrow { font-size: 9px; opacity: 0.4; transition: transform 0.15s; }
+.accordion-section.open .accordion-arrow { transform: rotate(90deg); }
+.accordion-body { display: none; padding: 10px 12px; border-top: 1px solid var(--border); flex-direction: column; gap: 10px; }
+.accordion-section.open .accordion-body { display: flex; }
+.settings-toggle-row { display: flex; align-items: center; justify-content: space-between; }
+.settings-toggle-label { font-size: 12px; }
+.toggle-switch { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-track { position: absolute; cursor: pointer; inset: 0; background: var(--border); border-radius: 20px; transition: 0.2s; }
+.toggle-switch input:checked + .toggle-track { background: var(--accent); }
+.toggle-track::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
+.toggle-switch input:checked + .toggle-track::before { transform: translateX(16px); }
+</style>
 </head>
 <body>
-    <div class="header">
-        <div class="header-title">
-            <span>🤖 CWTools AI</span>
-            <div class="mode-toggle" id="modeToggle">
-                <button class="mode-btn active" data-mode="build" onclick="switchMode('build')" title="Build 模式: 生成并验证代码">⚡ Build</button>
-                <button class="mode-btn" data-mode="plan" onclick="switchMode('plan')" title="Plan 模式: 只读分析与规划">📋 Plan</button>
+<div class="header">
+    <div class="header-title">
+        <span class="asterisk">✳</span>
+        <span class="brand-text">Claude Code</span>
+    </div>
+    <div class="header-actions">
+        <button class="icon-btn" id="btnTopics" title="历史话题">☰</button>
+        <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
+    </div>
+</div>
+
+<div class="topics-panel" id="topicsPanel"></div>
+<div class="plan-indicator" id="planIndicator">📋 Plan Mode — 只读分析，不修改文件</div>
+<div class="todo-panel" id="todoPanel">
+    <div class="todo-panel-title">Tasks</div>
+    <div id="todoList"></div>
+</div>
+
+<div class="chat-area" id="chatArea">
+    <div class="empty-state" id="emptyState">
+        <div class="empty-icon">✳</div>
+        <div style="font-size:13px;font-family:Georgia,serif;">CWTools AI Assistant</div>
+        <div style="font-size:11px;margin-top:2px;">描述你的需求，AI 将生成并验证 Paradox 脚本</div>
+    </div>
+</div>
+
+<div class="input-wrapper">
+    <div class="input-container">
+        <div class="input-row">
+            <textarea id="input" placeholder="描述你的需求..." rows="1"></textarea>
+        </div>
+        <div class="input-controls">
+            <div class="ctrl-group">
+                <button class="icon-btn" id="btnNewTopic" title="新话题" style="font-size:16px;padding:2px 7px;">+</button>
+                <button class="mode-btn active" id="buildModeBtn">📝 Build</button>
+                <button class="mode-btn" id="planModeBtn" style="display:none;">📋 Plan</button>
             </div>
-        </div>
-        <div class="header-actions">
-            <button class="header-btn" onclick="toggleTopics()" title="历史话题">📋</button>
-            <button class="header-btn" onclick="newTopic()" title="新话题">➕</button>
-            <button class="header-btn" onclick="configureProvider()" title="设置">⚙️</button>
+            <button class="send-btn" id="sendBtn">↑</button>
         </div>
     </div>
+</div>
 
-    <div class="topics-panel" id="topicsPanel"></div>
-
-    <div class="plan-indicator" id="planIndicator">📋 Plan Mode — 只读分析，不修改文件</div>
-
-    <div class="todo-panel" id="todoPanel">
-        <div class="todo-panel-title">📝 任务跟踪</div>
-        <div id="todoList"></div>
+<!-- Settings Page -->
+<div class="settings-page" id="settingsPage">
+    <div class="settings-header">
+        <button class="settings-back-btn" id="settingsBackBtn">←</button>
+        <span class="settings-title">⚙ AI 设置</span>
     </div>
-
-    <div class="chat-area" id="chatArea">
-        <div class="empty-state" id="emptyState">
-            <div class="icon">🛸</div>
-            <div>CWTools AI Assistant</div>
-            <div style="font-size:11px;margin-top:4px;">描述你的需求，AI 将生成并验证 Stellaris 代码</div>
-        </div>
-    </div>
-
-    <div class="input-area">
-        <textarea id="input" placeholder="描述你的需求..." rows="1"
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMessage()">发送</button>
-    </div>
-
-    <!-- ── Settings Page ──────────────────────── -->
-    <div class="settings-page" id="settingsPage">
-        <div class="settings-header">
-            <button class="settings-back-btn" onclick="closeSettings()" title="返回">←</button>
-            <span>⚙️ AI 设置</span>
-        </div>
-        <div class="settings-body">
-            <!-- Provider -->
-            <div class="settings-group">
-                <label class="settings-label">🤖 AI Provider</label>
-                <select class="settings-select" id="settingsProvider" onchange="onProviderChange()"></select>
-            </div>
-            <!-- Model -->
-            <div class="settings-group">
-                <label class="settings-label">📡 Model</label>
-                <div class="model-row">
-                    <select class="settings-select" id="settingsModelSelect" style="display:none"></select>
-                    <input class="settings-input" id="settingsModelInput" type="text" placeholder="model-name" />
-                    <button class="detect-btn" id="detectBtn" onclick="detectOllamaModels()" style="display:none">🔍 检测</button>
+    <div class="settings-body">
+        <div class="accordion-section open" id="chatModelSection">
+            <div class="accordion-header" id="accChat"><span>🤖 对话模型</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-body">
+                <div class="settings-group">
+                    <label class="settings-label">Provider</label>
+                    <select class="settings-select" id="settingsProvider"></select>
                 </div>
-                <div class="settings-hint" id="modelHint"></div>
-            </div>
-            <!-- API Key -->
-            <div class="settings-group" id="apiKeyGroup">
-                <label class="settings-label">🔑 API Key</label>
-                <div class="settings-key-row">
-                    <input class="settings-input" id="settingsApiKey" type="password" placeholder="sk-..." autocomplete="off" />
-                    <button class="key-toggle-btn" onclick="toggleKeyVisibility()" title="显示/隐藏">👁</button>
+                <div class="settings-group">
+                    <label class="settings-label">Model</label>
+                    <div class="model-row">
+                        <select class="settings-select" id="settingsModelSelect" style="display:none"></select>
+                        <input class="settings-input" id="settingsModelInput" type="text" placeholder="model-name" />
+                        <button class="detect-btn" id="detectBtn" style="display:none">🔍 检测</button>
+                    </div>
+                    <div class="settings-hint" id="modelHint"></div>
+                </div>
+                <div class="settings-group" id="apiKeyGroup">
+                    <label class="settings-label">🔑 API Key</label>
+                    <div class="settings-hint" id="apiKeyStatus" style="color:#4caf50;margin-bottom:3px;"></div>
+                    <div class="settings-key-row">
+                        <input class="settings-input" id="settingsApiKey" type="password" placeholder="输入新 Key（留空保留已有）" autocomplete="off" />
+                        <button class="key-toggle-btn" id="keyToggleBtn">👁</button>
+                    </div>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">🌐 Endpoint <span style="opacity:0.5;font-weight:400">(可选)</span></label>
+                    <input class="settings-input" id="settingsEndpoint" type="text" placeholder="留空使用默认" />
+                    <div class="settings-hint" id="endpointHint"></div>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">📏 上下文大小 (tokens)</label>
+                    <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="0 = provider 默认" />
                 </div>
             </div>
-            <!-- Endpoint -->
-            <div class="settings-group">
-                <label class="settings-label">🌐 API Endpoint <span style="opacity:0.5;font-weight:400">(可选)</span></label>
-                <input class="settings-input" id="settingsEndpoint" type="text" placeholder="留空使用默认" oninput="onEndpointChange()" />
-                <div class="settings-hint" id="endpointHint"></div>
-            </div>
-            <!-- Context size -->
-            <div class="settings-group">
-                <label class="settings-label">📏 上下文大小 (tokens)</label>
-                <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="0 = provider 默认值" />
-                <div class="settings-hint">0 = 使用 provider 默认值。Ollama 本地模型推荐手动设置。</div>
+        </div>
+        <div class="accordion-section" id="inlineSection">
+            <div class="accordion-header" id="accInline"><span>✏️ 补全模型</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-body">
+                <div class="settings-toggle-row">
+                    <span class="settings-toggle-label">启用 AI 补全</span>
+                    <label class="toggle-switch"><input type="checkbox" id="inlineEnabled"><span class="toggle-track"></span></label>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">Provider</label>
+                    <select class="settings-select" id="inlineProvider"><option value="">- 与对话相同 -</option></select>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">Model</label>
+                    <input class="settings-input" id="inlineModel" type="text" placeholder="留空与对话相同" />
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">Endpoint</label>
+                    <input class="settings-input" id="inlineEndpoint" type="text" placeholder="留空与对话相同" />
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">防抖延迟 (ms)</label>
+                    <input class="settings-input" id="inlineDebounce" type="number" min="100" step="100" placeholder="1500" />
+                </div>
             </div>
         </div>
-        <div class="settings-footer">
-            <div class="test-result" id="testResult"></div>
-            <button class="settings-test-btn" onclick="testConnection()">🧪 测试连接</button>
-            <button class="settings-save-btn" onclick="saveSettings()">💾 保存设置</button>
+        <div class="accordion-section" id="agentSection">
+            <div class="accordion-header" id="accAgent"><span>🛡️ Agent 设置</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-body">
+                <div class="settings-group">
+                    <label class="settings-label">文件写入模式</label>
+                    <select class="settings-select" id="agentWriteMode">
+                        <option value="confirm">确认模式 — 写操作前 diff 确认（推荐）</option>
+                        <option value="auto">自动模式 — 直接写入（高级）</option>
+                    </select>
+                </div>
+            </div>
         </div>
     </div>
+    <div class="settings-footer">
+        <div class="test-result" id="testResult"></div>
+        <button class="settings-test-btn" id="testConnBtn">🧪 测试连接</button>
+        <button class="settings-save-btn" id="saveSettingsBtn">💾 保存设置</button>
+    </div>
+</div>
 
-    <script>
-        const vscode = acquireVsCodeApi();
-        const chatArea = document.getElementById('chatArea');
-        const input = document.getElementById('input');
-        const sendBtn = document.getElementById('sendBtn');
-        const emptyState = document.getElementById('emptyState');
-        const topicsPanel = document.getElementById('topicsPanel');
-        let isGenerating = false;
-        let currentStepsDiv = null;
+<script nonce="${nonce}">
+(function() {
+    const vscode = acquireVsCodeApi();
+    const chatArea = document.getElementById('chatArea');
+    const input = document.getElementById('input');
+    const sendBtn = document.getElementById('sendBtn');
+    const emptyState = document.getElementById('emptyState');
+    const topicsPanel = document.getElementById('topicsPanel');
+    const settingsPage = document.getElementById('settingsPage');
+    const chatHeader = document.querySelector('.header');
+    const inputWrapper = document.querySelector('.input-wrapper');
+    const planIndicator = document.getElementById('planIndicator');
+    const todoPanel = document.getElementById('todoPanel');
 
-        // Auto-resize textarea
-        input.addEventListener('input', () => {
-            input.style.height = 'auto';
-            input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-        });
+    let isGenerating = false;
+    let currentAssistantDiv = null;
+    let currentMode = 'build';
+    const messageIndexMap = new Map();
+    let settingsProviders = [];
+    let settingsOllamaModels = [];
 
-        function sendMessage() {
-            const text = input.value.trim();
-            if (!text || isGenerating) return;
-            vscode.postMessage({ type: 'sendMessage', text });
-            input.value = '';
-            input.style.height = 'auto';
+    // ── Button bindings ──
+    document.getElementById('btnTopics').addEventListener('click', () => topicsPanel.classList.toggle('show'));
+    document.getElementById('btnNewTopic').addEventListener('click', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); });
+    document.getElementById('btnSettings').addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
+    document.getElementById('buildModeBtn').addEventListener('click', () => switchMode('plan'));
+    document.getElementById('planModeBtn').addEventListener('click', () => switchMode('build'));
+    sendBtn.addEventListener('click', sendMessage);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+    input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 150) + 'px'; });
+    document.getElementById('settingsBackBtn').addEventListener('click', closeSettings);
+    document.getElementById('testConnBtn').addEventListener('click', testConnection);
+    document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+    document.getElementById('keyToggleBtn').addEventListener('click', () => { const k = document.getElementById('settingsApiKey'); k.type = k.type === 'password' ? 'text' : 'password'; });
+    document.getElementById('detectBtn').addEventListener('click', detectOllamaModels);
+    document.getElementById('accChat').addEventListener('click', () => toggleAccordion('chatModelSection'));
+    document.getElementById('accInline').addEventListener('click', () => toggleAccordion('inlineSection'));
+    document.getElementById('accAgent').addEventListener('click', () => toggleAccordion('agentSection'));
+    document.getElementById('settingsProvider').addEventListener('change', onProviderChange);
+    document.getElementById('settingsEndpoint').addEventListener('input', onEndpointChange);
+
+    function sendMessage() {
+        const text = input.value.trim();
+        if (!text || isGenerating) return;
+        vscode.postMessage({ type: 'sendMessage', text });
+        input.value = '';
+        input.style.height = 'auto';
+    }
+
+    function switchMode(mode) {
+        currentMode = mode;
+        vscode.postMessage({ type: 'switchMode', mode });
+        const build = document.getElementById('buildModeBtn');
+        const plan = document.getElementById('planModeBtn');
+        if (mode === 'plan') { plan.classList.add('active'); plan.style.display = ''; build.classList.remove('active'); build.style.display = 'none'; }
+        else { build.classList.add('active'); build.style.display = ''; plan.classList.remove('active'); plan.style.display = 'none'; }
+        document.body.classList.toggle('plan-mode', mode === 'plan');
+    }
+
+    function setGenerating(val) {
+        isGenerating = val;
+        sendBtn.innerHTML = val ? '⬛' : '↑';
+        sendBtn.className = val ? 'send-btn cancel-btn' : 'send-btn';
+        sendBtn.onclick = val ? () => vscode.postMessage({ type: 'cancelGeneration' }) : sendMessage;
+    }
+
+    function escapeHtml(t) { const d = document.createElement('div'); d.textContent = String(t ?? ''); return d.innerHTML; }
+
+    function renderMarkdown(text) {
+        let h = escapeHtml(text);
+        h = h.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+        h = h.split('\\n').join('<br>');
+        return h;
+    }
+
+    function scrollBottom() { chatArea.scrollTop = chatArea.scrollHeight; }
+
+    function addUserMessage(text, msgIdx) {
+        emptyState.style.display = 'none';
+        const div = document.createElement('div');
+        div.className = 'message user';
+        const idx = msgIdx !== undefined ? msgIdx : -1;
+        if (idx >= 0) div.dataset.msgIndex = idx;
+        const hdr = document.createElement('div');
+        hdr.className = 'msg-header';
+        hdr.innerHTML = '<span style="opacity:0.5;font-size:11px;">You</span>';
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-bubble';
+        bubble.textContent = text;
+        div.appendChild(hdr);
+        div.appendChild(bubble);
+        if (idx >= 0) {
+            const rb = document.createElement('button');
+            rb.className = 'retract-btn';
+            rb.textContent = '↩ 撤回';
+            rb.addEventListener('click', () => vscode.postMessage({ type: 'retractMessage', messageIndex: idx }));
+            div.appendChild(rb);
+            messageIndexMap.set(idx, div);
         }
+        chatArea.appendChild(div);
+        scrollBottom();
+        return div;
+    }
 
-        function newTopic() { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); }
-        function configureProvider() { vscode.postMessage({ type: 'configureProvider' }); }
-        function toggleTopics() { topicsPanel.classList.toggle('show'); }
-        function cancelGeneration() { vscode.postMessage({ type: 'cancelGeneration' }); }
-
-        let currentMode = 'build';
-        function switchMode(mode) {
-            currentMode = mode;
-            vscode.postMessage({ type: 'switchMode', mode });
-            document.querySelectorAll('.mode-btn').forEach(b => {
-                b.classList.toggle('active', b.dataset.mode === mode);
-            });
-            document.body.classList.toggle('plan-mode', mode === 'plan');
-            // Update placeholder
-            input.placeholder = mode === 'plan' ? '请描述你想分析的内容...' : '描述你的需求...';
-        }
-
-        function setGenerating(val) {
-            isGenerating = val;
-            sendBtn.textContent = val ? '取消' : '发送';
-            sendBtn.className = val ? 'send-btn cancel-btn' : 'send-btn';
-            sendBtn.onclick = val ? cancelGeneration : sendMessage;
-        }
-
-        function scrollToBottom() {
-            chatArea.scrollTop = chatArea.scrollHeight;
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        function addMessage(role, content, code, isValid, steps) {
-            emptyState.style.display = 'none';
-            const div = document.createElement('div');
-            div.className = 'message';
-
-            let html = '<div class="msg-role ' + role + '">' + (role === 'user' ? '👤 你' : '🤖 AI') + '</div>';
-            html += '<div class="msg-content">' + escapeHtml(content) + '</div>';
-
-            if (steps && steps.length > 0) {
-                html += '<div class="steps">';
-                for (const step of steps) {
-                    const icons = { thinking:'💭', tool_call:'🔧', tool_result:'📦', validation:'✅', error:'❌', code_generated:'📝' };
-                    html += '<div class="step ' + step.type + '"><span class="step-icon">' + (icons[step.type]||'•') + '</span>' + escapeHtml(step.content) + '</div>';
+    function addAssistantMessage(content, code, isValid, steps) {
+        const div = document.createElement('div');
+        div.className = 'message assistant';
+        const hdr = document.createElement('div');
+        hdr.className = 'msg-header';
+        hdr.innerHTML = '<span style="color:#d95a43;font-size:15px;">✳</span><span style="font-family:Georgia,serif;">Claude</span>';
+        div.appendChild(hdr);
+        if (steps && steps.length > 0) {
+            const toolSteps = steps.filter(s => s.type === 'tool_call' || s.type === 'tool_result');
+            if (toolSteps.length > 0) {
+                const cnt = toolSteps.filter(s => s.type === 'tool_call').length;
+                const det = document.createElement('details');
+                det.className = 'tool-group';
+                const sum = document.createElement('summary');
+                sum.textContent = '🔧 Tool calls · ' + cnt;
+                det.appendChild(sum);
+                const body = document.createElement('div');
+                body.className = 'tool-group-body';
+                const icons = { tool_call:'⚙', tool_result:'📦', thinking:'💭', validation:'✅', error:'❌', code_generated:'📝', compaction:'🗄', todo_update:'📝' };
+                for (const s of toolSteps) {
+                    const el = document.createElement('div');
+                    el.className = 'step ' + s.type;
+                    el.innerHTML = '<span class="step-icon">' + (icons[s.type]||'·') + '</span>' + escapeHtml(s.content);
+                    body.appendChild(el);
                 }
-                html += '</div>';
+                det.appendChild(body);
+                div.appendChild(det);
             }
-
-            if (code) {
-                const statusClass = isValid ? 'valid' : 'invalid';
-                const statusText = isValid ? '✅ 验证通过' : '⚠️ 存在问题';
-                html += '<div class="code-block">';
-                html += '<div class="code-header"><span class="code-status ' + statusClass + '">' + statusText + '</span>';
-                html += '<div class="code-actions">';
-                html += '<button class="code-btn" onclick="copyCode(this)">📋 复制</button>';
-                html += '<button class="code-btn" onclick="insertCode(this)">📝 插入</button>';
-                html += '</div></div>';
-                html += '<div class="code-content">' + escapeHtml(code) + '</div>';
-                html += '</div>';
-            }
-
-            div.innerHTML = html;
-            chatArea.appendChild(div);
-            scrollToBottom();
         }
-
-        function copyCode(btn) {
-            const code = btn.closest('.code-block').querySelector('.code-content').textContent;
-            vscode.postMessage({ type: 'copyCode', code });
+        if (content && content.trim()) {
+            const b = document.createElement('div');
+            b.className = 'msg-bubble';
+            b.innerHTML = renderMarkdown(content);
+            div.appendChild(b);
         }
-
-        function insertCode(btn) {
-            const code = btn.closest('.code-block').querySelector('.code-content').textContent;
-            vscode.postMessage({ type: 'insertCode', code });
+        if (code) {
+            const cb = document.createElement('div');
+            cb.className = 'code-block';
+            const ch = document.createElement('div');
+            ch.className = 'code-header';
+            const valid = isValid ? 'valid' : 'invalid';
+            const vtext = isValid ? '✅ 验证通过' : '⚠ 存在问题';
+            ch.innerHTML = '<span class="code-status ' + valid + '">' + vtext + '</span>';
+            const ca = document.createElement('div');
+            ca.className = 'code-actions';
+            const cpBtn = document.createElement('button');
+            cpBtn.className = 'code-btn'; cpBtn.textContent = '复制';
+            cpBtn.addEventListener('click', () => vscode.postMessage({ type: 'copyCode', code: cb.querySelector('.code-content').textContent }));
+            const inBtn = document.createElement('button');
+            inBtn.className = 'code-btn'; inBtn.textContent = '插入';
+            inBtn.addEventListener('click', () => vscode.postMessage({ type: 'insertCode', code: cb.querySelector('.code-content').textContent }));
+            ca.appendChild(cpBtn); ca.appendChild(inBtn); ch.appendChild(ca);
+            const cc = document.createElement('div');
+            cc.className = 'code-content'; cc.textContent = code;
+            cb.appendChild(ch); cb.appendChild(cc);
+            div.appendChild(cb);
         }
+        chatArea.appendChild(div);
+        scrollBottom();
+        return div;
+    }
 
-        // Handle messages from extension host
-        window.addEventListener('message', (event) => {
-            const msg = event.data;
-            switch (msg.type) {
-                case 'addUserMessage':
-                    setGenerating(true);
-                    addMessage('user', msg.text);
-                    // Create steps container for the upcoming response
-                    currentStepsDiv = document.createElement('div');
-                    currentStepsDiv.className = 'message';
-                    currentStepsDiv.innerHTML = '<div class="msg-role assistant">🤖 AI</div><div class="steps" id="liveSteps"></div>';
-                    chatArea.appendChild(currentStepsDiv);
-                    scrollToBottom();
-                    break;
+    function showDiffCard(file, diff, messageId) {
+        const div = document.createElement('div');
+        const fileName = (file || '').split(/[\\\\/]/).pop() || file;
+        const diffHtml = (diff || '').split('\\n').map(line => {
+            if (line.startsWith('+') && !line.startsWith('+++')) return '<span class="diff-add">' + escapeHtml(line) + '</span>';
+            if (line.startsWith('-') && !line.startsWith('---')) return '<span class="diff-del">' + escapeHtml(line) + '</span>';
+            return escapeHtml(line);
+        }).join('\\n');
+        div.innerHTML = '<div class="diff-card">' +
+            '<div class="diff-card-header">Requesting to modify: ' + escapeHtml(fileName) + '</div>' +
+            '<div class="diff-card-body">' + diffHtml + '</div>' +
+            '<div class="diff-card-actions">' +
+            '<button class="diff-accept-btn" onclick="window._confirmWrite(\\'' + messageId + '\\',this)">Accept</button>' +
+            '<button class="diff-reject-btn" onclick="window._cancelWrite(\\'' + messageId + '\\',this)">Reject</button>' +
+            '</div></div>';
+        chatArea.appendChild(div);
+        scrollBottom();
+    }
 
-                case 'agentStep':
-                    if (currentStepsDiv) {
-                        const stepsDiv = currentStepsDiv.querySelector('.steps');
-                        const icons = { thinking:'💭', tool_call:'🔧', tool_result:'📦', validation:'✅', error:'❌', code_generated:'📝', compaction:'🗄️', todo_update:'📝' };
-                        const step = msg.step;
-                        const stepEl = document.createElement('div');
-                        stepEl.className = 'step ' + step.type;
-                        stepEl.innerHTML = '<span class="step-icon">' + (icons[step.type]||'•') + '</span>' + escapeHtml(step.content);
-                        stepsDiv.appendChild(stepEl);
-                        scrollToBottom();
+    window._confirmWrite = function(messageId, btn) {
+        btn.closest('.diff-card-actions').querySelectorAll('button').forEach(b => b.disabled = true);
+        btn.textContent = 'Accepted';
+        vscode.postMessage({ type: 'confirmWriteFile', messageId });
+    };
+    window._cancelWrite = function(messageId, btn) {
+        btn.closest('.diff-card-actions').querySelectorAll('button').forEach(b => b.disabled = true);
+        btn.textContent = 'Rejected';
+        vscode.postMessage({ type: 'cancelWriteFile', messageId });
+    };
+
+    // ── Messages from host ──
+    window.addEventListener('message', event => {
+        const msg = event.data;
+        switch (msg.type) {
+            case 'addUserMessage':
+                setGenerating(true);
+                addUserMessage(msg.text, msg.messageIndex);
+                currentAssistantDiv = document.createElement('div');
+                currentAssistantDiv.className = 'message assistant';
+                currentAssistantDiv.innerHTML =
+                    '<div class="msg-header"><span style="color:#d95a43;font-size:15px;">✳</span><span style="font-family:Georgia,serif;">Claude</span></div>' +
+                    '<details class="tool-group" id="liveToolGroup" style="display:none"><summary>thinking...</summary><div class="tool-group-body" id="liveToolBody"></div></details>';
+                chatArea.appendChild(currentAssistantDiv);
+                scrollBottom();
+                break;
+            case 'agentStep': {
+                if (!currentAssistantDiv) break;
+                const s = msg.step;
+                if (s.type === 'tool_call' || s.type === 'tool_result') {
+                    const tg = currentAssistantDiv.querySelector('#liveToolGroup');
+                    const tb = currentAssistantDiv.querySelector('#liveToolBody');
+                    if (tg) tg.style.display = '';
+                    if (tb) {
+                        const icons = { tool_call:'⚙', tool_result:'📦', thinking:'💭', validation:'✅', error:'❌', code_generated:'📝', compaction:'🗄', todo_update:'📝' };
+                        const el = document.createElement('div');
+                        el.className = 'step ' + s.type;
+                        el.innerHTML = '<span class="step-icon">' + (icons[s.type]||'·') + '</span>' + escapeHtml(s.content);
+                        tb.appendChild(el);
                     }
-                    break;
-
-                case 'generationComplete':
-                    setGenerating(false);
-                    // Remove the live steps container
-                    if (currentStepsDiv) { currentStepsDiv.remove(); currentStepsDiv = null; }
-                    const r = msg.result;
-                    addMessage('assistant', r.explanation || '代码已生成', r.code, r.isValid, r.steps);
-                    break;
-
-                case 'generationError':
-                    setGenerating(false);
-                    if (currentStepsDiv) { currentStepsDiv.remove(); currentStepsDiv = null; }
-                    addMessage('assistant', '❌ ' + msg.error);
-                    break;
-
-                case 'clearChat':
-                    chatArea.innerHTML = '';
-                    emptyState.style.display = '';
-                    chatArea.appendChild(emptyState);
-                    break;
-
-                case 'topicList':
-                    renderTopics(msg.topics);
-                    break;
-
-                case 'loadTopicMessages':
-                    for (const m of msg.messages) {
-                        addMessage(m.role, m.content, m.code, m.isValid, m.steps);
-                    }
-                    break;
-
-                case 'modeChanged':
-                    currentMode = msg.mode;
-                    document.querySelectorAll('.mode-btn').forEach(b => {
-                        b.classList.toggle('active', b.dataset.mode === msg.mode);
-                    });
-                    document.body.classList.toggle('plan-mode', msg.mode === 'plan');
-                    break;
-
-                case 'todoUpdate':
-                    renderTodos(msg.todos);
-                    break;
-
-                case 'settingsData':
-                    showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
-                    break;
-
-                case 'ollamaModels': {
-                    const detectBtn = document.getElementById('detectBtn');
-                    detectBtn.disabled = false;
-                    detectBtn.textContent = '🔍 检测';
-                    if (msg.error) {
-                        document.getElementById('modelHint').textContent = msg.error;
-                    } else {
-                        settingsOllamaModels = msg.models;
-                        const providerId = document.getElementById('settingsProvider').value;
-                        updateModelUI(providerId, '', msg.models);
-                    }
-                    break;
                 }
-
-                case 'testConnectionResult': {
-                    const tr = document.getElementById('testResult');
-                    tr.className = 'test-result ' + (msg.ok ? 'ok' : 'fail');
-                    tr.textContent = msg.message;
-                    break;
+                scrollBottom();
+                break;
+            }
+            case 'generationComplete':
+                setGenerating(false);
+                if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
+                { const r = msg.result; addAssistantMessage(r.explanation || '完成', r.code, r.isValid, r.steps); }
+                break;
+            case 'generationError':
+                setGenerating(false);
+                if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
+                addAssistantMessage('❌ ' + msg.error);
+                break;
+            case 'clearChat':
+                chatArea.innerHTML = '';
+                emptyState.style.display = '';
+                chatArea.appendChild(emptyState);
+                messageIndexMap.clear();
+                break;
+            case 'topicList': renderTopics(msg.topics); break;
+            case 'loadTopicMessages':
+                for (const m of msg.messages) {
+                    if (m.role === 'user') addUserMessage(m.content);
+                    else addAssistantMessage(m.content, m.code, m.isValid, m.steps);
                 }
+                break;
+            case 'messageRetracted': {
+                const rd = messageIndexMap.get(msg.messageIndex);
+                if (rd) { rd.classList.add('retracted'); const b = rd.querySelector('.msg-bubble'); if (b) b.textContent = '(已撤回)'; }
+                const nx = rd?.nextElementSibling;
+                if (nx && nx.classList.contains('assistant')) nx.remove();
+                break;
             }
-        });
-
-        function renderTopics(topics) {
-            if (topics.length === 0) {
-                topicsPanel.innerHTML = '<div style="text-align:center;opacity:0.5;padding:20px;">暂无历史话题</div>';
-                return;
+            case 'pendingWriteFile': showDiffCard(msg.file, msg.diff, msg.messageId); break;
+            case 'modeChanged':
+                currentMode = msg.mode;
+                document.body.classList.toggle('plan-mode', msg.mode === 'plan');
+                break;
+            case 'todoUpdate': renderTodos(msg.todos); break;
+            case 'settingsData': showSettingsPage(msg.providers, msg.current, msg.ollamaModels); break;
+            case 'ollamaModels': {
+                const db = document.getElementById('detectBtn');
+                db.disabled = false; db.textContent = '🔍 检测';
+                if (msg.error) { document.getElementById('modelHint').textContent = msg.error; }
+                else { settingsOllamaModels = msg.models; updateModelUI(document.getElementById('settingsProvider').value, '', msg.models); }
+                break;
             }
-            let html = '';
-            for (const t of topics) {
-                const date = new Date(t.updatedAt).toLocaleString();
-                html += '<div class="topic-item" onclick="loadTopic(\\'' + t.id + '\\')">';
-                html += '<span class="topic-title">' + escapeHtml(t.title) + '</span>';
-                html += '<span class="topic-delete" onclick="event.stopPropagation();deleteTopic(\\'' + t.id + '\\')">🗑️</span>';
-                html += '</div>';
+            case 'testConnectionResult': {
+                const tr = document.getElementById('testResult');
+                tr.className = 'test-result ' + (msg.ok ? 'ok' : 'fail');
+                tr.textContent = msg.message;
+                break;
             }
-            topicsPanel.innerHTML = html;
         }
+    });
 
-        function loadTopic(id) { vscode.postMessage({ type: 'loadTopic', topicId: id }); topicsPanel.classList.remove('show'); }
-        function deleteTopic(id) { vscode.postMessage({ type: 'deleteTopic', topicId: id }); }
+    function renderTopics(topics) {
+        if (!topics.length) { topicsPanel.innerHTML = '<div style="text-align:center;opacity:0.5;padding:20px;font-size:12px;">暂无历史话题</div>'; return; }
+        topicsPanel.innerHTML = topics.map(t =>
+            '<div class="topic-item" onclick="window._loadTopic(\\'' + t.id + '\\')">' +
+            '<span class="topic-title">' + escapeHtml(t.title) + '</span>' +
+            '<span class="topic-delete" onclick="event.stopPropagation();window._deleteTopic(\\'' + t.id + '\\')">✕</span>' +
+            '</div>'
+        ).join('');
+    }
+    window._loadTopic = id => { vscode.postMessage({ type: 'loadTopic', topicId: id }); topicsPanel.classList.remove('show'); };
+    window._deleteTopic = id => vscode.postMessage({ type: 'deleteTopic', topicId: id });
 
-        function renderTodos(todos) {
-            const panel = document.getElementById('todoPanel');
-            const list = document.getElementById('todoList');
-            if (!todos || todos.length === 0) {
-                panel.classList.remove('has-items');
-                list.innerHTML = '';
-                return;
-            }
-            panel.classList.add('has-items');
-            const statusIcons = { pending: '⬜', in_progress: '🔄', done: '✅' };
-            list.innerHTML = todos.map(t => {
-                const icon = statusIcons[t.status] || '⬜';
-                const cls = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in_progress' : '';
-                return '<div class="todo-item ' + cls + '"><span class="todo-status">' + icon + '</span>' + escapeHtml(t.content) + '</div>';
-            }).join('');
-        }
+    function renderTodos(todos) {
+        if (!todos || !todos.length) { todoPanel.classList.remove('has-items'); document.getElementById('todoList').innerHTML = ''; return; }
+        todoPanel.classList.add('has-items');
+        const icons = { pending:'○', in_progress:'●', done:'✓' };
+        document.getElementById('todoList').innerHTML = todos.map(t => {
+            const cls = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in_progress' : '';
+            return '<div class="todo-item ' + cls + '"><span>' + (icons[t.status]||'○') + '</span>' + escapeHtml(t.content) + '</div>';
+        }).join('');
+    }
 
-        // ── Settings Page ─────────────────────────────────────────
+    function showSettingsPage(providers, current, ollamaModels) {
+        settingsProviders = providers;
+        settingsOllamaModels = ollamaModels || [];
+        const sel = document.getElementById('settingsProvider');
+        sel.innerHTML = providers.map(p => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        const inlineSel = document.getElementById('inlineProvider');
+        inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map(p => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        const hasKey = providers.find(p => p.id === current.provider)?.hasKey;
+        document.getElementById('apiKeyStatus').textContent = hasKey ? '✅ 已配置 API Key' : '';
+        document.getElementById('settingsApiKey').value = '';
+        document.getElementById('settingsEndpoint').value = current.endpoint || '';
+        document.getElementById('settingsCtx').value = current.maxContextTokens || 0;
+        document.getElementById('inlineEnabled').checked = current.inlineCompletion?.enabled ?? false;
+        document.getElementById('inlineModel').value = current.inlineCompletion?.model || '';
+        document.getElementById('inlineEndpoint').value = current.inlineCompletion?.endpoint || '';
+        document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs || 1500;
+        document.getElementById('agentWriteMode').value = current.agentFileWriteMode || 'confirm';
+        updateModelUI(current.provider, current.model, ollamaModels);
+        chatHeader.style.display = 'none';
+        document.getElementById('chatArea').style.display = 'none';
+        if (inputWrapper) inputWrapper.style.display = 'none';
+        if (planIndicator) planIndicator.style.display = 'none';
+        if (todoPanel) todoPanel.style.display = 'none';
+        settingsPage.classList.add('active');
+        document.getElementById('testResult').className = 'test-result';
+        document.getElementById('testResult').textContent = '';
+    }
 
-        let settingsProviders = [];
-        let settingsOllamaModels = [];
-        const chatMain = document.getElementById('chatArea');
-        const chatInputArea = document.querySelector('.input-area');
-        const settingsPage = document.getElementById('settingsPage');
-        const chatHeader = document.querySelector('.header');
-        const planIndicator = document.getElementById('planIndicator');
-        const todoPanel = document.getElementById('todoPanel');
+    function closeSettings() {
+        settingsPage.classList.remove('active');
+        chatHeader.style.display = '';
+        document.getElementById('chatArea').style.display = 'flex';
+        if (inputWrapper) inputWrapper.style.display = '';
+        if (planIndicator) planIndicator.style.display = '';
+        if (todoPanel) todoPanel.style.display = '';
+    }
 
-        function openSettings() {
-            vscode.postMessage({ type: 'openSettings' });
-        }
+    function onProviderChange() { const id = document.getElementById('settingsProvider').value; updateModelUI(id, '', settingsOllamaModels); updateEndpointHint(id); }
 
-        function showSettingsPage(providers, current, ollamaModels) {
-            settingsProviders = providers;
-            settingsOllamaModels = ollamaModels || [];
-
-            // Populate provider dropdown
-            const sel = document.getElementById('settingsProvider');
-            sel.innerHTML = providers.map(p =>
-                '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>'
-            ).join('');
-
-            // Pre-fill values
-            document.getElementById('settingsApiKey').value = current.apiKey || '';
-            document.getElementById('settingsEndpoint').value = current.endpoint || '';
-            document.getElementById('settingsCtx').value = current.maxContextTokens || 0;
-
-            // Set model and refresh UI
-            updateModelUI(current.provider, current.model, ollamaModels);
-
-            // Show page
-            chatHeader.style.display = 'none';
-            chatMain.style.display = 'none';
-            chatInputArea.style.display = 'none';
-            if (planIndicator) planIndicator.style.display = 'none';
-            if (todoPanel) todoPanel.style.display = 'none';
-            settingsPage.classList.add('active');
-
-            // Clear test result
-            const tr = document.getElementById('testResult');
-            tr.className = 'test-result';
-            tr.textContent = '';
-        }
-
-        function closeSettings() {
-            settingsPage.classList.remove('active');
-            chatHeader.style.display = '';
-            chatMain.style.display = '';
-            chatInputArea.style.display = '';
-            if (planIndicator) planIndicator.style.display = '';
-            if (todoPanel) todoPanel.style.display = '';
-        }
-
-        function onProviderChange() {
-            const providerId = document.getElementById('settingsProvider').value;
-            updateModelUI(providerId, '', settingsOllamaModels);
-            updateEndpointHint(providerId);
-        }
-
-        function updateModelUI(providerId, currentModel, ollamaModels) {
-            const provider = settingsProviders.find(p => p.id === providerId);
-            const modelSel = document.getElementById('settingsModelSelect');
-            const modelInput = document.getElementById('settingsModelInput');
-            const detectBtn = document.getElementById('detectBtn');
-            const apiKeyGroup = document.getElementById('apiKeyGroup');
-            const modelHint = document.getElementById('modelHint');
-
-            // API key visibility
-            apiKeyGroup.style.display = (providerId === 'ollama') ? 'none' : '';
-
-            if (providerId === 'ollama') {
-                modelSel.style.display = 'none';
-                modelInput.style.display = '';
-                detectBtn.style.display = '';
-                modelHint.textContent = '点击「检测」自动获取正在运行的 Ollama 模型';
-
-                // If we have ollamaModels, show a select
-                if (ollamaModels && ollamaModels.length > 0) {
-                    modelSel.innerHTML = ollamaModels.map(m =>
-                        '<option value="' + escapeHtml(m.name) + '"' + (m.name === currentModel ? ' selected' : '') + '>' +
-                        escapeHtml(m.name) + (m.parameterSize ? ' (' + m.parameterSize + ')' : '') + ' — ' + m.size + '</option>'
-                    ).join('');
-                    modelSel.style.display = '';
-                    modelInput.style.display = 'none';
-                    modelHint.textContent = '已检测到 ' + ollamaModels.length + ' 个本地模型';
-                } else {
-                    modelInput.value = currentModel || '';
-                }
-            } else if (provider && provider.models.length > 0) {
-                modelSel.innerHTML = provider.models.map(m =>
-                    '<option value="' + escapeHtml(m) + '"' + (m === currentModel ? ' selected' : '') + '>' + escapeHtml(m) + '</option>'
-                ).join('');
-                if (!currentModel || !provider.models.includes(currentModel)) {
-                    // Also allow custom input: add a text input below
-                    modelSel.style.display = 'none';
-                    modelInput.style.display = '';
-                    modelInput.value = currentModel || provider.defaultModel || '';
-                    modelHint.textContent = '也可直接输入模型名称';
-                } else {
-                    modelSel.style.display = '';
-                    modelInput.style.display = 'none';
-                    modelHint.textContent = '或直接输入自定义模型名';
-                }
-                detectBtn.style.display = 'none';
+    function updateModelUI(providerId, currentModel, ollamaModels) {
+        const provider = settingsProviders.find(p => p.id === providerId);
+        const modelSel = document.getElementById('settingsModelSelect');
+        const modelInput = document.getElementById('settingsModelInput');
+        const detectBtn = document.getElementById('detectBtn');
+        const apiKeyGroup = document.getElementById('apiKeyGroup');
+        const modelHint = document.getElementById('modelHint');
+        apiKeyGroup.style.display = providerId === 'ollama' ? 'none' : '';
+        if (providerId === 'ollama') {
+            if (ollamaModels && ollamaModels.length > 0) {
+                modelSel.innerHTML = ollamaModels.map(m => '<option value="' + escapeHtml(m.name) + '"' + (m.name === currentModel ? ' selected' : '') + '>' + escapeHtml(m.name) + (m.parameterSize ? ' (' + m.parameterSize + ')' : '') + ' — ' + m.size + '</option>').join('');
+                modelSel.style.display = ''; modelInput.style.display = 'none';
+                modelHint.textContent = '已检测到 ' + ollamaModels.length + ' 个本地模型';
             } else {
-                // Custom / empty models
-                modelSel.style.display = 'none';
-                modelInput.style.display = '';
+                modelSel.style.display = 'none'; modelInput.style.display = ''; detectBtn.style.display = '';
                 modelInput.value = currentModel || '';
-                detectBtn.style.display = 'none';
-                modelHint.textContent = '';
+                modelHint.textContent = '点击「检测」自动获取正在运行的 Ollama 模型';
             }
-
-            updateEndpointHint(providerId);
-        }
-
-        function updateEndpointHint(providerId) {
-            const provider = settingsProviders.find(p => p.id === providerId);
-            const hint = document.getElementById('endpointHint');
-            const endpointEl = document.getElementById('settingsEndpoint');
-            if (provider) {
-                hint.textContent = '默认: ' + (provider.defaultEndpoint || '由 provider 决定');
-                if (!endpointEl.value) {
-                    endpointEl.placeholder = provider.defaultEndpoint || '留空使用默认';
-                }
+            detectBtn.style.display = '';
+        } else if (provider && provider.models.length > 0) {
+            modelSel.innerHTML = provider.models.map(m => '<option value="' + escapeHtml(m) + '"' + (m === currentModel ? ' selected' : '') + '>' + escapeHtml(m) + '</option>').join('');
+            if (!currentModel || !provider.models.includes(currentModel)) {
+                modelSel.style.display = 'none'; modelInput.style.display = '';
+                modelInput.value = currentModel || provider.defaultModel || '';
+                modelHint.textContent = '也可直接输入模型名称';
+            } else {
+                modelSel.style.display = ''; modelInput.style.display = 'none';
+                modelHint.textContent = '或直接输入自定义模型名';
             }
+            detectBtn.style.display = 'none';
+        } else {
+            modelSel.style.display = 'none'; modelInput.style.display = ''; detectBtn.style.display = 'none';
+            modelInput.value = currentModel || ''; modelHint.textContent = '';
         }
+        updateEndpointHint(providerId);
+    }
 
-        function onEndpointChange() {
-            const providerId = document.getElementById('settingsProvider').value;
-            if (providerId === 'ollama') {
-                settingsOllamaModels = [];
-                const modelSel = document.getElementById('settingsModelSelect');
-                const modelInput = document.getElementById('settingsModelInput');
-                modelSel.style.display = 'none';
-                modelInput.style.display = '';
-                document.getElementById('modelHint').textContent = '端点已更改，点击「检测」重新获取模型';
-            }
-        }
+    function updateEndpointHint(providerId) {
+        const provider = settingsProviders.find(p => p.id === providerId);
+        const hint = document.getElementById('endpointHint');
+        const ep = document.getElementById('settingsEndpoint');
+        if (provider) { hint.textContent = '默认: ' + (provider.defaultEndpoint || '由 provider 决定'); if (!ep.value) ep.placeholder = provider.defaultEndpoint || '留空使用默认'; }
+    }
 
-        function detectOllamaModels() {
-            const btn = document.getElementById('detectBtn');
-            const endpoint = document.getElementById('settingsEndpoint').value.trim();
-            btn.disabled = true;
-            btn.textContent = '检测中...';
-            document.getElementById('modelHint').textContent = '正在连接 Ollama...';
-            vscode.postMessage({ type: 'detectOllamaModels', endpoint: endpoint || 'http://localhost:11434/v1' });
+    function onEndpointChange() {
+        if (document.getElementById('settingsProvider').value === 'ollama') {
+            settingsOllamaModels = [];
+            document.getElementById('settingsModelSelect').style.display = 'none';
+            document.getElementById('settingsModelInput').style.display = '';
+            document.getElementById('modelHint').textContent = '端点已更改，点击「检测」重新获取模型';
         }
+    }
 
-        function toggleKeyVisibility() {
-            const input = document.getElementById('settingsApiKey');
-            input.type = input.type === 'password' ? 'text' : 'password';
-        }
+    function detectOllamaModels() {
+        const btn = document.getElementById('detectBtn');
+        const ep = document.getElementById('settingsEndpoint').value.trim();
+        btn.disabled = true; btn.textContent = '检测中...';
+        document.getElementById('modelHint').textContent = '正在连接 Ollama...';
+        vscode.postMessage({ type: 'detectOllamaModels', endpoint: ep || 'http://localhost:11434/v1' });
+    }
 
-        function getSelectedModel() {
-            const modelSel = document.getElementById('settingsModelSelect');
-            const modelInput = document.getElementById('settingsModelInput');
-            if (modelSel.style.display !== 'none') {
-                return modelSel.value;
-            }
-            return modelInput.value.trim();
-        }
+    function getSelectedModel() {
+        const sel = document.getElementById('settingsModelSelect');
+        const inp = document.getElementById('settingsModelInput');
+        return sel.style.display !== 'none' ? sel.value : inp.value.trim();
+    }
 
-        function saveSettings() {
-            const settings = {
-                provider: document.getElementById('settingsProvider').value,
-                model: getSelectedModel(),
-                apiKey: document.getElementById('settingsApiKey').value,
-                endpoint: document.getElementById('settingsEndpoint').value.trim(),
-                maxContextTokens: parseInt(document.getElementById('settingsCtx').value) || 0,
-            };
-            vscode.postMessage({ type: 'saveSettings', settings });
-            closeSettings();
-        }
+    function toggleAccordion(id) { document.getElementById(id).classList.toggle('open'); }
 
-        function testConnection() {
-            const tr = document.getElementById('testResult');
-            tr.className = 'test-result';
-            tr.textContent = '测试中...';
-            tr.style.display = 'block';
-            // Pass current form values so backend uses them, not old saved config
-            const settings = {
-                provider: document.getElementById('settingsProvider').value,
-                model: getSelectedModel(),
-                apiKey: document.getElementById('settingsApiKey').value,
-                endpoint: document.getElementById('settingsEndpoint').value.trim(),
-                maxContextTokens: parseInt(document.getElementById('settingsCtx').value) || 0,
-            };
-            vscode.postMessage({ type: 'testConnection', settings });
-        }
-    </script>
+    function saveSettings() {
+        vscode.postMessage({ type: 'saveSettings', settings: {
+            provider: document.getElementById('settingsProvider').value,
+            model: getSelectedModel(),
+            apiKey: document.getElementById('settingsApiKey').value,
+            endpoint: document.getElementById('settingsEndpoint').value.trim(),
+            maxContextTokens: parseInt(document.getElementById('settingsCtx').value) || 0,
+            agentFileWriteMode: document.getElementById('agentWriteMode').value,
+            inlineCompletion: {
+                enabled: document.getElementById('inlineEnabled').checked,
+                provider: document.getElementById('inlineProvider').value,
+                model: document.getElementById('inlineModel').value.trim(),
+                endpoint: document.getElementById('inlineEndpoint').value.trim(),
+                debounceMs: parseInt(document.getElementById('inlineDebounce').value) || 1500,
+            },
+        }});
+        closeSettings();
+    }
+
+    function testConnection() {
+        const tr = document.getElementById('testResult');
+        tr.className = 'test-result'; tr.textContent = '测试中...'; tr.style.display = 'block';
+        vscode.postMessage({ type: 'testConnection', settings: {
+            provider: document.getElementById('settingsProvider').value,
+            model: getSelectedModel(),
+            apiKey: document.getElementById('settingsApiKey').value,
+            endpoint: document.getElementById('settingsEndpoint').value.trim(),
+            maxContextTokens: 0, agentFileWriteMode: 'confirm',
+            inlineCompletion: { enabled: false, provider: '', model: '', endpoint: '', debounceMs: 1500 },
+        }});
+    }
+})();
+</script>
 </body>
 </html>`;
     }

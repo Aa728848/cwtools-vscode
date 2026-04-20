@@ -95,21 +95,53 @@ export class AIService {
      */
     getConfig(): AIUserConfig {
         const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        // NOTE: apiKey is intentionally empty here — keys live in SecretStorage.
+        // The legacy cfg key is read ONLY during migration (handled in chatCompletion).
         return {
             enabled: cfg.get<boolean>('enabled', false),
             provider: cfg.get<string>('provider', 'openai'),
             model: cfg.get<string>('model', ''),
             endpoint: cfg.get<string>('endpoint', ''),
-            apiKey: cfg.get<string>('apiKey', ''),
+            apiKey: '',   // never expose plaintext; use getKeyForProvider() instead
             maxRetries: cfg.get<number>('maxRetries', 3),
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
+            agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm'),
             inlineCompletion: {
                 enabled: cfg.get<boolean>('inlineCompletion.enabled', false),
                 debounceMs: cfg.get<number>('inlineCompletion.debounceMs', 1500),
                 provider: cfg.get<string>('inlineCompletion.provider', ''),
                 model: cfg.get<string>('inlineCompletion.model', ''),
+                endpoint: cfg.get<string>('inlineCompletion.endpoint', ''),
             },
         };
+    }
+
+    /**
+     * Get API key for a provider: SecretStorage first, then migrate from settings.json.
+     */
+    async getKeyForProvider(providerId: string): Promise<string> {
+        // 1. Try SecretStorage
+        let key = await this.keyManager.getKey(providerId);
+        if (key) return key;
+
+        // 2. Migration path: read plaintext from settings.json and move to SecretStorage
+        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const legacyKey = cfg.get<string>('apiKey', '');
+        if (legacyKey && legacyKey.trim().length > 0) {
+            const currentProvider = cfg.get<string>('provider', '');
+            // Only migrate if the saved provider matches the one being requested
+            if (currentProvider === providerId) {
+                await this.keyManager.setKey(providerId, legacyKey.trim());
+                // Clear plaintext from settings.json
+                await cfg.update('apiKey', '', vs.ConfigurationTarget.Global);
+                vs.window.showInformationMessage(
+                    `CWTools AI: API Key 已安全迁移到 SecretStorage (${providerId})`
+                );
+                return legacyKey.trim();
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -145,17 +177,21 @@ export class AIService {
         // Ollama doesn't require an API key
         let apiKey = '';
         if (providerId !== 'ollama') {
-            // Priority: options override > settings config > SecretStorage
+            // Priority: options override (for test) > SecretStorage (with migration fallback)
             if (options?.apiKey) {
                 apiKey = options.apiKey;
-            } else if (config.apiKey) {
-                apiKey = config.apiKey;
             } else {
-                const key = await this.keyManager.ensureKey(providerId);
+                const key = await this.getKeyForProvider(providerId);
                 if (!key) {
-                    throw new Error(`No API key configured for ${provider.name}. Please configure it in the AI Settings panel.`);
+                    // Prompt to enter key
+                    const entered = await this.keyManager.promptForKey(providerId);
+                    if (!entered) {
+                        throw new Error(`No API key configured for ${provider.name}. Please configure it in the AI Settings panel.`);
+                    }
+                    apiKey = entered;
+                } else {
+                    apiKey = key;
                 }
-                apiKey = key;
             }
         }
 
@@ -208,15 +244,11 @@ export class AIService {
         // Ollama doesn't require an API key
         let apiKey = '';
         if (providerId !== 'ollama') {
-            if (config.apiKey) {
-                apiKey = config.apiKey;
-            } else {
-                const key = await this.keyManager.ensureKey(providerId);
-                if (!key) {
-                    throw new Error(`No API key configured for ${provider.name}.`);
-                }
-                apiKey = key;
+            const key = await this.getKeyForProvider(providerId);
+            if (!key) {
+                throw new Error(`No API key configured for ${provider.name}.`);
             }
+            apiKey = key;
         }
 
         const endpoint = getEffectiveEndpoint(providerId, config.endpoint);

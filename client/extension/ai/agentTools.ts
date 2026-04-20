@@ -215,9 +215,75 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    {
+        type: 'function',
+        function: {
+            name: 'read_file',
+            description: 'Read the full content of a file, with optional line range. Returns content with line numbers prepended. Large files are automatically truncated with a notice. Prefer this over get_file_context when you need to read a whole file.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path' },
+                    startLine: { type: 'number', description: 'Start line (1-based, optional)' },
+                    endLine: { type: 'number', description: 'End line (1-based inclusive, optional)' },
+                },
+                required: ['file'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'write_file',
+            description: 'Write content to a file, replacing its entire content. If agentFileWriteMode is "confirm", the write will be queued for user confirmation via a diff view. If "auto", writes immediately.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path' },
+                    content: { type: 'string', description: 'New file content' },
+                },
+                required: ['file', 'content'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'patch_file',
+            description: 'Replace a specific range of lines in a file with new content. More surgical than write_file for small edits. Lines are 1-based. Subject to the same confirmation rules as write_file.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path' },
+                    startLine: { type: 'number', description: 'First line to replace (1-based)' },
+                    endLine: { type: 'number', description: 'Last line to replace (1-based, inclusive)' },
+                    newContent: { type: 'string', description: 'Replacement content for the specified line range' },
+                },
+                required: ['file', 'startLine', 'endLine', 'newContent'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'list_directory',
+            description: 'List files and subdirectories in a directory. Use this to understand project structure before reading files.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    directory: { type: 'string', description: 'Directory path (absolute or relative to workspace root)' },
+                    recursive: { type: 'boolean', description: 'Whether to list recursively (default false, depth limited to 3)' },
+                },
+                required: ['directory'],
+            },
+        },
+    },
 ];
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
+
+/** Maximum tool result size before truncation (~8K chars) */
+const MAX_TOOL_RESULT_CHARS = 8000;
 
 /**
  * Executes Agent tools by communicating with the CWTools Language Server
@@ -228,6 +294,10 @@ export class AgentToolExecutor {
     private currentTodos: TodoItem[] = [];
     /** Callback when todos are updated (for UI) */
     public onTodoUpdate?: (todos: TodoItem[]) => void;
+    /** Callback when a file write needs user confirmation (confirm mode) */
+    public onPendingWrite?: (file: string, diff: string, messageId: string) => Promise<boolean>;
+    /** Agent file write mode from config */
+    public fileWriteMode: 'confirm' | 'auto' = 'confirm';
 
     constructor(
         private client: LanguageClient,
@@ -236,34 +306,65 @@ export class AgentToolExecutor {
 
     /**
      * Execute a tool by name with the given arguments.
+     * Results are automatically truncated if too large.
      */
     async execute(toolName: AgentToolName, args: Record<string, unknown>): Promise<unknown> {
+        let result: unknown;
         switch (toolName) {
             case 'query_scope':
-                return this.queryScope(args as any);
+                result = await this.queryScope(args as any); break;
             case 'query_types':
-                return this.queryTypes(args as any);
+                result = await this.queryTypes(args as any); break;
             case 'query_rules':
-                return this.queryRules(args as any);
+                result = await this.queryRules(args as any); break;
             case 'query_references':
-                return this.queryReferences(args as any);
+                result = await this.queryReferences(args as any); break;
             case 'validate_code':
-                return this.validateCode(args as any);
+                result = await this.validateCode(args as any); break;
             case 'get_file_context':
-                return this.getFileContext(args as any);
+                result = await this.getFileContext(args as any); break;
             case 'search_mod_files':
-                return this.searchModFiles(args as any);
+                result = await this.searchModFiles(args as any); break;
             case 'get_completion_at':
-                return this.getCompletionAt(args as any);
+                result = await this.getCompletionAt(args as any); break;
             case 'document_symbols':
-                return this.documentSymbols(args as any);
+                result = await this.documentSymbols(args as any); break;
             case 'workspace_symbols':
-                return this.workspaceSymbols(args as any);
+                result = await this.workspaceSymbols(args as any); break;
             case 'todo_write':
-                return this.todoWrite(args as any);
+                result = await this.todoWrite(args as any); break;
+            case 'read_file':
+                result = await this.readFile(args as any); break;
+            case 'write_file':
+                result = await this.writeFile(args as any); break;
+            case 'patch_file':
+                result = await this.patchFile(args as any); break;
+            case 'list_directory':
+                result = await this.listDirectory(args as any); break;
             default:
                 throw new Error(`Unknown tool: ${toolName}`);
         }
+        return this.truncateResult(result);
+    }
+
+    /**
+     * Truncate large tool results to avoid overloading context window.
+     */
+    private truncateResult(result: unknown): unknown {
+        const json = JSON.stringify(result);
+        if (json.length <= MAX_TOOL_RESULT_CHARS) return result;
+
+        // For string-valued results, truncate directly
+        if (typeof result === 'object' && result !== null) {
+            const truncated = json.substring(0, MAX_TOOL_RESULT_CHARS);
+            return {
+                _truncated: true,
+                _originalLength: json.length,
+                _note: `Result truncated to ${MAX_TOOL_RESULT_CHARS} chars. Request a narrower range or specific subsection.`,
+                data: truncated,
+            };
+        }
+        return result;
     }
 
     // ─── Tool Implementations ────────────────────────────────────────────────
@@ -682,6 +783,163 @@ export class AgentToolExecutor {
     /** Clear todos (e.g., when starting a new topic) */
     clearTodos(): void {
         this.currentTodos = [];
+    }
+
+    // ─── File Tools ──────────────────────────────────────────────────────────
+
+    private async readFile(args: { file: string; startLine?: number; endLine?: number }): Promise<import('./types').ReadFileResult> {
+        try {
+            const content = fs.readFileSync(args.file, 'utf-8');
+            const lines = content.split('\n');
+            const totalLines = lines.length;
+
+            const start = args.startLine ? Math.max(1, args.startLine) - 1 : 0;
+            const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
+            const slice = lines.slice(start, end);
+
+            // Prepend line numbers
+            const numbered = slice.map((l, i) => `${start + i + 1}: ${l}`).join('\n');
+
+            const MAX_READ_CHARS = 12000;
+            const truncated = numbered.length > MAX_READ_CHARS;
+            return {
+                content: truncated ? numbered.substring(0, MAX_READ_CHARS) + '\n[... truncated ...]' : numbered,
+                totalLines,
+                truncated,
+            };
+        } catch (e) {
+            return { content: `Error reading file: ${String(e)}`, totalLines: 0, truncated: false };
+        }
+    }
+
+    private async writeFile(args: { file: string; content: string }): Promise<import('./types').WriteFileResult> {
+        try {
+            // Generate diff for display / confirmation
+            let originalContent = '';
+            try { originalContent = fs.readFileSync(args.file, 'utf-8'); } catch { /* new file */ }
+
+            const diff = this.generateSimpleDiff(args.file, originalContent, args.content);
+
+            if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
+                const messageId = `write_${Date.now()}`;
+                const confirmed = await this.onPendingWrite(args.file, diff, messageId);
+                if (!confirmed) {
+                    return { success: false, message: '用户取消了写入操作' };
+                }
+            }
+
+            // Ensure directory exists
+            const dir = path.dirname(args.file);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+            fs.writeFileSync(args.file, args.content, 'utf-8');
+            return { success: true, message: `文件已写入: ${args.file}` };
+        } catch (e) {
+            return { success: false, message: `写入失败: ${String(e)}` };
+        }
+    }
+
+    private async patchFile(args: { file: string; startLine: number; endLine: number; newContent: string }): Promise<import('./types').PatchFileResult> {
+        try {
+            const content = fs.readFileSync(args.file, 'utf-8');
+            const lines = content.split('\n');
+
+            const start = Math.max(0, args.startLine - 1);
+            const end = Math.min(lines.length, args.endLine);
+
+            const newLines = args.newContent.split('\n');
+            const patchedLines = [
+                ...lines.slice(0, start),
+                ...newLines,
+                ...lines.slice(end),
+            ];
+            const patchedContent = patchedLines.join('\n');
+
+            const diff = this.generateSimpleDiff(args.file, content, patchedContent);
+
+            if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
+                const messageId = `patch_${Date.now()}`;
+                const confirmed = await this.onPendingWrite(args.file, diff, messageId);
+                if (!confirmed) {
+                    return { success: false, message: '用户取消了修改操作' };
+                }
+            }
+
+            fs.writeFileSync(args.file, patchedContent, 'utf-8');
+            return { success: true, message: `文件第 ${args.startLine}-${args.endLine} 行已更新` };
+        } catch (e) {
+            return { success: false, message: `修改失败: ${String(e)}` };
+        }
+    }
+
+    private async listDirectory(args: { directory: string; recursive?: boolean }): Promise<import('./types').ListDirectoryResult> {
+        try {
+            // Resolve relative paths against workspace root
+            const dirPath = path.isAbsolute(args.directory)
+                ? args.directory
+                : path.join(this.workspaceRoot, args.directory);
+
+            if (!fs.existsSync(dirPath)) {
+                return { entries: [], path: dirPath };
+            }
+
+            const entries: Array<{ name: string; type: 'file' | 'directory'; size?: number }> = [];
+            this._listDir(dirPath, dirPath, entries, args.recursive ?? false, 0, 3);
+
+            return { entries: entries.slice(0, 200), path: dirPath };
+        } catch (e) {
+            return { entries: [], path: args.directory };
+        }
+    }
+
+    private _listDir(
+        baseDir: string,
+        currentDir: string,
+        results: Array<{ name: string; type: 'file' | 'directory'; size?: number }>,
+        recursive: boolean,
+        depth: number,
+        maxDepth: number
+    ): void {
+        if (depth > maxDepth || results.length >= 200) return;
+        const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+            if (results.length >= 200) break;
+            if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+            const relPath = path.relative(baseDir, path.join(currentDir, entry.name)).replace(/\\/g, '/');
+            if (entry.isDirectory()) {
+                results.push({ name: relPath + '/', type: 'directory' });
+                if (recursive) {
+                    this._listDir(baseDir, path.join(currentDir, entry.name), results, recursive, depth + 1, maxDepth);
+                }
+            } else {
+                const stat = fs.statSync(path.join(currentDir, entry.name));
+                results.push({ name: relPath, type: 'file', size: stat.size });
+            }
+        }
+    }
+
+    /** Generate a simple unified-diff-style string for display */
+    private generateSimpleDiff(filePath: string, original: string, modified: string): string {
+        const origLines = original.split('\n');
+        const modLines = modified.split('\n');
+        const fileName = path.basename(filePath);
+        let diff = `--- ${fileName} (原始)\n+++ ${fileName} (修改后)\n`;
+
+        // Simple line-by-line diff (highlight changed regions)
+        const maxLines = Math.max(origLines.length, modLines.length);
+        let changedCount = 0;
+        for (let i = 0; i < maxLines && changedCount < 50; i++) {
+            const o = origLines[i] ?? '';
+            const m = modLines[i] ?? '';
+            if (o !== m) {
+                changedCount++;
+                if (o) diff += `- ${o}\n`;
+                if (m) diff += `+ ${m}\n`;
+            }
+        }
+        if (changedCount === 0) diff += '(无变更)\n';
+        return diff;
     }
 
     // ─── Helper Methods ──────────────────────────────────────────────────────

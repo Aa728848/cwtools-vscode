@@ -46,16 +46,21 @@
 			]
 		},
 		"viewsContainers": {
-			"activitybar": [
+			"secondarySidebar": [
 				{
 					"id": "cwtools-ai-panel",
 					"title": "CWTools AI",
-					"icon": "docs/ai-icon.svg"
+					"icon": "$(robot)"
 				}
 			]
 		},
 		"menus": {
 			"editor/title": [
+				{
+					"command": "cwtools.ai.openChat",
+					"group": "navigation@0",
+					"when": "true"
+				},
 				{
 					"command": "cwtools.toggleInlineTextOn",
 					"when": "!config.cwtools.showInlineText",
@@ -162,7 +167,7 @@
 				"command": "cwtools.ai.openChat",
 				"title": "Open AI Chat",
 				"category": "CWTools AI",
-				"icon": "$(comment-discussion)"
+				"icon": "$(sparkle)"
 			}
 		],
 		"configuration": {
@@ -363,11 +368,13 @@
 					"default": "",
 					"description": "Custom API endpoint URL (only for 'custom'/'ollama' provider or endpoint override)"
 				},
-				"cwtools.ai.apiKey": {
+				"cwtools.ai.agentFileWriteMode": {
 					"scope": "window",
 					"type": "string",
-					"default": "",
-					"description": "API key for the selected provider. Stored in settings.json — use Secret Storage via CLI for improved security."
+					"enum": ["confirm", "auto"],
+					"enumDescriptions": ["写操作前弹出 diff 确认（默认，安全）", "自动写入，无需确认（高级用户）"],
+					"default": "confirm",
+					"description": "Agent 文件写入模式：confirm=弹出diff确认后写入，auto=直接写入"
 				},
 				"cwtools.ai.maxRetries": {
 					"scope": "window",
@@ -410,6 +417,12 @@
 					"type": "string",
 					"default": "",
 					"description": "Model for inline completion (can differ from chat model, e.g. use a faster model)"
+				},
+				"cwtools.ai.inlineCompletion.endpoint": {
+					"scope": "window",
+					"type": "string",
+					"default": "",
+					"description": "Custom endpoint for inline completion provider (leave empty to use provider default)"
 				}
 			}
 		},

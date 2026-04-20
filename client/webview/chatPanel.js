@@ -126,6 +126,7 @@
 
     // ── Slash command popup ────────────────────────────────────────────────────
     const SLASH_COMMANDS = [
+        { cmd: '/init',     desc: '扫描项目，生成 CWTOOLS.md 规则文件（类 OpenCode /init）' },
         { cmd: '/clear',    desc: '清空当前对话，开始新话题' },
         { cmd: '/fork',     desc: '从当前位置分叉对话' },
         { cmd: '/archive',  desc: '归档当前话题' },

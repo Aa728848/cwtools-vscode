@@ -278,6 +278,22 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    {
+        type: 'function',
+        function: {
+            name: 'get_diagnostics',
+            description: 'Get validation errors and warnings for workspace files DIRECTLY from the CWTools language server \u2014 the same diagnostics shown in the VSCode Problems panel. No file writing required. Use this to: (1) count/list errors in the current project, (2) check if a specific file has errors, (3) understand what the validator complains about before generating fixes. Filter by severity or file path prefix.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Optional: restrict to a specific file path (absolute) or a path substring to match. Leave empty to get all workspace diagnostics.' },
+                    severity: { type: 'string', enum: ['error', 'warning', 'info', 'hint', 'all'], description: 'Filter by severity. Default: "all"' },
+                    limit: { type: 'number', description: 'Max diagnostics to return (default 100).' },
+                },
+                required: [],
+            },
+        },
+    },
 ];
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
@@ -332,6 +348,8 @@ export class AgentToolExecutor {
                 result = await this.queryReferences(args as any); break;
             case 'validate_code':
                 result = await this.validateCode(args as any); break;
+            case 'get_diagnostics':
+                result = await this.getDiagnostics(args as any); break;
             case 'get_file_context':
                 result = await this.getFileContext(args as any); break;
             case 'search_mod_files':
@@ -561,56 +579,220 @@ export class AgentToolExecutor {
     }
 
     private async validateCode(args: { code: string; targetFile: string }): Promise<ValidateCodeResult> {
+        // Strategy: write a temp file INSIDE the workspace so CWTools LSP can see it,
+        // then wait for diagnostics to appear via onDidChangeDiagnostics event.
+        // The temp file is deleted immediately after validation.
+        const errors: ValidationError[] = [];
+
+        // Find a suitable workspace folder to host the temp file
+        const wsFolders = vs.workspace.workspaceFolders;
+        const wsRoot = wsFolders && wsFolders.length > 0
+            ? wsFolders[0].uri.fsPath
+            : this.workspaceRoot;
+
+        // Determine temp dir path — mirror the structure of targetFile within workspace
+        // so CWTools applies the same validation rules (e.g. events/ vs common/)
+        let tempSubdir = '.cwtools-ai-tmp';
+        if (args.targetFile) {
+            const relToWs = path.relative(wsRoot, path.dirname(args.targetFile));
+            // Only use the relative path if it's within the workspace
+            if (relToWs && !relToWs.startsWith('..') && !path.isAbsolute(relToWs)) {
+                tempSubdir = path.join('.cwtools-ai-tmp', relToWs);
+            }
+        }
+        const tempDir = path.join(wsRoot, tempSubdir);
+
+        // Determine the file extension from original target or default to .txt
+        let ext = '.txt';
+        if (args.targetFile) {
+            const origExt = path.extname(args.targetFile);
+            if (origExt) ext = origExt;
+        }
+        const tempName = `__ai_validate_${Date.now()}${ext}`;
+        const tempPath = path.join(tempDir, tempName);
+
         try {
-            const errors: ValidationError[] = [];
-
-            // Write to system temp dir (NOT workspace) to avoid CWTools rescanning it
-            const os = await import('os');
-            const tempDir = os.tmpdir();
-            const tempName = `cwtools_ai_validate_${Date.now()}.txt`;
-            const tempPath = path.join(tempDir, tempName);
-
-            try {
-                // If target exists, include surrounding context for better validation
-                let originalContent = '';
-                try { originalContent = fs.readFileSync(args.targetFile, 'utf-8'); } catch { /* ok */ }
-
-                const contentToValidate = originalContent
-                    ? originalContent + '\n' + args.code
-                    : args.code;
-
-                fs.writeFileSync(tempPath, contentToValidate, 'utf-8');
-
-                // Open as untitled in VSCode so LSP can see it without scanning workspace
-                const tempUri = vs.Uri.file(tempPath);
-                await new Promise(resolve => setTimeout(resolve, 800));
-
-                const diags = vs.languages.getDiagnostics(tempUri);
-                for (const d of diags) {
-                    errors.push({
-                        code: String(d.code ?? ''),
-                        severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
-                            : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                            : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
-                        message: d.message,
-                        line: d.range.start.line,
-                        column: d.range.start.character,
-                    });
-                }
-            } finally {
-                try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+            // Ensure temp directory exists
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
             }
 
-            return {
-                isValid: errors.filter(e => e.severity === 'error').length === 0,
-                errors,
-            };
+            // Build validation content: use original file as context for better validation
+            let originalContent = '';
+            try {
+                if (args.targetFile && fs.existsSync(args.targetFile)) {
+                    originalContent = fs.readFileSync(args.targetFile, 'utf-8');
+                }
+            } catch { /* ok */ }
+
+            const contentToValidate = originalContent
+                ? originalContent + '\n\n# AI_VALIDATE_START\n' + args.code
+                : args.code;
+
+            fs.writeFileSync(tempPath, contentToValidate, 'utf-8');
+
+            const tempUri = vs.Uri.file(tempPath);
+
+            // Open the document so VSCode/LSP knows about it
+            void vs.workspace.openTextDocument(tempUri);
+
+            // Wait for diagnostics from LSP — listen to onDidChangeDiagnostics
+            // (LSP will push diagnostics once it processes the new file, or on file open)
+            const diags = await new Promise<vs.Diagnostic[]>((resolve) => {
+                // Immediately check if already have diagnostics (unlikely but possible)
+                const existing = vs.languages.getDiagnostics(tempUri);
+                if (existing.length > 0) {
+                    resolve(existing);
+                    return;
+                }
+
+                // Set up listener for diagnostic changes
+                const timeout = setTimeout(() => {
+                    disposable.dispose();
+                    // Even on timeout, return whatever we have
+                    resolve(vs.languages.getDiagnostics(tempUri));
+                }, 6000); // 6 second timeout
+
+                const disposable = vs.languages.onDidChangeDiagnostics((e) => {
+                    // Check if our temp file's diagnostics changed
+                    const changedForUs = e.uris.some(u => u.fsPath === tempUri.fsPath);
+                    if (changedForUs) {
+                        clearTimeout(timeout);
+                        disposable.dispose();
+                        resolve(vs.languages.getDiagnostics(tempUri));
+                    }
+                });
+            });
+
+            // Calculate offset: if we prepended originalContent, subtract its line count
+            const originalLineCount = originalContent ? originalContent.split('\n').length + 2 : 0; // +2 for blank line + comment
+
+            for (const d of diags) {
+                // Skip diagnostics that fall within the original content prefix
+                const adjustedLine = d.range.start.line - originalLineCount;
+                if (originalContent && adjustedLine < 0) continue; // In original file portion
+
+                errors.push({
+                    code: String(d.code ?? ''),
+                    severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                        : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+                    message: d.message,
+                    line: Math.max(0, adjustedLine),
+                    column: d.range.start.character,
+                });
+            }
         } catch (e) {
-            return {
-                isValid: false,
-                errors: [{ code: 'VALIDATION_ERROR', severity: 'error', message: String(e), line: 0, column: 0 }],
-            };
+            errors.push({
+                code: 'VALIDATION_ERROR',
+                severity: 'error',
+                message: String(e),
+                line: 0,
+                column: 0,
+            });
+        } finally {
+            // Clean up temp file
+            try {
+                if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+                // Try to remove the temp directory if empty
+                try {
+                    const remaining = fs.readdirSync(tempDir);
+                    if (remaining.length === 0) fs.rmdirSync(tempDir);
+                } catch { /* ignore */ }
+            } catch { /* ignore */ }
         }
+
+        return {
+            isValid: errors.filter(e => e.severity === 'error').length === 0,
+            errors,
+        };
+    }
+
+    /**
+     * Directly read diagnostics from the CWTools LSP — the exact same data
+     * shown in VSCode's Problems panel. Zero file I/O; instantaneous.
+     *
+     * vs.languages.getDiagnostics() returns all diagnostics the LSP server has
+     * already pushed via textDocument/publishDiagnostics notifications.
+     */
+    private async getDiagnostics(args: {
+        file?: string;
+        severity?: 'error' | 'warning' | 'info' | 'hint' | 'all';
+        limit?: number;
+    }): Promise<import('./types').GetDiagnosticsResult> {
+        const limit = Math.min(args.limit ?? 100, 500);
+        const severityFilter = args.severity && args.severity !== 'all' ? args.severity : null;
+
+        // vs.languages.getDiagnostics() returns all [uri, diagnostics[]] pairs
+        // that ANY language server (including CWTools) has published.
+        const allPairs = vs.languages.getDiagnostics();
+
+        const entries: import('./types').DiagnosticEntry[] = [];
+        const filesWithDiags = new Set<string>();
+
+        for (const [uri, diags] of allPairs) {
+            if (diags.length === 0) continue;
+
+            const fsPath = uri.fsPath;
+
+            // File filter: skip files that don't match the requested path/prefix
+            if (args.file) {
+                const fileNorm = args.file.replace(/\\/g, '/').toLowerCase();
+                const pathNorm = fsPath.replace(/\\/g, '/').toLowerCase();
+                if (!pathNorm.includes(fileNorm)) continue;
+            }
+
+            // Skip temporary validation files we may have created
+            if (fsPath.includes('.cwtools-ai-tmp')) continue;
+
+            filesWithDiags.add(fsPath);
+
+            for (const d of diags) {
+                if (entries.length >= limit) break;
+
+                const sev = d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                    : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                    : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
+
+                if (severityFilter && sev !== severityFilter) continue;
+
+                entries.push({
+                    file: fsPath,
+                    logicalPath: path.relative(this.workspaceRoot, fsPath).replace(/\\/g, '/'),
+                    severity: sev,
+                    message: d.message,
+                    line: d.range.start.line,
+                    column: d.range.start.character,
+                    code: d.code !== undefined ? String(d.code) : undefined,
+                });
+            }
+            if (entries.length >= limit) break;
+        }
+
+        const summary = {
+            errors:   entries.filter(e => e.severity === 'error').length,
+            warnings: entries.filter(e => e.severity === 'warning').length,
+            info:     entries.filter(e => e.severity === 'info').length,
+            hints:    entries.filter(e => e.severity === 'hint').length,
+        };
+
+        // Total count across all pairs (for "total in workspace" info)
+        let totalDiagCount = 0;
+        for (const [uri, diags] of allPairs) {
+            if (uri.fsPath.includes('.cwtools-ai-tmp')) continue;
+            if (args.file) {
+                const fileNorm = args.file.replace(/\\/g, '/').toLowerCase();
+                if (!uri.fsPath.replace(/\\/g, '/').toLowerCase().includes(fileNorm)) continue;
+            }
+            totalDiagCount += diags.length;
+        }
+
+        return {
+            summary,
+            diagnostics: entries,
+            totalFiles: filesWithDiags.size,
+            truncated: totalDiagCount > limit,
+        };
     }
 
     private async getFileContext(args: { file: string; line: number; radius?: number }): Promise<GetFileContextResult> {

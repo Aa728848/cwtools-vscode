@@ -54,7 +54,7 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'todo_write',
-    'read_file', 'list_directory',
+    'read_file', 'list_directory', 'get_diagnostics',
 ];
 
 export class AgentRunner {
@@ -333,7 +333,7 @@ export class AgentRunner {
 
             // If no tool calls (either format), we're done
             if (!toolCalls || toolCalls.length === 0) {
-                return assistantMessage.content ?? '';
+                return this.cleanFinalContent(assistantMessage.content ?? '');
             }
 
             // Loop detection: check if we're repeating the same tool calls
@@ -420,7 +420,8 @@ export class AgentRunner {
             model: options?.model,
         });
 
-        return finalResponse.choices[0]?.message?.content ?? '';
+        const finalContent = finalResponse.choices[0]?.message?.content ?? '';
+        return this.cleanFinalContent(finalContent);
     }
 
     /**
@@ -557,21 +558,34 @@ export class AgentRunner {
         return calls;
     }
 
-    /** Strip all known text-format tool call markup from text */
+    /** Strip all known text-format tool call markup from text.
+     * Runs multiple passes; final pass also cleans orphaned lone tags. */
     private stripDsmlMarkup(content: string): string {
-        // Normalize full-width ｜ first (DeepSeek DSML uses U+FF5C)
-        const norm = content.replace(/\uFF5C/g, '|');
-        return norm
-            // DeepSeek DSML: <|DSML|function_calls>...</|DSML|function_calls>
-            .replace(/<\|DSML\|function_calls>[\s\S]*?<\/\|DSML\|function_calls>/gi, '')
-            .replace(/<\|DSML\|invoke(?:\s[^>]*)?>[\s\S]*?<\/\|DSML\|invoke>/gi, '')
-            // Qwen / Hermes: <tool_call>...</tool_call>
-            .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
-            // Generic XML / Claude antml_
-            .replace(/< *(?:antml_)?function_calls *>[\s\S]*?<\/ *(?:antml_)?function_calls *>/gi, '')
-            .replace(/< *(?:antml_)?invoke(?:\s[^>]*)? *>[\s\S]*?<\/ *(?:antml_)?invoke *>/gi, '')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
+        // Normalize full-width | first (DeepSeek DSML uses U+FF5C)
+        let s = content.replace(/\uFF5C/g, '|');
+
+        // Run up to 4 passes - each pass strips paired open/close blocks
+        for (let pass = 0; pass < 4; pass++) {
+            const before = s;
+            s = s
+                // DeepSeek DSML: <|DSML|function_calls>...</|DSML|function_calls>
+                .replace(/<\|DSML\|function_calls>[\s\S]*?<\/\|DSML\|function_calls>/gi, '')
+                .replace(/<\|DSML\|invoke(?:\s[^>]*)?>([\s\S]*?)<\/\|DSML\|invoke>/gi, '')
+                // Qwen / Hermes: <tool_call>...</tool_call>
+                .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+                // Generic XML / Claude antml_
+                .replace(/<\s*(?:antml_)?function_calls\s*>[\s\S]*?<\/\s*(?:antml_)?function_calls\s*>/gi, '')
+                .replace(/<\s*(?:antml_)?invoke(?:\s[^>]*)?\s*>[\s\S]*?<\/\s*(?:antml_)?invoke\s*>/gi, '')
+                // Orphaned lone open/close tags (safety net for unmatched pairs)
+                .replace(/<\/?\s*(?:antml_)?function_calls\s*>/gi, '')
+                .replace(/<\/?\s*(?:antml_)?invoke(?:\s[^>]*)?\s*>/gi, '')
+                .replace(/<\/?\s*(?:antml_)?parameter(?:\s[^>]*)?\s*>/gi, '')
+                // Strip leftover DSML pipe tags
+                .replace(/<\/?\s*\|DSML\|[^>]*>/gi, '');
+            if (s === before) break; // Stable - stop early
+        }
+
+        return s.replace(/\n{3,}/g, '\n\n').trim();
     }
 
     /** Strip <think>...</think> blocks from text (already emitted as thinking_content steps) */
@@ -580,6 +594,15 @@ export class AgentRunner {
             .replace(/<think>[\s\S]*?<\/think>/gi, '')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
+    }
+
+    /**
+     * Full clean pipeline for final user-visible content:
+     * strip think blocks → strip DSML/XML → normalize whitespace.
+     */
+    private cleanFinalContent(content: string): string {
+        if (!content) return content;
+        return this.stripThinkBlocks(this.stripDsmlMarkup(content));
     }
 
     /**

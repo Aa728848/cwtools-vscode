@@ -15,6 +15,9 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
     private debounceTimer: ReturnType<typeof setTimeout> | null = null;
     private lastRequestId = 0;
     private isEnabled = false;
+    /** Track cursor line between calls to detect Enter key press */
+    private lastSeenLine = -1;
+    private lastSeenUri = '';
 
     constructor(
         private aiService: AIService,
@@ -47,11 +50,18 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             return undefined;
         }
 
-        // For automatic trigger, only fire when cursor is at column 0
-        // (i.e. the user just pressed Enter and started a new line).
+        // Auto-trigger on Enter (line number increased), Space, or Tab.
         // Explicit trigger (e.g. editor.action.inlineSuggest.trigger) always proceeds.
         if (context.triggerKind === vs.InlineCompletionTriggerKind.Automatic) {
-            if (position.character !== 0) return undefined;
+            const uri = document.uri.toString();
+            const enteredNewLine = uri === this.lastSeenUri && position.line > this.lastSeenLine;
+            this.lastSeenLine = position.line;
+            this.lastSeenUri = uri;
+            const lineText = document.lineAt(position.line).text;
+            const charBefore = position.character > 0 ? lineText.charAt(position.character - 1) : '';
+            const isSpace = charBefore === ' ';
+            const isTab   = charBefore === '\t';
+            if (!enteredNewLine && !isSpace && !isTab) return undefined;
         }
 
         // Don't complete in comments

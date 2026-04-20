@@ -461,10 +461,40 @@
         document.getElementById('settingsEndpoint').value = current.endpoint || '';
         document.getElementById('settingsCtx').value = current.maxContextTokens || 0;
         document.getElementById('inlineEnabled').checked = current.inlineCompletion?.enabled ?? false;
-        document.getElementById('inlineModel').value = current.inlineCompletion?.model || '';
         document.getElementById('inlineEndpoint').value = current.inlineCompletion?.endpoint || '';
         document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs || 1500;
         document.getElementById('agentWriteMode').value = current.agentFileWriteMode || 'confirm';
+
+        // Populate inline model dropdown dynamically
+        function updateInlineModelSelect(selectedProviderId, selectedModel, ollamaModels) {
+            const sel = document.getElementById('inlineModel');
+            const pid = selectedProviderId || current.provider;
+            const provider = providers.find(p => p.id === pid);
+            const models = pid === 'ollama'
+                ? (ollamaModels || []).map(m => m.name)
+                : (provider ? provider.models : []);
+            sel.innerHTML = '<option value="">- 与对话相同 -</option>';
+            for (const m of models) {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                opt.selected = m === selectedModel;
+                sel.appendChild(opt);
+            }
+            // If current model isn't in the list (custom), add it
+            if (selectedModel && !models.includes(selectedModel)) {
+                const opt = document.createElement('option');
+                opt.value = selectedModel;
+                opt.textContent = selectedModel;
+                opt.selected = true;
+                sel.appendChild(opt);
+            }
+        }
+
+        const inlineProviderSel = document.getElementById('inlineProvider');
+        updateInlineModelSelect(current.inlineCompletion?.provider, current.inlineCompletion?.model, ollamaModels);
+        inlineProviderSel.onchange = () => updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
+
         updateModelUI(current.provider, current.model, ollamaModels);
         updateApiKeyStatus(current.provider, providers);
         chatHeader.style.display = 'none';

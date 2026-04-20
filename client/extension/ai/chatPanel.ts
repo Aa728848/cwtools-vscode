@@ -887,7 +887,7 @@ body.plan-mode .plan-indicator { display: block; }
                 </div>
                 <div class="settings-group">
                     <label class="settings-label">Model</label>
-                    <input class="settings-input" id="inlineModel" type="text" placeholder="留空与对话相同" />
+                    <select class="settings-select" id="inlineModel"></select>
                 </div>
                 <div class="settings-group">
                     <label class="settings-label">Endpoint</label>

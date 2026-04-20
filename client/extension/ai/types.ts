@@ -355,6 +355,7 @@ export type AgentToolName =
     | 'query_rules'
     | 'query_references'
     | 'validate_code'
+    | 'get_diagnostics'
     | 'get_file_context'
     | 'search_mod_files'
     | 'get_completion_at'
@@ -420,6 +421,27 @@ export interface ListDirectoryResult {
         size?: number;
     }>;
     path: string;
+}
+
+/** Single diagnostic entry from CWTools LSP */
+export interface DiagnosticEntry {
+    file: string;
+    /** Relative logical path from workspace root */
+    logicalPath: string;
+    severity: 'error' | 'warning' | 'info' | 'hint';
+    message: string;
+    line: number;
+    column: number;
+    code?: string;
+}
+
+export interface GetDiagnosticsResult {
+    /** All diagnostics, grouped summary by severity */
+    summary: { errors: number; warnings: number; info: number; hints: number };
+    /** Diagnostics list, truncated to limit */
+    diagnostics: DiagnosticEntry[];
+    totalFiles: number;
+    truncated: boolean;
 }
 
 // ─── Agent Execution ─────────────────────────────────────────────────────────

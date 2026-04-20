@@ -276,7 +276,7 @@ type Server(client: ILanguageClient) =
             | x -> x |> List.map parserErrorToDiagnostics |> sendDiagnostics
         }
 
-    let mutable delayTime = TimeSpan(0, 0, 30)
+    let mutable delayTime = TimeSpan(0, 0, 5)
 
     let delayedAnalyze () =
         match gameObj with
@@ -303,7 +303,7 @@ type Server(client: ILanguageClient) =
             let time = Stopwatch.GetElapsedTime(timestamp)
 
             delayTime <-
-                TimeSpan(Math.Min(TimeSpan(0, 0, 60).Ticks, Math.Max(TimeSpan(0, 0, 10).Ticks, 3L * time.Ticks)))
+                TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 3).Ticks, 2L * time.Ticks)))
             
             // 定期清理不存在文件的缓存，防止内存泄漏
             try
@@ -1257,7 +1257,7 @@ type Server(client: ILanguageClient) =
                     UpdateRequest(
                         { uri = p.textDocument.uri
                           version = 0 },
-                        false
+                        true
                     )
                 )
             }

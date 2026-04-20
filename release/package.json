@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Dayshine",
 	"license": "MIT",
-	"version": "1.3.0",
+	"version": "1.4.0",
 	"preview": true,
 	"publisher": "Eddy",
 	"icon": "docs/stellaris.png",
@@ -35,6 +35,22 @@
 				{
 					"id": "cwtools-files",
 					"name": "%views.cwtools-files.name%"
+				}
+			],
+			"cwtools-ai-panel": [
+				{
+					"type": "webview",
+					"id": "cwtools.aiChat",
+					"name": "AI Assistant"
+				}
+			]
+		},
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "cwtools-ai-panel",
+					"title": "CWTools AI",
+					"icon": "docs/ai-icon.svg"
 				}
 			]
 		},
@@ -136,6 +152,17 @@
 				"title": "Preview Solar System",
 				"category": "cwtools",
 				"icon": "$(telescope)"
+			},
+			{
+				"command": "cwtools.ai.configure",
+				"title": "Configure AI Provider",
+				"category": "CWTools AI"
+			},
+			{
+				"command": "cwtools.ai.openChat",
+				"title": "Open AI Chat",
+				"category": "CWTools AI",
+				"icon": "$(comment-discussion)"
 			}
 		],
 		"configuration": {
@@ -309,6 +336,80 @@
 					"minimum": 1,
 					"default": 2,
 					"description": "%configuration.cwtools.maxFileSize.description%"
+				},
+				"cwtools.ai.enabled": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "Enable AI-assisted code generation and completion"
+				},
+				"cwtools.ai.provider": {
+					"scope": "window",
+					"type": "string",
+					"enum": ["openai", "claude", "deepseek", "minimax", "glm", "qwen", "ollama", "custom"],
+					"enumDescriptions": ["OpenAI (GPT-5.4)", "Claude (Anthropic)", "DeepSeek", "MiniMax", "GLM (智谱)", "Qwen (通义千问)", "Ollama (本地模型)", "Custom OpenAI-compatible"],
+					"default": "openai",
+					"description": "AI service provider"
+				},
+				"cwtools.ai.model": {
+					"scope": "window",
+					"type": "string",
+					"default": "",
+					"description": "AI model name (leave empty for provider default)"
+				},
+				"cwtools.ai.endpoint": {
+					"scope": "window",
+					"type": "string",
+					"default": "",
+					"description": "Custom API endpoint URL (only for 'custom'/'ollama' provider or endpoint override)"
+				},
+				"cwtools.ai.apiKey": {
+					"scope": "window",
+					"type": "string",
+					"default": "",
+					"description": "API key for the selected provider. Stored in settings.json — use Secret Storage via CLI for improved security."
+				},
+				"cwtools.ai.maxRetries": {
+					"scope": "window",
+					"type": "integer",
+					"default": 3,
+					"minimum": 1,
+					"maximum": 5,
+					"description": "Maximum validation-retry rounds for generated code"
+				},
+				"cwtools.ai.maxContextTokens": {
+					"scope": "window",
+					"type": "integer",
+					"default": 0,
+					"minimum": 0,
+					"maximum": 10000000,
+					"description": "Override max context window size (tokens). 0 = use provider default. Useful for Ollama or custom providers."
+				},
+				"cwtools.ai.inlineCompletion.enabled": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "Enable AI inline code completion"
+				},
+				"cwtools.ai.inlineCompletion.debounceMs": {
+					"scope": "window",
+					"type": "integer",
+					"default": 1500,
+					"minimum": 500,
+					"maximum": 5000,
+					"description": "Delay before triggering inline AI completion (ms)"
+				},
+				"cwtools.ai.inlineCompletion.provider": {
+					"scope": "window",
+					"type": "string",
+					"default": "",
+					"description": "Provider for inline completion (leave empty to use main provider)"
+				},
+				"cwtools.ai.inlineCompletion.model": {
+					"scope": "window",
+					"type": "string",
+					"default": "",
+					"description": "Model for inline completion (can differ from chat model, e.g. use a faster model)"
 				}
 			}
 		},

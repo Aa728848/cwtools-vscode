@@ -16,6 +16,7 @@ import { GuiPanel } from './guiPanel';
 import { SolarSystemPanel } from './solarSystemPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
+import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelProvider, AIInlineCompletionProvider } from './ai';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
@@ -523,6 +524,42 @@ export async function activate(context: ExtensionContext) {
 			context.subscriptions.length = 0;
 			await activate(context);
 		});
+
+		// ─── AI Module Integration ────────────────────────────────────────────────
+		const aiService = new AIService(context);
+		const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+		const toolExecutor = new AgentToolExecutor(client, workspaceRoot);
+		const promptBuilder = new PromptBuilder(workspaceRoot);
+		const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder);
+
+		// Register AI Chat Panel (sidebar WebView)
+		const chatPanelProvider = new AIChatPanelProvider(
+			context.extensionUri,
+			agentRunner,
+			aiService,
+			context.globalStorageUri
+		);
+		context.subscriptions.push(
+			vs.window.registerWebviewViewProvider(AIChatPanelProvider.viewType, chatPanelProvider)
+		);
+
+		// Register AI Inline Completion Provider
+		const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder);
+		context.subscriptions.push(
+			vs.languages.registerInlineCompletionItemProvider(
+				docSelector,
+				inlineProvider
+			)
+		);
+
+		// AI Commands
+		safeRegisterCommand(context, "cwtools.ai.configure", async () => {
+			await aiService.quickConfigureProvider();
+		});
+		safeRegisterCommand(context, "cwtools.ai.openChat", async () => {
+			await vs.commands.executeCommand('cwtools.aiChat.focus');
+		});
+
 		await client.start();
 	}
 

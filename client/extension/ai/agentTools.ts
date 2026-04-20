@@ -310,8 +310,10 @@ export class AgentToolExecutor {
     private currentTodos: TodoItem[] = [];
     /** Callback when todos are updated (for UI) */
     public onTodoUpdate?: (todos: TodoItem[]) => void;
-    /** Callback when a file write needs user confirmation (confirm mode) */
-    public onPendingWrite?: (file: string, diff: string, messageId: string) => Promise<boolean>;
+    /** Callback when a file write needs user confirmation (confirm mode).
+     * Receives the target file path, the proposed new content, and a messageId.
+     * Returns true = confirmed, false = cancelled. */
+    public onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
     /** Agent file write mode from config */
     public fileWriteMode: 'confirm' | 'auto' = 'confirm';
 
@@ -1015,7 +1017,7 @@ export class AgentToolExecutor {
 
             if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
                 const messageId = `write_${Date.now()}`;
-                const confirmed = await this.onPendingWrite(args.file, diff, messageId);
+                const confirmed = await this.onPendingWrite(args.file, args.content, messageId);
                 if (!confirmed) {
                     return { success: false, message: '用户取消了写入操作' };
                 }
@@ -1053,7 +1055,7 @@ export class AgentToolExecutor {
 
             if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
                 const messageId = `patch_${Date.now()}`;
-                const confirmed = await this.onPendingWrite(args.file, diff, messageId);
+                const confirmed = await this.onPendingWrite(args.file, patchedContent, messageId);
                 if (!confirmed) {
                     return { success: false, message: '用户取消了修改操作' };
                 }

@@ -24,7 +24,7 @@ import { PromptBuilder } from './promptBuilder';
 import { getProvider } from './providers';
 
 // Maximum tool-call iterations per generation (prevent infinite loops)
-const MAX_TOOL_ITERATIONS = 8;
+const MAX_TOOL_ITERATIONS = 20;
 // How many consecutive identical tool calls before we stop
 const MAX_REPEATED_CALLS = 3;
 // Maximum validation-retry rounds
@@ -60,7 +60,7 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
 export class AgentRunner {
     constructor(
         private aiService: AIService,
-        private toolExecutor: AgentToolExecutor,
+        public readonly toolExecutor: AgentToolExecutor,
         private promptBuilder: PromptBuilder
     ) {}
 
@@ -353,6 +353,21 @@ export class AgentRunner {
                 break;
             }
 
+            // ── Deduplicate file-write calls ──────────────────────────────────
+            // If the model emitted multiple write_file/patch_file calls targeting
+            // the same file in one response, only keep the LAST one for each file.
+            // Earlier ones would overwrite later ones and cause stuck confirm dialogs.
+            const WRITE_TOOLS = new Set(['write_file', 'patch_file']);
+            const lastWriteIndexByFile = new Map<string, number>();
+            for (let i = 0; i < toolCalls.length; i++) {
+                if (!WRITE_TOOLS.has(toolCalls[i].function.name)) continue;
+                try {
+                    const a = JSON.parse(toolCalls[i].function.arguments);
+                    const filePath: string = a.file ?? '';
+                    if (filePath) lastWriteIndexByFile.set(filePath, i);
+                } catch { /* ignore */ }
+            }
+
             // Execute tool calls
             for (const toolCall of toolCalls) {
                 options?.abortSignal?.throwIfAborted();
@@ -375,7 +390,18 @@ export class AgentRunner {
 
                 let toolResult: unknown;
                 try {
-                    toolResult = await this.toolExecutor.execute(toolName, toolArgs);
+                    // Skip duplicate write calls: if a later call writes to the same file, skip this one
+                    const callIndex = toolCalls.indexOf(toolCall);
+                    const filePath = (toolArgs['file'] as string) ?? '';
+                    const isSupersededWrite = WRITE_TOOLS.has(toolName) && filePath &&
+                        lastWriteIndexByFile.get(filePath) !== callIndex;
+
+                    if (isSupersededWrite) {
+                        // Silently skip — the later write for this file takes precedence
+                        toolResult = { skipped: true, message: `已被后续对 ${filePath} 的写入操作覆盖，跳过本次写入` };
+                    } else {
+                        toolResult = await this.toolExecutor.execute(toolName, toolArgs);
+                    }
                 } catch (e) {
                     toolResult = { error: e instanceof Error ? e.message : String(e) };
                 }

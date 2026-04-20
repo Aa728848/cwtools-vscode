@@ -371,11 +371,50 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // ─── File Write Confirmation (提供给 AgentToolExecutor onPendingWrite) ───────────
 
     private pendingWriteResolvers = new Map<string, (confirmed: boolean) => void>();
+    /** Maps messageId → temp file path used for the diff view (for cleanup) */
+    private pendingDiffTempFiles = new Map<string, string>();
 
-    handlePendingWrite(file: string, diff: string, messageId: string): Promise<boolean> {
+    handlePendingWrite(file: string, newContent: string, messageId: string): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
             this.pendingWriteResolvers.set(messageId, resolve);
-            this.postMessage({ type: 'pendingWriteFile', file, diff, messageId });
+
+            const isNewFile = !fs.existsSync(file);
+
+            // ── Open VSCode native diff editor ────────────────────────────────
+            const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+            const tmpDir = path.join(workspaceRoot, '.cwtools-ai-tmp');
+            const ext = path.extname(file) || '.txt';
+            const tempPath = path.join(tmpDir, `__pending_${messageId}${ext}`);
+
+            try {
+                if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+                fs.writeFileSync(tempPath, newContent, 'utf-8');
+                this.pendingDiffTempFiles.set(messageId, tempPath);
+
+                const tempUri = vs.Uri.file(tempPath);
+                const label = `AI Changes → ${path.basename(file)}`;
+
+                if (isNewFile) {
+                    // New file: open proposed content in a preview column
+                    vs.commands.executeCommand('vscode.open', tempUri, {
+                        preview: true,
+                        viewColumn: vs.ViewColumn.Beside,
+                    });
+                } else {
+                    // Existing file: full diff view
+                    vs.commands.executeCommand('vscode.diff',
+                        vs.Uri.file(file), tempUri,
+                        label,
+                        { preview: true, viewColumn: vs.ViewColumn.Active }
+                    );
+                }
+            } catch (e) {
+                // Diff failed — still show the WebView card so user can decide
+                console.error('[CWTools AI] Failed to open diff view:', e);
+            }
+
+            // Tell the WebView to show a simple Accept/Reject card (no diff HTML)
+            this.postMessage({ type: 'pendingWriteFile', file, messageId, isNewFile });
         });
     }
 
@@ -385,6 +424,32 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.pendingWriteResolvers.delete(messageId);
             resolver(confirmed);
         }
+
+        // Close the diff/preview tab and remove the temp file
+        const tempPath = this.pendingDiffTempFiles.get(messageId);
+        if (tempPath) {
+            this.pendingDiffTempFiles.delete(messageId);
+            const tempUri = vs.Uri.file(tempPath);
+
+            // Close any editor tab that shows our temp file (as either side of diff)
+            vs.window.tabGroups.all.forEach(group => {
+                group.tabs.forEach(tab => {
+                    const input = tab.input;
+                    const isOurTab =
+                        (input instanceof vs.TabInputText && input.uri.fsPath === tempUri.fsPath) ||
+                        (input instanceof vs.TabInputTextDiff && input.modified.fsPath === tempUri.fsPath);
+                    if (isOurTab) vs.window.tabGroups.close(tab, true);
+                });
+            });
+
+            // Delete temp file
+            try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+        }
+    }
+
+    /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) */
+    sendTodoUpdate(todos: import('./types').TodoItem[]): void {
+        this.postMessage({ type: 'todoUpdate', todos });
     }
 
     // ─── Code Insertion ──────────────────────────────────────────────────────
@@ -699,15 +764,38 @@ body.plan-mode .plan-indicator { display: block; }
 .code-btn:hover { opacity: 1; background: var(--btn-hover); }
 .code-content { padding: 8px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; overflow-x: auto; white-space: pre; }
 
+/* ── Markdown rendering (inside .msg-bubble) ── */
+.msg-bubble h1,.msg-bubble h2,.msg-bubble h3,.msg-bubble h4,.msg-bubble h5,.msg-bubble h6 { font-family: Georgia,serif; font-weight:600; margin:10px 0 4px; line-height:1.3; }
+.msg-bubble h1 { font-size:1.2em; border-bottom:1px solid var(--border); padding-bottom:4px; }
+.msg-bubble h2 { font-size:1.1em; }
+.msg-bubble h3 { font-size:1.0em; }
+.msg-bubble h4,.msg-bubble h5,.msg-bubble h6 { font-size:0.95em; opacity:0.85; }
+.msg-bubble p  { margin:5px 0; }
+.msg-bubble ul,.msg-bubble ol { margin:5px 0 5px 18px; padding:0; }
+.msg-bubble li { margin:2px 0; }
+.msg-bubble blockquote { margin:6px 0; padding:4px 10px; border-left:3px solid var(--accent); background:rgba(255,255,255,0.04); border-radius:0 4px 4px 0; opacity:0.85; }
+.msg-bubble hr { border:none; border-top:1px solid var(--border); margin:8px 0; }
+.msg-bubble table { border-collapse:collapse; width:100%; margin:6px 0; font-size:12px; }
+.msg-bubble th,.msg-bubble td { border:1px solid var(--border); padding:4px 8px; text-align:left; }
+.msg-bubble th { background:rgba(255,255,255,0.05); font-weight:600; }
+.msg-bubble strong { font-weight:700; }
+.msg-bubble em { font-style:italic; }
+.msg-bubble del { text-decoration:line-through; opacity:0.6; }
+.msg-bubble a { color:#7ab4d4; text-decoration:none; }
+.msg-bubble a:hover { text-decoration:underline; }
+.msg-bubble .md-codeblock { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin:6px 0; }
+.msg-bubble .md-codeblock-lang { font-size:10px; opacity:0.5; padding:2px 8px; background:rgba(255,255,255,0.03); border-bottom:1px solid var(--border); letter-spacing:0.05em; text-transform:uppercase; }
+.msg-bubble .md-codeblock-lang:empty { display:none; }
+.msg-bubble .md-codeblock code { display:block; padding:8px 10px; font-family:var(--vscode-editor-font-family,monospace); font-size:12px; white-space:pre; overflow-x:auto; background:none; border-radius:0; }
+.msg-bubble code { background:rgba(255,255,255,0.1); border-radius:3px; padding:1px 4px; font-family:var(--vscode-editor-font-family,monospace); font-size:11px; }
+
 /* ── Diff card ── */
 .diff-card { border: 1px solid var(--warning); border-radius: 6px; overflow: hidden; margin: 4px 0; font-size: 11px; }
-.diff-card-header { background: rgba(255,152,0,0.12); padding: 6px 10px; font-size: 11px; font-family: Georgia, serif; opacity: 0.85; }
-.diff-card-body { padding: 8px 10px; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; background: var(--code-bg); max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
-.diff-add { color: #4caf50; }
-.diff-del { color: #f44336; }
-.diff-card-actions { padding: 6px 10px; display: flex; gap: 6px; background: var(--bg); }
-.diff-accept-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 11px; }
-.diff-reject-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 11px; }
+.diff-card-header { background: rgba(255,152,0,0.12); padding: 8px 12px; font-size: 12px; display:flex; align-items:center; gap:6px; }
+.diff-card-hint { font-size:11px; opacity:0.6; flex:1; }
+.diff-card-actions { padding: 6px 10px; display: flex; gap: 6px; background: var(--bg); border-top:1px solid var(--border); }
+.diff-accept-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
+.diff-reject-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
 
 /* ── Empty state ── */
 .empty-state { margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; opacity: 0.65; padding: 40px 20px; gap: 6px; }

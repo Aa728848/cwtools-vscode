@@ -91,14 +91,141 @@
         sendBtn.className = val ? 'send-btn cancel-btn' : 'send-btn';
     }
 
-    function escapeHtml(t) { const d = document.createElement('div'); d.textContent = String(t ?? ''); return d.innerHTML; }
+    // ── Markdown renderer ──────────────────────────────────────────────────────
+    // Supports: headings, bold, italic, del, inline-code, fenced code blocks,
+    // unordered/ordered lists, blockquotes, tables, horizontal rules, links.
 
-    function renderMarkdown(text) {
-        let h = escapeHtml(text);
-        h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        h = h.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-        h = h.split('\n').join('<br>');
-        return h;
+    function escapeHtml(t) {
+        return String(t ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function inlineMd(raw) {
+        let s = raw
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // inline code first so inner content is not processed
+        s = s.replace(/`([^`]+)`/g, (_, c) => '<code>' + c.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>') + '</code>');
+        s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+        s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+        s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+        s = s.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+        s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+        s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        return s;
+    }
+
+    function renderMarkdown(rawText) {
+        if (!rawText) return '';
+
+        // 1. Extract fenced code blocks, replace with placeholders
+        const blocks = [];
+        let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+            const i = blocks.length;
+            blocks.push({ lang: lang.trim(), code });
+            return '\x00BLOCK' + i + '\x00';
+        });
+
+        // 2. Split into "paragraphs" by blank lines
+        const paras = text.split(/\n{2,}/);
+        const out = [];
+
+        for (let para of paras) {
+            para = para.trim();
+            if (!para) continue;
+
+            // Code block placeholder
+            if (/^\x00BLOCK\d+\x00$/.test(para)) {
+                const { lang, code } = blocks[+para.match(/\d+/)[0]];
+                out.push(
+                    '<div class="md-codeblock"><div class="md-codeblock-lang">' +
+                    escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>'
+                );
+                continue;
+            }
+
+            // Para might have embedded placeholders (code in middle of text)
+            const lines = para.split('\n');
+
+            // Heading
+            if (/^#{1,6}\s/.test(lines[0]) && lines.length === 1) {
+                const m = lines[0].match(/^(#{1,6})\s+(.+)$/);
+                const lv = m[1].length;
+                out.push('<h' + lv + '>' + inlineMd(m[2]) + '</h' + lv + '>');
+                continue;
+            }
+
+            // Horizontal rule
+            if (/^[-*_]{3,}$/.test(para)) { out.push('<hr>'); continue; }
+
+            // Blockquote
+            if (lines.every(l => /^>/.test(l))) {
+                const inner = lines.map(l => l.replace(/^>\s?/, '')).join('\n');
+                out.push('<blockquote>' + renderMarkdown(inner) + '</blockquote>');
+                continue;
+            }
+
+            // Table
+            if (lines.length >= 2 && /^\|/.test(lines[0]) && /^[\|\s:-]+$/.test(lines[1])) {
+                const headers = lines[0].split('|').map(c=>c.trim()).filter(Boolean);
+                const rows = lines.slice(2).map(r => r.split('|').map(c=>c.trim()).filter(Boolean));
+                let tbl = '<table><thead><tr>' + headers.map(h=>'<th>'+inlineMd(h)+'</th>').join('') + '</tr></thead><tbody>';
+                rows.forEach(r => { tbl += '<tr>' + r.map(c=>'<td>'+inlineMd(c)+'</td>').join('') + '</tr>'; });
+                tbl += '</tbody></table>';
+                out.push(tbl);
+                continue;
+            }
+
+            // Unordered list
+            if (/^[\-\*\+]\s/.test(lines[0])) {
+                const items = [];
+                let cur = null;
+                for (const l of lines) {
+                    const m = l.match(/^[\-\*\+]\s+(.+)/);
+                    if (m) { if (cur !== null) items.push(cur); cur = m[1]; }
+                    else if (cur !== null) cur += ' ' + l.trim();
+                }
+                if (cur !== null) items.push(cur);
+                out.push('<ul>' + items.map(i => '<li>' + inlineMd(i) + '</li>').join('') + '</ul>');
+                continue;
+            }
+
+            // Ordered list
+            if (/^\d+\.\s/.test(lines[0])) {
+                const items = [];
+                let cur = null;
+                for (const l of lines) {
+                    const m = l.match(/^\d+\.\s+(.+)/);
+                    if (m) { if (cur !== null) items.push(cur); cur = m[1]; }
+                    else if (cur !== null) cur += ' ' + l.trim();
+                }
+                if (cur !== null) items.push(cur);
+                out.push('<ol>' + items.map(i => '<li>' + inlineMd(i) + '</li>').join('') + '</ol>');
+                continue;
+            }
+
+            // Regular paragraph — process line by line in case there are block placeholders
+            const lineHtmlParts = [];
+            for (const line of lines) {
+                const trimLine = line.trim();
+                if (/^\x00BLOCK\d+\x00$/.test(trimLine)) {
+                    const { lang, code } = blocks[+trimLine.match(/\d+/)[0]];
+                    lineHtmlParts.push(
+                        '<div class="md-codeblock"><div class="md-codeblock-lang">' +
+                        escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>'
+                    );
+                } else {
+                    lineHtmlParts.push(inlineMd(line));
+                }
+            }
+            // Join: use <br> between plain lines but not before/after block elements
+            out.push('<p>' + lineHtmlParts.join('<br>') + '</p>');
+        }
+
+        return out.join('');
     }
 
     function scrollBottom() { chatArea.scrollTop = chatArea.scrollHeight; }
@@ -217,33 +344,34 @@
         return div;
     }
 
-    function showDiffCard(file, diff, messageId) {
-        const div = document.createElement('div');
+    function showPendingWriteCard(file, messageId, isNewFile) {
         const fileName = (file || '').split(/[\\\/]/).pop() || file;
-        const lines = (diff || '').split('\n');
-        const diffHtml = lines.map(line => {
-            if (line.startsWith('+') && !line.startsWith('+++')) return '<span class="diff-add">' + escapeHtml(line) + '</span>';
-            if (line.startsWith('-') && !line.startsWith('---')) return '<span class="diff-del">' + escapeHtml(line) + '</span>';
-            return escapeHtml(line);
-        }).join('\n');
-        const safeId = escapeHtml(messageId);
+        const div = document.createElement('div');
         const card = document.createElement('div');
         card.className = 'diff-card';
+        const safeId = escapeHtml(messageId);
+        const hint = isNewFile
+            ? '新文件已在编辑器中打开，请确认内容后决定'
+            : '文件对比已在 VSCode 差异编辑器中打开';
         card.innerHTML =
-            '<div class="diff-card-header">Requesting to modify: ' + escapeHtml(fileName) + '</div>' +
-            '<div class="diff-card-body">' + diffHtml + '</div>' +
+            '<div class="diff-card-header">' +
+            '<span>✏️ 请求' + (isNewFile ? '创建' : '修改') + ': <strong>' + escapeHtml(fileName) + '</strong></span>' +
+            '<span class="diff-card-hint">' + hint + '</span>' +
+            '</div>' +
             '<div class="diff-card-actions">' +
-            '<button class="diff-accept-btn" data-msgid="' + safeId + '">Accept</button>' +
-            '<button class="diff-reject-btn" data-msgid="' + safeId + '">Reject</button>' +
+            '<button class="diff-accept-btn" data-msgid="' + safeId + '">✅ 接受</button>' +
+            '<button class="diff-reject-btn" data-msgid="' + safeId + '">❌ 拒绝</button>' +
             '</div>';
         card.querySelector('.diff-accept-btn').addEventListener('click', function() {
-            card.querySelectorAll('button').forEach(b => b.disabled = true);
-            this.textContent = 'Accepted';
+            this.disabled = true;
+            card.querySelector('.diff-reject-btn').disabled = true;
+            this.textContent = '已接受 ✅';
             vscode.postMessage({ type: 'confirmWriteFile', messageId });
         });
         card.querySelector('.diff-reject-btn').addEventListener('click', function() {
-            card.querySelectorAll('button').forEach(b => b.disabled = true);
-            this.textContent = 'Rejected';
+            this.disabled = true;
+            card.querySelector('.diff-accept-btn').disabled = true;
+            this.textContent = '已拒绝';
             vscode.postMessage({ type: 'cancelWriteFile', messageId });
         });
         div.appendChild(card);
@@ -345,7 +473,7 @@
                 break;
             }
 
-            case 'pendingWriteFile': showDiffCard(msg.file, msg.diff, msg.messageId); break;
+            case 'pendingWriteFile': showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile); break;
 
             case 'modeChanged':
                 currentMode = msg.mode;

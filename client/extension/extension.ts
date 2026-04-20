@@ -170,6 +170,22 @@ export async function activate(context: ExtensionContext) {
 	context.subscriptions.push(
 		vs.window.registerWebviewViewProvider(AIChatPanelProvider.viewType, chatPanelProvider)
 	);
+
+	// ─── Wire up AgentToolExecutor callbacks ─────────────────────────────────
+	// onPendingWrite: route file-write confirmations through the WebView panel
+	toolExecutor.onPendingWrite = (file, newContent, messageId) =>
+		chatPanelProvider.handlePendingWrite(file, newContent, messageId);
+	// onTodoUpdate: push todo list updates to the WebView panel
+	toolExecutor.onTodoUpdate = (todos) =>
+		chatPanelProvider.sendTodoUpdate(todos);
+	// Sync fileWriteMode from config on startup
+	toolExecutor.fileWriteMode = workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
+	// Re-sync fileWriteMode whenever config changes
+	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
+		if (e.affectsConfiguration('cwtools.ai.agentFileWriteMode')) {
+			toolExecutor.fileWriteMode = workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
+		}
+	}));
 	const gameLanguages2 = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
 	const docSelector2 = gameLanguages2.map(lang => ({ scheme: 'file', language: lang }));
 	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder);

@@ -501,7 +501,7 @@ export type WebViewMessage =
     | { type: 'detectOllamaModels'; endpoint: string }
     | { type: 'testConnection'; settings: PanelSettings }
     | { type: 'retractMessage'; messageIndex: number }
-    | { type: 'confirmWriteFile'; file: string; content: string; messageId: string }
+    | { type: 'confirmWriteFile'; messageId: string }
     | { type: 'cancelWriteFile'; messageId: string }
     | { type: 'quickChangeModel'; model: string };
 
@@ -520,7 +520,7 @@ export type HostMessage =
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }
-    | { type: 'pendingWriteFile'; file: string; diff: string; messageId: string };
+    | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

@@ -1,4 +1,17 @@
 import typescript from 'rollup-plugin-typescript2';
+import { copyFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
+
+/** Inline copy plugin — copies a plain JS file to the output directory */
+function copyFile(src, dest) {
+    return {
+        name: 'copy-file',
+        buildEnd() {
+            mkdirSync(dirname(dest), { recursive: true });
+            copyFileSync(src, dest);
+        }
+    };
+}
 
 export default [
     // GUI Preview webview bundle
@@ -37,6 +50,8 @@ export default [
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
                 }
             }),
+            // Also copy plain-JS webview files that don't need bundling
+            copyFile('./client/webview/chatPanel.js', './release/bin/client/webview/chatPanel.js'),
         ],
     },
 ];

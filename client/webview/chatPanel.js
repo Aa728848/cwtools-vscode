@@ -646,6 +646,16 @@
         document.body.appendChild(overlay);
     }
 
+    // ── Card dismiss helper ────────────────────────────────────────────────────
+    function dismissCard(el, delay) {
+        setTimeout(() => {
+            el.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(-4px)';
+            setTimeout(() => el.remove(), 260);
+        }, delay || 400);
+    }
+
     // ── Diff card ──────────────────────────────────────────────────────────────
     function showPendingWriteCard(file, messageId, isNewFile) {
         const fileName = (file || '').split(/[\\\/]/).pop() || file;
@@ -666,11 +676,13 @@
             this.disabled = true; card.querySelector('.diff-reject-btn').disabled = true;
             this.textContent = '已接受 ✅';
             vscode.postMessage({ type: 'confirmWriteFile', messageId });
+            dismissCard(div, 400);
         });
         card.querySelector('.diff-reject-btn').addEventListener('click', function () {
             this.disabled = true; card.querySelector('.diff-accept-btn').disabled = true;
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'cancelWriteFile', messageId });
+            dismissCard(div, 400);
         });
         div.appendChild(card);
         chatArea.appendChild(div);
@@ -698,11 +710,13 @@
             this.disabled = true; div.querySelector('.permission-deny-btn').disabled = true;
             this.textContent = '已允许 ✅';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
+            dismissCard(div, 400);
         });
         div.querySelector('.permission-deny-btn').addEventListener('click', function() {
             this.disabled = true; div.querySelector('.permission-allow-btn').disabled = true;
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
+            dismissCard(div, 400);
         });
         chatArea.appendChild(div);
         scrollBottom();

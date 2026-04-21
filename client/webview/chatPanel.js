@@ -961,13 +961,28 @@
                     formatTime(Date.now())
                 );
                 chatArea.appendChild(completedMsg);
-                const stepTokens = r.steps ? r.steps.reduce((sum, s) => {
-                    if (s.type === 'thinking_content' || s.type === 'thinking')
-                        return sum + Math.ceil((s.content || '').length / 4);
-                    return sum;
-                }, 0) : 0;
-                totalConversationTokens += Math.ceil((r.explanation || '').length / 4) + stepTokens + 500;
-                updateTokenUsage(totalConversationTokens, contextLimit);
+                // Use real tokenUsage from result if available, else fall back to rough estimate
+                if (r.tokenUsage && r.tokenUsage.total > 0) {
+                    totalConversationTokens = r.tokenUsage.total;
+                    updateTokenUsage(r.tokenUsage.total, contextLimit);
+                    // Show cost badge
+                    const label = document.getElementById('tokenUsageLabel');
+                    if (label && r.tokenUsage.estimatedCostUsd > 0) {
+                        const cost = r.tokenUsage.estimatedCostUsd < 0.001
+                            ? '<$0.001'
+                            : '$' + r.tokenUsage.estimatedCostUsd.toFixed(4);
+                        label.textContent = label.textContent + '  ·  ' + cost;
+                    }
+                } else {
+                    // Rough estimate fallback (no API usage data)
+                    const stepTokens = r.steps ? r.steps.reduce((sum, s) => {
+                        if (s.type === 'thinking_content' || s.type === 'thinking')
+                            return sum + Math.ceil((s.content || '').length / 4);
+                        return sum;
+                    }, 0) : 0;
+                    totalConversationTokens += Math.ceil((r.explanation || '').length / 4) + stepTokens + 500;
+                    updateTokenUsage(totalConversationTokens, contextLimit);
+                }
                 scrollBottom();
                 break;
             }
@@ -1266,20 +1281,21 @@
             }
 
             case 'tokenUsage': {
-                // Override rough estimation with actual counted tokens from the API
+                // Override/supplement with actual counted tokens from the API
+                // This fires AFTER generationComplete (for plan mode) or may duplicate normal mode;
+                // only update if we don't already have real data (avoid double-counting).
                 const u = msg.usage;
                 if (u && u.total > 0) {
                     totalConversationTokens = u.total;
                     updateTokenUsage(u.total, contextLimit);
-                    // Show cost badge if non-zero
-                    if (u.estimatedCostUsd > 0) {
-                        const label = document.getElementById('tokenUsageLabel');
-                        if (label) {
-                            const cost = u.estimatedCostUsd < 0.001
-                                ? '<$0.001'
-                                : '$' + u.estimatedCostUsd.toFixed(4);
-                            label.textContent = label.textContent + '  ·  ' + cost;
-                        }
+                    // Completely replace the label with token + cost info
+                    const label = document.getElementById('tokenUsageLabel');
+                    if (label) {
+                        const base = `~${formatNum(u.total)} / ${formatNum(contextLimit)} tokens`;
+                        const cost = u.estimatedCostUsd > 0
+                            ? '  ·  ' + (u.estimatedCostUsd < 0.001 ? '<$0.001' : '$' + u.estimatedCostUsd.toFixed(4))
+                            : '';
+                        label.textContent = base + cost;
                     }
                 }
                 break;
@@ -1396,6 +1412,10 @@
         document.getElementById('inlineEndpoint').value = current.inlineCompletion?.endpoint||'';
         document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs||1500;
         document.getElementById('agentWriteMode').value = current.agentFileWriteMode||'confirm';
+        // Brave Search API key — show masked placeholder if already set
+        const braveKeyEl = document.getElementById('braveSearchApiKey');
+        if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
+
         function updateInlineModelSelect(pid, selectedModel, ollamaModels) {
             const s = document.getElementById('inlineModel'); const p2 = providers.find(p=>p.id===(pid||current.provider));
             const ms = (pid||current.provider)==='ollama'?(ollamaModels||[]).map(m=>m.name):(p2?p2.models:[]);
@@ -1511,6 +1531,7 @@
             endpoint: document.getElementById('settingsEndpoint').value.trim(),
             maxContextTokens: parseInt(document.getElementById('settingsCtx').value)||0,
             agentFileWriteMode: document.getElementById('agentWriteMode').value,
+            braveSearchApiKey: (document.getElementById('braveSearchApiKey')?.value || '').trim(),
             inlineCompletion:{
                 enabled: document.getElementById('inlineEnabled').checked,
                 provider: document.getElementById('inlineProvider').value,

@@ -666,6 +666,8 @@ export interface PanelSettings {
     endpoint: string;
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
+    /** Brave Search API key for web_search tool (optional) */
+    braveSearchApiKey?: string;
     inlineCompletion: {
         enabled: boolean;
         provider: string;

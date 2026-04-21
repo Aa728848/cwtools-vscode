@@ -229,6 +229,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             endpoint: config.endpoint || '',
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: config.agentFileWriteMode,
+            braveSearchApiKey: (() => {
+                const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
+                return k ? '••••••••' : '';  // mask if set; expose empty string if not
+            })(),
             inlineCompletion: {
                 enabled: config.inlineCompletion.enabled,
                 provider: config.inlineCompletion.provider,
@@ -274,6 +278,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             await this.aiService.getKeyManager().setKey(settings.provider, settings.apiKey.trim());
             // Ensure plaintext key is cleared from settings.json
             await cfg.update('apiKey', '', vs.ConfigurationTarget.Global);
+        }
+        // Brave Search API key — stored in workspace config (not secret, not sensitive enough)
+        if (settings.braveSearchApiKey && settings.braveSearchApiKey.trim().length > 0
+            && !settings.braveSearchApiKey.startsWith('•')) {
+            await cfg.update('braveSearchApiKey', settings.braveSearchApiKey.trim(), vs.ConfigurationTarget.Global);
         }
         await cfg.update('endpoint', settings.endpoint, vs.ConfigurationTarget.Global);
         await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);
@@ -1505,10 +1514,10 @@ body.plan-mode .plan-indicator { display: block; }
 .send-btn.cancel-mode { background: rgba(244,67,54,0.15); color: var(--error); border: 1px solid rgba(244,67,54,0.35); }
 .send-icon { font-weight: 700; }
 .stop-icon { display: inline-block; width: 9px; height: 9px; background: var(--error); border-radius: 2px; }
-/* Token usage bar */
-.token-usage-bar { height: 2px; background: var(--border); overflow: hidden; margin: 2px 0 4px; }
+.token-usage-bar { height: 2px; background: var(--border); overflow: hidden; margin: 2px 0 3px; }
 .token-usage-fill { height: 100%; background: var(--accent); transition: width 0.4s; border-radius: 1px; }
-.token-usage-label { font-size: 10px; opacity: 0.35; text-align: right; padding: 0 8px 4px; }
+.token-usage-label { font-size: 10px; opacity: 0.5; text-align: right; padding: 0 8px 2px; letter-spacing: 0.02em; }
+#tokenUsageBar { padding: 0 4px; background: transparent; }
 /* Message timestamp */
 .msg-time { font-size: 10px; opacity: 0.3; margin-left: auto; font-family: monospace; }
 /* Topic date groups */
@@ -1706,13 +1715,13 @@ body.general-mode .mode-indicator { color: #c792ea; }
 
 <div class="input-wrapper" style="position:relative">
     <div id="slashPopup" class="slash-popup"></div>
+    <div id="tokenUsageBar" style="display:none">
+        <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
+        <div class="token-usage-label" id="tokenUsageLabel"></div>
+    </div>
     <div class="input-container">
         <div class="input-row">
             <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1"></textarea>
-        </div>
-        <div id="tokenUsageBar" style="display:none">
-            <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
-            <div class="token-usage-label" id="tokenUsageLabel"></div>
         </div>
         <div class="input-controls">
             <div class="ctrl-group">
@@ -1805,6 +1814,14 @@ body.general-mode .mode-indicator { color: #c792ea; }
                         <option value="confirm">确认模式 — 写操作前 diff 确认（推荐）</option>
                         <option value="auto">自动模式 — 直接写入（高级）</option>
                     </select>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">🔍 Brave Search API Key <span style="opacity:0.5;font-weight:400">(可选，用于 web_search 工具)</span></label>
+                    <div class="settings-key-row">
+                        <input class="settings-input" id="braveSearchApiKey" type="password" placeholder="留空则使用 DuckDuckGo 降级搜索" autocomplete="off" />
+                        <button class="key-toggle-btn" id="braveKeyToggleBtn" onclick="var k=document.getElementById('braveSearchApiKey');k.type=k.type==='password'?'text':'password';">👁</button>
+                    </div>
+                    <div class="settings-hint">填写后 web_search 工具将使用 Brave Search API，结果质量更高。Key 请在 <a href="https://api.search.brave.com/" target="_blank" rel="noopener">api.search.brave.com</a> 获取。</div>
                 </div>
             </div>
         </div>

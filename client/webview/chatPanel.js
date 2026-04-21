@@ -453,56 +453,128 @@
 
     function renderMarkdown(rawText) {
         if (!rawText) return '';
+
+        // Phase 1: extract fenced code blocks to avoid mis-parsing their content
         const blocks = [];
         let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_,lang,code) => {
             const i = blocks.length; blocks.push({lang:lang.trim(),code}); return '\x00BLOCK'+i+'\x00';
         });
-        const paras = text.split(/\n{2,}/);
+
+        // Phase 2: line-by-line state machine — correctly handles ## headings at any position
+        const lines = text.split('\n');
         const out = [];
-        for (let para of paras) {
-            para = para.trim(); if (!para) continue;
-            if (/^\x00BLOCK\d+\x00$/.test(para)) {
-                const {lang,code} = blocks[+para.match(/\d+/)[0]];
-                out.push('<div class="md-codeblock"><div class="md-codeblock-lang">'+escapeHtml(lang)+'</div><code>'+escapeHtml(code)+'</code></div>'); continue;
-            }
-            const lines = para.split('\n');
-            if (/^#{1,6}\s/.test(lines[0]) && lines.length===1) {
-                const m = lines[0].match(/^(#{1,6})\s+(.+)$/); const lv = m[1].length;
-                out.push('<h'+lv+'>'+inlineMd(m[2])+'</h'+lv+'>'); continue;
-            }
-            if (/^[-*_]{3,}$/.test(para)) { out.push('<hr>'); continue; }
-            if (lines.every(l=>/^>/.test(l))) {
-                out.push('<blockquote>'+renderMarkdown(lines.map(l=>l.replace(/^>\s?/,'')).join('\n'))+'</blockquote>'); continue;
-            }
-            if (lines.length>=2 && /^\|/.test(lines[0]) && /^[\|\s:-]+$/.test(lines[1])) {
-                const headers = lines[0].split('|').map(c=>c.trim()).filter(Boolean);
-                const rows = lines.slice(2).map(r=>r.split('|').map(c=>c.trim()).filter(Boolean));
-                let tbl='<table><thead><tr>'+headers.map(h=>'<th>'+inlineMd(h)+'</th>').join('')+'</tr></thead><tbody>';
-                rows.forEach(r=>{ tbl+='<tr>'+r.map(c=>'<td>'+inlineMd(c)+'</td>').join('')+'</tr>'; });
-                out.push(tbl+'</tbody></table>'); continue;
-            }
-            if (/^[\-\*\+]\s/.test(lines[0])) {
-                const items=[]; let cur=null;
-                for (const l of lines) { const m=l.match(/^[\-\*\+]\s+(.+)/); if(m){if(cur!==null)items.push(cur);cur=m[1];}else if(cur!==null)cur+=' '+l.trim(); }
-                if(cur!==null)items.push(cur);
-                out.push('<ul>'+items.map(i=>'<li>'+inlineMd(i)+'</li>').join('')+'</ul>'); continue;
-            }
-            if (/^\d+\.\s/.test(lines[0])) {
-                const items=[]; let cur=null;
-                for (const l of lines) { const m=l.match(/^\d+\.\s+(.+)/); if(m){if(cur!==null)items.push(cur);cur=m[1];}else if(cur!==null)cur+=' '+l.trim(); }
-                if(cur!==null)items.push(cur);
-                out.push('<ol>'+items.map(i=>'<li>'+inlineMd(i)+'</li>').join('')+'</ol>'); continue;
-            }
-            const lineHtml = lines.map(line => {
+        let i = 0;
+
+        function flushPara(paraLines) {
+            if (!paraLines.length) return;
+            const lineHtml = paraLines.map(line => {
                 const t = line.trim();
                 if (/^\x00BLOCK\d+\x00$/.test(t)) {
-                    const {lang,code}=blocks[+t.match(/\d+/)[0]];
+                    const {lang,code} = blocks[+t.match(/\d+/)[0]];
                     return '<div class="md-codeblock"><div class="md-codeblock-lang">'+escapeHtml(lang)+'</div><code>'+escapeHtml(code)+'</code></div>';
                 }
                 return inlineMd(line);
             });
-            out.push('<p>'+lineHtml.join('<br>')+'</p>');
+            out.push('<p>' + lineHtml.join('<br>') + '</p>');
         }
+
+        let paraLines = [];
+
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            // Empty line: flush current paragraph
+            if (!trimmed) { flushPara(paraLines); paraLines = []; i++; continue; }
+
+            // Fenced code block placeholder (standalone line)
+            if (/^\x00BLOCK\d+\x00$/.test(trimmed)) {
+                flushPara(paraLines); paraLines = [];
+                const {lang,code} = blocks[+trimmed.match(/\d+/)[0]];
+                out.push('<div class="md-codeblock"><div class="md-codeblock-lang">'+escapeHtml(lang)+'</div><code>'+escapeHtml(code)+'</code></div>');
+                i++; continue;
+            }
+
+            // ATX Heading — works at ANY line position (key fix: no lines.length===1 restriction)
+            const hdm = trimmed.match(/^(#{1,6})\s+(.+)$/);
+            if (hdm) {
+                flushPara(paraLines); paraLines = [];
+                const lv = hdm[1].length;
+                out.push('<h'+lv+'>'+inlineMd(hdm[2])+'</h'+lv+'>');
+                i++; continue;
+            }
+
+            // Horizontal rule
+            if (/^[-*_]{3,}$/.test(trimmed)) {
+                flushPara(paraLines); paraLines = [];
+                out.push('<hr>'); i++; continue;
+            }
+
+            // Blockquote — collect consecutive > lines
+            if (/^>/.test(trimmed)) {
+                flushPara(paraLines); paraLines = [];
+                const bqLines = [];
+                while (i < lines.length && /^>/.test(lines[i].trim())) {
+                    bqLines.push(lines[i].replace(/^>\s?/, '')); i++;
+                }
+                out.push('<blockquote>' + renderMarkdown(bqLines.join('\n')) + '</blockquote>');
+                continue;
+            }
+
+            // GFM Table — header row | separator row | data rows (all consecutive)
+            if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[\|\s:-]+$/.test(lines[i+1].trim())) {
+                flushPara(paraLines); paraLines = [];
+                const tblLines = [];
+                while (i < lines.length && /^\|/.test(lines[i].trim())) { tblLines.push(lines[i]); i++; }
+                if (tblLines.length >= 2) {
+                    const headers = tblLines[0].split('|').map(c=>c.trim()).filter(Boolean);
+                    const rows = tblLines.slice(2).map(r=>r.split('|').map(c=>c.trim()).filter(Boolean));
+                    let tbl='<table><thead><tr>'+headers.map(h=>'<th>'+inlineMd(h)+'</th>').join('')+'</tr></thead><tbody>';
+                    rows.forEach(r=>{ tbl+='<tr>'+r.map(c=>'<td>'+inlineMd(c)+'</td>').join('')+'</tr>'; });
+                    out.push(tbl+'</tbody></table>');
+                }
+                continue;
+            }
+
+            // Unordered list — collect consecutive list items
+            if (/^[-*+]\s/.test(trimmed)) {
+                flushPara(paraLines); paraLines = [];
+                const items = []; let cur = null;
+                while (i < lines.length) {
+                    const ll = lines[i], lt = ll.trim();
+                    if (!lt) { i++; break; }
+                    const mm = lt.match(/^[-*+]\s+(.+)/);
+                    if (mm) { if (cur !== null) items.push(cur); cur = mm[1]; i++; }
+                    else if (cur !== null && /^\s{2,}/.test(ll)) { cur += ' ' + lt; i++; }
+                    else break;
+                }
+                if (cur !== null) items.push(cur);
+                out.push('<ul>'+items.map(it=>'<li>'+inlineMd(it)+'</li>').join('')+'</ul>');
+                continue;
+            }
+
+            // Ordered list — collect consecutive numbered items
+            if (/^\d+\.\s/.test(trimmed)) {
+                flushPara(paraLines); paraLines = [];
+                const items = []; let cur = null;
+                while (i < lines.length) {
+                    const ll = lines[i], lt = ll.trim();
+                    if (!lt) { i++; break; }
+                    const mm = lt.match(/^\d+\.\s+(.+)/);
+                    if (mm) { if (cur !== null) items.push(cur); cur = mm[1]; i++; }
+                    else if (cur !== null && /^\s{2,}/.test(ll)) { cur += ' ' + lt; i++; }
+                    else break;
+                }
+                if (cur !== null) items.push(cur);
+                out.push('<ol>'+items.map(it=>'<li>'+inlineMd(it)+'</li>').join('')+'</ol>');
+                continue;
+            }
+
+            // Default: accumulate into paragraph
+            paraLines.push(line); i++;
+        }
+
+        flushPara(paraLines);
         return out.join('');
     }
 

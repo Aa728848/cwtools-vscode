@@ -573,29 +573,40 @@ export class AgentRunner {
             const useDsmlToolRole = useDsmlToolRole0;
 
             // Emit all tool_call steps upfront (preserves UI ordering)
-            const parsedCalls: Array<{ toolName: AgentToolName; toolArgs: Record<string, unknown>; toolCall: typeof toolCalls[0] }> = [];
+            const parsedCalls: Array<{ toolName: AgentToolName; toolArgs: Record<string, unknown>; toolArgsParseError?: string; toolCall: typeof toolCalls[0] }> = [];
             for (const toolCall of toolCalls) {
                 options?.abortSignal?.throwIfAborted();
                 const toolName = toolCall.function.name as AgentToolName;
                 let toolArgs: Record<string, unknown>;
-                try { toolArgs = JSON.parse(toolCall.function.arguments); } catch { toolArgs = {}; }
+                let toolArgsParseError: string | undefined;
+                try { toolArgs = JSON.parse(toolCall.function.arguments); } catch (e) {
+                    toolArgs = {};
+                    toolArgsParseError = `JSON parse error: ${e instanceof Error ? e.message : String(e)}. Raw arguments: ${toolCall.function.arguments?.substring(0, 200)}`;
+                }
                 emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now() });
-                parsedCalls.push({ toolName, toolArgs, toolCall });
+                parsedCalls.push({ toolName, toolArgs, toolArgsParseError, toolCall });
             }
 
-            // Partition into groups: run read-only in parallel, write in serial
-            // We process them in order but batch consecutive read-only calls.
             const toolResults: unknown[] = new Array(parsedCalls.length);
             let i = 0;
             while (i < parsedCalls.length) {
                 options?.abortSignal?.throwIfAborted();
-                const { toolName, toolArgs, toolCall } = parsedCalls[i];
+                const { toolName, toolArgs, toolArgsParseError, toolCall } = parsedCalls[i];
+
+                // If arguments failed to parse as JSON, short-circuit and return an error
+                // so the AI knows to retry with properly formatted arguments.
+                if (toolArgsParseError) {
+                    toolResults[i] = { ok: false, error: `Tool argument JSON parse failed — ${toolArgsParseError}. Please retry with valid JSON arguments.` };
+                    void toolCall;
+                    i++;
+                    continue;
+                }
 
                 if (READ_ONLY_TOOLS.has(toolName)) {
-                    // Collect a batch of consecutive read-only tools
+                    // Collect a batch of consecutive read-only tools (skip any with parse errors)
                     const batchStart = i;
                     const batch: Array<{ idx: number; toolName: AgentToolName; toolArgs: Record<string, unknown>; toolCall: typeof toolCalls[0] }> = [];
-                    while (i < parsedCalls.length && READ_ONLY_TOOLS.has(parsedCalls[i].toolName)) {
+                    while (i < parsedCalls.length && READ_ONLY_TOOLS.has(parsedCalls[i].toolName) && !parsedCalls[i].toolArgsParseError) {
                         batch.push({ idx: i, ...parsedCalls[i] });
                         i++;
                     }

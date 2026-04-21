@@ -880,7 +880,7 @@ export class AgentToolExecutor {
         if (!name) {
             return {
                 ok: false,
-                error: 'symbolName is required. Provide the exact name of the symbol to look up, e.g. query_definition_by_name({ symbolName: "my_scripted_trigger" }).',
+                error: 'Missing required parameter: symbolName. You must pass the exact symbol name as a string. Example: query_definition_by_name({ "symbolName": "kuat_has_psionic_research" })',
             };
         }
         try {

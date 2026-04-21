@@ -244,7 +244,9 @@ export class AIService {
             if (provider.supportsStreaming && provider.isOpenAICompatible && !isAnthropicCompat) {
                 return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller);
             } else if (isAnthropicCompat) {
-                return await this.callClaude(endpoint, apiKey, request, controller);
+                // L4 Fix: fully migrate callClaude to SSE — enables real-time thinking tokens
+                // and eliminates the previous blocking response.json() approach.
+                return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking);
             } else {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
             }
@@ -569,14 +571,28 @@ export class AIService {
         } as ChatCompletionResponse;
     }
 
+    /**
+     * Call Claude Messages API using Server-Sent Events streaming.
+     *
+     * Claude SSE event types used:
+     *  - message_start          → usage (input_tokens)
+     *  - content_block_start    → tool_use block started (captures id/name)
+     *  - content_block_delta    → text_delta or input_json_delta
+     *  - message_delta          → stop_reason, usage.output_tokens
+     *
+     * Result is assembled into a synthetic ChatCompletionResponse identical
+     * to the format returned by callOpenAICompatibleStreaming.
+     */
     private async callClaude(
         endpoint: string,
         apiKey: string,
         request: ChatCompletionRequest,
-        controller: AbortController
+        controller: AbortController,
+        onThinking?: (text: string) => void
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/messages`;
-        const claudeRequest = toClaudeRequest(request);
+        // Force stream=true so we get SSE — enables thinking tokens and unblocks UI
+        const claudeRequest = toClaudeRequest({ ...request, stream: true });
 
         const response = await fetch(url, {
             method: 'POST',
@@ -586,7 +602,7 @@ export class AIService {
                 'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify(claudeRequest),
-            signal: controller.signal,   // C1 Fix: use local per-call controller
+            signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -594,8 +610,124 @@ export class AIService {
             throw new Error(`Claude API error (${response.status}): ${errorText}`);
         }
 
-        const claudeResponse = await response.json() as Record<string, unknown>;
-        return fromClaudeResponse(claudeResponse);
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body from Claude SSE');
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        // Accumulation state (mirroring callOpenAICompatibleStreaming)
+        let textBuf = '';
+        let modelBuf = '';
+        let stopReason: string | null = null;
+        let inputTokens = 0;
+        let outputTokens = 0;
+
+        // Tool-use blocks: index → { id, name, argsBuf }
+        const toolBlocks: Record<number, { id: string; name: string; argsBuf: string }> = {};
+        let currentBlockIdx = -1;
+        let currentBlockType = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+
+            let eventType = '';
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('event: ')) {
+                    eventType = trimmed.slice(7).trim();
+                    continue;
+                }
+                if (!trimmed.startsWith('data: ')) continue;
+                let evt: Record<string, unknown>;
+                try { evt = JSON.parse(trimmed.slice(6)); } catch { continue; }
+
+                switch (eventType) {
+                    case 'message_start': {
+                        const msg = evt.message as Record<string, unknown> | undefined;
+                        if (msg?.model) modelBuf = msg.model as string;
+                        const u = msg?.usage as Record<string, number> | undefined;
+                        if (u) inputTokens = u.input_tokens ?? 0;
+                        break;
+                    }
+                    case 'content_block_start': {
+                        currentBlockIdx = (evt.index as number) ?? 0;
+                        const block = evt.content_block as Record<string, unknown> | undefined;
+                        currentBlockType = (block?.type as string) ?? '';
+                        if (currentBlockType === 'tool_use') {
+                            toolBlocks[currentBlockIdx] = {
+                                id: (block?.id as string) ?? '',
+                                name: (block?.name as string) ?? '',
+                                argsBuf: '',
+                            };
+                        }
+                        break;
+                    }
+                    case 'content_block_delta': {
+                        const delta = evt.delta as Record<string, unknown> | undefined;
+                        const deltaType = delta?.type as string;
+                        if (deltaType === 'text_delta') {
+                            const chunk = (delta?.text as string) ?? '';
+                            textBuf += chunk;
+                            // Emit thinking tokens to caller in real-time
+                            if (chunk && onThinking) onThinking(chunk);
+                        } else if (deltaType === 'input_json_delta') {
+                            const idx = (evt.index as number) ?? currentBlockIdx;
+                            if (toolBlocks[idx]) {
+                                toolBlocks[idx].argsBuf += (delta?.partial_json as string) ?? '';
+                            }
+                        }
+                        break;
+                    }
+                    case 'message_delta': {
+                        const d = evt.delta as Record<string, unknown> | undefined;
+                        if (d?.stop_reason) stopReason = d.stop_reason as string;
+                        const u = evt.usage as Record<string, number> | undefined;
+                        if (u) outputTokens = u.output_tokens ?? 0;
+                        break;
+                    }
+                    // 'message_stop', 'ping', 'error' — handled implicitly
+                }
+            }
+        }
+
+        // Map Claude stop_reason → OpenAI finish_reason
+        let finishReason: 'stop' | 'tool_calls' | 'length' = 'stop';
+        if (stopReason === 'tool_use') finishReason = 'tool_calls';
+        else if (stopReason === 'max_tokens') finishReason = 'length';
+
+        // Build synthetic tool_calls array from accumulated blocks
+        const toolCalls = Object.keys(toolBlocks).length > 0
+            ? Object.entries(toolBlocks)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([, tb]) => ({
+                    id: tb.id,
+                    type: 'function' as const,
+                    function: { name: tb.name, arguments: tb.argsBuf },
+                }))
+            : undefined;
+
+        const message: ChatMessage & { tool_calls?: typeof toolCalls } = {
+            role: 'assistant',
+            content: textBuf || null,
+        };
+        if (toolCalls && toolCalls.length > 0) message.tool_calls = toolCalls;
+
+        return {
+            model: modelBuf || undefined,
+            choices: [{
+                message: message as ChatMessage,
+                finish_reason: finishReason,
+            }],
+            usage: {
+                prompt_tokens: inputTokens,
+                completion_tokens: outputTokens,
+                total_tokens: inputTokens + outputTokens,
+            },
+        } as ChatCompletionResponse;
     }
 
     // ─── Provider quick-configure UI ─────────────────────────────────────────

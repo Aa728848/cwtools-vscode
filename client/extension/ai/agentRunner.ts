@@ -195,12 +195,14 @@ export class AgentRunner {
             options?.onStep?.(step);
         };
 
-        // Propagate runner options to tool executor for sub-agent dispatch
-        this.toolExecutor.parentRunnerOptions = options;
-
         // Accumulate token usage across all API calls in this generation
-        // (declared here so compaction call can also contribute to the total)
+        // (declared here so compaction call and sub-agent dispatch can also contribute to the total)
         const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
+
+        // Propagate runner options + accumulator to tool executor for sub-agent dispatch
+        this.toolExecutor.parentRunnerOptions = options;
+        // L8 Fix: wire up the parent accumulator so dispatchSubTask can merge sub-agent costs
+        this.toolExecutor.parentTokenAccumulator = tokenAccumulator;
 
         // Context compaction: if history is too long, summarize it
         const compactedHistory = await this.maybeCompactHistory(

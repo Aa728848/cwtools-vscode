@@ -13,9 +13,46 @@ type private Version =
       mutable version: int
       // 缓存 StringBuilder.ToString() 结果，避免热路径上重复分配字符串
       mutable cachedText: string
-      mutable cachedVersion: int }
+      mutable cachedVersion: int
+      // 行偏移缓存：lineOffsets.[i] = index of first char on line i
+      // Rebuilt lazily after Open/Replace; invalidated after Patch.
+      mutable lineOffsets: int[] | null
+      mutable lineOffsetsDirty: bool }
 
 module DocumentStoreUtils =
+    /// Build a sorted array of char offsets for the start of each line.
+    /// lineOffsets.[0] = 0 always; lineOffsets.[i] = offset of first char on line i.
+    let buildLineOffsets (text: StringBuilder) : int[] =
+        // Pre-scan to count newlines so we can allocate exactly once
+        let mutable nlCount = 0
+        for i = 0 to text.Length - 1 do
+            if text.[i] = '\n' then nlCount <- nlCount + 1
+        let offsets = Array.zeroCreate (nlCount + 1)
+        offsets.[0] <- 0
+        let mutable lineIdx = 0
+        for i = 0 to text.Length - 1 do
+            if text.[i] = '\n' && lineIdx < nlCount then
+                lineIdx <- lineIdx + 1
+                offsets.[lineIdx] <- i + 1
+        offsets
+
+    /// O(log n) replacement for the old O(n) findRange.
+    /// Uses a pre-built lineOffsets cache to jump directly to the right line,
+    /// then walks within that line for the column offset.
+    let findRangeFast (text: StringBuilder, lineOffsets: int[], range: Range) : struct (int * int) =
+        let lineStart (line: int) =
+            if line < lineOffsets.Length then lineOffsets.[line]
+            else text.Length  // clamp past-end lines
+
+        let posToOffset (line: int) (col: int) =
+            let ls = lineStart line
+            min (ls + col) text.Length
+
+        let startOffset = posToOffset range.start.line range.start.character
+        let endOffset   = posToOffset range.``end``.line range.``end``.character
+        struct (startOffset, endOffset)
+
+    /// Legacy O(n) fallback — kept for correctness validation only.
     let findRange (text: StringBuilder, range: Range) : struct (int * int) =
         let mutable line = 0
         let mutable char = 0
@@ -57,14 +94,28 @@ type DocumentStore() =
             v.cachedVersion <- v.version
             text
 
+    /// Get line-offset cache, rebuilding if dirty.
+    let getLineOffsets (v: Version) =
+        if v.lineOffsetsDirty || v.lineOffsets = null then
+            let offsets = buildLineOffsets v.text
+            v.lineOffsets <- offsets
+            v.lineOffsetsDirty <- false
+            offsets
+        else
+            v.lineOffsets
+
     /// Replace a section of an open file
     let patch (doc: VersionedTextDocumentIdentifier, range: Range, text: string) : unit =
         let file = FileInfo(doc.uri.LocalPath)
         let existing = activeDocuments[file.FullName]
-        let struct (startOffset, endOffset) = findRange (existing.text, range)
+        // Use cached offsets for fast lookup; mark dirty after mutation.
+        let offsets = getLineOffsets existing
+        let struct (startOffset, endOffset) = findRangeFast (existing.text, offsets, range)
         existing.text.Remove(startOffset, endOffset - startOffset) |> ignore
         existing.text.Insert(startOffset, text) |> ignore
         existing.version <- doc.version
+        // Invalidate cache — next patch/query will rebuild
+        existing.lineOffsetsDirty <- true
 
     /// Replace the entire contents of an open file
     let replace (doc: VersionedTextDocumentIdentifier, text: string) : unit =
@@ -73,16 +124,22 @@ type DocumentStore() =
         existing.text.Clear() |> ignore
         existing.text.Append(text) |> ignore
         existing.version <- doc.version
+        // Full replace: rebuild offsets eagerly (avoids lazy-rebuild on next call)
+        existing.lineOffsets <- buildLineOffsets existing.text
+        existing.lineOffsetsDirty <- false
 
     member this.Open(doc: DidOpenTextDocumentParams) : unit =
         let file = FileInfo(doc.textDocument.uri.LocalPath)
         let text = StringBuilder(doc.textDocument.text)
+        let offsets = buildLineOffsets text
 
         let version =
             { text = text
               version = doc.textDocument.version
               cachedText = doc.textDocument.text
-              cachedVersion = doc.textDocument.version }
+              cachedVersion = doc.textDocument.version
+              lineOffsets = offsets
+              lineOffsetsDirty = false }
 
         activeDocuments[file.FullName] <- version
 

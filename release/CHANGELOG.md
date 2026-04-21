@@ -1,34 +1,37 @@
 # Changelog
 
-## [1.5.0] - 2026-04-21
-### AI Agent — 架构全面重构
-#### 并发架构（LSP 服务端）
-- **读写锁并发**：引入 `ReaderWriterLockSlim`，只读请求（Hover、Completion、AI 查询等）线程池并发执行，写操作（DidChange、UpdateFile）串行独占执行
-- **validateCode 竞态修复**：`cwtools.ai.validateCode` 命令内的 `UpdateFile` 调用现在持有写锁保护，防止并发验证产生 AST 状态竞争
+## [1.5.0] — 2026-04-21
 
-#### 8 个新增 AI 专用 LSP 命令（Program.fs）
-所有新命令均注册为只读并发命令，不阻塞 LSP 主线程：
+### 🔒 LSP 服务端 — 稳定性与并发
 
-| 命令 | 功能 | 底层 API |
-|------|------|---------|
-| `cwtools.ai.queryDefinition` | 按坐标跳转定义 / 查找引用 | `GoToType` + `FindAllRefs` |
-| `cwtools.ai.queryDefinitionByName` | **按名称**直接定位符号定义，无需知道坐标 | `AllEntities` AST 搜索 |
-| `cwtools.ai.queryScriptedEffects` | 列出所有 scripted_effect 及 scope 约束 | `ScriptedEffects()` |
-| `cwtools.ai.queryScriptedTriggers` | 列出所有 scripted_trigger 及 scope 约束 | `ScriptedTriggers()` |
-| `cwtools.ai.queryEnums` | 查询枚举合法值 | `GetEmbeddedMetadata().enumDefs` |
-| `cwtools.ai.queryStaticModifiers` | 列出所有 static modifier 及类别 | `StaticModifiers()` |
-| `cwtools.ai.queryVariables` | 列出所有 `@variable` 定义 | `ScriptedVariables()` |
-| `cwtools.ai.getEntityInfo` | 获取文件的引用类型、定义变量、effect/trigger 块、event_target | `ComputedData` 缓存 |
+- **[修复] Tokenizer CRLF 安全性**：`readLine` 现在在消费 `\r` 前 peek 下一字节；单独的 `\r` 不再吞噬后续内容字节 (`Tokenizer.fs`)
+- **[修复] Tokenizer Content-Length 守卫**：`tokenize` 只在实际解析到有效 `Content-Length` 头时才调用 `readLength`；畸形空行静默跳过 (`Tokenizer.fs`)
+- **[修复] LanguageServer 进程队列无界化**：将 `BlockingCollection(10)` 改为无界 `BlockingCollection`，消除 AI 高频指令下读/处理线程的交叉死锁 (`LanguageServer.fs`)
+- **[修复] LanguageServer ReaderWriterLockSlim 并发**：只读 LSP 请求（Hover、Completion、GoToDefinition 等）在线程池中并发执行，持共享读锁；写操作（DidChange、validateCode 等）持独占写锁串行执行，消除慢查询阻塞快查询 (`LanguageServer.fs`)
+- **[修复] LanguageServer 请求 ID 原子递增**：请求 ID 改用 `Interlocked.Increment` 原子自增，原 `ref` 写法非线程安全 (`LanguageServer.fs`)
+- **[修复] LanguageServer 响应通道泄漏**：`responseAgent` 对每个挂起请求调度 30 秒 `Expire` 消息，防止客户端超时后 Map 无限增长 (`LanguageServer.fs`)
+- **[修复] Program.fs UNC/符号链接路径**：`checkOrSetGameCache` 改用 `Directory.GetParent().FullName` 取代 `cp + "/../"` 字符串拼接，修复 UNC 路径和符号链接兼容性 (`Program.fs`)
+- **[修复] Program.fs 孤儿命令响应**：为未处理的 `workspace/executeCommand` 调用（如 `cwtools.ai.queryVariables`）添加 stub 响应，服务端不再静默挂起 (`Program.fs`)
+- **[修复] Program.fs GC 压力**：`GC.Collect` 改用 `GCCollectionMode.Optimized` + `blocking=false`，消除热路径 lint 分析中的 STW 暂停 (`Program.fs`)
+- **[性能] DocumentStore O(n)→O(1) 范围查找**：`findRange` 替换为 `findRangeFast`，使用预构建行偏移缓存（`int[]`）实现 O(1) 定位——Open/Replace 时立即构建，Patch 修改后惰性重建。消除 Hover/GoToDefinition 对大文件的重复全文扫描 (`DocumentStore.fs`)
 
-#### TypeScript 客户端增强（agentTools.ts）
-- 8 个新工具的完整定义（tool schema）、dispatch 注册和实现方法
-- **5秒 TTL 缓存**：`cachedLspRead<T>()` 通用缓存，ScriptedEffects/Triggers/Enums/StaticModifiers 重复调用直接命中缓存，大幅降低 LSP 轮询频率
-- `AgentToolName` 联合类型同步更新（types.ts）
+### 🤖 AI Agent — 可靠性与正确性
 
-#### AI 系统提示强化（promptBuilder.ts）
-- **反幻觉强制检查规则**（Build 模式）：使用 scripted_effect/trigger/@variable/modifier 前**必须**先调用对应 AST 查询工具
-- **深层 API 工具表格**（所有模式 STELLARIS_KNOWLEDGE）：明确各工具使用时机，AST 工具优先于文件系统搜索
-- **Explore 模式**：区分文件级工具与 AST 级工具，标注 AST 工具更快且具 scope 感知能力
+- **[修复] AbortController 并发安全 (C1)**：`AIService.activeControllers` 改为 `Set<AbortController>`，每次 `chatCompletion` 创建独立 controller，消除并发请求（压缩 + 主推理循环）互相取消的竞态 (`aiService.ts`)
+- **[修复] 并行 tool_call 索引碰撞 (M1)**：`tc.index` 缺失时改用 `Object.keys(toolCallMap).length` 作为 fallback，防止并行 tool_call delta 在流式累积 Map 中相互覆盖 (`aiService.ts`)
+- **[修复] 默认 max_tokens 提升至 8192 (M5)**：原 4096 会静默截断 Claude Opus 4 / Gemini 2.5 Pro 的长代码生成；`chatCompletion` 和 `chatCompletionStream` 均已更新 (`aiService.ts`)
+- **[新功能] Claude SSE 流式传输 (L4)**：`callClaude` 从阻塞式 `response.json()` 完整迁移到 Anthropic Server-Sent Events 协议。支持实时 `onThinking` token 推送，消除 UI 生成阻塞。处理 `message_start`、`content_block_start`、`content_block_delta`（`text_delta`/`input_json_delta`）、`message_delta` 等事件类型 (`aiService.ts`)
+- **[修复] Doom-loop 检测 (M2)**：连续计数器替代滑动窗口，A-B-A-B 交替调用签名现在能被正确检测并终止 (`agentRunner.ts`)
+- **[修复] 最终 API 调用前中止信号检查 (C2)**：`reasoningLoop` 在每次 API 请求前调用 `options?.abortSignal?.throwIfAborted()`，防止用户取消后继续产生计费调用 (`agentRunner.ts`)
+- **[修复] `validate_code` 串行执行 (M6)**：从 `READ_ONLY_TOOLS` 中移除 `validate_code`，现在持独占写锁串行执行，防止并发读取期间代码注入导致 AST 状态损坏 (`agentRunner.ts`)
+- **[修复] 子 Agent token 用量传播 (L8)**：`runSubAgent` 接受 `parentAccumulator` 参数，子 agent 的 token 消耗正确合并到父 `TokenUsage`，UI 账单计数准确 (`agentRunner.ts`, `agentTools.ts`)
+- **[修复] 压缩过滤系统消息 (L3)**：系统消息从压缩摘要中排除，防止角色混淆导致摘要模型误判 (`agentRunner.ts`)
+- **[修复] 压缩截断限制 (M4)**：Tool/Assistant 消息截断上限从 500 提升至 2000 字符，保留技术细节跨压缩轮次传递 (`agentRunner.ts`)
+- **[修复] PDXScript 启发式假阳性 (L2)**：代码提取要求候选块同时包含 `{` 和 `}`，防止 Markdown 表格或说明文本被误判为 PDXScript (`agentRunner.ts`)
+- **[修复] Fence 模式去重 (L1)**：双 fence 正则合并为单一模式，消除双重匹配风险 (`agentRunner.ts`)
+- **[修复] `multiedit`/`patch` 纳入写工具集 (L6)**：两者现在正确参与写操作串行守护 (`agentRunner.ts`)
+- **[修复] Claude ContentPart[] 系统提示序列化 (L5)**：`toClaudeRequest` 使用 `contentToStr` 辅助函数正确序列化 `ContentPart[]` 类型的系统消息，修复原来 `.join()` 产生 `"[object Object]"` 的错误 (`providers.ts`)
+- **[修复] 动态 provider 导入移除 (M3)**：`await import('./providers')` 替换为静态导入的 `getProvider` 函数 (`agentRunner.ts`)
 
 ### 1.4.0
 #### 新功能

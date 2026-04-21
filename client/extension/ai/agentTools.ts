@@ -588,17 +588,21 @@ export class AgentToolExecutor {
     /**
      * Reference to the parent AgentRunner for task sub-agent dispatch.
      * Set by the owning AgentRunner after construction.
+     * L8 Fix: signature includes the optional parentAccumulator parameter.
      */
     public agentRunnerRef?: {
         runSubAgent(
             prompt: string,
             mode: 'explore' | 'general',
             parentOptions?: import('./agentRunner').AgentRunnerOptions,
-            onStep?: (step: import('./types').AgentStep) => void
+            onStep?: (step: import('./types').AgentStep) => void,
+            parentAccumulator?: import('./types').TokenUsage
         ): Promise<string>;
     };
     /** Parent AgentRunner options (used for sub-agent dispatch to inherit provider/model/abort) */
     public parentRunnerOptions?: import('./agentRunner').AgentRunnerOptions;
+    /** Parent token accumulator (used for sub-agent dispatch to merge costs) */
+    public parentTokenAccumulator?: import('./types').TokenUsage;
 
     /**
      * Tracks whether the LSP server has finished loading game data.
@@ -2645,7 +2649,10 @@ export class AgentToolExecutor {
             const result = await this.agentRunnerRef.runSubAgent(
                 args.prompt,
                 mode,
-                this.parentRunnerOptions
+                this.parentRunnerOptions,
+                undefined,
+                // L8 Fix: pass parent accumulator so sub-agent token costs merge into parent UI
+                this.parentTokenAccumulator
             );
             return { description: args.description, result };
         } catch (e) {

@@ -109,11 +109,16 @@ const MODEL_PRICING: Record<string, [number, number]> = {
 
 /** Look up per-million-token cost for a model. Falls back to [0, 0] if unknown. */
 function getModelPricing(model: string): [number, number] {
-    // Exact match first
+    if (!model) return [0, 0];
+    // 1. Exact match
     if (model in MODEL_PRICING) return MODEL_PRICING[model];
-    // Prefix match (e.g. "claude-opus-4-5-20251101" → "claude-opus-4-5")
+    // 2. Prefix match (e.g. "claude-opus-4-5-20251101" -> "claude-opus-4-5")
     for (const key of Object.keys(MODEL_PRICING)) {
         if (model.startsWith(key)) return MODEL_PRICING[key];
+    }
+    // 3. Contains match (e.g. "deepseek-chat-v3" contains "deepseek-chat")
+    for (const key of Object.keys(MODEL_PRICING)) {
+        if (model.includes(key)) return MODEL_PRICING[key];
     }
     return [0, 0];
 }

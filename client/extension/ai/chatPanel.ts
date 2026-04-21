@@ -412,6 +412,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.conversationMessages,
                 {
                     mode: this.currentMode,
+                    model: this.aiService.getConfig().model || undefined,
                     onStep: (step) => {
                         this._liveSteps.push(step);
                         this.postMessage({ type: 'agentStep', step });

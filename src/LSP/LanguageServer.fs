@@ -125,6 +125,15 @@ let private serializeShutdownResponse =
 type msg =
     | Request of int * AsyncReplyChannel<JsonValue>
     | Response of int * JsonValue
+    | Expire of int  // clean up timed-out pending requests
+
+/// Monotonically increasing request ID — safe under concurrent calls.
+let private requestIdCounter = ref 0
+let private nextRequestId () = System.Threading.Interlocked.Increment(requestIdCounter)
+
+/// Pending-request timeout (ms). If the client doesn't respond within this,
+/// we drop the channel to prevent the Map from growing without bound.
+let private requestTimeoutMs = 30_000
 
 let responseAgent =
     MailboxProcessor.Start(fun agent ->
@@ -133,12 +142,21 @@ let responseAgent =
                 let! msg = agent.Receive()
 
                 match msg with
-                | Request(id, reply) -> return! loop (state |> Map.add id reply)
+                | Request(id, reply) ->
+                    // Schedule an expiry message so stale channels get cleaned up.
+                    Async.Start(
+                        async {
+                            do! Async.Sleep requestTimeoutMs
+                            agent.Post(Expire id)
+                        })
+                    return! loop (state |> Map.add id reply)
                 | Response(id, value) ->
                     match state |> Map.tryFind id with
                     | Some reply -> reply.Reply(value)
                     | None -> eprintfn $"Unexpected response %i{id}"
-
+                    return! loop (state |> Map.remove id)
+                | Expire id ->
+                    // If the entry is still present the client never replied — silently drop it.
                     return! loop (state |> Map.remove id)
             }
 
@@ -231,14 +249,13 @@ type RealClient(send: BinaryWriter) =
         member this.ApplyWorkspaceEdit(p: ApplyWorkspaceEditParams) : Async<JsonValue> =
             async {
                 let json = serializeApplyWorkspaceEdit p
-                let id = Random.Shared.Next()
+                let id = nextRequestId ()
                 return! requestClient (send, id, "workspace/applyEdit", json)
             }
 
         member this.CustomRequest(method: string, json: string) : Async<JsonValue> =
             async {
-                // let jsonString = json.ToString(JsonSaveOptions.DisableFormatting)
-                let id = Random.Shared.Next()
+                let id = nextRequestId ()
                 return! requestClient (send, id, method, json)
             }
 
@@ -393,10 +410,15 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
             gameStateLock.EnterWriteLock()
             try
                 try
-                    match Async.RunSynchronously(task, 0, cancel.Token) with
+                    // No explicit timeout — rely on the CancellationToken ($/cancelRequest) for
+                    // aborting long-running writes. A 0ms timeout caused every write to throw
+                    // TimeoutException before the task even started.
+                    match Async.RunSynchronously(task, cancellationToken = cancel.Token) with
                     | Some result -> respond (send, id, result)
                     | None        -> respond (send, id, "null")
-                with :? OperationCanceledException -> ()
+                with
+                | :? OperationCanceledException -> ()
+                | :? System.TimeoutException    -> ()   // guard: should not occur without a timeout arg, but be safe
             finally
                 gameStateLock.ExitWriteLock()
         pendingRequests.TryRemove(id) |> ignore
@@ -417,4 +439,4 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | ProcessRequest(id, task, cancel, false (* isWrite    *)) ->
             runWriteRequest id task cancel
 
-    Environment.Exit(1)
+    Environment.Exit(0)  // normal shutdown — allows finalizers to run

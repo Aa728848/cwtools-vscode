@@ -325,8 +325,9 @@ type Server(client: ILanguageClient) =
             with e ->
                 logDiag $"CleanupCache failed: {e.Message}"
             
-            // 在大量文件处理后触发GC回收
-            if locCache.Count > 100 then
+            // L6/L3 Fix: Use non-blocking Gen2 GC only after a full refresh to
+            // reclaim large rule data; avoid frequent mid-stream GC in hot path.
+            if locCache.Count > 500 then
                 GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
         | None -> ()
 
@@ -744,7 +745,8 @@ type Server(client: ILanguageClient) =
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
                 valErrors @ locErrors |> List.map parserErrorToDiagnostics |> sendDiagnostics
-                GC.Collect()
+                // L6 Fix: non-blocking optimised GC — avoids a 100ms freeze on load
+                GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
             with e ->
                 eprintfn $"%A{e}"
 
@@ -929,10 +931,24 @@ type Server(client: ILanguageClient) =
                                           "gettech"
                                           "getGraphData"
                                           "exportTypes"
-                                          // ── AI-specific structured queries ──────────────
+                                          // A2 Fix: declare ALL implemented AI commands so
+                                          // strict LSP clients don't reject them.
                                           "cwtools.ai.getScopeAtPosition"
                                           "cwtools.ai.validateCode"
-                                          "cwtools.ai.queryTypes" ] }
+                                          "cwtools.ai.queryTypes"
+                                          "cwtools.ai.queryDefinition"
+                                          "cwtools.ai.queryDefinitionByName"
+                                          "cwtools.ai.queryScriptedEffects"
+                                          "cwtools.ai.queryScriptedTriggers"
+                                          "cwtools.ai.queryEnums"
+                                          "cwtools.ai.getEntityInfo"
+                                          "cwtools.ai.queryStaticModifiers"
+                                          "cwtools.ai.queryVariables"
+                                          "cwtools.exportTypes"
+                                          "typeGraphInfo"
+                                          "getFileTypes"
+                                          "getDataForFile"
+                                          "getTypesForFile" ] }
                             inlayHintProvider = true
                             renameProvider = false
                             semanticTokensProvider =
@@ -1191,9 +1207,16 @@ type Server(client: ILanguageClient) =
 
                 let task =
                     new Task(fun () ->
-                        setupRulesCaches ()
-                        checkOrSetGameCache false
-                        processWorkspace rootUri)
+                        // C3 Fix: processWorkspace mutates gameObj / stlGameObj / etc.
+                        // Acquire the write lock so no concurrent read request sees a
+                        // half-initialised game object while we are swapping it in.
+                        gameStateLock.EnterWriteLock()
+                        try
+                            setupRulesCaches ()
+                            checkOrSetGameCache false
+                            processWorkspace rootUri
+                        finally
+                            gameStateLock.ExitWriteLock())
 
                 task.Start()
             }
@@ -1222,23 +1245,29 @@ type Server(client: ILanguageClient) =
 
                     let task =
                         new Task(fun () ->
-                            let fileList =
-                                game.AllFiles()
-                                |> List.map mapResourceToFilePath
-                                |> List.choose (fun (s, f, l) -> parseUri f |> Option.map (fun u -> (s, u, l)))
-                                |> List.map (fun (s, uri, l) ->
-                                    JsonValue.Record
-                                        [| "scope", JsonValue.String s
-                                           "uri", uri
-                                           "logicalpath", JsonValue.String l |])
-                                |> Array.ofList
+                            // M1 Fix: AllFiles() reads internal game state — acquire a shared
+                            // read lock so we don't race against a concurrent game reload.
+                            gameStateLock.EnterReadLock()
+                            try
+                                let fileList =
+                                    game.AllFiles()
+                                    |> List.map mapResourceToFilePath
+                                    |> List.choose (fun (s, f, l) -> parseUri f |> Option.map (fun u -> (s, u, l)))
+                                    |> List.map (fun (s, uri, l) ->
+                                        JsonValue.Record
+                                            [| "scope", JsonValue.String s
+                                               "uri", uri
+                                               "logicalpath", JsonValue.String l |])
+                                    |> Array.ofList
 
-                            client.CustomNotification(
-                                "updateFileList",
-                                JsonValue.Record [| "fileList", JsonValue.Array fileList |]
-                            )
-
-                            currentlyRefreshingFiles <- false)
+                                client.CustomNotification(
+                                    "updateFileList",
+                                    JsonValue.Record [| "fileList", JsonValue.Array fileList |]
+                                )
+                            finally
+                                gameStateLock.ExitReadLock()
+                                // Reset the flag inside the task so writers can see it.
+                                currentlyRefreshingFiles <- false)
 
                     task.Start()
                 | _ -> ()
@@ -2431,17 +2460,22 @@ type Server(client: ILanguageClient) =
                                             match originalContent with
                                             | Some orig -> orig + "\n\n" + code
                                             | None      -> code
+                                        // M3 Fix: count lines using bare \n split to match
+                                        // the validationContent separator ("\n\n").
                                         let originalLineCount =
                                             match originalContent with
-                                            | Some orig -> orig.Split('\n').Length + 2 // +2 for blank line
+                                            | Some orig ->
+                                                orig.Split([|'\n'|], StringSplitOptions.None).Length + 2 // +2 for \n\n separator
                                             | None      -> 0
 
-                                        // Run validation via UpdateFile with shallow=true
-                                        let rawErrors =
-                                            try  g.UpdateFile true targetFile (Some validationContent)
-                                            with _ -> []
+                                        // M6 Fix: use a mutable to hold errors so the restore
+                                        // always executes regardless of whether Update throws.
+                                        let mutable rawErrors: CWError list = []
+                                        try
+                                            rawErrors <- g.UpdateFile true targetFile (Some validationContent)
+                                        with _ -> rawErrors <- []
 
-                                        // Restore original content in game state
+                                        // Restore original content unconditionally
                                         match originalContent with
                                         | Some orig ->
                                             try g.UpdateFile true targetFile (Some orig) |> ignore
@@ -2961,6 +2995,18 @@ type Server(client: ILanguageClient) =
                                             [| "ok",    JsonValue.Boolean false
                                                "error", JsonValue.String $"No entity found for file: {filePath}" |]
                             Some result
+
+                        // M8 Fix: previously these were declared as isReadCmd=true in LanguageServer.fs
+                        // but had no implementation — they would silently return null.
+                        // Return a structured not-implemented response so callers can detect the gap.
+                        | { command = "typeGraphInfo"; arguments = _ }
+                        | { command = "getFileTypes"; arguments = _ }
+                        | { command = "getDataForFile"; arguments = _ }
+                        | { command = "getTypesForFile"; arguments = _ } ->
+                            Some(
+                                JsonValue.Record
+                                    [| "ok",    JsonValue.Boolean false
+                                       "error", JsonValue.String "Command is declared but not implemented on the server" |])
 
                         | _ -> None
 

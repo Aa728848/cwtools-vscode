@@ -94,13 +94,20 @@ export async function activate(context: ExtensionContext) {
 					const files = await vs.workspace.findFiles('**/*.txt', '**/.*/**');
 					const wordBoundary = new RegExp(`(?<![A-Za-z0-9_])${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_])`, 'g');
 					for (const fileUri of files) {
-						const doc = await vs.workspace.openTextDocument(fileUri);
-						const text = doc.getText();
+						let text: string;
+						try { text = fs.readFileSync(fileUri.fsPath, 'utf8'); } catch { continue; }
+						// L4 Fix: avoid openTextDocument (never freed — memory leak)
+						const offs: number[] = [0];
+						for (let j = 0; j < text.length; j++) { if (text[j] === '\n') { offs.push(j + 1); } }
+						const posAt = (o: number): vs.Position => {
+							let lv = 0, hv = offs.length - 1;
+							while (lv < hv) { const mid = Math.ceil((lv + hv) / 2); if (offs[mid] <= o) { lv = mid; } else { hv = mid - 1; } }
+							return new vs.Position(lv, o - offs[lv]);
+						};
+						wordBoundary.lastIndex = 0;
 						let match: RegExpExecArray | null;
 						while ((match = wordBoundary.exec(text)) !== null) {
-							const startPos = doc.positionAt(match.index);
-							const endPos = doc.positionAt(match.index + oldName.length);
-							edit.replace(fileUri, new vs.Range(startPos, endPos), newName, editMeta);
+							edit.replace(fileUri, new vs.Range(posAt(match.index), posAt(match.index + oldName.length)), newName, editMeta);
 						}
 					}
 				}
@@ -152,7 +159,12 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	const isDevDir = env.machineId === "someValue.machineId"
-	const cacheDir = isDevDir ? context.globalStorageUri + '/.cwtools' : context.extensionPath + '/.cwtools'
+	// M4 Fix: context.globalStorageUri is a Uri object, not a string.
+	// Concatenating it with '/' calls toString() which produces "file:///..."— not a valid fs path.
+	// Use .fsPath and path.join() to get a proper filesystem path.
+	const cacheDir = isDevDir
+		? path.join(context.globalStorageUri.fsPath, '.cwtools')
+		: path.join(context.extensionPath, '.cwtools')
 
 	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
 	const aiService = new AIService(context);
@@ -367,11 +379,13 @@ export async function activate(context: ExtensionContext) {
 				}
 				status = window.setStatusBarMessage(param.value);
 				context.subscriptions.push(status);
-			}
-			else if (!param.enable) {
-				status.dispose();
-			}
-			else if (status !== undefined) {
+			} else if (!param.enable) {
+				// M5 Fix: guard against status never having been set (e.g. server sends
+				// enable:false before the first enable:true message).
+				if (status !== undefined) {
+					status.dispose();
+				}
+			} else if (status !== undefined) {
 				status.dispose();
 			}
 		})
@@ -557,6 +571,9 @@ export async function activate(context: ExtensionContext) {
 			if (GuiPanel.currentPanel) {
 				try { GuiPanel.currentPanel.dispose(); } catch (_) { /* ignore */ }
 			}
+			// L7 Fix: dispose the chat panel provider before re-activating so its
+			// WebView is closed and callbacks don't reference a stale agentRunner.
+			try { chatPanelProvider.dispose(); } catch (_) { /* ignore */ }
 			// Dispose all subscriptions
 			for (const sub of context.subscriptions) {
 				try {

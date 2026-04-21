@@ -71,6 +71,31 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.loadTopics();
     }
 
+    /**
+     * L7 Fix: Clean up the panel on extension reload so the WebView doesn't
+     * linger with callbacks pointing at a stale agentRunner.
+     */
+    dispose(): void {
+        // Cancel any in-flight generation
+        if (this.abortController) {
+            this.abortController.abort();
+            this.abortController = null;
+        }
+        // Dispose the shared content provider if registered
+        if (this._previewProviderRegistration) {
+            this._previewProviderRegistration.dispose();
+            this._previewProviderRegistration = undefined;
+        }
+        // Close the WebView so the user starts fresh after reload
+        if (this.view) {
+            // WebviewView doesn't expose a direct close(), but we can trigger
+            // VS Code to release it by showing nothing.
+            // The view reference becomes stale after reload — clear it.
+            this.view = undefined;
+        }
+        this._messageFileSnapshots.clear();
+    }
+
     resolveWebviewView(
         webviewView: vs.WebviewView,
         _context: vs.WebviewViewResolveContext,

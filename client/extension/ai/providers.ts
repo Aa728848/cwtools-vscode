@@ -1,8 +1,10 @@
 /**
  * CWTools AI Module — Provider Definitions & Quick Configurations
  *
- * Supports: OpenAI, Claude, Google Gemini, DeepSeek, MiniMax, GLM (Zhipu), Qwen (Tongyi), Ollama, Custom
- * All providers are called via OpenAI-compatible API format (with adapters where needed).
+ * Supports: OpenAI, Claude, Google Gemini, DeepSeek,
+ *   MiniMax (pay-as-you-go, OpenAI compat),
+ *   MiniMax Token Plan (Anthropic compat, api.minimaxi.com),
+ *   GLM (Zhipu), Qwen (Tongyi), Ollama, Custom
  */
 
 import type { AIProviderConfig, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ContentPart } from './types';
@@ -55,22 +57,50 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     minimax: {
         id: 'minimax',
-        name: 'MiniMax',
+        name: 'MiniMax (按量计费)',
+        // Pay-as-you-go: standard OpenAI-compatible endpoint
         endpoint: 'https://api.minimax.chat/v1',
         defaultModel: 'MiniMax-M2.7',
-        models: ['MiniMax-M2.7', 'MiniMax-M2.5', 'MiniMax-M2.5-Lightning'],
+        models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
         supportsToolUse: true,
         supportsStreaming: true,
-        maxContextTokens: 204800,
+        maxContextTokens: 1000000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+    },
+    'minimax-token-plan': {
+        id: 'minimax-token-plan',
+        name: 'MiniMax Token Plan',
+        // Token Plan: Anthropic Messages API compatible endpoint
+        // Docs: https://platform.minimaxi.com/docs/api-reference/text-anthropic-api
+        endpoint: 'https://api.minimaxi.com/anthropic/v1',
+        defaultModel: 'MiniMax-M2.7',
+        models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
+        supportsToolUse: true,
+        supportsStreaming: true,
+        maxContextTokens: 1000000,
+        isOpenAICompatible: false,   // uses Anthropic Messages API
+        toolCallStyle: 'openai',     // adapter normalises to openai format
     },
     glm: {
         id: 'glm',
         name: 'GLM (智谱 Zhipu)',
+        // Standard OpenAI-compat endpoint
+        // Auth: API key is "{id}.{secret}" — buildAuthHeaders() auto-generates HS256 JWT
         endpoint: 'https://open.bigmodel.cn/api/paas/v4',
         defaultModel: 'glm-5.1',
-        models: ['glm-5.1', 'glm-5', 'glm-5v-turbo'],
+        models: [
+            // Text / Agent series (latest)
+            'glm-5.1',
+            'glm-5',
+            'glm-5-turbo',
+            // Multimodal reasoning series
+            'glm-4.1v-thinking',
+            'glm-4.1v-thinking-flash',
+            // Flash / free tier
+            'glm-z1-flash',
+            'glm-4-flash',
+        ],
         supportsToolUse: true,
         supportsStreaming: true,
         maxContextTokens: 200000,
@@ -80,15 +110,23 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     qwen: {
         id: 'qwen',
         name: 'Qwen (通义千问)',
+        // Standard OpenAI-compat, Bearer sk-xxx auth, supports tool_choice
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         defaultModel: 'qwen3.6-plus',
-        models: ['qwen3.6-plus', 'qwen3.5-plus', 'qwen3.6-flash'],
+        models: [
+            'qwen3.6-plus',
+            'qwen3.5-plus',
+            'qwen3.6-flash',
+            'qwen3-235b-a22b',
+            'qwen3-32b',
+            'qwen-max',
+            'qwen-turbo',
+            'qwen-long',
+        ],
         supportsToolUse: true,
         supportsStreaming: true,
         maxContextTokens: 1000000,
         isOpenAICompatible: true,
-        // DashScope OpenAI-compat endpoint → standard tool_calls JSON.
-        // Local Qwen3 via Ollama → <tool_call>{JSON}</tool_call> (Hermes, handled as fallback).
         toolCallStyle: 'openai',
     },
     google: {

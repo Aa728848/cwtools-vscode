@@ -7,6 +7,7 @@
  */
 
 import * as vs from 'vscode';
+import * as crypto from 'crypto';
 import type {
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -223,17 +224,16 @@ export class AIService {
         this.abortController = new AbortController();
 
         try {
+            // MiniMax Token Plan uses Anthropic Messages API format
+            const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan';
             // Use streaming for OpenAI-compat providers when they support it.
-            // This reduces perceived latency: thinking tokens arrive incrementally
-            // and tool_calls are assembled from chunks as they stream in.
-            if (provider.supportsStreaming && provider.isOpenAICompatible && provider.id !== 'claude') {
+            if (provider.supportsStreaming && provider.isOpenAICompatible && !isAnthropicCompat) {
                 return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking);
+            } else if (isAnthropicCompat) {
+                return await this.callClaude(endpoint, apiKey, request);
             } else if (provider.isOpenAICompatible) {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId);
-            } else if (providerId === 'claude') {
-                return await this.callClaude(endpoint, apiKey, request);
             } else {
-                // Fallback to OpenAI-compatible
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId);
             }
         } finally {
@@ -352,6 +352,65 @@ export class AIService {
         }
     }
 
+    // ─── Auth header builder ──────────────────────────────────────────────────
+
+    /**
+     * Build the Authorization headers for a provider.
+     *
+     * Special handling:
+     * - GLM (Zhipu): API key is "{id}.{secret}". Must generate a short-lived JWT
+     *   signed with HS256. The JWT replaces the raw key as Bearer token.
+     * - MiniMax Token Plan: API key may be "{groupId}.{rawKey}". The groupId is
+     *   extracted and sent as the MM-GroupId header; rawKey is used as Bearer token.
+     *   If the key doesn't contain ".", it is used as-is (standard Token Plan JWT).
+     * - All other providers: standard "Bearer {apiKey}".
+     */
+    private buildAuthHeaders(providerId: string, apiKey: string): Record<string, string> {
+        // GLM (Zhipu AI): generate JWT from "{id}.{secret}" key
+        if (providerId === 'glm' && apiKey.includes('.')) {
+            const dot = apiKey.indexOf('.');
+            const id = apiKey.slice(0, dot);
+            const secret = apiKey.slice(dot + 1);
+            const now = Date.now();
+            const header = Buffer.from(JSON.stringify({ alg: 'HS256', sign_type: 'SIGN' })).toString('base64url');
+            const payload = Buffer.from(JSON.stringify({ api_key: id, exp: now + 3_600_000, timestamp: now })).toString('base64url');
+            const sig = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
+            return { 'Authorization': `Bearer ${header}.${payload}.${sig}` };
+        }
+
+        // MiniMax Token Plan uses Anthropic-style x-api-key header (routed via callClaude)
+        // GLM (Zhipu AI): generate JWT from "{id}.{secret}" key
+        if (providerId === 'glm' && apiKey.includes('.')) {
+            const dot = apiKey.indexOf('.');
+            const id = apiKey.slice(0, dot);
+            const secret = apiKey.slice(dot + 1);
+            const now = Date.now();
+            const header = Buffer.from(JSON.stringify({ alg: 'HS256', sign_type: 'SIGN' })).toString('base64url');
+            const payload = Buffer.from(JSON.stringify({ api_key: id, exp: now + 3_600_000, timestamp: now })).toString('base64url');
+            const sig = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
+            return { 'Authorization': `Bearer ${header}.${payload}.${sig}` };
+        }
+
+        return { 'Authorization': `Bearer ${apiKey}` };
+    }
+
+    /**
+     * Strip parameters that specific providers do not support.
+     * Returns a new request object with offending fields removed.
+     */
+    private sanitizeRequest(providerId: string, request: ChatCompletionRequest): ChatCompletionRequest {
+        // MiniMax pay-as-you-go (OpenAI compat) does not accept tool_choice — error 2013
+        // MiniMax Token Plan (Anthropic compat) DOES support tool_choice, so skip it
+        // Qwen (DashScope) confirmed to support tool_choice — NOT stripped
+        // GLM, DeepSeek: standard OpenAI compat — NOT stripped
+        if (providerId === 'minimax') {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { tool_choice, ...rest } = request as unknown as Record<string, unknown>;
+            void tool_choice;
+            return rest as unknown as ChatCompletionRequest;
+        }
+        return request;
+    }
     // ─── Private API callers ─────────────────────────────────────────────────
 
     private async callOpenAICompatible(
@@ -364,13 +423,13 @@ export class AIService {
 
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            ...this.buildAuthHeaders(providerId, apiKey),
         };
 
         const response = await fetch(url, {
             method: 'POST',
             headers,
-            body: JSON.stringify(request),
+            body: JSON.stringify(this.sanitizeRequest(providerId, request)),
             signal: this.abortController?.signal,
         });
 
@@ -397,13 +456,13 @@ export class AIService {
         const url = `${endpoint}/chat/completions`;
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            ...this.buildAuthHeaders(providerId, apiKey),
         };
 
         const response = await fetch(url, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ ...request, stream: true }),
+            body: JSON.stringify(this.sanitizeRequest(providerId, { ...request, stream: true })),
             signal: this.abortController?.signal,
         });
 
@@ -421,6 +480,8 @@ export class AIService {
         let contentBuf = '';
         let reasoningBuf = '';
         let finishReason: string | null = null;
+        let usageBuf: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
+        let modelBuf = '';
         // tool_calls reassembly: index → { id, type, function.name, function.arguments(buf) }
         const toolCallMap: Record<number, { id: string; type: string; function: { name: string; arguments: string } }> = {};
 
@@ -438,6 +499,9 @@ export class AIService {
                 let chunk: Record<string, unknown>;
                 try { chunk = JSON.parse(trimmed.slice(6)); } catch { continue; }
                 const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
+                // Capture model name and usage from any chunk
+                if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
+                if (chunk.usage) { const u = chunk.usage as Record<string, number>; usageBuf = { prompt_tokens: u.prompt_tokens ?? u.input_tokens ?? 0, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? ((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)) }; }
                 if (!choices || choices.length === 0) continue;
                 const delta = choices[0].delta as Record<string, unknown> | undefined;
                 if (!delta) { finishReason = (choices[0].finish_reason as string) ?? finishReason; continue; }
@@ -481,6 +545,7 @@ export class AIService {
             : undefined;
 
         return {
+            model: modelBuf || undefined,
             choices: [{
                 message: {
                     role: 'assistant',
@@ -490,6 +555,7 @@ export class AIService {
                 } as ChatMessage & { reasoning_content?: string; tool_calls?: typeof toolCalls },
                 finish_reason: finishReason ?? 'stop',
             }],
+            usage: usageBuf,
         } as ChatCompletionResponse;
     }
 

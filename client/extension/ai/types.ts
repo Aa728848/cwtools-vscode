@@ -82,9 +82,18 @@ export interface AIUserConfig {
 
 // ─── API Request/Response (OpenAI-compatible format) ─────────────────────────
 
+/**
+ * A single part of a multimodal content array.
+ * Supports text and image_url (OpenAI vision format).
+ */
+export type ContentPart =
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
+
 export interface ChatMessage {
     role: 'system' | 'user' | 'assistant' | 'tool';
-    content: string | null;
+    /** String for text-only; ContentPart[] for multimodal (vision) messages */
+    content: string | ContentPart[] | null;
     tool_calls?: ToolCall[];
     tool_call_id?: string;
     name?: string;
@@ -535,7 +544,7 @@ export interface ChatHistoryMessage {
 // ─── WebView Communication ───────────────────────────────────────────────────
 
 export type WebViewMessage =
-    | { type: 'sendMessage'; text: string }
+    | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
     | { type: 'insertCode'; code: string }
     | { type: 'copyCode'; code: string }
     | { type: 'regenerate' }
@@ -560,10 +569,14 @@ export type WebViewMessage =
     /** Submit inline annotations collected in the webview back to AI for revision */
     | { type: 'submitPlanAnnotations'; annotations: Array<{ section: string; note: string }> }
     /** Open the plan .md file in the VS Code editor */
-    | { type: 'openPlanFile'; filePath: string };
+    | { type: 'openPlanFile'; filePath: string }
+    /** WebView is fully loaded and ready to receive messages */
+    | { type: 'ready' }
+    /** Request the list of workspace files for @ mention */
+    | { type: 'requestFileList' };
 
 export type HostMessage =
-    | { type: 'addUserMessage'; text: string; messageIndex: number }
+    | { type: 'addUserMessage'; text: string; messageIndex: number; hasImages?: boolean }
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string }
@@ -588,7 +601,9 @@ export type HostMessage =
     /** Plan file saved to disk — tells webview to show the Open/Submit card */
     | { type: 'planFileSaved'; filePath: string; relPath: string }
     /** Send plan sections to webview for interactive inline annotation */
-    | { type: 'renderPlan'; sections: string[]; planText: string };
+    | { type: 'renderPlan'; sections: string[]; planText: string }
+    /** Return workspace file list for @ mention popup */
+    | { type: 'fileList'; files: string[] };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

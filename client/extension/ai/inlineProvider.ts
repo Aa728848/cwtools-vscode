@@ -131,10 +131,11 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             if (token.isCancellationRequested) return undefined;
 
             const content = response.choices[0]?.message?.content;
-            if (!content || content.trim().length === 0) return undefined;
+            const contentStr = typeof content === 'string' ? content : '';
+            if (!contentStr || contentStr.trim().length === 0) return undefined;
 
             // Clean up the response
-            let completionText = content.trim();
+            let completionText = contentStr.trim();
 
             // Remove markdown code fences if present
             completionText = completionText

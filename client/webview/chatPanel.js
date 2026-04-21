@@ -19,6 +19,15 @@
     let settingsOllamaModels = [];
     let totalConversationTokens = 0;
     let contextLimit = 128000;
+    /** Pending images (base64 data URLs) to attach to next sent message */
+    let pendingImages = [];
+    /** Pending @-mentioned file paths to attach */
+    let pendingFiles = [];
+    /** Available workspace files received from host for @ popup */
+    let workspaceFiles = [];
+
+    // Notify host that WebView JS has fully loaded and is ready to receive messages
+    vscode.postMessage({ type: 'ready' });
 
     // ── Placeholder rotation ───────────────────────────────────────────────────
     const PROMPT_EXAMPLES = [
@@ -166,14 +175,133 @@
         const v = input.value;
         if (v.startsWith('/') && v.length > 0) showSlashPopup(v);
         else slashPopup && slashPopup.classList.remove('show');
+        // @ file mention: request file list on first @
+        const atIdx = v.lastIndexOf('@');
+        if (atIdx >= 0 && (atIdx === 0 || v[atIdx - 1] === ' ' || v[atIdx - 1] === '\n')) {
+            const afterAt = v.slice(atIdx + 1);
+            showAtPopup(afterAt);
+        } else {
+            closeAtPopup();
+        }
     });
     document.addEventListener('click', e => { if (slashPopup && !slashPopup.contains(e.target) && e.target !== input) slashPopup.classList.remove('show'); });
+    document.addEventListener('click', e => { if (!e.target.closest('#atPopup') && e.target !== input) closeAtPopup(); });
     input.addEventListener('keydown', e => {
         if (e.key === 'Escape' && slashPopup && slashPopup.classList.contains('show')) {
             e.stopPropagation();
             slashPopup.classList.remove('show');
         }
     });
+
+    // ── @ file mention popup ───────────────────────────────────────────────────
+    const atPopup = (() => {
+        const el = document.createElement('div');
+        el.id = 'atPopup';
+        el.className = 'slash-popup'; // reuse slash-popup styles
+        el.style.cssText = 'display:none;position:absolute;bottom:100%;left:0;right:0;max-height:200px;overflow-y:auto;z-index:200;';
+        inputWrapper && inputWrapper.appendChild(el);
+        return el;
+    })();
+    let _atPopupVisible = false;
+
+    function showAtPopup(filter) {
+        if (!atPopup) return;
+        if (workspaceFiles.length === 0) {
+            vscode.postMessage({ type: 'requestFileList' });
+        }
+        const q = filter.toLowerCase();
+        const matches = workspaceFiles.filter(f => f.toLowerCase().includes(q)).slice(0, 15);
+        if (!matches.length && filter.length === 0 && workspaceFiles.length === 0) {
+            atPopup.style.display = 'none'; _atPopupVisible = false; return;
+        }
+        if (!matches.length && filter.length > 0) { atPopup.style.display = 'none'; _atPopupVisible = false; return; }
+        atPopup.innerHTML = matches.map(f =>
+            `<div class="slash-popup-item" data-file="${escapeHtml(f)}"><span class="slash-popup-cmd">@${escapeHtml(f.split('/').pop())}</span><span class="slash-popup-desc" style="opacity:0.5;font-size:10px">${escapeHtml(f)}</span></div>`
+        ).join('');
+        atPopup.querySelectorAll('.slash-popup-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const file = el.dataset.file;
+                closeAtPopup();
+                // Replace the @partial in input with @filename display
+                const v = input.value;
+                const atIdx = v.lastIndexOf('@');
+                input.value = v.slice(0, atIdx) + '@' + file.split('/').pop() + ' ';
+                // Track the actual full path
+                if (!pendingFiles.includes(file)) pendingFiles.push(file);
+                addFileBadge(file);
+                autoResizeInput();
+                input.focus();
+            });
+        });
+        atPopup.style.display = 'block'; _atPopupVisible = true;
+    }
+
+    function closeAtPopup() { if (atPopup) { atPopup.style.display = 'none'; _atPopupVisible = false; } }
+
+    function addFileBadge(file) {
+        let area = document.getElementById('fileBadgeArea');
+        if (!area) {
+            area = document.createElement('div');
+            area.id = 'fileBadgeArea';
+            area.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 0;';
+            inputWrapper && inputWrapper.insertBefore(area, inputWrapper.firstChild);
+        }
+        const badge = document.createElement('span');
+        badge.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:rgba(100,120,255,0.15);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:11px;';
+        badge.innerHTML = `📄 ${escapeHtml(file.split('/').pop())} <button style="background:none;border:none;cursor:pointer;color:inherit;padding:0;font-size:10px;" data-file="${escapeHtml(file)}">✕</button>`;
+        badge.querySelector('button').addEventListener('click', () => {
+            pendingFiles = pendingFiles.filter(f => f !== file);
+            badge.remove();
+        });
+        area.appendChild(badge);
+    }
+
+    // ── Image paste (Ctrl+V or paste event on input) ───────────────────────────
+    input.addEventListener('paste', e => {
+        const items = e.clipboardData && e.clipboardData.items;
+        if (!items) return;
+        for (const item of items) {
+            if (item.type.startsWith('image/')) {
+                e.preventDefault();
+                const blob = item.getAsFile();
+                if (!blob) continue;
+                const reader = new FileReader();
+                reader.onload = ev => {
+                    const dataUrl = ev.target.result;
+                    pendingImages.push(dataUrl);
+                    addImagePreview(dataUrl);
+                };
+                reader.readAsDataURL(blob);
+                break; // handle first image only per paste
+            }
+        }
+    });
+
+    function addImagePreview(dataUrl) {
+        let area = document.getElementById('imagePreviewArea');
+        if (!area) {
+            area = document.createElement('div');
+            area.id = 'imagePreviewArea';
+            area.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px 0;';
+            inputWrapper && inputWrapper.insertBefore(area, inputWrapper.firstChild);
+        }
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:relative;';
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,0.1);cursor:pointer;';
+        img.title = '点击放大';
+        const del = document.createElement('button');
+        del.textContent = '✕';
+        del.style.cssText = 'position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:#444;color:#fff;border:none;cursor:pointer;font-size:10px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;';
+        del.addEventListener('click', () => {
+            pendingImages = pendingImages.filter(u => u !== dataUrl);
+            wrap.remove();
+        });
+        wrap.appendChild(img); wrap.appendChild(del);
+        area.appendChild(wrap);
+    }
+
 
     const providerSel = document.getElementById('settingsProvider');
     if (providerSel) providerSel.addEventListener('change', onProviderChange);
@@ -182,11 +310,35 @@
 
     function sendMessage() {
         const text = input.value.trim();
-        if (!text) return;
-        vscode.postMessage({ type: 'sendMessage', text });
+        if (!text && pendingImages.length === 0) return;
+        // Clone image previews BEFORE clearing them, so addUserMessage can show them
+        const previewClone = (() => {
+            const area = document.getElementById('imagePreviewArea');
+            if (!area || area.children.length === 0) return null;
+            const c = area.cloneNode(true);
+            c.removeAttribute('id');
+            c.style.paddingLeft = '0';
+            return c;
+        })();
+        vscode.postMessage({
+            type: 'sendMessage',
+            text,
+            images: pendingImages.length > 0 ? [...pendingImages] : undefined,
+            attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
+        });
         input.value = '';
         input.style.height = 'auto';
         stopPlaceholderRotation();
+        // Clear image previews
+        pendingImages = [];
+        pendingFiles = [];
+        const preview = document.getElementById('imagePreviewArea');
+        if (preview) preview.innerHTML = '';
+        // Clear @file badges
+        const fileBadges = document.getElementById('fileBadgeArea');
+        if (fileBadges) fileBadges.innerHTML = '';
+        // Expose the clone for addUserMessage to use immediately
+        sendMessage._lastPreviewClone = previewClone;
     }
 
     const MODE_META = {
@@ -554,12 +706,16 @@
             const tsum = document.getElementById('liveThinkSum');
             if (tb) tb.style.display = '';
             if (tbd) {
-                if (tbd.textContent) tbd.textContent += '\n\n---\n\n' + (s.content || '');
-                else tbd.textContent = s.content || '';
+                // Append: use separator only for distinct reasoning blocks (type='thinking'),
+                // streaming delta tokens (type='thinking_content') are appended directly
+                if (s.type === 'thinking' && tbd.textContent) {
+                    tbd.textContent += '\n\n---\n\n' + (s.content || '');
+                } else {
+                    tbd.textContent += (s.content || '');
+                }
                 if (tsum) {
                     const est = Math.ceil(tbd.textContent.length / 4);
-                    const thinkCount = tbd.textContent.split('\n\n---\n\n').length;
-                    tsum.innerHTML = '<span class="think-pulse spinning"></span>Thinking · ' + thinkCount + ' block(s) &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
+                    tsum.innerHTML = '<span class="think-pulse spinning"></span>Thinking &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
                 }
             }
         } else if (s.type === 'tool_call') {
@@ -607,7 +763,7 @@
     }
 
     // ── User message ───────────────────────────────────────────────────────────
-    function addUserMessage(text, msgIdx) {
+    function addUserMessage(text, msgIdx, hasImages) {
         emptyState.style.display = 'none';
         const div = document.createElement('div');
         div.className = 'message user';
@@ -620,6 +776,23 @@
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble user-bubble';
         bubble.textContent = text;
+
+        // Show image attachment indicator if images were sent
+        if (hasImages) {
+            // Use the pre-cloned previews saved by sendMessage before it cleared the area
+            const clone = sendMessage._lastPreviewClone;
+            sendMessage._lastPreviewClone = null;
+            if (clone && clone.children.length > 0) {
+                bubble.appendChild(document.createElement('br'));
+                bubble.appendChild(clone);
+            } else {
+                const imgBadge = document.createElement('span');
+                imgBadge.style.cssText = 'display:inline-block;margin-left:6px;font-size:11px;opacity:0.7;';
+                imgBadge.textContent = '🖼 [附带图片]';
+                bubble.appendChild(imgBadge);
+            }
+        }
+
         div.appendChild(hdr);
         div.appendChild(bubble);
 
@@ -740,7 +913,7 @@
             case 'addUserMessage':
                 setGenerating(true);
                 liveTextBubble = null; liveTextContent = '';
-                addUserMessage(msg.text, msg.messageIndex);
+                addUserMessage(msg.text, msg.messageIndex, msg.hasImages);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
                 scrollBottom();
@@ -794,6 +967,17 @@
                 break;
 
             case 'topicList': renderTopics(msg.topics); break;
+
+            case 'fileList':
+                // Cache workspace files for @ mention popup
+                workspaceFiles = msg.files || [];
+                // If @ popup is open, refresh it
+                if (_atPopupVisible) {
+                    const v = input.value;
+                    const atIdx = v.lastIndexOf('@');
+                    if (atIdx >= 0) showAtPopup(v.slice(atIdx + 1));
+                }
+                break;
 
             case 'topicTitleGenerated': {
                 const list = document.getElementById('topicsList');
@@ -1207,9 +1391,13 @@
             } else { modelSel.style.display='none'; modelInput.style.display=''; detectBtn.style.display=''; modelInput.value=currentModel||''; modelHint.textContent='点击「检测」获取 Ollama 模型'; }
             detectBtn.style.display='';
         } else if (provider&&provider.models.length>0) {
-            modelSel.innerHTML=provider.models.map(m=>'<option value="'+escapeHtml(m)+'"'+(m===currentModel?' selected':'')+'>'+escapeHtml(m)+'</option>').join('');
-            if (!currentModel||!provider.models.includes(currentModel)) { modelSel.style.display='none'; modelInput.style.display=''; modelInput.value=currentModel||provider.defaultModel||''; modelHint.textContent='也可直接输入模型名称'; }
-            else { modelSel.style.display=''; modelInput.style.display='none'; modelHint.textContent='或直接输入自定义模型名'; }
+            // Build option list; always include a custom entry at top if current model not in list
+            const opts = [...provider.models];
+            if (currentModel && !opts.includes(currentModel)) opts.unshift(currentModel);
+            modelSel.innerHTML = opts.map(m=>'<option value="'+escapeHtml(m)+'"'+(m===currentModel?' selected':'')+'>'+escapeHtml(m)+'</option>').join('');
+            // Always show the select dropdown (never prefer bare input for known providers)
+            modelSel.style.display=''; modelInput.style.display='none';
+            modelHint.textContent='或直接输入自定义模型名';
             detectBtn.style.display='none';
         } else { modelSel.style.display='none'; modelInput.style.display=''; detectBtn.style.display='none'; modelInput.value=currentModel||''; modelHint.textContent=''; }
         updateEndpointHint(providerId);

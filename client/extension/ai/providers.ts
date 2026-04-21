@@ -1,11 +1,11 @@
 /**
  * CWTools AI Module — Provider Definitions & Quick Configurations
  *
- * Supports: OpenAI, Claude, Deepseek, Minimax, GLM (Zhipu), Qwen (Tongyi), Custom
+ * Supports: OpenAI, Claude, Google Gemini, DeepSeek, MiniMax, GLM (Zhipu), Qwen (Tongyi), Ollama, Custom
  * All providers are called via OpenAI-compatible API format (with adapters where needed).
  */
 
-import type { AIProviderConfig, ChatCompletionRequest, ChatCompletionResponse, ChatMessage } from './types';
+import type { AIProviderConfig, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ContentPart } from './types';
 
 // ─── Built-in Provider Definitions ────────────────────────────────────────────
 
@@ -89,6 +89,26 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         isOpenAICompatible: true,
         // DashScope OpenAI-compat endpoint → standard tool_calls JSON.
         // Local Qwen3 via Ollama → <tool_call>{JSON}</tool_call> (Hermes, handled as fallback).
+        toolCallStyle: 'openai',
+    },
+    google: {
+        id: 'google',
+        name: 'Google (Gemini)',
+        // Google provides an OpenAI-compatible endpoint (no trailing /v1 needed — it's included)
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        defaultModel: 'gemini-2.5-pro',
+        models: [
+            'gemini-3.1-pro-preview',
+            'gemini-3-flash-preview',
+            'gemini-3.1-flash-lite-preview',
+            'gemini-2.5-pro',
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite',
+        ],
+        supportsToolUse: true,
+        supportsStreaming: true,
+        maxContextTokens: 1048576,   // 1M token context window
+        isOpenAICompatible: true,
         toolCallStyle: 'openai',
     },
     ollama: {
@@ -240,14 +260,38 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
                 content: [{
                     type: 'tool_result',
                     tool_use_id: msg.tool_call_id,
-                    content: msg.content,
+                    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
                 }],
             });
         } else {
-            claudeMessages.push({
-                role: msg.role === 'user' ? 'user' : 'assistant',
-                content: msg.content ?? '',
-            });
+            // Text or multimodal user/assistant message
+            const role = msg.role === 'user' ? 'user' : 'assistant';
+            if (Array.isArray(msg.content)) {
+                // Convert OpenAI ContentPart[] → Claude content blocks
+                const claudeContent: Array<Record<string, unknown>> = [];
+                for (const part of msg.content as ContentPart[]) {
+                    if (part.type === 'text') {
+                        claudeContent.push({ type: 'text', text: part.text });
+                    } else if (part.type === 'image_url') {
+                        // Convert data URL to Claude's base64 format
+                        const url = part.image_url.url;
+                        const mediaMatch = url.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+                        if (mediaMatch) {
+                            claudeContent.push({
+                                type: 'image',
+                                source: {
+                                    type: 'base64',
+                                    media_type: mediaMatch[1],
+                                    data: mediaMatch[2],
+                                },
+                            });
+                        }
+                    }
+                }
+                claudeMessages.push({ role, content: claudeContent });
+            } else {
+                claudeMessages.push({ role, content: msg.content ?? '' });
+            }
         }
     }
 

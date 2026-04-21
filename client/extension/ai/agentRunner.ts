@@ -17,7 +17,19 @@ import type {
     AgentToolName,
     AgentMode,
     ChatCompletionResponse,
+    ContentPart,
 } from './types';
+
+/** Safely coerce ChatMessage.content (string | ContentPart[] | null) to a string for text operations. */
+function contentToString(content: string | ContentPart[] | null | undefined): string {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    // ContentPart[] — join text parts
+    return content.filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text')
+        .map(p => p.text)
+        .join('');
+}
+
 import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder } from './promptBuilder';
@@ -224,7 +236,7 @@ export class AgentRunner {
             // Build compaction prompt
             const summaryText = olderMessages.map(m => {
                 const role = m.role === 'user' ? 'User' : 'Assistant';
-                const content = (m.content ?? '').substring(0, 500);
+                const content = contentToString(m.content).substring(0, 500);
                 return `[${role}]: ${content}`;
             }).join('\n');
 
@@ -318,6 +330,14 @@ export class AgentRunner {
                 tools: availableTools,
                 providerId: options?.providerId,
                 model: options?.model,
+                // Stream thinking tokens to UI in real-time (OpenCode-style)
+                onThinking: (text) => {
+                    emitStep({
+                        type: 'thinking_content',
+                        content: text,
+                        timestamp: Date.now(),
+                    });
+                },
             });
 
             const choice = response.choices[0];
@@ -325,7 +345,8 @@ export class AgentRunner {
 
             const assistantMessage = choice.message;
             // Save raw content for DSML parsing BEFORE stripping markup
-            const rawContent = assistantMessage.content ?? '';
+            // (assistant messages from API are always text strings, not ContentPart[])
+            const rawContent = contentToString(assistantMessage.content);
 
             // ── Extract thinking/reasoning content ──────────────────────
             // 1. reasoning_content field (DeepSeek-R1 / some OpenAI-compat providers)
@@ -361,7 +382,7 @@ export class AgentRunner {
             // Strip DSML/XML markup AND <think> blocks from content for clean display
             if (assistantMessage.content) {
                 assistantMessage.content = this.stripThinkBlocks(
-                    this.stripDsmlMarkup(assistantMessage.content)
+                    this.stripDsmlMarkup(contentToString(assistantMessage.content))
                 );
             }
 
@@ -370,7 +391,7 @@ export class AgentRunner {
 
             // If no tool calls (either format), we're done
             if (!toolCalls || toolCalls.length === 0) {
-                return this.cleanFinalContent(assistantMessage.content ?? '');
+                return this.cleanFinalContent(contentToString(assistantMessage.content));
             }
 
             // ── Doom loop detection (OpenCode DOOM_LOOP_THRESHOLD) ─────────────
@@ -407,91 +428,107 @@ export class AgentRunner {
                 } catch { /* ignore */ }
             }
 
-            // Execute tool calls
+            // ── Execute tool calls (parallel for read-only, serial for writes) ──
+            // Read-only tools can safely run in parallel; write tools are kept serial
+            // because they may show confirm dialogs or interact with the UI.
+            const READ_ONLY_TOOLS = new Set<string>([
+                'read_file', 'list_directory', 'search_mod_files',
+                'get_file_context', 'document_symbols', 'workspace_symbols',
+                'query_scope', 'query_types', 'query_rules', 'query_references',
+                'get_diagnostics', 'get_completion_at', 'validate_code',
+            ]);
+
+            // Pre-fetch provider info once (needed for result routing)
+            const { getProvider: _getProvider } = await import('./providers');
+            const _config = this.aiService.getConfig();
+            const _providerId = options?.providerId ?? _config.provider;
+            const _providerDef = _getProvider(_providerId);
+            const useDsmlToolRole = _providerDef.toolCallStyle === 'dsml';
+
+            // Emit all tool_call steps upfront (preserves UI ordering)
+            const parsedCalls: Array<{ toolName: AgentToolName; toolArgs: Record<string, unknown>; toolCall: typeof toolCalls[0] }> = [];
             for (const toolCall of toolCalls) {
                 options?.abortSignal?.throwIfAborted();
-
                 const toolName = toolCall.function.name as AgentToolName;
                 let toolArgs: Record<string, unknown>;
-                try {
-                    toolArgs = JSON.parse(toolCall.function.arguments);
-                } catch {
-                    toolArgs = {};
-                }
+                try { toolArgs = JSON.parse(toolCall.function.arguments); } catch { toolArgs = {}; }
+                emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now() });
+                parsedCalls.push({ toolName, toolArgs, toolCall });
+            }
 
-                emitStep({
-                    type: 'tool_call',
-                    content: `调用工具: ${toolName}`,
-                    toolName,
-                    toolArgs,
-                    timestamp: Date.now(),
-                });
+            // Partition into groups: run read-only in parallel, write in serial
+            // We process them in order but batch consecutive read-only calls.
+            const toolResults: unknown[] = new Array(parsedCalls.length);
+            let i = 0;
+            while (i < parsedCalls.length) {
+                options?.abortSignal?.throwIfAborted();
+                const { toolName, toolArgs, toolCall } = parsedCalls[i];
 
-                let toolResult: unknown;
-                try {
-                    // Skip duplicate write calls: if a later call writes to the same file, skip this one
-                    const callIndex = toolCalls.indexOf(toolCall);
+                if (READ_ONLY_TOOLS.has(toolName)) {
+                    // Collect a batch of consecutive read-only tools
+                    const batchStart = i;
+                    const batch: Array<{ idx: number; toolName: AgentToolName; toolArgs: Record<string, unknown>; toolCall: typeof toolCalls[0] }> = [];
+                    while (i < parsedCalls.length && READ_ONLY_TOOLS.has(parsedCalls[i].toolName)) {
+                        batch.push({ idx: i, ...parsedCalls[i] });
+                        i++;
+                    }
+                    // Execute batch in parallel
+                    await Promise.all(batch.map(async ({ idx, toolName: tn, toolArgs: ta }) => {
+                        try {
+                            toolResults[idx] = await this.toolExecutor.execute(tn, ta);
+                        } catch (e) {
+                            toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
+                        }
+                    }));
+                    void batchStart; // suppress unused-var warning
+                } else {
+                    // Write or interactive tool — execute serially
+                    const callIndex = i;
                     const filePath = (toolArgs['filePath'] as string) ?? (toolArgs['file'] as string) ?? '';
                     const isSupersededWrite = WRITE_TOOLS.has(toolName) && filePath &&
                         lastWriteIndexByFile.get(filePath) !== callIndex;
 
-                    if (isSupersededWrite) {
-                        // Silently skip — the later write for this file takes precedence
-                        toolResult = { skipped: true, message: `已被后续对 ${filePath} 的写入操作覆盖，跳过本次写入` };
-                    } else if (WRITE_TOOLS.has(toolName) && filePath && confirmedWrittenFiles.has(filePath)) {
-                        // File was already written-and-confirmed in a PREVIOUS iteration:
-                        // apply this write silently (treat as auto mode) to avoid a second confirm card
-                        const origArgs = { ...toolArgs, _autoApply: true };
-                        toolResult = await this.toolExecutor.execute(toolName, origArgs);
-                    } else {
-                        toolResult = await this.toolExecutor.execute(toolName, toolArgs);
-                        // Mark file as confirmed-written so future iterations skip the confirm card
-                        if (WRITE_TOOLS.has(toolName) && filePath) {
-                            const r = toolResult as Record<string, unknown>;
-                            if (r && (r.success || r.confirmed)) {
-                                confirmedWrittenFiles.add(filePath);
+                    try {
+                        if (isSupersededWrite) {
+                            toolResults[i] = { skipped: true, message: `已被后续对 ${filePath} 的写入操作覆盖，跳过本次写入` };
+                        } else if (WRITE_TOOLS.has(toolName) && filePath && confirmedWrittenFiles.has(filePath)) {
+                            toolResults[i] = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true });
+                        } else {
+                            toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs);
+                            if (WRITE_TOOLS.has(toolName) && filePath) {
+                                const r = toolResults[i] as Record<string, unknown>;
+                                if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
                             }
                         }
+                    } catch (e) {
+                        toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
                     }
-                } catch (e) {
-                    toolResult = { error: e instanceof Error ? e.message : String(e) };
+                    void toolCall;
+                    i++;
                 }
+            }
 
-                emitStep({
-                    type: 'tool_result',
-                    content: `工具结果: ${toolName}`,
-                    toolName,
-                    toolResult,
-                    timestamp: Date.now(),
-                });
+            // Emit results in original order and feed back to AI
+            for (let j = 0; j < parsedCalls.length; j++) {
+                const { toolName, toolArgs: _ta, toolCall } = parsedCalls[j];
+                const toolResult = toolResults[j];
+                void _ta;
 
-                // Track consecutive tool errors for early abort
+                emitStep({ type: 'tool_result', content: `工具结果: ${toolName}`, toolName, toolResult, timestamp: Date.now() });
+
+                // Track consecutive errors
                 if (typeof toolResult === 'object' && toolResult !== null &&
                     'error' in toolResult && !('success' in toolResult)) {
                     consecutiveErrorCount++;
                     if (consecutiveErrorCount >= 5) {
-                        emitStep({
-                            type: 'error',
-                            content: '工具连续失败 5 次，已强制停止',
-                            timestamp: Date.now(),
-                        });
+                        emitStep({ type: 'error', content: '工具连续失败 5 次，已强制停止', timestamp: Date.now() });
                         break;
                     }
                 } else {
                     consecutiveErrorCount = 0;
                 }
 
-                // Feed tool result back to AI
-                // DeepSeek and some models in DSML mode require tool results as user messages
-                // Check if provider uses DSML-style (tool role not well supported)
-                const { getProvider } = await import('./providers');
-                const config = this.aiService.getConfig();
-                const providerId = options?.providerId ?? config.provider;
-                const providerDef = getProvider(providerId);
-                const useDsmlToolRole = providerDef.toolCallStyle === 'dsml';
-
                 if (useDsmlToolRole) {
-                    // DeepSeek DSML mode: wrap tool result as a user message
                     messages.push({
                         role: 'user',
                         content: `[Tool Result for ${toolCall.function.name} (id=${toolCall.id})]:\n${JSON.stringify(toolResult, null, 2)}`,
@@ -513,7 +550,7 @@ export class AgentRunner {
             model: options?.model,
         });
 
-        const finalContent = finalResponse.choices[0]?.message?.content ?? '';
+        const finalContent = contentToString(finalResponse.choices[0]?.message?.content);
         return this.cleanFinalContent(finalContent);
     }
 
@@ -795,7 +832,7 @@ export class AgentRunner {
                     model: options?.model,
                 });
 
-                const retryContent = retryResponse.choices[0]?.message?.content ?? '';
+                const retryContent = contentToString(retryResponse.choices[0]?.message?.content);
                 const fixedCode = this.extractCode(retryContent);
 
                 if (fixedCode && fixedCode !== currentCode) {
@@ -916,7 +953,7 @@ export class AgentRunner {
                 model: options?.model,
             });
 
-            const raw = (response.choices[0]?.message?.content ?? '').trim();
+            const raw = contentToString(response.choices[0]?.message?.content).trim();
             // Clean up think blocks and extra quotes
             const cleaned = raw
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')

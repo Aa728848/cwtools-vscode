@@ -178,6 +178,8 @@ export class AIService {
             model?: string;        // Override model
             apiKey?: string;       // Override API key (for test-without-save)
             endpoint?: string;     // Override endpoint
+            /** Real-time callback for incremental reasoning/thinking tokens */
+            onThinking?: (text: string) => void;
         }
     ): Promise<ChatCompletionResponse> {
         const config = this.getConfig();
@@ -221,7 +223,12 @@ export class AIService {
         this.abortController = new AbortController();
 
         try {
-            if (provider.isOpenAICompatible) {
+            // Use streaming for OpenAI-compat providers when they support it.
+            // This reduces perceived latency: thinking tokens arrive incrementally
+            // and tool_calls are assembled from chunks as they stream in.
+            if (provider.supportsStreaming && provider.isOpenAICompatible && provider.id !== 'claude') {
+                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking);
+            } else if (provider.isOpenAICompatible) {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId);
             } else if (providerId === 'claude') {
                 return await this.callClaude(endpoint, apiKey, request);
@@ -264,8 +271,8 @@ export class AIService {
         const endpoint = getEffectiveEndpoint(providerId, config.endpoint);
         const model = options?.model ?? getEffectiveModel(providerId, config.model);
 
-        // If provider doesn't support streaming or has tool calls, fall back to non-streaming
-        if (!provider.supportsStreaming || (options?.tools && options.tools.length > 0)) {
+        // If provider doesn't support streaming, fall back to non-streaming
+        if (!provider.supportsStreaming) {
             const response = await this.chatCompletion(messages, options);
             yield response;
             return;
@@ -373,6 +380,117 @@ export class AIService {
         }
 
         return await response.json() as ChatCompletionResponse;
+    }
+
+    /**
+     * Like callOpenAICompatible, but uses stream:true to receive SSE chunks.
+     * Assembles tool_calls from delta chunks as they arrive, yielding intermediate
+     * thinking tokens via onThinking callback. Returns the full ChatCompletionResponse.
+     */
+    private async callOpenAICompatibleStreaming(
+        endpoint: string,
+        apiKey: string,
+        request: ChatCompletionRequest,
+        providerId: string,
+        onThinking?: (text: string) => void
+    ): Promise<ChatCompletionResponse> {
+        const url = `${endpoint}/chat/completions`;
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ ...request, stream: true }),
+            signal: this.abortController?.signal,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${errorText}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        // Aggregation state
+        let contentBuf = '';
+        let reasoningBuf = '';
+        let finishReason: string | null = null;
+        // tool_calls reassembly: index → { id, type, function.name, function.arguments(buf) }
+        const toolCallMap: Record<number, { id: string; type: string; function: { name: string; arguments: string } }> = {};
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed === 'data: [DONE]') continue;
+                if (!trimmed.startsWith('data: ')) continue;
+                let chunk: Record<string, unknown>;
+                try { chunk = JSON.parse(trimmed.slice(6)); } catch { continue; }
+                const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
+                if (!choices || choices.length === 0) continue;
+                const delta = choices[0].delta as Record<string, unknown> | undefined;
+                if (!delta) { finishReason = (choices[0].finish_reason as string) ?? finishReason; continue; }
+                if (choices[0].finish_reason) finishReason = choices[0].finish_reason as string;
+
+                // Accumulate text content
+                if (typeof delta.content === 'string') {
+                    contentBuf += delta.content;
+                }
+                // Accumulate thinking/reasoning content and emit incrementally
+                const reasoning = delta.reasoning_content ?? delta.reasoning;
+                if (typeof reasoning === 'string' && reasoning) {
+                    reasoningBuf += reasoning;
+                    onThinking?.(reasoning);
+                }
+                // Reassemble tool_calls from deltas
+                const tcDeltas = delta.tool_calls as Array<Record<string, unknown>> | undefined;
+                if (tcDeltas) {
+                    for (const tc of tcDeltas) {
+                        const idx = (tc.index as number) ?? 0;
+                        if (!toolCallMap[idx]) {
+                            toolCallMap[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } };
+                        }
+                        if (tc.id) toolCallMap[idx].id = tc.id as string;
+                        if (tc.type) toolCallMap[idx].type = tc.type as string;
+                        const fn = tc.function as Record<string, string> | undefined;
+                        if (fn) {
+                            if (fn.name) toolCallMap[idx].function.name += fn.name;
+                            if (fn.arguments) toolCallMap[idx].function.arguments += fn.arguments;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build a synthetic ChatCompletionResponse
+        const toolCalls = Object.keys(toolCallMap).length > 0
+            ? Object.entries(toolCallMap)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([, tc]) => tc)
+            : undefined;
+
+        return {
+            choices: [{
+                message: {
+                    role: 'assistant',
+                    content: contentBuf || null,
+                    tool_calls: toolCalls,
+                    ...(reasoningBuf ? { reasoning_content: reasoningBuf } : {}),
+                } as ChatMessage & { reasoning_content?: string; tool_calls?: typeof toolCalls },
+                finish_reason: finishReason ?? 'stop',
+            }],
+        } as ChatCompletionResponse;
     }
 
     private async callClaude(

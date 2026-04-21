@@ -395,7 +395,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'multiedit',
-            description: 'Apply multiple edits to a SINGLE file in one atomic operation. All edits applied in sequence; only written to disk if ALL succeed. More efficient than multiple edit_file calls. Uses same fuzzy-matching as edit_file.',
+            description: 'Apply multiple edits to a SINGLE file in one atomic operation. All edits applied in sequence; only written to disk if ALL succeed. More efficient than multiple edit_file calls. Uses same fuzzy-matching as edit_file. **IMPORTANT**: if oldString appears multiple times in the file, either (a) add more surrounding context lines to make it unique, or (b) set `replaceAll=true` on that edit item.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -406,8 +406,9 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                         items: {
                             type: 'object',
                             properties: {
-                                oldString: { type: 'string', description: 'The exact text to replace' },
+                                oldString: { type: 'string', description: 'The exact text to replace. Must be unique in the file, OR set replaceAll=true.' },
                                 newString: { type: 'string', description: 'The replacement text' },
+                                replaceAll: { type: 'boolean', description: 'If true, replace ALL occurrences of oldString. Use when the same pattern appears multiple times and you want to change all of them. Default: false.' },
                             },
                             required: ['oldString', 'newString'],
                         },
@@ -2127,7 +2128,7 @@ export class AgentToolExecutor {
      */
     private async multiEdit(args: {
         filePath: string;
-        edits: Array<{ oldString: string; newString: string }>;
+        edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }>;
         encoding?: string;
     }): Promise<import('./types').EditFileResult> {
         const filePath = args.filePath;
@@ -2153,7 +2154,7 @@ export class AgentToolExecutor {
             const old = this.convertLineEnding(this.normalizeLineEndings(edit.oldString), ending);
             const next = this.convertLineEnding(this.normalizeLineEndings(edit.newString), ending);
             try {
-                content = this.replace(content, old, next, false);
+                content = this.replace(content, old, next, edit.replaceAll ?? false);
             } catch (e) {
                 errors.push(`Edit #${i + 1}: ${e instanceof Error ? e.message : String(e)}`);
             }

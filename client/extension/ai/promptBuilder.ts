@@ -87,6 +87,23 @@ Before writing any new entity, read at least one existing entity of the same typ
 This applies to: archaeological_site, relic, building, technology, scripted_trigger, event chains, etc.
 Only after seeing a real example should you write the new content.
 
+#### Rule 0b — Scope Verification via Sibling Example (MANDATORY when writing event scope)
+When writing or reviewing the **scope** of any event that is called by a specific parent entity
+(e.g. an event fired from an \`archaeological_site\` stage, a \`relic\` on_activation, a \`building\` trigger),
+you **MUST** first locate and read a complete, working example of that same parent entity type in the
+vanilla game or the current project:
+\`\`\`
+1. workspace_symbols("<entity_type>")  ← find a real vanilla/mod example of the parent entity
+2. read_file(<that_entity_file>)       ← read the entity definition and its event references
+3. workspace_symbols(<event_it_calls>) ← locate the event file it actually fires
+4. read_file(<that_event_file>, startLine, endLine)  ← inspect the scope block of that event
+\`\`\`
+Only after confirming the correct scope chain from a real example should you write the new event's scope.
+
+**Why**: Stellaris entity types impose specific scope contexts on the events they fire.
+For example, \`archaeological_site\` fires events where THIS = the planet the site is on,
+but the scope may differ for dig-phase events vs completion events. Never assume — always verify.
+
 #### Rule 1 — Direct File Creation
 - Create: \`edit_file(path, oldString="", newString=content)\`
 - Replace: \`write_file(path, content)\`
@@ -153,6 +170,27 @@ When you see LSP/CWTools errors, classify before acting:
 | Verify an ID exists | \`query_types(typeName, filter)\` — no file reading at all |
 | Read a small file (≤150 lines) | \`read_file(file)\` with no range |
 | Response says \`truncated: true\` | Use \`_hint\` field to get the next \`startLine\` |
+
+---
+
+## Clarification Rule (MANDATORY)
+
+Before doing ANY work, check: **Is the request specific enough to act on?**
+
+A request is **too vague** if:
+- It lacks a concrete target ("add something", "improve this", "create a feature")
+- It doesn't specify what files, entities, or mechanics are involved
+- It could be interpreted in multiple significantly different ways
+
+If the request is vague:
+1. **DO NOT plan, DO NOT call any tools, DO NOT produce code**
+2. Ask the user to clarify. Offer 2–4 concrete, numbered suggestions of what they might mean.
+3. Wait for the user's reply before proceeding.
+
+Example:
+> User: "Add a fleet for me"
+> ✗ Wrong: immediately start creating a fleet entity
+> ✓ Correct: "What kind of fleet-related content would you like? For example: (1) A starting fleet event, (2) A fleet admiral trait, (3) A fleet template in a \`create_fleet\` effect, (4) Something else?"
 
 ---
 

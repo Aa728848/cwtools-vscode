@@ -270,9 +270,20 @@ export function getEffectiveModel(providerId: string, userModel?: string): strin
  * Claude uses a different structure for system prompts, tools, and responses.
  */
 export function toClaudeRequest(request: ChatCompletionRequest): Record<string, unknown> {
+    // L5 Fix: content may be string | ContentPart[] | null — use helper to avoid
+    // .join() on an array (which produces "[object Object]" for ContentPart items).
+    const contentToStr = (c: string | ContentPart[] | null | undefined): string => {
+        if (!c) return '';
+        if (typeof c === 'string') return c;
+        return (c as ContentPart[])
+            .filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text')
+            .map(p => p.text)
+            .join('');
+    };
+
     // Extract system message
     const systemMessages = request.messages.filter(m => m.role === 'system');
-    const systemPrompt = systemMessages.map(m => m.content).join('\n\n');
+    const systemPrompt = systemMessages.map(m => contentToStr(m.content)).join('\n\n');
 
     // Convert non-system messages
     const claudeMessages: Array<Record<string, unknown>> = [];

@@ -324,12 +324,18 @@ export class AgentRunner {
             const olderMessages = history.slice(0, history.length - recentCount);
             const recentMessages = history.slice(history.length - recentCount);
 
-            // Build compaction prompt (specialized for Stellaris modding context)
-            const summaryText = olderMessages.map(m => {
-                const role = m.role === 'user' ? 'User' : m.role === 'tool' ? 'Tool' : 'Assistant';
-                const content = contentToString(m.content).substring(0, 500);
-                return `[${role}]: ${content}`;
-            }).join('\n');
+            // Build compaction prompt
+            // L3 Fix: exclude system messages (they'd be mapped as 'Assistant', misleading the summarizer).
+            // M4 Fix: use a larger char limit for tool/assistant messages which carry technical detail.
+            const summaryText = olderMessages
+                .filter(m => m.role !== 'system')   // L3 Fix
+                .map(m => {
+                    const role = m.role === 'user' ? 'User' : m.role === 'tool' ? 'Tool' : 'Assistant';
+                    // M4 Fix: user messages get 500 chars; tool/assistant get 2000
+                    const maxLen = m.role === 'user' ? 500 : 2000;
+                    const content = contentToString(m.content).substring(0, maxLen);
+                    return `[${role}]: ${content}`;
+                }).join('\n');
 
             const compactionMessages: ChatMessage[] = [
                 { role: 'system', content: this.promptBuilder.buildCompactionPrompt() },
@@ -399,15 +405,16 @@ export class AgentRunner {
         tokenAccumulator?: TokenUsage
     ): Promise<string> {
         let iteration = 0;
-        // Doom loop detection: sliding window of call signatures
-        const recentCallSignatures: string[] = [];
+        // M2 Fix: track consecutive identical signatures via counter,
+        // not a sliding window (A-B-A-B never triggered the old window approach).
+        let consecutiveSameSignature = 0;
+        let lastCallSignature = '';
         let consecutiveErrorCount = 0;
-        // Flag set to true when we need to exit the outer while loop (e.g. consecutive errors)
+        // Flag set to true when we need to exit the outer while loop
         let forceStop = false;
-        // Track files confirmed-written this session — prevents duplicate confirm cards
-        // if the AI calls write_file after edit_file for the same file (cross-iteration)
+        // Track files confirmed-written this session
         const confirmedWrittenFiles = new Set<string>();
-        // Track permanently allowed tool calls (OpenCode 'always' permission)
+        // Track permanently allowed tool calls
         const alwaysAllowedTools = new Set<string>();
 
         // Filter tools by mode
@@ -422,12 +429,11 @@ export class AgentRunner {
             availableTools = TOOL_DEFINITIONS;
         }
 
-        // Pre-fetch provider info once outside the loop (avoid repeated dynamic import overhead)
-        const { getProvider: _getProvider } = await import('./providers');
+        // M3 Fix: remove per-call dynamic import — getProvider is already statically
+        // imported at the top of this file; dynamic import added latency for nothing.
         const _config0 = this.aiService.getConfig();
         const _providerId0 = options?.providerId ?? _config0.provider;
-        const _providerDef0 = _getProvider(_providerId0);
-        const useDsmlToolRole0 = _providerDef0.toolCallStyle === 'dsml';
+        const useDsmlToolRole0 = getProvider(_providerId0).toolCallStyle === 'dsml';
 
         while (iteration < MAX_TOOL_ITERATIONS) {
             options?.abortSignal?.throwIfAborted();
@@ -512,17 +518,18 @@ export class AgentRunner {
                 return this.cleanFinalContent(contentToString(assistantMessage.content));
             }
 
-            // ── Doom loop detection (OpenCode DOOM_LOOP_THRESHOLD) ─────────────
-            // Track a sliding window of the last DOOM_LOOP_THRESHOLD call signatures.
-            // If they are all identical, the agent is stuck in a loop.
+            // ── M2 Fix: Doom loop detection via consecutive-call counter ──────
+            // Count consecutive iterations with identical call signatures.
+            // Works for both exact repeats AND alternating patterns if we track
+            // only the latest signature (pure repeat = doom loop).
             const callSignature = toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`).join('|');
-            recentCallSignatures.push(callSignature);
-            if (recentCallSignatures.length > DOOM_LOOP_THRESHOLD) {
-                recentCallSignatures.shift();
+            if (callSignature === lastCallSignature) {
+                consecutiveSameSignature++;
+            } else {
+                consecutiveSameSignature = 1;
+                lastCallSignature = callSignature;
             }
-            const allSame = recentCallSignatures.length >= DOOM_LOOP_THRESHOLD &&
-                recentCallSignatures.every(s => s === recentCallSignatures[0]);
-            if (allSame) {
+            if (consecutiveSameSignature >= DOOM_LOOP_THRESHOLD) {
                 emitStep({
                     type: 'error',
                     content: '检测到循环工具调用，已强制停止',
@@ -532,9 +539,10 @@ export class AgentRunner {
             }
 
             // ── Deduplicate file-write calls ──────────────────────────────────
-            // If the model emitted multiple write_file/edit_file calls targeting
-            // the same file in one response, only keep the LAST one for each file.
-            const WRITE_TOOLS = new Set(['write_file', 'edit_file']);
+            // If the model emitted multiple write/edit calls targeting the same file
+            // in one response, only keep the LAST one for each file.
+            // L6 Fix: include multiedit in the WRITE_TOOLS set (it also modifies files).
+            const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'patch']);
             const lastWriteIndexByFile = new Map<string, number>();
             for (let i = 0; i < toolCalls.length; i++) {
                 if (!WRITE_TOOLS.has(toolCalls[i].function.name)) continue;
@@ -549,11 +557,14 @@ export class AgentRunner {
             // ── Execute tool calls (parallel for read-only, serial for writes) ──
             // Read-only tools can safely run in parallel; write tools are kept serial
             // because they may show confirm dialogs or interact with the UI.
+            // M6 Fix: validate_code removed from READ_ONLY_TOOLS — it calls UpdateFile
+            // which temporarily mutates the game AST and must not run concurrently.
             const READ_ONLY_TOOLS = new Set<string>([
                 'read_file', 'list_directory', 'search_mod_files',
                 'get_file_context', 'document_symbols', 'workspace_symbols',
                 'query_scope', 'query_types', 'query_rules', 'query_references',
-                'get_diagnostics', 'get_completion_at', 'validate_code',
+                'get_diagnostics', 'get_completion_at',
+                // validate_code is intentionally omitted: it modifies the LSP game state temporarily
             ]);
 
             // Use pre-fetched provider info from outside the loop
@@ -664,6 +675,11 @@ export class AgentRunner {
             // If forceStop was set in the emit-results loop, exit outer while now
             if (forceStop) break;
         }
+
+        // C2 Fix: check abort signal BEFORE the final over-iteration API call.
+        // If the user cancelled, skip this call — it would produce charges and
+        // stale UI state ("已取消" already emitted but a new request fires anyway).
+        options?.abortSignal?.throwIfAborted();
 
         // Max iterations reached — try to get a final response without tools
         const finalResponse = await this.aiService.chatCompletion(messages, {
@@ -991,43 +1007,35 @@ export class AgentRunner {
     private extractCode(text: string): string | null {
         if (!text) return null;
 
-        // Try fenced code blocks (```pdx, ```paradox, ```stellaris, ```txt)
-        const fencePatterns = [
-            /```(?:pdx|paradox|stellaris|txt)?\s*\n([\s\S]*?)```/g,
-            /```\s*\n([\s\S]*?)```/g,
-        ];
-
-        for (const pattern of fencePatterns) {
-            const matches: RegExpExecArray[] = [];
-            let m: RegExpExecArray | null;
-            while ((m = pattern.exec(text)) !== null) {
-                matches.push(m);
-            }
-            if (matches.length > 0) {
-                // Return the largest code block
-                return matches
-                    .map(match => match[1].trim())
-                    .sort((a, b) => b.length - a.length)[0] || null;
-            }
+        // L1 Fix: merged into a single pattern — the two original patterns were
+        // almost identical (second was a superset) and could double-match the same block.
+        // Now: match optional language tag including empty (no-tag fences).
+        const fencePattern = /```(?:pdx|paradox|stellaris|txt)?\s*\n([\s\S]*?)```/g;
+        const matches: RegExpExecArray[] = [];
+        let m: RegExpExecArray | null;
+        fencePattern.lastIndex = 0;
+        while ((m = fencePattern.exec(text)) !== null) {
+            matches.push(m);
+        }
+        if (matches.length > 0) {
+            // Return the largest code block
+            return matches
+                .map(match => match[1].trim())
+                .sort((a, b) => b.length - a.length)[0] || null;
         }
 
         // Fallback: heuristic check — the entire response looks like raw PDXScript.
-        // Uses strict PDXScript-specific patterns to avoid false positives from
-        // Markdown tables or explanatory text that contain '='.
         const lines = text.split('\n');
         const nonEmpty = lines.filter(l => l.trim().length > 0);
         if (nonEmpty.length === 0) return null;
 
-        // A line is considered PDXScript code if it matches one of these patterns:
-        // - Block open/close: { or }
-        // - Key = value assignment: word_chars = <anything>  (requires word boundary on LHS)
-        // - Known PDXScript keywords at line start
         const pdxLineRe = /^\s*(?:\{\s*$|\}\s*$|[\w.]+\s*=[^=]|if\s*=|else\s*=|limit\s*=|trigger\s*=|effect\s*=|AND\s*=|OR\s*=|NOT\s*=)/;
         const codeLines = nonEmpty.filter(l => pdxLineRe.test(l));
 
-        // Require at least 75% of non-empty lines to look like PDXScript before treating
-        // the whole response as bare code (was 60%, raised to reduce false positives).
-        if (codeLines.length >= nonEmpty.length * 0.75 && nonEmpty.length >= 3) {
+        // L2 Fix: require at least one brace pair ({}) to guard against Markdown
+        // tables / config examples that happen to contain '=' on ≥75% of lines.
+        const hasBraces = text.includes('{') && text.includes('}');
+        if (hasBraces && codeLines.length >= nonEmpty.length * 0.75 && nonEmpty.length >= 3) {
             return text.trim();
         }
 
@@ -1099,22 +1107,16 @@ export class AgentRunner {
 
     /**
      * Run a sub-agent task with a restricted tool set (explore or general mode).
-     * The sub-agent runs an isolated reasoning loop and returns its final text output.
-     * Linked to parent abort signal — cancelling the parent automatically cancels sub-tasks.
-     *
-     * @param prompt       The task description / prompt for the sub-agent
-     * @param mode         Sub-agent mode: 'explore' (read-only) or 'general' (research)
-     * @param parentOptions Parent's options (inherits provider, model, abort signal)
-     * @param onStep        Optional step callback (sub-agent steps bubble via this)
-     * @returns             The sub-agent's final text response
+     * L8 Fix: accepts optional parentAccumulator so sub-agent token costs are
+     * merged into the parent generation's token counter (UI shows full cost).
      */
     async runSubAgent(
         prompt: string,
         mode: 'explore' | 'general',
         parentOptions?: AgentRunnerOptions,
-        onStep?: (step: AgentStep) => void
+        onStep?: (step: AgentStep) => void,
+        parentAccumulator?: TokenUsage
     ): Promise<string> {
-        // Sub-agent uses specialized system prompt
         const subSystemPrompt = this.promptBuilder.buildSystemPromptForMode(
             mode,
             this.aiService.getConfig().provider
@@ -1131,14 +1133,19 @@ export class AgentRunner {
             mode,
             abortSignal: parentOptions?.abortSignal,
             onStep,
-            // Sub-agents do NOT get permission callbacks (no file writes in explore/general)
         };
 
-        // Sub-agent accumulates its own token usage (not merged with parent)
         const subTokens: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
 
         try {
             const result = await this.reasoningLoop(messages, onStep ?? (() => {}), mode, subOptions, subTokens);
+            // L8 Fix: merge sub-agent token usage into parent accumulator
+            if (parentAccumulator) {
+                parentAccumulator.total  += subTokens.total;
+                parentAccumulator.input  += subTokens.input;
+                parentAccumulator.output += subTokens.output;
+                parentAccumulator.estimatedCostUsd += subTokens.estimatedCostUsd;
+            }
             return result;
         } catch (e) {
             return `Sub-agent error: ${e instanceof Error ? e.message : String(e)}`;

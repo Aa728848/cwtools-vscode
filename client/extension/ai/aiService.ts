@@ -81,7 +81,12 @@ export class ApiKeyManager {
 
 export class AIService {
     private keyManager: ApiKeyManager;
-    private abortController: AbortController | null = null;
+    /**
+     * C1 Fix: Use a Set instead of a single instance so that concurrent
+     * chatCompletion calls (e.g. compaction + main loop running in parallel)
+     * each manage their own controller without overwriting each other.
+     */
+    private activeControllers = new Set<AbortController>();
     /** In-memory model override — avoids writing to workspace config (which triggers LS restart) */
     private modelOverride: string | null = null;
 
@@ -156,13 +161,14 @@ export class AIService {
     }
 
     /**
-     * Cancel any in-progress generation.
+     * Cancel all in-progress generations.
+     * C1 Fix: abort every active controller in the Set.
      */
     cancel(): void {
-        if (this.abortController) {
-            this.abortController.abort();
-            this.abortController = null;
+        for (const ctrl of this.activeControllers) {
+            ctrl.abort();
         }
+        this.activeControllers.clear();
     }
 
     /**
@@ -217,27 +223,34 @@ export class AIService {
             tools: options?.tools,
             tool_choice: options?.tools && options.tools.length > 0 ? 'auto' : undefined,
             temperature: options?.temperature ?? 0.3,
-            max_tokens: options?.maxTokens ?? 4096,
+            // M5 Fix: raise default from 4096 to 8192 — Claude Opus 4 / Gemini 2.5 Pro
+            // support 64K+ output tokens; 4096 silently truncates long code generations.
+            max_tokens: options?.maxTokens ?? 8192,
             stream: false,
         };
 
-        this.abortController = new AbortController();
+        // C1 Fix: create a per-call controller; register it so cancel() can abort it.
+        const controller = new AbortController();
+        // Also link any external abort signal so the caller can cancel this specific call.
+        const externalSignal = (options as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
+        const linkAbort = () => controller.abort();
+        externalSignal?.addEventListener('abort', linkAbort);
+        this.activeControllers.add(controller);
 
         try {
             // MiniMax Token Plan uses Anthropic Messages API format
             const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan';
             // Use streaming for OpenAI-compat providers when they support it.
             if (provider.supportsStreaming && provider.isOpenAICompatible && !isAnthropicCompat) {
-                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking);
+                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller);
             } else if (isAnthropicCompat) {
-                return await this.callClaude(endpoint, apiKey, request);
-            } else if (provider.isOpenAICompatible) {
-                return await this.callOpenAICompatible(endpoint, apiKey, request, providerId);
+                return await this.callClaude(endpoint, apiKey, request, controller);
             } else {
-                return await this.callOpenAICompatible(endpoint, apiKey, request, providerId);
+                return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
             }
         } finally {
-            this.abortController = null;
+            this.activeControllers.delete(controller);
+            externalSignal?.removeEventListener('abort', linkAbort);
         }
     }
 
@@ -282,11 +295,13 @@ export class AIService {
             model,
             messages,
             temperature: options?.temperature ?? 0.3,
-            max_tokens: options?.maxTokens ?? 4096,
+            max_tokens: options?.maxTokens ?? 8192,
             stream: true,
         };
 
-        this.abortController = new AbortController();
+        // C1 Fix: local controller registered in Set for coordinated cancel()
+        const controller = new AbortController();
+        this.activeControllers.add(controller);
 
         try {
             const url = providerId === 'claude'
@@ -312,7 +327,7 @@ export class AIService {
                 method: 'POST',
                 headers,
                 body,
-                signal: this.abortController.signal,
+                signal: controller.signal,
             });
 
             if (!response.ok) {
@@ -348,7 +363,7 @@ export class AIService {
                 }
             }
         } finally {
-            this.abortController = null;
+            this.activeControllers.delete(controller);
         }
     }
 
@@ -406,7 +421,8 @@ export class AIService {
         endpoint: string,
         apiKey: string,
         request: ChatCompletionRequest,
-        providerId: string
+        providerId: string,
+        controller: AbortController
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/chat/completions`;
 
@@ -419,7 +435,7 @@ export class AIService {
             method: 'POST',
             headers,
             body: JSON.stringify(this.sanitizeRequest(providerId, request)),
-            signal: this.abortController?.signal,
+            signal: controller.signal,   // C1 Fix: use local per-call controller
         });
 
         if (!response.ok) {
@@ -440,7 +456,8 @@ export class AIService {
         apiKey: string,
         request: ChatCompletionRequest,
         providerId: string,
-        onThinking?: (text: string) => void
+        onThinking?: (text: string) => void,
+        controller?: AbortController   // C1 Fix: accept local controller
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/chat/completions`;
         const headers: Record<string, string> = {
@@ -452,7 +469,7 @@ export class AIService {
             method: 'POST',
             headers,
             body: JSON.stringify(this.sanitizeRequest(providerId, { ...request, stream: true })),
-            signal: this.abortController?.signal,
+            signal: controller?.signal ?? this.activeControllers.values().next().value?.signal,
         });
 
         if (!response.ok) {
@@ -510,7 +527,11 @@ export class AIService {
                 const tcDeltas = delta.tool_calls as Array<Record<string, unknown>> | undefined;
                 if (tcDeltas) {
                     for (const tc of tcDeltas) {
-                        const idx = (tc.index as number) ?? 0;
+                        // M1 Fix: don't blindly cast index to number — if missing,
+                        // use the next available slot to avoid overwriting parallel tool_calls.
+                        const idx = typeof tc.index === 'number'
+                            ? tc.index
+                            : Object.keys(toolCallMap).length;
                         if (!toolCallMap[idx]) {
                             toolCallMap[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } };
                         }
@@ -551,7 +572,8 @@ export class AIService {
     private async callClaude(
         endpoint: string,
         apiKey: string,
-        request: ChatCompletionRequest
+        request: ChatCompletionRequest,
+        controller: AbortController
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/messages`;
         const claudeRequest = toClaudeRequest(request);
@@ -564,7 +586,7 @@ export class AIService {
                 'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify(claudeRequest),
-            signal: this.abortController?.signal,
+            signal: controller.signal,   // C1 Fix: use local per-call controller
         });
 
         if (!response.ok) {

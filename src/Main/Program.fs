@@ -433,7 +433,12 @@ type Server(client: ILanguageClient) =
         match (cachePath, isVanillaFolder, activeGame) with
         | _, _, Custom -> ()
         | Some cp, false, _ ->
-            let gameCachePath = cp + "/../"
+            // L7 Fix: use Directory.GetParent() instead of string `+ "/../"` which
+            // fails on UNC paths (\\server\share\...) and some symlinked directories.
+            let gameCachePath =
+                let parent = System.IO.Directory.GetParent(cp)
+                if parent <> null then parent.FullName + "/"
+                else cp + "/../"
 
             let doesCacheExist =
                 match activeGame with

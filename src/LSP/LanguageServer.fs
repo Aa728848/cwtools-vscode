@@ -344,7 +344,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         System.Collections.Concurrent.ConcurrentDictionary<int, CancellationTokenSource>()
 
     let processQueue =
-        new System.Collections.Concurrent.BlockingCollection<PendingTask>(10)
+        // M7 Fix: unbounded queue — a bounded capacity of 10 can deadlock when the
+        // AI sends commands faster than the processing thread consumes them.
+        // The reader thread (which calls Add) would block while the processing thread
+        // (which calls Take) waits for more cancel messages from the reader — circular.
+        new System.Collections.Concurrent.BlockingCollection<PendingTask>()
 
     Thread(fun () ->
         try

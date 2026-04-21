@@ -322,6 +322,13 @@ export class AgentRunner {
             availableTools = TOOL_DEFINITIONS;
         }
 
+        // Pre-fetch provider info once outside the loop (avoid repeated dynamic import overhead)
+        const { getProvider: _getProvider } = await import('./providers');
+        const _config0 = this.aiService.getConfig();
+        const _providerId0 = options?.providerId ?? _config0.provider;
+        const _providerDef0 = _getProvider(_providerId0);
+        const useDsmlToolRole0 = _providerDef0.toolCallStyle === 'dsml';
+
         while (iteration < MAX_TOOL_ITERATIONS) {
             options?.abortSignal?.throwIfAborted();
             iteration++;
@@ -438,12 +445,8 @@ export class AgentRunner {
                 'get_diagnostics', 'get_completion_at', 'validate_code',
             ]);
 
-            // Pre-fetch provider info once (needed for result routing)
-            const { getProvider: _getProvider } = await import('./providers');
-            const _config = this.aiService.getConfig();
-            const _providerId = options?.providerId ?? _config.provider;
-            const _providerDef = _getProvider(_providerId);
-            const useDsmlToolRole = _providerDef.toolCallStyle === 'dsml';
+            // Use pre-fetched provider info from outside the loop
+            const useDsmlToolRole = useDsmlToolRole0;
 
             // Emit all tool_call steps upfront (preserves UI ordering)
             const parsedCalls: Array<{ toolName: AgentToolName; toolArgs: Record<string, unknown>; toolCall: typeof toolCalls[0] }> = [];

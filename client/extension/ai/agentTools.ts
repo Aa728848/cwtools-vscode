@@ -381,6 +381,13 @@ export class AgentToolExecutor {
      * Receives the target file path, the proposed new content, and a messageId.
      * Returns true = confirmed, false = cancelled. */
     public onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
+    /**
+     * Callback fired BEFORE any file is written or created.
+     * Receives the absolute file path and the file's content BEFORE the write
+     * (null if the file did not previously exist — i.e. it is being created).
+     * Used by the retract system to snapshot file state for later restoration.
+     */
+    public onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     /** Agent file write mode from config */
     public fileWriteMode: 'confirm' | 'auto' = 'confirm';
 
@@ -758,7 +765,8 @@ export class AgentToolExecutor {
                     disposable.dispose();
                     // Even on timeout, return whatever we have
                     resolve(vs.languages.getDiagnostics(tempUri));
-                }, 6000); // 6 second timeout
+                }, 3000); // 3 second timeout (reduced from 6s for faster tool calls)
+
 
                 const disposable = vs.languages.onDidChangeDiagnostics((e) => {
                     // Check if our temp file's diagnostics changed
@@ -1143,11 +1151,12 @@ export class AgentToolExecutor {
 
     private async writeFile(args: { file: string; content: string; encoding?: string }): Promise<import('./types').WriteFileResult> {
         try {
-            // Generate diff for display / confirmation
-            let originalContent = '';
-            try { originalContent = fs.readFileSync(args.file, 'utf-8'); } catch { /* new file */ }
+            // Snapshot original content for retract support (before any confirmation)
+            let originalContent: string | null = null;
+            try { originalContent = fs.readFileSync(args.file, 'utf-8'); } catch { /* new file — leave null */ }
+            this.onBeforeFileWrite?.(args.file, originalContent);
 
-            const diff = this.generateSimpleDiff(args.file, originalContent, args.content);
+            const diff = this.generateSimpleDiff(args.file, originalContent ?? '', args.content);
 
             if (this.fileWriteMode === 'confirm' && this.onPendingWrite && !(args as any)._autoApply) {
                 const messageId = `write_${Date.now()}`;
@@ -1196,6 +1205,10 @@ export class AgentToolExecutor {
         } catch (e) {
             return { success: false, message: `无法读取文件: ${String(e)}` };
         }
+
+        // Snapshot original content for retract support
+        // (null = new file being created via oldString === '')
+        this.onBeforeFileWrite?.(filePath, args.oldString === '' ? null : originalContent);
 
         // ── Create new file (oldString === '') ──────────────────────────────
         let newContent: string;

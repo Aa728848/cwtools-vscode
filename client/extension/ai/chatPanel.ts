@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Eddy CWTool Code Module — Chat Panel (WebView Host)
  *
  * Manages the side panel WebView for AI chat interaction.
@@ -39,7 +39,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     /** Whether an AI generation is currently running */
     private _isGenerating = false;
     /** Pending plan file that hasn't been submitted yet (shown as a persistent card) */
-    private _pendingPlanFile: { filePath: string; relPath: string } | null = null;
+    /**
+     * Per-message file snapshots for retract/undo support.
+     * Key = messageIndex (the topic.messages index at the time the user sent the message).
+     * Value = ordered list of { filePath, previousContent } captured BEFORE each write.
+     *   previousContent === null  ⇒ file was newly created (should be deleted on retract).
+     *   previousContent === string ⇒ file existed before; restore this content on retract.
+     * Snapshots are captured in chronological order; on retract we replay in reverse.
+     */
+    private _messageFileSnapshots = new Map<number, Array<{ filePath: string; previousContent: string | null }>>();
+    /**
+     * Points to the active snapshot array for the currently-running message.
+     * Set in handleUserMessage, cleared in finally. Allows non-tool writes
+     * (e.g. plan file) to register themselves into the same snapshot.
+     */
+    private _currentMessageSnapshots: Array<{ filePath: string; previousContent: string | null }> | null = null;
 
     constructor(
         private extensionUri: vs.Uri,
@@ -101,10 +115,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         //    so the user can see what the AI has done so far and cancel if needed
         if (this._isGenerating && this._liveSteps.length > 0) {
             this.postMessage({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
-        }
-        // 4. If a plan is pending approval, re-show the plan card so it's always visible
-        if (this._pendingPlanFile) {
-            this.postMessage({ type: 'planFileSaved', ...this._pendingPlanFile });
         }
     }
 
@@ -177,11 +187,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'permissionResponse':
                 this.resolvePermissionRequest(msg.permissionId, msg.allowed);
                 break;
-            case 'submitPlanAnnotations':
-                await this.submitPlanAnnotations(msg.annotations);
-                break;
             case 'openPlanFile':
-                this.openPlanAnnotationPanel(msg.filePath);
+                // Simply open the plan markdown file in the native VSCode editor
+                vs.commands.executeCommand('vscode.open', vs.Uri.file(msg.filePath));
                 break;
         }
     }
@@ -368,6 +376,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this._isGenerating = true;
         this._liveSteps = [];
 
+        // Collect file snapshots for retract/undo: wire up the tool executor callback
+        // for the duration of this message exchange.
+        const messageSnapshots: Array<{ filePath: string; previousContent: string | null }> = [];
+        this._currentMessageSnapshots = messageSnapshots;
+        this.agentRunner.toolExecutor.onBeforeFileWrite = (filePath, previousContent) => {
+            // Only record the first snapshot for each file (earliest = true "before" state)
+            if (!messageSnapshots.some(s => s.filePath === filePath)) {
+                messageSnapshots.push({ filePath, previousContent });
+            }
+        };
+
         try {
             const result = await this.agentRunner.run(
                 text,
@@ -441,26 +460,96 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const errorMsg = e instanceof Error ? e.message : String(e);
             this.postMessage({ type: 'generationError', error: errorMsg });
         } finally {
+            // Store file snapshots for this message (keyed by the message index)
+            if (messageSnapshots.length > 0) {
+                this._messageFileSnapshots.set(messageIndex, messageSnapshots);
+            }
+            // Clean up the per-request callback and snapshot pointer
+            this.agentRunner.toolExecutor.onBeforeFileWrite = undefined;
+            this._currentMessageSnapshots = null;
+
             this.abortController = null;
             this._isGenerating = false;
             this._liveSteps = [];
         }
     }
 
-    /** Retract a user message and its subsequent AI response */
-    private retractMessage(messageIndex: number): void {
+    /** Retract a user message, its AI response, AND any file changes made during that exchange */
+    private async retractMessage(messageIndex: number): Promise<void> {
         if (!this.currentTopic) return;
 
-        // Remove messages from messageIndex onwards in the topic
+        // ── Restore files changed in this message and all subsequent ones ──────
+        // Collect indices of all snapshots to undo (≥ messageIndex), sorted newest-first
+        // so that if message N wrote file A and message N+1 wrote it again,
+        // we undo message N+1 first (restoring "v1"), then message N (restoring original).
+        const indicesToUndo = [...this._messageFileSnapshots.keys()]
+            .filter(idx => idx >= messageIndex)
+            .sort((a, b) => b - a); // descending = newest-first
+
+        // Track which files we've already restored so we don't double-restore
+        const restored = new Set<string>();
+        let restoredFiles = 0;
+
+        for (const idx of indicesToUndo) {
+            const snapshots = this._messageFileSnapshots.get(idx)!;
+            // Process in reverse order within the same message too
+            for (const snap of [...snapshots].reverse()) {
+                if (restored.has(snap.filePath)) continue;
+                restored.add(snap.filePath);
+                try {
+                    if (snap.previousContent === null) {
+                        // File was newly created by AI — delete it
+                        if (fs.existsSync(snap.filePath)) {
+                            fs.unlinkSync(snap.filePath);
+                            restoredFiles++;
+                        }
+                    } else {
+                        // File existed before — restore original content
+                        fs.writeFileSync(snap.filePath, snap.previousContent, 'utf-8');
+                        restoredFiles++;
+                    }
+                } catch (e) {
+                    console.error(`[Retract] Failed to restore ${snap.filePath}:`, e);
+                }
+            }
+            this._messageFileSnapshots.delete(idx);
+        }
+
+        // ── Roll back conversation history ────────────────────────────────────
         this.currentTopic.messages = this.currentTopic.messages.slice(0, messageIndex);
-        // Also roll back conversationMessages
         this.conversationMessages = this.conversationMessages.slice(0, messageIndex);
 
         this.postMessage({ type: 'messageRetracted', messageIndex });
         this.saveTopics();
+
+        if (restoredFiles > 0) {
+            vs.window.showInformationMessage(
+                `已撤回消息并恢复 ${restoredFiles} 个文件的更改。`
+            );
+        }
     }
 
     // ─── Plan File ───────────────────────────────────────────────────────────
+
+    /**
+     * Register a file write into the current message's snapshot (for retract support).
+     * Call this BEFORE writing a file that bypasses AgentToolExecutor
+     * (e.g. savePlanFile). The file is treated as newly created (previousContent=null)
+     * unless it already exists on disk, in which case its current content is captured.
+     */
+    private _recordFileSnapshot(filePath: string): void {
+        const snapshots = this._currentMessageSnapshots;
+        if (!snapshots) return;
+        if (snapshots.some(s => s.filePath === filePath)) return; // already recorded
+        let previousContent: string | null = null;
+        try {
+            if (fs.existsSync(filePath)) {
+                previousContent = fs.readFileSync(filePath, 'utf-8');
+            }
+        } catch { /* treat as new file */ }
+        snapshots.push({ filePath, previousContent });
+    }
+
 
     /**
      * Save plan as .md for export, and emit renderPlan so the webview can
@@ -483,234 +572,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const fileName = `plan_${slug}_${timestamp}.md`;
             filePath = path.join(planDir, fileName);
             relPath = path.relative(wsRoot, filePath).replace(/\\/g, '/');
+            // Register plan file in the current message snapshot so retract can delete it
+            this._recordFileSnapshot(filePath);
             fs.writeFileSync(filePath, '\uFEFF' + planText, 'utf-8');
         }
-        // ── Notify webview: show file card (open button) ────────────────────
+        // ── Auto-open plan file beside the chat panel ────────────────────────
         if (filePath) {
-            this._pendingPlanFile = { filePath, relPath };
-            this.postMessage({ type: 'planFileSaved', filePath, relPath });
+            vs.commands.executeCommand(
+                'vscode.open',
+                vs.Uri.file(filePath),
+                { viewColumn: vs.ViewColumn.Beside, preview: true }
+            );
         }
-        // ── Auto-open annotation WebviewPanel ───────────────────────────────
-        this.openPlanAnnotationPanel(filePath, planText);
-    }
-
-    /**
-     * Open the plan file in a dedicated WebviewPanel that renders
-     * the markdown with an interactive inline annotation interface.
-     * When the user submits annotations, they're sent back to the AI.
-     */
-    private openPlanAnnotationPanel(filePath: string, planContent?: string): void {
-        const content = planContent
-            ?? (fs.existsSync(filePath)
-                ? fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '')
-                : null);
-        if (!content) {
-            vs.window.showErrorMessage(`计划文件不存在: ${filePath}`);
-            return;
-        }
-        const fileName = path.basename(filePath);
-        const panel = vs.window.createWebviewPanel(
-            'eddyPlanAnnotation',
-            `批注 — ${fileName}`,
-            vs.ViewColumn.One,
-            { enableScripts: true, localResourceRoots: [] }
-        );
-        panel.webview.html = this.getPlanAnnotationHtml(content, fileName);
-        panel.webview.onDidReceiveMessage(async (msg) => {
-            if (msg.type === 'submitAnnotations' && msg.annotations?.length > 0) {
-                panel.dispose();
-                await new Promise<void>(r => setTimeout(r, 120));
-                await this.submitPlanAnnotations(msg.annotations);
-            } else if (msg.type === 'openRawFile') {
-                vs.commands.executeCommand('vscode.open', vs.Uri.file(filePath));
-            }
-        });
-    }
-
-    /** Generate the HTML for the plan annotation WebviewPanel */
-    private getPlanAnnotationHtml(planContent: string, fileName: string): string {
-        const escTitle = fileName.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-        // IMPORTANT: Do NOT embed raw markdown in a JS template literal.
-        // Backticks in plan content (e.g. `file.txt` inline code) will prematurely
-        // end the template literal, causing the entire script block to be invalid
-        // and the panel to show a blank black screen.
-        // Solution: convert blocks to HTML strings on the TS side, JSON-serialize
-        // the array, and inject only the safe JSON array into the script.
-        const clean = planContent
-            .replace(/^\uFEFF/, '')          // strip BOM
-            .replace(/\r\n/g, '\n')          // normalize CRLF
-            .replace(/\r/g, '\n');
-        const rawBlocks = this.parseMarkdownBlocks(clean);
-        const htmlBlocks = rawBlocks.map(b => this.blockToHtml(b));
-        const blocksJson = JSON.stringify(htmlBlocks)
-            .replace(/<\/script>/gi, '<\\/script>');
-
-        const css = [
-            '*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}',
-            "body{font-family:-apple-system,'Segoe UI',sans-serif;background:#1e1e2e;color:#cdd6f4;font-size:14px;line-height:1.7;}",
-            '.toolbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:10px;padding:9px 20px;background:#181825;border-bottom:1px solid rgba(255,255,255,0.08);}',
-            '.toolbar-title{flex:1;font-size:13px;font-weight:600;opacity:0.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
-            '.raw-btn{background:none;border:1px solid rgba(255,255,255,0.12);color:#cdd6f4;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit;opacity:0.6;transition:opacity .15s;}',
-            '.raw-btn:hover{opacity:1;}',
-            '.submit-btn{background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;padding:5px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:opacity .15s;}',
-            '.submit-btn:disabled{opacity:0.3;cursor:default;}',
-            '.submit-btn:not(:disabled):hover{opacity:0.85;}',
-            '.content{max-width:800px;margin:0 auto;padding:28px 24px 80px;}',
-            '.block{position:relative;margin:2px 0;padding:6px 44px 6px 14px;border-radius:6px;cursor:pointer;transition:background .12s;border-left:3px solid transparent;}',
-            '.block:hover{background:rgba(137,220,235,0.06);}',
-            '.block.annotated{background:rgba(249,226,175,0.05);border-left-color:#f9e2af;}',
-            '.block.active{background:rgba(137,220,235,0.07);}',
-            '.add-btn{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:1px solid rgba(137,220,235,0.35);color:#89dceb;border-radius:4px;width:26px;height:26px;font-size:14px;cursor:pointer;opacity:0;transition:opacity .15s;display:flex;align-items:center;justify-content:center;}',
-            '.block:hover .add-btn,.block.active .add-btn{opacity:1;}',
-            '.block.annotated .add-btn{display:none;}',
-            '.block h1{color:#cba6f7;font-size:22px;font-weight:700;margin-bottom:2px;}',
-            '.block h2{color:#89b4fa;font-size:18px;font-weight:600;padding-top:6px;margin-bottom:2px;}',
-            '.block h3{color:#94e2d5;font-size:15px;font-weight:600;}',
-            '.block h4{font-size:14px;font-weight:600;opacity:0.85;}',
-            '.block code{background:rgba(255,255,255,0.07);border-radius:3px;padding:1px 5px;font-family:monospace;font-size:12px;}',
-            '.block pre{background:rgba(0,0,0,0.3);border-radius:6px;padding:12px;overflow-x:auto;margin:4px 0;}',
-            '.block pre code{background:none;padding:0;}',
-            '.block ul,.block ol{padding-left:20px;}',
-            '.block li{margin:2px 0;}',
-            '.block strong{color:#fab387;}',
-            '.block hr{border:none;border-top:1px solid rgba(255,255,255,0.08);margin:6px 0;}',
-            '.ann-input{margin-top:6px;border:1px solid rgba(137,220,235,0.3);border-radius:8px;overflow:hidden;background:#313244;}',
-            '.ann-textarea{display:block;width:100%;background:transparent;border:none;color:#cdd6f4;font-size:13px;font-family:inherit;padding:10px 12px;resize:none;outline:none;min-height:66px;line-height:1.5;}',
-            '.ann-actions{display:flex;gap:6px;padding:6px 10px;border-top:1px solid rgba(137,220,235,0.15);background:rgba(0,0,0,0.15);align-items:center;}',
-            '.ann-hint{flex:1;font-size:11px;opacity:0.4;}',
-            '.ann-confirm{background:#89dceb;color:#1e1e2e;border:none;border-radius:4px;padding:4px 14px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit;}',
-            '.ann-cancel{background:none;border:1px solid rgba(255,255,255,0.12);color:#cdd6f4;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit;}',
-            '.ann-bubble{display:flex;align-items:flex-start;gap:6px;margin-top:6px;padding:8px 10px;background:rgba(249,226,175,0.07);border-left:3px solid #f9e2af;border-radius:0 6px 6px 0;}',
-            '.ann-bubble-icon{font-size:13px;flex-shrink:0;}',
-            '.ann-bubble-text{flex:1;font-size:12px;opacity:0.9;word-break:break-word;line-height:1.5;}',
-            '.ann-bubble-edit{background:none;border:none;color:#89b4fa;cursor:pointer;font-size:11px;opacity:0.7;font-family:inherit;padding:0 2px;}',
-            '.ann-bubble-edit:hover{opacity:1;}',
-            '.empty-hint{padding:40px;text-align:center;opacity:0.4;font-size:13px;}',
-        ].join('\n');
-
-        // Build JS as joined string array no template literal nesting possible
-        const jsLines = [
-            '(function(){',
-            'try{',
-            'var vscode=acquireVsCodeApi();',
-            'var annotations={};',
-            'var BLOCKS=' + blocksJson + ';',
-            'var contentEl=document.getElementById("content");',
-            'var submitBtn=document.getElementById("submitBtn");',
-            'if(!BLOCKS||!BLOCKS.length){contentEl.innerHTML=\'<div class="empty-hint">\u8ba1\u5212\u5185\u5bb9\u4e3a\u7a7a</div>\';return;}',
-            'function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}',
-            'function updateSubmit(){var n=Object.keys(annotations).length;submitBtn.textContent="\uD83D\uDCE4 \u63D0\u4EA4\u6279\u6CE8\u7ED9 AI ("+n+")";submitBtn.disabled=n===0;}',
-            'BLOCKS.forEach(function(html,idx){',
-            '  var el=document.createElement("div");el.className="block";',
-            '  var txt=document.createElement("div");txt.innerHTML=html;el.appendChild(txt);',
-            '  var addBtn=document.createElement("button");addBtn.className="add-btn";addBtn.title="\u6DFB\u52A0\u6279\u6CE8";addBtn.textContent="\uD83D\uDCAC";el.appendChild(addBtn);',
-            '  var bubble=document.createElement("div");bubble.className="ann-bubble";bubble.style.display="none";el.appendChild(bubble);',
-            '  var box=document.createElement("div");box.className="ann-input";box.style.display="none";',
-            '  box.innerHTML=\'<textarea class="ann-textarea" placeholder="\u8F93\u5165\u6279\u6CE8\u5185\u5BB9\u2026"></textarea><div class="ann-actions"><span class="ann-hint">Ctrl+Enter \u786E\u8BA4\uFF0CEsc \u53D6\u6D88</span><button class="ann-cancel">\u53D6\u6D88</button><button class="ann-confirm">\u786E\u5B9A</button></div>\';',
-            '  el.appendChild(box);',
-            '  function openInput(){box.querySelector(".ann-textarea").value=annotations[idx]||"";box.style.display="block";bubble.style.display="none";el.classList.add("active");setTimeout(function(){box.querySelector(".ann-textarea").focus();},0);}',
-            '  function closeInput(){box.style.display="none";el.classList.remove("active");}',
-            '  function confirmAnnotation(){var v=box.querySelector(".ann-textarea").value.trim();closeInput();if(!v){delete annotations[idx];bubble.style.display="none";el.classList.remove("annotated");}else{annotations[idx]=v;bubble.innerHTML=\'<span class="ann-bubble-icon">\uD83D\uDCAC</span><span class="ann-bubble-text">\'+esc(v)+\'</span><button class="ann-bubble-edit">\u7F16\u8F91</button>\';bubble.querySelector(".ann-bubble-edit").addEventListener("click",function(e){e.stopPropagation();openInput();});bubble.style.display="flex";el.classList.add("annotated");}updateSubmit();}',
-            '  el.addEventListener("click",function(){if(box.style.display==="none"&&bubble.style.display==="none")openInput();});',
-            '  addBtn.addEventListener("click",function(e){e.stopPropagation();openInput();});',
-            '  box.addEventListener("click",function(e){e.stopPropagation();});',
-            '  box.querySelector(".ann-confirm").addEventListener("click",confirmAnnotation);',
-            '  box.querySelector(".ann-cancel").addEventListener("click",closeInput);',
-            '  box.querySelector(".ann-textarea").addEventListener("keydown",function(e){if(e.key==="Enter"&&(e.ctrlKey||e.metaKey))confirmAnnotation();if(e.key==="Escape")closeInput();});',
-            '  contentEl.appendChild(el);',
-            '});',
-            'submitBtn.addEventListener("click",function(){var keys=Object.keys(annotations);if(!keys.length)return;var data=keys.map(function(k){return{section:k,note:annotations[k]};});vscode.postMessage({type:"submitAnnotations",annotations:data});submitBtn.textContent="\u2705 \u5DF2\u63D0\u4EA4\u7ED9 AI";submitBtn.disabled=true;});',
-            'document.getElementById("rawBtn").addEventListener("click",function(){vscode.postMessage({type:"openRawFile"});});',
-            'document.addEventListener("click",function(){document.querySelectorAll(".ann-input").forEach(function(el){if(el.style.display!=="none"){el.style.display="none";var b=el.closest(".block");if(b)b.classList.remove("active");}});});',
-            '}catch(err){document.getElementById("content").innerHTML=\'<div style="color:#f38ba8;padding:20px;font-family:monospace">Error: \'+err.message+\'</div>\';}',
-            '})();',
-        ];
-        const js = jsLines.join('\n');
-
-        return [
-            '<!DOCTYPE html>',
-            '<html lang="zh-CN">',
-            '<head>',
-            '<meta charset="UTF-8">',
-            `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;">`,
-            `<title>\u6279\u6CE8 \u2014 ${escTitle}</title>`,
-            `<style>${css}</style>`,
-            '</head>',
-            '<body>',
-            '<div class="toolbar">',
-            `  <span class="toolbar-title">&#x270F;&#xFE0F; \u8BA1\u5212\u6279\u6CE8 \u2014 ${escTitle}</span>`,
-            '  <button class="raw-btn" id="rawBtn">&#x1F4C4; \u67E5\u770B\u539F\u59CB\u6587\u4EF6</button>',
-            '  <button class="submit-btn" id="submitBtn" disabled>&#x1F4E4; \u63D0\u4EA4\u6279\u6CE8\u7ED9 AI (0)</button>',
-            '</div>',
-            '<div class="content" id="content"></div>',
-            `<script>${js}</script>`,
-            '</body>',
-            '</html>',
-        ].join('\n');
-    }
-
-    /** Split markdown text into annotatable paragraph/heading blocks (TS-side only) */
-    private parseMarkdownBlocks(md: string): string[] {
-        const lines = md.split('\n');
-        const blocks: string[] = [];
-        let buf: string[] = [];
-        const flush = () => {
-            const s = buf.join('\n').trim();
-            if (s) { blocks.push(s); }
-            buf = [];
-        };
-        for (const l of lines) {
-            if (/^#{1,6}\s/.test(l)) { flush(); blocks.push(l); }
-            else if (l.trim() === '') { flush(); }
-            else { buf.push(l); }
-        }
-        flush();
-        return blocks;
-    }
-
-    /** Convert a single markdown block to safe HTML (TS-side, no user code execution) */
-    private blockToHtml(block: string): string {
-        const esc = (s: string) => s
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-        let h = esc(block);
-        h = h.replace(/^(#{1,6}) (.+)$/m, (_, hashes, text) => {
-            const level = Math.min(hashes.length, 6);
-            return `<h${level}>${text}</h${level}>`;
-        });
-        h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
-        h = h.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
-        h = h.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-        h = h.replace(/^---+$/gm, '<hr>');
-        h = h.replace(/\n/g, '<br>');
-        return h;
-    }
-
-
-    /**
-     * Receive inline annotations collected in the webview and generate
-     * a follow-up AI message requesting plan revisions.
-     */
-    private async submitPlanAnnotations(
-        annotations: Array<{ section: string; note: string }>
-    ): Promise<void> {
-        if (!annotations || annotations.length === 0) {
-            vs.window.showInformationMessage('没有批注需要提交');
-            return;
-        }
-        const followUp = [
-            '请根据以下批注修改计划：',
-            ...annotations.map((a, i) => {
-                const ctx = a.section.replace(/^#+\s*/, '').substring(0, 60);
-                return `${i + 1}. 在"${ctx}"处：${a.note}`;
-            }),
-        ].join('\n');
-        // Plan has been reviewed — clear the pending state so the card stops persisting
-        this._pendingPlanFile = null;
-        await this.handleUserMessage(followUp);
     }
 
     // ─── File Write Confirmation ──────────────────────────────────────────────
@@ -1299,7 +1172,7 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp};">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp}; img-src data: blob:;">
 <title>Eddy CWTool Code</title>
 <style>
 :root {

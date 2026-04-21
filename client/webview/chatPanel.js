@@ -815,7 +815,8 @@
         overlay.className = 'retract-confirm';
         overlay.innerHTML = '<div class="retract-confirm-box">' +
             '<div class="retract-confirm-title">撤回此消息？</div>' +
-            '<div class="retract-confirm-hint">这将同时撤回后续的 AI 回复</div>' +
+            '<div class="retract-confirm-hint">这将同时撤回后续的 AI 回复，并恢复所有被 AI 修改或创建的文件</div>' +
+
             '<div class="retract-confirm-btns">' +
             '<button class="retract-ok">撤回</button>' +
             '<button class="retract-cancel">取消</button>' +

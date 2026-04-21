@@ -479,6 +479,12 @@ export class AgentToolExecutor {
     /** Parent AgentRunner options (used for sub-agent dispatch to inherit provider/model/abort) */
     public parentRunnerOptions?: import('./agentRunner').AgentRunnerOptions;
 
+    /**
+     * Tracks whether the LSP server has finished loading game data.
+     * Set to true when cwtools/serverReady notification arrives.
+     */
+    private lspServerReady: boolean = false;
+
     private readonly clientGetter: () => LanguageClient;
 
     constructor(
@@ -489,6 +495,40 @@ export class AgentToolExecutor {
         this.clientGetter = typeof clientOrGetter === 'function'
             ? clientOrGetter
             : () => clientOrGetter;
+
+        // Listen for LSP server-ready notification
+        // The notification fires when game data + vanilla cache are fully loaded
+        vs.commands.executeCommand('setContext', 'cwtools.lspReady', false);
+        // Register the notification handler. We retry politely since the LanguageClient
+        // may not be fully started yet when the executor is constructed.
+        const tryRegisterNotif = () => {
+            try {
+                const c = this.clientGetter();
+                if (c) {
+                    // vscode-languageclient 8+ removed onReady(); use the client directly.
+                    // The registration is idempotent if called multiple times.
+                    try {
+                        // New API (v8+): no onReady needed, just register directly
+                        c.onNotification('cwtools/serverReady', (_params: any) => {
+                            this.lspServerReady = true;
+                            vs.commands.executeCommand('setContext', 'cwtools.lspReady', true);
+                        });
+                    } catch {
+                        // Old API (v7): wrap in onReady
+                        (c as any).onReady?.().then?.(() => {
+                            c.onNotification('cwtools/serverReady', (_params: any) => {
+                                this.lspServerReady = true;
+                                vs.commands.executeCommand('setContext', 'cwtools.lspReady', true);
+                            });
+                        });
+                    }
+                }
+            } catch { /* ignore, clientGetter not ready yet */ }
+        };
+        // Try immediately and retry if client not yet started
+        tryRegisterNotif();
+        setTimeout(tryRegisterNotif, 2000);
+        setTimeout(tryRegisterNotif, 5000);
     }
 
     private get client(): LanguageClient {
@@ -581,31 +621,66 @@ export class AgentToolExecutor {
     // ─── Tool Implementations ────────────────────────────────────────────────
 
     private async queryScope(args: { file: string; line: number; column: number }): Promise<QueryScopeResult> {
+        const unknown: QueryScopeResult = {
+            currentScope: 'unknown',
+            root: 'unknown',
+            thisScope: 'unknown',
+            prevChain: [],
+            fromChain: [],
+        };
         try {
-            // Use hover to extract scope info (the server includes scope tables in hover)
+            // ── Strategy 1: Use the structured LSP command (fast, stable, no Markdown parsing) ──
             const uri = vs.Uri.file(args.file);
+            try {
+                const structResult = await vs.commands.executeCommand<any>(
+                    'cwtools.executeServerCommand',
+                    'cwtools.ai.getScopeAtPosition',
+                    [uri.toString(), args.line, args.column]
+                );
+                if (structResult && structResult.ok === true) {
+                    return {
+                        currentScope: structResult.thisScope ?? 'unknown',
+                        root: structResult.root ?? 'unknown',
+                        thisScope: structResult.thisScope ?? 'unknown',
+                        prevChain: Array.isArray(structResult.prevChain) ? structResult.prevChain : [],
+                        fromChain: Array.isArray(structResult.fromChain) ? structResult.fromChain : [],
+                    };
+                }
+            } catch { /* structured command not available, fall through to Hover */ }
+
+            // ── Strategy 2: Execute the server command directly via LanguageClient ──
+            try {
+                const client = this.client;
+                if (client) {
+                    const raw = await client.sendRequest('workspace/executeCommand', {
+                        command: 'cwtools.ai.getScopeAtPosition',
+                        arguments: [uri.toString(), args.line, args.column],
+                    }) as any;
+                    if (raw && raw.ok === true) {
+                        return {
+                            currentScope: raw.thisScope ?? 'unknown',
+                            root: raw.root ?? 'unknown',
+                            thisScope: raw.thisScope ?? 'unknown',
+                            prevChain: Array.isArray(raw.prevChain) ? raw.prevChain : [],
+                            fromChain: Array.isArray(raw.fromChain) ? raw.fromChain : [],
+                        };
+                    }
+                }
+            } catch { /* fall through */ }
+
+            // ── Fallback: Hover Markdown parsing (original behaviour, kept for safety) ──
             const position = new vs.Position(args.line, args.column);
             const hovers = await vs.commands.executeCommand<vs.Hover[]>(
                 'vscode.executeHoverProvider', uri, position
             );
 
-            const result: QueryScopeResult = {
-                currentScope: 'unknown',
-                root: 'unknown',
-                thisScope: 'unknown',
-                prevChain: [],
-                fromChain: [],
-            };
+            const result = { ...unknown };
 
             if (hovers && hovers.length > 0) {
                 for (const hover of hovers) {
                     for (const content of hover.contents) {
                         const text = typeof content === 'string' ? content :
                             (content as vs.MarkdownString).value;
-                        // Parse scope table from hover markdown
-                        // Format: | Context | Scope |
-                        //         | ROOT | Country |
-                        //         | THIS | Country |
                         const lines = text.split('\n');
                         for (const line of lines) {
                             const match = line.match(/\|\s*(\w+)\s*\|\s*(\w+)\s*\|/);
@@ -626,28 +701,48 @@ export class AgentToolExecutor {
 
             return result;
         } catch (e) {
-            return {
-                currentScope: 'unknown',
-                root: 'unknown',
-                thisScope: 'unknown',
-                prevChain: [],
-                fromChain: [],
-            };
+            return unknown;
         }
     }
 
-    private async queryTypes(args: { typeName: string; filter?: string; limit?: number }): Promise<QueryTypesResult> {
+    private async queryTypes(args: { typeName: string; filter?: string; limit?: number; vanillaOnly?: boolean }): Promise<QueryTypesResult> {
         try {
-            // Use executeCommand to trigger the server's exportTypes command
-            // and parse the result. Since the server sends it as a CustomNotification,
-            // we instead query the completion system which has type info.
             const limit = args.limit ?? 50;
-            const types = await vs.commands.executeCommand<any>('cwtools.exportTypes');
 
-            // Fallback: search workspace files for type definitions
-            const instances: Array<{ id: string; file: string; subtypes?: string[] }> = [];
+            // ── Strategy 1: Use the new structured LSP command (includes vanilla cache) ──
+            try {
+                const client = this.client;
+                if (client) {
+                    const raw = await client.sendRequest('workspace/executeCommand', {
+                        command: 'cwtools.ai.queryTypes',
+                        arguments: [
+                            args.typeName,
+                            args.filter ?? '',
+                            limit,
+                            args.vanillaOnly ?? false,
+                        ],
+                    }) as any;
+                    if (raw && raw.ok === true) {
+                        const instances = Array.isArray(raw.instances)
+                            ? raw.instances.map((i: any) => ({
+                                id: i.id ?? '',
+                                file: i.file ?? '',
+                                line: i.line,
+                                vanilla: i.vanilla ?? false,
+                            }))
+                            : [];
+                        return {
+                            typeName: args.typeName,
+                            instances,
+                            totalCount: raw.totalCount ?? instances.length,
+                        };
+                    }
+                }
+            } catch { /* fall through to file-system scan */ }
 
-            // Search for type definitions in common/ directory
+            // ── Fallback: File-system scan of local mod files ──
+            const instances: Array<{ id: string; file: string; vanilla?: boolean }> = [];
+
             const typeToDir: Record<string, string> = {
                 technology: 'common/technology',
                 building: 'common/buildings',
@@ -677,7 +772,6 @@ export class AgentToolExecutor {
                     for (const file of files) {
                         try {
                             const content = fs.readFileSync(file, 'utf-8');
-                            // Extract top-level keys (type IDs)
                             const keyPattern = /^(\w[\w.-]*)\s*=/gm;
                             let match;
                             while ((match = keyPattern.exec(content)) !== null && instances.length < limit) {
@@ -790,128 +884,146 @@ export class AgentToolExecutor {
     }
 
     private async validateCode(args: { code: string; targetFile: string }): Promise<ValidateCodeResult> {
-        // Strategy: write a temp file INSIDE the workspace so CWTools LSP can see it,
-        // then wait for diagnostics to appear via onDidChangeDiagnostics event.
-        // The temp file is deleted immediately after validation.
-        const errors: ValidationError[] = [];
-
-        // Find a suitable workspace folder to host the temp file
-        const wsFolders = vs.workspace.workspaceFolders;
-        const wsRoot = wsFolders && wsFolders.length > 0
-            ? wsFolders[0].uri.fsPath
-            : this.workspaceRoot;
-
-        // Determine temp dir path — mirror the structure of targetFile within workspace
-        // so CWTools applies the same validation rules (e.g. events/ vs common/)
-        let tempSubdir = '.cwtools-ai-tmp';
-        if (args.targetFile) {
-            const relToWs = path.relative(wsRoot, path.dirname(args.targetFile));
-            // Only use the relative path if it's within the workspace
-            if (relToWs && !relToWs.startsWith('..') && !path.isAbsolute(relToWs)) {
-                tempSubdir = path.join('.cwtools-ai-tmp', relToWs);
-            }
-        }
-        const tempDir = path.join(wsRoot, tempSubdir);
-
-        // Determine the file extension from original target or default to .txt
-        let ext = '.txt';
-        if (args.targetFile) {
-            const origExt = path.extname(args.targetFile);
-            if (origExt) ext = origExt;
-        }
-        const tempName = `__ai_validate_${Date.now()}${ext}`;
-        const tempPath = path.join(tempDir, tempName);
+        const errors: import('./types').ValidationError[] = [];
 
         try {
-            // Ensure temp directory exists
-            if (!fs.existsSync(tempDir)) {
-                fs.mkdirSync(tempDir, { recursive: true });
-            }
+            const wsFolders = vs.workspace.workspaceFolders;
+            const wsRoot = wsFolders && wsFolders.length > 0
+                ? wsFolders[0].uri.fsPath
+                : this.workspaceRoot;
 
-            // Build validation content: use original file as context for better validation
-            let originalContent = '';
+            // ── Strategy 1: In-memory validation via LSP server command ──────────────────
+            // No temp files, no 3s wait. Direct access to CWTools game engine.
             try {
-                if (args.targetFile && fs.existsSync(args.targetFile)) {
-                    originalContent = fs.readFileSync(args.targetFile, 'utf-8');
+                const client = this.client;
+                if (client) {
+                    const raw = await client.sendRequest('workspace/executeCommand', {
+                        command: 'cwtools.ai.validateCode',
+                        arguments: [args.code, args.targetFile ?? ''],
+                    }) as any;
+
+                    if (raw && raw.ok === true) {
+                        if (Array.isArray(raw.errors)) {
+                            for (const e of raw.errors) {
+                                errors.push({
+                                    code: String(e.code ?? ''),
+                                    severity: e.severity ?? 'error',
+                                    message: String(e.message ?? ''),
+                                    line: Number(e.line ?? 0),
+                                    column: Number(e.column ?? 0),
+                                });
+                            }
+                        }
+                        return {
+                            isValid: errors.filter(e => e.severity === 'error').length === 0,
+                            errors,
+                        };
+                    }
                 }
-            } catch { /* ok */ }
+            } catch { /* fall through to temp-file validation */ }
 
-            const contentToValidate = originalContent
-                ? originalContent + '\n\n# AI_VALIDATE_START\n' + args.code
-                : args.code;
+            // ── Fallback: Temp-file approach (original behaviour) ─────────────────────────
+            // Used when LSP server command is unavailable.
+            let tempSubdir = '.cwtools-ai-tmp';
+            if (args.targetFile) {
+                const relToWs = path.relative(wsRoot, path.dirname(args.targetFile));
+                if (relToWs && !relToWs.startsWith('..') && !path.isAbsolute(relToWs)) {
+                    tempSubdir = path.join('.cwtools-ai-tmp', relToWs);
+                }
+            }
+            const tempDir = path.join(wsRoot, tempSubdir);
 
-            fs.writeFileSync(tempPath, contentToValidate, 'utf-8');
+            let ext = '.txt';
+            if (args.targetFile) {
+                const origExt = path.extname(args.targetFile);
+                if (origExt) ext = origExt;
+            }
+            const tempName = `__ai_validate_${Date.now()}${ext}`;
+            const tempPath = path.join(tempDir, tempName);
 
-            const tempUri = vs.Uri.file(tempPath);
-
-            // Open the document so VSCode/LSP knows about it
-            void vs.workspace.openTextDocument(tempUri);
-
-            // Wait for diagnostics from LSP — listen to onDidChangeDiagnostics
-            // (LSP will push diagnostics once it processes the new file, or on file open)
-            const diags = await new Promise<vs.Diagnostic[]>((resolve) => {
-                // Immediately check if already have diagnostics (unlikely but possible)
-                const existing = vs.languages.getDiagnostics(tempUri);
-                if (existing.length > 0) {
-                    resolve(existing);
-                    return;
+            try {
+                if (!fs.existsSync(tempDir)) {
+                    fs.mkdirSync(tempDir, { recursive: true });
                 }
 
-                // Set up listener for diagnostic changes
-                const timeout = setTimeout(() => {
-                    disposable.dispose();
-                    // Even on timeout, return whatever we have
-                    resolve(vs.languages.getDiagnostics(tempUri));
-                }, 3000); // 3 second timeout (reduced from 6s for faster tool calls)
+                let originalContent = '';
+                try {
+                    if (args.targetFile && fs.existsSync(args.targetFile)) {
+                        originalContent = fs.readFileSync(args.targetFile, 'utf-8');
+                    }
+                } catch { /* ok */ }
 
+                const contentToValidate = originalContent
+                    ? originalContent + '\n\n# AI_VALIDATE_START\n' + args.code
+                    : args.code;
 
-                const disposable = vs.languages.onDidChangeDiagnostics((e) => {
-                    // Check if our temp file's diagnostics changed
-                    const changedForUs = e.uris.some(u => u.fsPath === tempUri.fsPath);
-                    if (changedForUs) {
-                        clearTimeout(timeout);
+                fs.writeFileSync(tempPath, contentToValidate, 'utf-8');
+
+                const tempUri = vs.Uri.file(tempPath);
+                const doc = await vs.workspace.openTextDocument(tempUri);
+                // Wait briefly so LSP processes didOpen before we set up the listener
+                await new Promise(r => setTimeout(r, 80));
+
+                const diags = await new Promise<vs.Diagnostic[]>((resolve) => {
+                    const existing = vs.languages.getDiagnostics(tempUri);
+                    if (existing.length > 0) { resolve(existing); return; }
+
+                    const timeout = setTimeout(() => {
                         disposable.dispose();
                         resolve(vs.languages.getDiagnostics(tempUri));
-                    }
+                    }, 3000);
+
+                    const disposable = vs.languages.onDidChangeDiagnostics((e) => {
+                        const changedForUs = e.uris.some(u => u.fsPath === tempUri.fsPath);
+                        if (changedForUs) {
+                            clearTimeout(timeout);
+                            disposable.dispose();
+                            resolve(vs.languages.getDiagnostics(tempUri));
+                        }
+                    });
                 });
-            });
 
-            // Calculate offset: if we prepended originalContent, subtract its line count
-            const originalLineCount = originalContent ? originalContent.split('\n').length + 2 : 0; // +2 for blank line + comment
+                const originalLineCount = originalContent ? originalContent.split('\n').length + 2 : 0;
 
-            for (const d of diags) {
-                // Skip diagnostics that fall within the original content prefix
-                const adjustedLine = d.range.start.line - originalLineCount;
-                if (originalContent && adjustedLine < 0) continue; // In original file portion
+                for (const d of diags) {
+                    const adjustedLine = d.range.start.line - originalLineCount;
+                    if (originalContent && adjustedLine < 0) continue;
 
+                    errors.push({
+                        code: String(d.code ?? ''),
+                        severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                            : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                            : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+                        message: d.message,
+                        line: Math.max(0, adjustedLine),
+                        column: d.range.start.character,
+                    });
+                }
+            } catch (e) {
                 errors.push({
-                    code: String(d.code ?? ''),
-                    severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
-                        : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
-                    message: d.message,
-                    line: Math.max(0, adjustedLine),
-                    column: d.range.start.character,
+                    code: 'VALIDATION_ERROR',
+                    severity: 'error',
+                    message: String(e),
+                    line: 0,
+                    column: 0,
                 });
+            } finally {
+                try {
+                    if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+                    try {
+                        const remaining = fs.readdirSync(tempDir);
+                        if (remaining.length === 0) fs.rmdirSync(tempDir);
+                    } catch { /* ignore */ }
+                } catch { /* ignore */ }
             }
-        } catch (e) {
+        } catch (outerErr) {
             errors.push({
                 code: 'VALIDATION_ERROR',
                 severity: 'error',
-                message: String(e),
+                message: String(outerErr),
                 line: 0,
                 column: 0,
             });
-        } finally {
-            // Clean up temp file
-            try {
-                if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-                // Try to remove the temp directory if empty
-                try {
-                    const remaining = fs.readdirSync(tempDir);
-                    if (remaining.length === 0) fs.rmdirSync(tempDir);
-                } catch { /* ignore */ }
-            } catch { /* ignore */ }
         }
 
         return {

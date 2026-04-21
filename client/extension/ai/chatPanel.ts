@@ -1514,10 +1514,10 @@ body.plan-mode .plan-indicator { display: block; }
 .send-btn.cancel-mode { background: rgba(244,67,54,0.15); color: var(--error); border: 1px solid rgba(244,67,54,0.35); }
 .send-icon { font-weight: 700; }
 .stop-icon { display: inline-block; width: 9px; height: 9px; background: var(--error); border-radius: 2px; }
-.token-usage-bar { height: 2px; background: var(--border); overflow: hidden; margin: 2px 0 3px; }
+.token-usage-bar { height: 2px; background: var(--border); overflow: hidden; margin: 2px 0 1px; border-radius: 1px; }
 .token-usage-fill { height: 100%; background: var(--accent); transition: width 0.4s; border-radius: 1px; }
-.token-usage-label { font-size: 10px; opacity: 0.5; text-align: right; padding: 0 8px 2px; letter-spacing: 0.02em; }
-#tokenUsageBar { padding: 0 4px; background: transparent; }
+.token-usage-label { font-size: 11px; opacity: 0.7; text-align: right; padding: 0 8px 3px; letter-spacing: 0.02em; }
+#tokenUsageBar { padding: 2px 4px 0; background: transparent; border-top: 1px solid var(--border); }
 /* Message timestamp */
 .msg-time { font-size: 10px; opacity: 0.3; margin-left: auto; font-family: monospace; }
 /* Topic date groups */
@@ -1713,12 +1713,13 @@ body.general-mode .mode-indicator { color: #c792ea; }
     </div>
 </div>
 
+<div id="tokenUsageBar" style="display:none">
+    <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
+    <div class="token-usage-label" id="tokenUsageLabel"></div>
+</div>
+
 <div class="input-wrapper" style="position:relative">
     <div id="slashPopup" class="slash-popup"></div>
-    <div id="tokenUsageBar" style="display:none">
-        <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
-        <div class="token-usage-label" id="tokenUsageLabel"></div>
-    </div>
     <div class="input-container">
         <div class="input-row">
             <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1"></textarea>

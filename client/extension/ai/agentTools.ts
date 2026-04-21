@@ -871,13 +871,20 @@ export class AgentToolExecutor {
     }
 
     /** Find symbol definition by name — searches AllEntities AST, no position needed */
-    private async queryDefinitionByName(args: { symbolName: string }): Promise<unknown> {
+    private async queryDefinitionByName(args: { symbolName?: string }): Promise<unknown> {
+        const name = args?.symbolName?.trim();
+        if (!name) {
+            return {
+                ok: false,
+                error: 'symbolName is required. Provide the exact name of the symbol to look up, e.g. query_definition_by_name({ symbolName: "my_scripted_trigger" }).',
+            };
+        }
         try {
             const raw = await this.client.sendRequest('workspace/executeCommand', {
                 command: 'cwtools.ai.queryDefinitionByName',
-                arguments: [args.symbolName ?? ''],
+                arguments: [name],
             }) as any;
-            return raw ?? { ok: false, error: 'No response' };
+            return raw ?? { ok: false, error: 'No response from LSP' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }

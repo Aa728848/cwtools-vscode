@@ -2599,48 +2599,57 @@ type Server(client: ILanguageClient) =
                         // is defined, by searching AllEntities for a top-level key that matches.
                         // Much more practical than position-based GoToType for AI use.
                         | { command = "cwtools.ai.queryDefinitionByName"
-                            arguments = nameArg :: _ } ->
-                            let symbolName = nameArg.AsString().Trim()
+                            arguments = args } ->
+                            // Safely extract symbolName from first arg (handles empty args list)
+                            let symbolName =
+                                args
+                                |> List.tryItem 0
+                                |> Option.bind (function
+                                    | JsonValue.String s when s.Trim() <> "" -> Some (s.Trim())
+                                    | _ -> None)
                             let result =
-                                if symbolName = "" then
-                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "symbolName is required" |]
-                                else
-                                    // Search across all game entities for a top-level key matching symbolName
+                                match symbolName with
+                                | None ->
+                                    JsonValue.Record
+                                        [| "ok",    JsonValue.Boolean false
+                                           "error", JsonValue.String "symbolName is required. Provide the exact name of the symbol to find, e.g. \"my_scripted_trigger\" or \"distar.001\"." |]
+                                | Some name ->
+                                    // Search across all game entities for a top-level key matching name
                                     let tryFindInGame (g: IGame<'T>) =
                                         g.AllEntities()
                                         |> Seq.tryPick (fun struct (e, _) ->
-                                            // Parse the entity's AST to find a matching top-level key
                                             let node = e.entity
                                             node.Children
                                             |> Seq.tryFind (fun child ->
-                                                String.Equals(child.Key, symbolName, StringComparison.OrdinalIgnoreCase))
+                                                String.Equals(child.Key, name, StringComparison.OrdinalIgnoreCase))
                                             |> Option.map (fun child ->
                                                 JsonValue.Record
-                                                    [| "name",   JsonValue.String symbolName
+                                                    [| "name",   JsonValue.String name
                                                        "file",   JsonValue.String (e.filepath.Replace('\\', '/'))
                                                        "line",   JsonValue.Number(decimal (int child.Position.StartLine))
                                                        "col",    JsonValue.Number(decimal (int child.Position.StartColumn))
                                                        "ok",     JsonValue.Boolean true |]))
                                     let found =
-                                        stlGameObj   |> Option.bind tryFindInGame
-                                        |> Option.orElse (hoi4GameObj  |> Option.bind tryFindInGame)
-                                        |> Option.orElse (eu4GameObj   |> Option.bind tryFindInGame)
-                                        |> Option.orElse (ck2GameObj   |> Option.bind tryFindInGame)
-                                        |> Option.orElse (irGameObj    |> Option.bind tryFindInGame)
-                                        |> Option.orElse (vic2GameObj  |> Option.bind tryFindInGame)
-                                        |> Option.orElse (ck3GameObj   |> Option.bind tryFindInGame)
-                                        |> Option.orElse (vic3GameObj  |> Option.bind tryFindInGame)
-                                        |> Option.orElse (eu5GameObj   |> Option.bind tryFindInGame)
-                                        |> Option.orElse (customGameObj|> Option.bind tryFindInGame)
+                                        stlGameObj    |> Option.bind tryFindInGame
+                                        |> Option.orElse (hoi4GameObj   |> Option.bind tryFindInGame)
+                                        |> Option.orElse (eu4GameObj    |> Option.bind tryFindInGame)
+                                        |> Option.orElse (ck2GameObj    |> Option.bind tryFindInGame)
+                                        |> Option.orElse (irGameObj     |> Option.bind tryFindInGame)
+                                        |> Option.orElse (vic2GameObj   |> Option.bind tryFindInGame)
+                                        |> Option.orElse (ck3GameObj    |> Option.bind tryFindInGame)
+                                        |> Option.orElse (vic3GameObj   |> Option.bind tryFindInGame)
+                                        |> Option.orElse (eu5GameObj    |> Option.bind tryFindInGame)
+                                        |> Option.orElse (customGameObj |> Option.bind tryFindInGame)
                                     match found with
                                     | Some json -> json
                                     | None ->
                                         match gameObj with
-                                        | None -> JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                        | None ->
+                                            JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
                                         | Some _ ->
                                             JsonValue.Record
                                                 [| "ok",    JsonValue.Boolean false
-                                                   "error", JsonValue.String $"Symbol '{symbolName}' not found in any loaded entity" |]
+                                                   "error", JsonValue.String $"Symbol '{name}' not found. Try query_scripted_effects or query_scripted_triggers with a filter instead." |]
                             Some result
 
                         // ── cwtools.ai.queryScriptedEffects ───────────────────────────────────────

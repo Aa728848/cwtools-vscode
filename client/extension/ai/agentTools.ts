@@ -892,7 +892,8 @@ export class AgentToolExecutor {
 
     /** All scripted effects with scope constraints */
     private async queryScriptedEffects(args: { filter?: string; limit?: number }): Promise<unknown> {
-        const cacheKey = `sfx:${args.filter ?? ''}:${args.limit ?? 200}`;
+        // Encode args as JSON to avoid ':' collisions in filter values
+        const cacheKey = `sfx:${JSON.stringify([args.filter ?? '', args.limit ?? 200])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
                 const raw = await this.client.sendRequest('workspace/executeCommand', {
@@ -906,7 +907,8 @@ export class AgentToolExecutor {
 
     /** All scripted triggers with scope constraints */
     private async queryScriptedTriggers(args: { filter?: string; limit?: number }): Promise<unknown> {
-        const cacheKey = `stx:${args.filter ?? ''}:${args.limit ?? 200}`;
+        // Encode args as JSON to avoid ':' collisions in filter values
+        const cacheKey = `stx:${JSON.stringify([args.filter ?? '', args.limit ?? 200])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
                 const raw = await this.client.sendRequest('workspace/executeCommand', {
@@ -920,7 +922,8 @@ export class AgentToolExecutor {
 
     /** Enum values from CachedRuleMetadata */
     private async queryEnums(args: { enumName?: string; limit?: number }): Promise<unknown> {
-        const cacheKey = `enm:${args.enumName ?? ''}:${args.limit ?? 500}`;
+        // Encode args as JSON to avoid ':' collisions in enumName values
+        const cacheKey = `enm:${JSON.stringify([args.enumName ?? '', args.limit ?? 500])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
                 const raw = await this.client.sendRequest('workspace/executeCommand', {
@@ -948,7 +951,8 @@ export class AgentToolExecutor {
 
     /** Static modifiers with category info */
     private async queryStaticModifiers(args: { filter?: string; limit?: number }): Promise<unknown> {
-        const cacheKey = `smod:${args.filter ?? ''}:${args.limit ?? 300}`;
+        // Encode args as JSON to avoid ':' collisions in filter values
+        const cacheKey = `smod:${JSON.stringify([args.filter ?? '', args.limit ?? 300])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
                 const raw = await this.client.sendRequest('workspace/executeCommand', {
@@ -1046,7 +1050,8 @@ export class AgentToolExecutor {
                             let match;
                             while ((match = keyPattern.exec(content)) !== null && instances.length < limit) {
                                 const id = match[1];
-                                if (!args.filter || id.startsWith(args.filter)) {
+                                // Use substring match to align with the tool description ("Prefix or substring filter")
+                                if (!args.filter || id.includes(args.filter)) {
                                     instances.push({ id, file: path.relative(this.workspaceRoot, file) });
                                 }
                             }
@@ -1278,6 +1283,13 @@ export class AgentToolExecutor {
                     column: 0,
                 });
             } finally {
+                // Close the temp document to prevent it from accumulating in the LSP buffer.
+                // We use a show+close sequence since VSCode has no direct "closeDocument" API.
+                try {
+                    await vs.window.showTextDocument(vs.Uri.file(tempPath), { preserveFocus: true, preview: true });
+                    await vs.commands.executeCommand('workbench.action.closeActiveEditor');
+                } catch { /* ignore if document was never shown or already closed */ }
+                // Delete temp file from disk
                 try {
                     if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
                     try {
@@ -1370,7 +1382,7 @@ export class AgentToolExecutor {
             hints:    entries.filter(e => e.severity === 'hint').length,
         };
 
-        // Total count across all pairs (for "total in workspace" info)
+        // Total count across all pairs — only matching files, for accurate 'truncated' signal
         let totalDiagCount = 0;
         for (const [uri, diags] of allPairs) {
             if (uri.fsPath.includes('.cwtools-ai-tmp')) continue;
@@ -1378,7 +1390,17 @@ export class AgentToolExecutor {
                 const fileNorm = args.file.replace(/\\/g, '/').toLowerCase();
                 if (!uri.fsPath.replace(/\\/g, '/').toLowerCase().includes(fileNorm)) continue;
             }
-            totalDiagCount += diags.length;
+            // Only count matching severity, mirroring the main loop filter
+            if (severityFilter) {
+                for (const d of diags) {
+                    const sev = d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                        : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
+                    if (sev === severityFilter) totalDiagCount++;
+                }
+            } else {
+                totalDiagCount += diags.length;
+            }
         }
 
         return {
@@ -2155,7 +2177,13 @@ export class AgentToolExecutor {
                     edit.entries().forEach(([u, edits]) => {
                         changes.push({ file: path.relative(this.workspaceRoot, u.fsPath).replace(/\\/g, '/'), edits: edits.length });
                     });
-                    return { changes, message: `Rename preview: ${changes.length} files affected` };
+                    // Apply the rename edit to the workspace (not just a preview)
+                    const applied = await vs.workspace.applyEdit(edit);
+                    if (!applied) return { error: 'Rename apply failed — workspace rejected the edit' };
+                    return {
+                        changes,
+                        message: `Rename applied: ${changes.length} file(s) affected, ${changes.reduce((s, c) => s + c.edits, 0)} edit(s) total`,
+                    };
                 }
                 default:
                     return { error: `Unknown LSP operation: ${args.operation}` };
@@ -2481,9 +2509,22 @@ export class AgentToolExecutor {
         }
 
         // All hunks succeeded — commit writes
+        // Respect fileWriteMode='confirm': if multiple files changed, show a combined diff view
+        // and request confirmation for each file, same as edit_file does.
         const filesChanged: string[] = [];
         for (const { filePath, newContent } of pendingWrites) {
-            this.onBeforeFileWrite?.(filePath, fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null);
+            const prevContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null;
+            this.onBeforeFileWrite?.(filePath, prevContent);
+
+            if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
+                const messageId = `patch_${Date.now()}_${path.basename(filePath)}`;
+                const confirmed = await this.onPendingWrite(filePath, newContent, messageId);
+                if (!confirmed) {
+                    errors.push(`${path.basename(filePath)}: 用户取消了写入操作`);
+                    continue;
+                }
+            }
+
             try {
                 const dir = path.dirname(filePath);
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -2549,7 +2590,16 @@ export class AgentToolExecutor {
             };
         }
 
-        // All edits succeeded — write file
+        // All edits succeeded — write file, respecting fileWriteMode='confirm'
+        const diff = this.buildUnifiedDiff(filePath, originalContent, content);
+        if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
+            const messageId = `multiedit_${Date.now()}`;
+            const confirmed = await this.onPendingWrite(filePath, content, messageId);
+            if (!confirmed) {
+                return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
+            }
+        }
+
         try {
             const dir = path.dirname(filePath);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -2560,7 +2610,7 @@ export class AgentToolExecutor {
         }
 
         const diagnostics = await this.getLspDiagnosticsForFile(filePath);
-        const diff = this.buildUnifiedDiff(filePath, originalContent, content);
+        // diff is already computed above (for confirm mode); reuse it here
         let message = `multiedit: ${args.edits.length} 个编辑已应用到 ${path.basename(filePath)}`;
         const errorDiags = diagnostics.filter(d => d.severity === 'error');
         if (errorDiags.length > 0) {

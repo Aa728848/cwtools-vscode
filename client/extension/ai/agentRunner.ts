@@ -156,7 +156,7 @@ const EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
-    'get_diagnostics', 'query_references',
+    'get_diagnostics',
 ];
 
 /** General mode: all tools EXCEPT todo_write (research without task tracking) */
@@ -292,8 +292,8 @@ export class AgentRunner {
     ): Promise<ChatMessage[]> {
         if (history.length < 4) return history; // too short to compact
 
-        // Estimate total token usage
-        const totalChars = history.reduce((sum, m) => sum + (m.content?.length ?? 0), 0);
+        // Estimate total token usage (use contentToString to handle ContentPart[] correctly)
+        const totalChars = history.reduce((sum, m) => sum + contentToString(m.content).length, 0);
         const estimatedTokens = Math.ceil(totalChars / CHARS_PER_TOKEN);
 
         // Get provider context limit (user override takes precedence)
@@ -387,6 +387,8 @@ export class AgentRunner {
         // Doom loop detection: sliding window of call signatures
         const recentCallSignatures: string[] = [];
         let consecutiveErrorCount = 0;
+        // Flag set to true when we need to exit the outer while loop (e.g. consecutive errors)
+        let forceStop = false;
         // Track files confirmed-written this session — prevents duplicate confirm cards
         // if the AI calls write_file after edit_file for the same file (cross-iteration)
         const confirmedWrittenFiles = new Set<string>();
@@ -605,6 +607,9 @@ export class AgentRunner {
                 }
             }
 
+            // If forceStop was set in the inner loop, exit the outer while now
+            if (forceStop) break;
+
             // Emit results in original order and feed back to AI
             for (let j = 0; j < parsedCalls.length; j++) {
                 const { toolName, toolArgs: _ta, toolCall } = parsedCalls[j];
@@ -619,7 +624,8 @@ export class AgentRunner {
                     consecutiveErrorCount++;
                     if (consecutiveErrorCount >= 5) {
                         emitStep({ type: 'error', content: '工具连续失败 5 次，已强制停止', timestamp: Date.now() });
-                        break;
+                        forceStop = true;
+                        break; // break inner for-loop; forceStop will exit the outer while
                     }
                 } else {
                     consecutiveErrorCount = 0;
@@ -639,6 +645,9 @@ export class AgentRunner {
                     });
                 }
             }
+
+            // If forceStop was set in the emit-results loop, exit outer while now
+            if (forceStop) break;
         }
 
         // Max iterations reached — try to get a final response without tools
@@ -965,7 +974,7 @@ export class AgentRunner {
     private extractCode(text: string): string | null {
         if (!text) return null;
 
-        // Try fenced code blocks (```pdx, ```paradox, ```)
+        // Try fenced code blocks (```pdx, ```paradox, ```stellaris, ```txt)
         const fencePatterns = [
             /```(?:pdx|paradox|stellaris|txt)?\s*\n([\s\S]*?)```/g,
             /```\s*\n([\s\S]*?)```/g,
@@ -980,23 +989,28 @@ export class AgentRunner {
             if (matches.length > 0) {
                 // Return the largest code block
                 return matches
-                    .map(m => m[1].trim())
+                    .map(match => match[1].trim())
                     .sort((a, b) => b.length - a.length)[0] || null;
             }
         }
 
-        // If the entire response looks like code (no markdown), return it
+        // Fallback: heuristic check — the entire response looks like raw PDXScript.
+        // Uses strict PDXScript-specific patterns to avoid false positives from
+        // Markdown tables or explanatory text that contain '='.
         const lines = text.split('\n');
-        const codeLines = lines.filter(l => {
-            const trimmed = l.trim();
-            return trimmed.length > 0 &&
-                !trimmed.startsWith('#') &&
-                (trimmed.includes('=') || trimmed === '{' || trimmed === '}' ||
-                 trimmed.startsWith('if') || trimmed.startsWith('else') ||
-                 /^\w/.test(trimmed));
-        });
+        const nonEmpty = lines.filter(l => l.trim().length > 0);
+        if (nonEmpty.length === 0) return null;
 
-        if (codeLines.length > lines.length * 0.6) {
+        // A line is considered PDXScript code if it matches one of these patterns:
+        // - Block open/close: { or }
+        // - Key = value assignment: word_chars = <anything>  (requires word boundary on LHS)
+        // - Known PDXScript keywords at line start
+        const pdxLineRe = /^\s*(?:\{\s*$|\}\s*$|[\w.]+\s*=[^=]|if\s*=|else\s*=|limit\s*=|trigger\s*=|effect\s*=|AND\s*=|OR\s*=|NOT\s*=)/;
+        const codeLines = nonEmpty.filter(l => pdxLineRe.test(l));
+
+        // Require at least 75% of non-empty lines to look like PDXScript before treating
+        // the whole response as bare code (was 60%, raised to reduce false positives).
+        if (codeLines.length >= nonEmpty.length * 0.75 && nonEmpty.length >= 3) {
             return text.trim();
         }
 

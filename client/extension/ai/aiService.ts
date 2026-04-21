@@ -378,19 +378,8 @@ export class AIService {
             return { 'Authorization': `Bearer ${header}.${payload}.${sig}` };
         }
 
-        // MiniMax Token Plan uses Anthropic-style x-api-key header (routed via callClaude)
-        // GLM (Zhipu AI): generate JWT from "{id}.{secret}" key
-        if (providerId === 'glm' && apiKey.includes('.')) {
-            const dot = apiKey.indexOf('.');
-            const id = apiKey.slice(0, dot);
-            const secret = apiKey.slice(dot + 1);
-            const now = Date.now();
-            const header = Buffer.from(JSON.stringify({ alg: 'HS256', sign_type: 'SIGN' })).toString('base64url');
-            const payload = Buffer.from(JSON.stringify({ api_key: id, exp: now + 3_600_000, timestamp: now })).toString('base64url');
-            const sig = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
-            return { 'Authorization': `Bearer ${header}.${payload}.${sig}` };
-        }
-
+        // MiniMax Token Plan uses Anthropic Messages API (callClaude path) with x-api-key header,
+        // so it does NOT go through this method. All other providers use standard Bearer token.
         return { 'Authorization': `Bearer ${apiKey}` };
     }
 

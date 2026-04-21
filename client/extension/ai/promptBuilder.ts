@@ -47,6 +47,22 @@ Use LSP tools to query it — **do NOT read vanilla game files directly**.
 | Find what uses a vanilla ID | \`query_references("tech_lasers_1")\` | All references |
 
 **Rules**: always use the \`filter\` parameter with \`query_types\`; never call \`read_file\` on vanilla files.
+
+## Deep API Tools — Anti-Hallucination Arsenal
+These tools bypass file-system text search and query the CWTools AST directly.
+
+| Goal | Tool | When to use |
+|------|------|-------------|
+| Verify a scripted_effect exists | \`query_scripted_effects(filter)\` | **BEFORE every scripted_effect call** |
+| Verify a scripted_trigger exists | \`query_scripted_triggers(filter)\` | **BEFORE every scripted_trigger usage** |
+| Look up valid enum values | \`query_enums("enum_name")\` | Whenever you need values for an enum field |
+| Find where a symbol is defined | \`query_definition_by_name("my_trigger")\` | **Replaces grep** for locating definitions |
+| Find referenced types in a file | \`get_entity_info(file)\` | Understanding what a file depends on |
+| List static modifier tags | \`query_static_modifiers(filter)\` | Verifying \`add_modifier = { modifier = X }\` |
+| Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
+
+**Priority rule**: Use deep API tools **instead of** \`search_mod_files\` for symbol lookups.
+Deep API tools query the AST — they are 10-100x faster and report scope constraints.
 `;
 
 // ─── Build Mode System Prompt ─────────────────────────────────────────────────
@@ -198,6 +214,21 @@ Example:
 - **CONCISE**: No preamble, no "I will now…" sentences.
 - **NO GUESSING**: Use \`query_types\` only when you genuinely don't know if an ID exists.
 - **MAX 3 RETRIES**: If validation still fails after 3 attempts, present the best version with notes.
+
+## Anti-Hallucination: Mandatory Pre-Use Checks
+
+Before using any of the following constructs **for the first time** in a task, you MUST call the corresponding tool:
+
+| Construct | Mandatory pre-check |
+|-----------|---------------------|
+| Any \`scripted_effect = my_effect { }\` call | \`query_scripted_effects("my_effect")\` — verify exists + check scope |
+| Any scripted_trigger usage | \`query_scripted_triggers("my_trigger")\` — verify exists + check scope |
+| Any enum field value | \`query_enums("enum_name")\` — get valid values list |
+| Any \`add_modifier = { modifier = X }\` | \`query_static_modifiers("X")\` — verify tag exists |
+| Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |
+| Finding where a symbol is defined | \`query_definition_by_name("symbol")\` — instant AST lookup |
+
+**Skip ONLY when**: you defined the symbol yourself in the current task session.
 ${STELLARIS_KNOWLEDGE}`;
 
 // ─── Plan Mode System Prompt ──────────────────────────────────────────────────
@@ -246,7 +277,9 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 </system-reminder>
 
 ## Explore Mode Guidelines
-- Use read-only tools: \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
+- **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
+- **AST-level tools** (read-only, faster): \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\`, \`get_entity_info\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`
+- Prefer AST-level tools over file-system search — they are indexed and scope-aware
 - Make multiple parallel reads to efficiently understand the codebase
 - Provide clear, structured explanations of what you find
 - Use \`query_scope\` and \`query_rules\` to explain how code works

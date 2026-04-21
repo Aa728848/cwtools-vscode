@@ -397,7 +397,16 @@ export type AgentToolName =
     | 'run_command'
     | 'apply_patch'
     | 'multiedit'
-    | 'task';
+    | 'task'
+    // ── CWTools Deep API tools ──
+    | 'query_definition'
+    | 'query_definition_by_name'
+    | 'query_scripted_effects'
+    | 'query_scripted_triggers'
+    | 'query_enums'
+    | 'get_entity_info'
+    | 'query_static_modifiers'
+    | 'query_variables';
 
 // ─── File Tool Types ─────────────────────────────────────────────────────────
 

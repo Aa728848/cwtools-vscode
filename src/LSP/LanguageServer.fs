@@ -10,6 +10,11 @@ open Types
 open LSP.Json.Ser
 open JsonExtensions
 
+/// Shared reader-writer lock that coordinates concurrent read-only LSP requests
+/// against mutating write operations (file updates, cache refreshes).
+/// Exposed so Program.fs can acquire the write side during game-state mutations.
+let gameStateLock = new ReaderWriterLockSlim()
+
 let private jsonWriteOptions =
     { defaultJsonWriteOptions with
         customWriters =
@@ -240,57 +245,70 @@ type RealClient(send: BinaryWriter) =
 
 type private PendingTask =
     | ProcessNotification of method: string * task: Async<unit>
-    | ProcessRequest of id: int * task: Async<string option> * cancel: CancellationTokenSource
+    /// isReadOnly = true  → can execute concurrently on the thread pool (read lock)
+    /// isReadOnly = false → must execute serially, blocking the loop (write lock)
+    | ProcessRequest of id: int * task: Async<string option> * cancel: CancellationTokenSource * isReadOnly: bool
     | Quit
 
 let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryReader, send: BinaryWriter) =
     let server = serverFactory (RealClient(send))
 
-    let processRequest (request: Request) : Async<string option> =
+    /// Returns (serialisedResponseTask, isReadOnly).
+    /// isReadOnly = true  → safe to run concurrently with other reads, holding gameStateLock in read mode.
+    /// isReadOnly = false → must run exclusively, holding gameStateLock in write mode.
+    let processRequest (request: Request) : Async<string option> * bool =
         match request with
-        | Initialize(p) -> server.Initialize(p) |> thenMap serializeInitializeResult |> thenSome
-        | Shutdown -> server.Shutdown() |> thenMap serializeShutdownResponse |> thenSome
+        | Initialize(p)         -> server.Initialize(p) |> thenMap serializeInitializeResult |> thenSome, false
+        | Shutdown              -> server.Shutdown()     |> thenMap serializeShutdownResponse |> thenSome, false
         | WillSaveWaitUntilTextDocument(p) ->
-            server.WillSaveWaitUntilTextDocument(p)
-            |> thenMap serializeTextEditList
-            |> thenSome
-        | Completion(p) -> server.Completion(p) |> thenMap serializeCompletionListOption
-        | Hover(p) ->
-            server.Hover(p)
-            |> thenMap serializeHoverOption
-            |> thenMap (Option.defaultValue "null")
-            |> thenSome
-        | ResolveCompletionItem(p) -> server.ResolveCompletionItem(p) |> thenMap serializeCompletionItem |> thenSome
-        | SignatureHelp(p) ->
-            server.SignatureHelp(p)
-            |> thenMap serializeSignatureHelpOption
-            |> thenMap (Option.defaultValue "null")
-            |> thenSome
-        | GotoDefinition(p) -> server.GotoDefinition(p) |> thenMap serializeLocationList |> thenSome
-        | FindReferences(p) -> server.FindReferences(p) |> thenMap serializeLocationList |> thenSome
-        | DocumentHighlight(p) ->
-            server.DocumentHighlight(p)
-            |> thenMap serializeDocumentHighlightList
-            |> thenSome
-        | DocumentSymbols(p) -> server.DocumentSymbols(p) |> thenMap serializeDocumentSymbolList |> thenSome
-        | WorkspaceSymbols(p) -> server.WorkspaceSymbols(p) |> thenMap serializeSymbolInformationList |> thenSome
-        | CodeActions(p) -> server.CodeActions(p) |> thenMap serializeCommandList |> thenSome
-        | CodeLens(p) -> server.CodeLens(p) |> thenMap serializeCodeLensList |> thenSome
-        | ResolveCodeLens(p) -> server.ResolveCodeLens(p) |> thenMap serializeCodeLens |> thenSome
-        | InlayHint(p) -> server.InlayHint(p) |> thenMap serializeInlayHintList |> thenSome
-        | DocumentLink(p) -> server.DocumentLink(p) |> thenMap serializeDocumentLinkList |> thenSome
-        | ResolveDocumentLink(p) -> server.ResolveDocumentLink(p) |> thenMap serializeDocumentLink |> thenSome
-        | DocumentFormatting(p) -> server.DocumentFormatting(p) |> thenMap serializeTextEditList |> thenSome
-        | DocumentRangeFormatting(p) -> server.DocumentRangeFormatting(p) |> thenMap serializeTextEditList |> thenSome
-        | DocumentOnTypeFormatting(p) -> server.DocumentOnTypeFormatting(p) |> thenMap serializeTextEditList |> thenSome
-        | Rename(p) -> server.Rename(p) |> thenMap serializeWorkspaceEdit |> thenSome
-        | ExecuteCommand(p) -> server.ExecuteCommand p |> thenMap serializeExecuteCommandResponseOption
-        | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenNone
-        | SemanticTokensFull(p) ->
-            server.SemanticTokensFull(p)
-            |> thenMap serializeSemanticTokensOption
-            |> thenMap (Option.defaultValue "null")
-            |> thenSome
+            server.WillSaveWaitUntilTextDocument(p) |> thenMap serializeTextEditList |> thenSome, false
+        // ── Read-only requests (concurrent execution) ─────────────────────────────
+        | Completion(p)         -> server.Completion(p)          |> thenMap serializeCompletionListOption,               true
+        | Hover(p)              -> server.Hover(p)               |> thenMap serializeHoverOption |> thenMap (Option.defaultValue "null") |> thenSome, true
+        | ResolveCompletionItem(p) -> server.ResolveCompletionItem(p) |> thenMap serializeCompletionItem |> thenSome,    true
+        | SignatureHelp(p)      -> server.SignatureHelp(p)        |> thenMap serializeSignatureHelpOption |> thenMap (Option.defaultValue "null") |> thenSome, true
+        | GotoDefinition(p)     -> server.GotoDefinition(p)      |> thenMap serializeLocationList |> thenSome,           true
+        | FindReferences(p)     -> server.FindReferences(p)      |> thenMap serializeLocationList |> thenSome,           true
+        | DocumentHighlight(p)  -> server.DocumentHighlight(p)   |> thenMap serializeDocumentHighlightList |> thenSome,  true
+        | DocumentSymbols(p)    -> server.DocumentSymbols(p)     |> thenMap serializeDocumentSymbolList |> thenSome,     true
+        | WorkspaceSymbols(p)   -> server.WorkspaceSymbols(p)    |> thenMap serializeSymbolInformationList |> thenSome,  true
+        | CodeLens(p)           -> server.CodeLens(p)            |> thenMap serializeCodeLensList |> thenSome,           true
+        | ResolveCodeLens(p)    -> server.ResolveCodeLens(p)     |> thenMap serializeCodeLens |> thenSome,               true
+        | InlayHint(p)          -> server.InlayHint(p)           |> thenMap serializeInlayHintList |> thenSome,          true
+        | DocumentLink(p)       -> server.DocumentLink(p)        |> thenMap serializeDocumentLinkList |> thenSome,       true
+        | ResolveDocumentLink(p)-> server.ResolveDocumentLink(p) |> thenMap serializeDocumentLink |> thenSome,           true
+        | SemanticTokensFull(p) -> server.SemanticTokensFull(p)  |> thenMap serializeSemanticTokensOption |> thenMap (Option.defaultValue "null") |> thenSome, true
+        // CodeActions reads game state but result doesn't mutate; treat as read-only
+        | CodeActions(p)        -> server.CodeActions(p)         |> thenMap serializeCommandList |> thenSome,            true
+        // ExecuteCommand: split into read-only (query/info) and write (validateCode, etc.)
+        | ExecuteCommand(p) ->
+            let isReadCmd =
+                match p.command with
+                | "cwtools.ai.getScopeAtPosition"
+                | "cwtools.ai.queryTypes"
+                | "cwtools.ai.queryDefinition"
+                | "cwtools.ai.queryDefinitionByName"
+                | "cwtools.ai.queryScriptedEffects"
+                | "cwtools.ai.queryScriptedTriggers"
+                | "cwtools.ai.queryEnums"
+                | "cwtools.ai.getEntityInfo"
+                | "cwtools.ai.queryStaticModifiers"
+                | "cwtools.ai.queryVariables"
+                | "cwtools.exportTypes"
+                | "typeGraphInfo"
+                | "getFileTypes"
+                | "getDataForFile"
+                | "getTypesForFile"  -> true
+                | _                  -> false
+            server.ExecuteCommand p |> thenMap serializeExecuteCommandResponseOption, isReadCmd
+
+
+        // ── Write / formatting ────────────────────────────────────────────────────
+        | DocumentFormatting(p)     -> server.DocumentFormatting(p)     |> thenMap serializeTextEditList |> thenSome, false
+        | DocumentRangeFormatting(p)-> server.DocumentRangeFormatting(p)|> thenMap serializeTextEditList |> thenSome, false
+        | DocumentOnTypeFormatting(p)->server.DocumentOnTypeFormatting(p)|> thenMap serializeTextEditList |> thenSome, false
+        | Rename(p)                 -> server.Rename(p)                 |> thenMap serializeWorkspaceEdit |> thenSome, false
+        | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenNone,                             false
 
     let processNotification (n: Notification) =
         match n with
@@ -333,9 +351,9 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                     let task = processNotification n
                     processQueue.Add(ProcessNotification(method, task))
                 | Parser.RequestMessage(id, method, json) ->
-                    let task = processRequest (Parser.parseRequest (method, json))
+                    let task, isReadOnly = processRequest (Parser.parseRequest (method, json))
                     let cancel = new CancellationTokenSource()
-                    processQueue.Add(ProcessRequest(id, task, cancel))
+                    processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly))
                     pendingRequests[id] <- cancel
                 | Parser.ResponseMessage(id, result) -> responseAgent.Post(Response(id, result))
 
@@ -348,22 +366,55 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     // Process messages on main thread
     let mutable quit = false
 
+    // Helper: run a read-only task concurrently on the .NET thread pool,
+    // acquiring a shared read lock so concurrent writes are properly blocked.
+    let startReadOnlyRequest (id: int) (task: Async<string option>) (cancel: CancellationTokenSource) =
+        Async.Start(
+            async {
+                gameStateLock.EnterReadLock()
+                try
+                    if not cancel.IsCancellationRequested then
+                        try
+                            match! task with
+                            | Some result -> respond (send, id, result)
+                            | None        -> respond (send, id, "null")
+                        with :? OperationCanceledException -> ()
+                finally
+                    gameStateLock.ExitReadLock()
+                    pendingRequests.TryRemove(id) |> ignore
+            },
+            cancel.Token
+        )
+
+    // Helper: run a write-class task serially, acquiring an exclusive write lock.
+    // Any in-flight read-only requests will finish before the lock is granted.
+    let runWriteRequest (id: int) (task: Async<string option>) (cancel: CancellationTokenSource) =
+        if not cancel.IsCancellationRequested then
+            gameStateLock.EnterWriteLock()
+            try
+                try
+                    match Async.RunSynchronously(task, 0, cancel.Token) with
+                    | Some result -> respond (send, id, result)
+                    | None        -> respond (send, id, "null")
+                with :? OperationCanceledException -> ()
+            finally
+                gameStateLock.ExitWriteLock()
+        pendingRequests.TryRemove(id) |> ignore
+
     while not quit do
         match processQueue.Take() with
         | Quit -> quit <- true
-        | ProcessNotification(_, task) -> Async.RunSynchronously(task)
-        | ProcessRequest(id, task, cancel) ->
-            if cancel.IsCancellationRequested then
-                ()
-            //dprintfn "Skipping cancelled request %d" id
-            else
-                try
-                    match Async.RunSynchronously(task, 0, cancel.Token) with
-                    | Some(result) -> respond (send, id, result)
-                    | None -> respond (send, id, "null")
-                with :? OperationCanceledException ->
-                    ()
-            //dprintfn "Request %d was cancelled" id
-            pendingRequests.TryRemove(id) |> ignore
+        // Notifications (DidChange, Initialized, etc.) modify state — always serial.
+        // We acquire the write lock so any in-flight read tasks finish first.
+        | ProcessNotification(_, task) ->
+            gameStateLock.EnterWriteLock()
+            try
+                Async.RunSynchronously(task)
+            finally
+                gameStateLock.ExitWriteLock()
+        | ProcessRequest(id, task, cancel, true  (* isReadOnly *)) ->
+            startReadOnlyRequest id task cancel
+        | ProcessRequest(id, task, cancel, false (* isWrite    *)) ->
+            runWriteRequest id task cancel
 
     Environment.Exit(1)

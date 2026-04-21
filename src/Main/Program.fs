@@ -23,6 +23,7 @@ open Main.Lang.GameLoader
 open Main.Lang.LanguageServerFeatures
 open Main.Completion
 open CWTools.Utilities.Utils
+open LSP.LanguageServer   // brings gameStateLock into scope
 
 let private TODO () = raise (Exception "TODO")
 
@@ -260,12 +261,16 @@ type Server(client: ILanguageClient) =
                     parserErrors @ locErrors
                 else
                     // 普通文件需要进行完整的语法验证
+                    // UpdateFile 会修改 game 内部的 AST/errorCache，必须持写锁
                     parserErrors
                     @ locErrors
                     @ match gameObj with
                       | None -> []
                       | Some game ->
-                          let results = game.UpdateFile shallowAnalyze name filetext
+                          gameStateLock.EnterWriteLock()
+                          let results =
+                              try game.UpdateFile shallowAnalyze name filetext
+                              finally gameStateLock.ExitWriteLock()
                           // logDiag (sprintf "lint uf %A" results)
                           results
                           |> List.map (fun e ->
@@ -282,23 +287,28 @@ type Server(client: ILanguageClient) =
         match gameObj with
         | Some game ->
             let timestamp = Stopwatch.GetTimestamp()
-            game.RefreshCaches()
+            // RefreshCaches rewrites infoService/ruleValidationService/completionService — exclusive write lock
+            gameStateLock.EnterWriteLock()
+            try
+                game.RefreshCaches()
 
-            if delayedLocUpdate then
-                logDiag "delayedLocUpdate true"
-                game.RefreshLocalisationCaches()
-                delayedLocUpdate <- false
+                if delayedLocUpdate then
+                    logDiag "delayedLocUpdate true"
+                    game.RefreshLocalisationCaches()
+                    delayedLocUpdate <- false
 
-                // 使用 Dictionary: 清空后重新填充
-                locCache.Clear()
-                for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
-                    locCache.[fileName] <- errors
-            else
-                logDiag "delayedLocUpdate false"
+                    // 使用 Dictionary: 清空后重新填充
+                    locCache.Clear()
+                    for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
+                        locCache.[fileName] <- errors
+                else
+                    logDiag "delayedLocUpdate false"
 
-                locCache.Clear()
-                for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
-                    locCache.[fileName] <- errors
+                    locCache.Clear()
+                    for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
+                        locCache.[fileName] <- errors
+            finally
+                gameStateLock.ExitWriteLock()
 
             let time = Stopwatch.GetElapsedTime(timestamp)
 
@@ -2402,73 +2412,79 @@ type Server(client: ILanguageClient) =
                         | { command = "cwtools.ai.validateCode"
                             arguments = codeArg :: targetFileArg :: _ } ->
                             // In-memory code validation — no temp files, no 3s wait
+                            // Uses WRITE LOCK because UpdateFile mutates internal AST+error caches
                             let code       = codeArg.AsString()
                             let targetFile = targetFileArg.AsString()
                             let errorsJson =
                                 match gameObj with
                                 | Some g ->
-                                    // Save original content so we can restore after temp validation
-                                    let originalContent =
-                                        match docs.GetText(FileInfo(targetFile)) with
-                                        | Some t -> Some t
-                                        | None -> try Some(File.ReadAllText targetFile) with _ -> None
+                                    gameStateLock.EnterWriteLock()
+                                    try
+                                        // Save original content so we can restore after temp validation
+                                        let originalContent =
+                                            match docs.GetText(FileInfo(targetFile)) with
+                                            | Some t -> Some t
+                                            | None   -> try Some(File.ReadAllText targetFile) with _ -> None
 
-                                    // Build validation content: append AI code to existing file
-                                    // so CWTools applies the same context rules
-                                    let validationContent =
+                                        // Build validation content: append AI code to existing file
+                                        let validationContent =
+                                            match originalContent with
+                                            | Some orig -> orig + "\n\n" + code
+                                            | None      -> code
+                                        let originalLineCount =
+                                            match originalContent with
+                                            | Some orig -> orig.Split('\n').Length + 2 // +2 for blank line
+                                            | None      -> 0
+
+                                        // Run validation via UpdateFile with shallow=true
+                                        let rawErrors =
+                                            try  g.UpdateFile true targetFile (Some validationContent)
+                                            with _ -> []
+
+                                        // Restore original content in game state
                                         match originalContent with
-                                        | Some orig -> orig + "\n\n" + code
-                                        | None -> code
-                                    let originalLineCount =
-                                        match originalContent with
-                                        | Some orig -> orig.Split('\n').Length + 2  // +2 for blank line
-                                        | None -> 0
+                                        | Some orig ->
+                                            try g.UpdateFile true targetFile (Some orig) |> ignore
+                                            with _ -> ()
+                                        | None -> ()
 
-                                    // Run validation via UpdateFile with shallow=true
-                                    let rawErrors =
-                                        try
-                                            g.UpdateFile true targetFile (Some validationContent)
-                                        with _ -> []
+                                        // Filter and adjust line numbers
+                                        let adjustedErrors =
+                                            rawErrors
+                                            |> List.choose (fun e ->
+                                                let adjustedLine = int e.range.StartLine - 1 - originalLineCount
+                                                if adjustedLine < 0 then None
+                                                else
+                                                    let sevStr =
+                                                        match e.severity with
+                                                        | Severity.Error       -> "error"
+                                                        | Severity.Warning     -> "warning"
+                                                        | Severity.Information -> "info"
+                                                        | _                    -> "hint"
+                                                    Some (JsonValue.Record
+                                                        [| "code",     JsonValue.String e.code
+                                                           "severity", JsonValue.String sevStr
+                                                           "message",  JsonValue.String e.message
+                                                           "line",     JsonValue.Number(decimal adjustedLine)
+                                                           "column",   JsonValue.Number(decimal (int e.range.StartColumn)) |]))
 
-                                    // Restore original content in game state
-                                    match originalContent with
-                                    | Some orig ->
-                                        try g.UpdateFile true targetFile (Some orig) |> ignore
-                                        with _ -> ()
-                                    | None -> ()
+                                        let hasErrors =
+                                            adjustedErrors |> List.exists (fun e ->
+                                                match e.["severity"] with JsonValue.String "error" -> true | _ -> false)
 
-                                    // Filter and adjust line numbers
-                                    let adjustedErrors =
-                                        rawErrors
-                                        |> List.choose (fun e ->
-                                            let adjustedLine = int e.range.StartLine - 1 - originalLineCount
-                                            if adjustedLine < 0 then None
-                                            else
-                                                let sevStr =
-                                                    match e.severity with
-                                                    | Severity.Error -> "error"
-                                                    | Severity.Warning -> "warning"
-                                                    | Severity.Information -> "info"
-                                                    | _ -> "hint"
-                                                Some (JsonValue.Record
-                                                    [| "code",     JsonValue.String e.code
-                                                       "severity", JsonValue.String sevStr
-                                                       "message",  JsonValue.String e.message
-                                                       "line",     JsonValue.Number(decimal adjustedLine)
-                                                       "column",   JsonValue.Number(decimal (int e.range.StartColumn)) |]))
-
-                                    let hasErrors = adjustedErrors |> List.exists (fun e ->
-                                        match e.["severity"] with JsonValue.String "error" -> true | _ -> false)
-
-                                    JsonValue.Record
-                                        [| "isValid",  JsonValue.Boolean(not hasErrors)
-                                           "errors",   JsonValue.Array(adjustedErrors |> Array.ofList)
-                                           "ok",       JsonValue.Boolean true |]
+                                        JsonValue.Record
+                                            [| "isValid", JsonValue.Boolean(not hasErrors)
+                                               "errors",  JsonValue.Array(adjustedErrors |> Array.ofList)
+                                               "ok",      JsonValue.Boolean true |]
+                                    finally
+                                        gameStateLock.ExitWriteLock()
                                 | None ->
                                     JsonValue.Record
-                                        [| "ok", JsonValue.Boolean false
+                                        [| "ok",    JsonValue.Boolean false
                                            "error", JsonValue.String "LSP server not ready" |]
                             Some errorsJson
+
+
 
                         | { command = "cwtools.ai.queryTypes"
                             arguments = typeNameArg :: rest } ->
@@ -2524,7 +2540,421 @@ type Server(client: ILanguageClient) =
                                            "error", JsonValue.String "LSP server not ready" |]
                             Some resultJson
 
+
+                        // ── cwtools.ai.queryDefinition ────────────────────────────────────────────
+                        // GoToType + FindAllRefs directly from the AST (replaces file-system grep)
+                        | { command = "cwtools.ai.queryDefinition"
+                            arguments = uriArg :: lineArg :: colArg :: _ } ->
+                            let filePath =
+                                let raw = uriArg.AsString()
+                                getPathFromDoc (Uri(raw))
+                            let line = lineArg.AsInteger()
+                            let col  = colArg.AsInteger()
+                            let position = PosHelper.fromZ line col
+                            let fileContent =
+                                match docs.GetText(FileInfo(filePath)) with
+                                | Some t -> t
+                                | None   -> try File.ReadAllText filePath with _ -> ""
+                            let result =
+                                match gameObj with
+                                | Some g ->
+                                    // Try jump-to-definition first
+                                    match g.GoToType position filePath fileContent with
+                                    | Some rng ->
+                                        JsonValue.Record
+                                            [| "kind", JsonValue.String "definition"
+                                               "file", JsonValue.String (rng.FileName.Replace('\\', '/'))
+                                               "line", JsonValue.Number(decimal (int rng.StartLine))
+                                               "col",  JsonValue.Number(decimal (int rng.StartColumn))
+                                               "ok",   JsonValue.Boolean true |]
+                                    | None ->
+                                        // Fall back to find-all-refs
+                                        match g.FindAllRefs position filePath fileContent with
+                                        | Some refs ->
+                                            let refsArr =
+                                                refs
+                                                |> List.map (fun r ->
+                                                    JsonValue.Record
+                                                        [| "file", JsonValue.String (r.FileName.Replace('\\', '/'))
+                                                           "line", JsonValue.Number(decimal (int r.StartLine))
+                                                           "col",  JsonValue.Number(decimal (int r.StartColumn)) |])
+                                                |> Array.ofList
+                                            JsonValue.Record
+                                                [| "kind",  JsonValue.String "references"
+                                                   "refs",  JsonValue.Array refsArr
+                                                   "count", JsonValue.Number(decimal refsArr.Length)
+                                                   "ok",    JsonValue.Boolean true |]
+                                        | None ->
+                                            JsonValue.Record
+                                                [| "kind", JsonValue.String "none"
+                                                   "ok",   JsonValue.Boolean false |]
+                                | None ->
+                                    JsonValue.Record
+                                        [| "ok", JsonValue.Boolean false
+                                           "error", JsonValue.String "LSP server not ready" |]
+                            Some result
+
+                        // ── cwtools.ai.queryDefinitionByName ──────────────────────────────────────
+                        // Find where a named symbol (scripted_trigger, scripted_effect, event, type)
+                        // is defined, by searching AllEntities for a top-level key that matches.
+                        // Much more practical than position-based GoToType for AI use.
+                        | { command = "cwtools.ai.queryDefinitionByName"
+                            arguments = nameArg :: _ } ->
+                            let symbolName = nameArg.AsString().Trim()
+                            let result =
+                                if symbolName = "" then
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "symbolName is required" |]
+                                else
+                                    // Search across all game entities for a top-level key matching symbolName
+                                    let tryFindInGame (g: IGame<'T>) =
+                                        g.AllEntities()
+                                        |> Seq.tryPick (fun struct (e, _) ->
+                                            // Parse the entity's AST to find a matching top-level key
+                                            let node = e.entity
+                                            node.Children
+                                            |> Seq.tryFind (fun child ->
+                                                String.Equals(child.Key, symbolName, StringComparison.OrdinalIgnoreCase))
+                                            |> Option.map (fun child ->
+                                                JsonValue.Record
+                                                    [| "name",   JsonValue.String symbolName
+                                                       "file",   JsonValue.String (e.filepath.Replace('\\', '/'))
+                                                       "line",   JsonValue.Number(decimal (int child.Position.StartLine))
+                                                       "col",    JsonValue.Number(decimal (int child.Position.StartColumn))
+                                                       "ok",     JsonValue.Boolean true |]))
+                                    let found =
+                                        stlGameObj   |> Option.bind tryFindInGame
+                                        |> Option.orElse (hoi4GameObj  |> Option.bind tryFindInGame)
+                                        |> Option.orElse (eu4GameObj   |> Option.bind tryFindInGame)
+                                        |> Option.orElse (ck2GameObj   |> Option.bind tryFindInGame)
+                                        |> Option.orElse (irGameObj    |> Option.bind tryFindInGame)
+                                        |> Option.orElse (vic2GameObj  |> Option.bind tryFindInGame)
+                                        |> Option.orElse (ck3GameObj   |> Option.bind tryFindInGame)
+                                        |> Option.orElse (vic3GameObj  |> Option.bind tryFindInGame)
+                                        |> Option.orElse (eu5GameObj   |> Option.bind tryFindInGame)
+                                        |> Option.orElse (customGameObj|> Option.bind tryFindInGame)
+                                    match found with
+                                    | Some json -> json
+                                    | None ->
+                                        match gameObj with
+                                        | None -> JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                        | Some _ ->
+                                            JsonValue.Record
+                                                [| "ok",    JsonValue.Boolean false
+                                                   "error", JsonValue.String $"Symbol '{symbolName}' not found in any loaded entity" |]
+                            Some result
+
+                        // ── cwtools.ai.queryScriptedEffects ───────────────────────────────────────
+                        // Returns all scripted effects with name, scope constraints and type
+                        | { command = "cwtools.ai.queryScriptedEffects"
+                            arguments = rest } ->
+                            let filterStr =
+                                rest |> List.tryItem 0
+                                |> Option.bind (function JsonValue.String s when s <> "" -> Some s | _ -> None)
+                            let limitVal =
+                                rest |> List.tryItem 1
+                                |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
+                                |> Option.defaultValue 200
+                            let result =
+                                match gameObj with
+                                | Some g ->
+                                    let effects = g.ScriptedEffects()
+                                    let filtered =
+                                        effects
+                                        |> List.filter (fun e ->
+                                            let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
+                                            match filterStr with
+                                            | None   -> true
+                                            | Some f -> name.Contains(f, StringComparison.OrdinalIgnoreCase))
+                                        |> List.truncate limitVal
+                                    let arr =
+                                        filtered
+                                        |> List.map (fun e ->
+                                            let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
+                                            let scopes = e.Scopes |> List.map (fun s -> JsonValue.String(s.ToString())) |> Array.ofList
+                                            let typ = e.Type.ToString()
+                                            JsonValue.Record
+                                                [| "name",   JsonValue.String name
+                                                   "scopes", JsonValue.Array scopes
+                                                   "type",   JsonValue.String typ |])
+                                        |> Array.ofList
+                                    JsonValue.Record
+                                        [| "effects",    JsonValue.Array arr
+                                           "totalCount", JsonValue.Number(decimal (List.length effects))
+                                           "ok",         JsonValue.Boolean true |]
+                                | None ->
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                            Some result
+
+                        // ── cwtools.ai.queryScriptedTriggers ─────────────────────────────────────
+                        // Returns all scripted triggers with name, scope constraints and type
+                        | { command = "cwtools.ai.queryScriptedTriggers"
+                            arguments = rest } ->
+                            let filterStr =
+                                rest |> List.tryItem 0
+                                |> Option.bind (function JsonValue.String s when s <> "" -> Some s | _ -> None)
+                            let limitVal =
+                                rest |> List.tryItem 1
+                                |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
+                                |> Option.defaultValue 200
+                            let result =
+                                match gameObj with
+                                | Some g ->
+                                    let triggers = g.ScriptedTriggers()
+                                    let filtered =
+                                        triggers
+                                        |> List.filter (fun e ->
+                                            let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
+                                            match filterStr with
+                                            | None   -> true
+                                            | Some f -> name.Contains(f, StringComparison.OrdinalIgnoreCase))
+                                        |> List.truncate limitVal
+                                    let arr =
+                                        filtered
+                                        |> List.map (fun e ->
+                                            let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
+                                            let scopes = e.Scopes |> List.map (fun s -> JsonValue.String(s.ToString())) |> Array.ofList
+                                            let typ = e.Type.ToString()
+                                            JsonValue.Record
+                                                [| "name",   JsonValue.String name
+                                                   "scopes", JsonValue.Array scopes
+                                                   "type",   JsonValue.String typ |])
+                                        |> Array.ofList
+                                    JsonValue.Record
+                                        [| "triggers",   JsonValue.Array arr
+                                           "totalCount", JsonValue.Number(decimal (List.length triggers))
+                                           "ok",         JsonValue.Boolean true |]
+                                | None ->
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                            Some result
+
+                        // ── cwtools.ai.queryEnums ─────────────────────────────────────────────────
+                        // Returns enum values from CachedRuleMetadata (available on IGame interface)
+                        | { command = "cwtools.ai.queryEnums"
+                            arguments = enumNameArg :: rest } ->
+                            let enumName = enumNameArg.AsString()
+                            let limitVal =
+                                rest |> List.tryItem 0
+                                |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
+                                |> Option.defaultValue 500
+                            let result =
+                                match gameObj with
+                                | None ->
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                | Some g ->
+                                    // GetEmbeddedMetadata() is on the IGame interface
+                                    let metadata = g.GetEmbeddedMetadata()
+                                    if enumName = "" then
+                                        // Return all available enum names
+                                        let allNames = metadata.enumDefs |> Map.keys |> Seq.toArray
+                                        JsonValue.Record
+                                            [| "allEnumNames", JsonValue.Array(allNames |> Array.map JsonValue.String)
+                                               "ok",           JsonValue.Boolean true |]
+                                    else
+                                        match metadata.enumDefs |> Map.tryFind enumName with
+                                        | Some (desc, values) ->
+                                            let valuesArr =
+                                                values
+                                                |> Array.truncate limitVal
+                                                |> Array.map JsonValue.String
+                                            JsonValue.Record
+                                                [| "enumName",   JsonValue.String enumName
+                                                   "desc",       JsonValue.String desc
+                                                   "values",     JsonValue.Array valuesArr
+                                                   "totalCount", JsonValue.Number(decimal values.Length)
+                                                   "ok",         JsonValue.Boolean true |]
+                                        | None ->
+                                            JsonValue.Record
+                                                [| "ok",       JsonValue.Boolean false
+                                                   "enumName", JsonValue.String enumName
+                                                   "error",    JsonValue.String $"Enum '{enumName}' not found" |]
+                            Some result
+
+                        // ── cwtools.ai.queryStaticModifiers ───────────────────────────────────────
+                        // Returns static modifiers filterable by name fragment
+                        | { command = "cwtools.ai.queryStaticModifiers"
+                            arguments = rest } ->
+                            let filterStr =
+                                rest |> List.tryItem 0
+                                |> Option.bind (function JsonValue.String s when s <> "" -> Some s | _ -> None)
+                            let limitVal =
+                                rest |> List.tryItem 1
+                                |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
+                                |> Option.defaultValue 300
+                            let result =
+                                match gameObj with
+                                | Some g ->
+                                    let mods = g.StaticModifiers()
+                                    let filtered =
+                                        mods
+                                        |> Array.filter (fun m ->
+                                            match filterStr with
+                                            | None   -> true
+                                            | Some f -> m.tag.Contains(f, StringComparison.OrdinalIgnoreCase))
+                                        |> Array.truncate limitVal
+                                    let arr =
+                                        filtered
+                                        |> Array.map (fun m ->
+                                            let cats = m.categories |> List.map (fun c -> JsonValue.String(c.ToString())) |> Array.ofList
+                                            JsonValue.Record
+                                                [| "tag",        JsonValue.String m.tag
+                                                   "categories", JsonValue.Array cats |])
+                                    JsonValue.Record
+                                        [| "modifiers",  JsonValue.Array arr
+                                           "totalCount", JsonValue.Number(decimal mods.Length)
+                                           "ok",         JsonValue.Boolean true |]
+                                | None ->
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                            Some result
+
+                        // ── cwtools.ai.queryVariables ─────────────────────────────────────────────
+                        // Returns all scripted @variable = value definitions
+                        | { command = "cwtools.ai.queryVariables"
+                            arguments = rest } ->
+                            let filterStr =
+                                rest |> List.tryItem 0
+                                |> Option.bind (function JsonValue.String s when s <> "" -> Some s | _ -> None)
+                            let result =
+                                match gameObj with
+                                | Some g ->
+                                    let vars = g.ScriptedVariables()
+                                    let filtered =
+                                        vars
+                                        |> List.filter (fun (name, _) ->
+                                            match filterStr with
+                                            | None   -> true
+                                            | Some f -> name.Contains(f, StringComparison.OrdinalIgnoreCase))
+                                    let arr =
+                                        filtered
+                                        |> List.map (fun (name, value) ->
+                                            JsonValue.Record
+                                                [| "name",  JsonValue.String name
+                                                   "value", JsonValue.String value |])
+                                        |> Array.ofList
+                                    JsonValue.Record
+                                        [| "variables",  JsonValue.Array arr
+                                           "totalCount", JsonValue.Number(decimal (List.length vars))
+                                           "ok",         JsonValue.Boolean true |]
+                                | None ->
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                            Some result
+
+                        // ── cwtools.ai.getEntityInfo ──────────────────────────────────────────────
+                        // BatchFolds: returns type refs, defined vars, effect/trigger blocks, event_targets
+                        // Uses ComputedData cache which is available on IGame<T>.AllEntities()
+                        | { command = "cwtools.ai.getEntityInfo"
+                            arguments = uriArg :: _ } ->
+                            let filePath =
+                                let raw = uriArg.AsString()
+                                getPathFromDoc (Uri(raw))
+                            let result =
+                                match gameObj with
+                                | None ->
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                | Some _g ->
+                                    // Helper to find an entity via IGame<T>.AllEntities() and extract pre-computed data
+                                    let tryEntityFromGame (g: IGame<'T>) =
+                                        g.AllEntities()
+                                        |> Seq.tryFind (fun struct (e, _) ->
+                                            String.Equals(e.filepath, filePath, StringComparison.OrdinalIgnoreCase))
+                                        |> Option.map (fun struct (e, lazyData) ->
+                                            let cd = lazyData.Force()
+
+                                            // Serialize referenced types (from ComputedData.Referencedtypes)
+                                            let typesArr =
+                                                match cd.Referencedtypes with
+                                                | None -> [||]
+                                                | Some typesMap ->
+                                                    typesMap
+                                                    |> Map.toSeq
+                                                    |> Seq.collect (fun (typeGroup, refList) ->
+                                                        refList |> List.map (fun rd ->
+                                                            let nameStr = CWTools.Utilities.StringResource.stringManager.GetStringForIDs rd.name
+                                                            JsonValue.Record
+                                                                [| "typeGroup", JsonValue.String typeGroup
+                                                                   "name",      JsonValue.String nameStr |]))
+                                                    |> Array.ofSeq
+
+                                            // Serialize defined variables (from ComputedData.Definedvariables)
+                                            let varsArr =
+                                                match cd.Definedvariables with
+                                                | None -> [||]
+                                                | Some varMap ->
+                                                    varMap
+                                                    |> Map.toSeq
+                                                    |> Seq.collect (fun (varType, varList) ->
+                                                        varList |> Seq.map (fun (name, _rng) ->
+                                                            JsonValue.Record
+                                                                [| "varType", JsonValue.String varType
+                                                                   "name",    JsonValue.String name |]))
+                                                    |> Array.ofSeq
+
+                                            // Serialize effect blocks (from ComputedData.EffectBlocks)
+                                            let effectsArr =
+                                                match cd.EffectBlocks with
+                                                | None -> [||]
+                                                | Some nodes ->
+                                                    nodes
+                                                    |> List.map (fun (n: CWTools.Process.Node) ->
+                                                        JsonValue.Record
+                                                            [| "key",  JsonValue.String n.Key
+                                                               "line", JsonValue.Number(decimal (int n.Position.StartLine)) |])
+                                                    |> Array.ofList
+
+                                            // Serialize trigger blocks (from ComputedData.TriggerBlocks)
+                                            let triggersArr =
+                                                match cd.TriggerBlocks with
+                                                | None -> [||]
+                                                | Some nodes ->
+                                                    nodes
+                                                    |> List.map (fun (n: CWTools.Process.Node) ->
+                                                        JsonValue.Record
+                                                            [| "key",  JsonValue.String n.Key
+                                                               "line", JsonValue.Number(decimal (int n.Position.StartLine)) |])
+                                                    |> Array.ofList
+
+                                            // Serialize saved event targets (from ComputedData.SavedEventTargets)
+                                            let eventTargetsArr =
+                                                match cd.SavedEventTargets with
+                                                | None -> [||]
+                                                | Some targets ->
+                                                    targets
+                                                    |> Seq.map (fun (name, _rng, scope) ->
+                                                        JsonValue.Record
+                                                            [| "name",  JsonValue.String name
+                                                               "scope", JsonValue.String (scope.ToString()) |])
+                                                    |> Array.ofSeq
+
+                                            JsonValue.Record
+                                                [| "referencedTypes", JsonValue.Array typesArr
+                                                   "definedVars",     JsonValue.Array varsArr
+                                                   "effectBlocks",    JsonValue.Array effectsArr
+                                                   "triggerBlocks",   JsonValue.Array triggersArr
+                                                   "eventTargets",    JsonValue.Array eventTargetsArr
+                                                   "file",            JsonValue.String (filePath.Replace('\\', '/'))
+                                                   "ok",              JsonValue.Boolean true |])
+
+                                    let entityResult =
+                                        stlGameObj  |> Option.bind tryEntityFromGame
+                                        |> Option.orElse (hoi4GameObj  |> Option.bind tryEntityFromGame)
+                                        |> Option.orElse (eu4GameObj   |> Option.bind tryEntityFromGame)
+                                        |> Option.orElse (ck2GameObj   |> Option.bind tryEntityFromGame)
+                                        |> Option.orElse (irGameObj    |> Option.bind tryEntityFromGame)
+                                        |> Option.orElse (vic2GameObj  |> Option.bind tryEntityFromGame)
+                                        |> Option.orElse (ck3GameObj   |> Option.bind tryEntityFromGame)
+                                        |> Option.orElse (vic3GameObj  |> Option.bind tryEntityFromGame)
+                                        |> Option.orElse (eu5GameObj   |> Option.bind tryEntityFromGame)
+                                        |> Option.orElse (customGameObj|> Option.bind tryEntityFromGame)
+
+                                    match entityResult with
+                                    | Some json -> json
+                                    | None ->
+                                        JsonValue.Record
+                                            [| "ok",    JsonValue.Boolean false
+                                               "error", JsonValue.String $"No entity found for file: {filePath}" |]
+                            Some result
+
                         | _ -> None
+
                     | None -> None
             }
             |> catchError None

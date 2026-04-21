@@ -435,6 +435,125 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // ─── CWTools Deep API tools ──────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'query_definition',
+            description: 'Jump to the definition of the symbol under a position (GoToType), or find all references if no definition exists (FindAllRefs). This uses the CWTools AST directly — far faster and more accurate than file-system grep. Use it to locate where any scripted_trigger, scripted_effect, event, or type is defined before reading or editing it.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path' },
+                    line: { type: 'number', description: 'Line number (0-based)' },
+                    column: { type: 'number', description: 'Column number (0-based)' },
+                },
+                required: ['file', 'line', 'column'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'query_definition_by_name',
+            description: 'Find where a named symbol is defined by searching the CWTools AST — no file/position needed, just the symbol name. Works for: scripted_trigger, scripted_effect, event IDs, character names, and any other top-level PDXScript key. Much easier than query_definition when you know the name but not the location. Returns file path and line number of the definition.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    symbolName: { type: 'string', description: 'The exact name of the symbol to find (e.g. "kuat_has_psionic_research", "distar.001")' },
+                },
+                required: ['symbolName'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'query_scripted_effects',
+            description: 'List all scripted effects defined in the current game/mod, with their name, valid scope constraints, and effect type. Use this BEFORE calling any scripted_effect to verify the exact name and that the call is valid in the current scope. Prevents hallucinated effect names.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filter: { type: 'string', description: 'Optional substring filter on effect name' },
+                    limit: { type: 'number', description: 'Max results (default 200)' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'query_scripted_triggers',
+            description: 'List all scripted triggers defined in the current game/mod, with their name, valid scope constraints, and trigger type. Use this BEFORE using any scripted_trigger to verify the exact name and scope validity. Prevents hallucinated trigger names.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filter: { type: 'string', description: 'Optional substring filter on trigger name' },
+                    limit: { type: 'number', description: 'Max results (default 200)' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'query_enums',
+            description: 'Query enum values from the CWTools rule engine. Call with no enumName (or empty string) to list all available enum names. Then query a specific enum to get all valid values. Use this whenever you need to know valid values for an enum field — prevents hallucinated enum values.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    enumName: { type: 'string', description: 'Enum name to query (e.g. "anomaly_category"). Leave empty to list all enum names.' },
+                    limit: { type: 'number', description: 'Max values to return (default 500)' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'get_entity_info',
+            description: 'Get deep structural info for a file from the CWTools ComputedData cache: referenced types, defined scripted variables, effect blocks, trigger blocks, and saved event_targets. Use this when you need to understand what a file references before deciding how to modify it, or to get a list of event_targets saved in a scripted_effect.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path (must be a parsed mod file)' },
+                },
+                required: ['file'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'query_static_modifiers',
+            description: 'List all static modifiers (from static_modifiers/*.txt files) with their modifier categories. Use this to verify that a modifier tag exists and to understand which scope categories it applies to before using it in generated code.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filter: { type: 'string', description: 'Optional substring filter on modifier tag' },
+                    limit: { type: 'number', description: 'Max results (default 300)' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'query_variables',
+            description: 'List all scripted variables (@variable_name = value) defined across the mod and vanilla. Use this to look up numeric constant values defined with @-prefix before using them in generated code.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filter: { type: 'string', description: 'Optional substring filter on variable name' },
+                },
+                required: [],
+            },
+        },
+    },
 ];
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
@@ -448,6 +567,8 @@ const MAX_TOOL_RESULT_CHARS = 8000;
  */
 export class AgentToolExecutor {
     private cwtRulesCache: { triggers: RuleInfo[]; effects: RuleInfo[] } | null = null;
+    /** 5-second TTL cache for heavy read-only LSP commands (scripted effects/triggers, enums, modifiers) */
+    private lspReadCache = new Map<string, { data: unknown; expiresAt: number }>();
     private currentTodos: TodoItem[] = [];
     /** Callback when todos are updated (for UI) */
     public onTodoUpdate?: (todos: TodoItem[]) => void;
@@ -592,6 +713,23 @@ export class AgentToolExecutor {
                 result = await this.multiEdit(args as any); break;
             case 'task':
                 result = await this.dispatchSubTask(args as any); break;
+            // ─── CWTools Deep API tools ─────────────────────────────────────
+            case 'query_definition':
+                result = await this.queryDefinition(args as any); break;
+            case 'query_definition_by_name':
+                result = await this.queryDefinitionByName(args as any); break;
+            case 'query_scripted_effects':
+                result = await this.queryScriptedEffects(args as any); break;
+            case 'query_scripted_triggers':
+                result = await this.queryScriptedTriggers(args as any); break;
+            case 'query_enums':
+                result = await this.queryEnums(args as any); break;
+            case 'get_entity_info':
+                result = await this.getEntityInfo(args as any); break;
+            case 'query_static_modifiers':
+                result = await this.queryStaticModifiers(args as any); break;
+            case 'query_variables':
+                result = await this.queryVariables(args as any); break;
             default:
                 throw new Error(`Unknown tool: ${toolName}`);
         }
@@ -704,6 +842,131 @@ export class AgentToolExecutor {
             return unknown;
         }
     }
+
+    // ─── CWTools Deep API tool implementations ───────────────────────────────
+
+    /** Generic TTL-based cache for expensive LSP reads (5s default). */
+    private async cachedLspRead<T>(key: string, fetcher: () => Promise<T>, ttlMs = 5000): Promise<T> {
+        const now = Date.now();
+        const cached = this.lspReadCache.get(key);
+        if (cached && cached.expiresAt > now) return cached.data as T;
+        const freshData = await fetcher();
+        this.lspReadCache.set(key, { data: freshData, expiresAt: now + ttlMs });
+        return freshData;
+    }
+
+    /** GoToType + FindAllRefs via LSP command — replaces file-system grep */
+    private async queryDefinition(args: { file: string; line: number; column: number }): Promise<unknown> {
+        try {
+            const uri = vs.Uri.file(args.file);
+            const raw = await this.client.sendRequest('workspace/executeCommand', {
+                command: 'cwtools.ai.queryDefinition',
+                arguments: [uri.toString(), args.line, args.column],
+            }) as any;
+            if (raw && raw.ok === true) return raw;
+            return { ok: false, error: 'No definition found' };
+        } catch (e) {
+            return { ok: false, error: String(e) };
+        }
+    }
+
+    /** Find symbol definition by name — searches AllEntities AST, no position needed */
+    private async queryDefinitionByName(args: { symbolName: string }): Promise<unknown> {
+        try {
+            const raw = await this.client.sendRequest('workspace/executeCommand', {
+                command: 'cwtools.ai.queryDefinitionByName',
+                arguments: [args.symbolName ?? ''],
+            }) as any;
+            return raw ?? { ok: false, error: 'No response' };
+        } catch (e) {
+            return { ok: false, error: String(e) };
+        }
+    }
+
+    /** All scripted effects with scope constraints */
+    private async queryScriptedEffects(args: { filter?: string; limit?: number }): Promise<unknown> {
+        const cacheKey = `sfx:${args.filter ?? ''}:${args.limit ?? 200}`;
+        return this.cachedLspRead(cacheKey, async () => {
+            try {
+                const raw = await this.client.sendRequest('workspace/executeCommand', {
+                    command: 'cwtools.ai.queryScriptedEffects',
+                    arguments: [args.filter ?? '', args.limit ?? 200],
+                }) as any;
+                return raw ?? { ok: false, error: 'No response' };
+            } catch (e) { return { ok: false, error: String(e) }; }
+        });
+    }
+
+    /** All scripted triggers with scope constraints */
+    private async queryScriptedTriggers(args: { filter?: string; limit?: number }): Promise<unknown> {
+        const cacheKey = `stx:${args.filter ?? ''}:${args.limit ?? 200}`;
+        return this.cachedLspRead(cacheKey, async () => {
+            try {
+                const raw = await this.client.sendRequest('workspace/executeCommand', {
+                    command: 'cwtools.ai.queryScriptedTriggers',
+                    arguments: [args.filter ?? '', args.limit ?? 200],
+                }) as any;
+                return raw ?? { ok: false, error: 'No response' };
+            } catch (e) { return { ok: false, error: String(e) }; }
+        });
+    }
+
+    /** Enum values from CachedRuleMetadata */
+    private async queryEnums(args: { enumName?: string; limit?: number }): Promise<unknown> {
+        const cacheKey = `enm:${args.enumName ?? ''}:${args.limit ?? 500}`;
+        return this.cachedLspRead(cacheKey, async () => {
+            try {
+                const raw = await this.client.sendRequest('workspace/executeCommand', {
+                    command: 'cwtools.ai.queryEnums',
+                    arguments: [args.enumName ?? '', args.limit ?? 500],
+                }) as any;
+                return raw ?? { ok: false, error: 'No response' };
+            } catch (e) { return { ok: false, error: String(e) }; }
+        });
+    }
+
+    /** Deep entity info from ComputedData cache (refs, vars, effect/trigger blocks, event_targets) */
+    private async getEntityInfo(args: { file: string }): Promise<unknown> {
+        try {
+            const uri = vs.Uri.file(args.file);
+            const raw = await this.client.sendRequest('workspace/executeCommand', {
+                command: 'cwtools.ai.getEntityInfo',
+                arguments: [uri.toString()],
+            }) as any;
+            return raw ?? { ok: false, error: 'No response' };
+        } catch (e) {
+            return { ok: false, error: String(e) };
+        }
+    }
+
+    /** Static modifiers with category info */
+    private async queryStaticModifiers(args: { filter?: string; limit?: number }): Promise<unknown> {
+        const cacheKey = `smod:${args.filter ?? ''}:${args.limit ?? 300}`;
+        return this.cachedLspRead(cacheKey, async () => {
+            try {
+                const raw = await this.client.sendRequest('workspace/executeCommand', {
+                    command: 'cwtools.ai.queryStaticModifiers',
+                    arguments: [args.filter ?? '', args.limit ?? 300],
+                }) as any;
+                return raw ?? { ok: false, error: 'No response' };
+            } catch (e) { return { ok: false, error: String(e) }; }
+        });
+    }
+
+    /** Scripted @variable definitions across mod + vanilla */
+    private async queryVariables(args: { filter?: string }): Promise<unknown> {
+        try {
+            const raw = await this.client.sendRequest('workspace/executeCommand', {
+                command: 'cwtools.ai.queryVariables',
+                arguments: [args.filter ?? ''],
+            }) as any;
+            return raw ?? { ok: false, error: 'No response' };
+        } catch (e) {
+            return { ok: false, error: String(e) };
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     private async queryTypes(args: { typeName: string; filter?: string; limit?: number; vanillaOnly?: boolean }): Promise<QueryTypesResult> {
         try {

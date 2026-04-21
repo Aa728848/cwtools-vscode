@@ -53,7 +53,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_types',
-            description: 'Query defined instances of a specific Stellaris type. Searches BOTH the current mod AND the vanilla game cache loaded by the CWTools language server. Use this to look up vanilla technology IDs, building IDs, trait IDs, etc. BEFORE using any identifier in generated code. Always prefer this over reading vanilla files directly — the cache is already indexed. Set filter to narrow results and avoid token waste.',
+            description: '\u26a0\ufe0f MANDATORY before using any game ID for the first time. Query defined instances of a specific Stellaris type. Searches BOTH the current mod AND the vanilla game cache loaded by the CWTools language server. PDXscript IDs are routinely hallucinated by LLMs — always verify through this tool before using any technology, building, trait, scripted_trigger, scripted_effect, event, or archaeological_site ID in generated code. Set filter to narrow results and avoid token waste. Never call read_file on vanilla game files — this cache is faster and more complete.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -470,7 +470,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_scripted_effects',
-            description: 'List all scripted effects defined in the current game/mod, with their name, valid scope constraints, and effect type. Use this BEFORE calling any scripted_effect to verify the exact name and that the call is valid in the current scope. Prevents hallucinated effect names.',
+            description: '\u26a0\ufe0f MANDATORY before calling any scripted_effect. List all scripted effects in the current game/mod with their name, valid scope constraints, and effect type. PDXscript training data for LLMs is extremely sparse — scripted_effect names are frequently hallucinated. You MUST call this before using any scripted_effect to verify the exact name and that the call is valid in the current scope. Prevents hallucinated effect names that would cause silent failures.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -485,7 +485,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_scripted_triggers',
-            description: 'List all scripted triggers defined in the current game/mod, with their name, valid scope constraints, and trigger type. Use this BEFORE using any scripted_trigger to verify the exact name and scope validity. Prevents hallucinated trigger names.',
+            description: '\u26a0\ufe0f MANDATORY before using any scripted_trigger. List all scripted triggers in the current game/mod with their name, valid scope constraints, and trigger type. PDXscript training data for LLMs is extremely sparse — scripted_trigger names are frequently hallucinated. You MUST call this before using any scripted_trigger to verify the exact name and scope validity. Prevents hallucinated trigger names that would cause silent failures.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -500,7 +500,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_enums',
-            description: 'Query enum values from the CWTools rule engine. Call with no enumName (or empty string) to list all available enum names. Then query a specific enum to get all valid values. Use this whenever you need to know valid values for an enum field — prevents hallucinated enum values.',
+            description: '\u26a0\ufe0f MANDATORY before using any enum field value. Query enum values from the CWTools rule engine. Call with no enumName (or empty string) to list all available enum names. Then query a specific enum to get all valid values. PDXscript enum values are domain-specific and not reliably known to LLMs — always verify before using an enum field to prevent hallucinated values that silently break scripts.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -529,7 +529,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_static_modifiers',
-            description: 'List all static modifiers (from static_modifiers/*.txt files) with their modifier categories. Use this to verify that a modifier tag exists and to understand which scope categories it applies to before using it in generated code.',
+            description: '\u26a0\ufe0f MANDATORY before using any modifier tag in add_modifier. List all static modifiers (from static_modifiers/*.txt files) with their modifier categories. PDXscript modifier tag names are domain-specific and frequently hallucinated by LLMs — always verify that a modifier tag exists and check which scope categories it applies to before using it in generated code.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1116,16 +1116,16 @@ export class AgentToolExecutor {
 
         // Also check the extension's own config directory
         const ext = vs.extensions.getExtension('tboby.cwtools-vscode') ??
-                    vs.extensions.getExtension('cwtools.cwtools-vscode');
+            vs.extensions.getExtension('cwtools.cwtools-vscode');
         if (ext) {
             configPaths.push(path.join(ext.extensionPath, 'config'));
         }
 
         for (const configPath of configPaths) {
             const triggersFile = path.join(configPath, 'triggers.cwt');
-            const effectsFile  = path.join(configPath, 'effects.cwt');
+            const effectsFile = path.join(configPath, 'effects.cwt');
             if (fs.existsSync(triggersFile)) { this.parseCWTFile(triggersFile, triggers); }
-            if (fs.existsSync(effectsFile))  { this.parseCWTFile(effectsFile, effects); }
+            if (fs.existsSync(effectsFile)) { this.parseCWTFile(effectsFile, effects); }
             if (triggers.length > 0 || effects.length > 0) break;
         }
 
@@ -1272,7 +1272,7 @@ export class AgentToolExecutor {
                         code: String(d.code ?? ''),
                         severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
                             : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                            : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+                                : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
                         message: d.message,
                         line: Math.max(0, adjustedLine),
                         column: d.range.start.character,
@@ -1362,7 +1362,7 @@ export class AgentToolExecutor {
 
                 const sev = d.severity === vs.DiagnosticSeverity.Error ? 'error'
                     : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                    : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
+                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
 
                 if (severityFilter && sev !== severityFilter) continue;
 
@@ -1380,10 +1380,10 @@ export class AgentToolExecutor {
         }
 
         const summary = {
-            errors:   entries.filter(e => e.severity === 'error').length,
+            errors: entries.filter(e => e.severity === 'error').length,
             warnings: entries.filter(e => e.severity === 'warning').length,
-            info:     entries.filter(e => e.severity === 'info').length,
-            hints:    entries.filter(e => e.severity === 'hint').length,
+            info: entries.filter(e => e.severity === 'info').length,
+            hints: entries.filter(e => e.severity === 'hint').length,
         };
 
         // Total count across all pairs — only matching files, for accurate 'truncated' signal
@@ -1399,7 +1399,7 @@ export class AgentToolExecutor {
                 for (const d of diags) {
                     const sev = d.severity === vs.DiagnosticSeverity.Error ? 'error'
                         : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
+                            : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
                     if (sev === severityFilter) totalDiagCount++;
                 }
             } else {
@@ -1620,7 +1620,7 @@ export class AgentToolExecutor {
             }
 
             const start = args.startLine ? Math.max(1, args.startLine) - 1 : 0;
-            const end   = args.endLine   ? Math.min(totalLines, args.endLine) : totalLines;
+            const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
             const slice = lines.slice(start, end);
 
             // Prepend line numbers
@@ -1783,7 +1783,7 @@ export class AgentToolExecutor {
                 code: String(d.code ?? ''),
                 severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
                     : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                    : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
                 message: d.message,
                 line: d.range.start.line,
                 column: d.range.start.character,
@@ -1806,8 +1806,8 @@ export class AgentToolExecutor {
             Array.from({ length: b.length + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0));
         for (let i = 1; i <= a.length; i++)
             for (let j = 1; j <= b.length; j++) {
-                const c = a[i-1] === b[j-1] ? 0 : 1;
-                m[i][j] = Math.min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+c);
+                const c = a[i - 1] === b[j - 1] ? 0 : 1;
+                m[i][j] = Math.min(m[i - 1][j] + 1, m[i][j - 1] + 1, m[i - 1][j - 1] + c);
             }
         return m[a.length][b.length];
     }
@@ -1816,11 +1816,11 @@ export class AgentToolExecutor {
 
     private *lineTrimmedReplacer(content: string, find: string): Generator<string> {
         const oL = content.split('\n'), sL = find.split('\n');
-        if (sL[sL.length-1] === '') sL.pop();
+        if (sL[sL.length - 1] === '') sL.pop();
         for (let i = 0; i <= oL.length - sL.length; i++) {
-            if (sL.every((s, j) => oL[i+j].trim() === s.trim())) {
-                let st = 0; for (let k=0;k<i;k++) st += oL[k].length+1;
-                let en = st; for (let k=0;k<sL.length;k++) { en += oL[i+k].length; if (k<sL.length-1) en+=1; }
+            if (sL.every((s, j) => oL[i + j].trim() === s.trim())) {
+                let st = 0; for (let k = 0; k < i; k++) st += oL[k].length + 1;
+                let en = st; for (let k = 0; k < sL.length; k++) { en += oL[i + k].length; if (k < sL.length - 1) en += 1; }
                 yield content.substring(st, en);
             }
         }
@@ -1829,32 +1829,32 @@ export class AgentToolExecutor {
     private *blockAnchorReplacer(content: string, find: string): Generator<string> {
         const oL = content.split('\n'), sL = find.split('\n');
         if (sL.length < 3) return;
-        if (sL[sL.length-1] === '') sL.pop();
-        const first = sL[0].trim(), last = sL[sL.length-1].trim();
-        const cands: {s:number; e:number}[] = [];
-        for (let i=0; i<oL.length; i++) {
+        if (sL[sL.length - 1] === '') sL.pop();
+        const first = sL[0].trim(), last = sL[sL.length - 1].trim();
+        const cands: { s: number; e: number }[] = [];
+        for (let i = 0; i < oL.length; i++) {
             if (oL[i].trim() !== first) continue;
-            for (let j=i+2; j<oL.length; j++) { if (oL[j].trim() === last) { cands.push({s:i,e:j}); break; } }
+            for (let j = i + 2; j < oL.length; j++) { if (oL[j].trim() === last) { cands.push({ s: i, e: j }); break; } }
         }
         if (!cands.length) return;
         const score = (s: number, e: number) => {
-            const check = Math.min(sL.length-2, e-s-1);
+            const check = Math.min(sL.length - 2, e - s - 1);
             if (check <= 0) return 1.0;
             let sim = 0;
-            for (let j=1; j<sL.length-1 && j<e-s; j++) {
-                const mx = Math.max(oL[s+j].trim().length, sL[j].trim().length);
-                if (mx) sim += (1 - this.levenshtein(oL[s+j].trim(), sL[j].trim()) / mx) / check;
+            for (let j = 1; j < sL.length - 1 && j < e - s; j++) {
+                const mx = Math.max(oL[s + j].trim().length, sL[j].trim().length);
+                if (mx) sim += (1 - this.levenshtein(oL[s + j].trim(), sL[j].trim()) / mx) / check;
             }
             return sim;
         };
         const extract = (s: number, e: number) => {
-            let st=0; for (let k=0;k<s;k++) st+=oL[k].length+1;
-            let en=st; for (let k=s;k<=e;k++) { en+=oL[k].length; if (k<e) en+=1; }
+            let st = 0; for (let k = 0; k < s; k++) st += oL[k].length + 1;
+            let en = st; for (let k = s; k <= e; k++) { en += oL[k].length; if (k < e) en += 1; }
             return content.substring(st, en);
         };
         if (cands.length === 1) { if (score(cands[0].s, cands[0].e) >= 0) yield extract(cands[0].s, cands[0].e); return; }
-        let best=cands[0], bestSim=-1;
-        for (const {s,e} of cands) { const sim=score(s,e); if (sim>bestSim) { bestSim=sim; best={s,e}; } }
+        let best = cands[0], bestSim = -1;
+        for (const { s, e } of cands) { const sim = score(s, e); if (sim > bestSim) { bestSim = sim; best = { s, e }; } }
         if (bestSim >= 0.3) yield extract(best.s, best.e);
     }
 
@@ -1862,32 +1862,32 @@ export class AgentToolExecutor {
         const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
         const nF = norm(find), lns = content.split('\n'), fL = find.split('\n');
         if (fL.length === 1) { for (const l of lns) { if (norm(l) === nF) yield l; } return; }
-        for (let i=0; i<=lns.length-fL.length; i++)
-            if (norm(lns.slice(i, i+fL.length).join('\n')) === nF) yield lns.slice(i, i+fL.length).join('\n');
+        for (let i = 0; i <= lns.length - fL.length; i++)
+            if (norm(lns.slice(i, i + fL.length).join('\n')) === nF) yield lns.slice(i, i + fL.length).join('\n');
     }
 
     private *indentationFlexibleReplacer(content: string, find: string): Generator<string> {
         const strip = (text: string) => {
             const lns = text.split('\n'), ne = lns.filter(l => l.trim().length > 0);
             if (!ne.length) return text;
-            const min = Math.min(...ne.map(l => { const m=l.match(/^(\s*)/); return m?m[1].length:0; }));
+            const min = Math.min(...ne.map(l => { const m = l.match(/^(\s*)/); return m ? m[1].length : 0; }));
             return lns.map(l => l.trim().length === 0 ? l : l.slice(min)).join('\n');
         };
         const nF = strip(find), lns = content.split('\n'), fL = find.split('\n');
-        for (let i=0; i<=lns.length-fL.length; i++) {
-            const b = lns.slice(i, i+fL.length).join('\n');
+        for (let i = 0; i <= lns.length - fL.length; i++) {
+            const b = lns.slice(i, i + fL.length).join('\n');
             if (strip(b) === nF) yield b;
         }
     }
 
     private *escapeNormalizedReplacer(content: string, find: string): Generator<string> {
         const un = (s: string) => s.replace(/\\(n|t|r|'|"|`|\\|\n|\$)/g, (_m, c: string) =>
-            ({n:'\n',t:'\t',r:'\r',"'":"'",'"':'"','`':'`','\\':'\\','\n':'\n','$':'$'}[c] ?? _m));
+            ({ n: '\n', t: '\t', r: '\r', "'": "'", '"': '"', '`': '`', '\\': '\\', '\n': '\n', '$': '$' }[c] ?? _m));
         const uF = un(find);
         if (content.includes(uF)) { yield uF; return; }
         const lns = content.split('\n'), fL = uF.split('\n');
-        if (fL.length > 1) for (let i=0; i<=lns.length-fL.length; i++) {
-            const b = lns.slice(i, i+fL.length).join('\n');
+        if (fL.length > 1) for (let i = 0; i <= lns.length - fL.length; i++) {
+            const b = lns.slice(i, i + fL.length).join('\n');
             if (un(b) === uF) yield b;
         }
     }
@@ -1897,8 +1897,8 @@ export class AgentToolExecutor {
         if (trimmed === find) return;
         if (content.includes(trimmed)) { yield trimmed; return; }
         const lns = content.split('\n'), fL = find.split('\n');
-        for (let i=0; i<=lns.length-fL.length; i++) {
-            const b = lns.slice(i, i+fL.length).join('\n');
+        for (let i = 0; i <= lns.length - fL.length; i++) {
+            const b = lns.slice(i, i + fL.length).join('\n');
             if (b.trim() === trimmed) yield b;
         }
     }
@@ -1906,20 +1906,20 @@ export class AgentToolExecutor {
     private *contextAwareReplacer(content: string, find: string): Generator<string> {
         const fL = find.split('\n');
         if (fL.length < 3) return;
-        if (fL[fL.length-1] === '') fL.pop();
+        if (fL[fL.length - 1] === '') fL.pop();
         const cL = content.split('\n');
-        const fl = fL[0].trim(), ll = fL[fL.length-1].trim();
-        for (let i=0; i<cL.length; i++) {
+        const fl = fL[0].trim(), ll = fL[fL.length - 1].trim();
+        for (let i = 0; i < cL.length; i++) {
             if (cL[i].trim() !== fl) continue;
-            for (let j=i+2; j<cL.length; j++) {
+            for (let j = i + 2; j < cL.length; j++) {
                 if (cL[j].trim() !== ll) continue;
-                const b = cL.slice(i, j+1);
+                const b = cL.slice(i, j + 1);
                 if (b.length !== fL.length) break;
-                let hit=0, tot=0;
-                for (let k=1; k<b.length-1; k++) {
-                    if (b[k].trim().length || fL[k].trim().length) { tot++; if (b[k].trim()===fL[k].trim()) hit++; }
+                let hit = 0, tot = 0;
+                for (let k = 1; k < b.length - 1; k++) {
+                    if (b[k].trim().length || fL[k].trim().length) { tot++; if (b[k].trim() === fL[k].trim()) hit++; }
                 }
-                if (tot===0 || hit/tot >= 0.5) { yield b.join('\n'); break; }
+                if (tot === 0 || hit / tot >= 0.5) { yield b.join('\n'); break; }
                 break;
             }
         }
@@ -1960,10 +1960,10 @@ export class AgentToolExecutor {
         const name = path.basename(filePath);
         const oL = original.split('\n'), mL = modified.split('\n');
         let diff = `--- ${name}\n+++ ${name}\n`, changed = 0;
-        let i=0, j=0;
+        let i = 0, j = 0;
         while ((i < oL.length || j < mL.length) && changed < 80) {
             if (oL[i] === mL[j]) { i++; j++; }
-            else { changed++; if (i<oL.length) { diff += `- ${oL[i++]}\n`; } if (j<mL.length) { diff += `+ ${mL[j++]}\n`; } }
+            else { changed++; if (i < oL.length) { diff += `- ${oL[i++]}\n`; } if (j < mL.length) { diff += `+ ${mL[j++]}\n`; } }
         }
         return changed === 0 ? diff + '(无变更)\n' : diff;
     }
@@ -2059,7 +2059,7 @@ export class AgentToolExecutor {
 
             // Pattern: alias[trigger:name] or alias[effect:name]
             const aliasPattern = /^##\s*scope\s*=\s*\{?\s*([^}]*)\}?\s*$/i;
-            const namePattern = /^alias\[(?:trigger|effect):(\w+)\]\s*=\s*(.*)/ ;
+            const namePattern = /^alias\[(?:trigger|effect):(\w+)\]\s*=\s*(.*)/;
 
             let currentScopes: string[] = [];
             let currentDesc = '';

@@ -393,7 +393,7 @@ export type AgentToolName =
     | 'glob_files'
     | 'lsp_operation'
     | 'web_fetch'
-    | 'web_search'
+    | 'search_web'
     | 'run_command'
     | 'apply_patch'
     | 'multiedit'

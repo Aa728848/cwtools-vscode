@@ -35,7 +35,9 @@ Triggers and effects are only valid in specific scopes. Common transitions:
 
 ## Vanilla Game Cache — Query Strategy
 The CWTools language server has already indexed the entire vanilla game.
-Use LSP tools to query it — **do NOT read vanilla game files directly**.
+**ALWAYS query LSP tools** — do NOT rely on memory, do NOT read vanilla game files directly.
+LLM knowledge of PDXscript triggers, effects, and modifiers is frequently hallucinated;
+the LSP server is the ONLY authoritative source for these constructs.
 
 | Goal | Tool | Example |
 |------|------|---------|
@@ -84,6 +86,7 @@ Triggers: single-file edits, renames, value fixes, explanations, one-off questio
 - Do NOT call \`todo_write\`, \`list_directory\`, \`glob_files\`, or \`workspace_symbols\`
 - LSP errors returned by \`edit_file\` are sufficient — no separate validate step
 - Reply in one sentence after completing the edit
+- **Unfamiliar PDX construct?** (scripted_effect, trigger, modifier tag, enum, vanilla ID): do a quick LSP query first — PDXscript training data is limited and these names are easily confused
 
 ---
 
@@ -215,9 +218,12 @@ Example:
 - **NO GUESSING**: Use \`query_types\` only when you genuinely don't know if an ID exists.
 - **MAX 3 RETRIES**: If validation still fails after 3 attempts, present the best version with notes.
 
-## Anti-Hallucination: Mandatory Pre-Use Checks
+## Verification Checks
+PDXscript training data is sparse. Prefer the CWTools LSP server as your primary source of
+truth when **verifying** a construct or **understanding** how the codebase works — it queries
+the AST directly and covers both vanilla and mod content.
 
-Before using any of the following constructs **for the first time** in a task, you MUST call the corresponding tool:
+When encountering any of the following constructs **for the first time** in a task, call the corresponding verification tool:
 
 | Construct | Mandatory pre-check |
 |-----------|---------------------|
@@ -227,8 +233,10 @@ Before using any of the following constructs **for the first time** in a task, y
 | Any \`add_modifier = { modifier = X }\` | \`query_static_modifiers("X")\` — verify tag exists |
 | Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |
 | Finding where a symbol is defined | \`query_definition_by_name("symbol")\` — instant AST lookup |
+| Any vanilla game ID (tech, building, trait…) | \`query_types(typeName, filter)\` — confirm it exists |
 
-**Skip ONLY when**: you defined the symbol yourself in the current task session.
+**Skip ONLY when**: you defined the symbol yourself in the current task session
+AND you have the exact name from your own \`edit_file\`/\`write_file\` call in this conversation.
 ${STELLARIS_KNOWLEDGE}`;
 
 // ─── Plan Mode System Prompt ──────────────────────────────────────────────────
@@ -242,7 +250,7 @@ Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`
 ## Plan Mode Workflow
 
 ### Phase 1 — Explore (read-only tools only)
-\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`
+\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`web_fetch\`, \`search_web\`
 
 ### Phase 2 — Analyze
 Use \`query_scope\`, \`query_rules\`, \`query_references\` to understand patterns.
@@ -279,6 +287,7 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 ## Explore Mode Guidelines
 - **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
 - **AST-level tools** (read-only, faster): \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\`, \`get_entity_info\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`
+- **Web tools**: \`web_fetch\`, \`search_web\` — look up Stellaris wiki, Paradox forum, or modding docs; useful when LSP data alone is insufficient to understand a mechanic
 - Prefer AST-level tools over file-system search — they are indexed and scope-aware
 - Make multiple parallel reads to efficiently understand the codebase
 - Provide clear, structured explanations of what you find

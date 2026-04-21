@@ -129,6 +129,32 @@
     bindBtn('accInline',        () => toggleAccordion('inlineSection'));
     bindBtn('accAgent',         () => toggleAccordion('agentSection'));
 
+    // ── Topic search (debounced 300ms) ─────────────────────────────────────────
+    (() => {
+        const si = document.getElementById('topicsSearch');
+        if (!si) return;
+        let _timer = null;
+        si.addEventListener('input', () => {
+            clearTimeout(_timer);
+            _timer = setTimeout(() => {
+                vscode.postMessage({ type: 'searchTopics', query: si.value.trim() });
+            }, 300);
+        });
+        si.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                si.value = '';
+                vscode.postMessage({ type: 'searchTopics', query: '' });
+            }
+        });
+    })();
+
+    // ── Export current topic as Markdown ───────────────────────────────────────
+    bindBtn('btnExportTopic', () => {
+        vscode.postMessage({ type: 'exportTopic', topicId: undefined });
+        topicsPanel.classList.remove('show');
+    });
+
+
     // ── Mode dropdown ──────────────────────────────────────────────────────────
     const modeSel = document.getElementById('modeSel');
     if (modeSel) {
@@ -1236,6 +1262,49 @@
                 wrap.appendChild(sectionsWrap);
                 chatArea.appendChild(wrap);
                 scrollBottom();
+                break;
+            }
+
+            case 'tokenUsage': {
+                // Override rough estimation with actual counted tokens from the API
+                const u = msg.usage;
+                if (u && u.total > 0) {
+                    totalConversationTokens = u.total;
+                    updateTokenUsage(u.total, contextLimit);
+                    // Show cost badge if non-zero
+                    if (u.estimatedCostUsd > 0) {
+                        const label = document.getElementById('tokenUsageLabel');
+                        if (label) {
+                            const cost = u.estimatedCostUsd < 0.001
+                                ? '<$0.001'
+                                : '$' + u.estimatedCostUsd.toFixed(4);
+                            label.textContent = label.textContent + '  ·  ' + cost;
+                        }
+                    }
+                }
+                break;
+            }
+
+            case 'topicSearchResults': {
+                const list = document.getElementById('topicsList');
+                if (!list) break;
+                if (!msg.results || msg.results.length === 0) {
+                    list.innerHTML = '<div style="padding:12px 8px;opacity:0.5;font-size:11px;text-align:center;">无匹配结果</div>';
+                    break;
+                }
+                list.innerHTML = msg.results.map(t =>
+                    `<div class="topic-item" data-topic-id="${escapeHtml(t.id)}" onclick="this.dispatchEvent(new CustomEvent('topic-click',{bubbles:true,detail:'${escapeHtml(t.id)}'}))">
+                        <span class="topic-title">${escapeHtml(t.title)}</span>
+                        <span class="topic-date" style="font-size:10px;opacity:0.5">${new Date(t.updatedAt).toLocaleDateString('zh-CN')}</span>
+                    </div>`
+                ).join('');
+                // Re-attach click handlers
+                list.querySelectorAll('.topic-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        vscode.postMessage({ type: 'loadTopic', topicId: el.dataset.topicId });
+                        topicsPanel.classList.remove('show');
+                    });
+                });
                 break;
             }
         }

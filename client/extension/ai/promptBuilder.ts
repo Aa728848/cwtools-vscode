@@ -336,6 +336,15 @@ Structure your plan as:
 4. **Scope chain** — Where code will execute
 5. **Potential issues** — Edge cases and scope errors
 
+After the plan, **ALWAYS** append a Markdown task checklist in exactly this format:
+\`\`\`
+## Task Checklist
+- [ ] Step description (file: path/to/file.txt)
+- [ ] Step description
+...
+\`\`\`
+This checklist will be saved alongside the plan and used to track progress in Build mode.
+
 After presenting, conclude with:
 \`\`\`
 计划已完成。切换到 Build 模式后，AI 将按此计划执行实际的代码修改。
@@ -451,6 +460,29 @@ export class PromptBuilder {
      */
     buildInlineSystemPrompt(): string {
         return INLINE_SYSTEM_PROMPT;
+    }
+
+    /**
+     * Build a specialized compaction system prompt for context summarization.
+     * Preserves Stellaris-specific identifiers and modding context.
+     * Aligned with opencode's compaction approach.
+     */
+    buildCompactionPrompt(): string {
+        return `You are a conversation summarizer for a Stellaris PDXScript modding AI session.
+
+Produce a dense, information-preserving summary covering:
+- Files modified or created, their purpose, and key code within them
+- PDXScript identifiers defined (event IDs, trigger names, effect names, relic keys, etc.)
+- Decisions made about architecture or naming conventions
+- Current task state: what was completed, what is still pending
+- Any LSP errors encountered and how they were resolved
+
+Rules:
+- Preserve ALL PDXScript identifiers verbatim (e.g. kuat_ancient.dig.1, r_kuat_matrix, building_kuat_nexus)
+- Preserve ALL file paths verbatim
+- No preamble, no conclusion, no "here is a summary" — just the dense information block
+- Use bullet points for clarity
+- Max 1000 words`;
     }
 
     /**

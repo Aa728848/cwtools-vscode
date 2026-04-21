@@ -389,7 +389,15 @@ export type AgentToolName =
     | 'read_file'
     | 'write_file'
     | 'edit_file'
-    | 'list_directory';
+    | 'list_directory'
+    | 'glob_files'
+    | 'lsp_operation'
+    | 'web_fetch'
+    | 'web_search'
+    | 'run_command'
+    | 'apply_patch'
+    | 'multiedit'
+    | 'task';
 
 // ─── File Tool Types ─────────────────────────────────────────────────────────
 
@@ -476,6 +484,19 @@ export interface GetDiagnosticsResult {
     truncated: boolean;
 }
 
+// ─── Token Usage & Cost ──────────────────────────────────────────────────────
+
+export interface TokenUsage {
+    /** Total tokens used across all API calls in this generation */
+    total: number;
+    /** Input/prompt tokens */
+    input: number;
+    /** Output/completion tokens */
+    output: number;
+    /** Estimated cost in USD (based on provider pricing table) */
+    estimatedCostUsd: number;
+}
+
 // ─── Agent Execution ─────────────────────────────────────────────────────────
 
 export interface AgentStep {
@@ -493,11 +514,14 @@ export interface AgentStep {
      * - compaction        : context history was compressed
      * - todo_update       : todo list was updated
      * - permission_request: agent is asking user for permission (bash/write)
+     * - subtask_start     : a sub-agent task was dispatched
+     * - subtask_complete  : a sub-agent task completed
      */
     type: 'thinking' | 'thinking_content' | 'tool_call' | 'tool_result'
         | 'text_delta' | 'step_finish'
         | 'code_generated' | 'validation' | 'error' | 'compaction'
-        | 'todo_update' | 'permission_request';
+        | 'todo_update' | 'permission_request'
+        | 'subtask_start' | 'subtask_complete';
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;
@@ -505,6 +529,8 @@ export interface AgentStep {
     timestamp: number;
     /** For permission_request: identifier so UI can respond */
     permissionId?: string;
+    /** For subtask steps: the sub-agent type */
+    subagentType?: string;
 }
 
 export interface GenerationResult {
@@ -514,6 +540,8 @@ export interface GenerationResult {
     isValid: boolean;
     retryCount: number;
     steps: AgentStep[];
+    /** Token usage accumulated across all API calls in this generation */
+    tokenUsage?: TokenUsage;
 }
 
 // ─── Chat History ────────────────────────────────────────────────────────────
@@ -573,7 +601,11 @@ export type WebViewMessage =
     /** WebView is fully loaded and ready to receive messages */
     | { type: 'ready' }
     /** Request the list of workspace files for @ mention */
-    | { type: 'requestFileList' };
+    | { type: 'requestFileList' }
+    /** Search topics by keyword */
+    | { type: 'searchTopics'; query: string }
+    /** Export current or specified topic as Markdown */
+    | { type: 'exportTopic'; topicId?: string };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; hasImages?: boolean }
@@ -603,7 +635,11 @@ export type HostMessage =
     /** Send plan sections to webview for interactive inline annotation */
     | { type: 'renderPlan'; sections: string[]; planText: string }
     /** Return workspace file list for @ mention popup */
-    | { type: 'fileList'; files: string[] };
+    | { type: 'fileList'; files: string[] }
+    /** Token usage stats after generation completes */
+    | { type: 'tokenUsage'; usage: TokenUsage; model: string }
+    /** Topic search results */
+    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number }> };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

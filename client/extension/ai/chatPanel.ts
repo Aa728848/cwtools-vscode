@@ -191,6 +191,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 // Simply open the plan markdown file in the native VSCode editor
                 vs.commands.executeCommand('vscode.open', vs.Uri.file(msg.filePath));
                 break;
+            case 'searchTopics':
+                this.handleSearchTopics(msg.query);
+                break;
+            case 'exportTopic':
+                await this.exportTopicAsMarkdown(msg.topicId);
+                break;
+            case 'requestFileList':
+                this.sendWorkspaceFileList();
+                break;
         }
     }
 
@@ -437,6 +446,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 });
             }
             this.saveTopics();
+
+            // ── Send token usage stats to UI ────────────────────────────────────
+            if (result.tokenUsage && result.tokenUsage.total > 0) {
+                const config = this.aiService.getConfig();
+                this.postMessage({
+                    type: 'tokenUsage',
+                    usage: result.tokenUsage,
+                    model: config.model,
+                });
+            }
 
             // ── Auto-title: generate a short AI title after the first exchange ─
             // Matches OpenCode's title-agent pattern: fire-and-forget, no blocking
@@ -1156,6 +1175,138 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
         });
     }
 
+    // ─── Topic Search ─────────────────────────────────────────────────────────
+
+    /**
+     * Search topics by keyword — scans title and message content.
+     * Returns top 20 matches sorted by relevance (title match first, then recency).
+     */
+    private handleSearchTopics(query: string): void {
+        const q = query.toLowerCase().trim();
+        if (!q) {
+            this.sendTopicList();
+            return;
+        }
+        const results = this.topics
+            .filter(t => !t.archived)
+            .filter(t => {
+                const titleMatch = t.title.toLowerCase().includes(q);
+                const contentMatch = t.messages.some(m =>
+                    m.content.toLowerCase().includes(q) ||
+                    (m.code ?? '').toLowerCase().includes(q)
+                );
+                return titleMatch || contentMatch;
+            })
+            .slice(0, 20)
+            .map(t => ({ id: t.id, title: t.title, updatedAt: t.updatedAt }));
+
+        this.postMessage({ type: 'topicSearchResults', results });
+    }
+
+    // ─── Topic Export ─────────────────────────────────────────────────────────
+
+    /**
+     * Export a topic (or the current topic) as a Markdown file.
+     * Saves to the workspace root and opens in VSCode.
+     */
+    private async exportTopicAsMarkdown(topicId?: string): Promise<void> {
+        const topic = topicId
+            ? this.topics.find(t => t.id === topicId)
+            : this.currentTopic;
+
+        if (!topic) {
+            vs.window.showWarningMessage('没有可导出的对话');
+            return;
+        }
+
+        const lines: string[] = [
+            `# ${topic.title}`,
+            ``,
+            `> 导出时间: ${new Date().toLocaleString('zh-CN')}  `,
+            `> 创建时间: ${new Date(topic.createdAt).toLocaleString('zh-CN')}`,
+            ``,
+        ];
+
+        for (const msg of topic.messages) {
+            if (msg.role === 'user') {
+                lines.push(`## 👤 用户`);
+                lines.push(``);
+                lines.push(msg.content);
+                lines.push(``);
+            } else if (msg.role === 'assistant') {
+                lines.push(`## 🤖 Eddy CWTool Code`);
+                lines.push(``);
+                if (msg.content) {
+                    lines.push(msg.content);
+                    lines.push(``);
+                }
+                if (msg.code) {
+                    lines.push('```pdx');
+                    lines.push(msg.code);
+                    lines.push('```');
+                    lines.push(``);
+                }
+            }
+        }
+
+        const content = lines.join('\n');
+        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspaceRoot) {
+            vs.window.showWarningMessage('没有打开的工作区');
+            return;
+        }
+
+        const safeName = topic.title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 60);
+        const outPath = path.join(workspaceRoot, `.cwtools-ai-exports`, `${safeName}.md`);
+        const outDir = path.dirname(outPath);
+        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+        fs.writeFileSync(outPath, content, 'utf-8');
+
+        const doc = await vs.workspace.openTextDocument(outPath);
+        await vs.window.showTextDocument(doc, { preview: true });
+        vs.window.showInformationMessage(`对话已导出: ${path.basename(outPath)}`);
+    }
+
+    // ─── Workspace File List ──────────────────────────────────────────────────
+
+    /**
+     * Send the list of workspace files to the WebView for @ mention autocomplete.
+     * Limits to 500 files to avoid UI lag; excludes binary/generated directories.
+     */
+    private sendWorkspaceFileList(): void {
+        const root = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root) {
+            this.postMessage({ type: 'fileList', files: [] });
+            return;
+        }
+
+        const IGNORE_DIRS = new Set([
+            'node_modules', '.git', '.cwtools', '__pycache__',
+            'bin', 'obj', '.cwtools-ai-tmp', '.cwtools-ai-exports',
+        ]);
+
+        const files: string[] = [];
+        const walk = (dir: string) => {
+            if (files.length >= 500) return;
+            try {
+                for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                    if (entry.isDirectory()) {
+                        if (!IGNORE_DIRS.has(entry.name) && !entry.name.startsWith('.')) {
+                            walk(path.join(dir, entry.name));
+                        }
+                    } else {
+                        const ext = path.extname(entry.name);
+                        if (['.txt', '.yml', '.yaml', '.json', '.md', '.ts', '.js', '.csv', '.gfx', '.gui'].includes(ext)) {
+                            files.push(path.relative(root, path.join(dir, entry.name)).replace(/\\/g, '/'));
+                        }
+                    }
+                }
+            } catch { /* skip unreadable dirs */ }
+        };
+        walk(root);
+        this.postMessage({ type: 'fileList', files: files.slice(0, 500) });
+    }
+
     private postMessage(msg: HostMessage): void {
         this.view?.webview.postMessage(msg);
     }
@@ -1208,6 +1359,10 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size:
 .new-topic-btn { width: 100%; background: none; border: 1px dashed var(--border); border-radius: 5px; color: var(--fg); cursor: pointer; padding: 6px 10px; font-size: 12px; text-align: left; opacity: 0.7; display: flex; align-items: center; gap: 5px; transition: opacity 0.15s, background 0.15s; }
 .new-topic-btn:hover { opacity: 1; background: var(--btn-hover); border-color: var(--accent); }
 .topics-list { flex: 1; overflow-y: auto; padding: 6px 8px 8px; }
+.topics-search-row { display: flex; gap: 5px; align-items: center; margin-top: 5px; }
+.topics-search-input { flex: 1; background: var(--input-bg); border: 1px solid var(--border); color: var(--fg); border-radius: 5px; padding: 4px 8px; font-size: 11px; outline: none; font-family: inherit; }
+.topics-search-input:focus { border-color: var(--accent); }
+.topics-search-input::placeholder { opacity: 0.4; }
 .topic-item { padding: 8px; cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
 .topic-item:hover { background: var(--btn-hover); }
 .topic-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
@@ -1522,6 +1677,10 @@ body.general-mode .mode-indicator { color: #c792ea; }
 <div class="topics-panel" id="topicsPanel">
     <div class="topics-panel-header">
         <button class="new-topic-btn" id="btnNewTopicPanel">＋ 新话题</button>
+        <div class="topics-search-row">
+            <input type="text" id="topicsSearch" class="topics-search-input" placeholder="🔍 搜索对话..." autocomplete="off" />
+            <button class="icon-btn topics-export-btn" id="btnExportTopic" title="导出当前对话 (Markdown)" style="font-size:11px;padding:4px 7px;">⬇ 导出</button>
+        </div>
     </div>
     <div class="topics-list" id="topicsList"></div>
 </div>

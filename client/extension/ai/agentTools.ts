@@ -361,6 +361,79 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    {
+        type: 'function',
+        function: {
+            name: 'search_web',
+            description: 'Search the web for information about Stellaris modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (cwtools.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Search query. Be specific. Example: "Stellaris relic activation trigger conditions"' },
+                    maxResults: { type: 'number', description: 'Max results to return (default 5, max 10)' },
+                },
+                required: ['query'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'apply_patch',
+            description: 'Apply a unified diff patch to one or more files atomically. Use this instead of multiple edit_file calls when you have a git-style patch. All hunks must succeed or none are written.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    patch: { type: 'string', description: 'Unified diff patch string (--- a/file ... +++ b/file ... @@ ...). File paths relative to workspace root or absolute.' },
+                    cwd: { type: 'string', description: 'Working directory for resolving relative paths (defaults to workspace root)' },
+                },
+                required: ['patch'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'multiedit',
+            description: 'Apply multiple edits to a SINGLE file in one atomic operation. All edits applied in sequence; only written to disk if ALL succeed. More efficient than multiple edit_file calls. Uses same fuzzy-matching as edit_file.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filePath: { type: 'string', description: 'Absolute path to the file to modify' },
+                    edits: {
+                        type: 'array',
+                        description: 'List of edits to apply in order',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                oldString: { type: 'string', description: 'The exact text to replace' },
+                                newString: { type: 'string', description: 'The replacement text' },
+                            },
+                            required: ['oldString', 'newString'],
+                        },
+                    },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Default: utf8bom.' },
+                },
+                required: ['filePath', 'edits'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'task',
+            description: 'Dispatch a sub-task to a specialized sub-agent for research/exploration. The sub-agent runs independently and returns findings as text. Sub-agents CANNOT write files. Use "explore" for codebase exploration (read-only), "general" for research (all read + web tools).',
+            parameters: {
+                type: 'object',
+                properties: {
+                    description: { type: 'string', description: 'Short label for this sub-task (shown in UI)' },
+                    prompt: { type: 'string', description: 'Detailed prompt for the sub-agent. Include all context it needs — it has no access to the parent conversation.' },
+                    subagent_type: { type: 'string', enum: ['explore', 'general'], description: 'Sub-agent mode. Default: "general"' },
+                },
+                required: ['description', 'prompt'],
+            },
+        },
+    },
 ];
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
@@ -390,6 +463,20 @@ export class AgentToolExecutor {
     public onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     /** Agent file write mode from config */
     public fileWriteMode: 'confirm' | 'auto' = 'confirm';
+    /**
+     * Reference to the parent AgentRunner for task sub-agent dispatch.
+     * Set by the owning AgentRunner after construction.
+     */
+    public agentRunnerRef?: {
+        runSubAgent(
+            prompt: string,
+            mode: 'explore' | 'general',
+            parentOptions?: import('./agentRunner').AgentRunnerOptions,
+            onStep?: (step: import('./types').AgentStep) => void
+        ): Promise<string>;
+    };
+    /** Parent AgentRunner options (used for sub-agent dispatch to inherit provider/model/abort) */
+    public parentRunnerOptions?: import('./agentRunner').AgentRunnerOptions;
 
     private readonly clientGetter: () => LanguageClient;
 
@@ -413,7 +500,7 @@ export class AgentToolExecutor {
      */
     async execute(toolName: string, args: Record<string, unknown>): Promise<unknown> {
         let result: unknown;
-        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command') {
+        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'apply_patch' | 'multiedit' | 'task') {
             case 'query_scope':
                 result = await this.queryScope(args as any); break;
             case 'query_types':
@@ -455,6 +542,15 @@ export class AgentToolExecutor {
                 result = await this.webFetch(args as any); break;
             case 'run_command':
                 result = await this.runCommand(args as any); break;
+            // ── New extended tools ─────────────────────────────────────────────
+            case 'search_web':
+                result = await this.searchWeb(args as any); break;
+            case 'apply_patch':
+                result = await this.applyPatch(args as any); break;
+            case 'multiedit':
+                result = await this.multiEdit(args as any); break;
+            case 'task':
+                result = await this.dispatchSubTask(args as any); break;
             default:
                 throw new Error(`Unknown tool: ${toolName}`);
         }
@@ -1806,5 +1902,324 @@ export class AgentToolExecutor {
             );
             void proc;
         });
+    }
+
+    // ─── search_web ──────────────────────────────────────────────────────────
+
+    /**
+     * Web search: uses Brave Search API if a key is configured in VSCode settings,
+     * otherwise falls back to DuckDuckGo HTML scraping.
+     * Aligned with opencode's web search approach.
+     */
+    private async searchWeb(args: { query: string; maxResults?: number }): Promise<{
+        results: Array<{ title: string; url: string; description: string }>;
+        source: 'brave' | 'duckduckgo';
+        query: string;
+    }> {
+        const maxResults = Math.min(args.maxResults ?? 5, 10);
+        const query = args.query.trim();
+
+        // Try Brave Search API first (if configured)
+        const braveKey = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
+        if (braveKey) {
+            try {
+                const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
+                const resp = await fetch(url, {
+                    headers: {
+                        'Accept': 'application/json',
+                        'Accept-Encoding': 'gzip',
+                        'X-Subscription-Token': braveKey,
+                    },
+                });
+                if (resp.ok) {
+                    const data = await resp.json() as {
+                        web?: { results?: Array<{ title: string; url: string; description?: string }> }
+                    };
+                    const results = (data.web?.results ?? []).slice(0, maxResults).map(r => ({
+                        title: r.title,
+                        url: r.url,
+                        description: r.description ?? '',
+                    }));
+                    return { results, source: 'brave', query };
+                }
+            } catch { /* fall through to DuckDuckGo */ }
+        }
+
+        // Fallback: DuckDuckGo HTML scraping (no API key required)
+        try {
+            const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+            const resp = await fetch(ddgUrl, {
+                headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
+            });
+            const html = await resp.text();
+
+            // Parse result links and snippets from DuckDuckGo HTML
+            const results: Array<{ title: string; url: string; description: string }> = [];
+            // Extract links like: <a class="result__a" href="...">Title</a>
+            const linkRe = /<a class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/gi;
+            const snippetRe = /<a class="result__snippet"[^>]*>([^<]+)<\/a>/gi;
+            const links: Array<{ url: string; title: string }> = [];
+            const snippets: string[] = [];
+            let m: RegExpExecArray | null;
+            while ((m = linkRe.exec(html)) !== null && links.length < maxResults) {
+                let url = m[1];
+                // DuckDuckGo redirects — extract real URL
+                if (url.startsWith('/l/?uddg=')) {
+                    try { url = decodeURIComponent(url.replace('/l/?uddg=', '')); } catch { /* keep */ }
+                }
+                links.push({ url, title: m[2].trim() });
+            }
+            while ((m = snippetRe.exec(html)) !== null && snippets.length < maxResults) {
+                snippets.push(m[1].trim());
+            }
+            for (let i = 0; i < links.length; i++) {
+                results.push({
+                    title: links[i].title,
+                    url: links[i].url,
+                    description: snippets[i] ?? '',
+                });
+            }
+            return { results, source: 'duckduckgo', query };
+        } catch (e) {
+            return { results: [], source: 'duckduckgo', query };
+        }
+    }
+
+    // ─── apply_patch ─────────────────────────────────────────────────────────
+
+    /**
+     * Apply a unified diff patch atomically.
+     * Parses standard git-format patches (--- a/file / +++ b/file / @@ hunks).
+     * If ALL hunks succeed, files are written; otherwise nothing is written.
+     */
+    private async applyPatch(args: { patch: string; cwd?: string }): Promise<{
+        success: boolean;
+        filesChanged: string[];
+        errors: string[];
+    }> {
+        const cwd = args.cwd ?? this.workspaceRoot;
+
+        // ── Parse unified diff ────────────────────────────────────────────────
+        interface HunkPatch {
+            filePath: string;
+            oldString: string;
+            newString: string;
+        }
+        const hunks: HunkPatch[] = [];
+
+        const lines = args.patch.split('\n');
+        let currentFile: string | null = null;
+        let i = 0;
+
+        while (i < lines.length) {
+            const line = lines[i];
+            // Detect file header: --- a/file or --- file
+            if (line.startsWith('--- ')) {
+                const nextLine = lines[i + 1] ?? '';
+                if (nextLine.startsWith('+++ ')) {
+                    // Extract file path from +++ line (remove b/ prefix)
+                    let filePath = nextLine.slice(4).trim();
+                    if (filePath.startsWith('b/')) filePath = filePath.slice(2);
+                    // Make absolute
+                    currentFile = path.isAbsolute(filePath)
+                        ? filePath
+                        : path.join(cwd, filePath);
+                    i += 2;
+                    continue;
+                }
+            }
+            // Detect hunk header: @@ -a,b +c,d @@
+            if (line.startsWith('@@') && currentFile) {
+                // Collect hunk lines
+                i++;
+                const oldLines: string[] = [];
+                const newLines: string[] = [];
+                while (i < lines.length && !lines[i].startsWith('@@') && !lines[i].startsWith('--- ')) {
+                    const hunkLine = lines[i];
+                    if (hunkLine.startsWith('-')) {
+                        oldLines.push(hunkLine.slice(1));
+                    } else if (hunkLine.startsWith('+')) {
+                        newLines.push(hunkLine.slice(1));
+                    } else {
+                        // Context line — appears in both
+                        oldLines.push(hunkLine.startsWith(' ') ? hunkLine.slice(1) : hunkLine);
+                        newLines.push(hunkLine.startsWith(' ') ? hunkLine.slice(1) : hunkLine);
+                    }
+                    i++;
+                }
+                hunks.push({
+                    filePath: currentFile,
+                    oldString: oldLines.join('\n'),
+                    newString: newLines.join('\n'),
+                });
+                continue;
+            }
+            i++;
+        }
+
+        if (hunks.length === 0) {
+            return { success: false, filesChanged: [], errors: ['No valid hunks found in patch'] };
+        }
+
+        // ── Apply all hunks (simulate first, then commit) ─────────────────────
+        // Group hunks by file
+        const byFile = new Map<string, { content: string; hunks: HunkPatch[] }>();
+        for (const hunk of hunks) {
+            if (!byFile.has(hunk.filePath)) {
+                let content = '';
+                try { content = fs.readFileSync(hunk.filePath, 'utf-8'); } catch { /* new file */ }
+                byFile.set(hunk.filePath, { content, hunks: [] });
+            }
+            byFile.get(hunk.filePath)!.hunks.push(hunk);
+        }
+
+        const errors: string[] = [];
+        const pendingWrites: Array<{ filePath: string; newContent: string }> = [];
+
+        for (const [filePath, { content, hunks: fileHunks }] of byFile) {
+            let currentContent = content;
+            const ending = this.detectLineEnding(currentContent);
+            for (const hunk of fileHunks) {
+                const old = this.convertLineEnding(this.normalizeLineEndings(hunk.oldString), ending);
+                const next = this.convertLineEnding(this.normalizeLineEndings(hunk.newString), ending);
+                try {
+                    currentContent = this.replace(currentContent, old, next, false);
+                } catch (e) {
+                    errors.push(`${path.basename(filePath)}: ${e instanceof Error ? e.message : String(e)}`);
+                }
+            }
+            if (errors.length === 0) {
+                pendingWrites.push({ filePath, newContent: currentContent });
+            }
+        }
+
+        if (errors.length > 0) {
+            return { success: false, filesChanged: [], errors };
+        }
+
+        // All hunks succeeded — commit writes
+        const filesChanged: string[] = [];
+        for (const { filePath, newContent } of pendingWrites) {
+            this.onBeforeFileWrite?.(filePath, fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null);
+            try {
+                const dir = path.dirname(filePath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(filePath, newContent, 'utf-8');
+                filesChanged.push(path.relative(this.workspaceRoot, filePath).replace(/\\/g, '/'));
+            } catch (e) {
+                errors.push(`Write ${path.basename(filePath)}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+
+        return {
+            success: errors.length === 0,
+            filesChanged,
+            errors,
+        };
+    }
+
+    // ─── multiedit ───────────────────────────────────────────────────────────
+
+    /**
+     * Apply multiple edit operations to a single file atomically.
+     * If any edit fails, no changes are written.
+     * Uses the same 8-strategy fuzzy matching as editFile().
+     */
+    private async multiEdit(args: {
+        filePath: string;
+        edits: Array<{ oldString: string; newString: string }>;
+        encoding?: string;
+    }): Promise<import('./types').EditFileResult> {
+        const filePath = args.filePath;
+        let content = '';
+        try {
+            if (fs.existsSync(filePath)) {
+                content = fs.readFileSync(filePath, 'utf-8');
+            }
+        } catch (e) {
+            return { success: false, message: `无法读取文件: ${String(e)}` };
+        }
+
+        const originalContent = content;
+        this.onBeforeFileWrite?.(filePath, originalContent || null);
+
+        const ending = this.detectLineEnding(content);
+        const errors: string[] = [];
+
+        // Apply all edits sequentially, accumulating into current content
+        for (let i = 0; i < args.edits.length; i++) {
+            const edit = args.edits[i];
+            if (edit.oldString === edit.newString) continue; // skip no-ops
+            const old = this.convertLineEnding(this.normalizeLineEndings(edit.oldString), ending);
+            const next = this.convertLineEnding(this.normalizeLineEndings(edit.newString), ending);
+            try {
+                content = this.replace(content, old, next, false);
+            } catch (e) {
+                errors.push(`Edit #${i + 1}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+
+        if (errors.length > 0) {
+            return {
+                success: false,
+                message: `${errors.length} 个编辑失败，文件未修改:\n${errors.join('\n')}`,
+            };
+        }
+
+        // All edits succeeded — write file
+        try {
+            const dir = path.dirname(filePath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            const useBom = (args.encoding ?? 'utf8bom') !== 'utf8';
+            fs.writeFileSync(filePath, useBom ? '\uFEFF' + content : content, 'utf-8');
+        } catch (e) {
+            return { success: false, message: `写入失败: ${String(e)}` };
+        }
+
+        const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+        const diff = this.buildUnifiedDiff(filePath, originalContent, content);
+        let message = `multiedit: ${args.edits.length} 个编辑已应用到 ${path.basename(filePath)}`;
+        const errorDiags = diagnostics.filter(d => d.severity === 'error');
+        if (errorDiags.length > 0) {
+            message += `\n\nLSP 检测到 ${errorDiags.length} 个错误:\n` +
+                errorDiags.slice(0, 5).map(e => `  第 ${e.line + 1} 行: ${e.message}`).join('\n');
+        }
+        return { success: true, message, diff, diagnostics };
+    }
+
+    // ─── task (sub-agent dispatch) ────────────────────────────────────────────
+
+    /**
+     * Dispatch a sub-task to a specialized sub-agent.
+     * Delegates to AgentRunner.runSubAgent() via agentRunnerRef.
+     * The sub-agent runs in 'explore' or 'general' mode (read-only or research).
+     */
+    private async dispatchSubTask(args: {
+        description: string;
+        prompt: string;
+        subagent_type?: 'explore' | 'general';
+    }): Promise<{ result: string; description: string }> {
+        const mode = (args.subagent_type ?? 'general') as 'explore' | 'general';
+
+        if (!this.agentRunnerRef) {
+            return {
+                description: args.description,
+                result: 'Sub-agent dispatch not available: agentRunnerRef not set',
+            };
+        }
+
+        try {
+            const result = await this.agentRunnerRef.runSubAgent(
+                args.prompt,
+                mode,
+                this.parentRunnerOptions
+            );
+            return { description: args.description, result };
+        } catch (e) {
+            return {
+                description: args.description,
+                result: `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}`,
+            };
+        }
     }
 }

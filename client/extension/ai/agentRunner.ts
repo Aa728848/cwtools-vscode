@@ -18,6 +18,7 @@ import type {
     AgentMode,
     ChatCompletionResponse,
     ContentPart,
+    TokenUsage,
 } from './types';
 
 /** Safely coerce ChatMessage.content (string | ContentPart[] | null) to a string for text operations. */
@@ -47,6 +48,75 @@ const CHARS_PER_TOKEN = 4;
 const COMPACTION_THRESHOLD_RATIO = 0.7;
 // Default context limit if unknown
 const DEFAULT_CONTEXT_LIMIT = 128000;
+// How many recent messages to keep un-compressed during compaction
+const COMPACTION_KEEP_LAST_N = 4;
+
+/**
+ * Per-model cost table (USD per 1M tokens, [input, output]).
+ * Uses cache-miss (standard) input rate as the representative figure.
+ * Sources (verified 2026-04):
+ *   OpenAI:    https://openai.com/api/pricing
+ *   Anthropic: https://www.anthropic.com/api
+ *   DeepSeek:  https://platform.deepseek.com/  (V3.2 pricing, post 2025-09-29)
+ *   Google:    https://ai.google.dev/pricing
+ *   MiniMax:   https://www.minimax.io/
+ *   Zhipu:     https://bigmodel.cn / z.ai
+ *   DashScope: https://www.alibabacloud.com/help/en/model-studio/
+ */
+const MODEL_PRICING: Record<string, [number, number]> = {
+    // ── Anthropic Claude ─────────────────────────────────────────────────────
+    'claude-opus-4-7':                  [5.00,  25.00],
+    'claude-opus-4-6':                  [5.00,  25.00],   // same tier as 4-7
+    'claude-sonnet-4-6':                [3.00,  15.00],
+    'claude-haiku-4-5':                 [1.00,   5.00],
+
+    // ── OpenAI GPT-5.4 series ─────────────────────────────────────────────────
+    'gpt-5.4':                          [2.50,  15.00],
+    'gpt-5.4-mini':                     [0.75,   4.50],
+    'gpt-5.4-nano':                     [0.20,   1.25],
+    'gpt-5-mini':                       [0.75,   4.50],   // alias, same tier
+    'gpt-5-nano':                       [0.20,   1.25],   // alias, same tier
+
+    // ── DeepSeek V3.2 (unified, post 2025-09-29) ─────────────────────────────
+    'deepseek-chat':                    [0.28,   0.42],
+    'deepseek-reasoner':                [0.28,   0.42],
+
+    // ── MiniMax ───────────────────────────────────────────────────────────────
+    'MiniMax-M2.7':                     [0.30,   1.20],
+    'MiniMax-M2.5':                     [0.12,   0.95],
+    'MiniMax-M2.5-Lightning':           [0.12,   2.40],
+
+    // ── Zhipu GLM ─────────────────────────────────────────────────────────────
+    'glm-5.1':                          [1.40,   4.40],
+    'glm-5':                            [1.00,   3.20],
+    'glm-5v-turbo':                     [0.50,   1.50],   // estimated visual-turbo tier
+
+    // ── Qwen / DashScope ──────────────────────────────────────────────────────
+    'qwen3.6-plus':                     [0.33,   1.95],
+    'qwen3.5-plus':                     [0.30,   1.80],
+    'qwen3.6-flash':                    [0.06,   0.25],   // flash tier (estimated)
+
+    // ── Google Gemini 2.5 ─────────────────────────────────────────────────────
+    'gemini-2.5-pro':                   [1.25,  10.00],
+    'gemini-2.5-flash':                 [0.30,   2.50],
+    'gemini-2.5-flash-lite':            [0.10,   0.40],
+
+    // ── Google Gemini 3 / 3.1 (preview, as of 2026-04) ────────────────────────
+    'gemini-3.1-pro-preview':           [2.00,  12.00],   // ≤200K ctx tier
+    'gemini-3-flash-preview':           [0.50,   3.00],
+    'gemini-3.1-flash-lite-preview':    [0.25,   1.50],
+};
+
+/** Look up per-million-token cost for a model. Falls back to [0, 0] if unknown. */
+function getModelPricing(model: string): [number, number] {
+    // Exact match first
+    if (model in MODEL_PRICING) return MODEL_PRICING[model];
+    // Prefix match (e.g. "claude-opus-4-5-20251101" → "claude-opus-4-5")
+    for (const key of Object.keys(MODEL_PRICING)) {
+        if (model.startsWith(key)) return MODEL_PRICING[key];
+    }
+    return [0, 0];
+}
 
 export interface AgentRunnerOptions {
     /** Override provider for this run */
@@ -92,7 +162,10 @@ export class AgentRunner {
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
         private promptBuilder: PromptBuilder
-    ) {}
+    ) {
+        // Wire up sub-agent dispatch: give the tool executor a reference to this runner
+        this.toolExecutor.agentRunnerRef = this;
+    }
 
     /**
      * Run the full agent loop for a user request.
@@ -116,6 +189,9 @@ export class AgentRunner {
             steps.push(step);
             options?.onStep?.(step);
         };
+
+        // Propagate runner options to tool executor for sub-agent dispatch
+        this.toolExecutor.parentRunnerOptions = options;
 
         // Context compaction: if history is too long, summarize it
         const compactedHistory = await this.maybeCompactHistory(
@@ -142,9 +218,12 @@ export class AgentRunner {
             timestamp: Date.now(),
         });
 
+        // Accumulate token usage across all API calls in this generation
+        const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
+
         try {
             // Phase 1: Agent reasoning loop (with tool calls)
-            const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options);
+            const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator);
 
             // Phase 2: Extract code from the response
             const code = this.extractCode(finalMessage);
@@ -158,6 +237,7 @@ export class AgentRunner {
                     isValid: true,
                     retryCount: 0,
                     steps,
+                    tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
                 };
             }
 
@@ -171,6 +251,7 @@ export class AgentRunner {
                 ...validationResult,
                 explanation: this.extractExplanation(finalMessage),
                 steps,
+                tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
             };
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
@@ -188,6 +269,7 @@ export class AgentRunner {
                 isValid: false,
                 retryCount: 0,
                 steps,
+                tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
             };
         }
     }
@@ -229,26 +311,20 @@ export class AgentRunner {
 
         try {
             // Keep the most recent messages intact
-            const recentCount = Math.min(4, history.length);
+            const recentCount = Math.min(COMPACTION_KEEP_LAST_N, history.length);
             const olderMessages = history.slice(0, history.length - recentCount);
             const recentMessages = history.slice(history.length - recentCount);
 
-            // Build compaction prompt
+            // Build compaction prompt (specialized for Stellaris modding context)
             const summaryText = olderMessages.map(m => {
-                const role = m.role === 'user' ? 'User' : 'Assistant';
+                const role = m.role === 'user' ? 'User' : m.role === 'tool' ? 'Tool' : 'Assistant';
                 const content = contentToString(m.content).substring(0, 500);
                 return `[${role}]: ${content}`;
             }).join('\n');
 
             const compactionMessages: ChatMessage[] = [
-                {
-                    role: 'system',
-                    content: 'You are a conversation summarizer. Summarize the following conversation into a concise, information-dense summary. Preserve: key decisions, code snippets mentioned, file paths, identifiers, error messages, and any important context. Output ONLY the summary, no preamble.',
-                },
-                {
-                    role: 'user',
-                    content: `Summarize this conversation:\n\n${summaryText}`,
-                },
+                { role: 'system', content: this.promptBuilder.buildCompactionPrompt() },
+                { role: 'user', content: `Summarize this conversation:\n\n${summaryText}` },
             ];
 
             const compactionResponse = await this.aiService.chatCompletion(compactionMessages, {
@@ -293,12 +369,14 @@ export class AgentRunner {
     /**
      * Agent reasoning loop: call AI → if tool_calls → execute → feed back → repeat.
      * Supports both OpenAI JSON tool_calls and DSML/XML text-format tool calls (DeepSeek fallback).
+     * Accumulates token usage into the provided tokenAccumulator (mutated in-place).
      */
     private async reasoningLoop(
         messages: ChatMessage[],
         emitStep: (step: AgentStep) => void,
         mode: AgentMode,
-        options?: AgentRunnerOptions
+        options?: AgentRunnerOptions,
+        tokenAccumulator?: TokenUsage
     ): Promise<string> {
         let iteration = 0;
         // Doom loop detection: sliding window of call signatures
@@ -346,6 +424,17 @@ export class AgentRunner {
                     });
                 },
             });
+
+            // Accumulate token usage from this API call
+            if (tokenAccumulator && response.usage) {
+                const pricing = getModelPricing(response.model ?? options?.model ?? '');
+                const inputCost  = (response.usage.prompt_tokens     / 1_000_000) * pricing[0];
+                const outputCost = (response.usage.completion_tokens / 1_000_000) * pricing[1];
+                tokenAccumulator.input  += response.usage.prompt_tokens;
+                tokenAccumulator.output += response.usage.completion_tokens;
+                tokenAccumulator.total  += response.usage.total_tokens;
+                tokenAccumulator.estimatedCostUsd += inputCost + outputCost;
+            }
 
             const choice = response.choices[0];
             if (!choice) throw new Error('No response from AI');
@@ -967,6 +1056,56 @@ export class AgentRunner {
             return cleaned;
         } catch {
             return null;
+        }
+    }
+
+    // ─── Sub-Agent Dispatch ───────────────────────────────────────────────────
+
+    /**
+     * Run a sub-agent task with a restricted tool set (explore or general mode).
+     * The sub-agent runs an isolated reasoning loop and returns its final text output.
+     * Linked to parent abort signal — cancelling the parent automatically cancels sub-tasks.
+     *
+     * @param prompt       The task description / prompt for the sub-agent
+     * @param mode         Sub-agent mode: 'explore' (read-only) or 'general' (research)
+     * @param parentOptions Parent's options (inherits provider, model, abort signal)
+     * @param onStep        Optional step callback (sub-agent steps bubble via this)
+     * @returns             The sub-agent's final text response
+     */
+    async runSubAgent(
+        prompt: string,
+        mode: 'explore' | 'general',
+        parentOptions?: AgentRunnerOptions,
+        onStep?: (step: AgentStep) => void
+    ): Promise<string> {
+        // Sub-agent uses specialized system prompt
+        const subSystemPrompt = this.promptBuilder.buildSystemPromptForMode(
+            mode,
+            this.aiService.getConfig().provider
+        );
+
+        const messages: ChatMessage[] = [
+            { role: 'system', content: subSystemPrompt },
+            { role: 'user', content: prompt },
+        ];
+
+        const subOptions: AgentRunnerOptions = {
+            providerId: parentOptions?.providerId,
+            model: parentOptions?.model,
+            mode,
+            abortSignal: parentOptions?.abortSignal,
+            onStep,
+            // Sub-agents do NOT get permission callbacks (no file writes in explore/general)
+        };
+
+        // Sub-agent accumulates its own token usage (not merged with parent)
+        const subTokens: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
+
+        try {
+            const result = await this.reasoningLoop(messages, onStep ?? (() => {}), mode, subOptions, subTokens);
+            return result;
+        } catch (e) {
+            return `Sub-agent error: ${e instanceof Error ? e.message : String(e)}`;
         }
     }
 }

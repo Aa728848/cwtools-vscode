@@ -38,22 +38,29 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private _liveSteps: AgentStep[] = [];
     /** Whether an AI generation is currently running */
     private _isGenerating = false;
-    /** Pending plan file that hasn't been submitted yet (shown as a persistent card) */
     /**
      * Per-message file snapshots for retract/undo support.
      * Key = messageIndex (the topic.messages index at the time the user sent the message).
-     * Value = ordered list of { filePath, previousContent } captured BEFORE each write.
-     *   previousContent === null  ⇒ file was newly created (should be deleted on retract).
-     *   previousContent === string ⇒ file existed before; restore this content on retract.
-     * Snapshots are captured in chronological order; on retract we replay in reverse.
+     * Value = { files, convLength } where convLength is the length of conversationMessages
+     * at the start of this exchange (used to slice conversationMessages correctly on retract,
+     * since its indexing can diverge from topic.messages after fork/load).
      */
-    private _messageFileSnapshots = new Map<number, Array<{ filePath: string; previousContent: string | null }>>();
+    private _messageFileSnapshots = new Map<number, {
+        files: Array<{ filePath: string; previousContent: string | null }>;
+        convLength: number;
+    }>();
     /**
      * Points to the active snapshot array for the currently-running message.
      * Set in handleUserMessage, cleared in finally. Allows non-tool writes
      * (e.g. plan file) to register themselves into the same snapshot.
      */
     private _currentMessageSnapshots: Array<{ filePath: string; previousContent: string | null }> | null = null;
+
+    // ── Shared ContentProvider for insertCodeWithDiff (M5 fix) ───────────────
+    // Lazily registered once and reused for all code-insert previews.
+    // The mutable `_previewContent` field is updated before each diff view.
+    private _previewContent = '';
+    private _previewProviderRegistration?: vs.Disposable;
 
     constructor(
         private extensionUri: vs.Uri,
@@ -315,7 +322,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const { getEffectiveEndpoint } = await import('./providers');
         const saved = this.aiService.getConfig();
         const providerId = settings?.provider ?? saved.provider;
-        const apiKey = settings?.apiKey ?? saved.apiKey;
+        // If the settings page shows a masked key (starts with '•'), the user hasn't
+        // entered a new key — fall back to the one stored in SecretStorage.
+        const rawSettingsKey = settings?.apiKey ?? '';
+        const apiKey = (rawSettingsKey && !rawSettingsKey.startsWith('\u2022'))
+            ? rawSettingsKey
+            : await this.aiService.getKeyForProvider(providerId);
         const endpoint = settings?.endpoint || getEffectiveEndpoint(providerId, saved.endpoint);
         const model = settings?.model || undefined;
 
@@ -490,8 +502,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'generationError', error: errorMsg });
         } finally {
             // Store file snapshots for this message (keyed by the message index)
+            // Also record the conversationMessages length so retractMessage can use the
+            // correct slice point (avoids index divergence after fork/load).
             if (messageSnapshots.length > 0) {
-                this._messageFileSnapshots.set(messageIndex, messageSnapshots);
+                this._messageFileSnapshots.set(messageIndex, {
+                    files: messageSnapshots,
+                    convLength: this.conversationMessages.length,
+                });
             }
             // Clean up the per-request callback and snapshot pointer
             this.agentRunner.toolExecutor.onBeforeFileWrite = undefined;
@@ -519,8 +536,20 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const restored = new Set<string>();
         let restoredFiles = 0;
 
+        // Also collect the earliest convLength from all retained snapshots so we
+        // can roll back conversationMessages to the right boundary.
+        let convRollbackLength: number | undefined;
+
         for (const idx of indicesToUndo) {
-            const snapshots = this._messageFileSnapshots.get(idx)!;
+            const entry = this._messageFileSnapshots.get(idx)!;
+            const snapshots = entry.files ?? (entry as any); // back-compat if entry is raw array
+            const entryConvLength = (entry as any).convLength as number | undefined;
+            // We want the earliest (smallest) convLength across all retracted messages
+            if (entryConvLength !== undefined) {
+                if (convRollbackLength === undefined || entryConvLength < convRollbackLength) {
+                    convRollbackLength = entryConvLength;
+                }
+            };
             // Process in reverse order within the same message too
             for (const snap of [...snapshots].reverse()) {
                 if (restored.has(snap.filePath)) continue;
@@ -544,9 +573,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this._messageFileSnapshots.delete(idx);
         }
 
-        // ── Roll back conversation history ────────────────────────────────────
+        // ── Roll back conversation history ─────────────────────────────────
+        // Use the accurately recorded convLength if available; otherwise fall back to
+        // using messageIndex (which may diverge from conversationMessages after fork/load).
         this.currentTopic.messages = this.currentTopic.messages.slice(0, messageIndex);
-        this.conversationMessages = this.conversationMessages.slice(0, messageIndex);
+        if (convRollbackLength !== undefined) {
+            this.conversationMessages = this.conversationMessages.slice(0, convRollbackLength - 2);
+        } else {
+            // Fallback: best-effort slice by messageIndex
+            this.conversationMessages = this.conversationMessages.slice(0, messageIndex);
+        }
 
         this.postMessage({ type: 'messageRetracted', messageIndex });
         this.saveTopics();
@@ -734,18 +770,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         newLines.splice(insertLine + 1, 0, code);
         const newContent = newLines.join('\n');
 
-        // Show diff in a virtual document
-        const originalUri = document.uri;
+        // Lazily register a shared ContentProvider (re-registered at most once per panel).
+        // Re-using the same scheme+registration avoids accumulating stale providers
+        // when the user rapidly clicks "Insert" multiple times.
         const scheme = 'cwtools-ai-preview';
-        const previewUri = vs.Uri.parse(`${scheme}:${document.uri.fsPath}?preview`);
+        this._previewContent = newContent;
+        if (!this._previewProviderRegistration) {
+            const self = this;
+            this._previewProviderRegistration = vs.workspace.registerTextDocumentContentProvider(
+                scheme,
+                { provideTextDocumentContent: () => self._previewContent }
+            );
+        }
 
-        // Register a content provider for the preview
-        const provider = new (class implements vs.TextDocumentContentProvider {
-            provideTextDocumentContent(): string {
-                return newContent;
-            }
-        })();
-        const registration = vs.workspace.registerTextDocumentContentProvider(scheme, provider);
+        const originalUri = document.uri;
+        const previewUri = vs.Uri.parse(`${scheme}:${document.uri.fsPath}?preview`);
 
         try {
             // Show diff view
@@ -774,8 +813,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 vs.window.showInformationMessage('已取消插入');
             }
         } finally {
-            registration.dispose();
-            // Close the diff editor
+            // Close the diff editor (preview registration kept alive for next use)
             await vs.commands.executeCommand('workbench.action.closeActiveEditor');
         }
     }
@@ -798,6 +836,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private startNewTopic(): void {
         this.currentTopic = null;
         this.conversationMessages = [];
+        // Clear file snapshots associated with the previous topic to prevent memory leaks
+        this._messageFileSnapshots.clear();
+        this._currentMessageSnapshots = null;
         this.postMessage({ type: 'clearChat' });
         this.sendTopicList();
     }
@@ -1032,6 +1073,9 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
                 }
             }
 
+            // Register CWTOOLS.md in the current message snapshot so /init can be retracted.
+            // This allows `retractMessage` to delete or restore the file if the user undoes the /init.
+            this._recordFileSnapshot(outPath);
             fs.writeFileSync(outPath, finalContent, 'utf-8');
 
             // Open the file in editor
@@ -1266,8 +1310,13 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
             return;
         }
 
-        const safeName = topic.title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 60);
-        const outPath = path.join(workspaceRoot, `.cwtools-ai-exports`, `${safeName}.md`);
+        const safeName = topic.title
+            .replace(/[<>:"/\\|?*\uFF1A\uFF1F\uFF0F\u3000\u300A\u300B]/g, '_')
+            .replace(/\s+/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_|_$/g, '')
+            .substring(0, 60);
+        const outPath = path.join(workspaceRoot, `.cwtools-ai-exports`, `${safeName || 'chat'}.md`);
         const outDir = path.dirname(outPath);
         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
         fs.writeFileSync(outPath, content, 'utf-8');

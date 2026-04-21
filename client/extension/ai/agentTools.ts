@@ -1660,7 +1660,7 @@ export class AgentToolExecutor {
             const diff = this.generateSimpleDiff(args.file, originalContent ?? '', args.content);
 
             if (this.fileWriteMode === 'confirm' && this.onPendingWrite && !(args as any)._autoApply) {
-                const messageId = `write_${Date.now()}`;
+                const messageId = `write_${crypto.randomUUID()}`;
                 const confirmed = await this.onPendingWrite(args.file, args.content, messageId);
                 if (!confirmed) {
                     return { success: false, message: '用户取消了写入操作' };
@@ -2517,7 +2517,7 @@ export class AgentToolExecutor {
             this.onBeforeFileWrite?.(filePath, prevContent);
 
             if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
-                const messageId = `patch_${Date.now()}_${path.basename(filePath)}`;
+                const messageId = `patch_${crypto.randomUUID()}`;
                 const confirmed = await this.onPendingWrite(filePath, newContent, messageId);
                 if (!confirmed) {
                     errors.push(`${path.basename(filePath)}: 用户取消了写入操作`);
@@ -2593,7 +2593,7 @@ export class AgentToolExecutor {
         // All edits succeeded — write file, respecting fileWriteMode='confirm'
         const diff = this.buildUnifiedDiff(filePath, originalContent, content);
         if (this.fileWriteMode === 'confirm' && this.onPendingWrite) {
-            const messageId = `multiedit_${Date.now()}`;
+            const messageId = `multiedit_${crypto.randomUUID()}`;
             const confirmed = await this.onPendingWrite(filePath, content, messageId);
             if (!confirmed) {
                 return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };

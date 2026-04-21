@@ -198,9 +198,13 @@ export class AgentRunner {
         // Propagate runner options to tool executor for sub-agent dispatch
         this.toolExecutor.parentRunnerOptions = options;
 
+        // Accumulate token usage across all API calls in this generation
+        // (declared here so compaction call can also contribute to the total)
+        const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
+
         // Context compaction: if history is too long, summarize it
         const compactedHistory = await this.maybeCompactHistory(
-            conversationHistory, emitStep, options
+            conversationHistory, emitStep, options, tokenAccumulator
         );
 
         // Build the message array
@@ -223,8 +227,6 @@ export class AgentRunner {
             timestamp: Date.now(),
         });
 
-        // Accumulate token usage across all API calls in this generation
-        const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
 
         try {
             // Phase 1: Agent reasoning loop (with tool calls)
@@ -288,9 +290,11 @@ export class AgentRunner {
     private async maybeCompactHistory(
         history: ChatMessage[],
         emitStep: (step: AgentStep) => void,
-        options?: AgentRunnerOptions
+        options?: AgentRunnerOptions,
+        tokenAccumulator?: TokenUsage
     ): Promise<ChatMessage[]> {
-        if (history.length < 4) return history; // too short to compact
+        // No early-return based on message count alone — a single large message (e.g. with
+        // images) can exceed the context limit. Let the token estimate decide.
 
         // Estimate total token usage (use contentToString to handle ContentPart[] correctly)
         const totalChars = history.reduce((sum, m) => sum + contentToString(m.content).length, 0);
@@ -338,6 +342,17 @@ export class AgentRunner {
                 providerId: options?.providerId,
                 model: options?.model,
             });
+
+            // Account for compaction call's token usage in the parent accumulator
+            if (tokenAccumulator && compactionResponse.usage) {
+                const pricing = getModelPricing(compactionResponse.model ?? options?.model ?? '');
+                tokenAccumulator.input  += compactionResponse.usage.prompt_tokens;
+                tokenAccumulator.output += compactionResponse.usage.completion_tokens;
+                tokenAccumulator.total  += compactionResponse.usage.total_tokens;
+                tokenAccumulator.estimatedCostUsd +=
+                    (compactionResponse.usage.prompt_tokens     / 1_000_000) * pricing[0] +
+                    (compactionResponse.usage.completion_tokens / 1_000_000) * pricing[1];
+            }
 
             const summary = compactionResponse.choices?.[0]?.message?.content ?? '';
 
@@ -705,7 +720,8 @@ export class AgentRunner {
                     const val = pm[2].trim();
                     try { args[pm[1]] = JSON.parse(val); } catch { args[pm[1]] = val; }
                 }
-                calls.push({ id: `dsml_${Date.now()}_${callIndex++}`, type: 'function',
+                // Use crypto.randomUUID() to avoid ID collisions in concurrent sub-agents
+                calls.push({ id: `dsml_${crypto.randomUUID()}`, type: 'function',
                     function: { name: toolName, arguments: JSON.stringify(args) } });
             }
             if (calls.length > 0) return calls;
@@ -729,7 +745,8 @@ export class AgentRunner {
                 try {
                     const obj = JSON.parse(raw) as { name?: string; arguments?: unknown };
                     if (obj.name) {
-                        calls.push({ id: `tc_${Date.now()}_${callIndex++}`, type: 'function',
+                        // Use crypto.randomUUID() to avoid ID collisions in concurrent sub-agents
+                        calls.push({ id: `tc_${crypto.randomUUID()}`, type: 'function',
                             function: { name: obj.name,
                                 arguments: typeof obj.arguments === 'string'
                                     ? obj.arguments : JSON.stringify(obj.arguments ?? {}) } });
@@ -764,7 +781,7 @@ export class AgentRunner {
                     const val = pm2[2].trim();
                     try { args[pm2[1]] = JSON.parse(val); } catch { args[pm2[1]] = val; }
                 }
-                calls.push({ id: `gen_${Date.now()}_${callIndex++}`, type: 'function',
+                calls.push({ id: `gen_${crypto.randomUUID()}`, type: 'function',
                     function: { name: toolName, arguments: JSON.stringify(args) } });
             }
         }
@@ -788,7 +805,7 @@ export class AgentRunner {
                 const val = pm[2].trim();
                 try { args[pm[1]] = JSON.parse(val); } catch { args[pm[1]] = val; }
             }
-            calls.push({ id: `qc_${Date.now()}_${startIndex++}`, type: 'function',
+            calls.push({ id: `qc_${crypto.randomUUID()}`, type: 'function',
                 function: { name: toolName, arguments: JSON.stringify(args) } });
         }
         return calls;

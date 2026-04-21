@@ -79,10 +79,19 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             }
 
             const requestId = ++this.lastRequestId;
+            // Capture document version at the moment the debounce starts.
+            // If the document changes while we're waiting (user types more),
+            // the version will differ and we abandon the stale request.
+            const docVersionAtCapture = document.version;
 
             this.debounceTimer = setTimeout(async () => {
-                // Check if this request is still current
+                // Check if this request is still current AND the document hasn't changed
                 if (requestId !== this.lastRequestId || token.isCancellationRequested) {
+                    resolve(undefined);
+                    return;
+                }
+                if (document.version !== docVersionAtCapture) {
+                    // Document changed during debounce — position is now stale, abandon
                     resolve(undefined);
                     return;
                 }

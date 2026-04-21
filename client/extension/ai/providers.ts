@@ -181,6 +181,9 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
  * Get a provider config by ID, falling back to custom.
  */
 export function getProvider(id: string): AIProviderConfig {
+    if (id && !(id in BUILTIN_PROVIDERS)) {
+        console.warn(`[Eddy AI] Unknown provider "${id}", falling back to custom.`);
+    }
     return BUILTIN_PROVIDERS[id] ?? BUILTIN_PROVIDERS['custom'];
 }
 
@@ -283,11 +286,15 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
                 content.push({ type: 'text', text: msg.content });
             }
             for (const tc of msg.tool_calls) {
+                // Guard against malformed/truncated arguments from streaming
+                let toolInput: unknown = {};
+                try { toolInput = JSON.parse(tc.function.arguments); }
+                catch { toolInput = {}; /* Degraded: empty args better than a crash */ }
                 content.push({
                     type: 'tool_use',
                     id: tc.id,
                     name: tc.function.name,
-                    input: JSON.parse(tc.function.arguments),
+                    input: toolInput,
                 });
             }
             claudeMessages.push({ role: 'assistant', content });

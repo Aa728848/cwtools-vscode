@@ -1052,10 +1052,22 @@
                 break;
 
             case 'messageRetracted': {
+                // Find the retracted message element and remove it plus ALL subsequent siblings
                 const rd = messageIndexMap.get(msg.messageIndex);
-                if (rd) { rd.classList.add('retracted'); const b = rd.querySelector('.msg-bubble'); if (b) b.textContent = '(已撤回)'; }
-                const nx = rd ? rd.nextElementSibling : null;
-                if (nx && nx.classList.contains('assistant')) nx.remove();
+                if (rd) {
+                    // Collect all nodes from rd onwards (inclusive) and remove them
+                    const toRemove = [];
+                    let cur = rd;
+                    while (cur) {
+                        toRemove.push(cur);
+                        cur = cur.nextElementSibling;
+                    }
+                    for (const el of toRemove) el.remove();
+                }
+                // Clear all messageIndexMap entries whose index >= retracted index
+                for (const [idx] of messageIndexMap) {
+                    if (idx >= msg.messageIndex) messageIndexMap.delete(idx);
+                }
                 break;
             }
 

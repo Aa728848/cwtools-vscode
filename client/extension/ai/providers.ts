@@ -63,7 +63,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         id: 'minimax',
         name: 'MiniMax (按量计费)',
         // Pay-as-you-go: standard OpenAI-compatible endpoint
-        endpoint: 'https://api.minimax.chat/v1',
+        endpoint: 'https://api.minimaxi.com/v1',
         defaultModel: 'MiniMax-M2.7',
         models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
         supportsToolUse: true,
@@ -72,10 +72,10 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         // MiniMax M2/M2.5/M2.7 are natively multimodal (docs: minimax.io)
-        // IMPORTANT: MiniMax does NOT support image_url.detail (causes error 2013 / "cannot read URL").
-        //   aiService.sanitizeRequest() strips the `detail` field automatically for this provider.
+        // IMPORTANT: MiniMax's OpenAI-compatible endpoint currently does NOT support image or audio inputs.
+        // Official docs (2026-04): "当前不支持图像和音频类型的输入"
         // IMPORTANT: MiniMax does NOT support tool_choice — also stripped in sanitizeRequest.
-        supportsVision: true,
+        supportsVision: false,
     },
     'minimax-token-plan': {
         id: 'minimax-token-plan',
@@ -256,13 +256,13 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gemini': true,
 
     // ── MiniMax ────────────────────────────────────────────────────────────────
-    // M2 series is natively multimodal (text + image + document) on the pay-as-you-go
-    // OpenAI-compat endpoint ('minimax' provider, api.minimax.chat).
+    // M2 series is multimodal in its native API, but their OpenAI-compatible endpoint
+    // and Anthropic-compatible endpoint explicitly state they do NOT support images.
     // NOTE: The Token Plan Anthropic-compat endpoint ('minimax-token-plan') does NOT support
     //   images — agentRunner guards against sending images to provider with supportsVision:false.
     // Listed models: MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5,
     //   MiniMax-M2.5-highspeed, MiniMax-M2.1, MiniMax-M2
-    'MiniMax-M2': true,      // prefix covers M2, M2.1, M2.5, M2.7 and highspeed variants
+    'MiniMax-M2': false,     // Both Token Plan and pay-as-you-go APIs reject image inputs
 
     // ── GLM (Zhipu / Z.ai) ────────────────────────────────────────────────────
     // Only the -v (vision) suffix models support images.

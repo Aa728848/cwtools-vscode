@@ -186,7 +186,9 @@ export class AgentRunner {
             fileContent?: string;
         },
         conversationHistory: ChatMessage[],
-        options?: AgentRunnerOptions
+        options?: AgentRunnerOptions,
+        /** Base64 data-URL images to attach to this user turn (vision/multimodal) */
+        images?: string[]
     ): Promise<GenerationResult> {
         const steps: AgentStep[] = [];
         const mode = options?.mode ?? 'build';
@@ -209,12 +211,25 @@ export class AgentRunner {
             conversationHistory, emitStep, options, tokenAccumulator
         );
 
+        // Build the user turn: multimodal ContentPart[] when images are provided,
+        // otherwise a plain string (keeps token overhead minimal for text-only turns)
+        const userContent: string | ContentPart[] =
+            images && images.length > 0
+                ? [
+                    { type: 'text' as const, text: userMessage },
+                    ...images.map(url => ({
+                        type: 'image_url' as const,
+                        image_url: { url, detail: 'auto' as const },
+                    })),
+                  ]
+                : userMessage;
+
         // Build the message array
         const messages: ChatMessage[] = [
             { role: 'system', content: this.promptBuilder.buildSystemPromptForMode(mode, this.aiService.getConfig().provider) },
             ...this.promptBuilder.buildContextMessages(context),
             ...compactedHistory,
-            { role: 'user', content: userMessage },
+            { role: 'user', content: userContent },
         ];
 
         const modeLabel: Record<string, string> = {
@@ -298,8 +313,24 @@ export class AgentRunner {
         // No early-return based on message count alone — a single large message (e.g. with
         // images) can exceed the context limit. Let the token estimate decide.
 
-        // Estimate total token usage (use contentToString to handle ContentPart[] correctly)
-        const totalChars = history.reduce((sum, m) => sum + contentToString(m.content).length, 0);
+        // Estimate total token usage. For ContentPart[] messages, also add image token overhead:
+        // a typical 512×512 screenshot in base64 ≈ 800 tokens; we use the data URL byte length
+        // divided by ~3 (base64 overhead factor) divided by CHARS_PER_TOKEN as a rough estimate.
+        const totalChars = history.reduce((sum, m) => {
+            if (typeof m.content === 'string') return sum + m.content.length;
+            if (Array.isArray(m.content)) {
+                return sum + (m.content as import('./types').ContentPart[]).reduce((s, part) => {
+                    if (part.type === 'text') return s + part.text.length;
+                    if (part.type === 'image_url') {
+                        // base64 data URL byte length / 3 ≈ raw bytes; divide by 4 chars/token
+                        const urlLen = part.image_url.url.length;
+                        return s + Math.ceil(urlLen / 3);  // rough token estimate for image
+                    }
+                    return s;
+                }, 0);
+            }
+            return sum;
+        }, 0);
         const estimatedTokens = Math.ceil(totalChars / CHARS_PER_TOKEN);
 
         // Get provider context limit (user override takes precedence)

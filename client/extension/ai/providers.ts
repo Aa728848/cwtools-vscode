@@ -23,6 +23,8 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 400000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        // All gpt-4o+ and gpt-5+ models support vision (image_url in content)
+        supportsVision: true,
     },
     claude: {
         id: 'claude',
@@ -40,6 +42,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 1000000,
         isOpenAICompatible: false,   // needs adapter
         toolCallStyle: 'openai',     // adapter normalises to openai format
+        supportsVision: true,
     },
     deepseek: {
         id: 'deepseek',
@@ -54,6 +57,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         // Official API → standard openai tool_calls JSON.
         // Raw/local via vLLM → <｜DSML｜function_calls> (handled as fallback).
         toolCallStyle: 'openai',
+        supportsVision: false,
     },
     minimax: {
         id: 'minimax',
@@ -67,6 +71,8 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 1000000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        // MiniMax M2/M2.5/M2.7 are natively multimodal (docs: minimax.io)
+        supportsVision: true,
     },
     'minimax-token-plan': {
         id: 'minimax-token-plan',
@@ -81,6 +87,8 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 1000000,
         isOpenAICompatible: false,   // uses Anthropic Messages API
         toolCallStyle: 'openai',     // adapter normalises to openai format
+        // MiniMax M2 full series is natively multimodal
+        supportsVision: true,
     },
     glm: {
         id: 'glm',
@@ -106,6 +114,9 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 200000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        // GLM-4.1v-thinking* are vision-capable; text models (glm-5, glm-z1-flash) are not.
+        // Use isModelVisionCapable(model) to check at runtime.
+        supportsVision: true,
     },
     qwen: {
         id: 'qwen',
@@ -128,6 +139,9 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 1000000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        // Current listed models are text-only (qwen3.6-plus etc). VL models
+        // (qwen-vl, qwen2.5-vl) must be specified manually; use isModelVisionCapable().
+        supportsVision: false,
     },
     google: {
         id: 'google',
@@ -148,6 +162,8 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 1048576,   // 1M token context window
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        // All Gemini models are natively multimodal (docs: ai.google.dev)
+        supportsVision: true,
     },
     ollama: {
         id: 'ollama',
@@ -162,6 +178,8 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         // Ollama normalises tool_calls to openai format for most models.
         // If the model outputs raw <tool_call> text, fallback parser handles it.
         toolCallStyle: 'openai',
+        // Vision depends on local model; allow and let API return error if unsupported.
+        supportsVision: true,
     },
     custom: {
         id: 'custom',
@@ -174,8 +192,123 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 32000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        // Custom endpoint: assume vision capable; user responsible for model choice.
+        supportsVision: true,
     },
 };
+
+/**
+ * Model-level vision capability map.
+ * Entries here override the provider-level `supportsVision` flag.
+ * A model is vision-capable if its name starts with or contains any key.
+ *
+ * Sources (verified 2026-04):
+ *   OpenAI:    gpt-4o and later — all vision-capable
+ *   Claude:    All Claude 3+ models support vision
+ *   Gemini:    All Gemini models are natively multimodal
+ *   MiniMax:   M2 series — all native multimodal
+ *   GLM:       Only glm-4Xv / glm-4.1v / glm-4.5v variants; text models do not support images
+ *   Qwen:      Only qwen-vl / qwen2.5-vl / qwen3-vl variants; qwen-long/turbo/max are text-only
+ *   DeepSeek:  Official API (chat/reasoner) is text-only; Janus-Pro is not in the chat API
+ *   Ollama:    Depends on local model — use 'auto' detection via model name
+ */
+export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
+    // ── OpenAI ─────────────────────────────────────────────────────────────────
+    // All gpt-5.x and gpt-4o+ models support vision (image_url content type).
+    // Listed models: gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, gpt-5-mini, gpt-5-nano
+    'gpt-5.4': true,
+    'gpt-5.4-mini': true,
+    'gpt-5.4-nano': true,
+    'gpt-5-mini': true,
+    'gpt-5-nano': true,
+    // Legacy / alias prefixes (covers user-specified custom OpenAI vision models)
+    'gpt-4o': true,
+    'gpt-4-vision': true,
+    'gpt-5': true,           // prefix catch-all for future gpt-5.x variants
+
+    // ── Anthropic Claude ───────────────────────────────────────────────────────
+    // All Claude 3+ models support vision.
+    // Listed models: claude-opus-4-7, claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5
+    'claude-opus-4-7': true,
+    'claude-opus-4-6': true,
+    'claude-sonnet-4-6': true,
+    'claude-haiku-4-5': true,
+    // Prefix catch-alls for future claude-3.x / claude-4.x variants
+    'claude-3': true,
+    'claude-4': true,
+
+    // ── Google Gemini ──────────────────────────────────────────────────────────
+    // All Gemini models are natively multimodal.
+    // Listed models: gemini-3.1-pro-preview, gemini-3-flash-preview,
+    //   gemini-3.1-flash-lite-preview, gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite
+    'gemini-3.1-pro-preview': true,
+    'gemini-3-flash-preview': true,
+    'gemini-3.1-flash-lite-preview': true,
+    'gemini-2.5-pro': true,
+    'gemini-2.5-flash': true,
+    'gemini-2.5-flash-lite': true,
+    // Prefix catch-all (covers any gemini-* the user types in manually)
+    'gemini': true,
+
+    // ── MiniMax ────────────────────────────────────────────────────────────────
+    // M2 series is natively multimodal (text + image + document).
+    // Listed models: MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5,
+    //   MiniMax-M2.5-highspeed, MiniMax-M2.1, MiniMax-M2
+    'MiniMax-M2': true,      // prefix covers M2, M2.1, M2.5, M2.7 and highspeed variants
+
+    // ── GLM (Zhipu / Z.ai) ────────────────────────────────────────────────────
+    // Only the -v (vision) suffix models support images.
+    // Listed vision models: glm-4.1v-thinking, glm-4.1v-thinking-flash
+    // Listed text-only:     glm-5.1, glm-5, glm-5-turbo, glm-z1-flash, glm-4-flash
+    'glm-4.1v-thinking': true,
+    'glm-4.1v-thinking-flash': true,
+    // Future-proof aliases for GLM vision variants
+    'glm-4v': true,
+    'glm-4.5v': true,
+    // Explicitly mark text-only GLM models as false (prevents false-positive prefix match)
+    'glm-5.1': false,
+    'glm-5-turbo': false,
+    'glm-5': false,
+    'glm-z1-flash': false,
+    'glm-4-flash': false,
+
+    // ── Qwen (DashScope) ──────────────────────────────────────────────────────
+    // Current listed models are all text-only.
+    // Listed: qwen3.6-plus, qwen3.5-plus, qwen3.6-flash, qwen3-235b-a22b,
+    //         qwen3-32b, qwen-max, qwen-turbo, qwen-long
+    'qwen3.6-plus': false,
+    'qwen3.5-plus': false,
+    'qwen3.6-flash': false,
+    'qwen3-235b-a22b': false,
+    'qwen3-32b': false,
+    'qwen-max': false,
+    'qwen-turbo': false,
+    'qwen-long': false,
+    // VL variants (user must specify manually, not in default list)
+    'qwen-vl': true,
+    'qwen2-vl': true,
+    'qwen2.5-vl': true,
+    'qwen3-vl': true,
+
+    // ── DeepSeek ──────────────────────────────────────────────────────────────
+    // Official API models are text-only (Janus-Pro vision is not exposed via chat API).
+    // Listed: deepseek-chat, deepseek-reasoner
+    'deepseek-chat': false,
+    'deepseek-reasoner': false,
+};
+
+/**
+ * Check if a specific model name is vision-capable.
+ * Uses VISION_CAPABLE_MODELS prefix/substring matching for flexibility.
+ */
+export function isModelVisionCapable(model: string): boolean {
+    if (!model) return false;
+    const lower = model.toLowerCase();
+    for (const [key, capable] of Object.entries(VISION_CAPABLE_MODELS)) {
+        if (lower.includes(key.toLowerCase())) return capable;
+    }
+    return false;
+}
 
 /**
  * Get a provider config by ID, falling back to custom.

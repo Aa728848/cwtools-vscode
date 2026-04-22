@@ -155,7 +155,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async handleWebViewMessage(msg: WebViewMessage): Promise<void> {
         switch (msg.type) {
             case 'sendMessage':
-                await this.handleUserMessage(msg.text);
+                await this.handleUserMessage(msg.text, msg.images, msg.attachedFiles);
                 break;
             case 'insertCode':
                 await this.insertCodeWithDiff(msg.code);
@@ -389,8 +389,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    private async handleUserMessage(text: string): Promise<void> {
-        if (!text.trim()) return;
+    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[]): Promise<void> {
+        if (!text.trim() && (!images || images.length === 0)) return;
 
         // Check if AI is enabled
         const config = this.aiService.getConfig();
@@ -410,11 +410,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Track message index for retract support
         const messageIndex = this.currentTopic!.messages.length;
 
-        // Add user message to UI (with message index for retract)
-        this.postMessage({ type: 'addUserMessage', text, messageIndex });
+        // Add user message to UI — pass images array directly (not just a bool flag)
+        this.postMessage({ type: 'addUserMessage', text, messageIndex, images: images?.length ? images : undefined });
 
-        // Add to history
-        this.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now() });
+        // Add to history — store images for topic persistence
+        this.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now(), images: images?.length ? images : undefined });
 
         // Get current editor context
         const editor = vs.window.activeTextEditor;
@@ -454,19 +454,29 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         this._liveSteps.push(step);
                         this.postMessage({ type: 'agentStep', step });
                     },
-                    abortSignal: this.abortController.signal,
+                    abortSignal: this.abortController!.signal,
                     // Permission callback for run_command tool (OpenCode strategy)
                     onPermissionRequest: (id, tool, description, command) =>
                         this.requestPermission(id, tool, description, command),
-                }
+                },
+                images  // pass images to build ContentPart[] user turn
             );
 
-            // ── Update conversation history ────────────────────────────────────────
+            // ── Update conversation history ───────────────────────────────────────
+            // For the user turn: use ContentPart[] if images were sent, otherwise plain text.
+            // This ensures the AI has full context in multi-turn conversations.
+            const userHistoryContent: import('./types').ChatMessage['content'] =
+                images && images.length > 0
+                    ? [
+                        { type: 'text' as const, text },
+                        ...images.map(url => ({ type: 'image_url' as const, image_url: { url, detail: 'auto' as const } })),
+                      ]
+                    : text;
             const assistantContent = result.code
                 ? `${result.explanation}\n\`\`\`pdx\n${result.code}\n\`\`\``
                 : result.explanation;
             this.conversationMessages.push(
-                { role: 'user', content: text },
+                { role: 'user', content: userHistoryContent },
                 { role: 'assistant', content: assistantContent }
             );
 
@@ -1589,6 +1599,11 @@ body.plan-mode .plan-indicator { display: block; }
 .send-btn.cancel-mode { background: rgba(244,67,54,0.15); color: var(--error); border: 1px solid rgba(244,67,54,0.35); }
 .send-icon { font-weight: 700; }
 .stop-icon { display: inline-block; width: 9px; height: 9px; background: var(--error); border-radius: 2px; }
+/* Image pick button — compact, sits beside model selector */
+.img-pick-btn { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.15s, border-color 0.15s; }
+.img-pick-btn:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.28); }
+/* Drag-over highlight for input wrapper */
+.input-wrapper.drag-over .input-container { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99,179,237,0.18); }
 .token-usage-bar { height: 2px; background: var(--border); overflow: hidden; margin: 2px 0 1px; border-radius: 1px; }
 .token-usage-fill { height: 100%; background: var(--accent); transition: width 0.4s; border-radius: 1px; }
 .token-usage-label { font-size: 11px; opacity: 0.7; text-align: right; padding: 0 8px 3px; letter-spacing: 0.02em; }
@@ -1795,7 +1810,7 @@ body.general-mode .mode-indicator { color: #c792ea; }
 
 <div class="input-wrapper" style="position:relative">
     <div id="slashPopup" class="slash-popup"></div>
-    <div class="input-container">
+    <div class="input-container input-wrapper">
         <div class="input-row">
             <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1"></textarea>
         </div>
@@ -1808,6 +1823,7 @@ body.general-mode .mode-indicator { color: #c792ea; }
                     <option value="general">💬 General — 通用问答</option>
                 </select>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
+                <button class="img-pick-btn" id="imgPickBtn" title="上传图片（支持多选，也可粘贴或拖拽）">🖼</button>
             </div>
             <button class="send-btn" id="sendBtn" title="发送 (Enter)">↑</button>
         </div>

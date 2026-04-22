@@ -46,6 +46,12 @@ export interface AIProviderConfig {
      * Default: 'openai'
      */
     toolCallStyle?: 'openai' | 'dsml' | 'tool_call';
+    /**
+     * Whether this provider supports multimodal vision input (images).
+     * For providers where only specific model variants are vision-capable
+     * (e.g. glm-4.1v but not glm-5), use isModelVisionCapable() for model-level check.
+     */
+    supportsVision: boolean;
 }
 
 export interface AIProviderUserConfig {
@@ -576,6 +582,8 @@ export interface ChatHistoryMessage {
     isValid?: boolean;
     timestamp: number;
     steps?: AgentStep[];
+    /** Base64 data-URL images attached to this user message (persisted with topic) */
+    images?: string[];
 }
 
 // ─── WebView Communication ───────────────────────────────────────────────────
@@ -617,7 +625,7 @@ export type WebViewMessage =
     | { type: 'exportTopic'; topicId?: string };
 
 export type HostMessage =
-    | { type: 'addUserMessage'; text: string; messageIndex: number; hasImages?: boolean }
+    | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[] }
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string }

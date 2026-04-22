@@ -283,9 +283,11 @@
     }
 
     // ── Image paste (Ctrl+V or paste event on input) ───────────────────────────
+    // Supports multiple images per paste (no break limit)
     input.addEventListener('paste', e => {
         const items = e.clipboardData && e.clipboardData.items;
         if (!items) return;
+        let added = 0;
         for (const item of items) {
             if (item.type.startsWith('image/')) {
                 e.preventDefault();
@@ -298,10 +300,71 @@
                     addImagePreview(dataUrl);
                 };
                 reader.readAsDataURL(blob);
-                break; // handle first image only per paste
+                added++;
             }
         }
     });
+
+    // ── Drag-and-drop images onto input area ───────────────────────────────────
+    inputWrapper && inputWrapper.addEventListener('dragover', e => {
+        e.preventDefault();
+        inputWrapper.classList.add('drag-over');
+    });
+    inputWrapper && inputWrapper.addEventListener('dragleave', () => {
+        inputWrapper.classList.remove('drag-over');
+    });
+    inputWrapper && inputWrapper.addEventListener('drop', e => {
+        e.preventDefault();
+        inputWrapper.classList.remove('drag-over');
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (!files) return;
+        for (const file of files) {
+            if (!file.type.startsWith('image/')) continue;
+            const reader = new FileReader();
+            reader.onload = ev => {
+                const dataUrl = ev.target.result;
+                pendingImages.push(dataUrl);
+                addImagePreview(dataUrl);
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    // ── Image file-picker button ───────────────────────────────────────────────
+    (() => {
+        const imgPickBtn = document.getElementById('imgPickBtn');
+        if (!imgPickBtn) return;
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.multiple = true;
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+        imgPickBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', () => {
+            for (const file of fileInput.files) {
+                const reader = new FileReader();
+                reader.onload = ev => {
+                    pendingImages.push(ev.target.result);
+                    addImagePreview(ev.target.result);
+                };
+                reader.readAsDataURL(file);
+            }
+            fileInput.value = '';
+        });
+    })();
+
+    // ── Lightbox for full-size image preview ───────────────────────────────────
+    function showImageLightbox(dataUrl) {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.style.cssText = 'max-width:90vw;max-height:90vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.6);';
+        overlay.appendChild(img);
+        overlay.addEventListener('click', () => overlay.remove());
+        document.body.appendChild(overlay);
+    }
 
     function addImagePreview(dataUrl) {
         let area = document.getElementById('imagePreviewArea');
@@ -315,8 +378,12 @@
         wrap.style.cssText = 'position:relative;';
         const img = document.createElement('img');
         img.src = dataUrl;
-        img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,0.1);cursor:pointer;';
+        img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,0.1);cursor:zoom-in;transition:transform 0.15s;';
         img.title = '点击放大';
+        // M7 fix: actually open lightbox on click
+        img.addEventListener('click', () => showImageLightbox(dataUrl));
+        img.addEventListener('mouseenter', () => { img.style.transform = 'scale(1.07)'; });
+        img.addEventListener('mouseleave', () => { img.style.transform = ''; });
         const del = document.createElement('button');
         del.textContent = '✕';
         del.style.cssText = 'position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:#444;color:#fff;border:none;cursor:pointer;font-size:10px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;';
@@ -337,15 +404,6 @@
     function sendMessage() {
         const text = input.value.trim();
         if (!text && pendingImages.length === 0) return;
-        // Clone image previews BEFORE clearing them, so addUserMessage can show them
-        const previewClone = (() => {
-            const area = document.getElementById('imagePreviewArea');
-            if (!area || area.children.length === 0) return null;
-            const c = area.cloneNode(true);
-            c.removeAttribute('id');
-            c.style.paddingLeft = '0';
-            return c;
-        })();
         vscode.postMessage({
             type: 'sendMessage',
             text,
@@ -363,8 +421,6 @@
         // Clear @file badges
         const fileBadges = document.getElementById('fileBadgeArea');
         if (fileBadges) fileBadges.innerHTML = '';
-        // Expose the clone for addUserMessage to use immediately
-        sendMessage._lastPreviewClone = previewClone;
     }
 
     const MODE_META = {
@@ -861,7 +917,25 @@
     }
 
     // ── User message ───────────────────────────────────────────────────────────
-    function addUserMessage(text, msgIdx, hasImages) {
+    // Builds inline image thumbnails (clickable lightbox) from images array
+    function buildImageRow(images) {
+        if (!images || !images.length) return null;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
+        for (const src of images) {
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,0.12);cursor:zoom-in;transition:transform 0.15s;';
+            img.title = '点击放大';
+            img.addEventListener('click', () => showImageLightbox(src));
+            img.addEventListener('mouseenter', () => { img.style.transform = 'scale(1.07)'; });
+            img.addEventListener('mouseleave', () => { img.style.transform = ''; });
+            row.appendChild(img);
+        }
+        return row;
+    }
+
+    function addUserMessage(text, msgIdx, images) {
         emptyState.style.display = 'none';
         const div = document.createElement('div');
         div.className = 'message user';
@@ -875,21 +949,9 @@
         bubble.className = 'msg-bubble user-bubble';
         bubble.textContent = text;
 
-        // Show image attachment indicator if images were sent
-        if (hasImages) {
-            // Use the pre-cloned previews saved by sendMessage before it cleared the area
-            const clone = sendMessage._lastPreviewClone;
-            sendMessage._lastPreviewClone = null;
-            if (clone && clone.children.length > 0) {
-                bubble.appendChild(document.createElement('br'));
-                bubble.appendChild(clone);
-            } else {
-                const imgBadge = document.createElement('span');
-                imgBadge.style.cssText = 'display:inline-block;margin-left:6px;font-size:11px;opacity:0.7;';
-                imgBadge.textContent = '🖼 [附带图片]';
-                bubble.appendChild(imgBadge);
-            }
-        }
+        // M6 fix: display image thumbnails from the actual images array
+        const imgRow = buildImageRow(images);
+        if (imgRow) bubble.appendChild(imgRow);
 
         div.appendChild(hdr);
         div.appendChild(bubble);
@@ -1012,7 +1074,7 @@
             case 'addUserMessage':
                 setGenerating(true);
                 liveTextBubble = null; liveTextContent = '';
-                addUserMessage(msg.text, msg.messageIndex, msg.hasImages);
+                addUserMessage(msg.text, msg.messageIndex, msg.images);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
                 scrollBottom();
@@ -1118,7 +1180,8 @@
 
             case 'loadTopicMessages':
                 for (const m of msg.messages) {
-                    if (m.role === 'user') addUserMessage(m.content);
+                    // M4 fix: pass images array when restoring user messages from history
+                    if (m.role === 'user') addUserMessage(m.content, undefined, m.images);
                     else { chatArea.appendChild(buildAssistantMessage(m.content, m.steps, '')); scrollBottom(); }
                 }
                 break;

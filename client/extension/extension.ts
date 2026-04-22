@@ -49,6 +49,7 @@ export async function activate(context: ExtensionContext) {
 	registerLocalizationFeatures(context);
 
 	// Client-side Rename Provider — uses VSCode's built-in reference finding
+	// Fix #8: shared game language list (was duplicated as gameLanguages and gameLanguages2)
 	const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
 	const docSelector = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 
@@ -147,7 +148,10 @@ export async function activate(context: ExtensionContext) {
 		private disposables: Disposable[] = [];
 
 		constructor() {
-			workspace.registerTextDocumentContentProvider("cwtools", this)
+			// Fix #7: capture registration Disposable instead of dropping it
+			this.disposables.push(
+				workspace.registerTextDocumentContentProvider("cwtools", this)
+			);
 		}
 		async provideTextDocumentContent() {
 			return '';
@@ -198,8 +202,8 @@ export async function activate(context: ExtensionContext) {
 			toolExecutor.fileWriteMode = workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
 		}
 	}));
-	const gameLanguages2 = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
-	const docSelector2 = gameLanguages2.map(lang => ({ scheme: 'file', language: lang }));
+	// Fix #8: reuse shared gameLanguages instead of duplicate gameLanguages2
+	const docSelector2 = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder);
 	context.subscriptions.push(
 		vs.languages.registerInlineCompletionItemProvider(docSelector2, inlineProvider)

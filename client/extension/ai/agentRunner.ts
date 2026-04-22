@@ -162,6 +162,17 @@ const EXPLORE_MODE_TOOLS: AgentToolName[] = [
 /** General mode: all tools EXCEPT todo_write (research without task tracking) */
 const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
 
+
+// Fix #9: module-level constants — no need to recreate on every loop iteration
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'patch']);
+const READ_ONLY_TOOLS = new Set<string>([
+    'read_file', 'list_directory', 'search_mod_files',
+    'get_file_context', 'document_symbols', 'workspace_symbols',
+    'query_scope', 'query_types', 'query_rules', 'query_references',
+    'get_diagnostics', 'get_completion_at',
+    // validate_code is intentionally omitted: it modifies the LSP game state temporarily
+]);
+
 export class AgentRunner {
     constructor(
         private aiService: AIService,
@@ -595,8 +606,6 @@ export class AgentRunner {
             // ── Deduplicate file-write calls ──────────────────────────────────
             // If the model emitted multiple write/edit calls targeting the same file
             // in one response, only keep the LAST one for each file.
-            // L6 Fix: include multiedit in the WRITE_TOOLS set (it also modifies files).
-            const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'patch']);
             const lastWriteIndexByFile = new Map<string, number>();
             for (let i = 0; i < toolCalls.length; i++) {
                 if (!WRITE_TOOLS.has(toolCalls[i].function.name)) continue;
@@ -609,17 +618,7 @@ export class AgentRunner {
             }
 
             // ── Execute tool calls (parallel for read-only, serial for writes) ──
-            // Read-only tools can safely run in parallel; write tools are kept serial
-            // because they may show confirm dialogs or interact with the UI.
-            // M6 Fix: validate_code removed from READ_ONLY_TOOLS — it calls UpdateFile
-            // which temporarily mutates the game AST and must not run concurrently.
-            const READ_ONLY_TOOLS = new Set<string>([
-                'read_file', 'list_directory', 'search_mod_files',
-                'get_file_context', 'document_symbols', 'workspace_symbols',
-                'query_scope', 'query_types', 'query_rules', 'query_references',
-                'get_diagnostics', 'get_completion_at',
-                // validate_code is intentionally omitted: it modifies the LSP game state temporarily
-            ]);
+            // Fix #9: WRITE_TOOLS and READ_ONLY_TOOLS are now module-level constants
 
             // Use pre-fetched provider info from outside the loop
             const useDsmlToolRole = useDsmlToolRole0;
@@ -649,14 +648,13 @@ export class AgentRunner {
                 // so the AI knows to retry with properly formatted arguments.
                 if (toolArgsParseError) {
                     toolResults[i] = { ok: false, error: `Tool argument JSON parse failed — ${toolArgsParseError}. Please retry with valid JSON arguments.` };
-                    void toolCall;
+                    // Fix #10: toolCall unused in error path — no need for void statement
                     i++;
                     continue;
                 }
 
                 if (READ_ONLY_TOOLS.has(toolName)) {
                     // Collect a batch of consecutive read-only tools (skip any with parse errors)
-                    const batchStart = i;
                     const batch: Array<{ idx: number; toolName: AgentToolName; toolArgs: Record<string, unknown>; toolCall: typeof toolCalls[0] }> = [];
                     while (i < parsedCalls.length && READ_ONLY_TOOLS.has(parsedCalls[i].toolName) && !parsedCalls[i].toolArgsParseError) {
                         batch.push({ idx: i, ...parsedCalls[i] });
@@ -670,7 +668,7 @@ export class AgentRunner {
                             toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
                         }
                     }));
-                    void batchStart; // suppress unused-var warning
+                    // Fix #10: batchStart was only used by void — removed
                 } else {
                     // Write or interactive tool — execute serially
                     const callIndex = i;
@@ -693,7 +691,7 @@ export class AgentRunner {
                     } catch (e) {
                         toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
                     }
-                    void toolCall;
+                    // Fix #10: removed void toolCall — variable unused in this branch
                     i++;
                 }
             }
@@ -703,9 +701,9 @@ export class AgentRunner {
 
             // Emit results in original order and feed back to AI
             for (let j = 0; j < parsedCalls.length; j++) {
-                const { toolName, toolArgs: _ta, toolCall } = parsedCalls[j];
+                // Fix #10: use _prefix for intentionally unused destructured vars
+                const { toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j];
                 const toolResult = toolResults[j];
-                void _ta;
 
                 emitStep({ type: 'tool_result', content: `工具结果: ${toolName}`, toolName, toolResult, timestamp: Date.now() });
 

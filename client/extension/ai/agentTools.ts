@@ -1770,7 +1770,10 @@ export class AgentToolExecutor {
     private async getLspDiagnosticsForFile(filePath: string): Promise<import('./types').ValidationError[]> {
         try {
             const uri = vs.Uri.file(filePath);
-            try { void vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
+            // Fix #6: await openTextDocument instead of fire-and-forget (void).
+            // VS Code needs the file loaded in its document model for diagnostics to appear.
+            // Already-open files return immediately without duplication.
+            try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
             await new Promise<void>((resolve) => {
                 const t = setTimeout(resolve, 2000);
                 const sub = vs.languages.onDidChangeDiagnostics((e) => {

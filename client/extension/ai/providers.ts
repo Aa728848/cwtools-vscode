@@ -463,6 +463,21 @@ export function isModelVisionCapable(model: string): boolean {
  *   Zhipu:     https://bigmodel.cn / z.ai
  *   DashScope: https://www.alibabacloud.com/help/en/model-studio/
  */
+/**
+ * Fix #4: Single source of truth for thinking models that CANNOT disable thinking.
+ * Used by both chatPanel.ts (settings UI filter) and inlineProvider.ts (blocking).
+ * Models on this list are too slow for inline completion.
+ */
+export const ALWAYS_THINKING_PREFIXES: string[] = [
+    'deepseek-reasoner', 'deepseek-r1', 'DeepSeek-R1',
+    'o1', 'o3', 'o4-mini',
+    'glm-z1', 'GLM-Z1',
+    'gemini-2.5-pro', 'gemini-3.1-pro',
+    'minimax-m2',
+    'QwQ', 'qwq',
+    'Thinking', 'thinking',
+];
+
 export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // ── OpenAI ──────────────────────────────────────────────────────────────────
     'gpt-5.4':         1000000,

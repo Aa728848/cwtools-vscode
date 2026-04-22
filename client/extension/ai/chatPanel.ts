@@ -61,6 +61,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // The mutable `_previewContent` field is updated before each diff view.
     private _previewContent = '';
     private _previewProviderRegistration?: vs.Disposable;
+    /** Fix #2: disposables for WebView event listeners, cleaned up on dispose() */
+    private _viewDisposables: vs.Disposable[] = [];
 
     constructor(
         private extensionUri: vs.Uri,
@@ -94,6 +96,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.view = undefined;
         }
         this._messageFileSnapshots.clear();
+        // Fix #2: dispose WebView event listeners
+        this._viewDisposables.forEach(d => d.dispose());
+        this._viewDisposables = [];
     }
 
     resolveWebviewView(
@@ -111,16 +116,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         webviewView.webview.html = this.getHtmlContent(webviewView.webview);
 
         // Handle messages from WebView
-        webviewView.webview.onDidReceiveMessage((msg: WebViewMessage) => {
-            this.handleWebViewMessage(msg);
-        });
+        // Fix #2: capture disposables so they are released with the view
+        webviewView.webview.onDidReceiveMessage(
+            (msg: WebViewMessage) => { this.handleWebViewMessage(msg); },
+            this,
+            this._viewDisposables
+        );
 
         // ── Restore state when panel becomes visible again ────────────────────
-        webviewView.onDidChangeVisibility(() => {
-            if (webviewView.visible) {
-                this._restoreViewState();
-            }
-        });
+        webviewView.onDidChangeVisibility(
+            () => { if (webviewView.visible) this._restoreViewState(); },
+            this,
+            this._viewDisposables
+        );
 
         // Send topic list and initial model data on load
         this.sendTopicList();
@@ -208,7 +216,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.switchMode(msg.mode);
                 break;
             case 'retractMessage':
-                this.retractMessage(msg.messageIndex);
+                // Fix #3: retractMessage is async — must await to catch errors
+                await this.retractMessage(msg.messageIndex);
                 break;
             case 'confirmWriteFile':
                 this.resolveWriteConfirmation(msg.messageId, true);
@@ -293,15 +302,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         const dynamicContexts = vscodeConfig.get<Record<string, number>>('dynamicModelsContext') || {};
 
-        // Thinking models that can't disable thinking — useless for inline completion
-        const thinkingModelPrefixes = [
-            'deepseek-reasoner', 'deepseek-r1', 'DeepSeek-R1',
-            'o1', 'o3', 'o4-mini',
-            'glm-z1', 'GLM-Z1',
-            'gemini-2.5-pro', 'gemini-3.1-pro',
-            'QwQ', 'qwq',
-            'Thinking', 'thinking',
-        ];
+        // Fix #4: import shared list from providers.ts instead of maintaining a duplicate
+        const { ALWAYS_THINKING_PREFIXES } = await import('./providers');
 
         this.postMessage({
             type: 'settingsData',
@@ -315,7 +317,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             showPanel,
             // Merge static MODEL_CONTEXT_TOKENS with any dynamic contexts grabbed from OpenRouter/etc.
             modelContextTokens: { ...MODEL_CONTEXT_TOKENS, ...dynamicContexts },
-            thinkingModelPrefixes,
+            thinkingModelPrefixes: ALWAYS_THINKING_PREFIXES,
         });
     }
 
@@ -821,14 +823,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Save plan as .md for export, and emit renderPlan so the webview can
      * display an interactive inline annotation interface.
      */
-    private savePlanFile(planText: string, userPrompt: string): void {
+    // Fix #12: async to avoid blocking extension host
+    private async savePlanFile(planText: string, userPrompt: string): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────
         const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         let filePath = '';
-        let relPath = '';
         if (wsRoot) {
             const planDir = path.join(wsRoot, '.cwtools-ai');
-            if (!fs.existsSync(planDir)) fs.mkdirSync(planDir, { recursive: true });
+            await fs.promises.mkdir(planDir, { recursive: true });
             const slug = userPrompt
                 .replace(/[^\u4e00-\u9fa5a-z0-9]/gi, '_')
                 .substring(0, 30)
@@ -837,10 +839,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
             const fileName = `plan_${slug}_${timestamp}.md`;
             filePath = path.join(planDir, fileName);
-            relPath = path.relative(wsRoot, filePath).replace(/\\/g, '/');
             // Register plan file in the current message snapshot so retract can delete it
             this._recordFileSnapshot(filePath);
-            fs.writeFileSync(filePath, '\uFEFF' + planText, 'utf-8');
+            await fs.promises.writeFile(filePath, '\uFEFF' + planText, 'utf-8');
         }
         // ── Auto-open plan file beside the chat panel ────────────────────────
         if (filePath) {
@@ -915,7 +916,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         });
     }
 
-    resolveWriteConfirmation(messageId: string, confirmed: boolean): void {
+    async resolveWriteConfirmation(messageId: string, confirmed: boolean): Promise<void> {
         const resolver = this.pendingWriteResolvers.get(messageId);
         if (resolver) {
             this.pendingWriteResolvers.delete(messageId);
@@ -939,8 +940,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 });
             });
 
-            // Delete temp file
-            try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+            // Fix #5: async delete to avoid blocking extension host
+            try { await fs.promises.unlink(tempPath); } catch { /* ignore */ }
         }
     }
 

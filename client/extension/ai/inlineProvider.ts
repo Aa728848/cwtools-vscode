@@ -18,27 +18,12 @@ import * as vs from 'vscode';
 import type { ChatCompletionResponse } from './types';
 import { AIService } from './aiService';
 import { PromptBuilder } from './promptBuilder';
-import { getProvider, getEffectiveModel } from './providers';
+import { getProvider, getEffectiveModel, ALWAYS_THINKING_PREFIXES } from './providers';
 
 // ─── Thinking-model detection ────────────────────────────────────────────────
 
-/**
- * Models that use extended thinking / chain-of-thought and cannot disable it.
- * These are too slow for inline completion and must be blocked.
- * Matches by prefix — e.g. 'deepseek-reasoner' matches 'deepseek-reasoner-*'.
- */
-const THINKING_MODEL_PREFIXES: string[] = [
-    'deepseek-reasoner',      // DeepSeek R1 / Reasoner — always thinks
-    'deepseek-r1',            // Used by OpenRouter and others
-    'DeepSeek-R1',            // Used by SiliconFlow
-    'o1',                     // OpenAI o1 (reasoning model, no disable)
-    'o3',                     // OpenAI o3 (reasoning model)
-    'o4-mini',                // OpenAI o4-mini (reasoning model)
-    'glm-z1',                 // GLM Z1 Flash — always-on reasoning (like R1)
-    'gemini-2.5-pro',         // Gemini 2.5 Pro — thinking cannot be disabled
-    'gemini-3.1-pro',         // Gemini 3.1 Pro — thinking cannot be disabled
-    'minimax-m2',             // MiniMax M2/M2.1/M2.5/M2.7 — always emits <think>, no API toggle
-];
+// Fix #4: Use shared ALWAYS_THINKING_PREFIXES from providers.ts (single source of truth)
+const THINKING_MODEL_PREFIXES = ALWAYS_THINKING_PREFIXES;
 
 /**
  * Models that support thinking but can disable it via API parameters.
@@ -147,17 +132,28 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
     /** AbortController for the current in-flight AI request */
     private currentAbortController: AbortController | null = null;
 
+    /** Fix #1: collect event Disposables for proper cleanup */
+    private _disposables: vs.Disposable[] = [];
+
     constructor(
         private aiService: AIService,
         private promptBuilder: PromptBuilder
     ) {
-        // Watch for configuration changes
-        vs.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('cwtools.ai')) {
-                this.updateEnabled();
-            }
-        });
+        // Watch for configuration changes — Fix #1: capture Disposable
+        this._disposables.push(
+            vs.workspace.onDidChangeConfiguration((e) => {
+                if (e.affectsConfiguration('cwtools.ai')) {
+                    this.updateEnabled();
+                }
+            })
+        );
         this.updateEnabled();
+    }
+
+    /** Fix #1: release event listeners */
+    dispose(): void {
+        this._disposables.forEach(d => d.dispose());
+        this._disposables = [];
     }
 
     private updateEnabled(): void {

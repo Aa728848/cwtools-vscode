@@ -160,12 +160,12 @@
 			},
 			{
 				"command": "cwtools.ai.configure",
-				"title": "Configure AI Provider",
+				"title": "%commands.cwtools.ai.configure%",
 				"category": "CWTools AI"
 			},
 			{
 				"command": "cwtools.ai.openChat",
-				"title": "Open AI Chat",
+				"title": "%commands.cwtools.ai.openChat%",
 				"category": "CWTools AI",
 				"icon": "$(sparkle)"
 			}
@@ -346,35 +346,47 @@
 					"scope": "window",
 					"type": "boolean",
 					"default": false,
-					"description": "Enable AI-assisted code generation and completion"
+					"description": "%configuration.cwtools.ai.enabled.description%"
 				},
 				"cwtools.ai.provider": {
 					"scope": "window",
 					"type": "string",
 					"enum": ["openai", "claude", "deepseek", "minimax", "glm", "qwen", "ollama", "custom"],
-					"enumDescriptions": ["OpenAI (GPT-5.4)", "Claude (Anthropic)", "DeepSeek", "MiniMax", "GLM (智谱)", "Qwen (通义千问)", "Ollama (本地模型)", "Custom OpenAI-compatible"],
+					"enumDescriptions": [
+						"%configuration.cwtools.ai.provider.enum.openai%",
+						"%configuration.cwtools.ai.provider.enum.claude%",
+						"%configuration.cwtools.ai.provider.enum.deepseek%",
+						"%configuration.cwtools.ai.provider.enum.minimax%",
+						"%configuration.cwtools.ai.provider.enum.glm%",
+						"%configuration.cwtools.ai.provider.enum.qwen%",
+						"%configuration.cwtools.ai.provider.enum.ollama%",
+						"%configuration.cwtools.ai.provider.enum.custom%"
+					],
 					"default": "openai",
-					"description": "AI service provider"
+					"description": "%configuration.cwtools.ai.provider.description%"
 				},
 				"cwtools.ai.model": {
 					"scope": "window",
 					"type": "string",
 					"default": "",
-					"description": "AI model name (leave empty for provider default)"
+					"description": "%configuration.cwtools.ai.model.description%"
 				},
 				"cwtools.ai.endpoint": {
 					"scope": "window",
 					"type": "string",
 					"default": "",
-					"description": "Custom API endpoint URL (only for 'custom'/'ollama' provider or endpoint override)"
+					"description": "%configuration.cwtools.ai.endpoint.description%"
 				},
 				"cwtools.ai.agentFileWriteMode": {
 					"scope": "window",
 					"type": "string",
 					"enum": ["confirm", "auto"],
-					"enumDescriptions": ["写操作前弹出 diff 确认（默认，安全）", "自动写入，无需确认（高级用户）"],
+					"enumDescriptions": [
+						"%configuration.cwtools.ai.agentFileWriteMode.enum.confirm%",
+						"%configuration.cwtools.ai.agentFileWriteMode.enum.auto%"
+					],
 					"default": "confirm",
-					"description": "Agent 文件写入模式：confirm=弹出diff确认后写入，auto=直接写入"
+					"description": "%configuration.cwtools.ai.agentFileWriteMode.description%"
 				},
 				"cwtools.ai.maxRetries": {
 					"scope": "window",
@@ -382,7 +394,7 @@
 					"default": 3,
 					"minimum": 1,
 					"maximum": 5,
-					"description": "Maximum validation-retry rounds for generated code"
+					"description": "%configuration.cwtools.ai.maxRetries.description%"
 				},
 				"cwtools.ai.maxContextTokens": {
 					"scope": "window",
@@ -390,39 +402,45 @@
 					"default": 0,
 					"minimum": 0,
 					"maximum": 10000000,
-					"description": "Override max context window size (tokens). 0 = use provider default. Useful for Ollama or custom providers."
+					"description": "%configuration.cwtools.ai.maxContextTokens.description%"
 				},
 				"cwtools.ai.inlineCompletion.enabled": {
 					"scope": "window",
 					"type": "boolean",
 					"default": false,
-					"description": "Enable AI inline code completion"
+					"description": "%configuration.cwtools.ai.inlineCompletion.enabled.description%"
 				},
 				"cwtools.ai.inlineCompletion.debounceMs": {
 					"scope": "window",
 					"type": "integer",
-					"default": 1500,
-					"minimum": 500,
+					"default": 500,
+					"minimum": 200,
 					"maximum": 5000,
-					"description": "Delay before triggering inline AI completion (ms)"
+					"description": "%configuration.cwtools.ai.inlineCompletion.debounceMs.description%"
+				},
+				"cwtools.ai.inlineCompletion.overlapStripping": {
+					"scope": "window",
+					"type": "boolean",
+					"default": true,
+					"description": "%configuration.cwtools.ai.inlineCompletion.overlapStripping.description%"
 				},
 				"cwtools.ai.inlineCompletion.provider": {
 					"scope": "window",
 					"type": "string",
 					"default": "",
-					"description": "Provider for inline completion (leave empty to use main provider)"
+					"description": "%configuration.cwtools.ai.inlineCompletion.provider.description%"
 				},
 				"cwtools.ai.inlineCompletion.model": {
 					"scope": "window",
 					"type": "string",
 					"default": "",
-					"description": "Model for inline completion (can differ from chat model, e.g. use a faster model)"
+					"description": "%configuration.cwtools.ai.inlineCompletion.model.description%"
 				},
 				"cwtools.ai.inlineCompletion.endpoint": {
 					"scope": "window",
 					"type": "string",
 					"default": "",
-					"description": "Custom endpoint for inline completion provider (leave empty to use provider default)"
+					"description": "%configuration.cwtools.ai.inlineCompletion.endpoint.description%"
 				}
 			}
 		},

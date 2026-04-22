@@ -83,6 +83,7 @@ export interface AIUserConfig {
         provider: string;
         model: string;
         endpoint: string;
+        overlapStripping: boolean;
     };
 }
 
@@ -691,5 +692,6 @@ export interface PanelSettings {
         model: string;
         endpoint: string;
         debounceMs: number;
+        overlapStripping: boolean;
     };
 }

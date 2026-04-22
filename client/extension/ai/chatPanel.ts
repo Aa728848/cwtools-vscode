@@ -272,6 +272,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 model: config.inlineCompletion.model,
                 endpoint: config.inlineCompletion.endpoint,
                 debounceMs: config.inlineCompletion.debounceMs,
+                overlapStripping: config.inlineCompletion.overlapStripping,
             },
         };
 
@@ -335,6 +336,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             await cfg.update('inlineCompletion.model', settings.inlineCompletion.model, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.endpoint', settings.inlineCompletion.endpoint, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
         }
         vs.window.showInformationMessage('Eddy CWTool Code 设置已保存');
         // Immediately push fresh settings data (with updated hasKey) back to the WebView
@@ -1901,7 +1903,11 @@ body.general-mode .mode-indicator { color: #c792ea; }
                 </div>
                 <div class="settings-group">
                     <label class="settings-label">防抖延迟 (ms)</label>
-                    <input class="settings-input" id="inlineDebounce" type="number" min="100" step="100" placeholder="1500" />
+                    <input class="settings-input" id="inlineDebounce" type="number" min="100" step="100" placeholder="500" />
+                </div>
+                <div class="settings-toggle-row" style="margin-top:12px;">
+                    <span class="settings-toggle-label">防重叠代码修剪 (Overlap Stripping)</span>
+                    <label class="toggle-switch"><input type="checkbox" id="inlineOverlapStripping"><span class="toggle-track"></span></label>
                 </div>
             </div>
         </div>

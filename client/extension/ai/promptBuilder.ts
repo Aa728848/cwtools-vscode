@@ -478,6 +478,7 @@ Rules:
         cursorLine: number;
         cursorColumn: number;
         filePath: string;
+        lspSuggestions?: string[];
     }): ChatMessage[] {
         const lines = options.fileContent.split('\n');
         const startLine = Math.max(0, options.cursorLine - 10);
@@ -505,6 +506,10 @@ Rules:
             }
         }
 
+        const lspHints = options.lspSuggestions && options.lspSuggestions.length > 0 
+            ? `\nVALID IDENTIFIERS (from Language Server):\n${options.lspSuggestions.join(' | ')}\nYou MUST choose from these identifiers if applicable to avoid hallucination.`
+            : '';
+
         const prompt = [
             `File: ${path.basename(options.filePath)}`,
             blockContext,
@@ -512,6 +517,7 @@ Rules:
             codeBefore,
             `\n[CURSOR HERE - generate next line(s)]`,
             linesAfter ? `\nCode after cursor:\n${linesAfter}` : '',
+            lspHints,
         ].filter(Boolean).join('\n');
 
         return [

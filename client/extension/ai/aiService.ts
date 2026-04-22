@@ -124,10 +124,11 @@ export class AIService {
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm'),
             inlineCompletion: {
                 enabled: cfg.get<boolean>('inlineCompletion.enabled', false),
-                debounceMs: cfg.get<number>('inlineCompletion.debounceMs', 1500),
+                debounceMs: cfg.get<number>('inlineCompletion.debounceMs', 500),
                 provider: cfg.get<string>('inlineCompletion.provider', ''),
                 model: cfg.get<string>('inlineCompletion.model', ''),
                 endpoint: cfg.get<string>('inlineCompletion.endpoint', ''),
+                overlapStripping: cfg.get<boolean>('inlineCompletion.overlapStripping', true),
             },
         };
     }

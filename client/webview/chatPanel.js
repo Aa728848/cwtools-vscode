@@ -1586,8 +1586,10 @@
         const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
         document.getElementById('settingsCtx').value = initCtx;
         document.getElementById('inlineEnabled').checked = current.inlineCompletion?.enabled??false;
+        const overlapEl = document.getElementById('inlineOverlapStripping');
+        if (overlapEl) overlapEl.checked = current.inlineCompletion?.overlapStripping ?? true;
         document.getElementById('inlineEndpoint').value = current.inlineCompletion?.endpoint||'';
-        document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs||1500;
+        document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs||500;
         document.getElementById('agentWriteMode').value = current.agentFileWriteMode||'confirm';
         // Brave Search API key — show masked placeholder if already set
         const braveKeyEl = document.getElementById('braveSearchApiKey');
@@ -1756,7 +1758,8 @@
                 provider: document.getElementById('inlineProvider').value,
                 model: document.getElementById('inlineModel').value.trim(),
                 endpoint: document.getElementById('inlineEndpoint').value.trim(),
-                debounceMs: parseInt(document.getElementById('inlineDebounce').value)||1500,
+                debounceMs: parseInt(document.getElementById('inlineDebounce').value)||500,
+                overlapStripping: document.getElementById('inlineOverlapStripping')?.checked ?? true,
             },
         }});
     }

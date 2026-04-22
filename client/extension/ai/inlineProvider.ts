@@ -117,12 +117,34 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
     ): Promise<vs.InlineCompletionItem[] | undefined> {
         const config = this.aiService.getConfig();
 
+        let lspSuggestions: string[] = [];
+        try {
+            const completions = await vs.commands.executeCommand<vs.CompletionList>(
+                'vscode.executeCompletionItemProvider',
+                document.uri,
+                position
+            );
+            if (completions && completions.items) {
+                const invalidKinds = [
+                    vs.CompletionItemKind.Snippet,
+                    vs.CompletionItemKind.Keyword
+                ];
+                lspSuggestions = completions.items
+                    .filter(item => item.kind === undefined || !invalidKinds.includes(item.kind))
+                    .map(item => typeof item.label === 'string' ? item.label : item.label.label)
+                    .slice(0, 50);
+            }
+        } catch (e) {
+            // ignore
+        }
+
         // Build the lightweight inline prompt
         const messages = this.promptBuilder.buildInlinePrompt({
             fileContent: document.getText(),
             cursorLine: position.line,
             cursorColumn: position.character,
             filePath: document.uri.fsPath,
+            lspSuggestions: lspSuggestions.length > 0 ? lspSuggestions : undefined
         });
 
         // Determine provider and model for inline completion
@@ -151,6 +173,22 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 .replace(/^```\w*\n?/, '')
                 .replace(/\n?```$/, '')
                 .trim();
+
+            // Overlap stripping
+            if (config.inlineCompletion.overlapStripping) {
+                const lineSuffix = document.lineAt(position.line).text.substring(position.character);
+                if (lineSuffix) {
+                    const firstLine = completionText.split('\n')[0];
+                    for (let i = 0; i < firstLine.length; i++) {
+                        const overlapCandidate = firstLine.slice(i);
+                        if (overlapCandidate.trim().length === 0) continue;
+                        if (lineSuffix.startsWith(overlapCandidate)) {
+                            completionText = completionText.slice(0, i);
+                            break;
+                        }
+                    }
+                }
+            }
 
             if (completionText.length === 0) return undefined;
 

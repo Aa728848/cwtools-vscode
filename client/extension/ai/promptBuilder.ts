@@ -311,13 +311,15 @@ ${STELLARIS_KNOWLEDGE}`;
 
 // ─── Inline Completion Prompt ─────────────────────────────────────────────────
 
-const INLINE_SYSTEM_PROMPT = `You are a Stellaris PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the context. No explanations, no markdown, no code fences. Output raw PDXScript only.
+const INLINE_SYSTEM_PROMPT = `You are a Stellaris PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the cursor position. No explanations, no markdown, no code fences. Output raw PDXScript only.
 
 Rules:
 - Booleans: yes/no (never true/false)
 - Key = value format
 - Indent with tabs to match context
 - Stay within the current scope
+- NEVER repeat text that already exists before the cursor (the line prefix is provided)
+- Output ONLY the new text to insert at the cursor position
 `;
 
 // ─── Model-specific instruction supplements ───────────────────────────────────
@@ -484,7 +486,15 @@ Rules:
         const startLine = Math.max(0, options.cursorLine - 15);
         const endLine = options.cursorLine;
 
-        const codeBefore = lines.slice(startLine, endLine + 1).join('\n');
+        // Split cursor line into prefix (before cursor) and suffix (after cursor)
+        const cursorLineText = lines[endLine] ?? '';
+        const linePrefix = cursorLineText.substring(0, options.cursorColumn);
+        const lineSuffix = cursorLineText.substring(options.cursorColumn);
+
+        // Code before cursor line (not including the cursor line itself)
+        const codeBefore = endLine > startLine
+            ? lines.slice(startLine, endLine).join('\n')
+            : '';
         const linesAfter = lines.slice(endLine + 1, endLine + 6).join('\n');
 
         // Detect current block context — build a scope chain (e.g. "planet_event.option.trigger")
@@ -513,9 +523,10 @@ Rules:
         const prompt = [
             `File: ${path.basename(options.filePath)}`,
             blockContext,
-            `\nCode before cursor:`,
-            codeBefore,
-            `\n[CURSOR HERE - generate next line(s)]`,
+            codeBefore ? `\nCode before cursor:\n${codeBefore}` : '',
+            `\nCursor line prefix (already typed): "${linePrefix}"`,
+            lineSuffix.trim() ? `Cursor line suffix (already exists): "${lineSuffix}"` : '',
+            `\n[CURSOR HERE — continue from the prefix above. Do NOT repeat the prefix.]`,
             linesAfter ? `\nCode after cursor:\n${linesAfter}` : '',
             lspHints,
         ].filter(Boolean).join('\n');

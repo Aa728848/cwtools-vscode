@@ -35,6 +35,7 @@ const THINKING_MODEL_PREFIXES: string[] = [
     'glm-z1',                 // GLM Z1 Flash — always-on reasoning (like R1)
     'gemini-2.5-pro',         // Gemini 2.5 Pro — thinking cannot be disabled
     'gemini-3.1-pro',         // Gemini 3.1 Pro — thinking cannot be disabled
+    'minimax-m2',             // MiniMax M2/M2.1/M2.5/M2.7 — always emits <think>, no API toggle
 ];
 
 /**
@@ -351,11 +352,33 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 .trim();
 
             // Strip <think>...</think> blocks if the model still outputs them
+            // Also handle unclosed <think> (truncated by max_tokens)
             completionText = completionText
                 .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
+                .replace(/<think>[\s\S]*$/g, '')  // unclosed think at end
                 .trim();
 
-            // Overlap stripping
+            // ── Prefix dedup: strip line prefix if AI repeated it ──
+            // AI sometimes echoes the current line prefix (e.g. "limit = {" when cursor is after "limit = {")
+            const linePrefix = document.lineAt(position.line).text.substring(0, position.character);
+            const trimmedPrefix = linePrefix.trimStart();
+            if (trimmedPrefix.length > 0) {
+                // Check if completion starts with the full prefix (or its trimmed version)
+                if (completionText.startsWith(trimmedPrefix)) {
+                    completionText = completionText.substring(trimmedPrefix.length);
+                } else if (completionText.startsWith(linePrefix)) {
+                    completionText = completionText.substring(linePrefix.length);
+                }
+                // Also check first line only for prefix echo
+                const firstNewline = completionText.indexOf('\n');
+                const firstLine = firstNewline >= 0 ? completionText.substring(0, firstNewline) : completionText;
+                if (firstLine.trim().length === 0 && firstNewline >= 0) {
+                    // AI output started with a blank first line after dedup — skip it
+                    completionText = completionText.substring(firstNewline + 1);
+                }
+            }
+
+            // ── Overlap stripping: prevent collision with existing suffix after cursor ──
             if (config.inlineCompletion.overlapStripping) {
                 const lineSuffix = document.lineAt(position.line).text.substring(position.character);
                 if (lineSuffix) {

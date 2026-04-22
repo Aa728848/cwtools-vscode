@@ -227,6 +227,9 @@ type Server(client: ILanguageClient) =
     let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) : Async<unit> =
         async {
             let name = getPathFromDoc doc
+            // Invalidate semantic/codelens cache for THIS file only (not globally)
+            semanticTokensCache.Remove(doc.LocalPath) |> ignore
+            codeLensCache.Remove(doc.LocalPath) |> ignore
 
             if name.EndsWith(".yml") then
                 delayedLocUpdate <- true
@@ -319,7 +322,11 @@ type Server(client: ILanguageClient) =
                     for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
 
-                // Clear SemanticTokens/CodeLens caches — effect/trigger sets may have changed
+                // Effect/trigger sets may have changed — invalidate all semantic caches.
+                // Unlike the old Clear() which caused VSCode to lose all highlighting,
+                // we now keep stale entries: SemanticTokensFull will return cached data
+                // when the entity is not yet rebuilt, then VSCode re-requests once the
+                // AST is ready. We clear codeLens because it's cheaper to recompute.
                 semanticTokensCache.Clear()
                 codeLensCache.Clear()
             finally
@@ -1926,7 +1933,12 @@ type Server(client: ILanguageClient) =
                             if e.filepath = filePath then Some e else None)
 
                     match entityOpt with
-                    | None -> None
+                    | None ->
+                        // Entity not yet available (AST rebuild in progress).
+                        // Return stale cached data to keep highlighting stable.
+                        match semanticTokensCache.TryGetValue(filePath) with
+                        | true, (_, cachedData) -> Some { data = cachedData }
+                        | _ -> None
                     | Some entity ->
                         let tokens = ResizeArray<struct (int * int * int * int * int)>()
                         let fileContent = fileText

@@ -34,7 +34,7 @@ function contentToString(content: string | ContentPart[] | null | undefined): st
 import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder } from './promptBuilder';
-import { getProvider } from './providers';
+import { getProvider, isModelVisionCapable } from './providers';
 
 // Maximum tool-call iterations per generation (matches OpenCode's permissive default)
 const MAX_TOOL_ITERATIONS = 50;
@@ -211,13 +211,34 @@ export class AgentRunner {
             conversationHistory, emitStep, options, tokenAccumulator
         );
 
+        // Vision capability check: if the active provider doesn't support image input,
+        // silently drop image attachments and emit a warning so the user knows.
+        const _cfgVision = this.aiService.getConfig();
+        const _providerIdVision = options?.providerId ?? _cfgVision.provider;
+        const _providerVision = getProvider(_providerIdVision);
+        const modelVision = _cfgVision.model || _providerVision.defaultModel;
+        const visionSupported = _providerVision.supportsVision && isModelVisionCapable(modelVision);
+
+        let effectiveImages = images && images.length > 0 ? images : undefined;
+        if (effectiveImages && !visionSupported) {
+            emitStep({
+                type: 'error',
+                content: `⚠️ 当前提供商 (${_providerVision.name}) 不支持图片输入，图片附件已被忽略。` +
+                    (_providerIdVision === 'minimax-token-plan'
+                        ? '\n提示: MiniMax Token Plan 的 Anthropic 兼容接口明确不支持图片 (官方文档)。\n若需发送图片，请切换到 "MiniMax (按量计费)" 提供商。'
+                        : '\n请检查您所选模型是否支持视觉功能。'),
+                timestamp: Date.now(),
+            });
+            effectiveImages = undefined; // drop images, proceed text-only
+        }
+
         // Build the user turn: multimodal ContentPart[] when images are provided,
         // otherwise a plain string (keeps token overhead minimal for text-only turns)
         const userContent: string | ContentPart[] =
-            images && images.length > 0
+            effectiveImages && effectiveImages.length > 0
                 ? [
                     { type: 'text' as const, text: userMessage },
-                    ...images.map(url => ({
+                    ...effectiveImages.map(url => ({
                         type: 'image_url' as const,
                         image_url: { url, detail: 'auto' as const },
                     })),

@@ -284,25 +284,55 @@
         area.appendChild(badge);
     }
 
+    // ── Image compression helper ───────────────────────────────────────────────
+    // Unifies all image input (paste / drag / file picker) to a clean JPEG data URL.
+    // Max dimension: 1024px  |  JPEG quality: 0.85  |  Output: single-line string.
+    // This ensures:
+    //   • No base64 line-breaks that break Claude / GLM regex matching on the backend
+    //   • Consistent "data:image/jpeg;base64,..." format accepted by all providers
+    //   • Payload is always ≤ ~400 KB (well within postMessage limits)
+    function compressImage(file, callback) {
+        const reader = new FileReader();
+        reader.onload = ev => {
+            const original = ev.target && ev.target.result;
+            if (typeof original !== 'string') return;
+            const img = new Image();
+            img.onload = () => {
+                const MAX = 1024;
+                let w = img.width, h = img.height;
+                if (w > MAX || h > MAX) {
+                    if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
+                    else        { w = Math.round(w * MAX / h); h = MAX; }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+                // toDataURL always returns a single-line string — no embedded newlines
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                callback(dataUrl);
+            };
+            img.onerror = () => callback(original); // fallback: use original if img fails
+            img.src = original;
+        };
+        reader.onerror = () => {};  // silently ignore unreadable files
+        reader.readAsDataURL(file);
+    }
+
     // ── Image paste (Ctrl+V or paste event on input) ───────────────────────────
     // Supports multiple images per paste (no break limit)
     input.addEventListener('paste', e => {
         const items = e.clipboardData && e.clipboardData.items;
         if (!items) return;
-        let added = 0;
         for (const item of items) {
             if (item.type.startsWith('image/')) {
                 e.preventDefault();
                 const blob = item.getAsFile();
                 if (!blob) continue;
-                const reader = new FileReader();
-                reader.onload = ev => {
-                    const dataUrl = ev.target.result;
+                compressImage(blob, dataUrl => {
                     pendingImages.push(dataUrl);
                     addImagePreview(dataUrl);
-                };
-                reader.readAsDataURL(blob);
-                added++;
+                });
             }
         }
     });
@@ -322,13 +352,10 @@
         if (!files) return;
         for (const file of files) {
             if (!file.type.startsWith('image/')) continue;
-            const reader = new FileReader();
-            reader.onload = ev => {
-                const dataUrl = ev.target.result;
+            compressImage(file, dataUrl => {
                 pendingImages.push(dataUrl);
                 addImagePreview(dataUrl);
-            };
-            reader.readAsDataURL(file);
+            });
         }
     });
 
@@ -345,12 +372,10 @@
         imgPickBtn.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', () => {
             for (const file of fileInput.files) {
-                const reader = new FileReader();
-                reader.onload = ev => {
-                    pendingImages.push(ev.target.result);
-                    addImagePreview(ev.target.result);
-                };
-                reader.readAsDataURL(file);
+                compressImage(file, dataUrl => {
+                    pendingImages.push(dataUrl);
+                    addImagePreview(dataUrl);
+                });
             }
             fileInput.value = '';
         });
@@ -382,7 +407,6 @@
         img.src = dataUrl;
         img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,0.1);cursor:zoom-in;transition:transform 0.15s;';
         img.title = '点击放大';
-        // M7 fix: actually open lightbox on click
         img.addEventListener('click', () => showImageLightbox(dataUrl));
         img.addEventListener('mouseenter', () => { img.style.transform = 'scale(1.07)'; });
         img.addEventListener('mouseleave', () => { img.style.transform = ''; });

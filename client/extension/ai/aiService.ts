@@ -401,20 +401,72 @@ export class AIService {
     }
 
     /**
+     * Strip image_url.detail from ContentPart[] messages.
+     *
+     * MiniMax (and several other Chinese-market providers) do NOT support the
+     * `detail` sub-field inside `image_url` objects — sending it causes error 2013
+     * ("invalid parameter"). The fix is to pass only { url } and drop `detail`.
+     *
+     * OpenAI, Claude, and Google all support `detail` natively, so we only strip
+     * for providers that are known NOT to support it.
+     */
+    private stripImageDetail(messages: import('./types').ChatMessage[]): import('./types').ChatMessage[] {
+        return messages.map(msg => {
+            if (!Array.isArray(msg.content)) return msg;
+            const cleaned = (msg.content as import('./types').ContentPart[]).map(part => {
+                if (part.type !== 'image_url') return part;
+                // Drop `detail` — destructure it away so JSON.stringify never sees it
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const { detail: _d, ...urlOnly } = part.image_url;
+                return { type: 'image_url' as const, image_url: urlOnly };
+            });
+            return { ...msg, content: cleaned };
+        });
+    }
+
+    /**
      * Strip parameters that specific providers do not support.
      * Returns a new request object with offending fields removed.
+     *
+     * Provider-specific quirks handled here:
+     *
+     * MiniMax (pay-as-you-go, OpenAI-compat endpoint):
+     *   - Does NOT accept `tool_choice` — causes error 2013
+     *   - Does NOT accept `image_url.detail` — causes error 2013 / "cannot read URL"
+     *   - Recommendation: send only { url } inside image_url objects
+     *
+     * GLM (Zhipu), Qwen (DashScope):
+     *   - `detail` field is NOT documented in their API specs; strip as a precaution
+     *     to avoid 400 / parameter-error responses on vision requests
+     *
+     * OpenAI, Gemini, Ollama, custom:
+     *   - Fully support both `url` and `detail` — pass through unchanged
      */
     private sanitizeRequest(providerId: string, request: ChatCompletionRequest): ChatCompletionRequest {
-        // MiniMax pay-as-you-go (OpenAI compat) does not accept tool_choice — error 2013
-        // MiniMax Token Plan (Anthropic compat) DOES support tool_choice, so skip it
-        // Qwen (DashScope) confirmed to support tool_choice — NOT stripped
-        // GLM, DeepSeek: standard OpenAI compat — NOT stripped
+        // ── Providers that reject image_url.detail ────────────────────────────
+        const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
+
+        // ── MiniMax pay-as-you-go: also strip tool_choice (error 2013) ────────
         if (providerId === 'minimax') {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { tool_choice, ...rest } = request as unknown as Record<string, unknown>;
             void tool_choice;
-            return rest as unknown as ChatCompletionRequest;
+            const sanitized = rest as unknown as ChatCompletionRequest;
+            // Also strip image_url.detail from message content parts
+            return {
+                ...sanitized,
+                messages: this.stripImageDetail(sanitized.messages),
+            };
         }
+
+        // ── GLM / Qwen: strip image_url.detail only ───────────────────────────
+        if (STRIP_IMAGE_DETAIL_PROVIDERS.has(providerId)) {
+            return {
+                ...request,
+                messages: this.stripImageDetail(request.messages),
+            };
+        }
+
         return request;
     }
     // ─── Private API callers ─────────────────────────────────────────────────

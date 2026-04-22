@@ -1831,7 +1831,7 @@ body.general-mode .mode-indicator { color: #c792ea; }
                     <option value="general">💬 General — 通用问答</option>
                 </select>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
-                <button class="img-pick-btn" id="imgPickBtn" title="上传图片（支持多选，也可粘贴或拖拽）">🖼</button>
+                <button class="img-pick-btn" id="imgPickBtn" title="上传图片">+</button>
             </div>
             <button class="send-btn" id="sendBtn" title="发送 (Enter)">↑</button>
         </div>

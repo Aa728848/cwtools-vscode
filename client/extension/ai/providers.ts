@@ -72,13 +72,16 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         // MiniMax M2/M2.5/M2.7 are natively multimodal (docs: minimax.io)
+        // IMPORTANT: MiniMax does NOT support image_url.detail (causes error 2013 / "cannot read URL").
+        //   aiService.sanitizeRequest() strips the `detail` field automatically for this provider.
+        // IMPORTANT: MiniMax does NOT support tool_choice — also stripped in sanitizeRequest.
         supportsVision: true,
     },
     'minimax-token-plan': {
         id: 'minimax-token-plan',
         name: 'MiniMax Token Plan',
         // Token Plan: Anthropic Messages API compatible endpoint
-        // Docs: https://platform.minimaxi.com/docs/api-reference/text-anthropic-api
+        // Docs: https://platform.minimax.io/docs/api-reference/text-anthropic-api
         endpoint: 'https://api.minimaxi.com/anthropic/v1',
         defaultModel: 'MiniMax-M2.7',
         models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
@@ -87,8 +90,10 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         maxContextTokens: 1000000,
         isOpenAICompatible: false,   // uses Anthropic Messages API
         toolCallStyle: 'openai',     // adapter normalises to openai format
-        // MiniMax M2 full series is natively multimodal
-        supportsVision: true,
+        // IMPORTANT: MiniMax Token Plan Anthropic-compat endpoint does NOT support image inputs.
+        // Official docs (2026-04): "Image and document type inputs are not currently supported"
+        // Use the pay-as-you-go 'minimax' provider (OpenAI-compat) if you need vision.
+        supportsVision: false,
     },
     glm: {
         id: 'glm',
@@ -251,7 +256,10 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gemini': true,
 
     // ── MiniMax ────────────────────────────────────────────────────────────────
-    // M2 series is natively multimodal (text + image + document).
+    // M2 series is natively multimodal (text + image + document) on the pay-as-you-go
+    // OpenAI-compat endpoint ('minimax' provider, api.minimax.chat).
+    // NOTE: The Token Plan Anthropic-compat endpoint ('minimax-token-plan') does NOT support
+    //   images — agentRunner guards against sending images to provider with supportsVision:false.
     // Listed models: MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5,
     //   MiniMax-M2.5-highspeed, MiniMax-M2.1, MiniMax-M2
     'MiniMax-M2': true,      // prefix covers M2, M2.1, M2.5, M2.7 and highspeed variants
@@ -557,9 +565,11 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
                     if (part.type === 'text') {
                         claudeContent.push({ type: 'text', text: part.text });
                     } else if (part.type === 'image_url') {
-                        // Convert data URL to Claude's base64 format
+                        // Convert data URL to Claude's base64 source format.
+                        // Regex accepts full MIME type charset (e.g. image/svg+xml, image/webp)
+                        // and does NOT anchor at $ to tolerate data URLs with no padding issues.
                         const url = part.image_url.url;
-                        const mediaMatch = url.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+                        const mediaMatch = url.match(/^data:(image\/[a-zA-Z+.-]+);base64,([A-Za-z0-9+/=]+)/);
                         if (mediaMatch) {
                             claudeContent.push({
                                 type: 'image',
@@ -568,6 +578,13 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
                                     media_type: mediaMatch[1],
                                     data: mediaMatch[2],
                                 },
+                            });
+                        }
+                        // If URL is an HTTPS URL (not data:), pass as url type instead
+                        else if (url.startsWith('http')) {
+                            claudeContent.push({
+                                type: 'image',
+                                source: { type: 'url', url },
                             });
                         }
                     }

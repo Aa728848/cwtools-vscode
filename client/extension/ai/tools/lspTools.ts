@@ -38,6 +38,37 @@ export class LspToolHandler {
     /** 5-second TTL cache for heavy read-only LSP commands */
     private lspReadCache = new Map<string, { data: unknown; expiresAt: number }>();
 
+    // ─── Concurrency limiter ─────────────────────────────────────────────────
+    // The CWTools LSP server is single-threaded (F# async event loop).
+    // When the AI agent fires many parallel read-only tool calls, flooding it
+    // with simultaneous requests causes queue saturation and deadlocks.
+    // This semaphore limits in-flight LSP requests to prevent overload.
+    private static readonly MAX_CONCURRENT_LSP = 2;
+    private lspInFlight = 0;
+    private lspQueue: Array<() => void> = [];
+
+    /** Acquire a slot in the LSP concurrency pool. Resolves when a slot is free. */
+    private acquireLspSlot(): Promise<void> {
+        if (this.lspInFlight < LspToolHandler.MAX_CONCURRENT_LSP) {
+            this.lspInFlight++;
+            return Promise.resolve();
+        }
+        return new Promise<void>(resolve => {
+            this.lspQueue.push(resolve);
+        });
+    }
+
+    /** Release a slot, allowing the next queued request to proceed. */
+    private releaseLspSlot(): void {
+        const next = this.lspQueue.shift();
+        if (next) {
+            // Don't decrement — the slot transfers directly to the next waiter
+            next();
+        } else {
+            this.lspInFlight--;
+        }
+    }
+
     constructor(
         private ctx: LspToolContext,
         private clientGetter: () => LanguageClient,
@@ -46,6 +77,62 @@ export class LspToolHandler {
 
     private get client(): LanguageClient {
         return this.clientGetter();
+    }
+
+    // ─── LSP request with timeout ─────────────────────────────────────────────
+
+    /** Default timeout for LSP requests (ms). */
+    private static readonly LSP_TIMEOUT_MS = 10_000;
+
+    /**
+     * Send an LSP workspace/executeCommand request with a timeout guard
+     * and concurrency control. Only MAX_CONCURRENT_LSP requests can be
+     * in-flight simultaneously; additional requests queue up.
+     */
+    private async lspRequest<T = any>(
+        command: string,
+        args: unknown[],
+        timeoutMs = LspToolHandler.LSP_TIMEOUT_MS,
+    ): Promise<T> {
+        await this.acquireLspSlot();
+        try {
+            const promise = this.client.sendRequest('workspace/executeCommand', {
+                command,
+                arguments: args,
+            });
+            const timeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(
+                    `LSP request "${command}" timed out after ${timeoutMs / 1000}s`
+                )), timeoutMs),
+            );
+            return await Promise.race([promise, timeout]) as T;
+        } finally {
+            this.releaseLspSlot();
+        }
+    }
+
+    /**
+     * Execute a VS Code command with a timeout guard and concurrency control.
+     * VS Code's built-in LSP provider commands (executeDocumentSymbolProvider etc.)
+     * also route through the language server, so they share the same concurrency pool.
+     */
+    private async vsCommand<T>(
+        command: string,
+        args: unknown[],
+        timeoutMs = LspToolHandler.LSP_TIMEOUT_MS,
+    ): Promise<T | undefined> {
+        await this.acquireLspSlot();
+        try {
+            const promise = vs.commands.executeCommand<T>(command, ...args);
+            const timeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(
+                    `VS Code command "${command}" timed out after ${timeoutMs / 1000}s`
+                )), timeoutMs),
+            );
+            return await Promise.race([promise, timeout]);
+        } finally {
+            this.releaseLspSlot();
+        }
     }
 
     // ─── Generic TTL cache ───────────────────────────────────────────────────
@@ -74,10 +161,9 @@ export class LspToolHandler {
 
             // Strategy 1: structured LSP command
             try {
-                const structResult = await vs.commands.executeCommand<any>(
+                const structResult = await this.vsCommand<any>(
                     'cwtools.executeServerCommand',
-                    'cwtools.ai.getScopeAtPosition',
-                    [uri.toString(), args.line, args.column]
+                    ['cwtools.ai.getScopeAtPosition', [uri.toString(), args.line, args.column]]
                 );
                 if (structResult && structResult.ok === true) {
                     return {
@@ -92,28 +178,22 @@ export class LspToolHandler {
 
             // Strategy 2: LanguageClient direct request
             try {
-                const client = this.client;
-                if (client) {
-                    const raw = await client.sendRequest('workspace/executeCommand', {
-                        command: 'cwtools.ai.getScopeAtPosition',
-                        arguments: [uri.toString(), args.line, args.column],
-                    }) as any;
-                    if (raw && raw.ok === true) {
-                        return {
-                            currentScope: raw.thisScope ?? 'unknown',
-                            root: raw.root ?? 'unknown',
-                            thisScope: raw.thisScope ?? 'unknown',
-                            prevChain: Array.isArray(raw.prevChain) ? raw.prevChain : [],
-                            fromChain: Array.isArray(raw.fromChain) ? raw.fromChain : [],
-                        };
-                    }
+                const raw = await this.lspRequest('cwtools.ai.getScopeAtPosition', [uri.toString(), args.line, args.column]) as any;
+                if (raw && raw.ok === true) {
+                    return {
+                        currentScope: raw.thisScope ?? 'unknown',
+                        root: raw.root ?? 'unknown',
+                        thisScope: raw.thisScope ?? 'unknown',
+                        prevChain: Array.isArray(raw.prevChain) ? raw.prevChain : [],
+                        fromChain: Array.isArray(raw.fromChain) ? raw.fromChain : [],
+                    };
                 }
             } catch { /* fall through */ }
 
             // Fallback: Hover Markdown parsing
             const position = new vs.Position(args.line, args.column);
-            const hovers = await vs.commands.executeCommand<vs.Hover[]>(
-                'vscode.executeHoverProvider', uri, position
+            const hovers = await this.vsCommand<vs.Hover[]>(
+                'vscode.executeHoverProvider', [uri, position]
             );
 
             const result = { ...unknown };
@@ -152,10 +232,7 @@ export class LspToolHandler {
     async queryDefinition(args: { file: string; line: number; column: number }): Promise<unknown> {
         try {
             const uri = vs.Uri.file(args.file);
-            const raw = await this.client.sendRequest('workspace/executeCommand', {
-                command: 'cwtools.ai.queryDefinition',
-                arguments: [uri.toString(), args.line, args.column],
-            }) as any;
+            const raw = await this.lspRequest('cwtools.ai.queryDefinition', [uri.toString(), args.line, args.column]) as any;
             if (raw && raw.ok === true) return raw;
             return { ok: false, error: 'No definition found' };
         } catch (e) {
@@ -172,10 +249,7 @@ export class LspToolHandler {
             };
         }
         try {
-            const raw = await this.client.sendRequest('workspace/executeCommand', {
-                command: 'cwtools.ai.queryDefinitionByName',
-                arguments: [name],
-            }) as any;
+            const raw = await this.lspRequest('cwtools.ai.queryDefinitionByName', [name]) as any;
             return raw ?? { ok: false, error: 'No response from LSP' };
         } catch (e) {
             return { ok: false, error: String(e) };
@@ -186,10 +260,7 @@ export class LspToolHandler {
         const cacheKey = `sfx:${JSON.stringify([args.filter ?? '', args.limit ?? 200])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.client.sendRequest('workspace/executeCommand', {
-                    command: 'cwtools.ai.queryScriptedEffects',
-                    arguments: [args.filter ?? '', args.limit ?? 200],
-                }) as any;
+                const raw = await this.lspRequest('cwtools.ai.queryScriptedEffects', [args.filter ?? '', args.limit ?? 200]) as any;
                 return raw ?? { ok: false, error: 'No response' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
@@ -199,10 +270,7 @@ export class LspToolHandler {
         const cacheKey = `stx:${JSON.stringify([args.filter ?? '', args.limit ?? 200])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.client.sendRequest('workspace/executeCommand', {
-                    command: 'cwtools.ai.queryScriptedTriggers',
-                    arguments: [args.filter ?? '', args.limit ?? 200],
-                }) as any;
+                const raw = await this.lspRequest('cwtools.ai.queryScriptedTriggers', [args.filter ?? '', args.limit ?? 200]) as any;
                 return raw ?? { ok: false, error: 'No response' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
@@ -212,10 +280,7 @@ export class LspToolHandler {
         const cacheKey = `enm:${JSON.stringify([args.enumName ?? '', args.limit ?? 500])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.client.sendRequest('workspace/executeCommand', {
-                    command: 'cwtools.ai.queryEnums',
-                    arguments: [args.enumName ?? '', args.limit ?? 500],
-                }) as any;
+                const raw = await this.lspRequest('cwtools.ai.queryEnums', [args.enumName ?? '', args.limit ?? 500]) as any;
                 return raw ?? { ok: false, error: 'No response' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
@@ -224,10 +289,7 @@ export class LspToolHandler {
     async getEntityInfo(args: { file: string }): Promise<unknown> {
         try {
             const uri = vs.Uri.file(args.file);
-            const raw = await this.client.sendRequest('workspace/executeCommand', {
-                command: 'cwtools.ai.getEntityInfo',
-                arguments: [uri.toString()],
-            }) as any;
+            const raw = await this.lspRequest('cwtools.ai.getEntityInfo', [uri.toString()]) as any;
             return raw ?? { ok: false, error: 'No response' };
         } catch (e) {
             return { ok: false, error: String(e) };
@@ -238,10 +300,7 @@ export class LspToolHandler {
         const cacheKey = `smod:${JSON.stringify([args.filter ?? '', args.limit ?? 300])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.client.sendRequest('workspace/executeCommand', {
-                    command: 'cwtools.ai.queryStaticModifiers',
-                    arguments: [args.filter ?? '', args.limit ?? 300],
-                }) as any;
+                const raw = await this.lspRequest('cwtools.ai.queryStaticModifiers', [args.filter ?? '', args.limit ?? 300]) as any;
                 return raw ?? { ok: false, error: 'No response' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
@@ -249,10 +308,7 @@ export class LspToolHandler {
 
     async queryVariables(args: { filter?: string }): Promise<unknown> {
         try {
-            const raw = await this.client.sendRequest('workspace/executeCommand', {
-                command: 'cwtools.ai.queryVariables',
-                arguments: [args.filter ?? ''],
-            }) as any;
+            const raw = await this.lspRequest('cwtools.ai.queryVariables', [args.filter ?? '']) as any;
             return raw ?? { ok: false, error: 'No response' };
         } catch (e) {
             return { ok: false, error: String(e) };
@@ -269,15 +325,12 @@ export class LspToolHandler {
             try {
                 const client = this.client;
                 if (client) {
-                    const raw = await client.sendRequest('workspace/executeCommand', {
-                        command: 'cwtools.ai.queryTypes',
-                        arguments: [
-                            args.typeName,
-                            args.filter ?? '',
-                            limit,
-                            args.vanillaOnly ?? false,
-                        ],
-                    }) as any;
+                    const raw = await this.lspRequest('cwtools.ai.queryTypes', [
+                        args.typeName,
+                        args.filter ?? '',
+                        limit,
+                        args.vanillaOnly ?? false,
+                    ]) as any;
                     if (raw && raw.ok === true) {
                         const instances = Array.isArray(raw.instances)
                             ? raw.instances.map((i: any) => ({
@@ -491,10 +544,7 @@ export class LspToolHandler {
             try {
                 const client = this.client;
                 if (client) {
-                    const raw = await client.sendRequest('workspace/executeCommand', {
-                        command: 'cwtools.ai.validateCode',
-                        arguments: [args.code, args.targetFile ?? ''],
-                    }) as any;
+                    const raw = await this.lspRequest('cwtools.ai.validateCode', [args.code, args.targetFile ?? ''], 15_000) as any;
 
                     if (raw && raw.ok === true) {
                         if (Array.isArray(raw.errors)) {
@@ -808,8 +858,8 @@ export class LspToolHandler {
         try {
             const uri = vs.Uri.file(args.file);
             const position = new vs.Position(args.line, args.column);
-            const completions = await vs.commands.executeCommand<vs.CompletionList>(
-                'vscode.executeCompletionItemProvider', uri, position
+            const completions = await this.vsCommand<vs.CompletionList>(
+                'vscode.executeCompletionItemProvider', [uri, position]
             );
 
             if (completions) {
@@ -832,8 +882,8 @@ export class LspToolHandler {
     async documentSymbols(args: { file: string }): Promise<DocumentSymbolsResult> {
         try {
             const uri = vs.Uri.file(args.file);
-            const symbols = await vs.commands.executeCommand<vs.DocumentSymbol[]>(
-                'vscode.executeDocumentSymbolProvider', uri
+            const symbols = await this.vsCommand<vs.DocumentSymbol[]>(
+                'vscode.executeDocumentSymbolProvider', [uri]
             );
 
             if (!symbols || symbols.length === 0) {
@@ -863,8 +913,8 @@ export class LspToolHandler {
     async workspaceSymbols(args: { query: string; limit?: number }): Promise<WorkspaceSymbolsResult> {
         try {
             const limit = args.limit ?? 30;
-            const symbols = await vs.commands.executeCommand<vs.SymbolInformation[]>(
-                'vscode.executeWorkspaceSymbolProvider', args.query
+            const symbols = await this.vsCommand<vs.SymbolInformation[]>(
+                'vscode.executeWorkspaceSymbolProvider', [args.query]
             );
 
             if (!symbols || symbols.length === 0) {
@@ -899,8 +949,8 @@ export class LspToolHandler {
         try {
             switch (args.operation) {
                 case 'goToDefinition': {
-                    const defs = await vs.commands.executeCommand<vs.Location[]>(
-                        'vscode.executeDefinitionProvider', uri, position
+                    const defs = await this.vsCommand<vs.Location[]>(
+                        'vscode.executeDefinitionProvider', [uri, position]
                     );
                     if (!defs || defs.length === 0) return { locations: [], message: 'No definition found' };
                     return {
@@ -916,8 +966,8 @@ export class LspToolHandler {
                     };
                 }
                 case 'findReferences': {
-                    const refs = await vs.commands.executeCommand<vs.Location[]>(
-                        'vscode.executeReferenceProvider', uri, position
+                    const refs = await this.vsCommand<vs.Location[]>(
+                        'vscode.executeReferenceProvider', [uri, position]
                     );
                     if (!refs || refs.length === 0) return { references: [], message: 'No references found' };
                     return {
@@ -930,8 +980,8 @@ export class LspToolHandler {
                     };
                 }
                 case 'hover': {
-                    const hovers = await vs.commands.executeCommand<vs.Hover[]>(
-                        'vscode.executeHoverProvider', uri, position
+                    const hovers = await this.vsCommand<vs.Hover[]>(
+                        'vscode.executeHoverProvider', [uri, position]
                     );
                     if (!hovers || hovers.length === 0) return { text: '', message: 'No hover info' };
                     const text = hovers.flatMap(h =>
@@ -941,8 +991,8 @@ export class LspToolHandler {
                 }
                 case 'rename': {
                     if (!args.newName) return { error: 'newName required for rename operation' };
-                    const edit = await vs.commands.executeCommand<vs.WorkspaceEdit>(
-                        'vscode.executeDocumentRenameProvider', uri, position, args.newName
+                    const edit = await this.vsCommand<vs.WorkspaceEdit>(
+                        'vscode.executeDocumentRenameProvider', [uri, position, args.newName]
                     );
                     if (!edit) return { error: 'Rename not supported at this position' };
                     const changes: Array<{ file: string; edits: number }> = [];

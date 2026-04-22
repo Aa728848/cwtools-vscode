@@ -260,6 +260,12 @@ function origoToOffset(widgetW: number, widgetH: number, origo: string): { x: nu
  * PDX core layout formula:
  *   top_left = anchor + position - origo_offset
  * centerPosition = yes acts as origo = CENTER
+ *
+ * parentAnchorOverride: For child elements, the Clausewitz engine resolves CENTER-type
+ * orientations using the parent's own anchor point in parent-local coordinates (derived
+ * from the parent's orientation + position relative to its grandparent), rather than
+ * simply using parentW/2. This ensures children with CENTER_UP stay stable when the
+ * parent container's width changes.
  */
 function computeTopLeft(
     parentW: number, parentH: number,
@@ -267,8 +273,21 @@ function computeTopLeft(
     orientation: string, origo: string,
     posX: number, posY: number,
     centerPosition: boolean,
+    parentAnchorOverride?: { x: number; y: number },
 ): { x: number; y: number } {
-    const anchor = orientationToAnchor(parentW, parentH, orientation);
+    let anchor: { x: number; y: number };
+    if (parentAnchorOverride) {
+        // Use the parent's own anchor for CENTER-type orientations.
+        // For edge-type orientations (UPPER_RIGHT, LOWER_LEFT etc.), still use parentW/H
+        // so that they correctly track the parent's edges.
+        const [fx, fy] = ORIENTATION_FRACS[normalizeOrientation(orientation)] ?? [0, 0];
+        anchor = {
+            x: fx === 0.5 ? parentAnchorOverride.x : parentW * fx,
+            y: fy === 0.5 ? parentAnchorOverride.y : parentH * fy,
+        };
+    } else {
+        anchor = orientationToAnchor(parentW, parentH, orientation);
+    }
     const effectiveOrigo = centerPosition ? 'CENTER' : origo;
     const offset = origoToOffset(widgetW, widgetH, effectiveOrigo);
     return {
@@ -415,7 +434,7 @@ function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
-function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH = 0): HTMLElement {
+function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH = 0, parentAnchorOverride?: { x: number; y: number }): HTMLElement {
     const c = COLORS[el.type] ?? DEFAULT_COLOR;
     const { w, h } = effectiveSize(el, parentW, parentH);
 
@@ -508,6 +527,7 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
         el.orientation ?? '', el.origo ?? '',
         el.position.x + marginLeft, el.position.y + marginTop,
         el.centerPosition ?? false,
+        parentAnchorOverride,
     );
 
     div.style.left = `${tl.x}px`;
@@ -635,8 +655,29 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     elMap.set(el.line, { el, div });
 
     // Render children (pass this element's size as parent dimensions)
+    // Compute the anchor override for children: only propagate when THIS element
+    // has a CENTER-type orientation. The Clausewitz engine projects the screen center
+    // into each container's local coordinate system, but only when the container itself
+    // is center-anchored. For non-centered containers (UPPER_LEFT, etc.), children
+    // should use the standard parentW/2 for their CENTER-type anchors.
+    const thisOrient = normalizeOrientation(el.orientation ?? '');
+    const [thisFx, thisFy] = ORIENTATION_FRACS[thisOrient] ?? [0, 0];
+    const isCenterOriented = thisFx === 0.5 || thisFy === 0.5;
+
+    let childAnchorOverride: { x: number; y: number } | undefined;
+    if (isCenterOriented) {
+        // The anchor in grandparent coords is at (grandparentW * thisFx, grandparentH * thisFy)
+        // This element's top-left in grandparent coords is at tl.x, tl.y
+        // So the anchor in this element's local coords = grandparentAnchor - tl
+        childAnchorOverride = {
+            x: thisFx === 0.5 ? parentW * thisFx - tl.x : w / 2,
+            y: thisFy === 0.5 ? parentH * thisFy - tl.y : h / 2,
+        };
+    }
+    // else: childAnchorOverride = undefined → children use normal parentW/2 layout
+
     for (const child of el.children) {
-        renderElement(child, div, w, h);
+        renderElement(child, div, w, h, childAnchorOverride);
     }
 
     parent.appendChild(div);
@@ -695,14 +736,27 @@ function renderAll(elements: GuiElement[], fileName: string) {
 
     // Calculate canvas size
     let maxR = 0, maxB = 0;
+    let hasAnchoredOrientation = false;
     for (const el of elements) {
         // Skip elements with extreme positions (hidden off-screen)
         if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) continue;
-        const { w, h } = effectiveSize(el);
-        const r = Math.max(0, el.position.x) + w;
-        const b = Math.max(0, el.position.y) + h;
-        if (r > maxR) maxR = r;
-        if (b > maxB) maxB = b;
+        
+        // Check if element uses a non-UPPER_LEFT orientation anchor.
+        // These elements position themselves relative to the canvas size (e.g. CENTER_UP → screenW*0.5),
+        // so they MUST NOT participate in the auto-size calculation (would create a feedback loop).
+        // Instead, when detected, we fall back to the standard game resolution.
+        const orient = normalizeOrientation(el.orientation ?? '');
+        const isAnchoredToEdges = orient !== '' && orient !== 'UPPER_LEFT' && orient !== 'TOP_LEFT' && orient !== 'LEFT_UP';
+
+        if (isAnchoredToEdges) {
+            hasAnchoredOrientation = true;
+        } else {
+            const { w, h } = effectiveSize(el);
+            const r = Math.max(0, el.position.x) + w;
+            const b = Math.max(0, el.position.y) + h;
+            if (r > maxR) maxR = r;
+            if (b > maxB) maxB = b;
+        }
     }
 
     // Resolution override
@@ -711,6 +765,11 @@ function renderAll(elements: GuiElement[], fileName: string) {
         const [rw, rh] = currentResolution.split('x').map(Number);
         screenW = rw;
         screenH = rh;
+    } else if (hasAnchoredOrientation) {
+        // When orientation-anchored elements exist, use the standard Stellaris resolution
+        // so that CENTER/RIGHT/BOTTOM anchors resolve to the positions the modder designed for.
+        screenW = Math.max(1920, maxR + 50);
+        screenH = Math.max(1080, maxB + 50);
     } else {
         screenW = Math.max(800, maxR + 50);
         screenH = Math.max(600, maxB + 50);

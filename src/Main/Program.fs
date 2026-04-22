@@ -2512,10 +2512,16 @@ type Server(client: ILanguageClient) =
                                 match gameObj with
                                 | Some g ->
                                     let typeMap = g.Types()
-                                    let instances =
-                                        match typeMap |> Map.tryFind typeName with
-                                        | None -> [||]
-                                        | Some typeArr ->
+                                    match typeMap |> Map.tryFind typeName with
+                                    | None ->
+                                        JsonValue.Record
+                                            [| "typeName",   JsonValue.String typeName
+                                               "instances",  JsonValue.Array [||]
+                                               "totalCount", JsonValue.Number 0m
+                                               "ok",         JsonValue.Boolean true |]
+                                    | Some typeArr ->
+                                        // Single filter pass → reuse for both count and truncated result
+                                        let filtered =
                                             typeArr
                                             |> Array.filter (fun td ->
                                                 let scopeOk = if vanillaOnly then td.range.FileName.Contains("cache") || td.range.FileName.Contains("vanilla") else true
@@ -2524,6 +2530,9 @@ type Server(client: ILanguageClient) =
                                                     | None -> true
                                                     | Some f -> td.id.StartsWith(f, StringComparison.OrdinalIgnoreCase)
                                                 scopeOk && filterOk)
+                                        let allCount = filtered.Length
+                                        let instances =
+                                            filtered
                                             |> Array.truncate limitVal
                                             |> Array.map (fun td ->
                                                 let filePath = td.range.FileName.Replace('\\', '/')
@@ -2533,21 +2542,11 @@ type Server(client: ILanguageClient) =
                                                        "file",    JsonValue.String filePath
                                                        "line",    JsonValue.Number(decimal (int td.range.StartLine))
                                                        "vanilla", JsonValue.Boolean isVanilla |])
-
-                                    let allCount =
-                                        match typeMap |> Map.tryFind typeName with
-                                        | None -> 0
-                                        | Some arr ->
-                                            arr |> Array.filter (fun td ->
-                                                match filterStr with
-                                                | None -> true
-                                                | Some f -> td.id.StartsWith(f, StringComparison.OrdinalIgnoreCase)) |> Array.length
-
-                                    JsonValue.Record
-                                        [| "typeName",   JsonValue.String typeName
-                                           "instances",  JsonValue.Array instances
-                                           "totalCount", JsonValue.Number(decimal allCount)
-                                           "ok",         JsonValue.Boolean true |]
+                                        JsonValue.Record
+                                            [| "typeName",   JsonValue.String typeName
+                                               "instances",  JsonValue.Array instances
+                                               "totalCount", JsonValue.Number(decimal allCount)
+                                               "ok",         JsonValue.Boolean true |]
                                 | None ->
                                     JsonValue.Record
                                         [| "ok", JsonValue.Boolean false
@@ -2612,6 +2611,9 @@ type Server(client: ILanguageClient) =
                         // Find where a named symbol (scripted_trigger, scripted_effect, event, type)
                         // is defined, by searching AllEntities for a top-level key that matches.
                         // Much more practical than position-based GoToType for AI use.
+                        //
+                        // Optimization: Phase 1 uses g.Types() — an already-indexed Map<typeName, TypeDefInfo[]>
+                        // for O(1) lookup. Phase 2 falls back to AllEntities scan only if Types() misses.
                         | { command = "cwtools.ai.queryDefinitionByName"
                             arguments = args } ->
                             // Safely extract symbolName from first arg (handles empty args list)
@@ -2628,7 +2630,23 @@ type Server(client: ILanguageClient) =
                                         [| "ok",    JsonValue.Boolean false
                                            "error", JsonValue.String "symbolName is required. Provide the exact name of the symbol to find, e.g. \"my_scripted_trigger\" or \"distar.001\"." |]
                                 | Some name ->
-                                    // Search across all game entities for a top-level key matching name
+                                    // Phase 1: Fast lookup via Types() index (O(1) per type category)
+                                    let tryFindInTypes (g: IGame) =
+                                        g.Types()
+                                        |> Map.toSeq
+                                        |> Seq.tryPick (fun (_typeName, instances) ->
+                                            instances
+                                            |> Array.tryFind (fun td ->
+                                                String.Equals(td.id, name, StringComparison.OrdinalIgnoreCase))
+                                            |> Option.map (fun td ->
+                                                JsonValue.Record
+                                                    [| "name",   JsonValue.String name
+                                                       "file",   JsonValue.String (td.range.FileName.Replace('\\', '/'))
+                                                       "line",   JsonValue.Number(decimal (int td.range.StartLine))
+                                                       "col",    JsonValue.Number(decimal (int td.range.StartColumn))
+                                                       "ok",     JsonValue.Boolean true |]))
+
+                                    // Phase 2: Fallback to full AllEntities scan (for non-typed symbols)
                                     let tryFindInGame (g: IGame<'T>) =
                                         g.AllEntities()
                                         |> Seq.tryPick (fun struct (e, _) ->
@@ -2643,8 +2661,11 @@ type Server(client: ILanguageClient) =
                                                        "line",   JsonValue.Number(decimal (int child.Position.StartLine))
                                                        "col",    JsonValue.Number(decimal (int child.Position.StartColumn))
                                                        "ok",     JsonValue.Boolean true |]))
+
+                                    // Try Types() first (fast), then AllEntities (slow)
                                     let found =
-                                        stlGameObj    |> Option.bind tryFindInGame
+                                        (gameObj |> Option.bind tryFindInTypes)
+                                        |> Option.orElse (stlGameObj    |> Option.bind tryFindInGame)
                                         |> Option.orElse (hoi4GameObj   |> Option.bind tryFindInGame)
                                         |> Option.orElse (eu4GameObj    |> Option.bind tryFindInGame)
                                         |> Option.orElse (ck2GameObj    |> Option.bind tryFindInGame)
@@ -2681,24 +2702,21 @@ type Server(client: ILanguageClient) =
                                 match gameObj with
                                 | Some g ->
                                     let effects = g.ScriptedEffects()
-                                    let filtered =
+                                    // Resolve name once per item via choose (avoids double GetStringForIDs)
+                                    let arr =
                                         effects
-                                        |> List.filter (fun e ->
+                                        |> List.choose (fun e ->
                                             let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
                                             match filterStr with
-                                            | None   -> true
-                                            | Some f -> name.Contains(f, StringComparison.OrdinalIgnoreCase))
+                                            | Some f when not (name.Contains(f, StringComparison.OrdinalIgnoreCase)) -> None
+                                            | _ -> Some (name, e))
                                         |> List.truncate limitVal
-                                    let arr =
-                                        filtered
-                                        |> List.map (fun e ->
-                                            let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
+                                        |> List.map (fun (name, e) ->
                                             let scopes = e.Scopes |> List.map (fun s -> JsonValue.String(s.ToString())) |> Array.ofList
-                                            let typ = e.Type.ToString()
                                             JsonValue.Record
                                                 [| "name",   JsonValue.String name
                                                    "scopes", JsonValue.Array scopes
-                                                   "type",   JsonValue.String typ |])
+                                                   "type",   JsonValue.String (e.Type.ToString()) |])
                                         |> Array.ofList
                                     JsonValue.Record
                                         [| "effects",    JsonValue.Array arr
@@ -2723,24 +2741,21 @@ type Server(client: ILanguageClient) =
                                 match gameObj with
                                 | Some g ->
                                     let triggers = g.ScriptedTriggers()
-                                    let filtered =
+                                    // Resolve name once per item via choose (avoids double GetStringForIDs)
+                                    let arr =
                                         triggers
-                                        |> List.filter (fun e ->
+                                        |> List.choose (fun e ->
                                             let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
                                             match filterStr with
-                                            | None   -> true
-                                            | Some f -> name.Contains(f, StringComparison.OrdinalIgnoreCase))
+                                            | Some f when not (name.Contains(f, StringComparison.OrdinalIgnoreCase)) -> None
+                                            | _ -> Some (name, e))
                                         |> List.truncate limitVal
-                                    let arr =
-                                        filtered
-                                        |> List.map (fun e ->
-                                            let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
+                                        |> List.map (fun (name, e) ->
                                             let scopes = e.Scopes |> List.map (fun s -> JsonValue.String(s.ToString())) |> Array.ofList
-                                            let typ = e.Type.ToString()
                                             JsonValue.Record
                                                 [| "name",   JsonValue.String name
                                                    "scopes", JsonValue.Array scopes
-                                                   "type",   JsonValue.String typ |])
+                                                   "type",   JsonValue.String (e.Type.ToString()) |])
                                         |> Array.ofList
                                     JsonValue.Record
                                         [| "triggers",   JsonValue.Array arr
@@ -2875,6 +2890,7 @@ type Server(client: ILanguageClient) =
                                     JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
                                 | Some _g ->
                                     // Helper to find an entity via IGame<T>.AllEntities() and extract pre-computed data
+                                    // Uses Dictionary for O(1) lookup instead of O(N) Seq.tryFind
                                     let tryEntityFromGame (g: IGame<'T>) =
                                         g.AllEntities()
                                         |> Seq.tryFind (fun struct (e, _) ->

@@ -58,7 +58,7 @@ These tools bypass file-system text search and query the CWTools AST directly.
 | Verify a scripted_effect exists | \`query_scripted_effects(filter)\` | **BEFORE every scripted_effect call** |
 | Verify a scripted_trigger exists | \`query_scripted_triggers(filter)\` | **BEFORE every scripted_trigger usage** |
 | Look up valid enum values | \`query_enums("enum_name")\` | Whenever you need values for an enum field |
-| Find where a symbol is defined | \`query_definition_by_name("my_trigger")\` | **Replaces grep** for locating definitions |
+| Find where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` | **Replaces grep** for locating definitions |
 | Find referenced types in a file | \`get_entity_info(file)\` | Understanding what a file depends on |
 | List static modifier tags | \`query_static_modifiers(filter)\` | Verifying \`add_modifier = { modifier = X }\` |
 | Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
@@ -232,7 +232,7 @@ When encountering any of the following constructs **for the first time** in a ta
 | Any enum field value | \`query_enums("enum_name")\` — get valid values list |
 | Any \`add_modifier = { modifier = X }\` | \`query_static_modifiers("X")\` — verify tag exists |
 | Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |
-| Finding where a symbol is defined | \`query_definition_by_name("symbol")\` — instant AST lookup |
+| Finding where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` — instant AST lookup |
 | Any vanilla game ID (tech, building, trait…) | \`query_types(typeName, filter)\` — confirm it exists |
 
 **Skip ONLY when**: you defined the symbol yourself in the current task session
@@ -344,7 +344,7 @@ When multiple independent pieces of information are needed, batch your tool call
 
 // ─── Prompt Builder ───────────────────────────────────────────────────────────
 export class PromptBuilder {
-    constructor(private workspaceRoot: string) {}
+    constructor(private workspaceRoot: string) { }
 
     /**
      * Build the system prompt for the given mode (model-aware).
@@ -360,10 +360,10 @@ export class PromptBuilder {
 
     private getModePrompt(mode: AgentMode): string {
         switch (mode) {
-            case 'plan':    return PLAN_SYSTEM_PROMPT;
+            case 'plan': return PLAN_SYSTEM_PROMPT;
             case 'explore': return EXPLORE_SYSTEM_PROMPT;
             case 'general': return GENERAL_SYSTEM_PROMPT;
-            default:        return BUILD_SYSTEM_PROMPT;
+            default: return BUILD_SYSTEM_PROMPT;
         }
     }
 
@@ -371,7 +371,7 @@ export class PromptBuilder {
         if (!providerId) return '';
         const id = providerId.toLowerCase();
         if (id === 'claude' || id.includes('anthropic')) return ANTHROPIC_SUPPLEMENT;
-        if (id === 'gemini' || id.includes('google'))    return GEMINI_SUPPLEMENT;
+        if (id === 'gemini' || id.includes('google')) return GEMINI_SUPPLEMENT;
         return OPENAI_SUPPLEMENT;
     }
 
@@ -516,7 +516,7 @@ Rules:
             ? `Current scope: ${scopeChain.join('.')}`
             : '';
 
-        const lspHints = options.lspSuggestions && options.lspSuggestions.length > 0 
+        const lspHints = options.lspSuggestions && options.lspSuggestions.length > 0
             ? `\nVALID IDENTIFIERS (from Language Server):\n${options.lspSuggestions.join(' | ')}\nYou MUST choose from these identifiers if applicable to avoid hallucination.`
             : '';
 

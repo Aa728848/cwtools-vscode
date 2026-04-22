@@ -1114,37 +1114,37 @@ export class AIService {
         });
 
         if (selectedModel) {
+            let modelName: string | undefined;
             if (selectedModel.label.startsWith('✏️')) {
-                const modelName = await vs.window.showInputBox({
+                modelName = await vs.window.showInputBox({
                     title: 'Model Name',
                     prompt: 'Enter the model name manually',
                     placeHolder: provider.defaultModel || 'model-name',
                     ignoreFocusOut: true,
                 });
-                if (modelName) {
-                    await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
-                    const { MODEL_CONTEXT_TOKENS } = await import('./providers');
-                    let foundCtx = 0;
-                    for (const [key, val] of Object.entries(MODEL_CONTEXT_TOKENS)) {
-                        if (modelName.includes(key)) { foundCtx = val; break; }
-                    }
-                    if (foundCtx > 0 || provider.maxContextTokens) {
-                        await vs.workspace.getConfiguration('cwtools.ai').update('maxContextTokens', foundCtx || provider.maxContextTokens, vs.ConfigurationTarget.Global);
-                    }
-                    vs.window.showInformationMessage(`AI Model set to: ${modelName}`);
-                }
             } else {
-                await vs.workspace.getConfiguration('cwtools.ai').update('model', selectedModel.label, vs.ConfigurationTarget.Global);
-                const { MODEL_CONTEXT_TOKENS } = await import('./providers');
-                let foundCtx = 0;
-                for (const [key, val] of Object.entries(MODEL_CONTEXT_TOKENS)) {
-                    if (selectedModel.label.includes(key)) { foundCtx = val; break; }
-                }
-                if (foundCtx > 0 || provider.maxContextTokens) {
-                    await vs.workspace.getConfiguration('cwtools.ai').update('maxContextTokens', foundCtx || provider.maxContextTokens, vs.ConfigurationTarget.Global);
-                }
-                vs.window.showInformationMessage(`AI Model set to: ${selectedModel.label}`);
+                modelName = selectedModel.label;
+            }
+            if (modelName) {
+                await this.applyModelSelection(modelName, provider);
             }
         }
+    }
+
+    /**
+     * P1 Fix: shared helper for applying model selection —
+     * sets the model config, infers maxContextTokens, and shows confirmation.
+     */
+    private async applyModelSelection(modelName: string, provider: { maxContextTokens: number }): Promise<void> {
+        await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+        const { MODEL_CONTEXT_TOKENS } = await import('./providers');
+        let foundCtx = 0;
+        for (const [key, val] of Object.entries(MODEL_CONTEXT_TOKENS)) {
+            if (modelName.includes(key)) { foundCtx = val as number; break; }
+        }
+        if (foundCtx > 0 || provider.maxContextTokens) {
+            await vs.workspace.getConfiguration('cwtools.ai').update('maxContextTokens', foundCtx || provider.maxContextTokens, vs.ConfigurationTarget.Global);
+        }
+        vs.window.showInformationMessage(`AI Model set to: ${modelName}`);
     }
 }

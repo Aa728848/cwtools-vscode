@@ -137,9 +137,10 @@ type Server(client: ILanguageClient) =
     /// CodeLens cache: filePath → (contentHash, lenses)
     let codeLensCache = System.Collections.Generic.Dictionary<string, int * CodeLens list>()
 
-    /// Simple content hash: length + lineCount (fast to compute, distinguishes most edits)
+    /// Content hash using .NET's built-in string hash (catches single-char edits that
+    /// don't change line count, unlike the old length ^^^ lineCount approach).
     let contentHash (text: string) =
-        text.Length ^^^ (text.Split('\n').Length <<< 16)
+        text.GetHashCode()
 
     let mutable lastFocusedFile: string option = None
 
@@ -490,152 +491,43 @@ type Server(client: ILanguageClient) =
                 if parent <> null then parent.FullName + "/"
                 else cp + "/../"
 
-            let doesCacheExist =
+            // P2 Fix: data-driven lookup eliminates ~120 lines of structural duplication.
+            // Each entry: (game, cacheFileName, serializeFunction, vanillaPathOption, promptGameName)
+            let gameConfig =
                 match activeGame with
-                | STL -> File.Exists(gameCachePath + "stl.cwb")
-                | HOI4 -> File.Exists(gameCachePath + "hoi4.cwb")
-                | EU4 -> File.Exists(gameCachePath + "eu4.cwb")
-                | CK2 -> File.Exists(gameCachePath + "ck2.cwb")
-                | IR -> File.Exists(gameCachePath + "ir.cwb")
-                | VIC2 -> File.Exists(gameCachePath + "vic2.cwb")
-                | CK3 -> File.Exists(gameCachePath + "ck3.cwb")
-                | VIC3 -> File.Exists(gameCachePath + "vic3.cwb")
-                | EU5 -> File.Exists(gameCachePath + "eu5.cwb")
-                | Custom -> false
+                | STL  -> Some ("stl",  serializeSTL,  stlVanillaPath,  "stellaris")
+                | EU4  -> Some ("eu4",  serializeEU4,  eu4VanillaPath,  "eu4")
+                | HOI4 -> Some ("hoi4", serializeHOI4, hoi4VanillaPath, "hoi4")
+                | CK2  -> Some ("ck2",  serializeCK2,  ck2VanillaPath,  "ck2")
+                | IR   -> Some ("ir",   serializeIR,   irVanillaPath,   "imperator")
+                | VIC2 -> Some ("vic2", serializeVIC2, vic2VanillaPath, "vic2")
+                | CK3  -> Some ("ck3",  serializeCK3,  ck3VanillaPath,  "ck3")
+                | VIC3 -> Some ("vic3", serializeVIC3, vic3VanillaPath, "vic3")
+                | EU5  -> Some ("eu5",  serializeEU5,  eu5VanillaPath,  "eu5")
+                | Custom -> None
 
-            if doesCacheExist && not forceCreate then
-                logInfo (sprintf "Cache exists at %s" (gameCachePath + ".cwb"))
-            else
-                match
-                    (activeGame,
-                     stlVanillaPath,
-                     eu4VanillaPath,
-                     hoi4VanillaPath,
-                     ck2VanillaPath,
-                     irVanillaPath,
-                     vic2VanillaPath,
-                     ck3VanillaPath,
-                     vic3VanillaPath,
-                     eu5VanillaPath)
-                with
-                | STL, Some vp, _, _, _, _, _, _, _, _ ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
+            match gameConfig with
+            | None -> ()
+            | Some (cacheFile, serializeFn, vanillaPathOpt, promptName) ->
+                let doesCacheExist = File.Exists(gameCachePath + cacheFile + ".cwb")
 
-                    serializeSTL vp gameCachePath
-                    let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | STL, None, _, _, _, _, _, _, _, _ ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("stellaris"))
-                | EU4, _, Some vp, _, _, _, _, _, _, _ ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
+                if doesCacheExist && not forceCreate then
+                    logInfo (sprintf "Cache exists at %s" (gameCachePath + ".cwb"))
+                else
+                    match vanillaPathOpt with
+                    | Some vp ->
+                        client.CustomNotification(
+                            "loadingBar",
+                            JsonValue.Record
+                                [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
+                                   "enable", JsonValue.Boolean(true) |]
+                        )
 
-                    serializeEU4 vp gameCachePath
-                    let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | EU4, _, None, _, _, _, _, _, _, _ ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("eu4"))
-                | HOI4, _, _, Some vp, _, _, _, _, _, _ ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
-
-                    serializeHOI4 vp gameCachePath
-                    let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | HOI4, _, _, None, _, _, _, _, _, _ ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("hoi4"))
-                | CK2, _, _, _, Some vp, _, _, _, _, _ ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
-
-                    serializeCK2 vp gameCachePath
-                    let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | CK2, _, _, _, None, _, _, _, _, _ ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("ck2"))
-                | IR, _, _, _, _, Some vp, _, _, _, _ ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
-
-                    serializeIR vp gameCachePath
-                    let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | IR, _, _, _, _, None, _, _, _, _ ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("imperator"))
-                | VIC2, _, _, _, _, _, Some vp, _, _, _ ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
-
-                    serializeVIC2 vp gameCachePath
-                    let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | VIC2, _, _, _, _, _, None, _, _, _ ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("vic2"))
-                | CK3, _, _, _, _, _, _, Some vp, _, _ ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
-
-                    serializeCK3 vp gameCachePath
-                    let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | CK3, _, _, _, _, _, _, None, _, _ ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("ck3"))
-                | VIC3, _, _, _, _, _, _, _, Some vp, _ ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_GeneratingVanillaCache)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
-
-                    serializeVIC3 vp gameCachePath
-                    let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | VIC3, _, _, _, _, _, _, _, None, _ ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("vic3"))
-                | EU5, _, _, _, _, _, _, _, _, Some vp ->
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String("Generating vanilla cache...")
-                               "enable", JsonValue.Boolean(true) |]
-                    )
-
-                    serializeEU5 vp gameCachePath
-                    let text = $"Vanilla cache for {activeGame} has been updated."
-                    client.CustomNotification("forceReload", JsonValue.String(text))
-                | EU5, _, _, _, _, _, _, _, _, None ->
-                    client.CustomNotification("promptVanillaPath", JsonValue.String("eu5"))
-                | Custom, _, _, _, _, _, _, _, _, _ -> ()
+                        serializeFn vp gameCachePath
+                        let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
+                        client.CustomNotification("forceReload", JsonValue.String(text))
+                    | None ->
+                        client.CustomNotification("promptVanillaPath", JsonValue.String(promptName))
         | _ -> logInfo "No cache path"
 
     let processWorkspace (uri: option<Uri>) =
@@ -1363,7 +1255,8 @@ type Server(client: ILanguageClient) =
                 )
             }
 
-        member this.WillSaveWaitUntilTextDocument(_: WillSaveTextDocumentParams) = TODO()
+        // P0 Fix: was TODO() — return empty edit list instead of crashing
+        member this.WillSaveWaitUntilTextDocument(_: WillSaveTextDocumentParams) = async { return [] }
 
         member this.DidSaveTextDocument(p: DidSaveTextDocumentParams) =
             async {
@@ -1553,7 +1446,8 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        member this.DocumentHighlight(_: TextDocumentPositionParams) = TODO()
+        // P0 Fix: was TODO() — return empty list instead of crashing
+        member this.DocumentHighlight(_: TextDocumentPositionParams) = async { return [] }
 
         member this.DocumentSymbols(p: DocumentSymbolParams) =
             let symbolKindForType (typeName: string) =
@@ -1908,8 +1802,9 @@ type Server(client: ILanguageClient) =
                         | _ -> []
             }
             |> catchError []
-        member this.DocumentLink(_: DocumentLinkParams) = TODO()
-        member this.ResolveDocumentLink(_: DocumentLink) = TODO()
+        // P0 Fix: was TODO() — return empty list / identity instead of crashing
+        member this.DocumentLink(_: DocumentLinkParams) = async { return [] }
+        member this.ResolveDocumentLink(link: DocumentLink) = async { return link }
 
         member this.SemanticTokensFull(p: SemanticTokensParams) =
             // Token type indices (must match legend in capabilities):
@@ -2169,9 +2064,10 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        member this.DocumentRangeFormatting(_: DocumentRangeFormattingParams) = TODO()
-        member this.DocumentOnTypeFormatting(_: DocumentOnTypeFormattingParams) = TODO()
-        member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = TODO()
+        // P0 Fix: was TODO() — return empty results / no-op instead of crashing
+        member this.DocumentRangeFormatting(_: DocumentRangeFormattingParams) = async { return [] }
+        member this.DocumentOnTypeFormatting(_: DocumentOnTypeFormattingParams) = async { return [] }
+        member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = async { () }
         member this.Rename(p: RenameParams) =
             async {
                 return

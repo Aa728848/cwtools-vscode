@@ -704,6 +704,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async retractMessage(messageIndex: number): Promise<void> {
         if (!this.currentTopic) return;
 
+        // ── P0 Fix: validate file paths are within workspace boundaries ──────
+        const workspaceFolders = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
+        const isWithinWorkspace = (filePath: string): boolean => {
+            if (workspaceFolders.length === 0) return false;
+            const normalised = path.resolve(filePath);
+            return workspaceFolders.some(root =>
+                normalised.startsWith(path.resolve(root) + path.sep) ||
+                normalised === path.resolve(root)
+            );
+        };
+
         // ── Restore files changed in this message and all subsequent ones ──────
         // Collect indices of all snapshots to undo (≥ messageIndex), sorted newest-first
         // so that if message N wrote file A and message N+1 wrote it again,
@@ -715,6 +726,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Track which files we've already restored so we don't double-restore
         const restored = new Set<string>();
         let restoredFiles = 0;
+        let skippedFiles = 0;
 
         // Also collect the earliest convLength from all retained snapshots so we
         // can roll back conversationMessages to the right boundary.
@@ -734,16 +746,24 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             for (const snap of [...snapshots].reverse()) {
                 if (restored.has(snap.filePath)) continue;
                 restored.add(snap.filePath);
+
+                // P0 Fix: reject paths outside workspace to prevent path traversal
+                if (!isWithinWorkspace(snap.filePath)) {
+                    console.warn(`[Retract] Skipping file outside workspace: ${snap.filePath}`);
+                    skippedFiles++;
+                    continue;
+                }
+
                 try {
                     if (snap.previousContent === null) {
-                        // File was newly created by AI — delete it
+                        // File was newly created by AI — delete it (async to avoid blocking)
                         if (fs.existsSync(snap.filePath)) {
-                            fs.unlinkSync(snap.filePath);
+                            await fs.promises.unlink(snap.filePath);
                             restoredFiles++;
                         }
                     } else {
-                        // File existed before — restore original content
-                        fs.writeFileSync(snap.filePath, snap.previousContent, 'utf-8');
+                        // File existed before — restore original content (async)
+                        await fs.promises.writeFile(snap.filePath, snap.previousContent, 'utf-8');
                         restoredFiles++;
                     }
                 } catch (e) {
@@ -767,10 +787,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.postMessage({ type: 'messageRetracted', messageIndex });
         this.saveTopics();
 
-        if (restoredFiles > 0) {
-            vs.window.showInformationMessage(
-                `已撤回消息并恢复 ${restoredFiles} 个文件的更改。`
-            );
+        if (restoredFiles > 0 || skippedFiles > 0) {
+            const msg = skippedFiles > 0
+                ? `已撤回消息并恢复 ${restoredFiles} 个文件的更改（${skippedFiles} 个文件因在工作区外被跳过）。`
+                : `已撤回消息并恢复 ${restoredFiles} 个文件的更改。`;
+            vs.window.showInformationMessage(msg);
         }
     }
 

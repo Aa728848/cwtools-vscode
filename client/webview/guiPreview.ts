@@ -1004,6 +1004,12 @@ function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 
 
         // Click to locate / select
         item.onclick = (e) => {
+            // Reparent mode: clicking a target container completes the operation
+            if (reparentMode) {
+                e.stopPropagation();
+                handleReparentTargetClick(el.line);
+                return;
+            }
             if (editMode) {
                 const entry = elMap.get(el.line);
                 if (!entry) return;
@@ -1042,6 +1048,59 @@ function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 
                 vscode.postMessage({ command: 'goToLine', line: el.line });
             }
         };
+
+        // Drag-and-drop for reparenting
+        item.draggable = true;
+        item.addEventListener('dragstart', (e) => {
+            if (!editMode) { e.preventDefault(); return; }
+            e.dataTransfer!.setData('text/plain', String(el.line));
+            e.dataTransfer!.effectAllowed = 'move';
+            item.classList.add('dragging');
+            // Highlight valid drop targets
+            requestAnimationFrame(() => {
+                document.querySelectorAll('.layer-item').forEach(li => {
+                    const targetLine = parseInt((li as HTMLElement).dataset.line ?? '0');
+                    const targetEl = findElementByLine(targetLine, allElements);
+                    if (targetEl && (targetEl.type === 'containerWindowType' || targetEl.type === 'windowType')
+                        && targetEl.line !== el.line && !findChild(el, targetEl.line)) {
+                        li.classList.add('drop-target-valid');
+                    }
+                });
+            });
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            document.querySelectorAll('.layer-item.drop-target-valid').forEach(li => li.classList.remove('drop-target-valid'));
+            document.querySelectorAll('.layer-item.drag-over').forEach(li => li.classList.remove('drag-over'));
+        });
+        // Container items accept drops
+        const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
+        if (isContainer) {
+            item.addEventListener('dragover', (e) => {
+                const sourceLine = e.dataTransfer?.types.includes('text/plain') ? true : false;
+                if (!sourceLine) return;
+                e.preventDefault();
+                e.dataTransfer!.dropEffect = 'move';
+                item.classList.add('drag-over');
+            });
+            item.addEventListener('dragleave', () => {
+                item.classList.remove('drag-over');
+            });
+            item.addEventListener('drop', (e) => {
+                e.preventDefault();
+                item.classList.remove('drag-over');
+                const sourceLine = parseInt(e.dataTransfer!.getData('text/plain'));
+                if (isNaN(sourceLine) || sourceLine === el.line) return;
+                const sourceEl = findElementByLine(sourceLine, allElements);
+                if (!sourceEl) return;
+                // Select source and reparent
+                const entry = elMap.get(sourceLine);
+                if (entry) {
+                    selectElement(entry.el, entry.div);
+                    reparentSelectedInto(el);
+                }
+            });
+        }
 
         container.appendChild(item);
 
@@ -2224,6 +2283,12 @@ function handleContextAction(action: string) {
             x: relX, y: relY, w: 100, h: 50,
         });
         pushUndo({ type: 'structural' });
+    } else if (action === 'reparent') {
+        // Reparent: enter target-selection mode in the layers panel
+        if (selectedElements.length !== 1) return;
+        startReparentTargetSelection();
+    } else if (action === 'unparent') {
+        unparentSelected();
     }
 }
 
@@ -2234,6 +2299,165 @@ function findChild(parent: GuiElement, line: number): boolean {
     }
     return false;
 }
+
+/** Find the direct parent of an element by line number */
+function findParentOf(line: number, elements: GuiElement[]): GuiElement | null {
+    for (const el of elements) {
+        for (const c of el.children) {
+            if (c.line === line) return el;
+        }
+        const found = findParentOf(line, el.children);
+        if (found) return found;
+    }
+    return null;
+}
+
+/** Find an element by line number in the tree */
+function findElementByLine(line: number, elements: GuiElement[]): GuiElement | null {
+    for (const el of elements) {
+        if (el.line === line) return el;
+        const found = findElementByLine(line, el.children);
+        if (found) return found;
+    }
+    return null;
+}
+
+/** Get approximate absolute position of an element's div on the canvas */
+function getElementCanvasPos(el: GuiElement): { x: number; y: number } {
+    const entry = elMap.get(el.line);
+    if (!entry) return { x: 0, y: 0 };
+    const vpRect = document.getElementById('viewport')!.getBoundingClientRect();
+    const elRect = entry.div.getBoundingClientRect();
+    return {
+        x: (elRect.left - vpRect.left - panX) / scale,
+        y: (elRect.top - vpRect.top - panY) / scale,
+    };
+}
+
+/** Reparent selected element: move into the given container */
+function reparentSelectedInto(targetContainer: GuiElement) {
+    if (selectedElements.length !== 1) return;
+    const sel = selectedElements[0];
+    // Can't reparent into itself or a descendant
+    if (sel.el.line === targetContainer.line) return;
+    if (findChild(sel.el, targetContainer.line)) return;
+    // Can't reparent into non-container
+    if (targetContainer.type !== 'containerWindowType' && targetContainer.type !== 'windowType') return;
+    // Already a child of this container?
+    const currentParent = findParentOf(sel.el.line, allElements);
+    if (currentParent?.line === targetContainer.line) return;
+
+    // Compute position adjustment to preserve visual location
+    const elPos = getElementCanvasPos(sel.el);
+    const targetPos = getElementCanvasPos(targetContainer);
+    const dx = -(targetPos.x - (currentParent ? getElementCanvasPos(currentParent).x : 0));
+    const dy = -(targetPos.y - (currentParent ? getElementCanvasPos(currentParent).y : 0));
+
+    pushUndo({ type: 'structural' });
+    vscode.postMessage({
+        command: 'reparentElement',
+        startLine: sel.el.line,
+        endLine: sel.el.endLine,
+        newParentEndLine: targetContainer.endLine,
+        positionAdjust: { dx, dy },
+    });
+    clearSelection();
+}
+
+/** Unparent selected element: move out of current parent one level up */
+function unparentSelected() {
+    if (selectedElements.length !== 1) return;
+    const sel = selectedElements[0];
+    const parent = findParentOf(sel.el.line, allElements);
+    if (!parent) return; // already top-level
+
+    // Compute position adjustment
+    const parentPos = getElementCanvasPos(parent);
+    const grandparent = findParentOf(parent.line, allElements);
+    const gpPos = grandparent ? getElementCanvasPos(grandparent) : { x: 0, y: 0 };
+    const dx = parentPos.x - gpPos.x;
+    const dy = parentPos.y - gpPos.y;
+
+    pushUndo({ type: 'structural' });
+    vscode.postMessage({
+        command: 'unparentElement',
+        startLine: sel.el.line,
+        endLine: sel.el.endLine,
+        parentEndLine: parent.endLine,
+        positionAdjust: { dx, dy },
+    });
+    clearSelection();
+}
+
+// ── Reparent Target Selection Mode ──
+let reparentMode = false;
+let reparentSource: GuiElement | null = null;
+
+function startReparentTargetSelection() {
+    if (selectedElements.length !== 1) return;
+    reparentSource = selectedElements[0].el;
+    reparentMode = true;
+    // Show visual indicator
+    document.body.classList.add('reparent-mode');
+    // Open side panel if closed
+    const sp = document.getElementById('side-panel')!;
+    if (sp.classList.contains('hidden')) {
+        sp.classList.remove('hidden');
+        document.getElementById('btn-layers')!.classList.add('active');
+    }
+    // Highlight valid targets in layers panel
+    document.querySelectorAll('.layer-item').forEach(item => {
+        const line = parseInt((item as HTMLElement).dataset.line ?? '0');
+        const el = findElementByLine(line, allElements);
+        if (el && (el.type === 'containerWindowType' || el.type === 'windowType')
+            && el.line !== reparentSource!.line && !findChild(reparentSource!, el.line)) {
+            item.classList.add('reparent-target');
+        }
+    });
+}
+
+function cancelReparentMode() {
+    reparentMode = false;
+    reparentSource = null;
+    document.body.classList.remove('reparent-mode');
+    document.querySelectorAll('.layer-item.reparent-target').forEach(i => i.classList.remove('reparent-target'));
+}
+
+function handleReparentTargetClick(line: number) {
+    if (!reparentSource) { cancelReparentMode(); return; }
+    const target = findElementByLine(line, allElements);
+    if (!target) { cancelReparentMode(); return; }
+    // Temporarily re-select the source for reparentSelectedInto
+    const entry = elMap.get(reparentSource.line);
+    if (entry) {
+        selectElement(entry.el, entry.div);
+        reparentSelectedInto(target);
+    }
+    cancelReparentMode();
+}
+
+// ── Keyboard shortcuts for reparent ──
+document.addEventListener('keydown', (e) => {
+    if (!editMode) return;
+    // Escape cancels reparent mode
+    if (e.key === 'Escape' && reparentMode) {
+        cancelReparentMode();
+        e.preventDefault();
+        return;
+    }
+    // P = reparent (enter target selection mode)
+    if (e.key === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (selectedElements.length === 1) {
+            startReparentTargetSelection();
+            e.preventDefault();
+        }
+    }
+    // Shift+P = unparent
+    if (e.key === 'P' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        unparentSelected();
+        e.preventDefault();
+    }
+});
 
 function deleteSelected() {
     if (selectedElements.length === 0) return;

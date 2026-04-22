@@ -89,6 +89,12 @@ export class GuiPanel {
                     case 'addBackground':
                         await this._handleAddBackground(msg);
                         break;
+                    case 'reparentElement':
+                        await this._handleReparentElement(msg);
+                        break;
+                    case 'unparentElement':
+                        await this._handleUnparentElement(msg);
+                        break;
                     case 'vscodeUndo':
                         await this._handleVscodeUndo();
                         break;
@@ -448,7 +454,7 @@ export class GuiPanel {
             } else {
                 // Check if position exists inline on the same line
                 const line = doc.lineAt(msg.line - 1);
-                const posRegex = /position\s*=\s*\{\s*x\s*=\s*-?\d+\s+y\s*=\s*-?\d+\s*\}/;
+                const posRegex = /position\s*=\s*\{[^}]*\}/;
                 if (posRegex.test(line.text)) {
                     const newText = line.text.replace(posRegex, `position = { x = ${val.x} y = ${val.y} }`);
                     const edit = new vscode.WorkspaceEdit();
@@ -458,7 +464,7 @@ export class GuiPanel {
                     await doc.save();
                 } else {
                     // Scan forward for existing position on nearby lines
-                    const posRegexScan = /position\s*=\s*\{\s*x\s*=\s*-?\d+\s+y\s*=\s*-?\d+\s*\}/;
+                    const posRegexScan = /position\s*=\s*\{[^}]*\}/;
                     let foundLine = -1;
                     for (let i = msg.line; i < Math.min(msg.line + 20, doc.lineCount); i++) {
                         if (posRegexScan.test(doc.lineAt(i).text)) { foundLine = i; break; }
@@ -763,6 +769,161 @@ export class GuiPanel {
         await this._loadAndRender(doc);
     }
 
+    /**
+     * Handle reparentElement message — move an element to be a child of another container.
+     * msg: { command, startLine, endLine, newParentEndLine, positionAdjust?: { dx: number; dy: number } }
+     * Cuts the element's source lines and inserts them before the new parent's closing brace.
+     * Indentation is automatically adjusted to match the new nesting level.
+     */
+    private async _handleReparentElement(msg: { startLine: number; endLine: number; newParentEndLine: number; positionAdjust?: { dx: number; dy: number } }) {
+        if (!this._document) return;
+        const doc = this._document;
+        this._contentSnapshots.push(doc.getText());
+
+        // Read the source lines of the element to move
+        const sourceLines: string[] = [];
+        for (let i = msg.startLine - 1; i < msg.endLine; i++) {
+            sourceLines.push(doc.lineAt(i).text);
+        }
+
+        // Determine indentation: new parent's closing brace indent + one tab
+        const newParentClosingLine = doc.lineAt(msg.newParentEndLine - 1);
+        const parentIndent = newParentClosingLine.text.match(/^(\s*)/)?.[1] ?? '';
+        const childIndent = parentIndent + '\t';
+
+        // Detect current indentation of the element
+        const currentIndent = sourceLines[0].match(/^(\s*)/)?.[1] ?? '';
+
+        // Re-indent all lines
+        let block = sourceLines.map(line => {
+            if (line.startsWith(currentIndent)) {
+                return childIndent + line.slice(currentIndent.length);
+            }
+            return childIndent + line.trimStart();
+        }).join('\n');
+
+        // Adjust position if needed (to preserve visual location)
+        if (msg.positionAdjust) {
+            const posRegex = /position\s*=\s*\{[^}]*\}/;
+            const posMatch = block.match(posRegex);
+            if (posMatch) {
+                // Try to extract x and y from the position block
+                const xMatch = posMatch[0].match(/x\s*=\s*(-?[\d.]+)/);
+                const yMatch = posMatch[0].match(/y\s*=\s*(-?[\d.]+)/);
+                if (xMatch && yMatch) {
+                    const newX = Math.round(parseFloat(xMatch[1]) + msg.positionAdjust.dx);
+                    const newY = Math.round(parseFloat(yMatch[1]) + msg.positionAdjust.dy);
+                    block = block.replace(posRegex, `position = { x = ${newX} y = ${newY} }`);
+                }
+            }
+        }
+
+        // Build the edit: delete original lines, then insert before new parent's closing brace
+        const edit = new vscode.WorkspaceEdit();
+
+        // Determine if the element is BEFORE or AFTER the new parent in the file
+        const movingUp = msg.startLine > msg.newParentEndLine;
+
+        if (movingUp) {
+            // Element is after target: insert first, then delete (line numbers shift)
+            const insertPos = new vscode.Position(msg.newParentEndLine - 1, 0);
+            edit.insert(doc.uri, insertPos, block + '\n');
+            // After insert, the original lines shifted down by the number of inserted lines
+            const insertedLineCount = block.split('\n').length + 1; // +1 for the trailing newline
+            const deleteStart = msg.startLine - 1 + insertedLineCount - 1;
+            const deleteEnd = msg.endLine - 1 + insertedLineCount - 1;
+            const startPos = deleteStart > 0
+                ? new vscode.Position(deleteStart - 1, doc.lineAt(Math.min(deleteStart - 1, doc.lineCount - 1)).text.length)
+                : new vscode.Position(0, 0);
+            const endPos = new vscode.Position(deleteEnd, doc.lineAt(Math.min(deleteEnd, doc.lineCount - 1)).text.length);
+            edit.delete(doc.uri, new vscode.Range(startPos, endPos));
+        } else {
+            // Element is before target: delete first, then insert (adjust target line)
+            const deleteStartPos = msg.startLine > 1
+                ? new vscode.Position(msg.startLine - 2, doc.lineAt(msg.startLine - 2).text.length)
+                : new vscode.Position(0, 0);
+            const deleteEndPos = new vscode.Position(msg.endLine - 1, doc.lineAt(msg.endLine - 1).text.length);
+            edit.delete(doc.uri, new vscode.Range(deleteStartPos, deleteEndPos));
+            // After delete, the target line shifts up by the number of deleted lines
+            const deletedLineCount = msg.endLine - msg.startLine + 1 + (msg.startLine > 1 ? 0 : 0);
+            const adjustedTargetLine = msg.newParentEndLine - deletedLineCount;
+            const insertPos = new vscode.Position(Math.max(0, adjustedTargetLine - 1), 0);
+            edit.insert(doc.uri, insertPos, block + '\n');
+        }
+
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+        await this._loadAndRender(doc);
+    }
+
+    /**
+     * Handle unparentElement message — move an element up one level out of its parent.
+     * msg: { command, startLine, endLine, parentEndLine, positionAdjust?: { dx: number; dy: number } }
+     * Cuts the element and inserts it after the parent's closing brace.
+     */
+    private async _handleUnparentElement(msg: { startLine: number; endLine: number; parentEndLine: number; positionAdjust?: { dx: number; dy: number } }) {
+        if (!this._document) return;
+        const doc = this._document;
+        this._contentSnapshots.push(doc.getText());
+
+        // Read the source lines
+        const sourceLines: string[] = [];
+        for (let i = msg.startLine - 1; i < msg.endLine; i++) {
+            sourceLines.push(doc.lineAt(i).text);
+        }
+
+        // Adjust indentation: remove one level of indentation
+        const currentIndent = sourceLines[0].match(/^(\s*)/)?.[1] ?? '';
+        const newIndent = currentIndent.length > 0
+            ? currentIndent.replace(/\t$/, '').replace(/    $/, '')  // remove one tab or 4 spaces
+            : '';
+
+        let block = sourceLines.map(line => {
+            if (line.startsWith(currentIndent)) {
+                return newIndent + line.slice(currentIndent.length);
+            }
+            return newIndent + line.trimStart();
+        }).join('\n');
+
+        // Adjust position to preserve visual location
+        if (msg.positionAdjust) {
+            const posRegex = /position\s*=\s*\{[^}]*\}/;
+            const posMatch = block.match(posRegex);
+            if (posMatch) {
+                const xMatch = posMatch[0].match(/x\s*=\s*(-?[\d.]+)/);
+                const yMatch = posMatch[0].match(/y\s*=\s*(-?[\d.]+)/);
+                if (xMatch && yMatch) {
+                    const newX = Math.round(parseFloat(xMatch[1]) + msg.positionAdjust.dx);
+                    const newY = Math.round(parseFloat(yMatch[1]) + msg.positionAdjust.dy);
+                    block = block.replace(posRegex, `position = { x = ${newX} y = ${newY} }`);
+                }
+            }
+        }
+
+        // Delete original, insert after parent's closing brace
+        const edit = new vscode.WorkspaceEdit();
+
+        // Delete original lines (including preceding newline)
+        const deleteStartPos = msg.startLine > 1
+            ? new vscode.Position(msg.startLine - 2, doc.lineAt(msg.startLine - 2).text.length)
+            : new vscode.Position(0, 0);
+        const deleteEndPos = new vscode.Position(msg.endLine - 1, doc.lineAt(msg.endLine - 1).text.length);
+        edit.delete(doc.uri, new vscode.Range(deleteStartPos, deleteEndPos));
+
+        // After delete, parent's closing brace shifts up
+        const deletedLineCount = msg.endLine - msg.startLine + 1;
+        const adjustedParentEnd = msg.parentEndLine - deletedLineCount;
+        const insertPos = new vscode.Position(Math.max(0, adjustedParentEnd - 1),
+            doc.lineAt(Math.min(Math.max(0, adjustedParentEnd - 1), doc.lineCount - 1)).text.length);
+        edit.insert(doc.uri, insertPos, '\n' + block);
+
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+        await this._loadAndRender(doc);
+    }
+
     private _getHtml(): string {
         const styleUri = this._panel.webview.asWebviewUri(vscode.Uri.file(path.join(this._webviewRootPath, 'guiPreview.css')));
         const scriptUri = this._panel.webview.asWebviewUri(vscode.Uri.file(path.join(this._webviewRootPath, 'guiPreview.js')));
@@ -824,6 +985,9 @@ export class GuiPanel {
         <hr />
         <button data-action="duplicate">复制 (Ctrl+D)</button>
         <button data-action="delete">删除 (Del)</button>
+        <hr />
+        <button data-action="reparent">移入容器 (P)</button>
+        <button data-action="unparent">移出容器 (Shift+P)</button>
     </div>
     <div id="main-layout">
         <div id="viewport">

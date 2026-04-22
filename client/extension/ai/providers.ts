@@ -68,7 +68,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
         supportsToolUse: true,
         supportsStreaming: true,
-        maxContextTokens: 1000000,
+        maxContextTokens: 200000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         // MiniMax M2/M2.5/M2.7 are natively multimodal (docs: minimax.io)
@@ -87,7 +87,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
         supportsToolUse: true,
         supportsStreaming: true,
-        maxContextTokens: 1000000,
+        maxContextTokens: 200000,
         isOpenAICompatible: false,   // uses Anthropic Messages API
         toolCallStyle: 'openai',     // adapter normalises to openai format
         // IMPORTANT: MiniMax Token Plan Anthropic-compat endpoint does NOT support image inputs.
@@ -108,6 +108,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'glm-5',
             'glm-5-turbo',
             // Multimodal reasoning series
+            'glm-5v-turbo',
             'glm-4.1v-thinking',
             'glm-4.1v-thinking-flash',
             // Flash / free tier
@@ -130,6 +131,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         defaultModel: 'qwen3.6-plus',
         models: [
+            'qwen3.6-max-preview',
             'qwen3.6-plus',
             'qwen3.5-plus',
             'qwen3.6-flash',
@@ -266,11 +268,13 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
 
     // ── GLM (Zhipu / Z.ai) ────────────────────────────────────────────────────
     // Only the -v (vision) suffix models support images.
-    // Listed vision models: glm-4.1v-thinking, glm-4.1v-thinking-flash
+    // Listed vision models: glm-5v-turbo, glm-4.1v-thinking, glm-4.1v-thinking-flash
     // Listed text-only:     glm-5.1, glm-5, glm-5-turbo, glm-z1-flash, glm-4-flash
+    'glm-5v-turbo': true,
     'glm-4.1v-thinking': true,
     'glm-4.1v-thinking-flash': true,
     // Future-proof aliases for GLM vision variants
+    'glm-5v': true,
     'glm-4v': true,
     'glm-4.5v': true,
     // Explicitly mark text-only GLM models as false (prevents false-positive prefix match)
@@ -334,7 +338,7 @@ export function isModelVisionCapable(model: string): boolean {
  */
 export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // ── OpenAI ──────────────────────────────────────────────────────────────────
-    'gpt-5.4':         400000,
+    'gpt-5.4':         1000000,
     'gpt-5.4-mini':    200000,
     'gpt-5.4-nano':    128000,
     'gpt-5-mini':      200000,
@@ -353,23 +357,25 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'deepseek-reasoner': 128000,
 
     // ── MiniMax ──────────────────────────────────────────────────────────────────
-    'MiniMax-M2.7':              1000000,
-    'MiniMax-M2.7-highspeed':    1000000,
-    'MiniMax-M2.5':              1000000,
-    'MiniMax-M2.5-highspeed':    1000000,
-    'MiniMax-M2.1':              1000000,
-    'MiniMax-M2':                1000000,
+    'MiniMax-M2.7':              200000,
+    'MiniMax-M2.7-highspeed':    200000,
+    'MiniMax-M2.5':              200000,
+    'MiniMax-M2.5-highspeed':    200000,
+    'MiniMax-M2.1':              200000,
+    'MiniMax-M2':                200000,
 
     // ── GLM (Zhipu / Z.ai) ───────────────────────────────────────────────────────
     'glm-5.1':                200000,
     'glm-5':                  200000,
     'glm-5-turbo':            128000,
+    'glm-5v-turbo':           128000,
     'glm-4.1v-thinking':      128000,
     'glm-4.1v-thinking-flash': 128000,
     'glm-z1-flash':            128000,
     'glm-4-flash':             128000,
 
     // ── Qwen (DashScope) ─────────────────────────────────────────────────────────
+    'qwen3.6-max-preview': 1000000,
     'qwen3.6-plus':       1000000,
     'qwen3.5-plus':       1000000,
     'qwen3.6-flash':       128000,

@@ -1332,6 +1332,9 @@
                         for(const m of newModels) {
                             if (!p.models.includes(m)) p.models.push(m);
                         }
+                        if (msg.dynContexts) {
+                            Object.assign(settingsModelContextTokens, msg.dynContexts);
+                        }
                         updateModelUI(msg.providerId, getSelectedModel(), null);
                         const ctxInfo = msg.ctxNote ? ` ${msg.ctxNote}` : '';
                         document.getElementById('modelHint').textContent = `成功从端点加载了 ${newModels.length} 个模型！${ctxInfo}`;

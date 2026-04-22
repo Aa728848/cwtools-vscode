@@ -335,6 +335,37 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private async saveSettings(settings: import('./types').PanelSettings): Promise<void> {
         const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const { BUILTIN_PROVIDERS } = await import('./providers');
+        
+        const handleDynamicModel = async (providerId: string, modelId: string, contextTokens: number) => {
+            const provider = BUILTIN_PROVIDERS[providerId];
+            if (provider && providerId !== 'ollama' && modelId) {
+                if (!provider.models.includes(modelId)) {
+                    let currentDynamic = cfg.get<Record<string, string[]>>('dynamicModels') || {};
+                    let providerDyns = currentDynamic[providerId] || [];
+                    if (!providerDyns.includes(modelId)) {
+                        providerDyns.push(modelId);
+                        currentDynamic = { ...currentDynamic, [providerId]: providerDyns };
+                        await cfg.update('dynamicModels', currentDynamic, vs.ConfigurationTarget.Global);
+                    }
+                    if (contextTokens > 0) {
+                        let currContexts = cfg.get<Record<string, number>>('dynamicModelsContext') || {};
+                        if (currContexts[modelId] !== contextTokens) {
+                            currContexts = { ...currContexts, [modelId]: contextTokens };
+                            await cfg.update('dynamicModelsContext', currContexts, vs.ConfigurationTarget.Global);
+                        }
+                    }
+                }
+            }
+        };
+
+        if (settings.model) {
+            await handleDynamicModel(settings.provider, settings.model, settings.maxContextTokens || 0);
+        }
+        if (settings.inlineCompletion && settings.inlineCompletion.model) {
+            await handleDynamicModel(settings.inlineCompletion.provider, settings.inlineCompletion.model, 0);
+        }
+
         await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
         await cfg.update('model', settings.model, vs.ConfigurationTarget.Global);
         // API key: store in SecretStorage, NEVER in settings.json
@@ -430,22 +461,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         if (c) dynContexts[m.id] = c;
                     });
                     
-                    const cfg = vs.workspace.getConfiguration('cwtools.ai');
-                    let currentDynamic = cfg.get<Record<string, string[]>>('dynamicModels') || {};
-                    currentDynamic = { ...currentDynamic, [providerId]: dynModels };
-                    await cfg.update('dynamicModels', currentDynamic, vs.ConfigurationTarget.Global);
-                    
-                    let currContexts = cfg.get<Record<string, number>>('dynamicModelsContext') || {};
-                    currContexts = { ...currContexts, ...dynContexts };
-                    await cfg.update('dynamicModelsContext', currContexts, vs.ConfigurationTarget.Global);
-                    
                     const apiHasContext = modelList.some((m: any) => m.context_length || m.context_window || m.top_provider?.context_length);
                     const inferredCount = Object.keys(dynContexts).length;
                     const ctxNote = apiHasContext
                         ? `（已从 API 获取 ${inferredCount} 个模型的上下文大小）`
                         : `（API 未返回上下文大小，已通过模型族推断 ${inferredCount}/${dynModels.length} 个）`;
                     
-                    this.postMessage({ type: 'apiModelsFetched', providerId, models: modelList, ctxNote });
+                    this.postMessage({ type: 'apiModelsFetched', providerId, models: modelList, dynContexts, ctxNote });
                     return;
                 }
             }

@@ -642,7 +642,7 @@ export type HostMessage =
     | { type: 'todoUpdate'; todos: TodoItem[] }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[] }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
-    | { type: 'apiModelsFetched'; providerId: string; models: Array<{id: string}>; error?: string; ctxNote?: string }
+    | { type: 'apiModelsFetched'; providerId: string; models: Array<{id: string}>; dynContexts?: Record<string, number>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }
     | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean }

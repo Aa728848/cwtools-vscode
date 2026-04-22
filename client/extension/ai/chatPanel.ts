@@ -237,7 +237,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     /** Build the settingsData payload and send it to the WebView (no UI activation side-effect) */
     private async buildAndSendSettingsData(showPanel = false): Promise<void> {
-        const { BUILTIN_PROVIDERS, fetchOllamaModels } = await import('./providers');
+        const { BUILTIN_PROVIDERS, fetchOllamaModels, MODEL_CONTEXT_TOKENS } = await import('./providers');
         const config = this.aiService.getConfig();
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => ({
@@ -247,6 +247,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             defaultModel: p.defaultModel,
             requiresApiKey: p.id !== 'ollama',
             defaultEndpoint: p.endpoint,
+            maxContextTokens: p.maxContextTokens,
         }));
 
         const hasKeyMap: Record<string, boolean> = {};
@@ -281,12 +282,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         this.postMessage({
-            type: 'settingsData', providers: providers.map(p => ({
+            type: 'settingsData',
+            providers: providers.map(p => ({
                 ...p,
                 hasKey: hasKeyMap[p.id] ?? false,
-            })) as any, current, ollamaModels, showPanel
+            })) as any,
+            current,
+            ollamaModels,
+            showPanel,
+            // Per-model context window lookup table — used by the UI to auto-fill settingsCtx
+            modelContextTokens: MODEL_CONTEXT_TOKENS,
         });
     }
+
 
     private async openSettingsPage(): Promise<void> {
         await this.buildAndSendSettingsData(true);

@@ -311,6 +311,101 @@ export function isModelVisionCapable(model: string): boolean {
 }
 
 /**
+ * Per-model context window sizes (tokens).
+ * Used by the settings UI to auto-fill the context size field when the user selects a model.
+ * Falls back to the provider-level maxContextTokens if a model is not listed here.
+ *
+ * Sources (verified 2026-04):
+ *   OpenAI:    https://platform.openai.com/docs/models
+ *   Anthropic: https://www.anthropic.com/api
+ *   DeepSeek:  https://platform.deepseek.com/
+ *   Google:    https://ai.google.dev/gemini-api/docs/models
+ *   MiniMax:   https://www.minimax.io/
+ *   Zhipu:     https://bigmodel.cn / z.ai
+ *   DashScope: https://www.alibabacloud.com/help/en/model-studio/
+ */
+export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
+    // ── OpenAI ──────────────────────────────────────────────────────────────────
+    'gpt-5.4':         400000,
+    'gpt-5.4-mini':    200000,
+    'gpt-5.4-nano':    128000,
+    'gpt-5-mini':      200000,
+    'gpt-5-nano':      128000,
+    'gpt-4o':          128000,
+    'gpt-4-vision':    128000,
+
+    // ── Anthropic Claude ─────────────────────────────────────────────────────────
+    'claude-opus-4-7':   1000000,
+    'claude-opus-4-6':   1000000,
+    'claude-sonnet-4-6': 1000000,
+    'claude-haiku-4-5':   200000,
+
+    // ── DeepSeek ────────────────────────────────────────────────────────────────
+    'deepseek-chat':     128000,
+    'deepseek-reasoner': 128000,
+
+    // ── MiniMax ──────────────────────────────────────────────────────────────────
+    'MiniMax-M2.7':              1000000,
+    'MiniMax-M2.7-highspeed':    1000000,
+    'MiniMax-M2.5':              1000000,
+    'MiniMax-M2.5-highspeed':    1000000,
+    'MiniMax-M2.1':              1000000,
+    'MiniMax-M2':                1000000,
+
+    // ── GLM (Zhipu / Z.ai) ───────────────────────────────────────────────────────
+    'glm-5.1':                200000,
+    'glm-5':                  200000,
+    'glm-5-turbo':            128000,
+    'glm-4.1v-thinking':      128000,
+    'glm-4.1v-thinking-flash': 128000,
+    'glm-z1-flash':            128000,
+    'glm-4-flash':             128000,
+
+    // ── Qwen (DashScope) ─────────────────────────────────────────────────────────
+    'qwen3.6-plus':       1000000,
+    'qwen3.5-plus':       1000000,
+    'qwen3.6-flash':       128000,
+    'qwen3-235b-a22b':     128000,
+    'qwen3-32b':           128000,
+    'qwen-max':            128000,
+    'qwen-turbo':           32000,
+    'qwen-long':          1000000,
+
+    // ── Google Gemini ────────────────────────────────────────────────────────────
+    'gemini-3.1-pro-preview':       1048576,
+    'gemini-3-flash-preview':       1048576,
+    'gemini-3.1-flash-lite-preview': 1048576,
+    'gemini-2.5-pro':               1048576,
+    'gemini-2.5-flash':             1048576,
+    'gemini-2.5-flash-lite':        1048576,
+};
+
+/**
+ * Get the context window size for a specific model.
+ * Tries exact match first, then prefix/substring match, then falls back to
+ * the provider's maxContextTokens, or 0 (meaning "use provider default").
+ */
+export function getModelContextTokens(model: string, providerId?: string): number {
+    if (!model) return 0;
+    // 1. Exact match
+    if (model in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[model];
+    // 2. Prefix match (e.g. "claude-sonnet-4-6-20251020" → "claude-sonnet-4-6")
+    for (const key of Object.keys(MODEL_CONTEXT_TOKENS)) {
+        if (model.startsWith(key)) return MODEL_CONTEXT_TOKENS[key];
+    }
+    // 3. Substring match
+    for (const key of Object.keys(MODEL_CONTEXT_TOKENS)) {
+        if (model.includes(key)) return MODEL_CONTEXT_TOKENS[key];
+    }
+    // 4. Fall back to provider-level context limit
+    if (providerId) {
+        const provider = BUILTIN_PROVIDERS[providerId];
+        if (provider) return provider.maxContextTokens;
+    }
+    return 0;
+}
+
+/**
  * Get a provider config by ID, falling back to custom.
  */
 export function getProvider(id: string): AIProviderConfig {

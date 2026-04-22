@@ -635,7 +635,7 @@ export type HostMessage =
     | { type: 'clearChat' }
     | { type: 'modeChanged'; mode: AgentMode; label?: string }
     | { type: 'todoUpdate'; todos: TodoItem[] }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; modelContextTokens?: Record<string, number> }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }

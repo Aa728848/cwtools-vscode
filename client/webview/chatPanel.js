@@ -17,6 +17,8 @@
     const messageIndexMap = new Map();
     let settingsProviders = [];
     let settingsOllamaModels = [];
+    /** Per-model context window sizes received from backend — used to auto-fill settingsCtx */
+    let settingsModelContextTokens = {};
     let totalConversationTokens = 0;
     let contextLimit = 128000;
     /** Pending images (base64 data URLs) to attach to next sent message */
@@ -1249,6 +1251,8 @@
 
             case 'settingsData':
                 if (msg.current && msg.current.maxContextTokens > 0) contextLimit = msg.current.maxContextTokens;
+                // Cache model context token map for use in updateModelUI
+                if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
                 if (msg.showPanel) showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
                 else updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
                 break;
@@ -1554,7 +1558,9 @@
         inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map(p=>'<option value="'+p.id+'"'+(p.id===current.inlineCompletion?.provider?' selected':'')+'>'+escapeHtml(p.name)+'</option>').join('');
         document.getElementById('settingsApiKey').value = '';
         document.getElementById('settingsEndpoint').value = current.endpoint||'';
-        document.getElementById('settingsCtx').value = current.maxContextTokens||0;
+        // Auto-fill context size: prefer per-model lookup, then user-saved value
+        const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
+        document.getElementById('settingsCtx').value = initCtx;
         document.getElementById('inlineEnabled').checked = current.inlineCompletion?.enabled??false;
         document.getElementById('inlineEndpoint').value = current.inlineCompletion?.endpoint||'';
         document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs||1500;
@@ -1586,6 +1592,24 @@
         document.getElementById('testResult').textContent = '';
     }
 
+    /** Look up per-model context size with fallback to provider level */
+    function autoFillContextForModel(model, providerId) {
+        if (!model) return 0;
+        // 1. Exact match
+        if (settingsModelContextTokens[model]) return settingsModelContextTokens[model];
+        // 2. Prefix match
+        for (const key of Object.keys(settingsModelContextTokens)) {
+            if (model.startsWith(key)) return settingsModelContextTokens[key];
+        }
+        // 3. Substring match
+        for (const key of Object.keys(settingsModelContextTokens)) {
+            if (model.includes(key)) return settingsModelContextTokens[key];
+        }
+        // 4. Provider-level fallback
+        const provider = settingsProviders.find(p=>p.id===providerId);
+        return (provider && provider.maxContextTokens) ? provider.maxContextTokens : 0;
+    }
+
     function closeSettings() {
         settingsPage.classList.remove('active');
         chatHeader.style.display = '';
@@ -1611,6 +1635,11 @@
         updateModelUI(id,'',settingsOllamaModels);
         updateEndpointHint(id);
         updateApiKeyStatus(id,settingsProviders);
+        // Auto-fill context with provider default when user switches provider
+        const provider = settingsProviders.find(p=>p.id===id);
+        if (provider && provider.maxContextTokens > 0) {
+            document.getElementById('settingsCtx').value = provider.maxContextTokens;
+        }
     }
 
     function updateModelUI(providerId, currentModel, ollamaModels) {
@@ -1619,6 +1648,13 @@
         const modelInput = document.getElementById('settingsModelInput');
         const detectBtn = document.getElementById('detectBtn');
         const modelHint = document.getElementById('modelHint');
+
+        /** Auto-fill settingsCtx when a model is chosen */
+        function onModelSelected(model) {
+            const ctx = autoFillContextForModel(model, providerId);
+            if (ctx > 0) document.getElementById('settingsCtx').value = ctx;
+        }
+
         if (providerId==='ollama') {
             document.getElementById('apiKeyGroup').style.display='none';
             if (ollamaModels&&ollamaModels.length>0) {
@@ -1637,6 +1673,18 @@
             modelHint.textContent='或直接输入自定义模型名';
             detectBtn.style.display='none';
         } else { modelSel.style.display='none'; modelInput.style.display=''; detectBtn.style.display='none'; modelInput.value=currentModel||''; modelHint.textContent=''; }
+
+        // Bind auto-fill to model select/input changes
+        modelSel.onchange = () => onModelSelected(modelSel.value);
+        let _modelInputTimer;
+        modelInput.oninput = () => {
+            clearTimeout(_modelInputTimer);
+            _modelInputTimer = setTimeout(() => onModelSelected(modelInput.value.trim()), 400);
+        };
+        // Auto-fill immediately for current selection
+        const activeModel = currentModel || (modelSel.style.display !== 'none' ? modelSel.value : modelInput.value);
+        if (activeModel) onModelSelected(activeModel);
+
         updateEndpointHint(providerId);
     }
 

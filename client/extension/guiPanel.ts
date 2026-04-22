@@ -818,38 +818,19 @@ export class GuiPanel {
             }
         }
 
-        // Build the edit: delete original lines, then insert before new parent's closing brace
+        // Build the edit
         const edit = new vscode.WorkspaceEdit();
 
-        // Determine if the element is BEFORE or AFTER the new parent in the file
-        const movingUp = msg.startLine > msg.newParentEndLine;
+        // Delete original lines (including preceding newline)
+        const deleteStartPos = msg.startLine > 1
+            ? new vscode.Position(msg.startLine - 2, doc.lineAt(msg.startLine - 2).text.length)
+            : new vscode.Position(0, 0);
+        const deleteEndPos = new vscode.Position(msg.endLine - 1, doc.lineAt(msg.endLine - 1).text.length);
+        edit.delete(doc.uri, new vscode.Range(deleteStartPos, deleteEndPos));
 
-        if (movingUp) {
-            // Element is after target: insert first, then delete (line numbers shift)
-            const insertPos = new vscode.Position(msg.newParentEndLine - 1, 0);
-            edit.insert(doc.uri, insertPos, block + '\n');
-            // After insert, the original lines shifted down by the number of inserted lines
-            const insertedLineCount = block.split('\n').length + 1; // +1 for the trailing newline
-            const deleteStart = msg.startLine - 1 + insertedLineCount - 1;
-            const deleteEnd = msg.endLine - 1 + insertedLineCount - 1;
-            const startPos = deleteStart > 0
-                ? new vscode.Position(deleteStart - 1, doc.lineAt(Math.min(deleteStart - 1, doc.lineCount - 1)).text.length)
-                : new vscode.Position(0, 0);
-            const endPos = new vscode.Position(deleteEnd, doc.lineAt(Math.min(deleteEnd, doc.lineCount - 1)).text.length);
-            edit.delete(doc.uri, new vscode.Range(startPos, endPos));
-        } else {
-            // Element is before target: delete first, then insert (adjust target line)
-            const deleteStartPos = msg.startLine > 1
-                ? new vscode.Position(msg.startLine - 2, doc.lineAt(msg.startLine - 2).text.length)
-                : new vscode.Position(0, 0);
-            const deleteEndPos = new vscode.Position(msg.endLine - 1, doc.lineAt(msg.endLine - 1).text.length);
-            edit.delete(doc.uri, new vscode.Range(deleteStartPos, deleteEndPos));
-            // After delete, the target line shifts up by the number of deleted lines
-            const deletedLineCount = msg.endLine - msg.startLine + 1 + (msg.startLine > 1 ? 0 : 0);
-            const adjustedTargetLine = msg.newParentEndLine - deletedLineCount;
-            const insertPos = new vscode.Position(Math.max(0, adjustedTargetLine - 1), 0);
-            edit.insert(doc.uri, insertPos, block + '\n');
-        }
+        // Insert before new parent's closing brace
+        const insertPos = new vscode.Position(msg.newParentEndLine - 1, 0);
+        edit.insert(doc.uri, insertPos, block + '\n');
 
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
@@ -911,11 +892,8 @@ export class GuiPanel {
         const deleteEndPos = new vscode.Position(msg.endLine - 1, doc.lineAt(msg.endLine - 1).text.length);
         edit.delete(doc.uri, new vscode.Range(deleteStartPos, deleteEndPos));
 
-        // After delete, parent's closing brace shifts up
-        const deletedLineCount = msg.endLine - msg.startLine + 1;
-        const adjustedParentEnd = msg.parentEndLine - deletedLineCount;
-        const insertPos = new vscode.Position(Math.max(0, adjustedParentEnd - 1),
-            doc.lineAt(Math.min(Math.max(0, adjustedParentEnd - 1), doc.lineCount - 1)).text.length);
+        // Insert after parent's closing brace
+        const insertPos = new vscode.Position(msg.parentEndLine - 1, doc.lineAt(msg.parentEndLine - 1).text.length);
         edit.insert(doc.uri, insertPos, '\n' + block);
 
         this._skipNextReload = true;

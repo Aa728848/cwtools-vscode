@@ -1042,6 +1042,8 @@ export class AIService {
             if (providerId === 'ollama') {
                 const ollamaModels = await fetchOllamaModels(endpoint);
                 detectedModels = ollamaModels.map(m => ({ id: m.name }));
+            } else if (providerId.startsWith('minimax')) {
+                detectedModels = provider.models.map(m => ({ id: m }));
             } else if (provider.isOpenAICompatible) {
                 try {
                     const modelsUrl = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '') + '/models';
@@ -1053,7 +1055,7 @@ export class AIService {
                     if (res.ok) {
                         const data = await res.json() as any;
                         if (data && Array.isArray(data.data)) {
-                            detectedModels = data.data.map((m: any) => ({ id: m.id }));
+                            const dynModels = data.data.map((m: any) => m.id); const cfg = vs.workspace.getConfiguration('cwtools.ai'); let currentDynamic = cfg.get('dynamicModels') || {}; currentDynamic = { ...currentDynamic, [providerId]: dynModels }; await cfg.update('dynamicModels', currentDynamic, vs.ConfigurationTarget.Global); detectedModels = dynModels.map((id: string) => ({ id }));
                         }
                     }
                 } catch (e) {
@@ -1099,10 +1101,26 @@ export class AIService {
                 });
                 if (modelName) {
                     await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+                    const { MODEL_CONTEXT_TOKENS } = await import('./providers');
+                    let foundCtx = 0;
+                    for (const [key, val] of Object.entries(MODEL_CONTEXT_TOKENS)) {
+                        if (modelName.includes(key)) { foundCtx = val; break; }
+                    }
+                    if (foundCtx > 0 || provider.maxContextTokens) {
+                        await vs.workspace.getConfiguration('cwtools.ai').update('maxContextTokens', foundCtx || provider.maxContextTokens, vs.ConfigurationTarget.Global);
+                    }
                     vs.window.showInformationMessage(`AI Model set to: ${modelName}`);
                 }
             } else {
                 await vs.workspace.getConfiguration('cwtools.ai').update('model', selectedModel.label, vs.ConfigurationTarget.Global);
+                const { MODEL_CONTEXT_TOKENS } = await import('./providers');
+                let foundCtx = 0;
+                for (const [key, val] of Object.entries(MODEL_CONTEXT_TOKENS)) {
+                    if (selectedModel.label.includes(key)) { foundCtx = val; break; }
+                }
+                if (foundCtx > 0 || provider.maxContextTokens) {
+                    await vs.workspace.getConfiguration('cwtools.ai').update('maxContextTokens', foundCtx || provider.maxContextTokens, vs.ConfigurationTarget.Global);
+                }
                 vs.window.showInformationMessage(`AI Model set to: ${selectedModel.label}`);
             }
         }

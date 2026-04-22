@@ -356,7 +356,20 @@
 				"cwtools.ai.provider": {
 					"scope": "window",
 					"type": "string",
-					"enum": ["openai", "claude", "deepseek", "minimax", "glm", "qwen", "ollama", "siliconflow", "openrouter", "github", "together", "deepinfra"],
+					"enum": [
+						"openai",
+						"claude",
+						"deepseek",
+						"minimax",
+						"glm",
+						"qwen",
+						"ollama",
+						"siliconflow",
+						"openrouter",
+						"github",
+						"together",
+						"deepinfra"
+					],
 					"enumDescriptions": [
 						"%configuration.cwtools.ai.provider.enum.openai%",
 						"%configuration.cwtools.ai.provider.enum.claude%",
@@ -389,7 +402,10 @@
 				"cwtools.ai.agentFileWriteMode": {
 					"scope": "window",
 					"type": "string",
-					"enum": ["confirm", "auto"],
+					"enum": [
+						"confirm",
+						"auto"
+					],
 					"enumDescriptions": [
 						"%configuration.cwtools.ai.agentFileWriteMode.enum.confirm%",
 						"%configuration.cwtools.ai.agentFileWriteMode.enum.auto%"
@@ -436,7 +452,20 @@
 				"cwtools.ai.inlineCompletion.provider": {
 					"scope": "window",
 					"type": "string",
-					"enum": ["openai", "claude", "deepseek", "minimax", "glm", "qwen", "ollama", "siliconflow", "openrouter", "github", "together", "deepinfra"],
+					"enum": [
+						"openai",
+						"claude",
+						"deepseek",
+						"minimax",
+						"glm",
+						"qwen",
+						"ollama",
+						"siliconflow",
+						"openrouter",
+						"github",
+						"together",
+						"deepinfra"
+					],
 					"enumDescriptions": [
 						"%configuration.cwtools.ai.provider.enum.openai%",
 						"%configuration.cwtools.ai.provider.enum.claude%",
@@ -465,6 +494,16 @@
 					"type": "string",
 					"default": "",
 					"description": "%configuration.cwtools.ai.inlineCompletion.endpoint.description%"
+				},
+				"cwtools.ai.dynamicModels": {
+					"type": "object",
+					"default": {},
+					"description": "Dynamically fetched AI models"
+				},
+				"cwtools.ai.dynamicModelsContext": {
+					"type": "object",
+					"default": {},
+					"description": "Dynamically fetched AI models context sizes"
 				}
 			}
 		},

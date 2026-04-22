@@ -192,8 +192,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'detectOllamaModels':
                 await this.detectOllamaModels(msg.endpoint);
                 break;
+            case 'fetchApiModels':
+                await this.fetchApiModels(msg.providerId, msg.endpoint, msg.apiKey);
+                break;
             case 'testConnection':
                 await this.testConnection(msg.settings);
+                break;
+            case 'deleteDynamicModel':
+                await this.deleteDynamicModel(msg.providerId, msg.modelId);
                 break;
             case 'cancelGeneration':
                 this.cancelGeneration();
@@ -282,17 +288,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (ep) ollamaModels = await fetchOllamaModels(ep);
         }
 
+        const vscodeConfig = vs.workspace.getConfiguration('cwtools.ai');
+        const dynamicModelsConfig = vscodeConfig.get<Record<string, string[]>>('dynamicModels') || {};
+
+        const dynamicContexts = vscodeConfig.get<Record<string, number>>('dynamicModelsContext') || {};
+
         this.postMessage({
             type: 'settingsData',
             providers: providers.map(p => ({
                 ...p,
                 hasKey: hasKeyMap[p.id] ?? false,
+                models: Array.from(new Set([...p.models, ...(dynamicModelsConfig[p.id] || [])]))
             })) as any,
             current,
             ollamaModels,
             showPanel,
-            // Per-model context window lookup table — used by the UI to auto-fill settingsCtx
-            modelContextTokens: MODEL_CONTEXT_TOKENS,
+            // Merge static MODEL_CONTEXT_TOKENS with any dynamic contexts grabbed from OpenRouter/etc.
+            modelContextTokens: { ...MODEL_CONTEXT_TOKENS, ...dynamicContexts },
         });
     }
 
@@ -350,6 +362,96 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'ollamaModels', models });
         } else {
             this.postMessage({ type: 'ollamaModels', models: [], error: '未检测到 Ollama 模型，请确认 Ollama 正在运行' });
+        }
+    }
+
+    private async fetchApiModels(providerId: string, endpointOverride: string, apiKeyOverride: string): Promise<void> {
+        const { getEffectiveEndpoint } = await import('./providers');
+        const saved = this.aiService.getConfig();
+        const endpoint = endpointOverride || getEffectiveEndpoint(providerId, saved.endpoint);
+        
+        let apiKey = apiKeyOverride;
+        if (!apiKey) apiKey = await this.aiService.getKeyForProvider(providerId) || '';
+
+        if (!apiKey) {
+            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: '需要 API Key 才能拉取模型列表' });
+            return;
+        }
+
+        if (providerId.startsWith('minimax')) {
+            // Minimax API does not currently have a standard /v1/models endpoint for listing.
+            // Return the hardcoded fallback list smoothly so the UI doesn't crash.
+            const { BUILTIN_PROVIDERS } = await import('./providers');
+            const models = (BUILTIN_PROVIDERS[providerId]?.models || []).map(m => ({ id: m }));
+            this.postMessage({ type: 'apiModelsFetched', providerId, models, error: '' });
+            return;
+        }
+
+        try {
+            const modelsUrl = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '') + '/models';
+            const res = await fetch(modelsUrl, {
+                headers: { 'Authorization': `Bearer ${apiKey}` }
+            });
+            if (res.ok) {
+                const data = await res.json() as any;
+                // Some providers return { data: [...] }, others return a flat array
+                const modelList: any[] = Array.isArray(data)
+                    ? data
+                    : (Array.isArray(data?.data) ? data.data : null);
+                if (modelList) {
+                    const dynModels = modelList.map((m: any) => m.id);
+                    const dynContexts: Record<string, number> = {};
+                    const { getModelContextTokens } = await import('./providers');
+                    
+                    modelList.forEach((m: any) => {
+                        // Tier 1: Direct from API response (OpenRouter, Together, DeepInfra, etc.)
+                        let c = m.context_length
+                            || m.context_window
+                            || m.max_context_length
+                            || m.top_provider?.context_length
+                            || 0;
+                        
+                        // Tier 2: Infer from model family using canonical knowledge base
+                        if (!c && m.id) {
+                            c = getModelContextTokens(m.id, providerId);
+                        }
+                        
+                        if (c) dynContexts[m.id] = c;
+                    });
+                    
+                    const cfg = vs.workspace.getConfiguration('cwtools.ai');
+                    let currentDynamic = cfg.get<Record<string, string[]>>('dynamicModels') || {};
+                    currentDynamic = { ...currentDynamic, [providerId]: dynModels };
+                    await cfg.update('dynamicModels', currentDynamic, vs.ConfigurationTarget.Global);
+                    
+                    let currContexts = cfg.get<Record<string, number>>('dynamicModelsContext') || {};
+                    currContexts = { ...currContexts, ...dynContexts };
+                    await cfg.update('dynamicModelsContext', currContexts, vs.ConfigurationTarget.Global);
+                    
+                    const apiHasContext = modelList.some((m: any) => m.context_length || m.context_window || m.top_provider?.context_length);
+                    const inferredCount = Object.keys(dynContexts).length;
+                    const ctxNote = apiHasContext
+                        ? `（已从 API 获取 ${inferredCount} 个模型的上下文大小）`
+                        : `（API 未返回上下文大小，已通过模型族推断 ${inferredCount}/${dynModels.length} 个）`;
+                    
+                    this.postMessage({ type: 'apiModelsFetched', providerId, models: modelList, ctxNote });
+                    return;
+                }
+            }
+            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: `接口返回未知数据结构 (状态码: ${res.status})` });
+        } catch (e: unknown) {
+            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: String(e) });
+        }
+    }
+
+    private async deleteDynamicModel(providerId: string, modelId: string): Promise<void> {
+        const vscodeConfig = vs.workspace.getConfiguration('cwtools.ai');
+        const dynamicModelsConfig = vscodeConfig.get<Record<string, string[]>>('dynamicModels') || {};
+        if (dynamicModelsConfig[providerId]) {
+            dynamicModelsConfig[providerId] = dynamicModelsConfig[providerId].filter(m => m !== modelId);
+            await vscodeConfig.update('dynamicModels', dynamicModelsConfig, vs.ConfigurationTarget.Global);
+            vs.window.showInformationMessage(`✅ 已删除动态拉取的模型: ${modelId}`);
+            await this.openSettingsPage(); // Refresh settings data
         }
     }
 
@@ -1581,6 +1683,11 @@ body.plan-mode .plan-indicator { display: block; }
 
 /* ── Empty state + Suggestion cards ── */
 .empty-state { margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 32px 16px; gap: 6px; }
+
+/* ── Custom Dropdown (Datalist Replacement) ── */
+.ap-dropdown { position: absolute; top: calc(100% + 2px); left: 0; max-height: 200px; overflow-y: auto; background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); width: calc(100% - 2px); z-index: 1000; box-shadow: 0 4px 8px rgba(0,0,0,0.3); border-radius: 4px; display: none; }
+.ap-dropdown-item { padding: 5px 8px; cursor: pointer; color: var(--vscode-foreground); font-size: 12px; }
+.ap-dropdown-item:hover { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .empty-icon { font-size: 40px; color: var(--accent); margin-bottom: 8px; }
 .empty-tagline { font-size: 11px; opacity: 0.45; margin-bottom: 16px; }
 .suggest-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; max-width: 280px; }
@@ -1856,10 +1963,11 @@ body.general-mode .mode-indicator { color: #c792ea; }
                 </div>
                 <div class="settings-group">
                     <label class="settings-label">Model</label>
-                    <div class="model-row">
-                        <select class="settings-select" id="settingsModelSelect" style="display:none"></select>
-                        <input class="settings-input" id="settingsModelInput" type="text" placeholder="model-name" />
-                        <button class="detect-btn" id="detectBtn" style="display:none">🔍 检测</button>
+                    <div class="model-row" style="position:relative">
+                        <input class="settings-input" id="settingsModelInput" type="text" placeholder="输入模型名，或点右侧下拉框搜索" autocomplete="off" />
+                        <div id="settingsModelDatalist" class="ap-dropdown"></div>
+                        <button class="detect-btn" id="delModelBtn" style="margin-left:4px; padding:0 8px; width:auto;" title="删除列表中当前字面的模型">🗑️ 删除</button>
+                        <button class="detect-btn" id="detectBtn" style="display:none; margin-left:4px;">🔍 检测</button>
                     </div>
                     <div class="settings-hint" id="modelHint"></div>
                 </div>
@@ -1869,6 +1977,7 @@ body.general-mode .mode-indicator { color: #c792ea; }
                     <div class="settings-key-row">
                         <input class="settings-input" id="settingsApiKey" type="password" placeholder="输入新 Key（留空保留已有）" autocomplete="off" />
                         <button class="key-toggle-btn" id="keyToggleBtn">👁</button>
+                        <button class="detect-btn" id="fetchApiModelsBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="用此 Key 去对应端点拉取模型">☁️ 获取模型</button>
                     </div>
                 </div>
                 <div class="settings-group">
@@ -1894,9 +2003,10 @@ body.general-mode .mode-indicator { color: #c792ea; }
                     <select class="settings-select" id="inlineProvider"><option value="">- 与对话相同 -</option></select>
                 </div>
                 <div class="settings-group">
-                    <label class="settings-label">Model</label>
-                    <select class="settings-select" id="inlineModel"></select>
-                </div>
+                    <div class="model-row" style="position:relative">
+                        <input class="settings-input" id="inlineModelInput" type="text" placeholder="例如 gpt-4" autocomplete="off" />
+                        <div id="inlineModelDatalist" class="ap-dropdown"></div>
+                    </div>
                 <div class="settings-group">
                     <label class="settings-label">Endpoint</label>
                     <input class="settings-input" id="inlineEndpoint" type="text" placeholder="留空与对话相同" />

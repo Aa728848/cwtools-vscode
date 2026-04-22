@@ -608,7 +608,8 @@ export type WebViewMessage =
     | { type: 'openSettings' }
     | { type: 'saveSettings'; settings: PanelSettings }
     | { type: 'detectOllamaModels'; endpoint: string }
-    | { type: 'testConnection'; settings: PanelSettings }
+    | { type: 'fetchApiModels'; providerId: string; endpoint: string; apiKey: string }
+    | { type: 'testConnection'; settings: PanelSettings } | { type: 'deleteDynamicModel'; providerId: string; modelId: string }
     | { type: 'retractMessage'; messageIndex: number }
     | { type: 'confirmWriteFile'; messageId: string }
     | { type: 'cancelWriteFile'; messageId: string }
@@ -641,6 +642,7 @@ export type HostMessage =
     | { type: 'todoUpdate'; todos: TodoItem[] }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; modelContextTokens?: Record<string, number> }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
+    | { type: 'apiModelsFetched'; providerId: string; models: Array<{id: string}>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }
     | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean }

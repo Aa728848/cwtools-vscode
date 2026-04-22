@@ -67,6 +67,17 @@ const THINKING_DISABLEABLE_PREFIXES: string[] = [
 /** Returns true if the model always thinks and CANNOT disable thinking */
 function isAlwaysThinkingModel(model: string): boolean {
     const lower = model.toLowerCase();
+
+    // If it natively supports disabling, it's not "always" thinking
+    if (isDisableableThinkingModel(model)) {
+        return false;
+    }
+
+    // Dynamic checks for fetched models
+    if (lower.includes('-r1') || lower.includes('reasoner') || lower.includes('think') || lower.match(/^o[13]/)) {
+        return true;
+    }
+
     return THINKING_MODEL_PREFIXES.some(prefix => lower.startsWith(prefix));
 }
 

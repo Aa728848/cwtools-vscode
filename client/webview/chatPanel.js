@@ -17,6 +17,35 @@
     const messageIndexMap = new Map();
     let settingsProviders = [];
     let settingsOllamaModels = [];
+
+    // Custom absolute positioned dropdown logic
+    function setupApDropdown(inputId, dropdownId, getOptions, onSelect) {
+        const input = document.getElementById(inputId);
+        const dropdown = document.getElementById(dropdownId);
+        if (!input || !dropdown) return;
+
+        function render(filter) {
+            const term = (filter||'').toLowerCase();
+            const opts = getOptions() || [];
+            const html = opts.filter(m => m.toLowerCase().includes(term))
+                .map(m => '<div class="ap-dropdown-item">'+escapeHtml(m)+'</div>').join('');
+            dropdown.innerHTML = html;
+            Array.from(dropdown.children).forEach(el => {
+                el.onmousedown = (e) => {
+                    e.preventDefault();
+                    input.value = el.textContent;
+                    dropdown.style.display = 'none';
+                    if (onSelect) onSelect(input.value);
+                };
+            });
+        }
+        
+        input.addEventListener('focus', () => { render(input.value); dropdown.style.display = 'block'; });
+        input.addEventListener('blur', () => { setTimeout(() => { dropdown.style.display = 'none'; }, 150); });
+        input.addEventListener('input_ap', () => { render(input.value); });
+        input.addEventListener('input', () => { render(input.value); });
+    }
+
     /** Per-model context window sizes received from backend — used to auto-fill settingsCtx */
     let settingsModelContextTokens = {};
     let totalConversationTokens = 0;
@@ -126,6 +155,7 @@
     bindBtn('testConnBtn',      testConnection);
     bindBtn('saveSettingsBtn',  saveSettings);
     bindBtn('keyToggleBtn',     () => { const k = document.getElementById('settingsApiKey'); if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
+    bindBtn('fetchApiModelsBtn', () => { fetchApiModels(); });
     bindBtn('detectBtn',        detectOllamaModels);
     bindBtn('accChat',          () => toggleAccordion('chatModelSection'));
     bindBtn('accInline',        () => toggleAccordion('inlineSection'));
@@ -1288,6 +1318,26 @@
                 else { settingsOllamaModels = msg.models; updateModelUI(document.getElementById('settingsProvider').value, '', msg.models); }
                 break;
             }
+            case 'apiModelsFetched': {
+                const fb = document.getElementById('fetchApiModelsBtn');
+                if (fb) { fb.disabled = false; fb.textContent = '☁️ 拉取支持的模型'; }
+                if (msg.error) { document.getElementById('apiKeyStatus').textContent = '获取失败: ' + msg.error; document.getElementById('apiKeyStatus').style.color = '#ff9800'; }
+                else { 
+                    const p = settingsProviders.find(p => p.id === msg.providerId);
+                    if (p && msg.models && msg.models.length > 0) {
+                        const newModels = msg.models.map(m => m.id);
+                        for(const m of newModels) {
+                            if (!p.models.includes(m)) p.models.push(m);
+                        }
+                        updateModelUI(msg.providerId, getSelectedModel(), null);
+                        const ctxInfo = msg.ctxNote ? ` ${msg.ctxNote}` : '';
+                        document.getElementById('modelHint').textContent = `成功从端点加载了 ${newModels.length} 个模型！${ctxInfo}`;
+                        document.getElementById('apiKeyStatus').textContent = '✅ 已成功获取模型'; 
+                        document.getElementById('apiKeyStatus').style.color = '#4caf50';
+                    }
+                }
+                break;
+            }
             case 'testConnectionResult': {
                 const tr = document.getElementById('testResult');
                 tr.className = 'test-result ' + (msg.ok ? 'ok' : 'fail');
@@ -1596,11 +1646,13 @@
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
 
         function updateInlineModelSelect(pid, selectedModel, ollamaModels) {
-            const s = document.getElementById('inlineModel'); const p2 = providers.find(p=>p.id===(pid||current.provider));
+            const p2 = providers.find(p=>p.id===(pid||current.provider));
             const ms = (pid||current.provider)==='ollama'?(ollamaModels||[]).map(m=>m.name):(p2?p2.models:[]);
-            s.innerHTML = '<option value="">- 与对话相同 -</option>';
-            for (const m of ms) { const o=document.createElement('option'); o.value=m; o.textContent=m; o.selected=m===selectedModel; s.appendChild(o); }
-            if (selectedModel&&!ms.includes(selectedModel)) { const o=document.createElement('option'); o.value=selectedModel; o.textContent=selectedModel; o.selected=true; s.appendChild(o); }
+            
+            const inp = document.getElementById('inlineModelInput');
+            inp.value = selectedModel || '';
+            
+            setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
         }
         const inlineProviderSel = document.getElementById('inlineProvider');
         updateInlineModelSelect(current.inlineCompletion?.provider, current.inlineCompletion?.model, ollamaModels);
@@ -1670,7 +1722,6 @@
 
     function updateModelUI(providerId, currentModel, ollamaModels) {
         const provider = settingsProviders.find(p=>p.id===providerId);
-        const modelSel = document.getElementById('settingsModelSelect');
         const modelInput = document.getElementById('settingsModelInput');
         const detectBtn = document.getElementById('detectBtn');
         const modelHint = document.getElementById('modelHint');
@@ -1681,35 +1732,37 @@
             if (ctx > 0) document.getElementById('settingsCtx').value = ctx;
         }
 
+        let currentDropdownOpts = [];
+
         if (providerId==='ollama') {
             document.getElementById('apiKeyGroup').style.display='none';
             if (ollamaModels&&ollamaModels.length>0) {
-                modelSel.innerHTML=ollamaModels.map(m=>'<option value="'+escapeHtml(m.name)+'"'+(m.name===currentModel?' selected':'')+'>'+escapeHtml(m.name)+(m.parameterSize?' ('+m.parameterSize+')':'')+'</option>').join('');
-                modelSel.style.display=''; modelInput.style.display='none';
+                currentDropdownOpts = ollamaModels.map(m=>m.name);
                 modelHint.textContent='已检测到 '+ollamaModels.length+' 个本地模型';
-            } else { modelSel.style.display='none'; modelInput.style.display=''; detectBtn.style.display=''; modelInput.value=currentModel||''; modelHint.textContent='点击「检测」获取 Ollama 模型'; }
+            } else { currentDropdownOpts=[]; modelHint.textContent='点击「检测」获取 Ollama 模型'; }
             detectBtn.style.display='';
         } else if (provider&&provider.models.length>0) {
-            // Build option list; always include a custom entry at top if current model not in list
-            const opts = [...provider.models];
-            if (currentModel && !opts.includes(currentModel)) opts.unshift(currentModel);
-            modelSel.innerHTML = opts.map(m=>'<option value="'+escapeHtml(m)+'"'+(m===currentModel?' selected':'')+'>'+escapeHtml(m)+'</option>').join('');
-            // Always show the select dropdown (never prefer bare input for known providers)
-            modelSel.style.display=''; modelInput.style.display='none';
-            modelHint.textContent='或直接输入自定义模型名';
+            currentDropdownOpts = provider.models;
+            modelHint.textContent='可选择下拉项，或直接输入自定义模型名';
             detectBtn.style.display='none';
-        } else { modelSel.style.display='none'; modelInput.style.display=''; detectBtn.style.display='none'; modelInput.value=currentModel||''; modelHint.textContent=''; }
+        } else { currentDropdownOpts=[]; modelHint.textContent=''; detectBtn.style.display='none'; }
+        
+        // Setup dropdown logic
+        setupApDropdown('settingsModelInput', 'settingsModelDatalist', () => currentDropdownOpts, onModelSelected);
 
-        // Bind auto-fill to model select/input changes
-        modelSel.onchange = () => onModelSelected(modelSel.value);
+        // Restore value
+        modelInput.value = currentModel || '';
+
+        // Bind auto-fill to model input changes
         let _modelInputTimer;
         modelInput.oninput = () => {
             clearTimeout(_modelInputTimer);
             _modelInputTimer = setTimeout(() => onModelSelected(modelInput.value.trim()), 400);
+            const evt = new Event('input_ap');
+            modelInput.dispatchEvent(evt); // trigger dropdown render
         };
         // Auto-fill immediately for current selection
-        const activeModel = currentModel || (modelSel.style.display !== 'none' ? modelSel.value : modelInput.value);
-        if (activeModel) onModelSelected(activeModel);
+        if (modelInput.value) onModelSelected(modelInput.value);
 
         updateEndpointHint(providerId);
     }
@@ -1737,9 +1790,31 @@
         vscode.postMessage({ type:'detectOllamaModels', endpoint: ep||'http://localhost:11434/v1' });
     }
 
+    document.getElementById('delModelBtn').addEventListener('click', () => {
+        const providerId = document.getElementById('settingsProvider').value;
+        const modelId = document.getElementById('settingsModelInput').value.trim();
+        if (providerId && modelId) {
+            vscode.postMessage({ type: 'deleteDynamicModel', providerId, modelId });
+        }
+    });
+    document.getElementById('detectBtn').addEventListener('click', detectOllamaModels);
+    document.getElementById('fetchApiModelsBtn').addEventListener('click', fetchApiModels);
+
+    function fetchApiModels() {
+        const btn = document.getElementById('fetchApiModelsBtn');
+        btn.disabled = true; btn.textContent = '拉取中...';
+        document.getElementById('apiKeyStatus').textContent = '正在发起网络请求拉取支持模型...';
+        document.getElementById('apiKeyStatus').style.color = 'inherit';
+        vscode.postMessage({ 
+            type: 'fetchApiModels', 
+            providerId: document.getElementById('settingsProvider').value,
+            endpoint: document.getElementById('settingsEndpoint').value.trim(),
+            apiKey: document.getElementById('settingsApiKey').value
+        });
+    }
+
     function getSelectedModel() {
-        const sel=document.getElementById('settingsModelSelect'); const inp=document.getElementById('settingsModelInput');
-        return sel.style.display!=='none'?sel.value:inp.value.trim();
+        return document.getElementById('settingsModelInput').value.trim();
     }
 
     function toggleAccordion(id) { document.getElementById(id).classList.toggle('open'); }
@@ -1756,7 +1831,7 @@
             inlineCompletion:{
                 enabled: document.getElementById('inlineEnabled').checked,
                 provider: document.getElementById('inlineProvider').value,
-                model: document.getElementById('inlineModel').value.trim(),
+                model: document.getElementById('inlineModelInput').value.trim(),
                 endpoint: document.getElementById('inlineEndpoint').value.trim(),
                 debounceMs: parseInt(document.getElementById('inlineDebounce').value)||500,
                 overlapStripping: document.getElementById('inlineOverlapStripping')?.checked ?? true,

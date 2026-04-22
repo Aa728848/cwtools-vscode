@@ -420,7 +420,6 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-5.4-nano':    128000,
     'gpt-5-mini':      200000,
     'gpt-5-nano':      128000,
-    'gpt-4o':          128000,
     'gpt-4-vision':    128000,
 
     // ── Anthropic Claude ─────────────────────────────────────────────────────────
@@ -430,8 +429,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'claude-haiku-4-5':   200000,
 
     // ── DeepSeek ────────────────────────────────────────────────────────────────
-    'deepseek-chat':     128000,
-    'deepseek-reasoner': 128000,
+    // (moved to Model Family Fallbacks section below)
 
     // ── MiniMax ──────────────────────────────────────────────────────────────────
     'MiniMax-M2.7':              200000,
@@ -458,9 +456,6 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'qwen3.6-flash':       128000,
     'qwen3-235b-a22b':     128000,
     'qwen3-32b':           128000,
-    'qwen-max':            128000,
-    'qwen-turbo':           32000,
-    'qwen-long':          1000000,
 
     // ── Google Gemini ────────────────────────────────────────────────────────────
     'gemini-3.1-pro-preview':       1048576,
@@ -469,6 +464,100 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gemini-2.5-pro':               1048576,
     'gemini-2.5-flash':             1048576,
     'gemini-2.5-flash-lite':        1048576,
+
+    // ── Model Family Fallbacks ────────────────────────────────────────────────────
+    // These are used as Tier-2 inference when the API doesn't return context_length
+    // (e.g. SiliconFlow, GitHub Models). Matched via substring/prefix in getModelContextTokens().
+    // Sources: official model docs, verified 2026-04.
+
+    // OpenAI family
+    'gpt-4o':                        128000,
+    'gpt-4':                         128000,
+    'gpt-3':                          16000,
+    'o3':                            200000,
+    'o1':                            200000,
+
+    // Anthropic family
+    'claude-opus':                  1000000,
+    'claude-sonnet':                1000000,
+    'claude-haiku':                  200000,
+    'claude-3.5':                    200000,
+    'claude-3':                      200000,
+
+    // DeepSeek family (deepseek.com — all 128K for V2/V3/R1)
+    'DeepSeek-V3':                   128000,
+    'DeepSeek-V2':                   128000,
+    'DeepSeek-R1':                   128000,
+    'DeepSeek-Coder':                128000,
+    'DeepSeek-OCR':                   32000,
+    'deepseek-chat':                 128000,
+    'deepseek-reasoner':             128000,
+    'deepseek':                      128000,
+
+    // Qwen family (dashscope — context varies by variant)
+    'Qwen3.6':                      1000000,
+    'Qwen3.5':                       128000,
+    'Qwen3-Coder':                   128000,
+    'Qwen3-VL':                      128000,
+    'Qwen3-Omni':                    128000,
+    'Qwen3-235':                     128000,
+    'Qwen3-32':                      128000,
+    'Qwen3-14':                      128000,
+    'Qwen3-8':                       128000,
+    'Qwen2.5-VL':                    128000,
+    'Qwen2.5-Coder':                 128000,
+    'Qwen2.5-72B-Instruct-128K':    128000,
+    'Qwen2.5':                       32000,
+    'Qwen2-VL':                      32000,
+    'QwQ':                           128000,
+    'qwen-max':                      128000,
+    'qwen-turbo':                     32000,
+    'qwen-long':                    1000000,
+    'qwen':                          128000,
+
+    // GLM / Zhipu / Z.ai family
+    'GLM-5.1':                       200000,
+    'GLM-5':                         200000,
+    'GLM-4.6':                       128000,
+    'GLM-4.5':                       128000,
+    'GLM-4.1':                       128000,
+    'GLM-Z1':                        128000,
+    'GLM-4':                         128000,
+    'glm':                           128000,
+
+    // Kimi / Moonshot family (moonshot.cn — K2 uses 128K)
+    'Kimi-K2':                       128000,
+    'moonshot':                      128000,
+    'kimi':                          128000,
+
+    // MiniMax family
+    'MiniMax':                       200000,
+    'minimax':                       200000,
+
+    // Meta Llama family
+    'Llama-3.3':                     128000,
+    'Llama-3.2':                     128000,
+    'Llama-3.1':                     128000,
+    'Llama-3':                       128000,
+    'llama':                         128000,
+
+    // Yi / 01.AI family
+    'yi-':                           128000,
+
+    // InternLM family
+    'internlm2':                     128000,
+    'internlm':                       32000,
+
+    // ERNIE / Baidu family
+    'ERNIE-4':                       128000,
+    'ERNIE':                          32000,
+
+    // StepFun family
+    'Step-3':                        128000,
+    'Step-2':                        128000,
+
+    // Google Gemini family
+    'gemini':                       1048576,
 };
 
 /**

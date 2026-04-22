@@ -15,6 +15,7 @@ interface GuiElement {
     position: { x: number; y: number };
     size: { width: number; height: number };
     sizeExplicit?: boolean;
+    sizeUsesXY?: boolean;
     percentWidth?: boolean;
     percentHeight?: boolean;
     orientation?: string;
@@ -1338,11 +1339,10 @@ interface ResizeState {
 let resizeState: ResizeState | null = null;
 
 /** Check if element should use scale (not size) for resizing.
- *  Only container types (containerWindowType, windowType) use size.
- *  All other child controls (buttonType, iconType, effectButtonType, etc.) use scale. */
+ *  Only iconType (and potentially a few others) strictly use scale natively.
+ *  Most other elements (containers, textboxes, lists, buttons) accept size = { ... } */
 function shouldUseScale(el: GuiElement): boolean {
-    const containerTypes = new Set(['containerWindowType', 'windowType', 'scrollAreaType', 'dropDownBoxType', 'expandedWindow']);
-    return !containerTypes.has(el.type);
+    return el.type === 'iconType';
 }
 
 function startResize(el: GuiElement, div: HTMLElement, dir: string, e: MouseEvent) {
@@ -1357,8 +1357,8 @@ function startResize(el: GuiElement, div: HTMLElement, dir: string, e: MouseEven
         const origScale = itemEl.scale ?? 1;
         const isContainerEl = itemEl.type === 'containerWindowType' || itemEl.type === 'windowType';
         // origW/origH must be the VISUAL size (including scale), since div dimensions are base*scale
-        const visualW = (useScale && !isContainerEl) ? w * origScale : w;
-        const visualH = (useScale && !isContainerEl) ? h * origScale : h;
+        const visualW = (!isContainerEl && origScale !== 1) ? w * origScale : w;
+        const visualH = (!isContainerEl && origScale !== 1) ? h * origScale : h;
         return { el: itemEl, div: itemDiv, origW: visualW, origH: visualH, origPosX: itemEl.position.x, origPosY: itemEl.position.y, useScale, origScale };
     };
 
@@ -1379,11 +1379,22 @@ function handleResizeMove(e: MouseEvent) {
     const dir = resizeState.dir;
 
     for (const s of resizeState.items) {
-        let newW = s.origW, newH = s.origH, newX = s.origPosX, newY = s.origPosY;
+        const effectiveOrigo = s.el.centerPosition ? 'CENTER' : (s.el.origo ?? '');
+        const [origoFracX, origoFracY] = ORIENTATION_FRACS[normalizeOrientation(effectiveOrigo)] ?? [0, 0];
+
+        let deltaLeft = 0;
+        let deltaTop = 0;
+        let newW = s.origW, newH = s.origH;
+
         if (dir.includes('e')) newW = Math.max(10, s.origW + dx);
-        if (dir.includes('w')) { newW = Math.max(10, s.origW - dx); newX = s.origPosX + (s.origW - newW); }
+        if (dir.includes('w')) { newW = Math.max(10, s.origW - dx); deltaLeft = s.origW - newW; }
         if (dir.includes('s')) newH = Math.max(10, s.origH + dy);
-        if (dir.includes('n')) { newH = Math.max(10, s.origH - dy); newY = s.origPosY + (s.origH - newH); }
+        if (dir.includes('n')) { newH = Math.max(10, s.origH - dy); deltaTop = s.origH - newH; }
+
+        const deltaPosX = deltaLeft + (newW - s.origW) * origoFracX;
+        const deltaPosY = deltaTop + (newH - s.origH) * origoFracY;
+        let newX = s.origPosX + deltaPosX;
+        let newY = s.origPosY + deltaPosY;
 
         if (s.useScale) {
             // Scale-based resize: compute new scale from size ratio
@@ -1393,21 +1404,15 @@ function handleResizeMove(e: MouseEvent) {
             const scaleY = newH / baseH;
             const newScale = Math.max(0.01, Math.round(((scaleX + scaleY) / 2) * 1000) / 1000);
             s.el.scale = newScale;
-            // Set div to visual size directly (consistent with renderElement)
-            const visualW = Math.round(baseW * newScale);
-            const visualH = Math.round(baseH * newScale);
-            s.div.style.width = `${visualW}px`;
-            s.div.style.height = `${visualH}px`;
         } else {
-            s.el.size.width = Math.round(newW);
-            s.el.size.height = Math.round(newH);
-            s.div.style.width = `${s.el.size.width}px`;
-            s.div.style.height = `${s.el.size.height}px`;
+            const isContainerEl = s.el.type === 'containerWindowType' || s.el.type === 'windowType';
+            const elScale = (!isContainerEl && s.el.scale !== undefined) ? s.el.scale : 1;
+            s.el.size.width = Math.round(newW / elScale);
+            s.el.size.height = Math.round(newH / elScale);
         }
         s.el.position.x = Math.round(newX);
         s.el.position.y = Math.round(newY);
-        s.div.style.left = `${s.el.position.x}px`;
-        s.div.style.top = `${s.el.position.y}px`;
+        syncDivVisuals(s.el, s.div);
     }
     const primary = resizeState.items[0];
     const displayW = primary.useScale ? Math.round((primary.origW / primary.origScale) * (primary.el.scale ?? 1)) : primary.el.size.width;
@@ -1435,7 +1440,7 @@ function finishResize() {
         } else {
             vscode.postMessage({
                 command: 'updateProperty', line: s.el.line, property: 'size',
-                value: { width: s.el.size.width, height: s.el.size.height },
+                value: { width: s.el.size.width, height: s.el.size.height, useXY: s.el.sizeUsesXY },
                 propertyLine: s.el.propertyLines?.['size'] ?? s.el.line,
             });
         }
@@ -1496,7 +1501,7 @@ function undo() {
 
             currentEl.position.x = item.origX;
             currentEl.position.y = item.origY;
-            if (current) { current.div.style.left = `${item.origX}px`; current.div.style.top = `${item.origY}px`; }
+            if (current) { syncDivVisuals(currentEl, current.div); }
             if (!item.hadPositionLine) {
                 // Property didn't exist before — remove the inserted line
                 const posLine = currentPropLines?.['position'];
@@ -1552,7 +1557,7 @@ function redo() {
             item.el.position.x = item.origX;
             item.el.position.y = item.origY;
             const m = elMap.get(item.el.line);
-            if (m) { m.div.style.left = `${item.origX}px`; m.div.style.top = `${item.origY}px`; }
+            if (m) { syncDivVisuals(item.el, m.div); }
             vscode.postMessage({
                 command: 'updateProperty', line: item.el.line, property: 'position',
                 value: { x: item.origX, y: item.origY },
@@ -1674,32 +1679,32 @@ function alignSelected(mode: string) {
     switch (mode) {
         case 'left': {
             const min = Math.min(...items.map(i => i.el.position.x));
-            items.forEach(i => { i.el.position.x = min; i.div.style.left = `${min}px`; });
+            items.forEach(i => { i.el.position.x = min; syncDivVisuals(i.el, i.div); });
             break;
         }
         case 'right': {
             const max = Math.max(...items.map(i => i.el.position.x + i.w));
-            items.forEach(i => { i.el.position.x = max - i.w; i.div.style.left = `${i.el.position.x}px`; });
+            items.forEach(i => { i.el.position.x = max - i.w; syncDivVisuals(i.el, i.div); });
             break;
         }
         case 'top': {
             const min = Math.min(...items.map(i => i.el.position.y));
-            items.forEach(i => { i.el.position.y = min; i.div.style.top = `${min}px`; });
+            items.forEach(i => { i.el.position.y = min; syncDivVisuals(i.el, i.div); });
             break;
         }
         case 'bottom': {
             const max = Math.max(...items.map(i => i.el.position.y + i.h));
-            items.forEach(i => { i.el.position.y = max - i.h; i.div.style.top = `${i.el.position.y}px`; });
+            items.forEach(i => { i.el.position.y = max - i.h; syncDivVisuals(i.el, i.div); });
             break;
         }
         case 'hcenter': {
             const cx = items.reduce((s, i) => s + i.el.position.x + i.w / 2, 0) / items.length;
-            items.forEach(i => { i.el.position.x = Math.round(cx - i.w / 2); i.div.style.left = `${i.el.position.x}px`; });
+            items.forEach(i => { i.el.position.x = Math.round(cx - i.w / 2); syncDivVisuals(i.el, i.div); });
             break;
         }
         case 'vcenter': {
             const cy = items.reduce((s, i) => s + i.el.position.y + i.h / 2, 0) / items.length;
-            items.forEach(i => { i.el.position.y = Math.round(cy - i.h / 2); i.div.style.top = `${i.el.position.y}px`; });
+            items.forEach(i => { i.el.position.y = Math.round(cy - i.h / 2); syncDivVisuals(i.el, i.div); });
             break;
         }
     }
@@ -1927,8 +1932,7 @@ function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
     if (prop === 'pos-x' || prop === 'pos-y') {
         if (prop === 'pos-x') el.position.x = value as number;
         else el.position.y = value as number;
-        entry.div.style.left = `${el.position.x}px`;
-        entry.div.style.top = `${el.position.y}px`;
+        syncDivVisuals(el, entry.div);
         vscode.postMessage({
             command: 'updateProperty', line: el.line, property: 'position',
             value: { x: el.position.x, y: el.position.y },
@@ -1937,11 +1941,10 @@ function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
     } else if (prop === 'size-w' || prop === 'size-h') {
         if (prop === 'size-w') el.size.width = value as number;
         else el.size.height = value as number;
-        entry.div.style.width = `${el.size.width}px`;
-        entry.div.style.height = `${el.size.height}px`;
+        syncDivVisuals(el, entry.div);
         vscode.postMessage({
             command: 'updateProperty', line: el.line, property: 'size',
-            value: { width: el.size.width, height: el.size.height },
+            value: { width: el.size.width, height: el.size.height, useXY: el.sizeUsesXY },
             propertyLine: el.propertyLines?.['size'] ?? el.line,
         });
     } else if (prop === 'name') {
@@ -1952,12 +1955,16 @@ function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
         });
     } else if (prop === 'orientation' || prop === 'origo') {
         (el as unknown as Record<string, unknown>)[prop] = (value as string) || undefined;
+        syncDivVisuals(el, entry.div);
         vscode.postMessage({
             command: 'updateProperty', line: el.line, property: prop, value: value || 'UPPER_LEFT',
             propertyLine: el.propertyLines?.[prop] ?? el.line,
         });
     } else if (prop === 'centerPosition' || prop === 'clipping') {
         (el as unknown as Record<string, unknown>)[prop] = value;
+        if (prop === 'centerPosition') {
+            syncDivVisuals(el, entry.div);
+        }
         vscode.postMessage({
             command: 'updateProperty', line: el.line, property: prop, value: value ? 'yes' : 'no',
             propertyLine: el.propertyLines?.[prop] ?? el.line,
@@ -2002,13 +2009,7 @@ function applyPropertyChange(el: GuiElement, prop: string, value: unknown) {
     } else if (prop === 'scale') {
         const newScale = value as number;
         el.scale = newScale;
-        // Apply scale to dimensions directly (consistent with renderElement)
-        const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
-        if (!isContainer) {
-            const { w, h } = effectiveSize(el);
-            entry.div.style.width = `${Math.round(w * newScale)}px`;
-            entry.div.style.height = `${Math.round(h * newScale)}px`;
-        }
+        syncDivVisuals(el, entry.div);
         vscode.postMessage({
             command: 'updateProperty', line: el.line, property: 'scale', value: newScale,
             propertyLine: el.propertyLines?.['scale'] ?? el.line,
@@ -2263,8 +2264,7 @@ function setupEditorKeyboard() {
                 if (e.key === 'ArrowRight') s.el.position.x += step;
                 if (e.key === 'ArrowUp') s.el.position.y -= step;
                 if (e.key === 'ArrowDown') s.el.position.y += step;
-                s.div.style.left = `${s.el.position.x}px`;
-                s.div.style.top = `${s.el.position.y}px`;
+                syncDivVisuals(s.el, s.div);
                 vscode.postMessage({
                     command: 'updateProperty', line: s.el.line, property: 'position',
                     value: { x: s.el.position.x, y: s.el.position.y },
@@ -2296,6 +2296,34 @@ function setupSidePanelTabs() {
         propsPanel.classList.remove('hidden');
         layersPanel.classList.add('hidden');
     };
+}
+
+// ── Sync Visuals ──
+function syncDivVisuals(el: GuiElement, div: HTMLElement) {
+    const parentDiv = div.parentElement;
+    if (!parentDiv) return;
+    const parentW = parseFloat(parentDiv.style.width) || parentDiv.offsetWidth || 0;
+    const parentH = parseFloat(parentDiv.style.height) || parentDiv.offsetHeight || 0;
+
+    const { w, h } = effectiveSize(el);
+    const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
+    const elScale = el.scale ?? 1;
+    const layoutW = (!isContainer && elScale !== 1) ? Math.round(w * elScale) : w;
+    const layoutH = (!isContainer && elScale !== 1) ? Math.round(h * elScale) : h;
+
+    const marginLeft = el.margin?.left ?? 0;
+    const marginTop = el.margin?.top ?? 0;
+    const tl = computeTopLeft(
+        parentW, parentH, layoutW, layoutH,
+        el.orientation ?? '', el.origo ?? '',
+        el.position.x + marginLeft, el.position.y + marginTop,
+        el.centerPosition ?? false,
+    );
+
+    div.style.left = `${tl.x}px`;
+    div.style.top = `${tl.y}px`;
+    div.style.width = `${layoutW}px`;
+    div.style.height = `${layoutH}px`;
 }
 
 // ── Setup Alignment Buttons ──
@@ -2330,3 +2358,5 @@ setupSidePanelTabs();
 setupAlignButtons();
 updateTransform();
 vscode.postMessage({ command: 'ready' });
+
+export {};

@@ -481,11 +481,11 @@ export class GuiPanel {
                 }
             }
         } else if (msg.property === 'size') {
-            const val = msg.value as { width: number; height: number };
+            const val = msg.value as { width: number; height: number; useXY?: boolean };
             if (hasOwnLine) {
                 const line = doc.lineAt(propLine - 1);
                 const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
-                const newText = `${indent}${serializeSize(val.width, val.height)}`;
+                const newText = `${indent}${serializeSize(val.width, val.height, val.useXY)}`;
                 const edit = new vscode.WorkspaceEdit();
                 edit.replace(doc.uri, line.range, newText);
                 this._skipNextReload = true;
@@ -493,9 +493,12 @@ export class GuiPanel {
                 await doc.save();
             } else {
                 const line = doc.lineAt(msg.line - 1);
-                const sizeRegex = /size\s*=\s*\{\s*x\s*=\s*-?\d+\s+y\s*=\s*-?\d+\s*\}/;
+                const sizeRegex = /size\s*=\s*\{\s*(?:x\s*=\s*-?\d+\s+y\s*=\s*-?\d+|width\s*=\s*-?\d+\s+height\s*=\s*-?\d+)\s*\}/;
                 if (sizeRegex.test(line.text)) {
-                    const newText = line.text.replace(sizeRegex, `size = { x = ${val.width} y = ${val.height} }`);
+                    const newText = line.text.replace(sizeRegex, (match) => {
+                        const isXY = match.includes('x') && !match.includes('width');
+                        return `size = { ${isXY ? 'x' : 'width'} = ${Math.round(val.width)} ${isXY ? 'y' : 'height'} = ${Math.round(val.height)} }`;
+                    });
                     const edit = new vscode.WorkspaceEdit();
                     edit.replace(doc.uri, line.range, newText);
                     this._skipNextReload = true;
@@ -511,7 +514,10 @@ export class GuiPanel {
                     }
                     if (foundLine >= 0) {
                         const existingLine = doc.lineAt(foundLine);
-                        const newText = existingLine.text.replace(sizeRegexScan, `size = { width = ${val.width} height = ${val.height} }`);
+                        const newText = existingLine.text.replace(sizeRegexScan, (match) => {
+                            const isXY = match.includes('x') && !match.includes('width');
+                            return `size = { ${isXY ? 'x' : 'width'} = ${Math.round(val.width)} ${isXY ? 'y' : 'height'} = ${Math.round(val.height)} }`;
+                        });
                         const edit = new vscode.WorkspaceEdit();
                         edit.replace(doc.uri, existingLine.range, newText);
                         this._skipNextReload = true;
@@ -520,7 +526,7 @@ export class GuiPanel {
                     } else {
                         const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
                         const childIndent = indent + '\t';
-                        await this._insertAfterLine(msg.line, `${childIndent}${serializeSize(val.width, val.height)}`);
+                        await this._insertAfterLine(msg.line, `${childIndent}${serializeSize(val.width, val.height, val.useXY)}`);
                         await this._loadAndRender(doc);
                     }
                 }

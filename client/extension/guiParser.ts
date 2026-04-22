@@ -11,6 +11,7 @@ export interface GuiElement {
     position: { x: number; y: number };
     size: { width: number; height: number };
     sizeExplicit?: boolean;
+    sizeUsesXY?: boolean;
     percentWidth?: boolean;   // true when width was specified as e.g. "100%"
     percentHeight?: boolean;  // true when height was specified as e.g. "100%"
     orientation?: string;
@@ -409,7 +410,8 @@ function buildElement(type: string, nodes: PdxNode[], line: number, endLine: num
     const sizeResult = getSize(nodes);
     const size = { width: sizeResult.width, height: sizeResult.height };
     // Only mark as explicitly sized (for hiding 0x0) when using width/height format
-    const sizeExplicit = sizeResult.explicit && sizeResult.usesWidthHeight;
+    const sizeExplicit = sizeResult.explicit;
+    const sizeUsesXY = sizeResult.explicit && !sizeResult.usesWidthHeight;
     const percentWidth = sizeResult.percentW || undefined;
     const percentHeight = sizeResult.percentH || undefined;
     const orientation = strProp(nodes, 'orientation') ?? strProp(nodes, 'Orientation');
@@ -526,7 +528,7 @@ function buildElement(type: string, nodes: PdxNode[], line: number, endLine: num
     }
 
     return {
-        type: normalizedType, name, position, size, sizeExplicit, percentWidth, percentHeight,
+        type: normalizedType, name, position, size, sizeExplicit, sizeUsesXY, percentWidth, percentHeight,
         orientation, origo, clipping, alwaysTransparent,
         spriteKey, spriteAttr, spriteTexture, spriteDefType, noOfFrames, frame, text, font, format,
         maxWidth, maxHeight, scale, rotation, alpha, centerPosition,
@@ -701,7 +703,8 @@ export function serializePosition(x: number, y: number): string {
 }
 
 /** Format a size value for PDX script: `size = { width = 100 height = 50 }` */
-export function serializeSize(w: number, h: number): string {
+export function serializeSize(w: number, h: number, useXY = false): string {
+    if (useXY) return `size = { x = ${Math.round(w)} y = ${Math.round(h)} }`;
     return `size = { width = ${Math.round(w)} height = ${Math.round(h)} }`;
 }
 

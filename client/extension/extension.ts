@@ -210,6 +210,9 @@ export async function activate(context: ExtensionContext) {
 	safeRegisterCommand(context, "cwtools.ai.openChat", async () => {
 		await vs.commands.executeCommand('cwtools.aiChat.focus');
 	});
+	safeRegisterCommand(context, "cwtools.ai.selectModel", async () => {
+		await aiService.selectModelCommand();
+	});
 
 	const init = async function (language: string, isVanillaFolder: boolean) {
 		vs.languages.setLanguageConfiguration(language, {

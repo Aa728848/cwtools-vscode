@@ -29,6 +29,8 @@ import { getProvider, getEffectiveModel } from './providers';
  */
 const THINKING_MODEL_PREFIXES: string[] = [
     'deepseek-reasoner',      // DeepSeek R1 / Reasoner — always thinks
+    'deepseek-r1',            // Used by OpenRouter and others
+    'DeepSeek-R1',            // Used by SiliconFlow
     'o1',                     // OpenAI o1 (reasoning model, no disable)
     'o3',                     // OpenAI o3 (reasoning model)
     'o4-mini',                // OpenAI o4-mini (reasoning model)

@@ -862,20 +862,12 @@ export class AIService {
      */
     async quickConfigureProvider(): Promise<void> {
         const items = Object.values(BUILTIN_PROVIDERS)
-            .filter(p => p.id !== 'custom')
             .map(p => ({
                 label: p.name,
                 description: p.defaultModel,
                 detail: `${p.models.length} models, up to ${(p.maxContextTokens / 1000).toFixed(0)}K context`,
                 providerId: p.id,
             }));
-
-        items.push({
-            label: '🔧 自定义 (OpenAI Compatible)',
-            description: 'Custom endpoint',
-            detail: 'Configure a custom OpenAI-compatible API endpoint',
-            providerId: 'custom',
-        });
 
         const selected = await vs.window.showQuickPick(items, {
             title: 'Select AI Provider',
@@ -889,19 +881,6 @@ export class AIService {
 
         // Set provider in config
         await vs.workspace.getConfiguration('cwtools.ai').update('provider', providerId, vs.ConfigurationTarget.Global);
-
-        // For custom, also prompt for endpoint
-        if (providerId === 'custom') {
-            const endpoint = await vs.window.showInputBox({
-                title: 'Custom API Endpoint',
-                prompt: 'Enter your OpenAI-compatible API endpoint',
-                placeHolder: 'https://your-server.com/v1',
-                ignoreFocusOut: true,
-            });
-            if (endpoint) {
-                await vs.workspace.getConfiguration('cwtools.ai').update('endpoint', endpoint, vs.ConfigurationTarget.Global);
-            }
-        }
 
         // Prompt for model selection
         if (providerId === 'ollama') {
@@ -965,13 +944,10 @@ export class AIService {
                 description: m === provider.defaultModel ? '(default)' : '',
             }));
 
-            // For custom, allow manual entry too
-            if (providerId === 'custom') {
-                modelItems.push({
-                    label: '✏️ 手动输入模型名...',
-                    description: '',
-                });
-            }
+            modelItems.push({
+                label: '✏️ 手动输入模型名...',
+                description: '',
+            });
 
             const selectedModel = await vs.window.showQuickPick(modelItems, {
                 title: `Select ${provider.name} Model`,
@@ -992,21 +968,23 @@ export class AIService {
                     await vs.workspace.getConfiguration('cwtools.ai').update('model', selectedModel.label, vs.ConfigurationTarget.Global);
                 }
             }
-        } else {
-            // Custom provider: ask user to type model name
-            const modelName = await vs.window.showInputBox({
-                title: 'Model Name',
-                prompt: 'Enter the model name',
-                placeHolder: 'gpt-5.4',
-                ignoreFocusOut: true,
-            });
-            if (modelName) {
-                await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
-            }
         }
 
-        // For Ollama/custom: ask context size
-        if (providerId === 'ollama' || providerId === 'custom') {
+        // For Ollama: ask optional custom endpoint
+        if (providerId === 'ollama') {
+            const epInput = await vs.window.showInputBox({
+                title: 'Ollama Endpoint',
+                prompt: '输入 Ollama 的 API 地址 (留空使用默认 http://localhost:11434/v1)',
+                placeHolder: 'http://localhost:11434/v1',
+                value: vs.workspace.getConfiguration('cwtools.ai').get<string>('endpoint', ''),
+                ignoreFocusOut: true,
+            });
+            if (epInput !== undefined) {
+                await vs.workspace.getConfiguration('cwtools.ai').update(
+                    'endpoint', epInput, vs.ConfigurationTarget.Global
+                );
+            }
+            
             const ctxInput = await vs.window.showInputBox({
                 title: '上下文大小 (tokens)',
                 prompt: '输入模型的最大上下文窗口大小 (留空使用默认值)',
@@ -1028,6 +1006,105 @@ export class AIService {
         // Enable AI
         await vs.workspace.getConfiguration('cwtools.ai').update('enabled', true, vs.ConfigurationTarget.Global);
 
-        vs.window.showInformationMessage(`CWTools AI configured: ${provider.name} (${getEffectiveModel(providerId, '')})`);
+    }
+
+    /**
+     * Show a quick-pick to dynamically fetch and select a model.
+     */
+    async selectModelCommand(): Promise<void> {
+        const config = this.getConfig();
+        const providerId = config.provider;
+        const provider = getProvider(providerId);
+
+        let endpoint = provider.endpoint;
+        // user endpoint override
+        if (config.endpoint && (providerId === 'ollama' || provider.isOpenAICompatible)) {
+            endpoint = config.endpoint || provider.endpoint;
+        } else if (provider.isOpenAICompatible && providerId !== 'ollama') {
+            endpoint = getEffectiveEndpoint(providerId, config.endpoint);
+        }
+
+        let apiKey = '';
+        if (providerId !== 'ollama') {
+            apiKey = await this.getKeyForProvider(providerId) || '';
+            if (!apiKey) {
+                vs.window.showWarningMessage(`No API key configured for ${provider.name}. Showing default models only.`);
+            }
+        }
+
+        let detectedModels: { id: string }[] = [];
+
+        await vs.window.withProgress({
+            location: vs.ProgressLocation.Notification,
+            title: `Fetching models for ${provider.name}...`,
+            cancellable: false
+        }, async () => {
+            if (providerId === 'ollama') {
+                const ollamaModels = await fetchOllamaModels(endpoint);
+                detectedModels = ollamaModels.map(m => ({ id: m.name }));
+            } else if (provider.isOpenAICompatible) {
+                try {
+                    const modelsUrl = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '') + '/models';
+                    const res = await fetch(modelsUrl, {
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`
+                        }
+                    });
+                    if (res.ok) {
+                        const data = await res.json() as any;
+                        if (data && Array.isArray(data.data)) {
+                            detectedModels = data.data.map((m: any) => ({ id: m.id }));
+                        }
+                    }
+                } catch (e) {
+                    console.error(`Failed to fetch models from ${provider.name}:`, e);
+                }
+            }
+        });
+
+        const modelItems = provider.models.map(m => ({
+            label: m,
+            description: m === provider.defaultModel ? '(default)' : '预设模型',
+        }));
+
+        const existingSet = new Set(provider.models);
+        for (const m of detectedModels) {
+            if (!existingSet.has(m.id)) {
+                modelItems.push({
+                    label: m.id,
+                    description: '已获取 (API)',
+                });
+            }
+        }
+
+        modelItems.push({
+            label: '✏️ 手动输入模型名...',
+            description: '',
+        });
+
+        const selectedModel = await vs.window.showQuickPick(modelItems, {
+            title: `Select ${provider.name} Model (fetched ${detectedModels.length} models)`,
+            placeHolder: 'Choose an AI model for completion/chat...',
+            matchOnDescription: true,
+            matchOnDetail: true
+        });
+
+        if (selectedModel) {
+            if (selectedModel.label.startsWith('✏️')) {
+                const modelName = await vs.window.showInputBox({
+                    title: 'Model Name',
+                    prompt: 'Enter the model name manually',
+                    placeHolder: provider.defaultModel || 'model-name',
+                    ignoreFocusOut: true,
+                });
+                if (modelName) {
+                    await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+                    vs.window.showInformationMessage(`AI Model set to: ${modelName}`);
+                }
+            } else {
+                await vs.workspace.getConfiguration('cwtools.ai').update('model', selectedModel.label, vs.ConfigurationTarget.Global);
+                vs.window.showInformationMessage(`AI Model set to: ${selectedModel.label}`);
+            }
+        }
     }
 }

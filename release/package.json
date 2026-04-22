@@ -168,6 +168,11 @@
 				"title": "%commands.cwtools.ai.openChat%",
 				"category": "CWTools AI",
 				"icon": "$(sparkle)"
+			},
+			{
+				"command": "cwtools.ai.selectModel",
+				"title": "Select AI Model from Provider...",
+				"category": "CWTools AI"
 			}
 		],
 		"configuration": {
@@ -351,7 +356,7 @@
 				"cwtools.ai.provider": {
 					"scope": "window",
 					"type": "string",
-					"enum": ["openai", "claude", "deepseek", "minimax", "glm", "qwen", "ollama", "custom"],
+					"enum": ["openai", "claude", "deepseek", "minimax", "glm", "qwen", "ollama", "siliconflow", "openrouter", "github", "together", "deepinfra"],
 					"enumDescriptions": [
 						"%configuration.cwtools.ai.provider.enum.openai%",
 						"%configuration.cwtools.ai.provider.enum.claude%",
@@ -360,7 +365,11 @@
 						"%configuration.cwtools.ai.provider.enum.glm%",
 						"%configuration.cwtools.ai.provider.enum.qwen%",
 						"%configuration.cwtools.ai.provider.enum.ollama%",
-						"%configuration.cwtools.ai.provider.enum.custom%"
+						"%configuration.cwtools.ai.provider.enum.siliconflow%",
+						"%configuration.cwtools.ai.provider.enum.openrouter%",
+						"%configuration.cwtools.ai.provider.enum.github%",
+						"%configuration.cwtools.ai.provider.enum.together%",
+						"%configuration.cwtools.ai.provider.enum.deepinfra%"
 					],
 					"default": "openai",
 					"description": "%configuration.cwtools.ai.provider.description%"
@@ -427,6 +436,21 @@
 				"cwtools.ai.inlineCompletion.provider": {
 					"scope": "window",
 					"type": "string",
+					"enum": ["openai", "claude", "deepseek", "minimax", "glm", "qwen", "ollama", "siliconflow", "openrouter", "github", "together", "deepinfra"],
+					"enumDescriptions": [
+						"%configuration.cwtools.ai.provider.enum.openai%",
+						"%configuration.cwtools.ai.provider.enum.claude%",
+						"%configuration.cwtools.ai.provider.enum.deepseek%",
+						"%configuration.cwtools.ai.provider.enum.minimax%",
+						"%configuration.cwtools.ai.provider.enum.glm%",
+						"%configuration.cwtools.ai.provider.enum.qwen%",
+						"%configuration.cwtools.ai.provider.enum.ollama%",
+						"%configuration.cwtools.ai.provider.enum.siliconflow%",
+						"%configuration.cwtools.ai.provider.enum.openrouter%",
+						"%configuration.cwtools.ai.provider.enum.github%",
+						"%configuration.cwtools.ai.provider.enum.together%",
+						"%configuration.cwtools.ai.provider.enum.deepinfra%"
+					],
 					"default": "",
 					"description": "%configuration.cwtools.ai.inlineCompletion.provider.description%"
 				},

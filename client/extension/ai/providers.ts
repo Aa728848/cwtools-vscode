@@ -188,20 +188,97 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         // Vision depends on local model; allow and let API return error if unsupported.
         supportsVision: true,
     },
-    custom: {
-        id: 'custom',
-        name: '自定义 (OpenAI Compatible)',
-        endpoint: '',
-        defaultModel: '',
-        models: [],
+    siliconflow: {
+        id: 'siliconflow',
+        name: 'SiliconFlow (硅基流动)',
+        endpoint: 'https://api.siliconflow.cn/v1',
+        defaultModel: 'deepseek-ai/DeepSeek-V3',
+        models: [
+            'deepseek-ai/DeepSeek-V3',
+            'deepseek-ai/DeepSeek-R1',
+            'Qwen/Qwen2.5-Coder-32B-Instruct',
+            'Qwen/Qwen2.5-7B-Instruct',
+            'THUDM/glm-4-9b-chat'
+        ],
         supportsToolUse: true,
         supportsStreaming: true,
-        maxContextTokens: 32000,
+        maxContextTokens: 64000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
-        // Custom endpoint: assume vision capable; user responsible for model choice.
+        supportsVision: false,
+    },
+    openrouter: {
+        id: 'openrouter',
+        name: 'OpenRouter',
+        endpoint: 'https://openrouter.ai/api/v1',
+        defaultModel: 'deepseek/deepseek-chat',
+        models: [
+            'deepseek/deepseek-chat',
+            'deepseek/deepseek-r1',
+            'anthropic/claude-3.5-sonnet',
+            'google/gemini-2.5-pro',
+            'openai/gpt-4o',
+            'openai/o3-mini'
+        ],
+        supportsToolUse: true,
+        supportsStreaming: true,
+        maxContextTokens: 128000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
         supportsVision: true,
     },
+    github: {
+        id: 'github',
+        name: 'GitHub Models',
+        endpoint: 'https://models.inference.ai.azure.com',
+        defaultModel: 'DeepSeek-V3',
+        models: [
+            'DeepSeek-V3',
+            'DeepSeek-R1',
+            'gpt-4o',
+            'o3-mini'
+        ],
+        supportsToolUse: true,
+        supportsStreaming: true,
+        maxContextTokens: 128000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsVision: true,
+    },
+    together: {
+        id: 'together',
+        name: 'Together AI',
+        endpoint: 'https://api.together.xyz/v1',
+        defaultModel: 'deepseek-ai/DeepSeek-V3',
+        models: [
+            'deepseek-ai/DeepSeek-V3',
+            'deepseek-ai/DeepSeek-R1',
+            'meta-llama/Llama-3.3-70B-Instruct-Turbo'
+        ],
+        supportsToolUse: true,
+        supportsStreaming: true,
+        maxContextTokens: 128000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsVision: false,
+    },
+    deepinfra: {
+        id: 'deepinfra',
+        name: 'DeepInfra',
+        endpoint: 'https://api.deepinfra.com/v1/openai',
+        defaultModel: 'deepseek-ai/DeepSeek-V3',
+        models: [
+            'deepseek-ai/DeepSeek-V3',
+            'deepseek-ai/DeepSeek-R1',
+            'meta-llama/Llama-3.3-70B-Instruct'
+        ],
+        supportsToolUse: true,
+        supportsStreaming: true,
+        maxContextTokens: 128000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsVision: false,
+    }
 };
 
 /**
@@ -424,9 +501,9 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
  */
 export function getProvider(id: string): AIProviderConfig {
     if (id && !(id in BUILTIN_PROVIDERS)) {
-        console.warn(`[Eddy AI] Unknown provider "${id}", falling back to custom.`);
+        console.warn(`[Eddy AI] Unknown provider "${id}", falling back to openai.`);
     }
-    return BUILTIN_PROVIDERS[id] ?? BUILTIN_PROVIDERS['custom'];
+    return BUILTIN_PROVIDERS[id] ?? BUILTIN_PROVIDERS['openai'];
 }
 
 /**

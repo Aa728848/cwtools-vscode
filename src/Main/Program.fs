@@ -130,6 +130,17 @@ type Server(client: ILanguageClient) =
     /// key: FileName (使用 Dictionary 替代不可变 Map 以减少 GC 压力)
     let locCache = System.Collections.Generic.Dictionary<string, CWError list>()
 
+    /// SemanticTokens cache: filePath → (contentHash, tokenData)
+    /// Avoids full AST re-traversal when file content hasn't changed.
+    let semanticTokensCache = System.Collections.Generic.Dictionary<string, int * int list>()
+
+    /// CodeLens cache: filePath → (contentHash, lenses)
+    let codeLensCache = System.Collections.Generic.Dictionary<string, int * CodeLens list>()
+
+    /// Simple content hash: length + lineCount (fast to compute, distinguishes most edits)
+    let contentHash (text: string) =
+        text.Length ^^^ (text.Split('\n').Length <<< 16)
+
     let mutable lastFocusedFile: string option = None
 
     let mutable currentlyRefreshingFiles: bool = false
@@ -307,6 +318,10 @@ type Server(client: ILanguageClient) =
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
+
+                // Clear SemanticTokens/CodeLens caches — effect/trigger sets may have changed
+                semanticTokensCache.Clear()
+                codeLensCache.Clear()
             finally
                 gameStateLock.ExitWriteLock()
 
@@ -330,6 +345,7 @@ type Server(client: ILanguageClient) =
             if locCache.Count > 500 then
                 GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
         | None -> ()
+
 
     let lintAgent =
         MailboxProcessor.Start(fun agent ->
@@ -404,6 +420,33 @@ type Server(client: ILanguageClient) =
                 }
 
             loop false Map.empty)
+
+    /// Debounce agent for DidChangeTextDocument → lintAgent.
+    /// Waits 1.5 seconds of inactivity before forwarding the lint request.
+    /// This prevents write-lock contention during rapid typing.
+    let lintDebounceAgent =
+        MailboxProcessor.Start(fun agent ->
+            let rec loop (pending: (VersionedTextDocumentIdentifier * bool) option) =
+                async {
+                    // Wait up to 1500ms for a new message; if none, fire the pending lint
+                    let! msgOpt = agent.TryReceive(1500)
+                    match msgOpt with
+                    | Some (UpdateRequest(ur, force)) ->
+                        // New edit arrived — reset the debounce timer
+                        return! loop (Some (ur, force))
+                    | Some (WorkComplete _) ->
+                        // Ignore WorkComplete messages in debounce agent
+                        return! loop pending
+                    | None ->
+                        // Timeout: 1.5s of inactivity — forward to lintAgent
+                        match pending with
+                        | Some (ur, force) ->
+                            lintAgent.Post(UpdateRequest(ur, force))
+                            return! loop None
+                        | None ->
+                            return! loop None
+                }
+            loop None)
 
     let setupRulesCaches () =
         match cachePath, remoteRepoPath, useManualRules with
@@ -1289,7 +1332,11 @@ type Server(client: ILanguageClient) =
             async {
                 docs.Change p
 
-                lintAgent.Post(
+                // Use debounce agent instead of immediate lint.
+                // Lint will fire after 1.5s of typing inactivity.
+                // This prevents the write lock (game.UpdateFile) from blocking
+                // read requests (Completion, Hover, SemanticTokens) during rapid typing.
+                lintDebounceAgent.Post(
                     UpdateRequest(
                         { uri = p.textDocument.uri
                           version = p.textDocument.version },
@@ -1643,26 +1690,37 @@ type Server(client: ILanguageClient) =
                 return
                     match gameObj with
                     | Some game ->
-                        let types = game.Types()
                         let filePath = p.textDocument.uri.LocalPath
+                        // ── Content-hash cache: skip recalc if file unchanged ──
+                        let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                        let hash = contentHash fileText
+                        match codeLensCache.TryGetValue(filePath) with
+                        | true, (cachedHash, cachedLenses) when cachedHash = hash ->
+                            cachedLenses
+                        | _ ->
+                            let types = game.Types()
 
-                        types
-                        |> Map.toList
-                        |> List.collect (fun (typeName, vs) ->
-                            vs
-                            |> Array.toList
-                            |> List.filter (fun tdi -> tdi.range.FileName = filePath && not (typeName.Contains(".")))
-                            |> List.map (fun tdi ->
-                                let range = convRangeToLSPRange tdi.range
-                                { range = range
-                                  command = None
-                                  data =
-                                    JsonValue.Record
-                                        [| "typeName", JsonValue.String typeName
-                                           "id", JsonValue.String tdi.id
-                                           "filePath", JsonValue.String filePath
-                                           "line", JsonValue.Number(decimal range.start.line)
-                                           "character", JsonValue.Number(decimal range.start.character) |] }))
+                            let lenses =
+                                types
+                                |> Map.toList
+                                |> List.collect (fun (typeName, vs) ->
+                                    vs
+                                    |> Array.toList
+                                    |> List.filter (fun tdi -> tdi.range.FileName = filePath && not (typeName.Contains(".")))
+                                    |> List.map (fun tdi ->
+                                        let range = convRangeToLSPRange tdi.range
+                                        { range = range
+                                          command = None
+                                          data =
+                                            JsonValue.Record
+                                                [| "typeName", JsonValue.String typeName
+                                                   "id", JsonValue.String tdi.id
+                                                   "filePath", JsonValue.String filePath
+                                                   "line", JsonValue.Number(decimal range.start.line)
+                                                   "character", JsonValue.Number(decimal range.start.character) |] }))
+
+                            codeLensCache.[filePath] <- (hash, lenses)
+                            lenses
                     | None -> []
             }
             |> catchError []
@@ -1854,7 +1912,14 @@ type Server(client: ILanguageClient) =
             // Effect keys -> 2(function), Trigger keys -> 1(type)
             async {
                 let semanticTokensFunction (game: IGame<_>) =
+                    // ── Content-hash cache: skip full AST traversal if file unchanged ──
                     let filePath = p.textDocument.uri.LocalPath
+                    let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                    let hash = contentHash fileText
+                    match semanticTokensCache.TryGetValue(filePath) with
+                    | true, (cachedHash, cachedData) when cachedHash = hash ->
+                        Some { data = cachedData }
+                    | _ ->
                     let entityOpt =
                         game.AllEntities()
                         |> Seq.tryPick (fun struct (e, _) ->
@@ -1864,7 +1929,7 @@ type Server(client: ILanguageClient) =
                     | None -> None
                     | Some entity ->
                         let tokens = ResizeArray<struct (int * int * int * int * int)>()
-                        let fileContent = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                        let fileContent = fileText
                         let lines = fileContent.Split('\n')
 
                         // Collect known names for classification
@@ -2032,7 +2097,9 @@ type Server(client: ILanguageClient) =
                             prevLine <- line
                             prevChar <- col
 
-                        Some { data = data |> Seq.toList }
+                        let dataList = data |> Seq.toList
+                        semanticTokensCache.[filePath] <- (hash, dataList)
+                        Some { data = dataList }
 
                 return
                     match

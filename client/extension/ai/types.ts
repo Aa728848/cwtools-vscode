@@ -133,6 +133,9 @@ export interface ChatCompletionRequest {
     max_tokens?: number;
     stream?: boolean;
     stop?: string[];
+    /** Extra provider-specific params to merge into the request body (e.g. thinking config) */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    [key: string]: any;
 }
 
 export interface ChatCompletionChoice {

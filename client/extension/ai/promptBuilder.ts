@@ -481,30 +481,30 @@ Rules:
         lspSuggestions?: string[];
     }): ChatMessage[] {
         const lines = options.fileContent.split('\n');
-        const startLine = Math.max(0, options.cursorLine - 10);
+        const startLine = Math.max(0, options.cursorLine - 15);
         const endLine = options.cursorLine;
 
         const codeBefore = lines.slice(startLine, endLine + 1).join('\n');
-        const linesAfter = lines.slice(endLine + 1, endLine + 4).join('\n');
+        const linesAfter = lines.slice(endLine + 1, endLine + 6).join('\n');
 
-        const currentLine = lines[options.cursorLine] ?? '';
-        const indent = currentLine.match(/^(\s*)/)?.[1] ?? '';
-
-        // Detect current block context
-        let blockContext = '';
+        // Detect current block context — build a scope chain (e.g. "planet_event.option.trigger")
+        const scopeChain: string[] = [];
         let braceDepth = 0;
-        for (let i = endLine; i >= Math.max(0, endLine - 30); i--) {
+        for (let i = endLine; i >= 0; i--) {
             const line = lines[i];
             for (const ch of line) {
                 if (ch === '}') braceDepth++;
                 if (ch === '{') braceDepth--;
             }
             if (braceDepth < 0) {
-                const blockMatch = line.match(/^\s*(\w[\w.]*)[\s]*=/);
-                if (blockMatch) blockContext = `Current block: ${blockMatch[1]}`;
-                break;
+                const blockMatch = line.match(/^\s*([\w][\w.]*)\s*=/);
+                if (blockMatch) scopeChain.unshift(blockMatch[1]);
+                braceDepth = 0;  // Continue scanning for outer blocks
             }
         }
+        const blockContext = scopeChain.length > 0
+            ? `Current scope: ${scopeChain.join('.')}`
+            : '';
 
         const lspHints = options.lspSuggestions && options.lspSuggestions.length > 0 
             ? `\nVALID IDENTIFIERS (from Language Server):\n${options.lspSuggestions.join(' | ')}\nYou MUST choose from these identifiers if applicable to avoid hallucination.`

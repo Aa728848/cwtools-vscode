@@ -188,6 +188,22 @@ export class AIService {
             endpoint?: string;     // Override endpoint
             /** Real-time callback for incremental reasoning/thinking tokens */
             onThinking?: (text: string) => void;
+            /** External AbortSignal for caller-controlled cancellation */
+            abortSignal?: AbortSignal;
+            /**
+             * Disable thinking/reasoning for this call (used by inline completion).
+             * Per-provider implementation:
+             *   - Qwen3+: enable_thinking=false + /no_think prompt injection
+             *   - GLM thinking models: thinking={type:'disabled'}
+             *   - Gemini 2.5 Flash: thinking_budget=0 (fully disables)
+             *   - Gemini 3.x: thinking_level='minimal' (cannot fully disable)
+             *   - Claude: no action needed (thinking not sent by default)
+             *   - MiniMax: no API toggle (rely on <think> stripping)
+             *   - OpenAI GPT/DeepSeek-chat: non-reasoning, no-op
+             * Models that ALWAYS think (o1/o3/deepseek-reasoner/glm-z1/gemini-pro)
+             * should be blocked before calling this method.
+             */
+            disableThinking?: boolean;
         }
     ): Promise<ChatCompletionResponse> {
         const config = this.getConfig();
@@ -217,10 +233,60 @@ export class AIService {
 
         const endpoint = options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
         const model = options?.model ?? getEffectiveModel(providerId, config.model);
+        const lowerModel = model.toLowerCase();
+
+        // ── Disable thinking: per-provider API parameters ──
+        // Each provider has a different mechanism to disable thinking/reasoning.
+        // This is critical for inline completion where latency must be minimal.
+        let finalMessages = messages;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let extraBody: Record<string, any> | undefined;
+
+        if (options?.disableThinking) {
+            // ── Qwen: enable_thinking=false + /no_think prompt fallback ──
+            // Applies to all Qwen3/3.5/3.6 models and qwen-max/qwen-turbo
+            if (lowerModel.startsWith('qwen') && (
+                lowerModel.includes('qwen3') || lowerModel.includes('qwen-max') || lowerModel.includes('qwen-turbo') || lowerModel.includes('qwen-long')
+            )) {
+                // Primary: API-level parameter (most reliable)
+                extraBody = { enable_thinking: false };
+                // Fallback: /no_think prompt injection (works even if API param is ignored)
+                finalMessages = messages.map(m => {
+                    if (m.role === 'system' && typeof m.content === 'string') {
+                        return { ...m, content: m.content + '\n/no_think' };
+                    }
+                    return m;
+                });
+            }
+
+            // ── GLM thinking models: thinking.type="disabled" ──
+            // glm-4.1v-thinking* models support turn-level thinking control
+            else if (lowerModel.startsWith('glm-') && lowerModel.includes('thinking')) {
+                extraBody = { thinking: { type: 'disabled' } };
+            }
+
+            // ── Gemini 2.5 Flash: thinkingBudget=0 (fully disables thinking) ──
+            else if (lowerModel.startsWith('gemini-2.5-flash')) {
+                extraBody = { thinking_config: { thinking_budget: 0 } };
+            }
+
+            // ── Gemini 3.x: thinkingLevel="minimal" (cannot fully disable, but minimizes) ──
+            else if (lowerModel.startsWith('gemini-3')) {
+                extraBody = { thinking_config: { thinking_level: 'minimal' } };
+            }
+
+            // ── Claude: no special action needed ──
+            // Claude models default to no thinking when `thinking` param is not sent.
+            // Our callClaude() doesn't send thinking by default, so no extra handling.
+
+            // ── MiniMax: no API toggle, rely on post-processing <think> stripping ──
+            // ── DeepSeek chat: non-reasoning, no action needed ──
+            // ── OpenAI GPT: non-reasoning, no action needed ──
+        }
 
         const request: ChatCompletionRequest = {
             model,
-            messages,
+            messages: finalMessages,
             tools: options?.tools,
             tool_choice: options?.tools && options.tools.length > 0 ? 'auto' : undefined,
             temperature: options?.temperature ?? 0.3,
@@ -228,6 +294,12 @@ export class AIService {
             // support 64K+ output tokens; 4096 silently truncates long code generations.
             max_tokens: options?.maxTokens ?? 8192,
             stream: false,
+            // Merge provider-specific thinking-disable parameters into the request body.
+            // Different providers expect different params at the root level:
+            //   Qwen: enable_thinking=false
+            //   GLM:  thinking={type:'disabled'}
+            //   Gemini: thinking_config={thinking_budget:0} or {thinking_level:'minimal'}
+            ...(extraBody ?? {}),
         };
 
         // C1 Fix: create a per-call controller; register it so cancel() can abort it.

@@ -48,6 +48,8 @@
 
     /** Per-model context window sizes received from backend — used to auto-fill settingsCtx */
     let settingsModelContextTokens = {};
+    /** Thinking model prefixes — these models are excluded from inline completion selectors */
+    let settingsThinkingPrefixes = [];
     let totalConversationTokens = 0;
     let contextLimit = 128000;
     /** Pending images (base64 data URLs) to attach to next sent message */
@@ -1307,6 +1309,7 @@
                 if (msg.current && msg.current.maxContextTokens > 0) contextLimit = msg.current.maxContextTokens;
                 // Cache model context token map for use in updateModelUI
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
+                if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
                 if (msg.showPanel) showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
                 else updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
                 break;
@@ -1647,7 +1650,9 @@
 
         function updateInlineModelSelect(pid, selectedModel, ollamaModels) {
             const p2 = providers.find(p=>p.id===(pid||current.provider));
-            const ms = (pid||current.provider)==='ollama'?(ollamaModels||[]).map(m=>m.name):(p2?p2.models:[]);
+            let ms = (pid||current.provider)==='ollama'?(ollamaModels||[]).map(m=>m.name):(p2?p2.models:[]);
+            // Filter out thinking/reasoning models — they can't do inline completion
+            ms = ms.filter(m => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
             
             const inp = document.getElementById('inlineModelInput');
             inp.value = selectedModel || '';

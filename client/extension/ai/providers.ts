@@ -278,6 +278,51 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         supportsVision: false,
+    },
+    opencode: {
+        id: 'opencode',
+        name: 'OpenCode Zen',
+        // OpenCode Zen — managed model gateway (opencode.ai)
+        // Models are referenced as opencode/<model-id> (e.g. opencode/claude-sonnet-4-6)
+        endpoint: 'https://opencode.ai/api/v1',
+        defaultModel: 'opencode/big-pickle (免费)',
+        models: [
+            // OpenCode Zen Free Models
+            'opencode/big-pickle (免费)',
+            'opencode/minimax-m2.5-free (免费)',
+            'opencode/nemotron-3-super-free (免费)',
+            // OpenCode Zen Models
+            'opencode/claude-sonnet-4-6',
+            'opencode/claude-opus-4-6',
+            'opencode/gpt-5.4',
+            'opencode/gpt-4o',
+            'opencode/gemini-2.5-pro',
+            'opencode/deepseek-chat',
+            'opencode/deepseek-reasoner',
+            'opencode/o1',
+            'opencode/o3',
+            // OpenCode Go Models
+            'opencode-go/claude-sonnet-4-6',
+            'opencode-go/gpt-5.4',
+            'opencode-go/gemini-2.5-pro',
+            'opencode-go/deepseek-chat',
+            'opencode-go/glm-5.1',
+            'opencode-go/glm-5',
+            'opencode-go/kimi-k2.6',
+            'opencode-go/kimi-k2.5',
+            'opencode-go/minimax-m2.7',
+            'opencode-go/minimax-m2.5',
+            'opencode-go/qwen3.6-plus',
+            'opencode-go/qwen3.5-plus',
+            'opencode-go/mimo-v2-pro',
+            'opencode-go/mimo-v2-omni'
+        ],
+        supportsToolUse: true,
+        supportsStreaming: true,
+        maxContextTokens: 200000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsVision: true,
     }
 };
 

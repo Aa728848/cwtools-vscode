@@ -232,7 +232,9 @@ export class AIService {
         }
 
         const endpoint = options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
-        const model = options?.model ?? getEffectiveModel(providerId, config.model);
+        const rawModel = options?.model ?? getEffectiveModel(providerId, config.model);
+        // Strip the UI '(免费)' suffix from the model ID before sending to the API
+        const model = rawModel.replace(/\s*\(免费\)$/i, '');
         const lowerModel = model.toLowerCase();
 
         // ── Disable thinking: per-provider API parameters ──
@@ -519,16 +521,36 @@ export class AIService {
         // ── Providers that reject image_url.detail ────────────────────────────
         const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
 
-        // ── MiniMax pay-as-you-go: also strip tool_choice (error 2013) ────────
+        // ── MiniMax pay-as-you-go: strict message requirements ──────────────
+        // Error 2013 causes: multiple system msgs, developer role, tool_choice, parallel_tool_calls
+        // Note: minimax-token-plan uses Anthropic adapter (isOpenAICompatible=false) and doesn't need this
         if (providerId === 'minimax') {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { tool_choice, ...rest } = request as unknown as Record<string, unknown>;
-            void tool_choice;
+            const { tool_choice, parallel_tool_calls, ...rest } = request as unknown as Record<string, unknown>;
+            void tool_choice; void parallel_tool_calls;
             const sanitized = rest as unknown as ChatCompletionRequest;
-            // Also strip image_url.detail from message content parts
+            
+            // Merge all system/developer messages into a single system message
+            const msgs = sanitized.messages;
+            const systemParts: string[] = [];
+            const nonSystemMsgs: typeof msgs = [];
+            for (const m of msgs) {
+                if (m.role === 'system' || (m.role as string) === 'developer') {
+                    const txt = typeof m.content === 'string' ? m.content : '';
+                    if (txt) systemParts.push(txt);
+                } else {
+                    nonSystemMsgs.push(m);
+                }
+            }
+            const mergedMsgs: typeof msgs = [];
+            if (systemParts.length > 0) {
+                mergedMsgs.push({ role: 'system', content: systemParts.join('\n\n') });
+            }
+            mergedMsgs.push(...nonSystemMsgs);
+            
             return {
                 ...sanitized,
-                messages: this.stripImageDetail(sanitized.messages),
+                messages: this.stripImageDetail(mergedMsgs),
             };
         }
 

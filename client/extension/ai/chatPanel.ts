@@ -293,6 +293,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         const dynamicContexts = vscodeConfig.get<Record<string, number>>('dynamicModelsContext') || {};
 
+        // Thinking models that can't disable thinking — useless for inline completion
+        const thinkingModelPrefixes = [
+            'deepseek-reasoner', 'deepseek-r1', 'DeepSeek-R1',
+            'o1', 'o3', 'o4-mini',
+            'glm-z1', 'GLM-Z1',
+            'gemini-2.5-pro', 'gemini-3.1-pro',
+            'QwQ', 'qwq',
+            'Thinking', 'thinking',
+        ];
+
         this.postMessage({
             type: 'settingsData',
             providers: providers.map(p => ({
@@ -305,6 +315,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             showPanel,
             // Merge static MODEL_CONTEXT_TOKENS with any dynamic contexts grabbed from OpenRouter/etc.
             modelContextTokens: { ...MODEL_CONTEXT_TOKENS, ...dynamicContexts },
+            thinkingModelPrefixes,
         });
     }
 
@@ -378,8 +389,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        if (providerId.startsWith('minimax')) {
-            // Minimax API does not currently have a standard /v1/models endpoint for listing.
+        if (providerId.startsWith('minimax') || providerId === 'opencode') {
+            // Minimax API and OpenCode Zen do not currently have a standard /v1/models endpoint for listing.
             // Return the hardcoded fallback list smoothly so the UI doesn't crash.
             const { BUILTIN_PROVIDERS } = await import('./providers');
             const models = (BUILTIN_PROVIDERS[providerId]?.models || []).map(m => ({ id: m }));
@@ -2020,6 +2031,9 @@ body.general-mode .mode-indicator { color: #c792ea; }
                     <label class="toggle-switch"><input type="checkbox" id="inlineOverlapStripping"><span class="toggle-track"></span></label>
                 </div>
             </div>
+        </div>
+        <div style="border-top: 1px solid var(--border); margin: 12px 0 8px; padding-top: 6px;">
+            <span style="font-size:11px; opacity:0.5; letter-spacing:0.05em;">行为与工具</span>
         </div>
         <div class="accordion-section" id="agentSection">
             <div class="accordion-header" id="accAgent"><span>🛡️ Agent 设置</span><span class="accordion-arrow">▶</span></div>

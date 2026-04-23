@@ -539,7 +539,10 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             const result = [item];
             this.completionCache.set(cacheKey, result, document.version);
             return result;
-        } catch {
+        } catch (err) {
+            if (err instanceof Error && err.name !== 'AbortError') {
+                console.error('[InlineProvider] Completion error:', err.message);
+            }
             return undefined;
         } finally {
             if (this.currentAbortController === abortController) {

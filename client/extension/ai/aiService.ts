@@ -380,7 +380,7 @@ export class AIService {
         try {
             if (providerId === 'ollama') {
                 // Ollama uses /api/generate instead of /v1/completions for its FIM support
-                const url = `${endpoint.replace('/v1', '')}/api/generate`;
+                const url = `${endpoint.replace(/\/v1\/?$/, '')}/api/generate`;
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -398,13 +398,26 @@ export class AIService {
                 });
                 if (!response.ok) {
                     const err = await response.text();
+                    console.error(`[FIM] Ollama API error (${response.status}): ${err}`);
                     throw new Error(`Ollama API error (${response.status}): ${err}`);
                 }
                 const data = await response.json() as { response?: string };
                 return data.response ?? '';
             } else {
-                // Standard OpenAI-compatible /completions request
-                const url = `${endpoint}/completions`;
+                // Build the correct FIM URL per provider:
+                // - DeepSeek uses /beta/completions (NOT /v1/completions)
+                // - SiliconFlow, OpenRouter, Together, DeepInfra use standard /v1/completions
+                let url: string;
+                if (providerId === 'deepseek') {
+                    // DeepSeek FIM is a beta feature at a different base path
+                    url = endpoint.replace(/\/v1\/?$/, '/beta') + '/completions';
+                } else {
+                    // Standard OpenAI-compatible /completions
+                    url = endpoint.replace(/\/$/, '') + '/completions';
+                }
+
+                console.log(`[FIM] Requesting: ${url} model=${model}`);
+
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: {
@@ -423,10 +436,16 @@ export class AIService {
                 });
                 if (!response.ok) {
                     const err = await response.text();
+                    console.error(`[FIM] ${provider.name} API error (${response.status}): ${err}`);
                     throw new Error(`${provider.name} FIM API error (${response.status}): ${err}`);
                 }
-                const data = await response.json() as { choices?: Array<{ text?: string }> };
-                return data.choices?.[0]?.text ?? '';
+                const data = await response.json() as {
+                    choices?: Array<{ text?: string; message?: { content?: string } }>;
+                };
+                // Some providers return choices[].text, some return choices[].message.content
+                const choice = data.choices?.[0];
+                const text = choice?.text ?? choice?.message?.content ?? '';
+                return text;
             }
         } finally {
             this.activeControllers.delete(controller);

@@ -1423,12 +1423,12 @@
                     const maxTokens = Math.max(...recent.map(d => d.tokens), 1);
                     html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px;">';
                     html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">近期趋势 (每日)</div>';
-                    html += '<div style="display:flex; align-items:flex-end; gap:2px; height:60px;">';
+                    html += '<div style="display:flex; justify-content:flex-end; align-items:flex-end; gap:4px; height:60px;">';
                     // Show in chronological order (reverse since dailyStats is desc)
                     for (const d of [...recent].reverse()) {
                         const h = Math.max(3, Math.round((d.tokens / maxTokens) * 56));
                         const dayLabel = d.date.slice(5); // MM-DD
-                        html += `<div title="${d.date}: ${d.tokens.toLocaleString()} tokens, ${d.callCount} 次调用, $${d.costUsd.toFixed(4)}" style="flex:1; min-width:0;">
+                        html += `<div title="${d.date}: ${d.tokens.toLocaleString()} tokens, ${d.callCount} 次调用, $${d.costUsd.toFixed(4)}" style="flex:1; min-width:12px; max-width:28px;">
                             <div style="background:var(--accent); opacity:0.7; height:${h}px; border-radius:2px 2px 0 0;"></div>
                             <div style="font-size:7px; text-align:center; opacity:0.4; margin-top:1px; overflow:hidden; white-space:nowrap;">${dayLabel}</div>
                         </div>`;

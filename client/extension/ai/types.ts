@@ -441,7 +441,9 @@ export type AgentToolName =
     | 'query_enums'
     | 'get_entity_info'
     | 'query_static_modifiers'
-    | 'query_variables';
+    | 'query_variables'
+    // ── MCP tools ──
+    | 'mcp_call';
 
 // ─── File Tool Types ─────────────────────────────────────────────────────────
 

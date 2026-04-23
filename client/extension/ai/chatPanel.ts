@@ -563,6 +563,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
+    /**
+     * Public API: Send a message to the AI chat programmatically.
+     * Used by keyboard shortcuts and command palette commands.
+     * Opens the chat panel if it's not visible.
+     */
+    async sendProgrammaticMessage(text: string): Promise<void> {
+        // Ensure the panel is visible
+        await vs.commands.executeCommand('cwtools.aiChat.focus');
+        // Short delay to allow panel to initialize if just opened
+        await new Promise(r => setTimeout(r, 200));
+        await this.handleUserMessage(text);
+    }
+
     private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
@@ -629,6 +642,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 {
                     mode: this.currentMode,
                     model: this.aiService.getConfig().model || undefined,
+                    streaming: true,  // Enable typewriter text effect
                     onStep: (step) => {
                         this._liveSteps.push(step);
                         this.postMessage({ type: 'agentStep', step });
@@ -1569,8 +1583,9 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
     // ─── Topic Search ─────────────────────────────────────────────────────────
 
     /**
-     * Search topics by keyword — scans title and message content.
+     * Search topics by keyword — scans title and full message content.
      * Returns top 20 matches sorted by relevance (title match first, then recency).
+     * Includes context preview showing where the match was found.
      */
     private handleSearchTopics(query: string): void {
         const q = query.toLowerCase().trim();
@@ -1578,18 +1593,66 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
             this.sendTopicList();
             return;
         }
-        const results = this.topics
-            .filter(t => !t.archived)
-            .filter(t => {
-                const titleMatch = t.title.toLowerCase().includes(q);
-                const contentMatch = t.messages.some(m =>
-                    m.content.toLowerCase().includes(q) ||
-                    (m.code ?? '').toLowerCase().includes(q)
-                );
-                return titleMatch || contentMatch;
-            })
-            .slice(0, 20)
-            .map(t => ({ id: t.id, title: t.title, updatedAt: t.updatedAt }));
+
+        const scored: Array<{
+            id: string; title: string; updatedAt: number;
+            matchContext?: string; score: number;
+        }> = [];
+
+        for (const t of this.topics) {
+            if (t.archived) continue;
+
+            let score = 0;
+            let matchContext: string | undefined;
+
+            // Title match (highest priority)
+            if (t.title.toLowerCase().includes(q)) {
+                score += 100;
+            }
+
+            // Message content match — find first matching message and extract context
+            for (const m of t.messages) {
+                const content = m.content.toLowerCase();
+                const codeContent = (m.code ?? '').toLowerCase();
+                const idx = content.indexOf(q);
+                const codeIdx = codeContent.indexOf(q);
+
+                if (idx >= 0) {
+                    score += (m.role === 'user' ? 10 : 5);
+                    if (!matchContext) {
+                        // Extract snippet around match (±40 chars)
+                        const start = Math.max(0, idx - 40);
+                        const end = Math.min(m.content.length, idx + q.length + 40);
+                        matchContext = (start > 0 ? '...' : '') +
+                            m.content.substring(start, end).replace(/\n/g, ' ') +
+                            (end < m.content.length ? '...' : '');
+                    }
+                } else if (codeIdx >= 0) {
+                    score += 8;
+                    if (!matchContext) {
+                        const start = Math.max(0, codeIdx - 40);
+                        const end = Math.min(m.code!.length, codeIdx + q.length + 40);
+                        matchContext = '📄 ' + (start > 0 ? '...' : '') +
+                            m.code!.substring(start, end).replace(/\n/g, ' ') +
+                            (end < m.code!.length ? '...' : '');
+                    }
+                }
+            }
+
+            if (score > 0) {
+                scored.push({ id: t.id, title: t.title, updatedAt: t.updatedAt, matchContext, score });
+            }
+        }
+
+        // Sort by score descending, then by recency
+        scored.sort((a, b) => b.score - a.score || b.updatedAt - a.updatedAt);
+
+        const results = scored.slice(0, 20).map(s => ({
+            id: s.id,
+            title: s.title,
+            updatedAt: s.updatedAt,
+            matchContext: s.matchContext,
+        }));
 
         this.postMessage({ type: 'topicSearchResults', results });
     }

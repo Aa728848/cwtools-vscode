@@ -537,4 +537,24 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // ─── MCP Tools ──────────────────────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'mcp_call',
+            description: 'Call a tool on a configured MCP (Model Context Protocol) server. MCP servers extend AI capabilities with external tools. Requires a server name (from cwtools.ai.mcp.servers config) and the tool name to call.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    server: { type: 'string', description: 'Name of the MCP server to call (must match a configured server name)' },
+                    tool: { type: 'string', description: 'Name of the tool to invoke on the MCP server' },
+                    arguments: {
+                        type: 'object',
+                        description: 'Arguments to pass to the MCP tool (schema depends on the tool)',
+                    },
+                },
+                required: ['server', 'tool'],
+            },
+        },
+    },
 ];

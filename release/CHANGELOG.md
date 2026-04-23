@@ -11,7 +11,12 @@
 - **[增强] 全项目本地化索引 (Feature 5)**：本地化文本（`locDecorations.ts`）由仅处理当前打开文件升级为使用 `FileSystemWatcher` 的全工作区后台异步索引，即时可用并支持增量更新。
 - **[新功能] Review Mode 代码审查 (Feature 6)**：新增独立的 `Review` 工作模式及专用系统提示词。在此模式下 AI 仅拥有审查与诊断等只读工具权限，用于高强度校验现有代码规范及逻辑漏洞并强制禁止代码覆盖。
 - **[新功能] 性能监控 Dashboard (Feature 7)**：于扩展设置页内置 AI 性能计量主板。实现按供应商分类统计、单模型调用细分占比以及最近 14 天消耗的综合可视化计算。
-
+- **[新功能] 多游戏 AI 知识库与 Prompt 支持**：内置 Stellaris, HOI4, EU4, CK2/3, VIC2/3, Imperator, EU5 等 9 款 Paradox 游戏的专属 PDXScript 语法与上下文，根据当前项目智能重组系统提示词。
+- **[新功能] 上下文窗口智能化 (Smart Windowing)**：基于 AST 大括号深度扫描，智能提取光标所在的完整语义代码块片段，大幅降低多余 Token 消耗并提升 AI 语境精度。
+- **[增强] 打字机流式输出体验**：推理反馈全面接入 `text_delta` Streaming 支持，无缝衔接主流 API 源及 Claude SSE，并重构 ProviderAdapter 消除长回复视觉停顿。
+- **[增强] AI 对话全文快速检索引擎**：历史搜索升级为基于权重的全文匹配（同时包含模型回复与内嵌代码快），并新增命中段落的前后文切片预览。
+- **[增强] AI 常用命令全局快捷键**：工作区全局注册 `AI: Review Current File` (Ctrl+Shift+R)、`AI: Explain Selected Code` (Ctrl+Shift+E) 及 `AI: Fix All Diagnostics` (Ctrl+Shift+F)。
+- **[增强] 子任务 (Sub-Task) 执行进度投屏**：底层任务分发机制接入统一的 AgentStep 回调，子 Agent 探索的进度生命周期 (`subtask_start`/`complete`) 会实时推送至面板供追踪。
 ## [1.5.0] — 2026-04-21
 
 ### 🔒 LSP 服务端 — 稳定性与并发

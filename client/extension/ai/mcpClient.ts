@@ -244,6 +244,16 @@ export class MCPClient {
         return this.sendRequest('resources/read', { uri });
     }
 
+    async listTools(): Promise<any> {
+        if (!this.initialized) throw new Error('MCP Client not initialized');
+        return this.sendRequest('tools/list');
+    }
+
+    async callTool(name: string, args: Record<string, unknown> = {}): Promise<any> {
+        if (!this.initialized) throw new Error('MCP Client not initialized');
+        return this.sendRequest('tools/call', { name, arguments: args });
+    }
+
     disconnect() {
         if (this.process) {
             this.process.kill();

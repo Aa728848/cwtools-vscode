@@ -19,6 +19,8 @@ export interface ExternalToolContext {
         command?: string
     ) => Promise<boolean>;
     onTodoUpdate?: (todos: TodoItem[]) => void;
+    /** Step callback for real-time UI progress (shared with AgentToolExecutor) */
+    onStep?: (step: import('../types').AgentStep) => void;
     agentRunnerRef?: {
         runSubAgent(
             prompt: string,
@@ -285,8 +287,15 @@ export class ExternalToolHandler {
         const tasksToRun = taskList.slice(0, 3);
         
         try {
-            const promises = tasksToRun.map(async task => {
+            const promises = tasksToRun.map(async (task, idx) => {
                 const mode = (task.subagent_type ?? 'general') as 'explore' | 'general';
+                // Emit subtask_start for UI progress visualization
+                this.ctx.onStep?.({
+                    type: 'subtask_start',
+                    content: `Sub-task ${idx + 1}/${tasksToRun.length}: ${task.description}`,
+                    subagentType: mode,
+                    timestamp: Date.now(),
+                });
                 try {
                     const result = await this.ctx.agentRunnerRef!.runSubAgent(
                         task.prompt,
@@ -295,8 +304,21 @@ export class ExternalToolHandler {
                         undefined,
                         this.ctx.parentTokenAccumulator
                     );
+                    // Emit subtask_complete for UI
+                    this.ctx.onStep?.({
+                        type: 'subtask_complete',
+                        content: `✓ ${task.description}`,
+                        subagentType: mode,
+                        timestamp: Date.now(),
+                    });
                     return { description: task.description, result };
                 } catch (e) {
+                    this.ctx.onStep?.({
+                        type: 'subtask_complete',
+                        content: `✗ ${task.description}: ${e instanceof Error ? e.message : String(e)}`,
+                        subagentType: mode,
+                        timestamp: Date.now(),
+                    });
                     return {
                         description: task.description,
                         result: `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}`,

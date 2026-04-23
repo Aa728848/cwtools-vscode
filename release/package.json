@@ -173,6 +173,44 @@
 				"command": "cwtools.ai.selectModel",
 				"title": "Select AI Model from Provider...",
 				"category": "CWTools AI"
+			},
+			{
+				"command": "cwtools.ai.reviewFile",
+				"title": "AI: Review Current File",
+				"category": "CWTools AI",
+				"icon": "$(search)"
+			},
+			{
+				"command": "cwtools.ai.explainSelection",
+				"title": "AI: Explain Selected Code",
+				"category": "CWTools AI",
+				"icon": "$(lightbulb)"
+			},
+			{
+				"command": "cwtools.ai.fixDiagnostics",
+				"title": "AI: Fix All Diagnostics",
+				"category": "CWTools AI",
+				"icon": "$(wrench)"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "cwtools.ai.reviewFile",
+				"key": "ctrl+shift+r",
+				"mac": "cmd+shift+r",
+				"when": "editorTextFocus"
+			},
+			{
+				"command": "cwtools.ai.explainSelection",
+				"key": "ctrl+shift+e",
+				"mac": "cmd+shift+e",
+				"when": "editorHasSelection"
+			},
+			{
+				"command": "cwtools.ai.fixDiagnostics",
+				"key": "ctrl+shift+f",
+				"mac": "cmd+shift+f",
+				"when": "editorTextFocus"
 			}
 		],
 		"configuration": {

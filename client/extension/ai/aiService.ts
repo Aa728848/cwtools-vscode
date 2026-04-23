@@ -192,6 +192,8 @@ export class AIService {
             endpoint?: string;     // Override endpoint
             /** Real-time callback for incremental reasoning/thinking tokens */
             onThinking?: (text: string) => void;
+            /** Real-time callback for incremental text content tokens (streaming typewriter effect) */
+            onTextDelta?: (text: string) => void;
             /** External AbortSignal for caller-controlled cancellation */
             abortSignal?: AbortSignal;
             /**
@@ -321,11 +323,11 @@ export class AIService {
             const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan';
             // Use streaming for OpenAI-compat providers when they support it.
             if (provider.supportsStreaming && provider.isOpenAICompatible && !isAnthropicCompat) {
-                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller);
+                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta);
             } else if (isAnthropicCompat) {
                 // L4 Fix: fully migrate callClaude to SSE — enables real-time thinking tokens
                 // and eliminates the previous blocking response.json() approach.
-                return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking);
+                return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking, options?.onTextDelta);
             } else {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
             }
@@ -728,7 +730,8 @@ export class AIService {
         request: ChatCompletionRequest,
         providerId: string,
         onThinking?: (text: string) => void,
-        controller?: AbortController   // C1 Fix: accept local controller
+        controller?: AbortController,   // C1 Fix: accept local controller
+        onTextDelta?: (text: string) => void
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/chat/completions`;
         const headers: Record<string, string> = {
@@ -787,6 +790,7 @@ export class AIService {
                 // Accumulate text content
                 if (typeof delta.content === 'string') {
                     contentBuf += delta.content;
+                    if (delta.content && onTextDelta) onTextDelta(delta.content);
                 }
                 // Accumulate thinking/reasoning content and emit incrementally
                 const reasoning = delta.reasoning_content ?? delta.reasoning;
@@ -857,7 +861,8 @@ export class AIService {
         apiKey: string,
         request: ChatCompletionRequest,
         controller: AbortController,
-        onThinking?: (text: string) => void
+        onThinking?: (text: string) => void,
+        onTextDelta?: (text: string) => void
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/messages`;
         // Force stream=true so we get SSE — enables thinking tokens and unblocks UI
@@ -943,6 +948,7 @@ export class AIService {
                             textBuf += chunk;
                             // Emit thinking tokens to caller in real-time
                             if (chunk && onThinking) onThinking(chunk);
+                            if (chunk && onTextDelta) onTextDelta(chunk);
                         } else if (deltaType === 'input_json_delta') {
                             const idx = (evt.index as number) ?? currentBlockIdx;
                             if (toolBlocks[idx]) {

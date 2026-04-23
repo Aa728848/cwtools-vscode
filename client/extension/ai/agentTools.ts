@@ -67,6 +67,8 @@ export class AgentToolExecutor {
         description: string,
         command?: string
     ) => Promise<boolean>;
+    /** Step callback for real-time UI progress (subtask events) */
+    public onStep?: (step: import('./types').AgentStep) => void;
 
     // ── Domain handlers ─────────────────────────────────────────────────────
     private fileHandler: FileToolHandler;
@@ -197,10 +199,79 @@ export class AgentToolExecutor {
             case 'task':
                 result = await this.externalHandler.dispatchSubTask(args as any); break;
 
+            // ── MCP tool call ────────────────────────────────────────────
+            case 'mcp_call':
+                result = await this.executeMcpTool(args as any); break;
+
             default:
-                throw new Error(`Unknown tool: ${toolName}`);
+                // Check if this is a dynamically registered MCP tool (mcp_<server>_<tool>)
+                if (toolName.startsWith('mcp_')) {
+                    result = await this.executeMcpTool({ ...args, _toolName: toolName } as any);
+                } else {
+                    throw new Error(`Unknown tool: ${toolName}`);
+                }
         }
         return this.truncateResult(result);
+    }
+
+    // ─── MCP Tool Execution ──────────────────────────────────────────────────
+
+    /**
+     * Execute a tool call via MCP (Model Context Protocol).
+     * Supports both generic mcp_call (with server + tool in args) and
+     * named mcp_<server>_<tool> patterns.
+     */
+    private async executeMcpTool(args: {
+        server?: string;
+        tool?: string;
+        arguments?: Record<string, unknown>;
+        _toolName?: string;
+        [key: string]: unknown;
+    }): Promise<{ success: boolean; result?: unknown; error?: string }> {
+        try {
+            const { MCPClient } = await import('./mcpClient');
+            const config = vs.workspace.getConfiguration('cwtools.ai');
+            const servers = config.get<any[]>('mcp.servers') || [];
+
+            let serverName = args.server;
+            let toolName = args.tool;
+
+            // Parse from mcp_<server>_<tool> pattern
+            if (!serverName && args._toolName) {
+                const match = args._toolName.match(/^mcp_(.+?)_(.+)$/);
+                if (match) {
+                    serverName = match[1];
+                    toolName = match[2];
+                }
+            }
+
+            if (!serverName || !toolName) {
+                return { success: false, error: 'Missing server or tool name. Use mcp_call with server and tool args.' };
+            }
+
+            const serverConfig = servers.find((s: any) => s.name === serverName);
+            if (!serverConfig) {
+                return { success: false, error: `MCP server "${serverName}" not found in configuration` };
+            }
+
+            const client = new MCPClient({
+                name: serverConfig.name,
+                type: serverConfig.type,
+                command: serverConfig.command,
+                args: serverConfig.args,
+                env: serverConfig.env,
+                url: serverConfig.url,
+            });
+            try {
+                await client.connect();
+                const result = await client.callTool(toolName, (args.arguments || {}) as Record<string, unknown>);
+                return { success: true, result };
+            } finally {
+                client.disconnect();
+            }
+        } catch (e) {
+            return { success: false, error: `MCP tool call failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
     }
 
     /** Truncate large tool results to avoid overloading context window. */

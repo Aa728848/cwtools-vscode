@@ -220,6 +220,47 @@ export async function activate(context: ExtensionContext) {
 		await aiService.selectModelCommand();
 	});
 
+	// ── Quick AI commands (keyboard shortcuts / command palette) ──────────
+	safeRegisterCommand(context, "cwtools.ai.reviewFile", async () => {
+		const editor = vs.window.activeTextEditor;
+		if (!editor) {
+			vs.window.showWarningMessage('没有打开的编辑器');
+			return;
+		}
+		const relPath = vs.workspace.asRelativePath(editor.document.uri);
+		await chatPanelProvider.sendProgrammaticMessage(
+			`请审查当前文件 \`${relPath}\`，检查 scope 错误、逻辑问题和 CWTools 诊断警告。`
+		);
+	});
+
+	safeRegisterCommand(context, "cwtools.ai.explainSelection", async () => {
+		const editor = vs.window.activeTextEditor;
+		if (!editor) {
+			vs.window.showWarningMessage('没有打开的编辑器');
+			return;
+		}
+		const selection = editor.document.getText(editor.selection);
+		if (!selection.trim()) {
+			vs.window.showWarningMessage('请先选中要解释的代码');
+			return;
+		}
+		await chatPanelProvider.sendProgrammaticMessage(
+			`请解释以下代码的作用、scope 链和逻辑：\n\`\`\`pdx\n${selection}\n\`\`\``
+		);
+	});
+
+	safeRegisterCommand(context, "cwtools.ai.fixDiagnostics", async () => {
+		const editor = vs.window.activeTextEditor;
+		if (!editor) {
+			vs.window.showWarningMessage('没有打开的编辑器');
+			return;
+		}
+		const relPath = vs.workspace.asRelativePath(editor.document.uri);
+		await chatPanelProvider.sendProgrammaticMessage(
+			`请获取并修复当前文件 \`${relPath}\` 中的所有 CWTools 诊断错误。`
+		);
+	});
+
 	const init = async function (language: string, isVanillaFolder: boolean) {
 		vs.languages.setLanguageConfiguration(language, {
 			wordPattern: /"?([^\s.]+)"?/,

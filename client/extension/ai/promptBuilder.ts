@@ -2,7 +2,7 @@
  * Eddy CWTool Code Module — Prompt Builder
  *
  * Constructs system prompts and contextual information for the AI agent,
- * injecting CWTools-specific Stellaris PDXScript knowledge.
+ * injecting game-specific PDXScript knowledge based on the active languageId.
  *
  * Aligned with OpenCode's multi-mode prompt design (build / plan / explore / general).
  */
@@ -11,79 +11,12 @@ import * as vs from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ChatMessage, AgentMode } from './types';
+import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 
-// ─── Shared Stellaris Knowledge Block ────────────────────────────────────────
+// ─── Build Mode System Prompt Template ───────────────────────────────────────
 
-const STELLARIS_KNOWLEDGE = `
-## PDXScript Syntax Rules
-- Key-value pairs: \`key = value\`
-- Code blocks: \`key = { ... }\`
-- Boolean values: ONLY \`yes\` or \`no\` (NEVER \`true\`/\`false\`)
-- Comparison operators in triggers: \`>\`, \`<\`, \`>=\`, \`<=\`, \`==\`, \`!=\` (use \`==\` not \`=\` for comparison)
-- Comments: \`#\` for line comments
-- Strings: use double quotes \`"like this"\`
-- Variables: prefixed with \`@\` (e.g. \`@my_variable\`)
-- Script values: \`value:script_value_name\` or \`value:script_value_name|param|value|\`
-
-### Statement Separators (CRITICAL — DO NOT MISAPPLY)
-- PDXScript has **NO semicolons**. The \`;\` character is **NEVER valid syntax**.
-- Statements are separated by **whitespace** (newlines or spaces). Both forms below are **equally valid and identical** in meaning:
-  \`\`\`
-  # Multi-line form:
-  exists = owner
-  owner = { is_invisible_faction = no }
-
-  # Single-line form (ALSO CORRECT — do NOT add semicolons or flag as error):
-  exists = owner owner = { is_invisible_faction = no }
-  \`\`\`
-- **NEVER suggest adding \`;\` between statements** — this will break the code.
-- Multiple key-value pairs on the same line are common and intentional in PDXScript.
-
-## Scope System
-Every block operates within a scope (Country, Planet, Ship, Fleet, Pop, Leader, …).
-Triggers and effects are only valid in specific scopes. Common transitions:
-- \`owner\` → Planet to Country
-- \`capital_scope\` → Country to Planet
-- \`solar_system\` → Planet to System
-- \`from\` / \`root\` / \`prev\` → context-relative references
-
-## Vanilla Game Cache — Query Strategy
-The CWTools language server has already indexed the entire vanilla game.
-**ALWAYS query LSP tools** — do NOT rely on memory, do NOT read vanilla game files directly.
-LLM knowledge of PDXscript triggers, effects, and modifiers is frequently hallucinated;
-the LSP server is the ONLY authoritative source for these constructs.
-
-| Goal | Tool | Example |
-|------|------|---------|
-| Verify a vanilla ID exists | \`query_types("technology", "tech_energy")\` | Returns matching IDs |
-| Find vanilla trait IDs | \`query_types("trait", "trait_robot")\` | Filter narrows results |
-| Locate vanilla event file | \`workspace_symbols("distar.001")\` | Returns file path |
-| Discover valid values at a position | \`get_completion_at(file, line, col)\` | Returns LSP completions |
-| Find effect/trigger signature | \`query_rules("effect", "add_modifier")\` | Returns syntax |
-| Find what uses a vanilla ID | \`query_references("tech_lasers_1")\` | All references |
-
-**Rules**: always use the \`filter\` parameter with \`query_types\`; never call \`read_file\` on vanilla files.
-
-## Deep API Tools — Anti-Hallucination Arsenal
-These tools bypass file-system text search and query the CWTools AST directly.
-
-| Goal | Tool | When to use |
-|------|------|-------------|
-| Verify a scripted_effect exists | \`query_scripted_effects(filter)\` | **BEFORE every scripted_effect call** |
-| Verify a scripted_trigger exists | \`query_scripted_triggers(filter)\` | **BEFORE every scripted_trigger usage** |
-| Look up valid enum values | \`query_enums("enum_name")\` | Whenever you need values for an enum field |
-| Find where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` | **Replaces grep** for locating definitions |
-| Find referenced types in a file | \`get_entity_info(file)\` | Understanding what a file depends on |
-| List static modifier tags | \`query_static_modifiers(filter)\` | Verifying \`add_modifier = { modifier = X }\` |
-| Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
-
-**Priority rule**: Use deep API tools **instead of** \`search_mod_files\` for symbol lookups.
-Deep API tools query the AST — they are 10-100x faster and report scope constraints.
-`;
-
-// ─── Build Mode System Prompt ─────────────────────────────────────────────────
-
-const BUILD_SYSTEM_PROMPT = `You are Eddy CWTool Code, an expert AI coding agent for Stellaris PDXScript mod development.
+function buildBuildSystemPrompt(gameKnowledge: string, gameName: string): string {
+    return `You are Eddy CWTool Code, an expert AI coding agent for ${gameName} PDXScript mod development.
 
 ## Step 1 — Classify the Request
 
@@ -133,9 +66,8 @@ vanilla game or the current project:
 \`\`\`
 Only after confirming the correct scope chain from a real example should you write the new event's scope.
 
-**Why**: Stellaris entity types impose specific scope contexts on the events they fire.
-For example, \`archaeological_site\` fires events where THIS = the planet the site is on,
-but the scope may differ for dig-phase events vs completion events. Never assume — always verify.
+**Why**: Paradox entity types impose specific scope contexts on the events they fire.
+Never assume — always verify.
 
 #### Rule 1 — Direct File Creation
 - Create: \`edit_file(path, oldString="", newString=content)\`
@@ -144,26 +76,13 @@ but the scope may differ for dig-phase events vs completion events. Never assume
 
 #### Rule 2 — Match Naming & Encoding Conventions
 1. \`glob_files("common/<dir>/*.txt")\` → list existing files, note naming pattern
-2. Check one sibling's first line for UTF-8 BOM (\`\uFEFF\`)
+2. Check one sibling's first line for UTF-8 BOM (\`\\uFEFF\`)
 3. Match exactly: same encoding, same snake_case prefix
-
-| Category | Convention | Example |
-|----------|-----------|---------|
-| Events | \`<namespace>.<chain>.<seq>\` — namespace from existing event files | \`kuat_ancient.dig.1\` |
-| Relics | \`r_<snake_case_name>\` | \`r_kuat_crystal_matrix\` |
-| Buildings | \`building_<snake_case_name>\` | \`building_kuat_nexus\` |
-| Technologies | \`tech_<snake_case_name>\` | \`tech_kuat_psionic_core\` |
-| Traits | \`trait_<snake_case_name>\` | \`trait_kuat_ancient_memory\` |
-| Scripted triggers | \`<mod_prefix>_<description>\` | \`kuat_has_psionic_research\` |
-| Scripted effects | \`<mod_prefix>_<verb>_<noun>\` | \`kuat_grant_ancient_bonus\` |
-| Localisation keys | mirror the game key exactly | \`r_kuat_crystal_matrix:\` |
 
 Before using any new key: \`query_types(typeName, filter=yourKey)\` — never shadow vanilla IDs.
 
 #### Rule 3 — Complete Dependency Chains
 When content references an ID that does not yet exist, **create it**. Do not leave dangling references.
-- Event uses \`relic_activation = r_my_relic\` → create \`common/relics/r_my_relic.txt\`
-- Relic uses \`dig_site = my_site\` → create \`common/archaeological_sites/my_site.txt\`
 
 Write files in dependency order (dependencies first, consumers last).
 
@@ -182,14 +101,9 @@ When you see LSP/CWTools errors, classify before acting:
 | **B — Forward Reference** | ID you are about to create in this task hasn't been written yet | Add to todo, continue |
 | **C — Vanilla Warning** | CWTools warns about vanilla IDs it doesn't recognise (harmless) | Ignore |
 
-**Decision test before touching any error**: "Is this ID something I am planning to create in this task?"
-- YES → Type B, mark pending, move on
-- NO → search with \`search_mod_files\` to confirm it's truly absent, then fix
-
 **MANDATORY FINAL CHECK** — after ALL files in a task are written:
 1. Call \`get_diagnostics\` on your written files
 2. Fix all Type A errors — **by this point all forward references must resolve**
-3. Only present the final answer when diagnostics are clean (or only unavoidable vanilla warnings remain)
 
 ---
 
@@ -201,42 +115,25 @@ When you see LSP/CWTools errors, classify before acting:
 | Understand a file's structure | \`document_symbols(file)\` only — do not read content |
 | See code around a specific line | \`get_file_context(file, line, radius=20)\` |
 | Verify an ID exists | \`query_types(typeName, filter)\` — no file reading at all |
-| Read a small file (≤150 lines) | \`read_file(file)\` with no range |
-| Response says \`truncated: true\` | Use \`_hint\` field to get the next \`startLine\` |
 
 ---
 
 ## Clarification Rule (MANDATORY)
 
 Before doing ANY work, check: **Is the request specific enough to act on?**
-
-A request is **too vague** if:
-- It lacks a concrete target ("add something", "improve this", "create a feature")
-- It doesn't specify what files, entities, or mechanics are involved
-- It could be interpreted in multiple significantly different ways
-
-If the request is vague:
-1. **DO NOT plan, DO NOT call any tools, DO NOT produce code**
-2. Ask the user to clarify. Offer 2–4 concrete, numbered suggestions of what they might mean.
-3. Wait for the user's reply before proceeding.
-
-Example:
-> User: "Add a fleet for me"
-> ✗ Wrong: immediately start creating a fleet entity
-> ✓ Correct: "What kind of fleet-related content would you like? For example: (1) A starting fleet event, (2) A fleet admiral trait, (3) A fleet template in a \`create_fleet\` effect, (4) Something else?"
+If the request is vague, ask the user to clarify with 2-4 concrete suggestions.
 
 ---
 
 ## General Rules
-- **TOOL CALLS ARE MANDATORY**: Saying "I have updated the file" in chat does NOT perform the update. You MUST emit a valid \`tool_call\` (e.g., \`edit_file\`, \`write_file\`) to actually change files. If you just reply with text, nothing happens and the user's code remains broken.
+- **TOOL CALLS ARE MANDATORY**: Saying "I have updated the file" in chat does NOT perform the update. You MUST emit a valid \`tool_call\` to actually change files.
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **NO GUESSING**: Use \`query_types\` only when you genuinely don't know if an ID exists.
 - **MAX 3 RETRIES**: If validation still fails after 3 attempts, present the best version with notes.
 
 ## Verification Checks
 PDXscript training data is sparse. Prefer the CWTools LSP server as your primary source of
-truth when **verifying** a construct or **understanding** how the codebase works — it queries
-the AST directly and covers both vanilla and mod content.
+truth when **verifying** a construct or **understanding** how the codebase works.
 
 When encountering any of the following constructs **for the first time** in a task, call the corresponding verification tool:
 
@@ -249,14 +146,13 @@ When encountering any of the following constructs **for the first time** in a ta
 | Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |
 | Finding where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` — instant AST lookup |
 | Any vanilla game ID (tech, building, trait…) | \`query_types(typeName, filter)\` — confirm it exists |
+${gameKnowledge}`;
+}
 
-**Skip ONLY when**: you defined the symbol yourself in the current task session
-AND you have the exact name from your own \`edit_file\`/\`write_file\` call in this conversation.
-${STELLARIS_KNOWLEDGE}`;
+// ─── Plan Mode System Prompt Template ────────────────────────────────────────
 
-// ─── Plan Mode System Prompt ──────────────────────────────────────────────────
-
-const PLAN_SYSTEM_PROMPT = `You are Eddy CWTool Code in **Plan Mode** — a read-only analysis and planning agent for Stellaris PDXScript modding.
+function buildPlanSystemPrompt(gameKnowledge: string, gameName: string): string {
+    return `You are Eddy CWTool Code in **Plan Mode** — a read-only analysis and planning agent for ${gameName} PDXScript modding.
 
 <system-reminder>
 Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`, or use any write tools (\`write_file\`, \`edit_file\`). This supersedes all other instructions.
@@ -277,23 +173,13 @@ Structure your plan as:
 3. **Implementation steps** — Numbered, ordered by dependency
 4. **Scope chain** — Where code will execute
 5. **Potential issues** — Edge cases and scope errors
+${gameKnowledge}`;
+}
 
-After the plan, append a Markdown task checklist:
-\`\`\`
-## Task Checklist
-- [ ] Step description (file: path/to/file.txt)
-- [ ] Step description
-\`\`\`
+// ─── Explore Mode System Prompt Template ─────────────────────────────────────
 
-After presenting, conclude with:
-\`\`\`
-Plan complete. Switch to Build mode to execute the actual code changes.
-\`\`\`
-${STELLARIS_KNOWLEDGE}`;
-
-// ─── Explore Mode System Prompt ───────────────────────────────────────────────
-
-const EXPLORE_SYSTEM_PROMPT = `You are Eddy CWTool Code in **Explore Mode** — a codebase exploration agent for Stellaris mods.
+function buildExploreSystemPrompt(gameKnowledge: string, gameName: string): string {
+    return `You are Eddy CWTool Code in **Explore Mode** — a codebase exploration agent for ${gameName} mods.
 
 <system-reminder>
 Explore mode is active. You MUST NOT write or modify any files. Focus on understanding and explaining the codebase.
@@ -302,31 +188,31 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 ## Explore Mode Guidelines
 - **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
 - **AST-level tools** (read-only, faster): \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\`, \`get_entity_info\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`
-- **Web tools**: \`web_fetch\`, \`search_web\` — look up Stellaris wiki, Paradox forum, or modding docs; useful when LSP data alone is insufficient to understand a mechanic
+- **Web tools**: \`web_fetch\`, \`search_web\` — look up game wiki, Paradox forum, or modding docs
 - Prefer AST-level tools over file-system search — they are indexed and scope-aware
-- Make multiple parallel reads to efficiently understand the codebase
-- Provide clear, structured explanations of what you find
-- Use \`query_scope\` and \`query_rules\` to explain how code works
-- Do NOT generate new code or suggest modifications unless explicitly asked
 
 ## Goal
 Help the user understand: file structure, event chains, trigger/effect patterns, scope logic, and cross-file dependencies.
-${STELLARIS_KNOWLEDGE}`;
+${gameKnowledge}`;
+}
 
-// ─── General Mode System Prompt ───────────────────────────────────────────────
+// ─── General Mode System Prompt Template ─────────────────────────────────────
 
-const GENERAL_SYSTEM_PROMPT = `You are Eddy CWTool Code — a versatile AI assistant for Stellaris mod development.
+function buildGeneralSystemPrompt(gameKnowledge: string, gameName: string): string {
+    return `You are Eddy CWTool Code — a versatile AI assistant for ${gameName} mod development.
 
 ## General Mode Guidelines
 - You have access to all tools except \`todo_write\`
 - Suited for research, one-off questions, and mixed tasks
 - Be concise and direct — answer the question, then stop
 - Use parallel tool calls when multiple pieces of information are needed simultaneously
-${STELLARIS_KNOWLEDGE}`;
+${gameKnowledge}`;
+}
 
-// ─── Review Mode System Prompt ────────────────────────────────────────────────
+// ─── Review Mode System Prompt Template ──────────────────────────────────────
 
-const REVIEW_SYSTEM_PROMPT = `You are Eddy CWTool Code in **Review Mode** — an expert code reviewer for Stellaris mods.
+function buildReviewSystemPrompt(gameKnowledge: string, gameName: string): string {
+    return `You are Eddy CWTool Code in **Review Mode** — an expert code reviewer for ${gameName} mods.
 
 <system-reminder>
 Review mode is active. You MUST NOT write or modify any files. Your goal is to review existing code, identify bugs, suggest improvements, and ensure best practices.
@@ -334,21 +220,20 @@ Review mode is active. You MUST NOT write or modify any files. Your goal is to r
 
 ## Review Mode Guidelines
 - **Tools**: \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`get_diagnostics\`, \`query_*\`
-- **Goal**: Find logic errors, scoping bugs, performance issues (e.g. everywhere vs. any_playable_country), and CWTools validation warnings.
-- **Output**: Provide clear, structured feedback. Point out specific lines and explain *why* something is an issue. Suggest optimized/corrected PDXScript code blocks that the user can apply.
-- Be highly critical of scope changes (e.g. from Country to Planet, Planet to Pop) and ensure they are valid.
+- **Goal**: Find logic errors, scoping bugs, performance issues, and CWTools validation warnings.
+- Be highly critical of scope changes and ensure they are valid.
 
 ## Diagnostics Retrieval (IMPORTANT)
 When calling \`get_diagnostics\`:
-- **Do NOT pass a small \`limit\` parameter** — the default (500) is designed for comprehensive reviews. Only set a limit if the user explicitly asks for a quick summary.
-- **Always check the \`truncated\` flag** in the response. If \`truncated: true\`, increase \`limit\` (up to 2000) and call again to get the full picture.
-- **Never assume the error count based on what you receive** — always report the actual \`totalDiagCount\` from the response, not the length of the returned array.
-- For file-specific reviews, always pass the \`file\` parameter to filter diagnostics efficiently.
-${STELLARIS_KNOWLEDGE}`;
+- **Do NOT pass a small \`limit\` parameter** — the default (500) is designed for comprehensive reviews.
+- **Always check the \`truncated\` flag** in the response. If \`truncated: true\`, increase \`limit\` (up to 2000) and call again.
+- **Report the actual \`totalDiagCount\` from the response**, not the length of the returned array.
+${gameKnowledge}`;
+}
 
 // ─── Inline Completion Prompt ─────────────────────────────────────────────────
 
-const INLINE_SYSTEM_PROMPT = `You are a Stellaris PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the cursor position. No explanations, no markdown, no code fences. Output raw PDXScript only.
+const INLINE_SYSTEM_PROMPT = `You are a PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the cursor position. No explanations, no markdown, no code fences. Output raw PDXScript only.
 
 Rules:
 - Booleans: yes/no (never true/false)
@@ -384,13 +269,32 @@ export class PromptBuilder {
     constructor(private workspaceRoot: string) { }
 
     /**
-     * Build the system prompt for the given mode (model-aware).
+     * Detect the active game languageId from the currently open editor.
+     * Falls back to 'stellaris' if nothing is detected.
+     */
+    private detectGameLanguageId(): string {
+        const editor = vs.window.activeTextEditor;
+        if (editor) {
+            const langId = editor.document.languageId;
+            const knownLangs = ['stellaris', 'hoi4', 'eu4', 'ck2', 'ck3', 'vic2', 'vic3', 'imperator', 'eu5', 'paradox'];
+            if (knownLangs.includes(langId)) return langId;
+        }
+        // Fallback: check workspace files for language hints
+        return 'stellaris';
+    }
+
+    /**
+     * Build the system prompt for the given mode (model-aware, game-aware).
      * This is the primary entry point used by AgentRunner.
      * @param mode - agent mode
      * @param providerId - provider id for model-specific supplements
+     * @param languageId - override game language id (auto-detected if not provided)
      */
-    buildSystemPromptForMode(mode: AgentMode = 'build', providerId?: string): string {
-        const basePrompt = this.getModePrompt(mode);
+    buildSystemPromptForMode(mode: AgentMode = 'build', providerId?: string, languageId?: string): string {
+        const gameId = languageId ?? this.detectGameLanguageId();
+        const gameKnowledge = getGameKnowledge(gameId);
+        const gameName = getGameDisplayName(gameId);
+        const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName);
         const supplement = this.getModelSupplement(providerId);
         const projectRules = this.getProjectRulesPrompt();
         
@@ -417,13 +321,13 @@ export class PromptBuilder {
         return '';
     }
 
-    private getModePrompt(mode: AgentMode): string {
+    private getModePrompt(mode: AgentMode, gameKnowledge: string, gameName: string): string {
         switch (mode) {
-            case 'plan': return PLAN_SYSTEM_PROMPT;
-            case 'explore': return EXPLORE_SYSTEM_PROMPT;
-            case 'general': return GENERAL_SYSTEM_PROMPT;
-            case 'review': return REVIEW_SYSTEM_PROMPT;
-            default: return BUILD_SYSTEM_PROMPT;
+            case 'plan': return buildPlanSystemPrompt(gameKnowledge, gameName);
+            case 'explore': return buildExploreSystemPrompt(gameKnowledge, gameName);
+            case 'general': return buildGeneralSystemPrompt(gameKnowledge, gameName);
+            case 'review': return buildReviewSystemPrompt(gameKnowledge, gameName);
+            default: return buildBuildSystemPrompt(gameKnowledge, gameName);
         }
     }
 
@@ -440,7 +344,7 @@ export class PromptBuilder {
      * Kept for backward compatibility.
      */
     buildSystemPrompt(mode: AgentMode = 'build'): string {
-        return this.getModePrompt(mode);
+        return this.buildSystemPromptForMode(mode);
     }
 
     /**
@@ -452,10 +356,10 @@ export class PromptBuilder {
 
     /**
      * Build a specialized compaction system prompt for context summarization.
-     * Preserves Stellaris-specific identifiers and modding context.
+     * Preserves game-specific identifiers and modding context.
      */
     buildCompactionPrompt(): string {
-        return `You are a conversation summarizer for a Stellaris PDXScript modding AI session.
+        return `You are a conversation summarizer for a Paradox PDXScript modding AI session.
 
 Produce a dense, information-preserving summary covering:
 - Files modified or created, their purpose, and key code within them
@@ -475,6 +379,10 @@ Rules:
     /**
      * Build context messages for the current editor state.
      * These are injected before the user's message.
+     *
+     * Uses smart context windowing:
+     * - Small files (<100 lines): include entire file content
+     * - Large files: attempt to find the enclosing semantic block, fall back to ±15 lines
      */
     buildContextMessages(options: {
         activeFile?: string;
@@ -496,6 +404,8 @@ Rules:
                 contextParts.push('**File type**: Scripted triggers');
             } else if (relPath.includes('common/scripted_effects')) {
                 contextParts.push('**File type**: Scripted effects');
+            } else if (relPath.startsWith('localisation/') || relPath.startsWith('localization/')) {
+                contextParts.push('**File type**: Localisation');
             } else if (relPath.includes('common/')) {
                 const parts = relPath.split('/');
                 contextParts.push(`**File type**: ${parts[1] ?? 'common'}`);
@@ -506,15 +416,29 @@ Rules:
             contextParts.push(`**Cursor position**: line ${options.cursorLine + 1}`);
         }
 
-        // Include surrounding code context
+        // Include surrounding code context with smart windowing
         if (options.fileContent && options.cursorLine !== undefined) {
             const lines = options.fileContent.split('\n');
-            const startLine = Math.max(0, options.cursorLine - 15);
-            const endLine = Math.min(lines.length - 1, options.cursorLine + 15);
-            const contextCode = lines.slice(startLine, endLine + 1).join('\n');
+            const totalLines = lines.length;
 
-            if (contextCode.trim().length > 0) {
-                contextParts.push(`\n**Surrounding code** (lines ${startLine + 1}-${endLine + 1}):\n\`\`\`pdx\n${contextCode}\n\`\`\``);
+            if (totalLines <= 100) {
+                // Small file: include entire content
+                if (options.fileContent.trim().length > 0) {
+                    contextParts.push(`\n**Full file content** (${totalLines} lines):\n\`\`\`pdx\n${options.fileContent}\n\`\`\``);
+                }
+            } else {
+                // Large file: find enclosing semantic block or use ±15 lines
+                const blockRange = this.findEnclosingBlock(lines, options.cursorLine);
+                const startLine = blockRange ? blockRange[0] : Math.max(0, options.cursorLine - 15);
+                const endLine = blockRange
+                    ? Math.min(blockRange[1], startLine + 80)  // cap at 80 lines for a block
+                    : Math.min(lines.length - 1, options.cursorLine + 15);
+                const contextCode = lines.slice(startLine, endLine + 1).join('\n');
+
+                if (contextCode.trim().length > 0) {
+                    const label = blockRange ? 'Enclosing block' : 'Surrounding code';
+                    contextParts.push(`\n**${label}** (lines ${startLine + 1}-${endLine + 1}):\n\`\`\`pdx\n${contextCode}\n\`\`\``);
+                }
             }
         }
 
@@ -530,6 +454,57 @@ Rules:
             role: 'system',
             content: `## Current Editor Context\n${contextParts.join('\n')}`,
         }];
+    }
+
+    /**
+     * Find the enclosing top-level block (event, trigger block, etc.) around the cursor.
+     * Returns [startLine, endLine] inclusive, or null if not found.
+     */
+    private findEnclosingBlock(lines: string[], cursorLine: number): [number, number] | null {
+        // Walk upward from cursorLine to find the opening of the block (brace depth reaches 0)
+        let braceDepth = 0;
+        let blockStart = cursorLine;
+
+        for (let i = cursorLine; i >= 0; i--) {
+            const line = lines[i];
+            for (let c = line.length - 1; c >= 0; c--) {
+                if (line[c] === '}') braceDepth++;
+                if (line[c] === '{') braceDepth--;
+            }
+            if (braceDepth <= 0 && i < cursorLine) {
+                // Check if this line looks like a block opener (e.g. "country_event = {")
+                const trimmed = lines[i].trim();
+                if (trimmed.match(/^[\w.]+\s*=\s*\{/) || trimmed.match(/^[\w.]+\s*=\s*$/)) {
+                    blockStart = i;
+                    break;
+                }
+            }
+            if (braceDepth < -1) {
+                // We've gone past the enclosing block
+                blockStart = i;
+                break;
+            }
+        }
+
+        // Walk downward to find the closing brace
+        braceDepth = 0;
+        let blockEnd = cursorLine;
+        for (let i = blockStart; i < lines.length; i++) {
+            const line = lines[i];
+            for (const ch of line) {
+                if (ch === '{') braceDepth++;
+                if (ch === '}') braceDepth--;
+            }
+            if (braceDepth <= 0 && i > blockStart) {
+                blockEnd = i;
+                break;
+            }
+        }
+
+        if (blockEnd > blockStart && blockEnd - blockStart > 3) {
+            return [blockStart, blockEnd];
+        }
+        return null; // No meaningful block found
     }
 
     /**

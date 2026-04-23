@@ -54,20 +54,45 @@ export interface FileToolContext {
 export class FileToolHandler {
     constructor(private ctx: FileToolContext) {}
 
-    private assertInWorkspace(filePath: string): void {
-        const normalized = path.resolve(filePath);
+    private resolveAndAssertInWorkspace(filePath: string): string {
+        const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(this.ctx.workspaceRoot, filePath);
+        const normalized = path.resolve(absolutePath);
         const wsRoot = path.resolve(this.ctx.workspaceRoot);
         if (!normalized.startsWith(wsRoot)) {
             throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
         }
+        return normalized;
+    }
+
+    private readTextFile(filePath: string): { content: string; hasBom: boolean } {
+        if (!fs.existsSync(filePath)) return { content: '', hasBom: false };
+        let content = fs.readFileSync(filePath, 'utf-8');
+        const hasBom = content.charCodeAt(0) === 0xFEFF;
+        if (hasBom) content = content.slice(1);
+        return { content, hasBom };
+    }
+
+    private writeTextFile(filePath: string, content: string, hasBom: boolean, requestedEncoding?: string): void {
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        
+        let shouldAddBom = hasBom;
+        if (requestedEncoding) {
+            shouldAddBom = requestedEncoding === 'utf8bom';
+        } else if (filePath.endsWith('.yml') && (filePath.replace(/\\/g, '/').includes('/localisation/'))) {
+            shouldAddBom = true;
+        }
+
+        const finalContent = shouldAddBom ? '\uFEFF' + content : content;
+        fs.writeFileSync(filePath, finalContent, 'utf-8');
     }
 
     // ─── readFile ────────────────────────────────────────────────────────────
 
     async readFile(args: { file: string; startLine?: number; endLine?: number }): Promise<import('../types').ReadFileResult> {
         try {
-            this.assertInWorkspace(args.file);
-            const content = fs.readFileSync(args.file, 'utf-8');
+            args.file = this.resolveAndAssertInWorkspace(args.file);
+            const { content } = this.readTextFile(args.file);
             const lines = content.split('\n');
             const totalLines = lines.length;
 
@@ -124,9 +149,8 @@ export class FileToolHandler {
 
     async writeFile(args: { file: string; content: string; encoding?: string }): Promise<import('../types').WriteFileResult> {
         try {
-            this.assertInWorkspace(args.file);
-            let originalContent: string | null = null;
-            try { originalContent = fs.readFileSync(args.file, 'utf-8'); } catch { /* new file */ }
+            args.file = this.resolveAndAssertInWorkspace(args.file);
+            const { content: originalContent, hasBom } = this.readTextFile(args.file);
             this.ctx.onBeforeFileWrite?.(args.file, originalContent);
 
             const _diff = this.generateSimpleDiff(args.file, originalContent ?? '', args.content);
@@ -139,14 +163,7 @@ export class FileToolHandler {
                 }
             }
 
-            const dir = path.dirname(args.file);
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-
-            const useBom = (args.encoding ?? 'utf8bom') !== 'utf8';
-            const writeContent = useBom ? '\uFEFF' + args.content : args.content;
-            fs.writeFileSync(args.file, writeContent, 'utf-8');
+            this.writeTextFile(args.file, args.content, hasBom, args.encoding);
             return { success: true, message: `文件已写入: ${args.file}` };
         } catch (e) {
             return { success: false, message: `写入失败: ${String(e)}` };
@@ -163,19 +180,12 @@ export class FileToolHandler {
         encoding?: string;
     }): Promise<import('../types').EditFileResult> {
         try {
-            this.assertInWorkspace(args.filePath);
+            args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
         } catch (e) {
             return { success: false, message: String(e) };
         }
         const filePath = args.filePath;
-        let originalContent = '';
-        try {
-            if (fs.existsSync(filePath)) {
-                originalContent = fs.readFileSync(filePath, 'utf-8');
-            }
-        } catch (e) {
-            return { success: false, message: `无法读取文件: ${String(e)}` };
-        }
+        const { content: originalContent, hasBom } = this.readTextFile(filePath);
 
         this.ctx.onBeforeFileWrite?.(filePath, args.oldString === '' ? null : originalContent);
 
@@ -206,11 +216,7 @@ export class FileToolHandler {
         }
 
         try {
-            const dir = path.dirname(filePath);
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            const useBom = (args.encoding ?? 'utf8bom') !== 'utf8';
-            const writeContent = (useBom && args.oldString === '') ? '\uFEFF' + newContent : newContent;
-            fs.writeFileSync(filePath, writeContent, 'utf-8');
+            this.writeTextFile(filePath, newContent, hasBom, args.encoding);
         } catch (e) {
             return { success: false, message: `写入失败: ${String(e)}` };
         }
@@ -233,21 +239,13 @@ export class FileToolHandler {
         encoding?: string;
     }): Promise<import('../types').EditFileResult> {
         try {
-            this.assertInWorkspace(args.filePath);
+            args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
         } catch (e) {
             return { success: false, message: String(e) };
         }
         const filePath = args.filePath;
-        let content = '';
-        try {
-            if (fs.existsSync(filePath)) {
-                content = fs.readFileSync(filePath, 'utf-8');
-            }
-        } catch (e) {
-            return { success: false, message: `无法读取文件: ${String(e)}` };
-        }
-
-        const originalContent = content;
+        const { content: originalContent, hasBom } = this.readTextFile(filePath);
+        let content = originalContent;
         this.ctx.onBeforeFileWrite?.(filePath, originalContent || null);
 
         const ending = this.detectLineEnding(content);
@@ -282,10 +280,7 @@ export class FileToolHandler {
         }
 
         try {
-            const dir = path.dirname(filePath);
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            const useBom = (args.encoding ?? 'utf8bom') !== 'utf8';
-            fs.writeFileSync(filePath, useBom ? '\uFEFF' + content : content, 'utf-8');
+            this.writeTextFile(filePath, content, hasBom, args.encoding);
         } catch (e) {
             return { success: false, message: `写入失败: ${String(e)}` };
         }
@@ -310,7 +305,7 @@ export class FileToolHandler {
         const cwd = args.cwd ?? this.ctx.workspaceRoot;
 
         try {
-            this.assertInWorkspace(cwd);
+            this.resolveAndAssertInWorkspace(cwd);
         } catch (e) {
             return { success: false, filesChanged: [], errors: [String(e)] };
         }
@@ -337,7 +332,7 @@ export class FileToolHandler {
                         ? filePath
                         : path.join(cwd, filePath);
                     try {
-                        this.assertInWorkspace(currentFile);
+                        this.resolveAndAssertInWorkspace(currentFile);
                     } catch (e) {
                         return { success: false, filesChanged: [], errors: [String(e)] };
                     }
@@ -375,20 +370,19 @@ export class FileToolHandler {
             return { success: false, filesChanged: [], errors: ['No valid hunks found in patch'] };
         }
 
-        const byFile = new Map<string, { content: string; hunks: HunkPatch[] }>();
+        const byFile = new Map<string, { content: string; hasBom: boolean; hunks: HunkPatch[] }>();
         for (const hunk of hunks) {
             if (!byFile.has(hunk.filePath)) {
-                let content = '';
-                try { content = fs.readFileSync(hunk.filePath, 'utf-8'); } catch { /* new file */ }
-                byFile.set(hunk.filePath, { content, hunks: [] });
+                const { content, hasBom } = this.readTextFile(hunk.filePath);
+                byFile.set(hunk.filePath, { content, hasBom, hunks: [] });
             }
             byFile.get(hunk.filePath)!.hunks.push(hunk);
         }
 
         const errors: string[] = [];
-        const pendingWrites: Array<{ filePath: string; newContent: string }> = [];
+        const pendingWrites: Array<{ filePath: string; newContent: string; hasBom: boolean }> = [];
 
-        for (const [filePath, { content, hunks: fileHunks }] of byFile) {
+        for (const [filePath, { content, hasBom, hunks: fileHunks }] of byFile) {
             let currentContent = content;
             const ending = this.detectLineEnding(currentContent);
             for (const hunk of fileHunks) {
@@ -401,7 +395,7 @@ export class FileToolHandler {
                 }
             }
             if (errors.length === 0) {
-                pendingWrites.push({ filePath, newContent: currentContent });
+                pendingWrites.push({ filePath, newContent: currentContent, hasBom });
             }
         }
 
@@ -410,9 +404,9 @@ export class FileToolHandler {
         }
 
         const filesChanged: string[] = [];
-        for (const { filePath, newContent } of pendingWrites) {
-            const prevContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null;
-            this.ctx.onBeforeFileWrite?.(filePath, prevContent);
+        for (const { filePath, newContent, hasBom } of pendingWrites) {
+            const { content: prevContent } = this.readTextFile(filePath);
+            this.ctx.onBeforeFileWrite?.(filePath, prevContent !== '' ? prevContent : null);
 
             if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite) {
                 const messageId = `patch_${crypto.randomUUID()}`;
@@ -424,9 +418,7 @@ export class FileToolHandler {
             }
 
             try {
-                const dir = path.dirname(filePath);
-                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                fs.writeFileSync(filePath, newContent, 'utf-8');
+                this.writeTextFile(filePath, newContent, hasBom);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
             } catch (e) {
                 errors.push(`Write ${path.basename(filePath)}: ${e instanceof Error ? e.message : String(e)}`);

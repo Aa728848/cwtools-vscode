@@ -555,14 +555,19 @@
     // ── Markdown renderer ──────────────────────────────────────────────────────
     function inlineMd(raw) {
         let s = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        s = s.replace(/`([^`]+)`/g, (_,c) => '<code>' + c.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>') + '</code>');
+        const codeBlocks = [];
+        s = s.replace(/`([^`]+)`/g, (_,c) => {
+            codeBlocks.push('<code>' + c.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>') + '</code>');
+            return '\x01CODE' + (codeBlocks.length - 1) + '\x01';
+        });
         s = s.replace(/\*\*\*([^*]+)\*\*\*/g,'<strong><em>$1</em></strong>');
         s = s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
-        s = s.replace(/__([^_]+)__/g,'<strong>$1</strong>');
+        s = s.replace(/(^|\W)__([^_\n]+)__(\W|$)/g,'$1<strong>$2</strong>$3');
         s = s.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
-        s = s.replace(/_([^_\n]+)_/g,'<em>$1</em>');
+        s = s.replace(/(^|\W)_([^_\n]+)_(\W|$)/g,'$1<em>$2</em>$3');
         s = s.replace(/~~([^~]+)~~/g,'<del>$1</del>');
         s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+        s = s.replace(/\x01CODE(\d+)\x01/g, (_,i) => codeBlocks[parseInt(i)]);
         return s;
     }
 

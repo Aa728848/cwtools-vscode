@@ -214,7 +214,8 @@ Example:
 ---
 
 ## General Rules
-- **CONCISE**: No preamble, no "I will now…" sentences.
+- **TOOL CALLS ARE MANDATORY**: Saying "I have updated the file" in chat does NOT perform the update. You MUST emit a valid \`tool_call\` (e.g., \`edit_file\`, \`write_file\`) to actually change files. If you just reply with text, nothing happens and the user's code remains broken.
+- **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **NO GUESSING**: Use \`query_types\` only when you genuinely don't know if an ID exists.
 - **MAX 3 RETRIES**: If validation still fails after 3 attempts, present the best version with notes.
 

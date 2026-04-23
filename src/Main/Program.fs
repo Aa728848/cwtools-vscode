@@ -143,9 +143,11 @@ type Server(client: ILanguageClient) =
     /// key: FileName (使用 Dictionary 替代不可变 Map 以减少 GC 压力)
     let locCache = System.Collections.Generic.Dictionary<string, CWError list>()
 
-    /// SemanticTokens cache: filePath → (contentHash, tokenData)
+    let mutable effectTriggerVersion = 0
+
+    /// SemanticTokens cache: filePath → (contentHash, effectTriggerVersion, tokenData)
     /// Avoids full AST re-traversal when file content hasn't changed.
-    let semanticTokensCache = System.Collections.Generic.Dictionary<string, int * int list>()
+    let semanticTokensCache = System.Collections.Generic.Dictionary<string, int * int * int list>()
 
     /// CodeLens cache: filePath → (contentHash, lenses)
     let codeLensCache = System.Collections.Generic.Dictionary<string, int * CodeLens list>()
@@ -344,7 +346,7 @@ type Server(client: ILanguageClient) =
                 // we now keep stale entries: SemanticTokensFull will return cached data
                 // when the entity is not yet rebuilt, then VSCode re-requests once the
                 // AST is ready. We clear codeLens because it's cheaper to recompute.
-                semanticTokensCache.Clear()
+                effectTriggerVersion <- effectTriggerVersion + 1
                 codeLensCache.Clear()
             finally
                 gameStateLock.ExitWriteLock()
@@ -1794,7 +1796,7 @@ type Server(client: ILanguageClient) =
                     let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
                     let hash = contentHash fileText
                     match semanticTokensCache.TryGetValue(filePath) with
-                    | true, (cachedHash, cachedData) when cachedHash = hash ->
+                    | true, (cachedHash, cachedVersion, cachedData) when cachedHash = hash && cachedVersion = effectTriggerVersion ->
                         Some { data = cachedData }
                     | _ ->
                     let entityOpt =
@@ -1807,7 +1809,7 @@ type Server(client: ILanguageClient) =
                         // Entity not yet available (AST rebuild in progress).
                         // Return stale cached data to keep highlighting stable.
                         match semanticTokensCache.TryGetValue(filePath) with
-                        | true, (_, cachedData) -> Some { data = cachedData }
+                        | true, (_, _, cachedData) -> Some { data = cachedData }
                         | _ -> None
                     | Some entity ->
                         let tokens = ResizeArray<struct (int * int * int * int * int)>()
@@ -1980,7 +1982,7 @@ type Server(client: ILanguageClient) =
                             prevChar <- col
 
                         let dataList = data |> Seq.toList
-                        semanticTokensCache.[filePath] <- (hash, dataList)
+                        semanticTokensCache.[filePath] <- (hash, effectTriggerVersion, dataList)
                         Some { data = dataList }
 
                 return
@@ -1993,17 +1995,19 @@ type Server(client: ILanguageClient) =
                         vic2GameObj,
                         ck3GameObj,
                         vic3GameObj,
+                        eu5GameObj,
                         customGameObj
                     with
-                    | Some game, _, _, _, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, Some game, _, _, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, Some game, _, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, Some game, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, Some game, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, Some game, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, _, Some game, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, _, _, Some game, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, _, _, _, Some game -> semanticTokensFunction game
+                    | Some game, _, _, _, _, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, Some game, _, _, _, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, Some game, _, _, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, Some game, _, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, Some game, _, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, Some game, _, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, _, Some game, _, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, _, _, Some game, _, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, _, _, _, Some game, _ -> semanticTokensFunction game
+                    | _, _, _, _, _, _, _, _, _, Some game -> semanticTokensFunction game
                     | _ -> None
             }
             |> catchError None

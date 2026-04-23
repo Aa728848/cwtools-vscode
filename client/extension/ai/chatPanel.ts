@@ -580,12 +580,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Collect file snapshots for retract/undo: wire up the tool executor callback
         // for the duration of this message exchange.
-        const messageSnapshots: Array<{ filePath: string; previousContent: string | null }> = [];
+        const messageSnapshots: Array<{ filePath: string; previousContent: string | null; _tooLarge?: boolean }> = [];
         this._currentMessageSnapshots = messageSnapshots;
         this.agentRunner.toolExecutor.onBeforeFileWrite = (filePath, previousContent) => {
             // Only record the first snapshot for each file (earliest = true "before" state)
             if (!messageSnapshots.some(s => s.filePath === filePath)) {
-                messageSnapshots.push({ filePath, previousContent });
+                if (previousContent && previousContent.length > 500000) {
+                    vs.window.showWarningMessage(`文件 ${path.basename(filePath)} 过大 (>${previousContent.length} 字符)。为防止内存耗尽，此文件的撤回快照未保存。`);
+                    messageSnapshots.push({ filePath, previousContent: null, _tooLarge: true });
+                } else {
+                    messageSnapshots.push({ filePath, previousContent });
+                }
             }
         };
 
@@ -691,6 +696,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     files: messageSnapshots,
                     convLength: this.conversationMessages.length,
                 });
+                
+                const MAX_SNAPSHOTS = 20;
+                if (this._messageFileSnapshots.size > MAX_SNAPSHOTS) {
+                    const keys = Array.from(this._messageFileSnapshots.keys()).sort((a, b) => a - b);
+                    const keysToRemove = keys.slice(0, keys.length - MAX_SNAPSHOTS);
+                    for (const key of keysToRemove) {
+                        this._messageFileSnapshots.delete(key);
+                    }
+                }
             }
             // Clean up the per-request callback and snapshot pointer
             this.agentRunner.toolExecutor.onBeforeFileWrite = undefined;
@@ -752,6 +766,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 // P0 Fix: reject paths outside workspace to prevent path traversal
                 if (!isWithinWorkspace(snap.filePath)) {
                     console.warn(`[Retract] Skipping file outside workspace: ${snap.filePath}`);
+                    skippedFiles++;
+                    continue;
+                }
+
+                if ((snap as any)._tooLarge) {
+                    console.warn(`[Retract] Skipping file due to being too large: ${snap.filePath}`);
                     skippedFiles++;
                     continue;
                 }

@@ -50,8 +50,25 @@ export default [
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
                 }
             }),
-            // Also copy plain-JS webview files that don't need bundling
-            copyFile('./client/webview/chatPanel.js', './release/bin/client/webview/chatPanel.js'),
+        ],
+    },
+    // Chat Panel webview bundle
+    {
+        input: './client/webview/chatPanel.ts',
+        output: {
+            file: './release/bin/client/webview/chatPanel.js',
+            format: "iife",
+            name: "cwtoolschatpanel",
+            indent: false,
+        },
+        plugins: [
+            typescript({
+                tsconfig: "tsconfig.webview.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
         ],
     },
 ];

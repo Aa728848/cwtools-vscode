@@ -137,10 +137,13 @@ type Server(client: ILanguageClient) =
     /// CodeLens cache: filePath → (contentHash, lenses)
     let codeLensCache = System.Collections.Generic.Dictionary<string, int * CodeLens list>()
 
-    /// Content hash using .NET's built-in string hash (catches single-char edits that
-    /// don't change line count, unlike the old length ^^^ lineCount approach).
+    /// Deterministic content hash using FNV-1a instead of string.GetHashCode()
+    /// because string.GetHashCode() is randomized per-process in .NET Core.
     let contentHash (text: string) =
-        text.GetHashCode()
+        let mutable hash = 2166136261u
+        for i = 0 to text.Length - 1 do
+            hash <- (hash ^^^ (uint32 text.[i])) * 16777619u
+        int hash
 
     let mutable lastFocusedFile: string option = None
 
@@ -415,13 +418,16 @@ type Server(client: ILanguageClient) =
                         if Map.isEmpty state then
                             return! loop false state
                         else
-                            let key, (next, force) =
-                                state
-                                |> Map.pick (fun k v ->
-                                    (k, v)
-                                    |> function
-                                        | k, v -> Some(k, v))
+                            let key =
+                                match lastFocusedFile with
+                                | Some focused when Map.containsKey focused state -> focused
+                                | _ ->
+                                    state
+                                    |> Map.toSeq
+                                    |> Seq.map fst
+                                    |> Seq.head
 
+                            let next, force = state.[key]
                             let newstate = state |> Map.remove key
                             analyze next force
                             return! loop true newstate

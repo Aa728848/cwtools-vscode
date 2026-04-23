@@ -4,6 +4,7 @@
  */
 
 import * as vs from 'vscode';
+import * as path from 'path';
 import type { TodoItem, TodoWriteResult } from '../types';
 
 // ─── Context type ────────────────────────────────────────────────────────────
@@ -62,6 +63,19 @@ export class ExternalToolHandler {
         }
 
         try {
+            const urlObj = new URL(args.url);
+            const host = urlObj.hostname;
+            const isLocalIPv4 = /^(127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+)$/.test(host);
+            const isLocalIPv6 = /^(::1|fd[0-9a-f]{2}:.+|fe80::.+)$/i.test(host);
+            
+            if (host === 'localhost' || isLocalIPv4 || isLocalIPv6 || host.endsWith('.local')) {
+                return { content: 'Error: Access to local/internal network addresses is prohibited for security reasons.', url: args.url, truncated: false };
+            }
+        } catch (e) {
+            return { content: 'Error: Invalid URL format', url: args.url, truncated: false };
+        }
+
+        try {
             const response = await fetch(args.url, {
                 headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
             });
@@ -109,17 +123,29 @@ export class ExternalToolHandler {
         exitCode: number;
         timedOut?: boolean;
     }> {
-        // Safety: deny obviously dangerous commands
+        // Safety: deny obviously dangerous commands and pipe operations
         const BLOCKED_PATTERNS = [
             /\brm\s+-rf\b/i, /\bdel\s+\/[fqs]/i, /\bformat\b/i,
             /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
-            /\bpowershell\b.*-enc/i, /\bcurl\b.*\|\s*bash/i,
-            /\bwget\b.*\|\s*sh/i,
+            /\bpowershell\b/i, /\bpwsh\b/i, /\bnode\b\s+-e/i, /\bpython\b\s+-c/i,
+            /\bcurl\b.*\|\s*bash/i, /\bwget\b.*\|\s*sh/i,
+            /\|/, /&&/, /;/, />/, /</ // Prevent command chaining and piping
         ];
         for (const pat of BLOCKED_PATTERNS) {
             if (pat.test(args.command)) {
-                return { stdout: '', stderr: `Blocked: command matched safety pattern (${pat.source})`, exitCode: 1 };
+                return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${pat.source}). Please use built-in tools instead of generic shell pipes/chains.`, exitCode: 1 };
             }
+        }
+
+        let cwd: string;
+        try {
+            cwd = path.resolve(args.cwd ?? this.ctx.workspaceRoot);
+            const wsRoot = path.resolve(this.ctx.workspaceRoot);
+            if (!cwd.startsWith(wsRoot)) {
+                return { stdout: '', stderr: `Blocked: Working directory must be within the workspace root`, exitCode: 1 };
+            }
+        } catch (e) {
+            return { stdout: '', stderr: `Blocked: Invalid working directory`, exitCode: 1 };
         }
 
         if (this.ctx.onPermissionRequest) {
@@ -137,7 +163,6 @@ export class ExternalToolHandler {
             return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
         }
 
-        const cwd = args.cwd ?? this.ctx.workspaceRoot;
         const timeoutMs = Math.min(args.timeoutMs ?? 15000, 60000);
         const { exec } = await import('child_process');
 

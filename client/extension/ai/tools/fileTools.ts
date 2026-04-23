@@ -54,23 +54,36 @@ export interface FileToolContext {
 export class FileToolHandler {
     constructor(private ctx: FileToolContext) {}
 
+    private assertInWorkspace(filePath: string): void {
+        const normalized = path.resolve(filePath);
+        const wsRoot = path.resolve(this.ctx.workspaceRoot);
+        if (!normalized.startsWith(wsRoot)) {
+            throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
+        }
+    }
+
     // ─── readFile ────────────────────────────────────────────────────────────
 
     async readFile(args: { file: string; startLine?: number; endLine?: number }): Promise<import('../types').ReadFileResult> {
         try {
+            this.assertInWorkspace(args.file);
             const content = fs.readFileSync(args.file, 'utf-8');
             const lines = content.split('\n');
             const totalLines = lines.length;
 
-            const LARGE_FILE_THRESHOLD = 150;
-            if (totalLines > LARGE_FILE_THRESHOLD && !args.startLine && !args.endLine) {
+            let threshold = 150;
+            if (args.file.endsWith('.gui') || args.file.endsWith('.gfx') || args.file.endsWith('.txt')) {
+                threshold = 500;
+            }
+
+            if (totalLines > threshold && !args.startLine && !args.endLine) {
                 return {
                     content: '',
                     totalLines,
                     truncated: true,
                     _hint: `File has ${totalLines} lines — too large to read in full. ` +
                         `Recommended: call document_symbols("${args.file}") first to identify the section you need, ` +
-                        `then re-call read_file with startLine and endLine (max 150 lines per call).`,
+                        `then re-call read_file with startLine and endLine (max ${threshold} lines per call).`,
                 };
             }
 
@@ -111,6 +124,7 @@ export class FileToolHandler {
 
     async writeFile(args: { file: string; content: string; encoding?: string }): Promise<import('../types').WriteFileResult> {
         try {
+            this.assertInWorkspace(args.file);
             let originalContent: string | null = null;
             try { originalContent = fs.readFileSync(args.file, 'utf-8'); } catch { /* new file */ }
             this.ctx.onBeforeFileWrite?.(args.file, originalContent);
@@ -148,6 +162,11 @@ export class FileToolHandler {
         replaceAll?: boolean;
         encoding?: string;
     }): Promise<import('../types').EditFileResult> {
+        try {
+            this.assertInWorkspace(args.filePath);
+        } catch (e) {
+            return { success: false, message: String(e) };
+        }
         const filePath = args.filePath;
         let originalContent = '';
         try {
@@ -213,6 +232,11 @@ export class FileToolHandler {
         edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }>;
         encoding?: string;
     }): Promise<import('../types').EditFileResult> {
+        try {
+            this.assertInWorkspace(args.filePath);
+        } catch (e) {
+            return { success: false, message: String(e) };
+        }
         const filePath = args.filePath;
         let content = '';
         try {
@@ -285,6 +309,12 @@ export class FileToolHandler {
     }> {
         const cwd = args.cwd ?? this.ctx.workspaceRoot;
 
+        try {
+            this.assertInWorkspace(cwd);
+        } catch (e) {
+            return { success: false, filesChanged: [], errors: [String(e)] };
+        }
+
         interface HunkPatch {
             filePath: string;
             oldString: string;
@@ -306,6 +336,11 @@ export class FileToolHandler {
                     currentFile = path.isAbsolute(filePath)
                         ? filePath
                         : path.join(cwd, filePath);
+                    try {
+                        this.assertInWorkspace(currentFile);
+                    } catch (e) {
+                        return { success: false, filesChanged: [], errors: [String(e)] };
+                    }
                     i += 2;
                     continue;
                 }

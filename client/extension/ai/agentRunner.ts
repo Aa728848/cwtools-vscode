@@ -771,132 +771,128 @@ export class AgentRunner {
      * 4. Generic XML (Claude antml_, simple <invoke>):
      *    <function_calls><invoke name="fn"><parameter name="p">val</parameter></invoke></function_calls>
      */
+    /**
+     * Parses Tool Calls using a robust state-machine approach.
+     * Replaces fragile regex parsing to handle nested brackets, code blocks,
+     * and escaped sequences elegantly.
+     */
     private parseDsmlToolCalls(content: string): import('./types').ToolCall[] {
         const calls: import('./types').ToolCall[] = [];
-        let callIndex = 0;
+        
+        // Normalize full-width pipes common in DeepSeek
+        let norm = content.replace(/\uFF5C/g, '|');
+        // Unify tag formats by normalizing them to standard <invoke name="...">...</invoke>
+        norm = norm.replace(/<\|DSML\|invoke\s+name=/gi, '<invoke name=');
+        norm = norm.replace(/<\/\|DSML\|invoke>/gi, '</invoke>');
+        norm = norm.replace(/<\|DSML\|parameter\s+name=/gi, '<parameter name=');
+        norm = norm.replace(/<\/\|DSML\|parameter>/gi, '</parameter>');
+        
+        norm = norm.replace(/<\s*(?:antml_)?invoke\s+name=/gi, '<invoke name=');
+        norm = norm.replace(/<\/\s*(?:antml_)?invoke\s*>/gi, '</invoke>');
+        norm = norm.replace(/<\s*(?:antml_)?parameter\s+name=/gi, '<parameter name=');
+        norm = norm.replace(/<\/\s*(?:antml_)?parameter\s*>/gi, '</parameter>');
+        
+        // Qwen Format adaptation
+        norm = norm.replace(/<function[= ]["']?([\w.-]+)["']?>/gi, '<invoke name="$1">');
+        norm = norm.replace(/<\/function>/gi, '</invoke>');
+        norm = norm.replace(/<parameter[= ]["']?([\w.-]+)["']?>/gi, '<parameter name="$1">');
 
-        // ── Pre-normalize: full-width ｜ (U+FF5C) → | (U+007C) ───────────────
-        // DeepSeek actual output: <｜DSML｜function_calls>  (full-width pipes)
-        // Normalizing to ASCII lets us use simple, reliable regexes.
-        const norm = content.replace(/\uFF5C/g, '|');
-
-        // ── Format 1: DeepSeek DSML  <|DSML|function_calls> ──────────────────
-        const hasDsml = /<\|DSML\|function_calls>/i.test(norm) ||
-            /<\|DSML\|invoke\s+name=/i.test(norm);
-
-        if (hasDsml) {
-            const invokeRe = /<\|DSML\|invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/\|DSML\|invoke>/gi;
-            const paramRe = /<\|DSML\|parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/\|DSML\|parameter>/gi;
-            invokeRe.lastIndex = 0;
-            let m: RegExpExecArray | null;
-            while ((m = invokeRe.exec(norm)) !== null) {
-                const toolName = m[1];
-                const inner = m[2];
-                const args: Record<string, unknown> = {};
-                paramRe.lastIndex = 0;
-                let pm: RegExpExecArray | null;
-                while ((pm = paramRe.exec(inner)) !== null) {
-                    const val = pm[2].trim();
-                    try { args[pm[1]] = JSON.parse(val); } catch { args[pm[1]] = val; }
+        // State Machine Extractors
+        const extractNodes = (text: string, tag: string) => {
+            const results: { attr: string, content: string }[] = [];
+            const openTagStart = `<${tag} name="`;
+            const openTagStartAlt = `<${tag} name='`;
+            const closeTag = `</${tag}>`;
+            
+            let pos = 0;
+            while (pos < text.length) {
+                let startIdx = text.indexOf(openTagStart, pos);
+                let isSingleQuote = false;
+                
+                const startIdxAlt = text.indexOf(openTagStartAlt, pos);
+                if (startIdx === -1 || (startIdxAlt !== -1 && startIdxAlt < startIdx)) {
+                    startIdx = startIdxAlt;
+                    isSingleQuote = true;
                 }
-                // Use crypto.randomUUID() to avoid ID collisions in concurrent sub-agents
+                
+                if (startIdx === -1) break;
+                
+                const attrStart = startIdx + openTagStart.length;
+                const quoteChar = isSingleQuote ? "'" : '"';
+                const attrEnd = text.indexOf(quoteChar, attrStart);
+                if (attrEnd === -1) { pos = attrStart; continue; }
+                
+                const attrVal = text.substring(attrStart, attrEnd);
+                
+                // Find ">" closing the open tag
+                const tagEnd = text.indexOf('>', attrEnd);
+                if (tagEnd === -1) { pos = attrEnd; continue; }
+                
+                const contentStart = tagEnd + 1;
+                
+                // For a robust search, we find the next closeTag. If another tool call contains nested XML, 
+                // we assume tools don't nest <invoke> inside <invoke>.
+                let contentEnd = text.indexOf(closeTag, contentStart);
+                if (contentEnd === -1) {
+                    // Fallback for LLMs that occasionally drop the closing tag at the very end
+                    contentEnd = text.length;
+                }
+                
+                results.push({
+                    attr: attrVal,
+                    content: text.substring(contentStart, contentEnd)
+                });
+                pos = contentEnd + closeTag.length;
+            }
+            return results;
+        };
+
+        // 1. Process as XML Node block
+        const invokes = extractNodes(norm, 'invoke');
+        if (invokes.length > 0) {
+            for (const inv of invokes) {
+                const toolName = inv.attr;
+                const args: Record<string, unknown> = {};
+                const params = extractNodes(inv.content, 'parameter');
+                for (const pm of params) {
+                    const val = pm.content.trim();
+                    try { args[pm.attr] = JSON.parse(val); } catch { args[pm.attr] = val; }
+                }
                 calls.push({
-                    id: `dsml_${crypto.randomUUID()}`, type: 'function',
+                    id: `sm_${crypto.randomUUID()}`, type: 'function',
                     function: { name: toolName, arguments: JSON.stringify(args) }
                 });
             }
-            if (calls.length > 0) return calls;
+            return calls;
         }
 
-        // ── Format 2: Qwen / Hermes <tool_call>{JSON}</tool_call> ─────────────
+        // 2. Qwen/Hermes JSON in <tool_call>
         const toolCallJsonRe = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
         toolCallJsonRe.lastIndex = 0;
         let tm: RegExpExecArray | null;
-        const toolCallMatches: string[] = [];
         while ((tm = toolCallJsonRe.exec(content)) !== null) {
-            toolCallMatches.push(tm[1]);
-        }
-        for (const raw of toolCallMatches) {
-            // might be plain JSON or <function=...><parameter=...> inside
+            const raw = tm[1];
+            // If it contains embedded <function> tag
             if (raw.trimStart().startsWith('<function=') || raw.trimStart().startsWith('<function ')) {
-                // Format 3 inside tool_call wrapper — fall through to format 3
-                const parsed = this.parseQwenCoderBlock(raw, callIndex);
-                calls.push(...parsed); callIndex += parsed.length;
+                // Re-process recursively or rely on the normalized XML flow
+                const parsed = this.parseDsmlToolCalls(raw);
+                calls.push(...parsed);
             } else {
                 try {
                     const obj = JSON.parse(raw) as { name?: string; arguments?: unknown };
                     if (obj.name) {
-                        // Use crypto.randomUUID() to avoid ID collisions in concurrent sub-agents
                         calls.push({
                             id: `tc_${crypto.randomUUID()}`, type: 'function',
                             function: {
                                 name: obj.name,
-                                arguments: typeof obj.arguments === 'string'
-                                    ? obj.arguments : JSON.stringify(obj.arguments ?? {})
+                                arguments: typeof obj.arguments === 'string' ? obj.arguments : JSON.stringify(obj.arguments ?? {})
                             }
                         });
                     }
-                } catch { /* not valid JSON, ignore */ }
-            }
-        }
-        if (calls.length > 0) return calls;
-
-        // ── Format 3: Qwen-Coder (no outer tool_call wrapper) ─────────────────
-        if (/<function[= ]/.test(content)) {
-            const qwenCalls = this.parseQwenCoderBlock(content, callIndex);
-            calls.push(...qwenCalls); callIndex += qwenCalls.length;
-            if (calls.length > 0) return calls;
-        }
-
-        // ── Format 4: Generic XML <function_calls><invoke ...> ────────────────
-        // (also handles Claude antml_ prefix)
-        const hasGeneric = /< *(?:antml_)?function_calls *>/i.test(content) ||
-            /< *(?:antml_)?invoke\s+name=/i.test(content);
-        if (hasGeneric) {
-            const invokeRe2 = /< *(?:antml_)?invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/ *(?:antml_)?invoke *>/gi;
-            const paramRe2 = /< *(?:antml_)?parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/ *(?:antml_)?parameter *>/gi;
-            invokeRe2.lastIndex = 0;
-            let m2: RegExpExecArray | null;
-            while ((m2 = invokeRe2.exec(content)) !== null) {
-                const toolName = m2[1], inner = m2[2];
-                const args: Record<string, unknown> = {};
-                paramRe2.lastIndex = 0;
-                let pm2: RegExpExecArray | null;
-                while ((pm2 = paramRe2.exec(inner)) !== null) {
-                    const val = pm2[2].trim();
-                    try { args[pm2[1]] = JSON.parse(val); } catch { args[pm2[1]] = val; }
-                }
-                calls.push({
-                    id: `gen_${crypto.randomUUID()}`, type: 'function',
-                    function: { name: toolName, arguments: JSON.stringify(args) }
-                });
+                } catch { /* ignore */ }
             }
         }
 
-        return calls;
-    }
-
-    /** Parse Qwen-Coder style <function=fn><parameter=key>val</parameter></function> blocks */
-    private parseQwenCoderBlock(content: string, startIndex: number): import('./types').ToolCall[] {
-        const calls: import('./types').ToolCall[] = [];
-        const fnRe = /<function[= ]["']?([\w.-]+)["']?>([\s\S]*?)<\/function>/gi;
-        const paramRe2 = /<parameter[= ]["']?([\w.-]+)["']?>([\s\S]*?)<\/parameter>/gi;
-        fnRe.lastIndex = 0;
-        let fm: RegExpExecArray | null;
-        while ((fm = fnRe.exec(content)) !== null) {
-            const toolName = fm[1], inner = fm[2];
-            const args: Record<string, unknown> = {};
-            paramRe2.lastIndex = 0;
-            let pm: RegExpExecArray | null;
-            while ((pm = paramRe2.exec(inner)) !== null) {
-                const val = pm[2].trim();
-                try { args[pm[1]] = JSON.parse(val); } catch { args[pm[1]] = val; }
-            }
-            calls.push({
-                id: `qc_${crypto.randomUUID()}`, type: 'function',
-                function: { name: toolName, arguments: JSON.stringify(args) }
-            });
-        }
         return calls;
     }
 

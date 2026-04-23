@@ -1,3 +1,4 @@
+// @ts-nocheck  
 (function() {
     const vscode = acquireVsCodeApi();
     const chatArea = document.getElementById('chatArea');

@@ -1234,6 +1234,39 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const triggerIds = this.sampleIds(path.join(root, 'common', 'scripted_triggers'), 20);
             const effectIds = this.sampleIds(path.join(root, 'common', 'scripted_effects'), 20);
             const eventIds = this.sampleIds(path.join(root, 'events'), 10);
+            const variableIds = this.sampleIds(path.join(root, 'common', 'scripted_variables'), 20);
+
+            // ── 3.1 Extract Namespaces ────────────────────────────────────────
+            const namespaces = new Set<string>();
+            const eventsDir = path.join(root, 'events');
+            if (fs.existsSync(eventsDir)) {
+                for (const file of fs.readdirSync(eventsDir).filter(f => f.endsWith('.txt'))) {
+                    try {
+                        const content = fs.readFileSync(path.join(eventsDir, file), 'utf-8');
+                        const nsMatch = content.match(/^namespace\s*=\s*"?([\w.:-]+)"?/m);
+                        if (nsMatch) namespaces.add(nsMatch[1]);
+                    } catch { /* skip */ }
+                }
+            }
+
+            // ── 3.2 Extract Localization Languages ────────────────────────────
+            const locLangs = new Set<string>();
+            const locDir = path.join(root, 'localisation');
+            if (fs.existsSync(locDir)) {
+                for (const file of fs.readdirSync(locDir)) {
+                    if (file.endsWith('.yml')) {
+                        const m = file.match(/([a-z_]+)\.yml$/i);
+                        if (m && m[1].includes('chinese')) locLangs.add('simp_chinese');
+                        else if (m && m[1].includes('english')) locLangs.add('english');
+                        else if (['russian', 'french', 'german', 'spanish', 'polish'].some(l => m && m[1].includes(l))) {
+                            const matched = ['russian', 'french', 'german', 'spanish', 'polish'].find(l => m && m[1].includes(l));
+                            if (matched) locLangs.add(matched);
+                        }
+                    } else if (fs.statSync(path.join(locDir, file)).isDirectory()) {
+                        locLangs.add(file);
+                    }
+                }
+            }
 
             // ── 4. Build CWTOOLS.md content ───────────────────────────────────
             const now = new Date().toISOString().split('T')[0];
@@ -1256,6 +1289,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 `## Known Identifiers`,
                 `When generating code that references these IDs, verify they exist before use.`,
                 ``,
+                namespaces.size > 0
+                    ? `### Event Namespaces\n${Array.from(namespaces).map(ns => `- \`${ns}\``).join('\n')}`
+                    : '',
+                variableIds.length > 0
+                    ? `\n### Global Variables (sample)\n${variableIds.map(id => `- \`${id}\``).join('\n')}`
+                    : '',
                 triggerIds.length > 0
                     ? `### Scripted Triggers (sample)
 ${triggerIds.map(id => `- \`${id}\``).join('\n')}`
@@ -1270,6 +1309,8 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
                     : '',
                 ``,
                 `## Agent Guidelines`,
+                locLangs.size > 0 ? `- **Localization Target**: This project supports [${Array.from(locLangs).join(', ')}]. Always provide localizations for these languages when creating new keys.` : '',
+                namespaces.size > 0 ? `- **Namespaces**: Always prefix new events with one of the established namespaces.` : '',
                 `- Always call \`query_types\` before using an identifier not listed above.`,
                 `- Distinguish Type A (code bug) from Type B (reference not yet defined) errors.`,
                 `- For multi-file tasks, check if referenced IDs are planned to be created later.`,
@@ -1346,8 +1387,8 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
         for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.txt')).slice(0, 10)) {
             try {
                 const content = fs.readFileSync(path.join(dir, file), 'utf-8');
-                // Match top-level identifier keys: key = {...} or key = value
-                const matches = content.match(/^(\w[\w.:-]*)\s*=/gm) || [];
+                // Match top-level identifier keys: key = {...} or @var = value
+                const matches = content.match(/^([@\w][\w.:-]*)\s*=/gm) || [];
                 for (const m of matches) {
                     const id = m.replace(/\s*=$/, '').trim();
                     if (id && !ids.includes(id) && id.length > 2) ids.push(id);

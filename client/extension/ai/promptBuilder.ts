@@ -356,7 +356,29 @@ export class PromptBuilder {
     buildSystemPromptForMode(mode: AgentMode = 'build', providerId?: string): string {
         const basePrompt = this.getModePrompt(mode);
         const supplement = this.getModelSupplement(providerId);
-        return supplement ? basePrompt + '\n' + supplement : basePrompt;
+        const projectRules = this.getProjectRulesPrompt();
+        
+        let finalPrompt = basePrompt;
+        if (supplement) finalPrompt += '\n' + supplement;
+        if (projectRules) finalPrompt += '\n' + projectRules;
+        
+        return finalPrompt;
+    }
+
+    private getProjectRulesPrompt(): string {
+        try {
+            if (!this.workspaceRoot) return '';
+            const rulesPath = path.join(this.workspaceRoot, 'CWTOOLS.md');
+            if (fs.existsSync(rulesPath)) {
+                const content = fs.readFileSync(rulesPath, 'utf8');
+                if (content.trim()) {
+                    return `\n## Project Context & Rules (from CWTOOLS.md)\n${content.trim()}\n`;
+                }
+            }
+        } catch (e) {
+            console.error('[PromptBuilder] Error reading CWTOOLS.md:', e);
+        }
+        return '';
     }
 
     private getModePrompt(mode: AgentMode): string {

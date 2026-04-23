@@ -392,11 +392,56 @@ export class AgentRunner {
             // Build compaction prompt
             // L3 Fix: exclude system messages (they'd be mapped as 'Assistant', misleading the summarizer).
             // M4 Fix: use a larger char limit for tool/assistant messages which carry technical detail.
+            
+            // Enhancement: Extract pinned context — critical entities that must survive compaction.
+            // These include file paths modified, scope chains established, and key entity names.
+            const pinnedContext: string[] = [];
+            const seenFiles = new Set<string>();
+            for (const m of olderMessages) {
+                const text = contentToString(m.content);
+                // Extract file paths from tool calls (read_file, write_file, edit_file)
+                const fileMatches = text.match(/(?:filePath|file|path)["']?\s*[:=]\s*["']([^"'\n]+)/gi);
+                if (fileMatches) {
+                    for (const fm of fileMatches) {
+                        const fp = fm.replace(/.*?["']([^"']+)["']?$/, '$1').trim();
+                        if (fp && fp.includes('/') && !seenFiles.has(fp)) {
+                            seenFiles.add(fp);
+                            pinnedContext.push(`• File: ${fp}`);
+                        }
+                    }
+                }
+                // Extract scope chains (common in Stellaris modding context)
+                const scopeMatches = text.match(/scope\s*[:=]\s*\w+/gi);
+                if (scopeMatches) {
+                    for (const sm of scopeMatches.slice(0, 5)) {
+                        pinnedContext.push(`• ${sm}`);
+                    }
+                }
+            }
+            const pinnedSection = pinnedContext.length > 0
+                ? `\n\n## Pinned Context (do NOT omit):\n${[...new Set(pinnedContext)].slice(0, 30).join('\n')}`
+                : '';
+
+            // Build per-message summaries with structured tool result preservation
             const summaryText = olderMessages
                 .filter(m => m.role !== 'system')   // L3 Fix
                 .map(m => {
                     const role = m.role === 'user' ? 'User' : m.role === 'tool' ? 'Tool' : 'Assistant';
-                    // M4 Fix: user messages get 500 chars; tool/assistant get 2000
+                    // Tool messages: preserve file path + action + success/error as structured data
+                    if (m.role === 'tool') {
+                        const content = contentToString(m.content);
+                        // Extract key result info: success/error + file path
+                        const successMatch = content.match(/"success"\s*:\s*(true|false)/);
+                        const fileMatch = content.match(/"(?:file|filePath)"\s*:\s*"([^"]+)"/);
+                        const errorMatch = content.match(/"(?:error|message)"\s*:\s*"([^"]{0,200})"/);
+                        const summary = [
+                            fileMatch ? `file=${fileMatch[1]}` : null,
+                            successMatch ? `success=${successMatch[1]}` : null,
+                            errorMatch && successMatch?.[1] === 'false' ? `error=${errorMatch[1]}` : null,
+                        ].filter(Boolean).join(' ');
+                        return `[Tool]: ${summary || content.substring(0, 500)}`;
+                    }
+                    // M4 Fix: user messages get 500 chars; assistant get 2000
                     const maxLen = m.role === 'user' ? 500 : 2000;
                     const content = contentToString(m.content).substring(0, maxLen);
                     return `[${role}]: ${content}`;
@@ -404,7 +449,7 @@ export class AgentRunner {
 
             const compactionMessages: ChatMessage[] = [
                 { role: 'system', content: this.promptBuilder.buildCompactionPrompt() },
-                { role: 'user', content: `Summarize this conversation:\n\n${summaryText}` },
+                { role: 'user', content: `Summarize this conversation:${pinnedSection}\n\n${summaryText}` },
             ];
 
             const compactionResponse = await this.aiService.chatCompletion(compactionMessages, {
@@ -430,15 +475,15 @@ export class AgentRunner {
             if (summary.length > 0) {
                 emitStep({
                     type: 'compaction',
-                    content: `上下文已压缩: ${olderMessages.length} 条消息 → 摘要 (${summary.length} chars)`,
+                    content: `上下文已压缩: ${olderMessages.length} 条消息 → 摘要 (${summary.length} chars, ${pinnedContext.length} pinned entities)`,
                     timestamp: Date.now(),
                 });
 
-                // Return compacted history: summary + recent messages
+                // Return compacted history: summary (with pinned context) + recent messages
                 return [
                     {
                         role: 'system',
-                        content: `## Conversation Summary (compacted)\n${summary}`,
+                        content: `## Conversation Summary (compacted)\n${summary}${pinnedSection}`,
                     },
                     ...recentMessages,
                 ];

@@ -109,6 +109,19 @@ type Server(client: ILanguageClient) =
     // Getter function for stlVanillaPath
     let getSTLVanillaPath() = stlVanillaPath
 
+    /// Data-driven mapping: config key → (getter, setter) for vanilla paths.
+    /// Used by the config reader loop and checkOrSetGameCache to eliminate duplication.
+    let vanillaPathMap =
+        [ "stellaris", (fun () -> stlVanillaPath),  (fun v -> stlVanillaPath <- v)
+          "hoi4",      (fun () -> hoi4VanillaPath), (fun v -> hoi4VanillaPath <- v)
+          "eu4",       (fun () -> eu4VanillaPath),  (fun v -> eu4VanillaPath <- v)
+          "ck2",       (fun () -> ck2VanillaPath),  (fun v -> ck2VanillaPath <- v)
+          "imperator", (fun () -> irVanillaPath),   (fun v -> irVanillaPath <- v)
+          "vic2",      (fun () -> vic2VanillaPath), (fun v -> vic2VanillaPath <- v)
+          "ck3",       (fun () -> ck3VanillaPath),  (fun v -> ck3VanillaPath <- v)
+          "vic3",      (fun () -> vic3VanillaPath), (fun v -> vic3VanillaPath <- v)
+          "eu5",       (fun () -> eu5VanillaPath),  (fun v -> eu5VanillaPath <- v) ]
+
     // Fallback paths for scripted variables hover (user configurable)
 
     let mutable remoteRepoPath: string option = None
@@ -574,15 +587,9 @@ type Server(client: ILanguageClient) =
                         with _ -> ()
                     | None -> ()
                     // 清除所有旧的类型特定引用
-                    stlGameObj <- None
-                    hoi4GameObj <- None
-                    eu4GameObj <- None
-                    ck2GameObj <- None
-                    irGameObj <- None
-                    vic2GameObj <- None
-                    ck3GameObj <- None
-                    vic3GameObj <- None
-                    eu5GameObj <- None
+                    stlGameObj <- None; hoi4GameObj <- None; eu4GameObj <- None
+                    ck2GameObj <- None; irGameObj <- None; vic2GameObj <- None
+                    ck3GameObj <- None; vic3GameObj <- None; eu5GameObj <- None
                     customGameObj <- None
 
                 let game =
@@ -1090,50 +1097,12 @@ type Server(client: ILanguageClient) =
                 | JsonValue.String "verbose" -> loglevel <- LogLevel.Verbose
                 | _ -> ()
 
-                match config.Item("cache").Item("eu4") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> eu4VanillaPath <- Some s
-                | _ -> ()
-
-                match config.Item("cache").Item("stellaris") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> stlVanillaPath <- Some s
-                | _ -> ()
-
-                match config.Item("cache").Item("hoi4") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> hoi4VanillaPath <- Some s
-                | _ -> ()
-
-                match config.Item("cache").Item("ck2") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> ck2VanillaPath <- Some s
-                | _ -> ()
-
-                match config.Item("cache").Item("imperator") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> irVanillaPath <- Some s
-                | _ -> ()
-
-                match config.Item("cache").Item("vic2") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> vic2VanillaPath <- Some s
-                | _ -> ()
-
-                match config.Item("cache").Item("ck3") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> ck3VanillaPath <- Some s
-                | _ -> ()
-
-                match config.Item("cache").Item("vic3") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> vic3VanillaPath <- Some s
-                | _ -> ()
-
-                match config.Item("cache").Item("eu5") with
-                | JsonValue.String "" -> ()
-                | JsonValue.String s -> eu5VanillaPath <- Some s
-                | _ -> ()
+                // Data-driven vanilla path config reader — replaces 9 repetitive match blocks
+                for (configKey, _, setter) in vanillaPathMap do
+                    match config.Item("cache").Item(configKey) with
+                    | JsonValue.String "" -> ()
+                    | JsonValue.String s -> setter (Some s)
+                    | _ -> ()
 
 
                 match config.Item("rules_folder") with

@@ -434,25 +434,20 @@ function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
-function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH = 0, parentAnchorOverride?: { x: number; y: number }): HTMLElement {
+function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH = 0, parentAnchorOverride?: { x: number; y: number }): HTMLElement | null {
     const c = COLORS[el.type] ?? DEFAULT_COLOR;
     const { w, h } = effectiveSize(el, parentW, parentH);
 
     // Skip elements with position > 5000 (off-screen, used for game logic)
+    // Performance: don't create any DOM nodes for skipped elements.
     if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) {
-        const placeholder = document.createElement('div');
-        placeholder.style.display = 'none';
-        parent.appendChild(placeholder);
-        return placeholder;
+        return null;
     }
 
     // size = { width = 0 height = 0 } on containerWindowType means hidden in PDX
     if (el.sizeExplicit && el.size.width === 0 && el.size.height === 0
         && (el.type === 'containerWindowType' || el.type === 'windowType')) {
-        const placeholder = document.createElement('div');
-        placeholder.style.display = 'none';
-        parent.appendChild(placeholder);
-        return placeholder;
+        return null;
     }
 
     const div = document.createElement('div');
@@ -793,10 +788,12 @@ function renderAll(elements: GuiElement[], fileName: string) {
         canvas.appendChild(resLabel);
     }
 
+    // Performance: all renderElement calls append to the detached `canvas` div,
+    // so no reflows occur until the single root.appendChild(canvas) below.
     for (const el of elements) {
         renderElement(el, canvas, screenW, screenH);
     }
-    
+    // Single DOM insertion — all children attached in one operation.
     root.appendChild(canvas);
     // Only fit to view on first render; preserve pan/zoom on re-renders
     if (!hasRendered) {

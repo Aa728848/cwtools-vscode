@@ -1830,6 +1830,12 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
 
+/* ── Custom Scrollbar ── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(136, 136, 136, 0.4); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(136, 136, 136, 0.7); }
+
 .header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .header-title { display: flex; align-items: center; gap: 8px; }
 .header-brand-icon { width: 18px; height: 18px; flex-shrink: 0; filter: drop-shadow(0 0 3px rgba(232,200,64,0.4)); }
@@ -2118,12 +2124,13 @@ body.review-mode .mode-indicator { color: #f48771; }
 .slash-popup-desc { opacity: 0.55; font-size: 11px; }
 
 /* ── Settings page ── */
-.settings-page { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+.settings-page { display: none; flex-direction: column; flex: 1; min-height: 0; width: 100%; overflow: hidden; }
 .settings-page.active { display: flex; }
 .settings-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .settings-back-btn { background: none; border: none; color: var(--fg); cursor: pointer; font-size: 16px; padding: 0 4px; opacity: 0.7; line-height: 1; }
 .settings-back-btn:hover { opacity: 1; }
-.settings-body { padding: 12px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow-y: auto; }
+.settings-body { padding: 12px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow-y: auto; min-height: 0; }
+.settings-body > * { flex-shrink: 0; }
 .settings-title { font-size: 13px; font-weight: 600; }
 .settings-group { display: flex; flex-direction: column; gap: 5px; }
 .settings-label { font-size: 11px; font-weight: 600; opacity: 0.75; letter-spacing: 0.03em; }
@@ -2147,7 +2154,7 @@ body.review-mode .mode-indicator { color: #f48771; }
 .test-result { font-size: 11px; text-align: center; padding: 4px; border-radius: 4px; display: none; }
 .test-result.ok { background: rgba(80,200,80,0.15); color: #5c5; display: block; }
 .test-result.fail { background: rgba(200,80,80,0.15); color: #e66; display: block; }
-.accordion-section { border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.accordion-section { border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
 .accordion-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; cursor: pointer; font-size: 12px; font-weight: 600; user-select: none; background: rgba(255,255,255,0.02); }
 .accordion-header:hover { background: rgba(255,255,255,0.05); }
 .accordion-arrow { font-size: 9px; opacity: 0.4; transition: transform 0.15s; }
@@ -2309,6 +2316,7 @@ body.review-mode .mode-indicator { color: #f48771; }
                         <input class="settings-input" id="inlineModelInput" type="text" placeholder="例如 gpt-4" autocomplete="off" />
                         <div id="inlineModelDatalist" class="ap-dropdown"></div>
                     </div>
+                </div>
                 <div class="settings-group">
                     <label class="settings-label">Endpoint</label>
                     <input class="settings-input" id="inlineEndpoint" type="text" placeholder="留空与对话相同" />
@@ -2353,6 +2361,7 @@ body.review-mode .mode-indicator { color: #f48771; }
                     <div class="settings-hint">填写后 web_search 工具将使用 Brave Search API，结果质量更高。Key 请在 <a href="https://api.search.brave.com/" target="_blank" rel="noopener">api.search.brave.com</a> 获取。</div>
                 </div>
             </div>
+        </div>
         <div class="accordion-section" id="usageSection" style="margin-top: 12px; border-color: rgba(100,149,237,0.3);">
             <div class="accordion-header" id="accUsage"><span>📊 Token 消耗统计</span><span class="accordion-arrow">▶</span></div>
             <div class="accordion-body">

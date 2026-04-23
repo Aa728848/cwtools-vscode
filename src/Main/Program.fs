@@ -246,8 +246,7 @@ type Server(client: ILanguageClient) =
     let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) : Async<unit> =
         async {
             let name = getPathFromDoc doc
-            // Invalidate semantic/codelens cache for THIS file only (not globally)
-            semanticTokensCache.Remove(doc.LocalPath) |> ignore
+            // Invalidate codelens cache for THIS file only
             codeLensCache.Remove(doc.LocalPath) |> ignore
 
             if name.EndsWith(".yml") then
@@ -1246,7 +1245,10 @@ type Server(client: ILanguageClient) =
                 )
             }
 
-        member this.DidCloseTextDocument(p: DidCloseTextDocumentParams) = async { docs.Close p }
+        member this.DidCloseTextDocument(p: DidCloseTextDocumentParams) = async { 
+            docs.Close p 
+            semanticTokensCache.Remove(p.textDocument.uri.LocalPath) |> ignore
+        }
 
         member this.DidChangeWatchedFiles(p: DidChangeWatchedFilesParams) =
             async {
@@ -1796,22 +1798,25 @@ type Server(client: ILanguageClient) =
                     let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
                     let hash = contentHash fileText
                     match semanticTokensCache.TryGetValue(filePath) with
-                    | true, (cachedHash, cachedVersion, cachedData) when cachedHash = hash && cachedVersion = effectTriggerVersion ->
+                    | true, (cachedHash, _, cachedData) when cachedHash = hash ->
                         Some { data = cachedData }
-                    | _ ->
-                    let entityOpt =
-                        game.AllEntities()
-                        |> Seq.tryPick (fun struct (e, _) ->
-                            if e.filepath = filePath then Some e else None)
+                    | true, _ ->
+                        // File modified! We want to cancel semantic updates until it is reopened.
+                        // Returning None translates to [[CANCEL]] error so VS Code shifts tokens natively.
+                        None
+                    | false, _ ->
+                        let entityOpt =
+                            game.AllEntities()
+                            |> Seq.tryPick (fun struct (e, _) ->
+                                if e.filepath = filePath then Some e else None)
 
-                    match entityOpt with
-                    | None ->
-                        // Entity not yet available (AST rebuild in progress).
-                        // Return stale cached data to keep highlighting stable.
-                        match semanticTokensCache.TryGetValue(filePath) with
-                        | true, (_, _, cachedData) -> Some { data = cachedData }
-                        | _ -> None
-                    | Some entity ->
+                        match entityOpt with
+                        | None ->
+                            // Entity not yet available (AST rebuild in progress).
+                            // Return None to let VS Code smoothly keep and shift the existing tokens 
+                            // internally without flickering.
+                            None
+                        | Some entity ->
                         let tokens = ResizeArray<struct (int * int * int * int * int)>()
                         let fileContent = fileText
                         let lines = fileContent.Split('\n')

@@ -294,7 +294,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | InlayHint(p)          -> server.InlayHint(p)           |> thenMap serializeInlayHintList |> thenSome,          true
         | DocumentLink(p)       -> server.DocumentLink(p)        |> thenMap serializeDocumentLinkList |> thenSome,       true
         | ResolveDocumentLink(p)-> server.ResolveDocumentLink(p) |> thenMap serializeDocumentLink |> thenSome,           true
-        | SemanticTokensFull(p) -> server.SemanticTokensFull(p)  |> thenMap serializeSemanticTokensOption |> thenMap (Option.defaultValue "null") |> thenSome, true
+        | SemanticTokensFull(p) -> server.SemanticTokensFull(p)  |> thenMap serializeSemanticTokensOption |> thenMap (Option.defaultValue "[[CANCEL]]") |> thenSome, true
         // CodeActions reads game state but result doesn't mutate; treat as read-only
         | CodeActions(p)        -> server.CodeActions(p)         |> thenMap serializeCommandList |> thenSome,            true
         // ExecuteCommand: split into read-only (query/info) and write (validateCode, etc.)
@@ -397,7 +397,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                     if not cancel.IsCancellationRequested then
                         try
                             match! task with
-                            | Some result -> respond (send, id, result)
+                            | Some result -> 
+                                if result = "[[CANCEL]]" then 
+                                    let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
+                                    writeClient (send, errText)
+                                else respond (send, id, result)
                             | None        -> respond (send, id, "null")
                         with :? OperationCanceledException -> ()
                 finally

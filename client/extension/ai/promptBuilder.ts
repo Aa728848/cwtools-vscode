@@ -25,6 +25,20 @@ const STELLARIS_KNOWLEDGE = `
 - Variables: prefixed with \`@\` (e.g. \`@my_variable\`)
 - Script values: \`value:script_value_name\` or \`value:script_value_name|param|value|\`
 
+### Statement Separators (CRITICAL — DO NOT MISAPPLY)
+- PDXScript has **NO semicolons**. The \`;\` character is **NEVER valid syntax**.
+- Statements are separated by **whitespace** (newlines or spaces). Both forms below are **equally valid and identical** in meaning:
+  \`\`\`
+  # Multi-line form:
+  exists = owner
+  owner = { is_invisible_faction = no }
+
+  # Single-line form (ALSO CORRECT — do NOT add semicolons or flag as error):
+  exists = owner owner = { is_invisible_faction = no }
+  \`\`\`
+- **NEVER suggest adding \`;\` between statements** — this will break the code.
+- Multiple key-value pairs on the same line are common and intentional in PDXScript.
+
 ## Scope System
 Every block operates within a scope (Country, Planet, Ship, Fleet, Pop, Leader, …).
 Triggers and effects are only valid in specific scopes. Common transitions:
@@ -323,6 +337,13 @@ Review mode is active. You MUST NOT write or modify any files. Your goal is to r
 - **Goal**: Find logic errors, scoping bugs, performance issues (e.g. everywhere vs. any_playable_country), and CWTools validation warnings.
 - **Output**: Provide clear, structured feedback. Point out specific lines and explain *why* something is an issue. Suggest optimized/corrected PDXScript code blocks that the user can apply.
 - Be highly critical of scope changes (e.g. from Country to Planet, Planet to Pop) and ensure they are valid.
+
+## Diagnostics Retrieval (IMPORTANT)
+When calling \`get_diagnostics\`:
+- **Do NOT pass a small \`limit\` parameter** — the default (500) is designed for comprehensive reviews. Only set a limit if the user explicitly asks for a quick summary.
+- **Always check the \`truncated\` flag** in the response. If \`truncated: true\`, increase \`limit\` (up to 2000) and call again to get the full picture.
+- **Never assume the error count based on what you receive** — always report the actual \`totalDiagCount\` from the response, not the length of the returned array.
+- For file-specific reviews, always pass the \`file\` parameter to filter diagnostics efficiently.
 ${STELLARIS_KNOWLEDGE}`;
 
 // ─── Inline Completion Prompt ─────────────────────────────────────────────────

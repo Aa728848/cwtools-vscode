@@ -264,7 +264,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                 properties: {
                     file: { type: 'string', description: 'Optional: restrict to a specific file path (absolute) or a path substring to match. Leave empty to get all workspace diagnostics.' },
                     severity: { type: 'string', enum: ['error', 'warning', 'info', 'hint', 'all'], description: 'Filter by severity. Default: "all"' },
-                    limit: { type: 'number', description: 'Max diagnostics to return (default 100).' },
+                    limit: { type: 'number', description: 'Max diagnostics to return (default 500, max 2000). For full project reviews, omit this parameter to get all diagnostics. Only set a low limit when you want a quick summary.' },
                 },
                 required: [],
             },

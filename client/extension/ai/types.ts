@@ -544,6 +544,8 @@ export interface GetDiagnosticsResult {
     /** Diagnostics list, truncated to limit */
     diagnostics: DiagnosticEntry[];
     totalFiles: number;
+    /** Total number of matching diagnostics before truncation */
+    totalDiagnosticCount: number;
     truncated: boolean;
 }
 

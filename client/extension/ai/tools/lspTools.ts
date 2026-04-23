@@ -685,7 +685,7 @@ export class LspToolHandler {
         severity?: 'error' | 'warning' | 'info' | 'hint' | 'all';
         limit?: number;
     }): Promise<import('../types').GetDiagnosticsResult> {
-        const limit = Math.min(args.limit ?? 100, 500);
+        const limit = Math.min(args.limit ?? 500, 2000);
         const severityFilter = args.severity && args.severity !== 'all' ? args.severity : null;
 
         const allPairs = vs.languages.getDiagnostics();
@@ -760,6 +760,7 @@ export class LspToolHandler {
             summary,
             diagnostics: entries,
             totalFiles: filesWithDiags.size,
+            totalDiagnosticCount: totalDiagCount,
             truncated: totalDiagCount > limit,
         };
     }

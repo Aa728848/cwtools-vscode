@@ -305,6 +305,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 overlapStripping: config.inlineCompletion.overlapStripping,
                 fimMode: config.inlineCompletion.fimMode,
             },
+            mcp: {
+                servers: config.mcp.servers
+            }
         };
 
         let ollamaModels: Array<{ name: string; size: string; parameterSize?: string }> | undefined;
@@ -411,7 +414,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.fimMode', settings.inlineCompletion.fimMode, vs.ConfigurationTarget.Global);
         }
-        vs.window.showInformationMessage('Eddy CWTool Code 设置已保存');
+        
+        // MCP Settings
+        if (settings.mcp?.servers) {
+            await cfg.update('mcp.servers', settings.mcp.servers, vs.ConfigurationTarget.Global);
+        }
+
+        vs.window.showInformationMessage('Eddy CWTool Code 设置已保存，部分 MCP 连接更改可能需要重载窗口生效');
         // Immediately push fresh settings data (with updated hasKey) back to the WebView
         await this.openSettingsPage();
     }
@@ -1996,6 +2005,14 @@ body.plan-mode .plan-indicator { display: block; }
 .token-usage-label { font-size: 11px; opacity: 0.7; text-align: right; padding: 0 8px 3px; letter-spacing: 0.02em; }
 #tokenUsageBar { padding: 2px 4px 0; background: transparent; border-top: 1px solid var(--border); }
 /* Message timestamp */
+.msg-time.settings-hint a { color: var(--accent); opacity: 0.8; text-decoration: none; transition: opacity 0.15s; }
+.settings-hint a:hover { opacity: 1; text-decoration: underline; }
+
+/* MCP specific CSS */
+.mcp-server-block { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.mcp-row { display: flex; gap: 6px; align-items: center; }
+.mcp-delete-btn { color: var(--error); background: none; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; opacity: 0.6; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+.mcp-delete-btn:hover { opacity: 1; border-color: var(--error); background: rgba(244,67,54,0.1); }
 .msg-time { font-size: 10px; opacity: 0.3; margin-left: auto; font-family: monospace; }
 /* Topic date groups */
 .topic-date-group { font-size: 10px; opacity: 0.38; padding: 8px 8px 3px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 600; }
@@ -2144,6 +2161,12 @@ body.review-mode .mode-indicator { color: #f48771; }
 .toggle-switch input:checked + .toggle-track { background: var(--accent); }
 .toggle-track::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
 .toggle-switch input:checked + .toggle-track::before { transform: translateX(16px); }
+
+/* MCP specific CSS */
+.mcp-server-block { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.mcp-row { display: flex; gap: 6px; align-items: start; }
+.mcp-delete-btn { color: var(--error); background: none; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; opacity: 0.6; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.mcp-delete-btn:hover { opacity: 1; border-color: var(--error); background: rgba(244,67,54,0.1); }
 </style>
 </head>
 <body>
@@ -2302,7 +2325,15 @@ body.review-mode .mode-indicator { color: #f48771; }
         <div style="border-top: 1px solid var(--border); margin: 12px 0 8px; padding-top: 6px;">
             <span style="font-size:11px; opacity:0.5; letter-spacing:0.05em;">行为与工具</span>
         </div>
-        <div class="accordion-section" id="agentSection">
+        <div class="accordion-section" id="mcpSection" style="margin-top: 12px;">
+            <div class="accordion-header" id="accMcp"><span>🔌 MCP (模型上下文协议)</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-body">
+                <div class="settings-hint" style="margin-bottom: 5px;">配置外部数据源为 AI 代理注入额外的上下文上下文信息。</div>
+                <div id="mcpServersList" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <button class="settings-test-btn" id="addMcpServerBtn" style="margin-top: 4px;">➕ 新增 MCP Server</button>
+            </div>
+        </div>
+        <div class="accordion-section" id="agentSection" style="margin-top: 12px;">
             <div class="accordion-header" id="accAgent"><span>🛡️ Agent 设置</span><span class="accordion-arrow">▶</span></div>
             <div class="accordion-body">
                 <div class="settings-group">

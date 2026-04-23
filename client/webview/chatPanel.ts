@@ -162,7 +162,9 @@
     bindBtn('detectBtn',        detectOllamaModels);
     bindBtn('accChat',          () => toggleAccordion('chatModelSection'));
     bindBtn('accInline',        () => toggleAccordion('inlineSection'));
+    bindBtn('accMcp',           () => toggleAccordion('mcpSection'));
     bindBtn('accAgent',         () => toggleAccordion('agentSection'));
+    bindBtn('addMcpServerBtn',  () => addMcpServerBlock());
     bindBtn('accUsage',         () => { toggleAccordion('usageSection'); vscode.postMessage({ type: 'requestUsageStats' }); });
     bindBtn('refreshUsageBtn',  () => vscode.postMessage({ type: 'requestUsageStats' }));
     bindBtn('clearUsageBtn',    () => {
@@ -1737,6 +1739,13 @@
         // Brave Search API key — show masked placeholder if already set
         const braveKeyEl = document.getElementById('braveSearchApiKey');
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
+        
+        // Render MCP Servers
+        const mcpList = document.getElementById('mcpServersList');
+        if (mcpList) mcpList.innerHTML = '';
+        if (current.mcp?.servers) {
+            current.mcp.servers.forEach(s => addMcpServerBlock(s));
+        }
 
         function updateInlineProviderSelect() {
             const isFimChecked = document.getElementById('inlineFimMode')?.checked ?? false;
@@ -1932,6 +1941,53 @@
             vscode.postMessage({ type: 'deleteDynamicModel', providerId, modelId });
         }
     });
+
+    function addMcpServerBlock(server = { name: '', transport: { type: 'stdio', command: '', args: [] } }) {
+        const list = document.getElementById('mcpServersList');
+        if (!list) return;
+        const div = document.createElement('div');
+        div.className = 'mcp-server-block';
+        
+        // Ensure transport exists
+        const t = server.transport || { type: 'stdio', command: '', args: [] };
+        
+        div.innerHTML = `
+            <div class="mcp-row">
+                <input class="settings-input mcp-name" type="text" placeholder="Server 名称" value="${escapeHtml(server.name || '')}" style="flex:1" />
+                <select class="settings-select mcp-type" style="width:90px">
+                    <option value="stdio" ${t.type==='stdio'?'selected':''}>stdio</option>
+                    <option value="sse" ${t.type==='sse'?'selected':''}>sse</option>
+                </select>
+                <button class="mcp-delete-btn" title="删除">🗑</button>
+            </div>
+            <div class="mcp-transport-content"></div>
+        `;
+        list.appendChild(div);
+
+        const typeSel = div.querySelector('.mcp-type');
+        const contentDiv = div.querySelector('.mcp-transport-content');
+        
+        function renderTransport() {
+            if (typeSel.value === 'stdio') {
+                contentDiv.innerHTML = `
+                    <input class="settings-input mcp-command" type="text" placeholder="Command (例如: npx)" value="${t.type==='stdio' ? escapeHtml(t.command||'') : ''}" />
+                    <input class="settings-input mcp-args" type="text" placeholder="Args (空格分隔)" value="${t.type==='stdio' && t.args ? escapeHtml(t.args.join(' ')) : ''}" style="margin-top:4px" />
+                `;
+            } else {
+                contentDiv.innerHTML = `
+                    <input class="settings-input mcp-url" type="text" placeholder="SSE URL (例如: http://localhost:3000/sse)" value="${t.type==='sse' ? escapeHtml(t.url||'') : ''}" />
+                `;
+            }
+        }
+        
+        renderTransport();
+        typeSel.addEventListener('change', renderTransport);
+        
+        div.querySelector('.mcp-delete-btn').addEventListener('click', () => {
+            div.remove();
+        });
+    }
+
     document.getElementById('detectBtn').addEventListener('click', detectOllamaModels);
     document.getElementById('fetchApiModelsBtn').addEventListener('click', fetchApiModels);
 
@@ -1955,6 +2011,22 @@
     function toggleAccordion(id) { document.getElementById(id).classList.toggle('open'); }
 
     function saveSettings() {
+        const mcpServers = Array.from(document.querySelectorAll('.mcp-server-block')).map(block => {
+            const type = block.querySelector('.mcp-type').value;
+            const transport = { type };
+            if (type === 'stdio') {
+                transport.command = block.querySelector('.mcp-command')?.value.trim() || '';
+                const argsStr = block.querySelector('.mcp-args')?.value.trim() || '';
+                transport.args = argsStr ? argsStr.split(/\s+/) : [];
+            } else {
+                transport.url = block.querySelector('.mcp-url')?.value.trim() || '';
+            }
+            return {
+                name: block.querySelector('.mcp-name').value.trim(),
+                transport
+            };
+        });
+
         vscode.postMessage({ type:'saveSettings', settings:{
             provider: document.getElementById('settingsProvider').value,
             model: getSelectedModel(),
@@ -1972,6 +2044,7 @@
                 overlapStripping: document.getElementById('inlineOverlapStripping')?.checked ?? true,
                 fimMode: document.getElementById('inlineFimMode')?.checked ?? false,
             },
+            mcp: { servers: mcpServers }
         }});
     }
 
@@ -1985,6 +2058,7 @@
             endpoint: document.getElementById('settingsEndpoint').value.trim(),
             maxContextTokens:0, agentFileWriteMode:'confirm',
             inlineCompletion:{enabled:false,provider:'',model:'',endpoint:'',debounceMs:1500},
+            mcp: { servers: [] }
         }});
     }
 })();

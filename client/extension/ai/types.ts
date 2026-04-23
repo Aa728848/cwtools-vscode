@@ -755,4 +755,7 @@ export interface PanelSettings {
         overlapStripping: boolean;
         fimMode: boolean;
     };
+    mcp?: {
+        servers: MCPServerConfig[];
+    };
 }

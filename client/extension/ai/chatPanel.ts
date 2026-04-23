@@ -278,6 +278,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             requiresApiKey: p.id !== 'ollama',
             defaultEndpoint: p.endpoint,
             maxContextTokens: p.maxContextTokens,
+            supportsFIM: p.supportsFIM,
         }));
 
         const hasKeyMap: Record<string, boolean> = {};

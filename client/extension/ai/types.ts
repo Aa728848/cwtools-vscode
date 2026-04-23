@@ -727,6 +727,7 @@ export interface ProviderMeta {
     defaultModel: string;
     requiresApiKey: boolean;
     defaultEndpoint: string;
+    supportsFIM: boolean;
 }
 
 /** Ollama model info for the settings UI */

@@ -19,11 +19,13 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'gpt-5.4',
         models: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5-nano'],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 400000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         // All gpt-4o+ and gpt-5+ models support vision (image_url in content)
+        supportsFIM: false,
         supportsVision: true,
     },
     claude: {
@@ -38,10 +40,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'claude-haiku-4-5',
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 1000000,
         isOpenAICompatible: false,   // needs adapter
         toolCallStyle: 'openai',     // adapter normalises to openai format
+        supportsFIM: false,
         supportsVision: true,
     },
     deepseek: {
@@ -51,12 +55,14 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'deepseek-chat',
         models: ['deepseek-chat', 'deepseek-reasoner'],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 128000,
         isOpenAICompatible: true,
         // Official API → standard openai tool_calls JSON.
         // Raw/local via vLLM → <｜DSML｜function_calls> (handled as fallback).
         toolCallStyle: 'openai',
+        supportsFIM: true,
         supportsVision: false,
     },
     minimax: {
@@ -67,6 +73,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'MiniMax-M2.7',
         models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 200000,
         isOpenAICompatible: true,
@@ -75,6 +82,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         // IMPORTANT: MiniMax's OpenAI-compatible endpoint currently does NOT support image or audio inputs.
         // Official docs (2026-04): "当前不支持图像和音频类型的输入"
         // IMPORTANT: MiniMax does NOT support tool_choice — also stripped in sanitizeRequest.
+        supportsFIM: false,
         supportsVision: false,
     },
     'minimax-token-plan': {
@@ -86,6 +94,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'MiniMax-M2.7',
         models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2'],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 200000,
         isOpenAICompatible: false,   // uses Anthropic Messages API
@@ -93,6 +102,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         // IMPORTANT: MiniMax Token Plan Anthropic-compat endpoint does NOT support image inputs.
         // Official docs (2026-04): "Image and document type inputs are not currently supported"
         // Use the pay-as-you-go 'minimax' provider (OpenAI-compat) if you need vision.
+        supportsFIM: false,
         supportsVision: false,
     },
     glm: {
@@ -116,12 +126,14 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'glm-4-flash',
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 200000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         // GLM-4.1v-thinking* are vision-capable; text models (glm-5, glm-z1-flash) are not.
         // Use isModelVisionCapable(model) to check at runtime.
+        supportsFIM: false,
         supportsVision: true,
     },
     qwen: {
@@ -142,12 +154,14 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'qwen-long',
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 1000000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         // Current listed models are text-only (qwen3.6-plus etc). VL models
         // (qwen-vl, qwen2.5-vl) must be specified manually; use isModelVisionCapable().
+        supportsFIM: false,
         supportsVision: false,
     },
     google: {
@@ -165,11 +179,13 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'gemini-2.5-flash-lite',
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 1048576,   // 1M token context window
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         // All Gemini models are natively multimodal (docs: ai.google.dev)
+        supportsFIM: false,
         supportsVision: true,
     },
     ollama: {
@@ -179,6 +195,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: '',
         models: [],  // Auto-detected from running Ollama instance
         supportsToolUse: true,
+        requiresApiKey: false,
         supportsStreaming: true,
         maxContextTokens: 32768,
         isOpenAICompatible: true,
@@ -186,6 +203,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         // If the model outputs raw <tool_call> text, fallback parser handles it.
         toolCallStyle: 'openai',
         // Vision depends on local model; allow and let API return error if unsupported.
+        supportsFIM: true,
         supportsVision: true,
     },
     siliconflow: {
@@ -201,10 +219,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'THUDM/glm-4-9b-chat'
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 64000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        supportsFIM: true,
         supportsVision: false,
     },
     openrouter: {
@@ -221,10 +241,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'openai/o3-mini'
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 128000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        supportsFIM: true,
         supportsVision: true,
     },
     github: {
@@ -239,10 +261,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'o3-mini'
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 128000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        supportsFIM: false,
         supportsVision: true,
     },
     together: {
@@ -256,10 +280,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'meta-llama/Llama-3.3-70B-Instruct-Turbo'
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 128000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        supportsFIM: true,
         supportsVision: false,
     },
     deepinfra: {
@@ -273,10 +299,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'meta-llama/Llama-3.3-70B-Instruct'
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 128000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        supportsFIM: true,
         supportsVision: false,
     },
     opencode: {
@@ -323,10 +351,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'qwen3.5-plus'
         ],
         supportsToolUse: true,
+        requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 200000,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
+        supportsFIM: false,
         supportsVision: true,
     }
 };
@@ -447,6 +477,41 @@ export function isModelVisionCapable(model: string): boolean {
         if (lower.includes(key.toLowerCase())) return capable;
     }
     return false;
+}
+
+/**
+ * Model-level FIM (Fill-in-the-Middle) capability map.
+ * Entries here filter the available models when FIM mode is enabled.
+ */
+export const FIM_CAPABLE_MODELS: Record<string, boolean> = {
+    // DeepSeek
+    'deepseek-chat': true,
+    'deepseek-coder': true,
+    // Provide general suffixes/substrings for code models
+    'qwen2.5-coder': true,
+    'codellama': true,
+    'starcoder': true,
+    'qwen': false, // by default qwen text models not FIM
+    // Add models which explicitly don't support FIM
+    'gpt-': false,
+    'claude-': false,
+};
+
+/**
+ * Check if a specific model name is FIM-capable.
+ * Uses provider default if model-level override is not defined.
+ */
+export function isModelFIMCapable(model: string, providerId: string): boolean {
+    const provider = getProvider(providerId);
+    if (!model) return provider.supportsFIM;
+    
+    const lower = model.toLowerCase();
+    for (const [key, capable] of Object.entries(FIM_CAPABLE_MODELS)) {
+        if (lower.includes(key.toLowerCase())) return capable;
+    }
+    
+    // Fallback to provider default if not explicitly listed
+    return provider.supportsFIM;
 }
 
 /**

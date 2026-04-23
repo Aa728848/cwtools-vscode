@@ -288,6 +288,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 endpoint: config.inlineCompletion.endpoint,
                 debounceMs: config.inlineCompletion.debounceMs,
                 overlapStripping: config.inlineCompletion.overlapStripping,
+                fimMode: config.inlineCompletion.fimMode,
             },
         };
 
@@ -393,6 +394,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             await cfg.update('inlineCompletion.endpoint', settings.inlineCompletion.endpoint, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.fimMode', settings.inlineCompletion.fimMode, vs.ConfigurationTarget.Global);
         }
         vs.window.showInformationMessage('Eddy CWTool Code 设置已保存');
         // Immediately push fresh settings data (with updated hasKey) back to the WebView
@@ -2113,6 +2115,11 @@ body.general-mode .mode-indicator { color: #c792ea; }
                 <div class="settings-toggle-row">
                     <span class="settings-toggle-label">启用 AI 补全</span>
                     <label class="toggle-switch"><input type="checkbox" id="inlineEnabled"><span class="toggle-track"></span></label>
+                </div>
+                <div class="settings-toggle-row" style="margin-top:12px;">
+                    <span class="settings-toggle-label" style="display:block;">启用 FIM 模式 (需选择支持的模型)</span>
+                    <label class="toggle-switch"><input type="checkbox" id="inlineFimMode"><span class="toggle-track"></span></label>
+                    <div class="settings-hint" style="margin-top:4px;">使用针对补全优化的高速 Endpoint。启用后将在列表内过滤不支持的模型。</div>
                 </div>
                 <div class="settings-group">
                     <label class="settings-label">Provider</label>

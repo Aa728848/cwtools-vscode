@@ -1657,11 +1657,42 @@
         const braveKeyEl = document.getElementById('braveSearchApiKey');
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
 
+        function updateInlineProviderSelect() {
+            const isFimChecked = document.getElementById('inlineFimMode')?.checked ?? false;
+            const currentPid = inlineSel.value;
+            const filteredProviders = isFimChecked
+                ? providers.filter(p => p.supportsFIM)
+                : providers;
+            inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + filteredProviders.map(p=>'<option value="'+p.id+'"'+(p.id===currentPid?' selected':'')+'>'+escapeHtml(p.name)+'</option>').join('');
+            // If previously selected provider is no longer in list, reset
+            if (isFimChecked && currentPid && !filteredProviders.find(p=>p.id===currentPid)) {
+                inlineSel.value = '';
+            }
+        }
+
         function updateInlineModelSelect(pid, selectedModel, ollamaModels) {
             const p2 = providers.find(p=>p.id===(pid||current.provider));
             let ms = (pid||current.provider)==='ollama'?(ollamaModels||[]).map(m=>m.name):(p2?p2.models:[]);
             // Filter out thinking/reasoning models — they can't do inline completion
             ms = ms.filter(m => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
+            
+            // Filter out non-FIM models if FIM mode is enabled
+            const isFimNode = document.getElementById('inlineFimMode');
+            if (isFimNode && isFimNode.checked && p2) {
+                const fimCapableModels = {
+                    'deepseek-chat': true, 'deepseek-coder': true,
+                    'qwen2.5-coder': true, 'codellama': true, 'starcoder': true,
+                    'qwen': false, 'gpt-': false, 'claude-': false
+                };
+                ms = ms.filter(m => {
+                    if (!m) return p2.supportsFIM;
+                    const lower = m.toLowerCase();
+                    for (const [key, capable] of Object.entries(fimCapableModels)) {
+                        if (lower.includes(key.toLowerCase())) return capable;
+                    }
+                    return p2.supportsFIM;
+                });
+            }
             
             const inp = document.getElementById('inlineModelInput');
             inp.value = selectedModel || '';
@@ -1669,6 +1700,15 @@
             setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
         }
         const inlineProviderSel = document.getElementById('inlineProvider');
+        const fimModeSel = document.getElementById('inlineFimMode');
+        if (fimModeSel) {
+            fimModeSel.checked = current.inlineCompletion?.fimMode ?? false;
+            fimModeSel.onchange = () => {
+                updateInlineProviderSelect();
+                updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
+            };
+        }
+        updateInlineProviderSelect();
         updateInlineModelSelect(current.inlineCompletion?.provider, current.inlineCompletion?.model, ollamaModels);
         inlineProviderSel.onchange = () => updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
         updateModelUI(current.provider, current.model, ollamaModels);
@@ -1849,6 +1889,7 @@
                 endpoint: document.getElementById('inlineEndpoint').value.trim(),
                 debounceMs: parseInt(document.getElementById('inlineDebounce').value)||500,
                 overlapStripping: document.getElementById('inlineOverlapStripping')?.checked ?? true,
+                fimMode: document.getElementById('inlineFimMode')?.checked ?? false,
             },
         }});
     }

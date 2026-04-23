@@ -76,6 +76,7 @@
   "configuration.cwtools.ai.maxRetries.description": "Maximum validation-retry rounds for generated code",
   "configuration.cwtools.ai.maxContextTokens.description": "Override max context window size (tokens). 0 = use provider default. Useful for Ollama or custom providers.",
   "configuration.cwtools.ai.inlineCompletion.enabled.description": "Enable AI inline code completion",
+  "configuration.cwtools.ai.inlineCompletion.fimMode.description": "Enable FIM (Fill-in-the-Middle) mode for inline completion. Only supports specific FIM-capable models to improve quality and speed.",
   "configuration.cwtools.ai.inlineCompletion.debounceMs.description": "Delay before triggering inline AI completion (ms)",
   "configuration.cwtools.ai.inlineCompletion.overlapStripping.description": "Enable automatic detection and trimming of overlapping suffix code to prevent duplication.",
   "configuration.cwtools.ai.inlineCompletion.provider.description": "Provider for inline completion (leave empty to use main provider)",

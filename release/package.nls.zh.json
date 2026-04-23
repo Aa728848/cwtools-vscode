@@ -76,6 +76,7 @@
   "configuration.cwtools.ai.maxRetries.description": "生成代码的最大验证重试轮数",
   "configuration.cwtools.ai.maxContextTokens.description": "覆盖最大上下文大小（tokens）。0 = 使用提供商默认值。主要用于 Ollama 或自定义提供商。",
   "configuration.cwtools.ai.inlineCompletion.enabled.description": "启用AI行内代码补全",
+  "configuration.cwtools.ai.inlineCompletion.fimMode.description": "启用 FIM (Fill-in-the-Middle) 模式用于首尾补全。仅支持特定的基于 FIM 的模型并可改善代码生成质量和速度。",
   "configuration.cwtools.ai.inlineCompletion.debounceMs.description": "行内AI补全触发前的延迟 (ms)",
   "configuration.cwtools.ai.inlineCompletion.overlapStripping.description": "启用自动检测并修剪重叠的后缀代码以防止重复。",
   "configuration.cwtools.ai.inlineCompletion.provider.description": "行内补全的提供商（留空则使用全局默认提供商）",

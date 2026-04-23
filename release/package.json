@@ -435,6 +435,12 @@
 					"default": false,
 					"description": "%configuration.cwtools.ai.inlineCompletion.enabled.description%"
 				},
+				"cwtools.ai.inlineCompletion.fimMode": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.cwtools.ai.inlineCompletion.fimMode.description%"
+				},
 				"cwtools.ai.inlineCompletion.debounceMs": {
 					"scope": "window",
 					"type": "integer",

@@ -129,6 +129,7 @@ export class AIService {
                 model: cfg.get<string>('inlineCompletion.model', ''),
                 endpoint: cfg.get<string>('inlineCompletion.endpoint', ''),
                 overlapStripping: cfg.get<boolean>('inlineCompletion.overlapStripping', true),
+                fimMode: cfg.get<boolean>('inlineCompletion.fimMode', false),
             },
         };
     }
@@ -324,6 +325,105 @@ export class AIService {
                 return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking);
             } else {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
+            }
+        } finally {
+            this.activeControllers.delete(controller);
+            externalSignal?.removeEventListener('abort', linkAbort);
+        }
+    }
+
+    /**
+     * Call the completions API for Fill-In-The-Middle (FIM) support.
+     * Uses /completions endpoint for compatible APIs and /api/generate for Ollama.
+     */
+    async fimCompletion(
+        prefix: string,
+        suffix: string,
+        options?: {
+            providerId?: string;
+            model?: string;
+            apiKey?: string;
+            endpoint?: string;
+            temperature?: number;
+            maxTokens?: number;
+            abortSignal?: AbortSignal;
+        }
+    ): Promise<string> {
+        const config = this.getConfig();
+        const providerId = options?.providerId || config.inlineCompletion.provider || config.provider;
+        const provider = getProvider(providerId);
+
+        let apiKey = '';
+        if (providerId !== 'ollama') {
+            if (options?.apiKey) {
+                apiKey = options.apiKey;
+            } else {
+                const key = await this.getKeyForProvider(providerId);
+                if (!key) throw new Error(`No API key configured for ${provider.name}.`);
+                apiKey = key;
+            }
+        }
+
+        const endpoint = options?.endpoint || getEffectiveEndpoint(providerId, config.inlineCompletion.endpoint || config.endpoint);
+        const rawModel = options?.model ?? getEffectiveModel(providerId, config.inlineCompletion.model || config.model);
+        const model = rawModel.replace(/\s*\(免费\)$/i, '');
+
+        const controller = new AbortController();
+        const externalSignal = options?.abortSignal;
+        const linkAbort = () => controller.abort();
+        externalSignal?.addEventListener('abort', linkAbort);
+        this.activeControllers.add(controller);
+
+        try {
+            if (providerId === 'ollama') {
+                // Ollama uses /api/generate instead of /v1/completions for its FIM support
+                const url = `${endpoint.replace('/v1', '')}/api/generate`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model,
+                        prompt: prefix,
+                        suffix: suffix,
+                        stream: false,
+                        options: {
+                            temperature: options?.temperature ?? 0.2,
+                            num_predict: options?.maxTokens ?? 256
+                        }
+                    }),
+                    signal: controller.signal
+                });
+                if (!response.ok) {
+                    const err = await response.text();
+                    throw new Error(`Ollama API error (${response.status}): ${err}`);
+                }
+                const data = await response.json() as { response?: string };
+                return data.response ?? '';
+            } else {
+                // Standard OpenAI-compatible /completions request
+                const url = `${endpoint}/completions`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...this.buildAuthHeaders(providerId, apiKey)
+                    },
+                    body: JSON.stringify({
+                        model,
+                        prompt: prefix,
+                        suffix: suffix,
+                        max_tokens: options?.maxTokens ?? 256,
+                        temperature: options?.temperature ?? 0.2,
+                        stream: false
+                    }),
+                    signal: controller.signal
+                });
+                if (!response.ok) {
+                    const err = await response.text();
+                    throw new Error(`${provider.name} FIM API error (${response.status}): ${err}`);
+                }
+                const data = await response.json() as { choices?: Array<{ text?: string }> };
+                return data.choices?.[0]?.text ?? '';
             }
         } finally {
             this.activeControllers.delete(controller);

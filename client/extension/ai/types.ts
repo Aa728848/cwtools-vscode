@@ -34,10 +34,15 @@ export interface AIProviderConfig {
     defaultModel: string;
     models: string[];
     supportsToolUse: boolean;
+    /** Whether this provider supports API keys */
+    requiresApiKey: boolean;
+    /** Whether this provider supports the streaming API */
     supportsStreaming: boolean;
     maxContextTokens: number;
-    /** Whether this provider uses OpenAI-compatible API format natively */
+    /** Whether this provider conforms strictly to OpenAI API response formats (determines adapter usage) */
     isOpenAICompatible: boolean;
+    /** Whether this provider supports generic FIM API (typically /completions with prompt+suffix) */
+    supportsFIM: boolean;
     /**
      * Expected tool call OUTPUT format from the model.
      * 'openai'    – standard JSON tool_calls field (all major official APIs)
@@ -84,6 +89,7 @@ export interface AIUserConfig {
         model: string;
         endpoint: string;
         overlapStripping: boolean;
+        fimMode: boolean;
     };
 }
 
@@ -537,10 +543,10 @@ export interface AgentStep {
      * - subtask_complete  : a sub-agent task completed
      */
     type: 'thinking' | 'thinking_content' | 'tool_call' | 'tool_result'
-        | 'text_delta' | 'step_finish'
-        | 'code_generated' | 'validation' | 'error' | 'compaction'
-        | 'todo_update' | 'permission_request'
-        | 'subtask_start' | 'subtask_complete';
+    | 'text_delta' | 'step_finish'
+    | 'code_generated' | 'validation' | 'error' | 'compaction'
+    | 'todo_update' | 'permission_request'
+    | 'subtask_start' | 'subtask_complete';
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;
@@ -642,7 +648,7 @@ export type HostMessage =
     | { type: 'todoUpdate'; todos: TodoItem[] }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[] }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
-    | { type: 'apiModelsFetched'; providerId: string; models: Array<{id: string}>; dynContexts?: Record<string, number>; error?: string; ctxNote?: string }
+    | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }
     | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean }
@@ -698,5 +704,6 @@ export interface PanelSettings {
         endpoint: string;
         debounceMs: number;
         overlapStripping: boolean;
+        fimMode: boolean;
     };
 }

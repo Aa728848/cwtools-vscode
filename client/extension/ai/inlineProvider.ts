@@ -246,6 +246,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         token: vs.CancellationToken
     ): Promise<vs.InlineCompletionItem[] | undefined> {
         const config = this.aiService.getConfig();
+        const fimMode = config.inlineCompletion.fimMode;
 
         // ── Build cache key from context ──
         const linePrefix = document.lineAt(position.line).text.substring(0, position.character).trim();
@@ -253,66 +254,50 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         const cached = this.completionCache.get(cacheKey, document.version);
         if (cached) return cached;
 
-        // ── Fetch LSP suggestions with 150ms timeout ──
+        // ── Fetch LSP suggestions with 150ms timeout (Chat mode only) ──
+        // FIM models infer context themselves; skip to avoid unnecessary latency.
         let lspSuggestions: string[] = [];
-        try {
-            const lspPromise = vs.commands.executeCommand<vs.CompletionList>(
-                'vscode.executeCompletionItemProvider',
-                document.uri,
-                position
-            );
-            const timeoutPromise = new Promise<null>(r => setTimeout(() => r(null), 150));
-            const completions = await Promise.race([lspPromise, timeoutPromise]);
-
-            if (completions && 'items' in completions && completions.items) {
-                const invalidKinds = [
-                    vs.CompletionItemKind.Snippet,
-                    vs.CompletionItemKind.Keyword
-                ];
-                lspSuggestions = completions.items
-                    .filter(item => item.kind === undefined || !invalidKinds.includes(item.kind))
-                    .map(item => typeof item.label === 'string' ? item.label : item.label.label)
-                    .slice(0, 20);
-            }
-        } catch {
-            // LSP timeout or error — continue with empty suggestions
-        }
-
-        if (token.isCancellationRequested) return undefined;
-
-        // ── Local fast-path: simple kv pattern with ≤5 clear LSP results ──
-        // Pattern: `key = ` or `key =` at cursor — if LSP has few clear results, use directly
-        if (lspSuggestions.length > 0 && lspSuggestions.length <= 5) {
-            const kvMatch = linePrefix.match(/^\s*[\w.]+\s*=\s*$/);
-            if (kvMatch) {
-                const item = new vs.InlineCompletionItem(
-                    lspSuggestions[0],
-                    new vs.Range(position, position)
+        if (!fimMode) {
+            try {
+                const lspPromise = vs.commands.executeCommand<vs.CompletionList>(
+                    'vscode.executeCompletionItemProvider',
+                    document.uri,
+                    position
                 );
-                const result = [item];
-                this.completionCache.set(cacheKey, result, document.version);
-                return result;
+                const timeoutPromise = new Promise<null>(r => setTimeout(() => r(null), 150));
+                const completions = await Promise.race([lspPromise, timeoutPromise]);
+
+                if (completions && 'items' in completions && completions.items) {
+                    const invalidKinds = [
+                        vs.CompletionItemKind.Snippet,
+                        vs.CompletionItemKind.Keyword
+                    ];
+                    lspSuggestions = completions.items
+                        .filter(item => item.kind === undefined || !invalidKinds.includes(item.kind))
+                        .map(item => typeof item.label === 'string' ? item.label : item.label.label)
+                        .slice(0, 20);
+                }
+            } catch {
+                // LSP timeout or error — continue with empty suggestions
+            }
+
+            if (token.isCancellationRequested) return undefined;
+
+            // ── Local fast-path: simple kv pattern with ≤5 clear LSP results ──
+            // Pattern: `key = ` or `key =` at cursor — if LSP has few clear results, use directly
+            if (lspSuggestions.length > 0 && lspSuggestions.length <= 5) {
+                const kvMatch = linePrefix.match(/^\s*[\w.]+\s*=\s*$/);
+                if (kvMatch) {
+                    const item = new vs.InlineCompletionItem(
+                        lspSuggestions[0],
+                        new vs.Range(position, position)
+                    );
+                    const result = [item];
+                    this.completionCache.set(cacheKey, result, document.version);
+                    return result;
+                }
             }
         }
-
-        // ── Extract limited context (±30 lines around cursor) ──
-        const totalLines = document.lineCount;
-        const contextStart = Math.max(0, position.line - 30);
-        const contextEnd = Math.min(totalLines, position.line + 31);
-        const contextLines: string[] = [];
-        for (let i = contextStart; i < contextEnd; i++) {
-            contextLines.push(document.lineAt(i).text);
-        }
-        const contextContent = contextLines.join('\n');
-
-        // Build the lightweight inline prompt with limited context
-        const messages = this.promptBuilder.buildInlinePrompt({
-            fileContent: contextContent,
-            cursorLine: position.line - contextStart,  // Adjust to relative line
-            cursorColumn: position.character,
-            filePath: document.uri.fsPath,
-            lspSuggestions: lspSuggestions.length > 0 ? lspSuggestions : undefined
-        });
 
         // Determine provider and model for inline completion
         const inlineProvider = config.inlineCompletion.provider || config.provider;
@@ -330,42 +315,95 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         token.onCancellationRequested(() => abortController.abort());
 
         try {
-            // Determine effective model for thinking-disable check
-            const effectiveModel = inlineModel || getEffectiveModel(inlineProvider, undefined);
-            const disableThinking = isDisableableThinkingModel(effectiveModel);
+            let completionText = '';
 
-            const response = await this.aiService.chatCompletion(messages, {
-                providerId: inlineProvider,
-                model: inlineModel,
-                temperature: disableThinking ? 0 : 0.2,
-                maxTokens: 200,  // Keep responses short for inline
-                // Pass abort signal so cancellation immediately releases the connection
-                abortSignal: abortController.signal,
-                // Disable thinking for models that support it
-                disableThinking,
-            } as Parameters<typeof this.aiService.chatCompletion>[1]);
+            if (fimMode) {
+                // ── FIM Mode ──
+                const totalLines = document.lineCount;
+                const contextStart = Math.max(0, position.line - 30);
+                const contextEnd = Math.min(totalLines, position.line + 31);
+                
+                // Prefix: from contextStart to cursor
+                const prefixDoc = document.getText(new vs.Range(
+                    new vs.Position(contextStart, 0),
+                    position
+                ));
+                // Suffix: from cursor to contextEnd
+                const suffixDoc = document.getText(new vs.Range(
+                    position,
+                    new vs.Position(contextEnd, 0)
+                ));
 
-            if (token.isCancellationRequested || abortController.signal.aborted) return undefined;
+                const contentStr = await this.aiService.fimCompletion(prefixDoc, suffixDoc, {
+                    providerId: inlineProvider,
+                    model: inlineModel,
+                    temperature: 0.2,
+                    maxTokens: 200,
+                    abortSignal: abortController.signal
+                });
 
-            const content = response.choices[0]?.message?.content;
-            const contentStr = typeof content === 'string' ? content : '';
-            if (!contentStr || contentStr.trim().length === 0) return undefined;
+                if (token.isCancellationRequested || abortController.signal.aborted) return undefined;
+                completionText = contentStr.trim();
+                
+            } else {
+                // ── Chat Mode (Legacy) ──
+                // ── Extract limited context (±30 lines around cursor) ──
+                const totalLines = document.lineCount;
+                const contextStart = Math.max(0, position.line - 30);
+                const contextEnd = Math.min(totalLines, position.line + 31);
+                const contextLines: string[] = [];
+                for (let i = contextStart; i < contextEnd; i++) {
+                    contextLines.push(document.lineAt(i).text);
+                }
+                const contextContent = contextLines.join('\n');
 
-            // Clean up the response
-            let completionText = contentStr.trim();
+                // Build the lightweight inline prompt with limited context
+                const messages = this.promptBuilder.buildInlinePrompt({
+                    fileContent: contextContent,
+                    cursorLine: position.line - contextStart,  // Adjust to relative line
+                    cursorColumn: position.character,
+                    filePath: document.uri.fsPath,
+                    lspSuggestions: lspSuggestions.length > 0 ? lspSuggestions : undefined
+                });
 
-            // Remove markdown code fences if present
-            completionText = completionText
-                .replace(/^```\w*\n?/, '')
-                .replace(/\n?```$/, '')
-                .trim();
+                // Determine effective model for thinking-disable check
+                const effectiveModel = inlineModel || getEffectiveModel(inlineProvider, undefined);
+                const disableThinking = isDisableableThinkingModel(effectiveModel);
 
-            // Strip <think>...</think> blocks if the model still outputs them
-            // Also handle unclosed <think> (truncated by max_tokens)
-            completionText = completionText
-                .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
-                .replace(/<think>[\s\S]*$/g, '')  // unclosed think at end
-                .trim();
+                const response = await this.aiService.chatCompletion(messages, {
+                    providerId: inlineProvider,
+                    model: inlineModel,
+                    temperature: disableThinking ? 0 : 0.2,
+                    maxTokens: 200,  // Keep responses short for inline
+                    // Pass abort signal so cancellation immediately releases the connection
+                    abortSignal: abortController.signal,
+                    // Disable thinking for models that support it
+                    disableThinking,
+                } as Parameters<typeof this.aiService.chatCompletion>[1]);
+
+                if (token.isCancellationRequested || abortController.signal.aborted) return undefined;
+
+                const content = response.choices[0]?.message?.content;
+                const contentStr = typeof content === 'string' ? content : '';
+
+                // Clean up the response
+                completionText = contentStr.trim();
+
+                // Remove markdown code fences if present
+                completionText = completionText
+                    .replace(/^```\w*\n?/, '')
+                    .replace(/\n?```$/, '')
+                    .trim();
+
+                // Strip <think>...</think> blocks if the model still outputs them
+                // Also handle unclosed <think> (truncated by max_tokens)
+                completionText = completionText
+                    .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
+                    .replace(/<think>[\s\S]*$/g, '')  // unclosed think at end
+                    .trim();
+            }
+
+            if (!completionText || completionText.length === 0) return undefined;
 
             // ── Prefix dedup: strip line prefix if AI repeated it ──
             // AI sometimes echoes the current line prefix (e.g. "limit = {" when cursor is after "limit = {")

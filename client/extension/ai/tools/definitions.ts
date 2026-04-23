@@ -396,15 +396,25 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'task',
-            description: 'Dispatch a sub-task to a specialized sub-agent for research/exploration. The sub-agent runs independently and returns findings as text. Sub-agents CANNOT write files. Use "explore" for codebase exploration (read-only), "general" for research (all read + web tools).',
+            description: 'Dispatch one or more sub-tasks to specialized sub-agents for research/exploration. They run independently and in parallel (up to 3). They return findings as text and CANNOT write files. Use "explore" for codebase exploration (read-only), "general" for research (all read + web tools).',
             parameters: {
                 type: 'object',
                 properties: {
-                    description: { type: 'string', description: 'Short label for this sub-task (shown in UI)' },
-                    prompt: { type: 'string', description: 'Detailed prompt for the sub-agent. Include all context it needs — it has no access to the parent conversation.' },
-                    subagent_type: { type: 'string', enum: ['explore', 'general'], description: 'Sub-agent mode. Default: "general"' },
+                    tasks: {
+                        type: 'array',
+                        description: 'List of sub-tasks to run in parallel',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                description: { type: 'string', description: 'Short label for this sub-task (shown in UI)' },
+                                prompt: { type: 'string', description: 'Detailed prompt for the sub-agent. Include all context it needs.' },
+                                subagent_type: { type: 'string', enum: ['explore', 'general'], description: 'Sub-agent mode. Default: "general"' },
+                            },
+                            required: ['description', 'prompt'],
+                        },
+                    },
                 },
-                required: ['description', 'prompt'],
+                required: ['tasks'],
             },
         },
     },

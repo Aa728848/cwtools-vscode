@@ -24,6 +24,7 @@ import type {
 } from './types';
 import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
+import { UsageTracker } from './usageTracker';
 
 export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public static readonly viewType = 'cwtools.aiChat';
@@ -68,6 +69,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         private extensionUri: vs.Uri,
         private agentRunner: AgentRunner,
         private aiService: AIService,
+        private usageTracker: UsageTracker,
         private storageUri: vs.Uri | undefined
     ) {
         this.loadTopics();
@@ -244,8 +246,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'exportTopic':
                 await this.exportTopicAsMarkdown(msg.topicId);
                 break;
+            case 'exportTopicJson':
+                await this.exportTopicAsJson(msg.topicId);
+                break;
+            case 'importTopic':
+                await this.importTopicFromJson(msg.data);
+                break;
             case 'requestFileList':
                 this.sendWorkspaceFileList();
+                break;
+            case 'requestUsageStats':
+                this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
+                break;
+            case 'clearUsageStats':
+                this.usageTracker.clearStats();
+                this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
                 break;
         }
     }
@@ -661,6 +676,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // ── Send token usage stats to UI ────────────────────────────────────
             if (result.tokenUsage && result.tokenUsage.total > 0) {
                 const config = this.aiService.getConfig();
+                this.usageTracker.addUsage(config.provider, config.model || 'unknown', result.tokenUsage);
                 this.postMessage({
                     type: 'tokenUsage',
                     usage: result.tokenUsage,
@@ -711,6 +727,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // Clean up the per-request callback and snapshot pointer
             this.agentRunner.toolExecutor.onBeforeFileWrite = undefined;
             this._currentMessageSnapshots = null;
+
+            // Send diff summary if files were changed
+            if (messageSnapshots.length > 0) {
+                await this.sendDiffSummary(messageSnapshots);
+            }
 
             this.abortController = null;
             this._isGenerating = false;
@@ -816,6 +837,47 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 ? `已撤回消息并恢复 ${restoredFiles} 个文件的更改（${skippedFiles} 个文件因在工作区外被跳过）。`
                 : `已撤回消息并恢复 ${restoredFiles} 个文件的更改。`;
             vs.window.showInformationMessage(msg);
+        }
+    }
+
+    /**
+     * Builds a summary of files changed during the current generation
+     * and sends it to the WebView.
+     */
+    private async sendDiffSummary(snapshots: Array<{ filePath: string; previousContent: string | null }>): Promise<void> {
+        if (!snapshots || snapshots.length === 0) return;
+
+        const files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string }> = [];
+
+        for (const snap of snapshots) {
+            const currentContentExists = fs.existsSync(snap.filePath);
+            const currentContent = currentContentExists ? await fs.promises.readFile(snap.filePath, 'utf-8').catch(() => null) : null;
+
+            if (snap.previousContent === null && currentContent !== null) {
+                files.push({
+                    file: snap.filePath,
+                    status: 'created',
+                    diffPreview: `+ ${currentContent.split('\n').length} lines added`,
+                });
+            } else if (snap.previousContent !== null && currentContent === null) {
+                files.push({
+                    file: snap.filePath,
+                    status: 'deleted',
+                    diffPreview: `- ${snap.previousContent.split('\n').length} lines removed`,
+                });
+            } else if (snap.previousContent !== null && currentContent !== null) {
+                if (snap.previousContent !== currentContent) {
+                    files.push({
+                        file: snap.filePath,
+                        status: 'modified',
+                        diffPreview: `~ File modified`,
+                    });
+                }
+            }
+        }
+
+        if (files.length > 0) {
+            this.postMessage({ type: 'diffSummary', files });
         }
     }
 
@@ -1181,7 +1243,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.startNewTopic();
         } else if (cmd.startsWith('mode:') || cmd.startsWith('/mode:')) {
             const mode = cmd.split(':')[1] as AgentMode;
-            if (['build', 'plan', 'explore', 'general'].includes(mode)) {
+            if (['build', 'plan', 'explore', 'general', 'review'].includes(mode)) {
                 this.switchMode(mode);
             }
         } else if (cmd === 'fork' || cmd === '/fork') {
@@ -1591,6 +1653,96 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
         vs.window.showInformationMessage(`对话已导出: ${path.basename(outPath)}`);
     }
 
+    /**
+     * Export a topic as a full JSON file (preserving all metadata and steps).
+     */
+    private async exportTopicAsJson(topicId?: string): Promise<void> {
+        const topic = topicId
+            ? this.topics.find(t => t.id === topicId)
+            : this.currentTopic;
+
+        if (!topic) {
+            vs.window.showWarningMessage('没有可导出的对话');
+            return;
+        }
+
+        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspaceRoot) {
+            vs.window.showWarningMessage('没有打开的工作区');
+            return;
+        }
+
+        const safeName = topic.title
+            .replace(/[<>:"/\\|?*\uFF1A\uFF1F\uFF0F\u3000\u300A\u300B]/g, '_')
+            .replace(/\s+/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_|_$/g, '')
+            .substring(0, 60);
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        const outPath = path.join(workspaceRoot, `.cwtools-ai-exports`, `${safeName || 'chat'}_${timestamp}.json`);
+        const outDir = path.dirname(outPath);
+        
+        if (!fs.existsSync(outDir)) {
+            await fs.promises.mkdir(outDir, { recursive: true });
+        }
+        
+        // Export the full topic object, including steps, messages, images, etc.
+        const jsonContent = JSON.stringify(topic, null, 2);
+        await fs.promises.writeFile(outPath, jsonContent, 'utf-8');
+
+        const doc = await vs.workspace.openTextDocument(outPath);
+        await vs.window.showTextDocument(doc, { preview: true });
+        vs.window.showInformationMessage(`对话已导出为 JSON: ${path.basename(outPath)}`);
+    }
+
+    /**
+     * Import a topic from a JSON string, perform schema validation, and load it.
+     */
+    private async importTopicFromJson(jsonString: string): Promise<void> {
+        try {
+            const data = JSON.parse(jsonString) as Partial<import('./types').ChatTopic>;
+            
+            // Simple schema validation
+            if (!data.title || !Array.isArray(data.messages)) {
+                throw new Error('无效的会话文件格式 (缺少 title 或 messages 数组)');
+            }
+            
+            // Generate a new ID to avoid collisions
+            const importedTopic: import('./types').ChatTopic = {
+                id: `topic_imported_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                title: `${data.title} (导入)`,
+                createdAt: data.createdAt || Date.now(),
+                updatedAt: Date.now(),
+                messages: data.messages as import('./types').ChatHistoryMessage[],
+                archived: false,
+            };
+            
+            // Validate messages
+            for (let i = 0; i < importedTopic.messages.length; i++) {
+                const msg = importedTopic.messages[i];
+                if (!msg.role || (msg.role !== 'user' && msg.role !== 'assistant')) {
+                    throw new Error(`消息 ${i} 格式无效: role 必须为 'user' 或 'assistant'`);
+                }
+                if (msg.content === undefined || msg.content === null) {
+                    throw new Error(`消息 ${i} 格式无效: 缺少 content field`);
+                }
+            }
+
+            this.topics.unshift(importedTopic);
+            this.saveTopics();
+            this.sendTopicList();
+            
+            this.loadTopic(importedTopic.id);
+            this.postMessage({ type: 'topicImported', topicId: importedTopic.id, title: importedTopic.title });
+            
+            vs.window.showInformationMessage(`成功导入会话: ${importedTopic.title}`);
+        } catch (e) {
+            const err = e instanceof Error ? e.message : String(e);
+            vs.window.showErrorMessage(`导入对话失败: ${err}`);
+        }
+    }
+
     // ─── Workspace File List ──────────────────────────────────────────────────
 
     /**
@@ -1932,10 +2084,12 @@ body.plan-mode .plan-indicator { display: block; }
 .mode-indicator { display: none; padding: 4px 16px; font-size: 11px; background: rgba(100,149,237,0.07); border-bottom: 1px solid var(--border); text-align: center; }
 body.plan-mode .mode-indicator,
 body.explore-mode .mode-indicator,
-body.general-mode .mode-indicator { display: block; }
+body.general-mode .mode-indicator,
+body.review-mode .mode-indicator { display: block; }
 body.plan-mode .mode-indicator { color: cornflowerblue; }
 body.explore-mode .mode-indicator { color: #7dbb7d; }
 body.general-mode .mode-indicator { color: #c792ea; }
+body.review-mode .mode-indicator { color: #f48771; }
 
 /* ── Slash command popup ── */
 .slash-popup { display: none; position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
@@ -2056,6 +2210,7 @@ body.general-mode .mode-indicator { color: #c792ea; }
                     <option value="plan">📋 Plan — 只读规划</option>
                     <option value="explore">🔭 Explore — 探索代码库</option>
                     <option value="general">💬 General — 通用问答</option>
+                    <option value="review">🔎 Review — 代码审查</option>
                 </select>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
                 <button class="img-pick-btn" id="imgPickBtn" title="上传图片">+</button>
@@ -2164,6 +2319,17 @@ body.general-mode .mode-indicator { color: #c792ea; }
                         <button class="key-toggle-btn" id="braveKeyToggleBtn" onclick="var k=document.getElementById('braveSearchApiKey');k.type=k.type==='password'?'text':'password';">👁</button>
                     </div>
                     <div class="settings-hint">填写后 web_search 工具将使用 Brave Search API，结果质量更高。Key 请在 <a href="https://api.search.brave.com/" target="_blank" rel="noopener">api.search.brave.com</a> 获取。</div>
+                </div>
+            </div>
+        <div class="accordion-section" id="usageSection" style="margin-top: 12px; border-color: rgba(100,149,237,0.3);">
+            <div class="accordion-header" id="accUsage"><span>📊 Token 消耗统计</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-body">
+                <div class="settings-group">
+                    <div id="usageStatsContent" style="font-size:12px; line-height: 1.6; opacity: 0.9;">
+                        加载中...
+                    </div>
+                    <button class="settings-test-btn" id="refreshUsageBtn" style="margin-top: 8px;">🔄 刷新统计</button>
+                    <button class="settings-test-btn" id="clearUsageBtn" style="margin-top: 5px; color: #e66; border-color: rgba(200,80,80,0.3);">🗑️ 清空统计</button>
                 </div>
             </div>
         </div>

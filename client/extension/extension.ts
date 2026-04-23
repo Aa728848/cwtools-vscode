@@ -16,7 +16,7 @@ import { GuiPanel } from './guiPanel';
 import { SolarSystemPanel } from './solarSystemPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
-import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelProvider, AIInlineCompletionProvider } from './ai';
+import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelProvider, AIInlineCompletionProvider, UsageTracker } from './ai';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
@@ -177,10 +177,12 @@ export async function activate(context: ExtensionContext) {
 	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot);
 	const promptBuilder = new PromptBuilder(workspaceRoot);
 	const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder);
+	const usageTracker = new UsageTracker(context);
 	const chatPanelProvider = new AIChatPanelProvider(
 		context.extensionUri,
 		agentRunner,
 		aiService,
+		usageTracker,
 		context.globalStorageUri
 	);
 	context.subscriptions.push(
@@ -204,7 +206,7 @@ export async function activate(context: ExtensionContext) {
 	}));
 	// Fix #8: reuse shared gameLanguages instead of duplicate gameLanguages2
 	const docSelector2 = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
-	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder);
+	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder, usageTracker);
 	context.subscriptions.push(
 		vs.languages.registerInlineCompletionItemProvider(docSelector2, inlineProvider)
 	);

@@ -310,6 +310,21 @@ const GENERAL_SYSTEM_PROMPT = `You are Eddy CWTool Code — a versatile AI assis
 - Use parallel tool calls when multiple pieces of information are needed simultaneously
 ${STELLARIS_KNOWLEDGE}`;
 
+// ─── Review Mode System Prompt ────────────────────────────────────────────────
+
+const REVIEW_SYSTEM_PROMPT = `You are Eddy CWTool Code in **Review Mode** — an expert code reviewer for Stellaris mods.
+
+<system-reminder>
+Review mode is active. You MUST NOT write or modify any files. Your goal is to review existing code, identify bugs, suggest improvements, and ensure best practices.
+</system-reminder>
+
+## Review Mode Guidelines
+- **Tools**: \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`get_diagnostics\`, \`query_*\`
+- **Goal**: Find logic errors, scoping bugs, performance issues (e.g. everywhere vs. any_playable_country), and CWTools validation warnings.
+- **Output**: Provide clear, structured feedback. Point out specific lines and explain *why* something is an issue. Suggest optimized/corrected PDXScript code blocks that the user can apply.
+- Be highly critical of scope changes (e.g. from Country to Planet, Planet to Pop) and ensure they are valid.
+${STELLARIS_KNOWLEDGE}`;
+
 // ─── Inline Completion Prompt ─────────────────────────────────────────────────
 
 const INLINE_SYSTEM_PROMPT = `You are a Stellaris PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the cursor position. No explanations, no markdown, no code fences. Output raw PDXScript only.
@@ -386,6 +401,7 @@ export class PromptBuilder {
             case 'plan': return PLAN_SYSTEM_PROMPT;
             case 'explore': return EXPLORE_SYSTEM_PROMPT;
             case 'general': return GENERAL_SYSTEM_PROMPT;
+            case 'review': return REVIEW_SYSTEM_PROMPT;
             default: return BUILD_SYSTEM_PROMPT;
         }
     }

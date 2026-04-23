@@ -19,6 +19,8 @@ import type { ChatCompletionResponse } from './types';
 import { AIService } from './aiService';
 import { PromptBuilder } from './promptBuilder';
 import { getProvider, getEffectiveModel, ALWAYS_THINKING_PREFIXES } from './providers';
+import { MCPClient } from './mcpClient';
+import { UsageTracker } from './usageTracker';
 
 // ─── Thinking-model detection ────────────────────────────────────────────────
 
@@ -131,13 +133,16 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
     private completionCache = new InlineCompletionCache(10, 5000);
     /** AbortController for the current in-flight AI request */
     private currentAbortController: AbortController | null = null;
+    /** Managed MCP Clients */
+    private mcpClients = new Map<string, MCPClient>();
 
     /** Fix #1: collect event Disposables for proper cleanup */
     private _disposables: vs.Disposable[] = [];
 
     constructor(
         private aiService: AIService,
-        private promptBuilder: PromptBuilder
+        private promptBuilder: PromptBuilder,
+        private usageTracker: UsageTracker
     ) {
         // Watch for configuration changes — Fix #1: capture Disposable
         this._disposables.push(
@@ -154,11 +159,39 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
     dispose(): void {
         this._disposables.forEach(d => d.dispose());
         this._disposables = [];
+        this.disconnectAllMcp();
+    }
+
+    private disconnectAllMcp(): void {
+        for (const client of this.mcpClients.values()) {
+            client.disconnect();
+        }
+        this.mcpClients.clear();
     }
 
     private updateEnabled(): void {
         const config = this.aiService.getConfig();
         this.isEnabled = config.enabled && config.inlineCompletion.enabled;
+
+        // Initialize MCP servers
+        const newServerNames = new Set(config.mcp.servers.map(s => s.name));
+        // Remove stale servers
+        for (const name of this.mcpClients.keys()) {
+            if (!newServerNames.has(name)) {
+                this.mcpClients.get(name)?.disconnect();
+                this.mcpClients.delete(name);
+            }
+        }
+        // Add new servers
+        for (const serverConf of config.mcp.servers) {
+            if (!this.mcpClients.has(serverConf.name)) {
+                const client = new MCPClient(serverConf);
+                client.connect().catch((e) => {
+                    console.error(`[MCP] Failed to connect to ${serverConf.name}`, e);
+                });
+                this.mcpClients.set(serverConf.name, client);
+            }
+        }
     }
 
     async provideInlineCompletionItems(
@@ -317,6 +350,37 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         try {
             let completionText = '';
 
+            // ── Gather MCP context ──
+            let mcpContextStr = '';
+            if (this.mcpClients.size > 0 && !token.isCancellationRequested) {
+                try {
+                    const promises = Array.from(this.mcpClients.values()).map(async client => {
+                        try {
+                            const res = await Promise.race([
+                                client.getResources(),
+                                new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 300))
+                            ]);
+                            if (res && res.resources && res.resources.length > 0) {
+                                const content = await Promise.race([
+                                    client.readResource(res.resources[0].uri),
+                                    new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 300))
+                                ]);
+                                if (content && content.contents && content.contents[0].text) {
+                                    return `[MCP Resource ${res.resources[0].name || res.resources[0].uri}]:\n${content.contents[0].text}`;
+                                }
+                            }
+                        } catch {
+                            // Ignore
+                        }
+                        return '';
+                    });
+                    const contexts = await Promise.all(promises);
+                    mcpContextStr = contexts.filter(Boolean).join('\n\n');
+                } catch {
+                    // Ignore
+                }
+            }
+
             if (fimMode) {
                 // ── FIM Mode ──
                 const totalLines = document.lineCount;
@@ -324,10 +388,14 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 const contextEnd = Math.min(totalLines, position.line + 31);
                 
                 // Prefix: from contextStart to cursor
-                const prefixDoc = document.getText(new vs.Range(
+                let prefixDoc = document.getText(new vs.Range(
                     new vs.Position(contextStart, 0),
                     position
                 ));
+                if (mcpContextStr) {
+                    prefixDoc = `<mcp_context>\n${mcpContextStr}\n</mcp_context>\n\n${prefixDoc}`;
+                }
+                
                 // Suffix: from cursor to contextEnd
                 const suffixDoc = document.getText(new vs.Range(
                     position,
@@ -366,6 +434,11 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                     lspSuggestions: lspSuggestions.length > 0 ? lspSuggestions : undefined
                 });
 
+                if (mcpContextStr) {
+                    // Prepend MCP context as a system message
+                    messages.unshift({ role: 'system', content: `Background context from MCP servers:\n${mcpContextStr}` });
+                }
+
                 // Determine effective model for thinking-disable check
                 const effectiveModel = inlineModel || getEffectiveModel(inlineProvider, undefined);
                 const disableThinking = isDisableableThinkingModel(effectiveModel);
@@ -401,6 +474,20 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                     .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
                     .replace(/<think>[\s\S]*$/g, '')  // unclosed think at end
                     .trim();
+
+                // Track usage for chat-mode inline completion
+                if (response.usage) {
+                    this.usageTracker.addUsage(
+                        inlineProvider || this.aiService.getConfig().provider,
+                        inlineModel || this.aiService.getConfig().model || 'unknown',
+                        {
+                            input: response.usage.prompt_tokens ?? 0,
+                            output: response.usage.completion_tokens ?? 0,
+                            total: response.usage.total_tokens ?? 0,
+                            estimatedCostUsd: 0,
+                        }
+                    );
+                }
             }
 
             if (!completionText || completionText.length === 0) return undefined;

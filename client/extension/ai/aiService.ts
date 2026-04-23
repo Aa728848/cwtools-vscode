@@ -131,6 +131,9 @@ export class AIService {
                 overlapStripping: cfg.get<boolean>('inlineCompletion.overlapStripping', true),
                 fimMode: cfg.get<boolean>('inlineCompletion.fimMode', false),
             },
+            mcp: {
+                servers: cfg.get<import('./types').MCPServerConfig[]>('mcp.servers', []),
+            },
         };
     }
 

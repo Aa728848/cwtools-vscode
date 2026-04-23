@@ -47,37 +47,54 @@ const colorPattern = /§([RGBYWHETLMSP!])/gi;
 const refPattern = /\$([A-Za-z_][A-Za-z0-9_.:]*)\$/g;
 
 /**
- * Cached localization map — rebuilt lazily on document changes.
+ * Cached localization map — rebuilt incrementally on document/file changes.
  */
-let _locMapCache: Map<string, { value: string; uri: vs.Uri; line: number }> | null = null;
-let _locMapDirty = true;
+const documentLocCache = new Map<string, Map<string, { value: string; uri: vs.Uri; line: number }>>();
+let initialScanPromise: Promise<void> | null = null;
 
-function markLocMapDirty() { _locMapDirty = true; _locMapCache = null; }
-
-function getLocMap(): Map<string, { value: string; uri: vs.Uri; line: number }> {
-    if (_locMapCache && !_locMapDirty) return _locMapCache;
-
-    const locMap = new Map<string, { value: string; uri: vs.Uri; line: number }>();
-    const locPattern = /^\s*([a-zA-Z0-9_.:]+)\s*:\d*\s*"(.*)"\s*$/;
-
-    for (const doc of vs.workspace.textDocuments) {
-        if (!doc.fileName.endsWith('.yml')) continue;
-        const text = doc.getText();
-        const lines = text.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-            const match = locPattern.exec(lines[i]);
-            if (match) {
-                locMap.set(match[1], {
-                    value: match[2],
-                    uri: doc.uri,
-                    line: i,
-                });
-            }
+function parseYmlContent(uri: vs.Uri, text: string) {
+    const fileLocs = new Map<string, { value: string; uri: vs.Uri; line: number }>();
+    const locPattern = /^\s*([a-zA-Z0-9_.:\-]+)\s*:\d*\s*"(.*)"\s*$/;
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const match = locPattern.exec(lines[i]);
+        if (match) {
+            fileLocs.set(match[1], { value: match[2], uri, line: i });
         }
     }
-    _locMapCache = locMap;
-    _locMapDirty = false;
-    return locMap;
+    documentLocCache.set(uri.toString(), fileLocs);
+}
+
+async function performInitialScan() {
+    try {
+        const uris = await vs.workspace.findFiles('**/*.yml');
+        await Promise.all(uris.map(async (uri) => {
+            try {
+                const data = await vs.workspace.fs.readFile(uri);
+                const text = new TextDecoder('utf-8').decode(data);
+                parseYmlContent(uri, text);
+            } catch (e) {
+                // Ignore read errors
+            }
+        }));
+    } catch {
+        // Ignore search errors
+    }
+}
+
+async function getLocMap(): Promise<Map<string, { value: string; uri: vs.Uri; line: number }>> {
+    if (!initialScanPromise) {
+        initialScanPromise = performInitialScan();
+    }
+    await initialScanPromise;
+
+    const flatMap = new Map<string, { value: string; uri: vs.Uri; line: number }>();
+    for (const fileLocs of documentLocCache.values()) {
+        for (const [k, v] of fileLocs.entries()) {
+            flatMap.set(k, v);
+        }
+    }
+    return flatMap;
 }
 
 /**
@@ -148,14 +165,14 @@ function updateColorDecorations(editor: vs.TextEditor) {
  * Hover provider for $REF$ references in .yml files
  */
 class LocRefHoverProvider implements vs.HoverProvider {
-    provideHover(document: vs.TextDocument, position: vs.Position): vs.Hover | null {
-        const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:]*\$/);
+    async provideHover(document: vs.TextDocument, position: vs.Position): Promise<vs.Hover | null> {
+        const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:\-]*\$/);
         if (!range) return null;
 
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const locMap = getLocMap();
+        const locMap = await getLocMap();
         const entry = locMap.get(refName);
         if (!entry) return null;
 
@@ -175,14 +192,14 @@ class LocRefHoverProvider implements vs.HoverProvider {
  * Definition provider for $REF$ references in .yml files
  */
 class LocRefDefinitionProvider implements vs.DefinitionProvider {
-    provideDefinition(document: vs.TextDocument, position: vs.Position): vs.Location | null {
-        const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:]*\$/);
+    async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
+        const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:\-]*\$/);
         if (!range) return null;
 
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const locMap = getLocMap();
+        const locMap = await getLocMap();
         const entry = locMap.get(refName);
         if (!entry) return null;
 
@@ -209,11 +226,12 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
         }),
     );
 
-    // Apply decorations on document change
+    // Update LocMap on document changes (active unsaved typing)
     context.subscriptions.push(
         vs.workspace.onDidChangeTextDocument(event => {
-            // Invalidate loc cache when .yml files change
-            if (event.document.fileName.endsWith('.yml')) markLocMapDirty();
+            if (event.document.fileName.endsWith('.yml')) {
+                parseYmlContent(event.document.uri, event.document.getText());
+            }
             const editor = vs.window.activeTextEditor;
             if (editor && event.document === editor.document) {
                 updateColorDecorations(editor);
@@ -221,15 +239,39 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
         }),
     );
 
-    // Invalidate loc cache when .yml files open/close
-    context.subscriptions.push(
-        vs.workspace.onDidOpenTextDocument(doc => {
-            if (doc.fileName.endsWith('.yml')) markLocMapDirty();
-        }),
-        vs.workspace.onDidCloseTextDocument(doc => {
-            if (doc.fileName.endsWith('.yml')) markLocMapDirty();
-        }),
-    );
+    // Initial parse of any already open .yml files
+    for (const doc of vs.workspace.textDocuments) {
+        if (doc.fileName.endsWith('.yml')) {
+            parseYmlContent(doc.uri, doc.getText());
+        }
+    }
+
+    // Set up file system watchers for background tracking of .yml files
+    const watcher = vs.workspace.createFileSystemWatcher('**/*.yml');
+    context.subscriptions.push(watcher);
+    
+    watcher.onDidChange(async uri => {
+        try {
+            const data = await vs.workspace.fs.readFile(uri);
+            const text = new TextDecoder('utf-8').decode(data);
+            parseYmlContent(uri, text);
+        } catch { }
+    });
+    watcher.onDidCreate(async uri => {
+        try {
+            const data = await vs.workspace.fs.readFile(uri);
+            const text = new TextDecoder('utf-8').decode(data);
+            parseYmlContent(uri, text);
+        } catch { }
+    });
+    watcher.onDidDelete(uri => {
+        documentLocCache.delete(uri.toString());
+    });
+
+    // Fire off the background scan
+    if (!initialScanPromise) {
+        initialScanPromise = performInitialScan();
+    }
 
     // Apply decorations on startup for the current editor
     if (vs.window.activeTextEditor) {

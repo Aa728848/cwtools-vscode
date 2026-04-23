@@ -10,8 +10,9 @@
  * - plan:    Read-only analysis, no writes, structured plan output
  * - explore: Parallel read-only exploration; focuses on understanding codebase, no validation
  * - general: Full tool access like build, but no todo_write; suited for research tasks
+ * - review:  Read-only mode focused on code review, finding issues, and providing feedback.
  */
-export type AgentMode = 'build' | 'plan' | 'explore' | 'general';
+export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'review';
 
 export interface AgentModeConfig {
     mode: AgentMode;
@@ -23,6 +24,19 @@ export interface AgentModeConfig {
     canModifyFiles: boolean;
     /** Whether validation loop runs */
     runValidation: boolean;
+}
+
+// ─── MCP Settings ────────────────────────────────────────────────────────────
+
+export interface MCPServerConfig {
+    name: string;
+    type: 'stdio' | 'sse';
+    // For stdio
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    // For sse
+    url?: string;
 }
 
 // ─── Provider & Configuration ────────────────────────────────────────────────
@@ -90,6 +104,9 @@ export interface AIUserConfig {
         endpoint: string;
         overlapStripping: boolean;
         fimMode: boolean;
+    };
+    mcp: {
+        servers: MCPServerConfig[];
     };
 }
 
@@ -370,7 +387,8 @@ export type ToolArgs =
     | ReadFileArgs
     | WriteFileArgs
     | EditFileArgs
-    | ListDirectoryArgs;
+    | ListDirectoryArgs
+    | TaskArgs;
 
 export type ToolResult =
     | QueryScopeResult
@@ -387,7 +405,8 @@ export type ToolResult =
     | ReadFileResult
     | WriteFileResult
     | EditFileResult
-    | ListDirectoryResult;
+    | ListDirectoryResult
+    | TaskResult;
 
 export type AgentToolName =
     | 'query_scope'
@@ -488,6 +507,25 @@ export interface ListDirectoryResult {
     path: string;
 }
 
+export interface TaskArgs {
+    tasks?: Array<{
+        description: string;
+        prompt: string;
+        subagent_type?: 'explore' | 'general';
+    }>;
+    // Legacy single task support
+    description?: string;
+    prompt?: string;
+    subagent_type?: 'explore' | 'general';
+}
+
+export interface TaskResult {
+    results: Array<{
+        description: string;
+        result: string;
+    }>;
+}
+
 /** Single diagnostic entry from CWTools LSP */
 export interface DiagnosticEntry {
     file: string;
@@ -546,7 +584,7 @@ export interface AgentStep {
     | 'text_delta' | 'step_finish'
     | 'code_generated' | 'validation' | 'error' | 'compaction'
     | 'todo_update' | 'permission_request'
-    | 'subtask_start' | 'subtask_complete';
+    | 'subtask_start' | 'subtask_complete' | 'diff_summary';
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;
@@ -633,7 +671,13 @@ export type WebViewMessage =
     /** Search topics by keyword */
     | { type: 'searchTopics'; query: string }
     /** Export current or specified topic as Markdown */
-    | { type: 'exportTopic'; topicId?: string };
+    | { type: 'exportTopic'; topicId?: string }
+    /** Export current or specified topic as JSON */
+    | { type: 'exportTopicJson'; topicId?: string }
+    /** Import topic from JSON */
+    | { type: 'importTopic'; data: string }
+    | { type: 'requestUsageStats' }
+    | { type: 'clearUsageStats' };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[] }
@@ -667,8 +711,13 @@ export type HostMessage =
     | { type: 'fileList'; files: string[] }
     /** Token usage stats after generation completes */
     | { type: 'tokenUsage'; usage: TokenUsage; model: string }
+    /** Emit a unified diff summary of all files changed in the message */
+    | { type: 'diffSummary'; files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string }> }
     /** Topic search results */
-    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number }> };
+    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number }> }
+    /** Topic imported successfully */
+    | { type: 'topicImported'; topicId: string; title: string }
+    | { type: 'usageStats'; stats: any };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

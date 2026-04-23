@@ -162,6 +162,16 @@ const EXPLORE_MODE_TOOLS: AgentToolName[] = [
 /** General mode: all tools EXCEPT todo_write (research without task tracking) */
 const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
 
+/** Review mode: same as explore, plus validate_code and query_definition */
+const REVIEW_MODE_TOOLS: AgentToolName[] = [
+    'query_scope', 'query_types', 'query_rules', 'query_references',
+    'get_file_context', 'search_mod_files', 'get_completion_at',
+    'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
+    'get_diagnostics', 'validate_code', 'query_definition', 'query_definition_by_name',
+    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
+    'get_entity_info', 'query_static_modifiers', 'query_variables'
+];
+
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'patch']);
@@ -269,6 +279,7 @@ export class AgentRunner {
             plan: '分析中（Plan 模式 — 只读）...',
             explore: '探索代码库中（Explore 模式）...',
             general: '处理请求中（General 模式）...',
+            review: '代码审查中（Review 模式）...',
         };
         emitStep({
             type: 'thinking',
@@ -284,8 +295,8 @@ export class AgentRunner {
             // Phase 2: Extract code from the response
             const code = this.extractCode(finalMessage);
 
-            // Plan / Explore / General mode — or no code generated — just an explanation
-            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general') {
+            // Plan / Explore / General / Review mode — or no code generated — just an explanation
+            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'review') {
                 return {
                     code: '',
                     explanation: finalMessage,
@@ -533,6 +544,8 @@ export class AgentRunner {
             availableTools = TOOL_DEFINITIONS.filter(t => PLAN_MODE_TOOLS.includes(t.function.name as AgentToolName));
         } else if (mode === 'explore') {
             availableTools = TOOL_DEFINITIONS.filter(t => EXPLORE_MODE_TOOLS.includes(t.function.name as AgentToolName));
+        } else if (mode === 'review') {
+            availableTools = TOOL_DEFINITIONS.filter(t => REVIEW_MODE_TOOLS.includes(t.function.name as AgentToolName));
         } else if (mode === 'general') {
             availableTools = TOOL_DEFINITIONS.filter(t => !GENERAL_EXCLUDED_TOOLS.includes(t.function.name as AgentToolName));
         } else {

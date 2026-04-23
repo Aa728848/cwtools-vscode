@@ -163,6 +163,13 @@
     bindBtn('accChat',          () => toggleAccordion('chatModelSection'));
     bindBtn('accInline',        () => toggleAccordion('inlineSection'));
     bindBtn('accAgent',         () => toggleAccordion('agentSection'));
+    bindBtn('accUsage',         () => { toggleAccordion('usageSection'); vscode.postMessage({ type: 'requestUsageStats' }); });
+    bindBtn('refreshUsageBtn',  () => vscode.postMessage({ type: 'requestUsageStats' }));
+    bindBtn('clearUsageBtn',    () => {
+        if (confirm('确定要清空所有 Token 消耗统计吗？此操作不可逆转。')) {
+            vscode.postMessage({ type: 'clearUsageStats' });
+        }
+    });
 
     // ── Topic search (debounced 300ms) ─────────────────────────────────────────
     (() => {
@@ -208,6 +215,7 @@
         { cmd: '/mode:plan',    desc: '切换到 Plan 模式（只读规划）' },
         { cmd: '/mode:explore', desc: '切换到 Explore 模式（分析代码库）' },
         { cmd: '/mode:general', desc: '切换到 General 模式（通用问答）' },
+        { cmd: '/mode:review',  desc: '切换到 Review 模式（代码审查）' },
     ];
     const slashPopup = document.getElementById('slashPopup');
 
@@ -487,6 +495,7 @@
         plan:    { icon: '📋', label: '📋 Plan Mode — 只读分析，不修改文件', bodyClass: 'plan-mode' },
         explore: { icon: '🔭', label: '🔭 Explore Mode — 探索代码库结构', bodyClass: 'explore-mode' },
         general: { icon: '💬', label: '💬 General Mode — 通用问答',        bodyClass: 'general-mode' },
+        review:  { icon: '🔎', label: '🔎 Review Mode — 代码审查',        bodyClass: 'review-mode' },
     };
 
     /**
@@ -1354,6 +1363,78 @@
                 const tr = document.getElementById('testResult');
                 tr.className = 'test-result ' + (msg.ok ? 'ok' : 'fail');
                 tr.textContent = msg.message;
+                break;
+            }
+            case 'usageStats': {
+                const stats = msg.stats;
+                const c = document.getElementById('usageStatsContent');
+                if (!c) break;
+                
+                if (!stats || stats.totalTokens === 0) {
+                    c.innerHTML = '<div style="opacity:0.6; text-align:center; padding: 10px;">暂无 Token 消耗数据</div>';
+                    break;
+                }
+                
+                let html = '';
+
+                // ── Summary ──
+                html += `<div style="margin-bottom: 10px; font-weight: 600; font-size: 13px;">
+                    总计消耗: <span style="color:var(--accent);">${stats.totalTokens.toLocaleString()}</span> tokens<br>
+                    预估成本: <span style="color:#4caf50;">$${typeof stats.totalCostUsd === 'number' ? stats.totalCostUsd.toFixed(4) : '0.0000'}</span><br>
+                    <span style="font-size:11px; opacity:0.6;">共 ${stats.totalCalls ?? 0} 次调用</span>
+                </div>`;
+
+                // ── Provider breakdown ──
+                html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
+                html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">按 Provider</div>';
+                for (const [providerId, pStats] of Object.entries(stats.byProvider || {})) {
+                    html += `<div style="display:flex; justify-content:space-between; margin-bottom: 3px;">
+                                <span style="opacity:0.8;">${providerId}</span>
+                                <span><b>${(pStats as any).tokens.toLocaleString()}</b> <span style="opacity:0.5; font-size:10px;">($${typeof (pStats as any).costUsd === 'number' ? (pStats as any).costUsd.toFixed(4) : '0.0000'})</span></span>
+                             </div>`;
+                }
+                html += '</div>';
+
+                // ── Model distribution ──
+                if (stats.modelDistribution && stats.modelDistribution.length > 0) {
+                    html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
+                    html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">模型分布</div>';
+                    for (const m of stats.modelDistribution) {
+                        const barWidth = Math.max(2, m.percentage);
+                        const shortModel = m.model.length > 24 ? m.model.slice(0, 22) + '…' : m.model;
+                        html += `<div style="margin-bottom: 5px;">
+                            <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+                                <span title="${m.model}" style="opacity:0.85;">${shortModel}</span>
+                                <span style="opacity:0.6;">${m.percentage}% · ${m.callCount} 次</span>
+                            </div>
+                            <div style="background:var(--border); border-radius:3px; height:6px; overflow:hidden;">
+                                <div style="width:${barWidth}%; height:100%; background:var(--accent); border-radius:3px; transition:width 0.3s;"></div>
+                            </div>
+                        </div>`;
+                    }
+                    html += '</div>';
+                }
+
+                // ── Daily trend (last 14 days) ──
+                if (stats.dailyStats && stats.dailyStats.length > 0) {
+                    const recent = stats.dailyStats.slice(0, 14);
+                    const maxTokens = Math.max(...recent.map(d => d.tokens), 1);
+                    html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px;">';
+                    html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">近期趋势 (每日)</div>';
+                    html += '<div style="display:flex; align-items:flex-end; gap:2px; height:60px;">';
+                    // Show in chronological order (reverse since dailyStats is desc)
+                    for (const d of [...recent].reverse()) {
+                        const h = Math.max(3, Math.round((d.tokens / maxTokens) * 56));
+                        const dayLabel = d.date.slice(5); // MM-DD
+                        html += `<div title="${d.date}: ${d.tokens.toLocaleString()} tokens, ${d.callCount} 次调用, $${d.costUsd.toFixed(4)}" style="flex:1; min-width:0;">
+                            <div style="background:var(--accent); opacity:0.7; height:${h}px; border-radius:2px 2px 0 0;"></div>
+                            <div style="font-size:7px; text-align:center; opacity:0.4; margin-top:1px; overflow:hidden; white-space:nowrap;">${dayLabel}</div>
+                        </div>`;
+                    }
+                    html += '</div></div>';
+                }
+
+                c.innerHTML = html;
                 break;
             }
 

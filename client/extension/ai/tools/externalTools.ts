@@ -257,33 +257,61 @@ export class ExternalToolHandler {
 
     // ─── dispatchSubTask ─────────────────────────────────────────────────────
 
-    async dispatchSubTask(args: {
-        description: string;
-        prompt: string;
-        subagent_type?: 'explore' | 'general';
-    }): Promise<{ result: string; description: string }> {
-        const mode = (args.subagent_type ?? 'general') as 'explore' | 'general';
-
+    async dispatchSubTask(args: import('../types').TaskArgs): Promise<import('../types').TaskResult> {
         if (!this.ctx.agentRunnerRef) {
             return {
-                description: args.description,
-                result: 'Sub-agent dispatch not available: agentRunnerRef not set',
+                results: [{
+                    description: args.description || 'Unknown task',
+                    result: 'Sub-agent dispatch not available: agentRunnerRef not set',
+                }]
             };
         }
 
+        const taskList = args.tasks && Array.isArray(args.tasks) ? args.tasks : [];
+        // Legacy single task fallback
+        if (taskList.length === 0 && args.prompt && args.description) {
+            taskList.push({
+                description: args.description,
+                prompt: args.prompt,
+                subagent_type: args.subagent_type || 'general'
+            });
+        }
+
+        if (taskList.length === 0) {
+            return { results: [{ description: 'Error', result: 'No tasks provided' }] };
+        }
+
+        // Limit to max 3 parallel tasks
+        const tasksToRun = taskList.slice(0, 3);
+        
         try {
-            const result = await this.ctx.agentRunnerRef.runSubAgent(
-                args.prompt,
-                mode,
-                this.ctx.parentRunnerOptions,
-                undefined,
-                this.ctx.parentTokenAccumulator
-            );
-            return { description: args.description, result };
+            const promises = tasksToRun.map(async task => {
+                const mode = (task.subagent_type ?? 'general') as 'explore' | 'general';
+                try {
+                    const result = await this.ctx.agentRunnerRef!.runSubAgent(
+                        task.prompt,
+                        mode,
+                        this.ctx.parentRunnerOptions,
+                        undefined,
+                        this.ctx.parentTokenAccumulator
+                    );
+                    return { description: task.description, result };
+                } catch (e) {
+                    return {
+                        description: task.description,
+                        result: `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}`,
+                    };
+                }
+            });
+
+            const completed = await Promise.all(promises);
+            return { results: completed };
         } catch (e) {
             return {
-                description: args.description,
-                result: `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}`,
+                results: [{
+                    description: 'Global task error',
+                    result: `Dispatch failed: ${e instanceof Error ? e.message : String(e)}`,
+                }]
             };
         }
     }

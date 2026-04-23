@@ -12,6 +12,7 @@ export { AgentRunner } from './agentRunner';
 export { PromptBuilder } from './promptBuilder';
 export { AIChatPanelProvider } from './chatPanel';
 export { AIInlineCompletionProvider } from './inlineProvider';
+export { UsageTracker } from './usageTracker';
 
 // Re-export key types
 export type {

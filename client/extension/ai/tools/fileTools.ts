@@ -120,9 +120,21 @@ export class FileToolHandler {
 
             const MAX_READ_CHARS = 12000;
             const truncated = numbered.length > MAX_READ_CHARS;
-            const resultContent = truncated
-                ? numbered.substring(0, MAX_READ_CHARS)
-                : numbered;
+            let resultContent: string;
+            if (truncated) {
+                // Truncate at line boundary to avoid broken last line
+                const lines2 = numbered.split('\n');
+                let charCount = 0;
+                let lineCount = 0;
+                for (const line of lines2) {
+                    if (charCount + line.length + 1 > MAX_READ_CHARS) break;
+                    charCount += line.length + 1;
+                    lineCount++;
+                }
+                resultContent = lines2.slice(0, Math.max(1, lineCount)).join('\n');
+            } else {
+                resultContent = numbered;
+            }
 
             const lastLineReturned = start + (truncated
                 ? resultContent.split('\n').length
@@ -222,13 +234,31 @@ export class FileToolHandler {
         }
 
         const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+        // Only return diagnostics near the edited region to save context
+        const editedLines = new Set<number>();
+        const newLines = args.newString.split('\n');
+        const oldLines = args.oldString.split('\n');
+        // Approximate: find the edit region in the new content
+        const newContent2 = fs.readFileSync(filePath, 'utf-8');
+        const newContentLines = newContent2.split('\n');
+        for (let li = 0; li < newContentLines.length; li++) {
+            if (newLines.some(nl => newContentLines[li].includes(nl.trim()) && nl.trim().length > 3)) {
+                for (let r = -10; r <= 10; r++) editedLines.add(li + r);
+            }
+        }
+        const nearbyDiags = editedLines.size > 0
+            ? diagnostics.filter(d => editedLines.has(d.line))
+            : diagnostics; // fallback: return all if we can't identify region
         let message = `文件已更新: ${path.basename(filePath)}`;
-        const errors = diagnostics.filter(d => d.severity === 'error');
+        const errors = nearbyDiags.filter(d => d.severity === 'error');
         if (errors.length > 0) {
             message += `\n\nLSP 检测到 ${errors.length} 个错误，请修复：\n` +
                 errors.slice(0, 5).map(e => `  第 ${e.line + 1} 行: ${e.message}`).join('\n');
         }
-        return { success: true, message, diff, diagnostics };
+        return {
+            success: true, message, diff, diagnostics: nearbyDiags,
+            ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
+        } as any;
     }
 
     // ─── multiEdit ───────────────────────────────────────────────────────────
@@ -286,13 +316,31 @@ export class FileToolHandler {
         }
 
         const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+        // Only return diagnostics near edited regions
+        const editedRegionLines = new Set<number>();
+        for (const edit of args.edits) {
+            const fileContent2 = fs.readFileSync(filePath, 'utf-8');
+            const fileLines = fileContent2.split('\n');
+            const editLines = edit.newString.split('\n');
+            for (let li = 0; li < fileLines.length; li++) {
+                if (editLines.some(el => fileLines[li].includes(el.trim()) && el.trim().length > 3)) {
+                    for (let r = -10; r <= 10; r++) editedRegionLines.add(li + r);
+                }
+            }
+        }
+        const nearbyDiags = editedRegionLines.size > 0
+            ? diagnostics.filter(d => editedRegionLines.has(d.line))
+            : diagnostics;
         let message = `multiedit: ${args.edits.length} 个编辑已应用到 ${path.basename(filePath)}`;
-        const errorDiags = diagnostics.filter(d => d.severity === 'error');
+        const errorDiags = nearbyDiags.filter(d => d.severity === 'error');
         if (errorDiags.length > 0) {
             message += `\n\nLSP 检测到 ${errorDiags.length} 个错误：\n` +
                 errorDiags.slice(0, 5).map(e => `  第 ${e.line + 1} 行: ${e.message}`).join('\n');
         }
-        return { success: true, message, diff, diagnostics };
+        return {
+            success: true, message, diff, diagnostics: nearbyDiags,
+            ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
+        } as any;
     }
 
     // ─── applyPatch ──────────────────────────────────────────────────────────

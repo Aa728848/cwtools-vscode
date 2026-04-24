@@ -51,6 +51,16 @@ const COMPACTION_THRESHOLD_RATIO = 0.7;
 const DEFAULT_CONTEXT_LIMIT = 128000;
 // How many recent messages to keep un-compressed during compaction
 const COMPACTION_KEEP_LAST_N = 4;
+// Mid-loop compaction: check every N iterations within reasoningLoop
+const MID_LOOP_COMPACTION_INTERVAL = 3;
+// Mid-loop compaction triggers at this fraction of context limit
+const MID_LOOP_COMPACTION_RATIO = 0.80;
+// Tool result budget: max chars per individual tool result (scaled by context limit)
+const TOOL_RESULT_BUDGET_BASE = 8000;
+// Minimum tool result budget (even for tiny context windows)
+const TOOL_RESULT_BUDGET_MIN = 3000;
+// Maximum tool result budget (even for huge context windows like 1M)
+const TOOL_RESULT_BUDGET_MAX = 30000;
 
 export interface AgentRunnerOptions {
     /** Override provider for this run */
@@ -328,8 +338,26 @@ export class AgentRunner {
         try {
             // Keep the most recent messages intact
             const recentCount = Math.min(COMPACTION_KEEP_LAST_N, history.length);
-            const olderMessages = history.slice(0, history.length - recentCount);
             const recentMessages = history.slice(history.length - recentCount);
+
+            // ── Incremental compaction: detect existing summary and merge ──
+            // If history already contains a compacted summary (from a previous
+            // compaction round), merge it with the new older messages instead of
+            // discarding it. This preserves L2 (cold archive) knowledge.
+            const existingSummaryIdx = history.findIndex(
+                m => m.role === 'system' && contentToString(m.content).startsWith('## Conversation Summary')
+            );
+            let existingSummaryText = '';
+            let olderMessages: ChatMessage[];
+            if (existingSummaryIdx >= 0 && existingSummaryIdx < history.length - recentCount) {
+                // Extract existing summary content (strip the header)
+                existingSummaryText = contentToString(history[existingSummaryIdx].content)
+                    .replace(/^## Conversation Summary \(compacted\)\n?/, '').trim();
+                // New L1 messages = everything between the old summary and the recent window
+                olderMessages = history.slice(existingSummaryIdx + 1, history.length - recentCount);
+            } else {
+                olderMessages = history.slice(0, history.length - recentCount);
+            }
 
             // Build compaction prompt
             // L3 Fix: exclude system messages (they'd be mapped as 'Assistant', misleading the summarizer).
@@ -389,9 +417,14 @@ export class AgentRunner {
                     return `[${role}]: ${content}`;
                 }).join('\n');
 
+            // If there's an existing summary, ask the AI to merge it with the new messages
+            const compactionInstruction = existingSummaryText
+                ? `Merge the existing conversation summary with the new messages below into a single updated summary.\n\n## Existing Summary:\n${existingSummaryText}\n\n## New Messages:${pinnedSection}\n\n${summaryText}`
+                : `Summarize this conversation:${pinnedSection}\n\n${summaryText}`;
+
             const compactionMessages: ChatMessage[] = [
                 { role: 'system', content: this.promptBuilder.buildCompactionPrompt() },
-                { role: 'user', content: `Summarize this conversation:${pinnedSection}\n\n${summaryText}` },
+                { role: 'user', content: compactionInstruction },
             ];
 
             const compactionResponse = await this.aiService.chatCompletion(compactionMessages, {
@@ -415,9 +448,10 @@ export class AgentRunner {
             const summary = compactionResponse.choices?.[0]?.message?.content ?? '';
 
             if (summary.length > 0) {
+                const compactionType = existingSummaryText ? '增量合并' : '初始压缩';
                 emitStep({
                     type: 'compaction',
-                    content: `上下文已压缩: ${olderMessages.length} 条消息 → 摘要 (${summary.length} chars, ${pinnedContext.length} pinned entities)`,
+                    content: `上下文已压缩 (${compactionType}): ${olderMessages.length} 条消息 → 摘要 (${summary.length} chars, ${pinnedContext.length} pinned entities)`,
                     timestamp: Date.now(),
                 });
 
@@ -448,6 +482,10 @@ export class AgentRunner {
      * Agent reasoning loop: call AI → if tool_calls → execute → feed back → repeat.
      * Supports both OpenAI JSON tool_calls and DSML/XML text-format tool calls (DeepSeek fallback).
      * Accumulates token usage into the provided tokenAccumulator (mutated in-place).
+     *
+     * Mid-loop compaction: every MID_LOOP_COMPACTION_INTERVAL iterations, the loop
+     * estimates cumulative message size and compacts older tool results in-place
+     * if they exceed MID_LOOP_COMPACTION_RATIO of the context window.
      */
     private async reasoningLoop(
         messages: ChatMessage[],
@@ -487,11 +525,40 @@ export class AgentRunner {
         // imported at the top of this file; dynamic import added latency for nothing.
         const _config0 = this.aiService.getConfig();
         const _providerId0 = options?.providerId ?? _config0.provider;
-        const useDsmlToolRole0 = getProvider(_providerId0).toolCallStyle === 'dsml';
+        const _provider0 = getProvider(_providerId0);
+        const useDsmlToolRole0 = _provider0.toolCallStyle === 'dsml';
+
+        // Compute context limit and tool result budget once for the entire loop
+        const contextLimit = _config0.maxContextTokens > 0
+            ? _config0.maxContextTokens
+            : (_provider0.maxContextTokens || DEFAULT_CONTEXT_LIMIT);
+        const midLoopThreshold = Math.floor(contextLimit * MID_LOOP_COMPACTION_RATIO);
+        // Scale tool result budget proportionally to context window (linear interpolation)
+        // 128K → 8000 chars, 200K → 12500, 1M → 30000 (capped)
+        const toolResultBudget = Math.min(
+            TOOL_RESULT_BUDGET_MAX,
+            Math.max(TOOL_RESULT_BUDGET_MIN, Math.floor(TOOL_RESULT_BUDGET_BASE * (contextLimit / DEFAULT_CONTEXT_LIMIT)))
+        );
 
         while (iteration < MAX_TOOL_ITERATIONS) {
             options?.abortSignal?.throwIfAborted();
             iteration++;
+
+            // ── Mid-loop compaction: prevent uncontrolled context growth ──────
+            // Every MID_LOOP_COMPACTION_INTERVAL iterations, estimate message size
+            // and compact if approaching the context window limit.
+            if (iteration > 1 && (iteration - 1) % MID_LOOP_COMPACTION_INTERVAL === 0) {
+                const loopChars = messages.reduce((s, m) => s + contentToString(m.content).length, 0);
+                const loopTokens = Math.ceil(loopChars / CHARS_PER_TOKEN);
+                if (loopTokens > midLoopThreshold) {
+                    emitStep({
+                        type: 'compaction',
+                        content: `循环内上下文压缩中... (${loopTokens} tokens, 阈值 ${midLoopThreshold})`,
+                        timestamp: Date.now(),
+                    });
+                    this.compactMessagesInPlace(messages, toolResultBudget);
+                }
+            }
 
             const response = await this.aiService.chatCompletion(messages, {
                 tools: availableTools,
@@ -717,15 +784,19 @@ export class AgentRunner {
                     consecutiveErrorCount = 0;
                 }
 
+                // Budget tool result: apply smart dedup/segmentation to prevent
+                // oversized tool results from consuming the context window.
+                const budgetedResult = this.budgetToolResult(toolResult, toolResultBudget);
+
                 if (useDsmlToolRole) {
                     messages.push({
                         role: 'user',
-                        content: `[Tool Result for ${toolCall.function.name} (id=${toolCall.id})]:\n${JSON.stringify(toolResult, null, 2)}`,
+                        content: `[Tool Result for ${toolCall.function.name} (id=${toolCall.id})]:\n${budgetedResult}`,
                     });
                 } else {
                     messages.push({
                         role: 'tool',
-                        content: JSON.stringify(toolResult, null, 2),
+                        content: budgetedResult,
                         tool_call_id: toolCall.id,
                         name: toolName,
                     });
@@ -929,6 +1000,255 @@ export class AgentRunner {
             .replace(/<think>[\s\S]*?<\/think>/gi, '')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
+    }
+
+    // ─── Context Budget Utilities ────────────────────────────────────────────
+
+    /**
+     * Intelligently budget a tool result to fit within maxChars.
+     * Instead of brute-force truncation, this uses strategies that preserve
+     * information density:
+     *
+     * 1. **Array dedup**: For arrays of objects (e.g. diagnostics), group by
+     *    a key field (message), deduplicate, and report counts.
+     * 2. **Segmentation**: For long arrays, keep representative items from
+     *    the start, middle, and end with a "[... N more]" gap.
+     * 3. **Structured truncation**: For objects with large string fields,
+     *    truncate the strings while preserving the structure.
+     *
+     * Returns a JSON string ready for injection into conversation messages.
+     */
+    private budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT_BUDGET_BASE): string {
+        const raw = JSON.stringify(result, null, 2);
+        if (raw.length <= maxChars) return raw;
+
+        // Strategy 1: Detect and handle diagnostic-like arrays
+        // Common shapes: { diagnostics: [...] }, { entries: [...] }, or raw [...]
+        const arrayTarget = this.extractBudgetableArray(result);
+        if (arrayTarget) {
+            const { array, wrapper, key: arrayKey } = arrayTarget;
+            const budgeted = this.budgetArray(array, maxChars, wrapper, arrayKey);
+            if (budgeted) return budgeted;
+        }
+
+        // Strategy 2: If result is a direct array
+        if (Array.isArray(result)) {
+            const budgeted = this.budgetArray(result, maxChars, null, null);
+            if (budgeted) return budgeted;
+        }
+
+        // Strategy 3: Generic truncation with structure hint
+        return raw.substring(0, maxChars) +
+            `\n\n[... truncated — original: ${raw.length} chars. Ask for specific items if needed.]`;
+    }
+
+    /**
+     * Extract a budgetable array from a tool result object.
+     * Detects common patterns like { diagnostics: [...] }, { instances: [...] },
+     * { results: [...] }, { files: [...] }, { references: [...] }.
+     */
+    private extractBudgetableArray(
+        result: unknown
+    ): { array: unknown[]; wrapper: Record<string, unknown>; key: string } | null {
+        if (typeof result !== 'object' || result === null || Array.isArray(result)) return null;
+        const obj = result as Record<string, unknown>;
+        // Known array-valued keys in tool results, ordered by likelihood
+        const candidateKeys = ['diagnostics', 'instances', 'results', 'files', 'references', 'entries', 'items', 'rules'];
+        for (const k of candidateKeys) {
+            if (Array.isArray(obj[k]) && (obj[k] as unknown[]).length > 5) {
+                return { array: obj[k] as unknown[], wrapper: obj, key: k };
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Budget an array using dedup + segmentation.
+     * Returns a JSON string, or null if the array is too small to be worth budgeting.
+     */
+    private budgetArray(
+        array: unknown[],
+        maxChars: number,
+        wrapper: Record<string, unknown> | null,
+        arrayKey: string | null
+    ): string | null {
+        if (array.length <= 3) return null;
+
+        // Step 1: Attempt deduplication by message/error field
+        // Group items by a "message" or "error" or "id" field and report counts
+        const groupKey = this.findGroupKey(array);
+        if (groupKey && array.length > 10) {
+            const grouped = new Map<string, { count: number; representative: unknown; files: Set<string> }>();
+            for (const item of array) {
+                const obj = item as Record<string, unknown>;
+                const key = String(obj[groupKey] ?? '');
+                const existing = grouped.get(key);
+                if (existing) {
+                    existing.count++;
+                    // Track distinct files if available
+                    const file = obj['file'] ?? obj['logicalPath'] ?? obj['filePath'];
+                    if (file) existing.files.add(String(file));
+                } else {
+                    const file = obj['file'] ?? obj['logicalPath'] ?? obj['filePath'];
+                    grouped.set(key, {
+                        count: 1,
+                        representative: item,
+                        files: file ? new Set([String(file)]) : new Set(),
+                    });
+                }
+            }
+
+            // If dedup reduced the count significantly, use grouped output
+            if (grouped.size < array.length * 0.7) {
+                const dedupedItems = [...grouped.entries()]
+                    .sort((a, b) => b[1].count - a[1].count)
+                    .map(([, v]) => ({
+                        ...v.representative as Record<string, unknown>,
+                        _occurrences: v.count,
+                        _affectedFiles: v.files.size > 1 ? v.files.size : undefined,
+                        _sampleFiles: v.files.size > 1 ? [...v.files].slice(0, 3) : undefined,
+                    }));
+
+                // Build result within budget
+                let kept = Math.min(dedupedItems.length, 30);
+                let resultObj = this.buildArrayResult(dedupedItems, kept, array.length, wrapper, arrayKey);
+                while (resultObj.length > maxChars && kept > 5) {
+                    kept = Math.floor(kept * 0.6);
+                    resultObj = this.buildArrayResult(dedupedItems, kept, array.length, wrapper, arrayKey);
+                }
+                return resultObj;
+            }
+        }
+
+        // Step 2: Segmentation — keep items from start, middle, end
+        const totalCount = array.length;
+        const segmentSize = Math.max(3, Math.floor(maxChars / 800)); // ~800 chars per item
+        const headCount = Math.ceil(segmentSize * 0.5);
+        const tailCount = Math.floor(segmentSize * 0.3);
+        const midCount = Math.max(1, segmentSize - headCount - tailCount);
+
+        const head = array.slice(0, headCount);
+        const midStart = Math.floor(totalCount / 2) - Math.floor(midCount / 2);
+        const mid = array.slice(midStart, midStart + midCount);
+        const tail = array.slice(totalCount - tailCount);
+
+        const segmented = [
+            ...head,
+            { _gap: `... ${totalCount - headCount - midCount - tailCount} items omitted ...` },
+            ...mid,
+            { _gap: `... continuing to end ...` },
+            ...tail,
+        ];
+
+        const result = this.buildArrayResult(segmented, segmented.length, totalCount, wrapper, arrayKey);
+        if (result.length <= maxChars) return result;
+
+        // Last resort: just head items with count
+        let kept = headCount;
+        let fallback = this.buildArrayResult(array.slice(0, kept), kept, totalCount, wrapper, arrayKey);
+        while (fallback.length > maxChars && kept > 3) {
+            kept = Math.floor(kept * 0.6);
+            fallback = this.buildArrayResult(array.slice(0, kept), kept, totalCount, wrapper, arrayKey);
+        }
+        return fallback;
+    }
+
+    /** Find a suitable grouping key for deduplication of array items. */
+    private findGroupKey(array: unknown[]): string | null {
+        if (array.length === 0) return null;
+        const first = array[0];
+        if (typeof first !== 'object' || first === null) return null;
+        const obj = first as Record<string, unknown>;
+        // Prefer 'message' (diagnostics), then 'error', then 'id'
+        for (const candidate of ['message', 'error', 'id', 'name']) {
+            if (typeof obj[candidate] === 'string') return candidate;
+        }
+        return null;
+    }
+
+    /** Build a budgeted array result JSON string with metadata. */
+    private buildArrayResult(
+        items: unknown[],
+        keptCount: number,
+        totalCount: number,
+        wrapper: Record<string, unknown> | null,
+        arrayKey: string | null
+    ): string {
+        if (wrapper && arrayKey) {
+            // Reconstruct wrapper with budgeted array
+            const budgetedWrapper = { ...wrapper };
+            budgetedWrapper[arrayKey] = items.slice(0, keptCount);
+            budgetedWrapper[`_${arrayKey}Shown`] = Math.min(keptCount, items.length);
+            budgetedWrapper[`_${arrayKey}Total`] = totalCount;
+            if (keptCount < totalCount) {
+                budgetedWrapper[`_${arrayKey}Note`] = `Showing ${Math.min(keptCount, items.length)} of ${totalCount} items (deduplicated/segmented to save context). Use targeted queries for specific files.`;
+            }
+            return JSON.stringify(budgetedWrapper, null, 2);
+        }
+        // Raw array
+        const shown = items.slice(0, keptCount);
+        if (keptCount >= totalCount) return JSON.stringify(shown, null, 2);
+        return JSON.stringify({
+            items: shown,
+            _shown: Math.min(keptCount, items.length),
+            _total: totalCount,
+            _note: `Showing ${Math.min(keptCount, items.length)} of ${totalCount} items. Use targeted queries for specific items.`,
+        }, null, 2);
+    }
+
+    /**
+     * Compact messages array in-place during the reasoning loop.
+     * This is a lightweight, synchronous operation (no AI call) that targets
+     * the biggest context consumers: oversized tool result messages.
+     *
+     * Strategy:
+     * 1. Keep the first message (system prompt) and last 6 messages intact.
+     * 2. For messages in between, if they are tool results larger than
+     *    toolResultBudget, replace their content with a truncated version.
+     * 3. For very old tool results (beyond the last 12 messages),
+     *    aggressively compress to just file/success/error metadata.
+     */
+    private compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number): void {
+        if (messages.length <= 8) return; // Not enough to compact
+
+        const keepHead = 1;  // System prompt
+        const keepTail = 6;  // Recent messages (must be >= COMPACTION_KEEP_LAST_N)
+        const aggressiveThreshold = messages.length - 12; // Beyond this age, compress hard
+
+        for (let i = keepHead; i < messages.length - keepTail; i++) {
+            const m = messages[i];
+            const content = contentToString(m.content);
+            if (content.length <= 500) continue; // Small messages are fine
+
+            if (m.role === 'tool' || (m.role === 'user' && content.startsWith('[Tool Result'))) {
+                if (i < aggressiveThreshold) {
+                    // Aggressive: extract only key metadata
+                    const successMatch = content.match(/"success"\s*:\s*(true|false)/);
+                    const fileMatch = content.match(/"(?:file|filePath|logicalPath)"\s*:\s*"([^"]+)"/);
+                    const errorMatch = content.match(/"(?:error|message)"\s*:\s*"([^"]{0,150})"/);
+                    const countMatch = content.match(/"(?:total\w*Count|totalCount|length)"\s*:\s*(\d+)/);
+                    const meta = [
+                        fileMatch ? `file=${fileMatch[1]}` : null,
+                        successMatch ? `ok=${successMatch[1]}` : null,
+                        errorMatch && successMatch?.[1] === 'false' ? `err=${errorMatch[1].substring(0, 80)}` : null,
+                        countMatch ? `count=${countMatch[1]}` : null,
+                    ].filter(Boolean).join(', ');
+                    messages[i] = { ...m, content: `[Compacted] ${meta || content.substring(0, 200)}` };
+                } else if (content.length > toolResultBudget) {
+                    // Moderate: apply budgeting
+                    try {
+                        const parsed = JSON.parse(content);
+                        messages[i] = { ...m, content: this.budgetToolResult(parsed, toolResultBudget) };
+                    } catch {
+                        // Not valid JSON — just truncate
+                        messages[i] = { ...m, content: content.substring(0, toolResultBudget) + '\n[... compacted]' };
+                    }
+                }
+            } else if (m.role === 'assistant' && i < aggressiveThreshold && content.length > 2000) {
+                // Aggressively compress old assistant reasoning
+                messages[i] = { ...m, content: content.substring(0, 1000) + '\n[... compacted]' };
+            }
+        }
     }
 
     /**

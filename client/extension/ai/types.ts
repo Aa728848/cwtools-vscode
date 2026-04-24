@@ -236,6 +236,8 @@ export interface RuleInfo {
 
 export interface QueryRulesResult {
     rules: RuleInfo[];
+    totalCount: number;
+    truncated: boolean;
 }
 
 export interface QueryReferencesArgs {
@@ -298,7 +300,7 @@ export interface SearchModFilesArgs {
 
 export interface SearchModFilesResult {
     files: Array<{
-        path: string;
+        /** Relative path from searchedRoot */
         logicalPath: string;
         matchingLines: Array<{
             line: number;
@@ -325,6 +327,8 @@ export interface DocumentSymbolInfo {
     kind: string;
     range: { startLine: number; endLine: number };
     children?: DocumentSymbolInfo[];
+    /** True if this node has deeper nested children not shown (depth limit) */
+    _hasDeeper?: boolean;
 }
 
 export interface DocumentSymbolsResult {
@@ -369,6 +373,9 @@ export interface GetCompletionAtResult {
         kind: string;
         description?: string;
     }>;
+    /** Total completions available from the LSP before slicing */
+    totalAvailable?: number;
+    _note?: string;
 }
 
 // Union type for all tool args/results

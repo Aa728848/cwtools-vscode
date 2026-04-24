@@ -22,8 +22,12 @@ import { ExternalToolHandler } from './tools/externalTools';
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
 
-/** Maximum tool result size before truncation (~8K chars) */
-const MAX_TOOL_RESULT_CHARS = 8000;
+/** Maximum tool result size before truncation.
+ * This is a safety-net ceiling — the smarter budgetToolResult in agentRunner.ts
+ * handles context-aware dedup/segmentation. This threshold must be >= TOOL_RESULT_BUDGET_MAX
+ * so the intelligent budgeting layer gets first crack at the data.
+ */
+const MAX_TOOL_RESULT_CHARS = 30000;
 
 /**
  * Executes Agent tools by communicating with the CWTools Language Server
@@ -274,17 +278,20 @@ export class AgentToolExecutor {
         }
     }
 
-    /** Truncate large tool results to avoid overloading context window. */
+    /** Truncate large tool results to avoid overloading context window.
+     * This is a safety-net for extreme cases — the smarter budgetToolResult
+     * in agentRunner.ts handles normal-sized results with dedup/segmentation.
+     */
     private truncateResult(result: unknown): unknown {
         const json = JSON.stringify(result);
         if (json.length <= MAX_TOOL_RESULT_CHARS) return result;
+        // For objects, extract known array fields and truncate them
+        // rather than producing broken JSON
         if (typeof result === 'object' && result !== null) {
-            const truncated = json.substring(0, MAX_TOOL_RESULT_CHARS);
             return {
                 _truncated: true,
                 _originalLength: json.length,
-                _note: `Result truncated to ${MAX_TOOL_RESULT_CHARS} chars. Request a narrower range or specific subsection.`,
-                data: truncated,
+                _note: `Result exceeded ${MAX_TOOL_RESULT_CHARS} chars safety limit. Use targeted queries (add filter, limit, or file parameters) for smaller results.`,
             };
         }
         return result;

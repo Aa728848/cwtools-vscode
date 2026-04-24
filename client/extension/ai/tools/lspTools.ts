@@ -257,20 +257,28 @@ export class LspToolHandler {
     }
 
     async queryScriptedEffects(args: { filter?: string; limit?: number }): Promise<unknown> {
-        const cacheKey = `sfx:${JSON.stringify([args.filter ?? '', args.limit ?? 200])}`;
+        const limit = args.limit ?? (args.filter ? 200 : 50);
+        const cacheKey = `sfx:${JSON.stringify([args.filter ?? '', limit])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.lspRequest('cwtools.ai.queryScriptedEffects', [args.filter ?? '', args.limit ?? 200]) as any;
+                const raw = await this.lspRequest('cwtools.ai.queryScriptedEffects', [args.filter ?? '', limit]) as any;
+                if (!args.filter && raw?.ok && Array.isArray(raw.items) && raw.items.length >= limit) {
+                    raw._note = `Showing first ${limit} results. Use filter parameter for targeted queries.`;
+                }
                 return raw ?? { ok: false, error: 'No response' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
 
     async queryScriptedTriggers(args: { filter?: string; limit?: number }): Promise<unknown> {
-        const cacheKey = `stx:${JSON.stringify([args.filter ?? '', args.limit ?? 200])}`;
+        const limit = args.limit ?? (args.filter ? 200 : 50);
+        const cacheKey = `stx:${JSON.stringify([args.filter ?? '', limit])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.lspRequest('cwtools.ai.queryScriptedTriggers', [args.filter ?? '', args.limit ?? 200]) as any;
+                const raw = await this.lspRequest('cwtools.ai.queryScriptedTriggers', [args.filter ?? '', limit]) as any;
+                if (!args.filter && raw?.ok && Array.isArray(raw.items) && raw.items.length >= limit) {
+                    raw._note = `Showing first ${limit} results. Use filter parameter for targeted queries.`;
+                }
                 return raw ?? { ok: false, error: 'No response' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
@@ -335,8 +343,11 @@ export class LspToolHandler {
                         const instances = Array.isArray(raw.instances)
                             ? raw.instances.map((i: any) => ({
                                 id: i.id ?? '',
-                                file: i.file ?? '',
-                                line: i.line,
+                                file: i.file
+                                    ? (path.isAbsolute(i.file)
+                                        ? path.relative(this.ctx.workspaceRoot, i.file).replace(/\\/g, '/')
+                                        : i.file)
+                                    : '',
                                 vanilla: i.vanilla ?? false,
                             }))
                             : [];
@@ -431,7 +442,7 @@ export class LspToolHandler {
             );
         }
 
-        return { rules: rules.slice(0, 80) };
+        return { rules: rules.slice(0, 80), totalCount: rules.length, truncated: rules.length > 80 };
     }
 
     private async loadCWTRules(): Promise<{ triggers: RuleInfo[]; effects: RuleInfo[] }> {
@@ -832,12 +843,11 @@ export class LspToolHandler {
                         const matchingLines: Array<{ line: number; content: string }> = [];
                         for (let i = 0; i < lines.length; i++) {
                             if (lines[i].toLowerCase().includes(queryLower)) {
-                                matchingLines.push({ line: i, content: lines[i].trim().substring(0, 200) });
+                        matchingLines.push({ line: i, content: lines[i].trim().substring(0, 120) });
                             }
                             if (matchingLines.length >= 20) break;
                         }
                         results.push({
-                            path: file,
                             logicalPath: path.relative(searchRoot, file).replace(/\\/g, '/'),
                             matchingLines,
                         });
@@ -855,8 +865,9 @@ export class LspToolHandler {
 
     // ─── getCompletionAt ─────────────────────────────────────────────────────
 
-    async getCompletionAt(args: { file: string; line: number; column: number }): Promise<GetCompletionAtResult> {
+    async getCompletionAt(args: { file: string; line: number; column: number; limit?: number }): Promise<GetCompletionAtResult> {
         try {
+            const limit = args.limit ?? 30;
             const uri = vs.Uri.file(args.file);
             const position = new vs.Position(args.line, args.column);
             const completions = await this.vsCommand<vs.CompletionList>(
@@ -865,11 +876,13 @@ export class LspToolHandler {
 
             if (completions) {
                 return {
-                    completions: completions.items.slice(0, 50).map(item => ({
+                    completions: completions.items.slice(0, limit).map(item => ({
                         label: typeof item.label === 'string' ? item.label : item.label.label,
                         kind: vs.CompletionItemKind[item.kind ?? vs.CompletionItemKind.Text],
                         description: typeof item.detail === 'string' ? item.detail : undefined,
                     })),
+                    totalAvailable: completions.items.length,
+                    ...(completions.items.length > limit ? { _note: `Showing ${limit} of ${completions.items.length} completions. Increase limit for more.` } : {}),
                 };
             }
             return { completions: [] };
@@ -891,19 +904,23 @@ export class LspToolHandler {
                 return { symbols: [] };
             }
 
-            const mapSymbol = (s: vs.DocumentSymbol): DocumentSymbolInfo => ({
+            const MAX_DEPTH = 2;
+            const mapSymbol = (s: vs.DocumentSymbol, depth: number = 0): DocumentSymbolInfo => ({
                 name: s.name,
                 kind: vs.SymbolKind[s.kind],
                 range: {
                     startLine: s.range.start.line,
                     endLine: s.range.end.line,
                 },
-                children: s.children && s.children.length > 0
-                    ? s.children.map(mapSymbol)
+                children: depth < MAX_DEPTH && s.children && s.children.length > 0
+                    ? s.children.map(c => mapSymbol(c, depth + 1))
+                    : undefined,
+                _hasDeeper: depth >= MAX_DEPTH && s.children && s.children.length > 0
+                    ? true
                     : undefined,
             });
 
-            return { symbols: symbols.map(mapSymbol) };
+            return { symbols: symbols.map(s => mapSymbol(s, 0)) };
         } catch {
             return { symbols: [] };
         }
@@ -913,7 +930,7 @@ export class LspToolHandler {
 
     async workspaceSymbols(args: { query: string; limit?: number }): Promise<WorkspaceSymbolsResult> {
         try {
-            const limit = args.limit ?? 30;
+            const limit = args.limit ?? 20;
             const symbols = await this.vsCommand<vs.SymbolInformation[]>(
                 'vscode.executeWorkspaceSymbolProvider', [args.query]
             );

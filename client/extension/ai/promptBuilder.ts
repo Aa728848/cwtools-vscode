@@ -116,6 +116,11 @@ When you see LSP/CWTools errors, classify before acting:
 | See code around a specific line | \`get_file_context(file, line, radius=20)\` |
 | Verify an ID exists | \`query_types(typeName, filter)\` — no file reading at all |
 
+### Large Project Awareness
+- When reading sibling files (Rule 0), prefer \`read_file\` with \`startLine\` and \`endLine\` to read only the relevant section (e.g. first 60 lines for structure)
+- For MANDATORY FINAL CHECK, if \`get_diagnostics\` returns results with \`_occurrences\` or \`_diagnosticsNote\` fields, the results have been automatically deduplicated — use these metadata fields for accurate counts
+- Before reading a large file in full, consider: can \`document_symbols\` + \`get_file_context\` answer my question with less context cost?
+
 ---
 
 ## Clarification Rule (MANDATORY)
@@ -173,6 +178,12 @@ Structure your plan as:
 3. **Implementation steps** — Numbered, ordered by dependency
 4. **Scope chain** — Where code will execute
 5. **Potential issues** — Edge cases and scope errors
+
+## Context Efficiency
+- **Skim before deep-reading**: use \`document_symbols\` to understand file structure first, then \`read_file\` with \`startLine\`/\`endLine\` to read only the section you need
+- Prefer \`get_file_context(file, line, radius=20)\` over full \`read_file\` when inspecting specific code locations
+- Prefer AST-level tools (\`query_definition_by_name\`, \`query_scripted_effects\`, etc.) for verification — they return structured data, not raw code
+- When analyzing a large project, use \`list_directory\` + \`document_symbols\` to build an overview, then selectively deep-dive into specific files as needed
 ${gameKnowledge}`;
 }
 
@@ -189,10 +200,16 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 - **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
 - **AST-level tools** (read-only, faster): \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\`, \`get_entity_info\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`
 - **Web tools**: \`web_fetch\`, \`search_web\` — look up game wiki, Paradox forum, or modding docs
-- Prefer AST-level tools over file-system search — they are indexed and scope-aware
+- **ALWAYS prefer AST-level tools over file-system search** — they are indexed, scope-aware, and consume far less context
 
 ## Goal
 Help the user understand: file structure, event chains, trigger/effect patterns, scope logic, and cross-file dependencies.
+
+## Context Efficiency
+- **Tracing chains**: use \`query_definition_by_name\` → \`get_file_context\` for quick lookups. When you need full understanding of a mechanism, reading complete files is fine — just prefer targeted reads when a quick check suffices
+- **Structure first**: use \`document_symbols\` to understand a file's layout before deciding whether to read specific sections or the whole file
+- **AST tools are your fastest path**: \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\` return indexed results instantly — reach for these before \`search_mod_files\`
+- Tool results may contain deduplication metadata (\`_occurrences\`, \`_affectedFiles\`) — use these for accurate reporting
 ${gameKnowledge}`;
 }
 
@@ -206,6 +223,14 @@ function buildGeneralSystemPrompt(gameKnowledge: string, gameName: string): stri
 - Suited for research, one-off questions, and mixed tasks
 - Be concise and direct — answer the question, then stop
 - Use parallel tool calls when multiple pieces of information are needed simultaneously
+
+## Context Efficiency
+General mode has access to nearly all tools — choose the right tool for each situation:
+- **Quick verification?** Use AST queries (\`query_definition_by_name\`, \`query_scripted_effects\`, \`query_types\`) — they return structured data with minimal context cost
+- **Inspecting a specific location?** Use \`get_file_context(file, line, radius=20)\` — precise and lightweight
+- **Need full file understanding?** Reading complete files is appropriate, just prefer \`document_symbols\` first to know what you're looking at
+- **Searching across files?** Use \`search_mod_files\` or \`workspace_symbols\` before resorting to reading multiple files
+- Tool results may be deduplicated/segmented — metadata fields like \`_occurrences\` and \`_diagnosticsNote\` contain aggregation info for accurate reporting
 ${gameKnowledge}`;
 }
 
@@ -228,6 +253,39 @@ When calling \`get_diagnostics\`:
 - **Do NOT pass a small \`limit\` parameter** — the default (500) is designed for comprehensive reviews.
 - **Always check the \`truncated\` flag** in the response. If \`truncated: true\`, increase \`limit\` (up to 2000) and call again.
 - **Report the actual \`totalDiagCount\` from the response**, not the length of the returned array.
+- Note: Tool results may be automatically deduplicated/segmented to save context. Fields like \`_occurrences\`, \`_affectedFiles\`, and \`_diagnosticsNote\` contain aggregation metadata — use these to report accurate totals.
+
+## Large Project Review Strategy (IMPORTANT)
+When reviewing projects with many diagnostics, use a phased approach to stay within context limits:
+
+### Phase 1 — Triage
+Call \`get_diagnostics\` once. Note \`totalDiagnosticCount\` and the \`summary\` breakdown.
+If there are >200 total diagnostics, do NOT attempt to analyze every single one.
+
+### Phase 2 — Categorize
+Group the returned diagnostics by directory and severity. Report counts per category:
+\`\`\`
+events/: 45 errors, 12 warnings
+common/scripted_triggers/: 23 errors
+common/buildings/: 8 errors, 35 warnings
+\`\`\`
+
+### Phase 3 — Deep Dive
+Pick the top 3 most impactful categories (by error count or severity).
+For each, use \`get_file_context\` (targeted line ranges) to inspect 1-2 representative error sites.
+**NEVER read more than 5 full files in a single review session** — use \`get_file_context\` instead.
+
+### Phase 4 — Summary
+Provide an actionable summary with:
+1. Total error/warning counts
+2. Priority-ranked list of issues by category
+3. Specific fix recommendations for the most critical patterns
+4. Patterns that can be batch-fixed (e.g. "all 23 errors in scripted_triggers/ are missing \`exists\` checks")
+
+### Context Efficiency
+- Prefer \`query_definition_by_name\` and other AST tools over \`read_file\` for verification
+- Prefer \`get_file_context(file, line, radius=15)\` over reading entire files
+- If diagnostics results appear deduplicated (contain \`_occurrences\` fields), use those counts for accurate reporting
 ${gameKnowledge}`;
 }
 
@@ -298,9 +356,10 @@ export class PromptBuilder {
         const supplement = this.getModelSupplement(providerId);
         const projectRules = this.getProjectRulesPrompt();
         
-        let finalPrompt = basePrompt;
+        let finalPrompt = '';
+        if (projectRules) finalPrompt += projectRules + '\n';
+        finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
-        if (projectRules) finalPrompt += '\n' + projectRules;
         
         return finalPrompt;
     }
@@ -312,7 +371,7 @@ export class PromptBuilder {
             if (fs.existsSync(rulesPath)) {
                 const content = fs.readFileSync(rulesPath, 'utf8');
                 if (content.trim()) {
-                    return `\n## Project Context & Rules (from CWTOOLS.md)\n${content.trim()}\n`;
+                    return `<project-premise>\n# MANDATORY PROJECT RULES & CONTEXT (From CWTOOLS.md)\nYou MUST strictly read and follow these rules before attempting any task. These project-specific rules supersede all general instructions:\n\n${content.trim()}\n</project-premise>\n`;
                 }
             }
         } catch (e) {

@@ -128,6 +128,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     file: { type: 'string', description: 'Absolute file path (must be in the workspace)' },
                     line: { type: 'number', description: 'Line number (0-based)' },
                     column: { type: 'number', description: 'Column number (0-based)' },
+                    limit: { type: 'number', description: 'Max completions to return (default 30). Increase if you need to see more options.' },
                 },
                 required: ['file', 'line', 'column'],
             },
@@ -457,8 +458,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    filter: { type: 'string', description: 'Optional substring filter on effect name' },
-                    limit: { type: 'number', description: 'Max results (default 200)' },
+                    filter: { type: 'string', description: 'Optional substring filter on effect name. Without filter, results are limited to 50; with filter, up to 200.' },
+                    limit: { type: 'number', description: 'Max results (default 50 without filter, 200 with filter)' },
                 },
                 required: [],
             },
@@ -472,8 +473,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    filter: { type: 'string', description: 'Optional substring filter on trigger name' },
-                    limit: { type: 'number', description: 'Max results (default 200)' },
+                    filter: { type: 'string', description: 'Optional substring filter on trigger name. Without filter, results are limited to 50; with filter, up to 200.' },
+                    limit: { type: 'number', description: 'Max results (default 50 without filter, 200 with filter)' },
                 },
                 required: [],
             },

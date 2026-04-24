@@ -611,23 +611,29 @@ let completion
                     | Some lastWord when not (String.IsNullOrWhiteSpace lastWord) -> lastWord.Split('.') |> Array.last |> Some
                     | _ -> None
 
-                let itemCount = items |> Seq.length
+                // Single-pass: materialize once, then dedup + filter + count in one pass
+                let itemsArr = items |> Seq.toArray
+                let itemCount = itemsArr.Length
                 let partialReturn = itemCount > 2000
 
-                let filtered =
-                    match prefixSoFar, partialReturn with
-                    | None, _ -> items
-                    | _, false -> items
-                    | Some prefix, true ->
-                        items
-                        |> Seq.filter (fun i -> i.label.Contains(prefix, StringComparison.OrdinalIgnoreCase))
+                // Single-pass dedup + filter using HashSet
+                let seen = HashSet<struct (string * MarkupContent option)>()
+                let dedupedItems = ResizeArray<CompletionItem>(min itemCount 2048)
+                for i in 0 .. itemsArr.Length - 1 do
+                    let item = itemsArr.[i]
+                    if not (item.label.StartsWith("$", StringComparison.OrdinalIgnoreCase)) then
+                        let matchesPrefix =
+                            match prefixSoFar, partialReturn with
+                            | None, _ -> true
+                            | _, false -> true
+                            | Some prefix, true ->
+                                item.label.Contains(prefix, StringComparison.OrdinalIgnoreCase)
+                        if matchesPrefix then
+                            let key = struct (item.label, item.documentation)
+                            if seen.Add(key) then
+                                dedupedItems.Add(item)
 
-                let deduped =
-                    filtered
-                    |> Seq.distinctBy (fun i -> (i.label, i.documentation))
-                    |> Seq.filter (fun i -> not (i.label.StartsWith("$", StringComparison.OrdinalIgnoreCase)))
-
-                let optimised = optimiseCompletion deduped
+                let optimised = optimiseCompletion dedupedItems
                 let itemsList = optimised |> Seq.toList
 
                 let isScriptValueLike =

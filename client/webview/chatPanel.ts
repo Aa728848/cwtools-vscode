@@ -1,5 +1,5 @@
 // @ts-nocheck  
-(function() {
+(function () {
     const vscode = acquireVsCodeApi();
     const chatArea = document.getElementById('chatArea');
     const input = document.getElementById('input');
@@ -26,10 +26,10 @@
         if (!input || !dropdown) return;
 
         function render(filter) {
-            const term = (filter||'').toLowerCase();
+            const term = (filter || '').toLowerCase();
             const opts = getOptions() || [];
             const html = opts.filter(m => m.toLowerCase().includes(term))
-                .map(m => '<div class="ap-dropdown-item">'+escapeHtml(m)+'</div>').join('');
+                .map(m => '<div class="ap-dropdown-item">' + escapeHtml(m) + '</div>').join('');
             dropdown.innerHTML = html;
             Array.from(dropdown.children).forEach(el => {
                 el.onmousedown = (e) => {
@@ -40,7 +40,7 @@
                 };
             });
         }
-        
+
         input.addEventListener('focus', () => { render(input.value); dropdown.style.display = 'block'; });
         input.addEventListener('blur', () => { setTimeout(() => { dropdown.style.display = 'none'; }, 150); });
         input.addEventListener('input_ap', () => { render(input.value); });
@@ -150,24 +150,24 @@
         });
     }
 
-    bindBtn('btnNewTopic',      () => vscode.postMessage({ type: 'newTopic' }));
-    bindBtn('btnTopics',        () => topicsPanel.classList.toggle('show'));
+    bindBtn('btnNewTopic', () => vscode.postMessage({ type: 'newTopic' }));
+    bindBtn('btnTopics', () => topicsPanel.classList.toggle('show'));
     bindBtn('btnNewTopicPanel', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); });
-    bindBtn('btnSettings',      () => vscode.postMessage({ type: 'openSettings' }));
-    bindBtn('settingsBackBtn',  closeSettings);
-    bindBtn('testConnBtn',      testConnection);
-    bindBtn('saveSettingsBtn',  saveSettings);
-    bindBtn('keyToggleBtn',     () => { const k = document.getElementById('settingsApiKey'); if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
+    bindBtn('btnSettings', () => vscode.postMessage({ type: 'openSettings' }));
+    bindBtn('settingsBackBtn', closeSettings);
+    bindBtn('testConnBtn', testConnection);
+    bindBtn('saveSettingsBtn', saveSettings);
+    bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey'); if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
     bindBtn('fetchApiModelsBtn', () => { fetchApiModels(); });
-    bindBtn('detectBtn',        detectOllamaModels);
-    bindBtn('accChat',          () => toggleAccordion('chatModelSection'));
-    bindBtn('accInline',        () => toggleAccordion('inlineSection'));
-    bindBtn('accMcp',           () => toggleAccordion('mcpSection'));
-    bindBtn('accAgent',         () => toggleAccordion('agentSection'));
-    bindBtn('addMcpServerBtn',  () => addMcpServerBlock());
-    bindBtn('accUsage',         () => { toggleAccordion('usageSection'); vscode.postMessage({ type: 'requestUsageStats' }); });
-    bindBtn('refreshUsageBtn',  () => vscode.postMessage({ type: 'requestUsageStats' }));
-    bindBtn('clearUsageBtn',    () => {
+    bindBtn('detectBtn', detectOllamaModels);
+    bindBtn('accChat', () => toggleAccordion('chatModelSection'));
+    bindBtn('accInline', () => toggleAccordion('inlineSection'));
+    bindBtn('accMcp', () => toggleAccordion('mcpSection'));
+    bindBtn('accAgent', () => toggleAccordion('agentSection'));
+    bindBtn('addMcpServerBtn', () => addMcpServerBlock());
+    bindBtn('accUsage', () => { toggleAccordion('usageSection'); vscode.postMessage({ type: 'requestUsageStats' }); });
+    bindBtn('refreshUsageBtn', () => vscode.postMessage({ type: 'requestUsageStats' }));
+    bindBtn('clearUsageBtn', () => {
         if (confirm('确定要清空所有 Token 消耗统计吗？此操作不可逆转。')) {
             vscode.postMessage({ type: 'clearUsageStats' });
         }
@@ -209,15 +209,15 @@
 
     // ── Slash command popup ────────────────────────────────────────────────────
     const SLASH_COMMANDS = [
-        { cmd: '/init',     desc: '扫描项目，生成 CWTOOLS.md 规则文件（类 OpenCode /init）' },
-        { cmd: '/clear',    desc: '清空当前对话，开始新话题' },
-        { cmd: '/fork',     desc: '从当前位置分叉对话' },
-        { cmd: '/archive',  desc: '归档当前话题' },
-        { cmd: '/mode:build',   desc: '切换到 Build 模式（生成代码）' },
-        { cmd: '/mode:plan',    desc: '切换到 Plan 模式（只读规划）' },
+        { cmd: '/init', desc: '扫描项目，生成 CWTOOLS.md 规则文件（类 OpenCode /init）' },
+        { cmd: '/clear', desc: '清空当前对话，开始新话题' },
+        { cmd: '/fork', desc: '从当前位置分叉对话' },
+        { cmd: '/archive', desc: '归档当前话题' },
+        { cmd: '/mode:build', desc: '切换到 Build 模式（生成代码）' },
+        { cmd: '/mode:plan', desc: '切换到 Plan 模式（只读规划）' },
         { cmd: '/mode:explore', desc: '切换到 Explore 模式（分析代码库）' },
         { cmd: '/mode:general', desc: '切换到 General 模式（通用问答）' },
-        { cmd: '/mode:review',  desc: '切换到 Review 模式（代码审查）' },
+        { cmd: '/mode:review', desc: '切换到 Review 模式（代码审查）' },
     ];
     const slashPopup = document.getElementById('slashPopup');
 
@@ -345,7 +345,7 @@
                 let w = img.width, h = img.height;
                 if (w > MAX || h > MAX) {
                     if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
-                    else        { w = Math.round(w * MAX / h); h = MAX; }
+                    else { w = Math.round(w * MAX / h); h = MAX; }
                 }
                 const canvas = document.createElement('canvas');
                 canvas.width = w; canvas.height = h;
@@ -358,7 +358,7 @@
             img.onerror = () => callback(original); // fallback: use original if img fails
             img.src = original;
         };
-        reader.onerror = () => {};  // silently ignore unreadable files
+        reader.onerror = () => { };  // silently ignore unreadable files
         reader.readAsDataURL(file);
     }
 
@@ -493,11 +493,11 @@
     }
 
     const MODE_META = {
-        build:   { icon: '📝', label: null,             bodyClass: null },
-        plan:    { icon: '📋', label: '📋 Plan Mode — 只读分析，不修改文件', bodyClass: 'plan-mode' },
+        build: { icon: '📝', label: null, bodyClass: null },
+        plan: { icon: '📋', label: '📋 Plan Mode — 只读分析，不修改文件', bodyClass: 'plan-mode' },
         explore: { icon: '🔭', label: '🔭 Explore Mode — 探索代码库结构', bodyClass: 'explore-mode' },
-        general: { icon: '💬', label: '💬 General Mode — 通用问答',        bodyClass: 'general-mode' },
-        review:  { icon: '🔎', label: '🔎 Review Mode — 代码审查',        bodyClass: 'review-mode' },
+        general: { icon: '💬', label: '💬 General Mode — 通用问答', bodyClass: 'general-mode' },
+        review: { icon: '🔎', label: '🔎 Review Mode — 代码审查', bodyClass: 'review-mode' },
     };
 
     /**
@@ -539,8 +539,8 @@
     // ── Token usage bar ────────────────────────────────────────────────────────
     function updateTokenUsage(used, limit) {
         if (!used) return;
-        const bar   = document.getElementById('tokenUsageBar');
-        const fill  = document.getElementById('tokenUsageFill');
+        const bar = document.getElementById('tokenUsageBar');
+        const fill = document.getElementById('tokenUsageFill');
         const label = document.getElementById('tokenUsageLabel');
         if (!bar || !fill || !label) return;
         const pct = Math.min(100, Math.round((used / limit) * 100));
@@ -555,30 +555,30 @@
     function formatTime(ts) {
         if (!ts) return '';
         const d = new Date(ts);
-        return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+        return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
     }
 
     // ── HTML escape ────────────────────────────────────────────────────────────
     function escapeHtml(t) {
-        return String(t ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        return String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     // ── Markdown renderer ──────────────────────────────────────────────────────
     function inlineMd(raw) {
-        let s = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        let s = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const codeBlocks = [];
-        s = s.replace(/`([^`]+)`/g, (_,c) => {
-            codeBlocks.push('<code>' + c.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>') + '</code>');
+        s = s.replace(/`([^`]+)`/g, (_, c) => {
+            codeBlocks.push('<code>' + c.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') + '</code>');
             return '\x01CODE' + (codeBlocks.length - 1) + '\x01';
         });
-        s = s.replace(/\*\*\*([^*]+)\*\*\*/g,'<strong><em>$1</em></strong>');
-        s = s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
-        s = s.replace(/(^|\W)__([^_\n]+)__(\W|$)/g,'$1<strong>$2</strong>$3');
-        s = s.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
-        s = s.replace(/(^|\W)_([^_\n]+)_(\W|$)/g,'$1<em>$2</em>$3');
-        s = s.replace(/~~([^~]+)~~/g,'<del>$1</del>');
-        s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
-        s = s.replace(/\x01CODE(\d+)\x01/g, (_,i) => codeBlocks[parseInt(i)]);
+        s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+        s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/(^|\W)__([^_\n]+)__(\W|$)/g, '$1<strong>$2</strong>$3');
+        s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+        s = s.replace(/(^|\W)_([^_\n]+)_(\W|$)/g, '$1<em>$2</em>$3');
+        s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+        s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        s = s.replace(/\x01CODE(\d+)\x01/g, (_, i) => codeBlocks[parseInt(i)]);
         return s;
     }
 
@@ -587,8 +587,8 @@
 
         // Phase 1: extract fenced code blocks to avoid mis-parsing their content
         const blocks = [];
-        let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_,lang,code) => {
-            const i = blocks.length; blocks.push({lang:lang.trim(),code}); return '\x00BLOCK'+i+'\x00';
+        let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+            const i = blocks.length; blocks.push({ lang: lang.trim(), code }); return '\x00BLOCK' + i + '\x00';
         });
 
         // Phase 2: line-by-line state machine — correctly handles ## headings at any position
@@ -601,8 +601,8 @@
             const lineHtml = paraLines.map(line => {
                 const t = line.trim();
                 if (/^\x00BLOCK\d+\x00$/.test(t)) {
-                    const {lang,code} = blocks[+t.match(/\d+/)[0]];
-                    return '<div class="md-codeblock"><div class="md-codeblock-lang">'+escapeHtml(lang)+'</div><code>'+escapeHtml(code)+'</code></div>';
+                    const { lang, code } = blocks[+t.match(/\d+/)[0]];
+                    return '<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>';
                 }
                 return inlineMd(line);
             });
@@ -621,8 +621,8 @@
             // Fenced code block placeholder (standalone line)
             if (/^\x00BLOCK\d+\x00$/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
-                const {lang,code} = blocks[+trimmed.match(/\d+/)[0]];
-                out.push('<div class="md-codeblock"><div class="md-codeblock-lang">'+escapeHtml(lang)+'</div><code>'+escapeHtml(code)+'</code></div>');
+                const { lang, code } = blocks[+trimmed.match(/\d+/)[0]];
+                out.push('<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>');
                 i++; continue;
             }
 
@@ -631,7 +631,7 @@
             if (hdm) {
                 flushPara(paraLines); paraLines = [];
                 const lv = hdm[1].length;
-                out.push('<h'+lv+'>'+inlineMd(hdm[2])+'</h'+lv+'>');
+                out.push('<h' + lv + '>' + inlineMd(hdm[2]) + '</h' + lv + '>');
                 i++; continue;
             }
 
@@ -653,16 +653,16 @@
             }
 
             // GFM Table — header row | separator row | data rows (all consecutive)
-            if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[\|\s:-]+$/.test(lines[i+1].trim())) {
+            if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[\|\s:-]+$/.test(lines[i + 1].trim())) {
                 flushPara(paraLines); paraLines = [];
                 const tblLines = [];
                 while (i < lines.length && /^\|/.test(lines[i].trim())) { tblLines.push(lines[i]); i++; }
                 if (tblLines.length >= 2) {
-                    const headers = tblLines[0].split('|').map(c=>c.trim()).filter(Boolean);
-                    const rows = tblLines.slice(2).map(r=>r.split('|').map(c=>c.trim()).filter(Boolean));
-                    let tbl='<table><thead><tr>'+headers.map(h=>'<th>'+inlineMd(h)+'</th>').join('')+'</tr></thead><tbody>';
-                    rows.forEach(r=>{ tbl+='<tr>'+r.map(c=>'<td>'+inlineMd(c)+'</td>').join('')+'</tr>'; });
-                    out.push(tbl+'</tbody></table>');
+                    const headers = tblLines[0].split('|').map(c => c.trim()).filter(Boolean);
+                    const rows = tblLines.slice(2).map(r => r.split('|').map(c => c.trim()).filter(Boolean));
+                    let tbl = '<table><thead><tr>' + headers.map(h => '<th>' + inlineMd(h) + '</th>').join('') + '</tr></thead><tbody>';
+                    rows.forEach(r => { tbl += '<tr>' + r.map(c => '<td>' + inlineMd(c) + '</td>').join('') + '</tr>'; });
+                    out.push(tbl + '</tbody></table>');
                 }
                 continue;
             }
@@ -680,7 +680,7 @@
                     else break;
                 }
                 if (cur !== null) items.push(cur);
-                out.push('<ul>'+items.map(it=>'<li>'+inlineMd(it)+'</li>').join('')+'</ul>');
+                out.push('<ul>' + items.map(it => '<li>' + inlineMd(it) + '</li>').join('') + '</ul>');
                 continue;
             }
 
@@ -697,7 +697,7 @@
                     else break;
                 }
                 if (cur !== null) items.push(cur);
-                out.push('<ol>'+items.map(it=>'<li>'+inlineMd(it)+'</li>').join('')+'</ol>');
+                out.push('<ol>' + items.map(it => '<li>' + inlineMd(it) + '</li>').join('') + '</ol>');
                 continue;
             }
 
@@ -714,13 +714,13 @@
     // ── OpenCode-style step rendering ─────────────────────────────────────────
     // Tool step icons — minimal, professional
     const TOOL_ICONS = {
-        read_file:'📄', write_file:'💾', edit_file:'✏️',
-        list_directory:'📁', search_mod_files:'🔍', validate_code:'✅',
-        get_file_context:'📄', get_diagnostics:'🩺', get_completion_at:'💡',
-        document_symbols:'🔖', workspace_symbols:'🔖', query_scope:'🔭',
-        query_types:'📐', query_rules:'📏', query_references:'🔗', todo_write:'📋',
+        read_file: '📄', write_file: '💾', edit_file: '✏️',
+        list_directory: '📁', search_mod_files: '🔍', validate_code: '✅',
+        get_file_context: '📄', get_diagnostics: '🩺', get_completion_at: '💡',
+        document_symbols: '🔖', workspace_symbols: '🔖', query_scope: '🔭',
+        query_types: '📐', query_rules: '📏', query_references: '🔗', todo_write: '📋',
     };
-    const WRITE_TOOL_NAMES = new Set(['edit_file','write_file','read_file','delete_file']);
+    const WRITE_TOOL_NAMES = new Set(['edit_file', 'write_file', 'read_file', 'delete_file']);
 
     /**
      * Build ONE tool-pair <div class="tool-pair"> that shows:
@@ -742,12 +742,12 @@
         if (resultStep && resultStep.toolResult) {
             const r = resultStep.toolResult;
             if (r && r.success === true) {
-                const added   = r.stats ? r.stats.linesAdded   || 0 : 0;
+                const added = r.stats ? r.stats.linesAdded || 0 : 0;
                 const removed = r.stats ? r.stats.linesRemoved || 0 : 0;
                 const diffStr = (added || removed) ? ` +${added}/-${removed}` : '';
                 resultHtml = `<div class="tp-result ok">✓${escapeHtml(diffStr)}</div>`;
             } else if (r && r.success === false) {
-                resultHtml = `<div class="tp-result err">✗ ${escapeHtml(r.message||r.error||'')}</div>`;
+                resultHtml = `<div class="tp-result err">✗ ${escapeHtml(r.message || r.error || '')}</div>`;
             } else if (r && r.error) {
                 resultHtml = `<div class="tp-result err">✗ ${escapeHtml(r.error)}</div>`;
             } else if (r && r.skipped) {
@@ -822,10 +822,31 @@
                 div.appendChild(det);
             }
 
+            // 2.5 Text Delta block (raw streaming chunks)
+            const textDeltaSteps = steps.filter(s => s.type === 'text_delta');
+            if (textDeltaSteps.length > 0) {
+                const textDeltaContent = textDeltaSteps.map(s => s.content || '').join('').trim();
+                if (textDeltaContent) {
+                    const det = document.createElement('details');
+                    det.className = 'thinking-block';
+                    const sum = document.createElement('summary');
+                    sum.innerHTML = '<span class="think-pulse" style="background:#5da2ff"></span>Text_Delta · ' + textDeltaSteps.length + ' chunks';
+                    det.appendChild(sum);
+                    const body = document.createElement('div');
+                    body.className = 'thinking-body';
+                    body.style.whiteSpace = 'pre-wrap';
+                    body.style.fontFamily = 'var(--vscode-editor-font-family)';
+                    body.textContent = textDeltaContent;
+                    det.appendChild(body);
+                    div.appendChild(det);
+                }
+            }
+
             // Also show non-tool, non-thinking special steps (errors, compaction, etc.)
             const specialSteps = steps.filter(s =>
                 s.type !== 'tool_call' && s.type !== 'tool_result' &&
-                s.type !== 'thinking_content' && s.type !== 'thinking'
+                s.type !== 'thinking_content' && s.type !== 'thinking' &&
+                s.type !== 'text_delta'
             );
             for (const s of specialSteps) {
                 const el = document.createElement('div');
@@ -1125,13 +1146,13 @@
             `<button class="permission-allow-btn" data-permid="${safeId}">✅ 允许</button>` +
             `<button class="permission-deny-btn" data-permid="${safeId}">❌ 拒绝</button>` +
             `</div>`;
-        div.querySelector('.permission-allow-btn').addEventListener('click', function() {
+        div.querySelector('.permission-allow-btn').addEventListener('click', function () {
             this.disabled = true; div.querySelector('.permission-deny-btn').disabled = true;
             this.textContent = '已允许 ✅';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
             dismissCard(div, 400);
         });
-        div.querySelector('.permission-deny-btn').addEventListener('click', function() {
+        div.querySelector('.permission-deny-btn').addEventListener('click', function () {
             this.disabled = true; div.querySelector('.permission-allow-btn').disabled = true;
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
@@ -1342,11 +1363,11 @@
                 const fb = document.getElementById('fetchApiModelsBtn');
                 if (fb) { fb.disabled = false; fb.textContent = '☁️ 拉取支持的模型'; }
                 if (msg.error) { document.getElementById('apiKeyStatus').textContent = '获取失败: ' + msg.error; document.getElementById('apiKeyStatus').style.color = '#ff9800'; }
-                else { 
+                else {
                     const p = settingsProviders.find(p => p.id === msg.providerId);
                     if (p && msg.models && msg.models.length > 0) {
                         const newModels = msg.models.map(m => m.id);
-                        for(const m of newModels) {
+                        for (const m of newModels) {
                             if (!p.models.includes(m)) p.models.push(m);
                         }
                         if (msg.dynContexts) {
@@ -1355,7 +1376,7 @@
                         updateModelUI(msg.providerId, getSelectedModel(), null);
                         const ctxInfo = msg.ctxNote ? ` ${msg.ctxNote}` : '';
                         document.getElementById('modelHint').textContent = `成功从端点加载了 ${newModels.length} 个模型！${ctxInfo}`;
-                        document.getElementById('apiKeyStatus').textContent = '✅ 已成功获取模型'; 
+                        document.getElementById('apiKeyStatus').textContent = '✅ 已成功获取模型';
                         document.getElementById('apiKeyStatus').style.color = '#4caf50';
                     }
                 }
@@ -1371,12 +1392,12 @@
                 const stats = msg.stats;
                 const c = document.getElementById('usageStatsContent');
                 if (!c) break;
-                
+
                 if (!stats || stats.totalTokens === 0) {
                     c.innerHTML = '<div style="opacity:0.6; text-align:center; padding: 10px;">暂无 Token 消耗数据</div>';
                     break;
                 }
-                
+
                 let html = '';
 
                 // ── Summary ──
@@ -1649,15 +1670,15 @@
     // ── Topic list with date groups ────────────────────────────────────────────
     function groupTopicsByDate(topics) {
         const now = Date.now(); const DAY = 86400000;
-        const groups = [{ label:'今天',items:[] },{ label:'昨天',items:[] },{ label:'本周',items:[] },{ label:'更早',items:[] }];
+        const groups = [{ label: '今天', items: [] }, { label: '昨天', items: [] }, { label: '本周', items: [] }, { label: '更早', items: [] }];
         for (const t of topics) {
-            const age = now - (t.updatedAt||0);
-            if (age<DAY) groups[0].items.push(t);
-            else if (age<DAY*2) groups[1].items.push(t);
-            else if (age<DAY*7) groups[2].items.push(t);
+            const age = now - (t.updatedAt || 0);
+            if (age < DAY) groups[0].items.push(t);
+            else if (age < DAY * 2) groups[1].items.push(t);
+            else if (age < DAY * 7) groups[2].items.push(t);
             else groups[3].items.push(t);
         }
-        return groups.filter(g=>g.items.length>0);
+        return groups.filter(g => g.items.length > 0);
     }
 
     function renderTopics(topics) {
@@ -1697,24 +1718,24 @@
     }
 
     function renderTodos(todos) {
-        if (!todos||!todos.length) { todoPanel.classList.remove('has-items'); document.getElementById('todoList').innerHTML=''; return; }
+        if (!todos || !todos.length) { todoPanel.classList.remove('has-items'); document.getElementById('todoList').innerHTML = ''; return; }
         todoPanel.classList.add('has-items');
-        const icons = { pending:'○', in_progress:'●', done:'✓' };
+        const icons = { pending: '○', in_progress: '●', done: '✓' };
         document.getElementById('todoList').innerHTML = todos.map(t => {
-            const cls = t.status==='done'?'done':t.status==='in_progress'?'in_progress':'';
-            return '<div class="todo-item '+cls+'"><span>'+(icons[t.status]||'○')+'</span>'+escapeHtml(t.content)+'</div>';
+            const cls = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in_progress' : '';
+            return '<div class="todo-item ' + cls + '"><span>' + (icons[t.status] || '○') + '</span>' + escapeHtml(t.content) + '</div>';
         }).join('');
     }
 
     function updateQuickModelSelector(providers, current, ollamaModels) {
         const qms = document.getElementById('quickModelSelect');
         if (!qms) return;
-        const provider = providers.find(p=>p.id===current.provider);
-        const models = current.provider==='ollama' ? (ollamaModels||[]).map(m=>m.name) : (provider?provider.models:[]);
+        const provider = providers.find(p => p.id === current.provider);
+        const models = current.provider === 'ollama' ? (ollamaModels || []).map(m => m.name) : (provider ? provider.models : []);
         qms.innerHTML = '';
-        if (models.length>0) {
-            for (const m of models) { const opt=document.createElement('option'); opt.value=m; opt.textContent=m; opt.selected=m===current.model; qms.appendChild(opt); }
-        } else { const opt=document.createElement('option'); opt.value=current.model||''; opt.textContent=current.model||'(未设置)'; qms.appendChild(opt); }
+        if (models.length > 0) {
+            for (const m of models) { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; opt.selected = m === current.model; qms.appendChild(opt); }
+        } else { const opt = document.createElement('option'); opt.value = current.model || ''; opt.textContent = current.model || '(未设置)'; qms.appendChild(opt); }
     }
 
     function showSettingsPage(providers, current, ollamaModels) {
@@ -1722,24 +1743,24 @@
         settingsOllamaModels = ollamaModels || [];
         updateQuickModelSelector(providers, current, ollamaModels);
         const sel = document.getElementById('settingsProvider');
-        sel.innerHTML = providers.map(p=>'<option value="'+p.id+'"'+(p.id===current.provider?' selected':'')+'>'+escapeHtml(p.name)+'</option>').join('');
+        sel.innerHTML = providers.map(p => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const inlineSel = document.getElementById('inlineProvider');
-        inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map(p=>'<option value="'+p.id+'"'+(p.id===current.inlineCompletion?.provider?' selected':'')+'>'+escapeHtml(p.name)+'</option>').join('');
+        inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map(p => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         document.getElementById('settingsApiKey').value = '';
-        document.getElementById('settingsEndpoint').value = current.endpoint||'';
+        document.getElementById('settingsEndpoint').value = current.endpoint || '';
         // Auto-fill context size: prefer per-model lookup, then user-saved value
         const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
         document.getElementById('settingsCtx').value = initCtx;
-        document.getElementById('inlineEnabled').checked = current.inlineCompletion?.enabled??false;
+        document.getElementById('inlineEnabled').checked = current.inlineCompletion?.enabled ?? false;
         const overlapEl = document.getElementById('inlineOverlapStripping');
         if (overlapEl) overlapEl.checked = current.inlineCompletion?.overlapStripping ?? true;
-        document.getElementById('inlineEndpoint').value = current.inlineCompletion?.endpoint||'';
-        document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs||500;
-        document.getElementById('agentWriteMode').value = current.agentFileWriteMode||'confirm';
+        document.getElementById('inlineEndpoint').value = current.inlineCompletion?.endpoint || '';
+        document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs || 500;
+        document.getElementById('agentWriteMode').value = current.agentFileWriteMode || 'confirm';
         // Brave Search API key — show masked placeholder if already set
         const braveKeyEl = document.getElementById('braveSearchApiKey');
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
-        
+
         // Render MCP Servers
         const mcpList = document.getElementById('mcpServersList');
         if (mcpList) mcpList.innerHTML = '';
@@ -1753,24 +1774,24 @@
             const filteredProviders = isFimChecked
                 ? providers.filter(p => p.supportsFIM)
                 : providers;
-            inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + filteredProviders.map(p=>'<option value="'+p.id+'"'+(p.id===currentPid?' selected':'')+'>'+escapeHtml(p.name)+'</option>').join('');
+            inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + filteredProviders.map(p => '<option value="' + p.id + '"' + (p.id === currentPid ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
             // If previously selected provider is no longer in list, reset
-            if (isFimChecked && currentPid && !filteredProviders.find(p=>p.id===currentPid)) {
+            if (isFimChecked && currentPid && !filteredProviders.find(p => p.id === currentPid)) {
                 inlineSel.value = '';
             }
         }
 
         function updateInlineModelSelect(pid, selectedModel, ollamaModels) {
-            const p2 = providers.find(p=>p.id===(pid||current.provider));
-            let ms = (pid||current.provider)==='ollama'?(ollamaModels||[]).map(m=>m.name):(p2?p2.models:[]);
+            const p2 = providers.find(p => p.id === (pid || current.provider));
+            let ms = (pid || current.provider) === 'ollama' ? (ollamaModels || []).map(m => m.name) : (p2 ? p2.models : []);
             // Filter out thinking/reasoning models — they can't do inline completion
             ms = ms.filter(m => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
-            
+
             // Filter out non-FIM models if FIM mode is enabled
             const isFimNode = document.getElementById('inlineFimMode');
             if (isFimNode && isFimNode.checked && p2) {
                 const fimCapableModels = {
-                    'deepseek-chat': true, 'deepseek-coder': true,
+                    'deepseek-v4-pro': true, 'deepseek-v4-flash': true, 'deepseek-coder': true,
                     'qwen2.5-coder': true, 'codellama': true, 'starcoder': true,
                     'qwen': false, 'gpt-': false, 'claude-': false
                 };
@@ -1783,10 +1804,10 @@
                     return p2.supportsFIM;
                 });
             }
-            
+
             const inp = document.getElementById('inlineModelInput');
             inp.value = selectedModel || '';
-            
+
             setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
         }
         const inlineProviderSel = document.getElementById('inlineProvider');
@@ -1828,7 +1849,7 @@
             if (model.includes(key)) return settingsModelContextTokens[key];
         }
         // 4. Provider-level fallback
-        const provider = settingsProviders.find(p=>p.id===providerId);
+        const provider = settingsProviders.find(p => p.id === providerId);
         return (provider && provider.maxContextTokens) ? provider.maxContextTokens : 0;
     }
 
@@ -1843,29 +1864,29 @@
     }
 
     function updateApiKeyStatus(providerId, providers) {
-        const p = (providers||settingsProviders).find(x=>x.id===providerId);
+        const p = (providers || settingsProviders).find(x => x.id === providerId);
         const status = document.getElementById('apiKeyStatus');
         const group = document.getElementById('apiKeyGroup');
-        if (providerId==='ollama') { group.style.display='none'; return; }
+        if (providerId === 'ollama') { group.style.display = 'none'; return; }
         group.style.display = '';
-        if (p&&p.hasKey) { status.textContent='✅ 已配置 API Key'; status.style.color='#4caf50'; }
-        else { status.textContent='⚠️ 尚未配置 API Key'; status.style.color='#ff9800'; }
+        if (p && p.hasKey) { status.textContent = '✅ 已配置 API Key'; status.style.color = '#4caf50'; }
+        else { status.textContent = '⚠️ 尚未配置 API Key'; status.style.color = '#ff9800'; }
     }
 
     function onProviderChange() {
         const id = document.getElementById('settingsProvider').value;
-        updateModelUI(id,'',settingsOllamaModels);
+        updateModelUI(id, '', settingsOllamaModels);
         updateEndpointHint(id);
-        updateApiKeyStatus(id,settingsProviders);
+        updateApiKeyStatus(id, settingsProviders);
         // Auto-fill context with provider default when user switches provider
-        const provider = settingsProviders.find(p=>p.id===id);
+        const provider = settingsProviders.find(p => p.id === id);
         if (provider && provider.maxContextTokens > 0) {
             document.getElementById('settingsCtx').value = provider.maxContextTokens;
         }
     }
 
     function updateModelUI(providerId, currentModel, ollamaModels) {
-        const provider = settingsProviders.find(p=>p.id===providerId);
+        const provider = settingsProviders.find(p => p.id === providerId);
         const modelInput = document.getElementById('settingsModelInput');
         const detectBtn = document.getElementById('detectBtn');
         const modelHint = document.getElementById('modelHint');
@@ -1878,19 +1899,19 @@
 
         let currentDropdownOpts = [];
 
-        if (providerId==='ollama') {
-            document.getElementById('apiKeyGroup').style.display='none';
-            if (ollamaModels&&ollamaModels.length>0) {
-                currentDropdownOpts = ollamaModels.map(m=>m.name);
-                modelHint.textContent='已检测到 '+ollamaModels.length+' 个本地模型';
-            } else { currentDropdownOpts=[]; modelHint.textContent='点击「检测」获取 Ollama 模型'; }
-            detectBtn.style.display='';
-        } else if (provider&&provider.models.length>0) {
+        if (providerId === 'ollama') {
+            document.getElementById('apiKeyGroup').style.display = 'none';
+            if (ollamaModels && ollamaModels.length > 0) {
+                currentDropdownOpts = ollamaModels.map(m => m.name);
+                modelHint.textContent = '已检测到 ' + ollamaModels.length + ' 个本地模型';
+            } else { currentDropdownOpts = []; modelHint.textContent = '点击「检测」获取 Ollama 模型'; }
+            detectBtn.style.display = '';
+        } else if (provider && provider.models.length > 0) {
             currentDropdownOpts = provider.models;
-            modelHint.textContent='可选择下拉项，或直接输入自定义模型名';
-            detectBtn.style.display='none';
-        } else { currentDropdownOpts=[]; modelHint.textContent=''; detectBtn.style.display='none'; }
-        
+            modelHint.textContent = '可选择下拉项，或直接输入自定义模型名';
+            detectBtn.style.display = 'none';
+        } else { currentDropdownOpts = []; modelHint.textContent = ''; detectBtn.style.display = 'none'; }
+
         // Setup dropdown logic
         setupApDropdown('settingsModelInput', 'settingsModelDatalist', () => currentDropdownOpts, onModelSelected);
 
@@ -1912,26 +1933,26 @@
     }
 
     function updateEndpointHint(providerId) {
-        const provider = settingsProviders.find(p=>p.id===providerId);
+        const provider = settingsProviders.find(p => p.id === providerId);
         const hint = document.getElementById('endpointHint');
         const ep = document.getElementById('settingsEndpoint');
-        if (provider) { hint.textContent='默认: '+(provider.defaultEndpoint||'由 provider 决定'); if(!ep.value) ep.placeholder=provider.defaultEndpoint||'留空使用默认'; }
+        if (provider) { hint.textContent = '默认: ' + (provider.defaultEndpoint || '由 provider 决定'); if (!ep.value) ep.placeholder = provider.defaultEndpoint || '留空使用默认'; }
     }
 
     function onEndpointChange() {
-        if (document.getElementById('settingsProvider').value==='ollama') {
-            settingsOllamaModels=[];
-            document.getElementById('settingsModelSelect').style.display='none';
-            document.getElementById('settingsModelInput').style.display='';
-            document.getElementById('modelHint').textContent='端点已更改，点击「检测」重新获取模型';
+        if (document.getElementById('settingsProvider').value === 'ollama') {
+            settingsOllamaModels = [];
+            document.getElementById('settingsModelSelect').style.display = 'none';
+            document.getElementById('settingsModelInput').style.display = '';
+            document.getElementById('modelHint').textContent = '端点已更改，点击「检测」重新获取模型';
         }
     }
 
     function detectOllamaModels() {
-        const btn=document.getElementById('detectBtn'); const ep=document.getElementById('settingsEndpoint').value.trim();
-        btn.disabled=true; btn.textContent='检测中...';
-        document.getElementById('modelHint').textContent='正在连接 Ollama...';
-        vscode.postMessage({ type:'detectOllamaModels', endpoint: ep||'http://localhost:11434/v1' });
+        const btn = document.getElementById('detectBtn'); const ep = document.getElementById('settingsEndpoint').value.trim();
+        btn.disabled = true; btn.textContent = '检测中...';
+        document.getElementById('modelHint').textContent = '正在连接 Ollama...';
+        vscode.postMessage({ type: 'detectOllamaModels', endpoint: ep || 'http://localhost:11434/v1' });
     }
 
     document.getElementById('delModelBtn').addEventListener('click', () => {
@@ -1947,16 +1968,16 @@
         if (!list) return;
         const div = document.createElement('div');
         div.className = 'mcp-server-block';
-        
+
         // Ensure transport exists
         const t = server.transport || { type: 'stdio', command: '', args: [] };
-        
+
         div.innerHTML = `
             <div class="mcp-row">
                 <input class="settings-input mcp-name" type="text" placeholder="Server 名称" value="${escapeHtml(server.name || '')}" style="flex:1" />
                 <select class="settings-select mcp-type" style="width:90px">
-                    <option value="stdio" ${t.type==='stdio'?'selected':''}>stdio</option>
-                    <option value="sse" ${t.type==='sse'?'selected':''}>sse</option>
+                    <option value="stdio" ${t.type === 'stdio' ? 'selected' : ''}>stdio</option>
+                    <option value="sse" ${t.type === 'sse' ? 'selected' : ''}>sse</option>
                 </select>
                 <button class="mcp-delete-btn" title="删除">🗑</button>
             </div>
@@ -1966,23 +1987,23 @@
 
         const typeSel = div.querySelector('.mcp-type');
         const contentDiv = div.querySelector('.mcp-transport-content');
-        
+
         function renderTransport() {
             if (typeSel.value === 'stdio') {
                 contentDiv.innerHTML = `
-                    <input class="settings-input mcp-command" type="text" placeholder="Command (例如: npx)" value="${t.type==='stdio' ? escapeHtml(t.command||'') : ''}" />
-                    <input class="settings-input mcp-args" type="text" placeholder="Args (空格分隔)" value="${t.type==='stdio' && t.args ? escapeHtml(t.args.join(' ')) : ''}" style="margin-top:4px" />
+                    <input class="settings-input mcp-command" type="text" placeholder="Command (例如: npx)" value="${t.type === 'stdio' ? escapeHtml(t.command || '') : ''}" />
+                    <input class="settings-input mcp-args" type="text" placeholder="Args (空格分隔)" value="${t.type === 'stdio' && t.args ? escapeHtml(t.args.join(' ')) : ''}" style="margin-top:4px" />
                 `;
             } else {
                 contentDiv.innerHTML = `
-                    <input class="settings-input mcp-url" type="text" placeholder="SSE URL (例如: http://localhost:3000/sse)" value="${t.type==='sse' ? escapeHtml(t.url||'') : ''}" />
+                    <input class="settings-input mcp-url" type="text" placeholder="SSE URL (例如: http://localhost:3000/sse)" value="${t.type === 'sse' ? escapeHtml(t.url || '') : ''}" />
                 `;
             }
         }
-        
+
         renderTransport();
         typeSel.addEventListener('change', renderTransport);
-        
+
         div.querySelector('.mcp-delete-btn').addEventListener('click', () => {
             div.remove();
         });
@@ -1996,8 +2017,8 @@
         btn.disabled = true; btn.textContent = '拉取中...';
         document.getElementById('apiKeyStatus').textContent = '正在发起网络请求拉取支持模型...';
         document.getElementById('apiKeyStatus').style.color = 'inherit';
-        vscode.postMessage({ 
-            type: 'fetchApiModels', 
+        vscode.postMessage({
+            type: 'fetchApiModels',
             providerId: document.getElementById('settingsProvider').value,
             endpoint: document.getElementById('settingsEndpoint').value.trim(),
             apiKey: document.getElementById('settingsApiKey').value
@@ -2027,38 +2048,42 @@
             };
         });
 
-        vscode.postMessage({ type:'saveSettings', settings:{
-            provider: document.getElementById('settingsProvider').value,
-            model: getSelectedModel(),
-            apiKey: document.getElementById('settingsApiKey').value,
-            endpoint: document.getElementById('settingsEndpoint').value.trim(),
-            maxContextTokens: parseInt(document.getElementById('settingsCtx').value)||0,
-            agentFileWriteMode: document.getElementById('agentWriteMode').value,
-            braveSearchApiKey: (document.getElementById('braveSearchApiKey')?.value || '').trim(),
-            inlineCompletion:{
-                enabled: document.getElementById('inlineEnabled').checked,
-                provider: document.getElementById('inlineProvider').value,
-                model: document.getElementById('inlineModelInput').value.trim(),
-                endpoint: document.getElementById('inlineEndpoint').value.trim(),
-                debounceMs: parseInt(document.getElementById('inlineDebounce').value)||500,
-                overlapStripping: document.getElementById('inlineOverlapStripping')?.checked ?? true,
-                fimMode: document.getElementById('inlineFimMode')?.checked ?? false,
-            },
-            mcp: { servers: mcpServers }
-        }});
+        vscode.postMessage({
+            type: 'saveSettings', settings: {
+                provider: document.getElementById('settingsProvider').value,
+                model: getSelectedModel(),
+                apiKey: document.getElementById('settingsApiKey').value,
+                endpoint: document.getElementById('settingsEndpoint').value.trim(),
+                maxContextTokens: parseInt(document.getElementById('settingsCtx').value) || 0,
+                agentFileWriteMode: document.getElementById('agentWriteMode').value,
+                braveSearchApiKey: (document.getElementById('braveSearchApiKey')?.value || '').trim(),
+                inlineCompletion: {
+                    enabled: document.getElementById('inlineEnabled').checked,
+                    provider: document.getElementById('inlineProvider').value,
+                    model: document.getElementById('inlineModelInput').value.trim(),
+                    endpoint: document.getElementById('inlineEndpoint').value.trim(),
+                    debounceMs: parseInt(document.getElementById('inlineDebounce').value) || 500,
+                    overlapStripping: document.getElementById('inlineOverlapStripping')?.checked ?? true,
+                    fimMode: document.getElementById('inlineFimMode')?.checked ?? false,
+                },
+                mcp: { servers: mcpServers }
+            }
+        });
     }
 
     function testConnection() {
         const tr = document.getElementById('testResult');
-        tr.className='test-result'; tr.textContent='测试中...'; tr.style.display='block';
-        vscode.postMessage({ type:'testConnection', settings:{
-            provider: document.getElementById('settingsProvider').value,
-            model: getSelectedModel(),
-            apiKey: document.getElementById('settingsApiKey').value,
-            endpoint: document.getElementById('settingsEndpoint').value.trim(),
-            maxContextTokens:0, agentFileWriteMode:'confirm',
-            inlineCompletion:{enabled:false,provider:'',model:'',endpoint:'',debounceMs:1500},
-            mcp: { servers: [] }
-        }});
+        tr.className = 'test-result'; tr.textContent = '测试中...'; tr.style.display = 'block';
+        vscode.postMessage({
+            type: 'testConnection', settings: {
+                provider: document.getElementById('settingsProvider').value,
+                model: getSelectedModel(),
+                apiKey: document.getElementById('settingsApiKey').value,
+                endpoint: document.getElementById('settingsEndpoint').value.trim(),
+                maxContextTokens: 0, agentFileWriteMode: 'confirm',
+                inlineCompletion: { enabled: false, provider: '', model: '', endpoint: '', debounceMs: 1500 },
+                mcp: { servers: [] }
+            }
+        });
     }
 })();

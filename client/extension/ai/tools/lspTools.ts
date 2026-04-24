@@ -112,6 +112,27 @@ export class LspToolHandler {
     }
 
     /**
+     * Send an LSP request with a timeout and an automatic retry if the first attempt times out.
+     * Useful for heavy queries (like queryStaticModifiers) that might time out during
+     * the language server's initial load but succeed on a subsequent try.
+     */
+    private async lspRequestWithRetry<T = any>(
+        command: string,
+        args: unknown[],
+        timeoutMs = 20_000,
+    ): Promise<T> {
+        try {
+            return await this.lspRequest<T>(command, args, timeoutMs);
+        } catch (e) {
+            if (e instanceof Error && e.message.includes('timed out')) {
+                // Retry once
+                return await this.lspRequest<T>(command, args, timeoutMs);
+            }
+            throw e;
+        }
+    }
+
+    /**
      * Execute a VS Code command with a timeout guard and concurrency control.
      * VS Code's built-in LSP provider commands (executeDocumentSymbolProvider etc.)
      * also route through the language server, so they share the same concurrency pool.
@@ -261,7 +282,7 @@ export class LspToolHandler {
         const cacheKey = `sfx:${JSON.stringify([args.filter ?? '', limit])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.lspRequest('cwtools.ai.queryScriptedEffects', [args.filter ?? '', limit]) as any;
+                const raw = await this.lspRequestWithRetry('cwtools.ai.queryScriptedEffects', [args.filter ?? '', limit], 20_000) as any;
                 if (!args.filter && raw?.ok && Array.isArray(raw.items) && raw.items.length >= limit) {
                     raw._note = `Showing first ${limit} results. Use filter parameter for targeted queries.`;
                 }
@@ -275,7 +296,7 @@ export class LspToolHandler {
         const cacheKey = `stx:${JSON.stringify([args.filter ?? '', limit])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.lspRequest('cwtools.ai.queryScriptedTriggers', [args.filter ?? '', limit]) as any;
+                const raw = await this.lspRequestWithRetry('cwtools.ai.queryScriptedTriggers', [args.filter ?? '', limit], 20_000) as any;
                 if (!args.filter && raw?.ok && Array.isArray(raw.items) && raw.items.length >= limit) {
                     raw._note = `Showing first ${limit} results. Use filter parameter for targeted queries.`;
                 }
@@ -288,7 +309,7 @@ export class LspToolHandler {
         const cacheKey = `enm:${JSON.stringify([args.enumName ?? '', args.limit ?? 500])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.lspRequest('cwtools.ai.queryEnums', [args.enumName ?? '', args.limit ?? 500]) as any;
+                const raw = await this.lspRequestWithRetry('cwtools.ai.queryEnums', [args.enumName ?? '', args.limit ?? 500], 20_000) as any;
                 return raw ?? { ok: false, error: 'No response' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
@@ -308,7 +329,7 @@ export class LspToolHandler {
         const cacheKey = `smod:${JSON.stringify([args.filter ?? '', args.limit ?? 300])}`;
         return this.cachedLspRead(cacheKey, async () => {
             try {
-                const raw = await this.lspRequest('cwtools.ai.queryStaticModifiers', [args.filter ?? '', args.limit ?? 300]) as any;
+                const raw = await this.lspRequestWithRetry('cwtools.ai.queryStaticModifiers', [args.filter ?? '', args.limit ?? 300], 20_000) as any;
                 return raw ?? { ok: false, error: 'No response' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
@@ -661,9 +682,18 @@ export class LspToolHandler {
                     column: 0,
                 });
             } finally {
+                // P3 Fix: close the temp file's tab by URI instead of closing
+                // the active editor (which could be the user's file)
                 try {
-                    await vs.window.showTextDocument(vs.Uri.file(tempPath), { preserveFocus: true, preview: true });
-                    await vs.commands.executeCommand('workbench.action.closeActiveEditor');
+                    const tempUri = vs.Uri.file(tempPath);
+                    for (const group of vs.window.tabGroups.all) {
+                        for (const tab of group.tabs) {
+                            const input = tab.input;
+                            if (input instanceof vs.TabInputText && input.uri.fsPath === tempUri.fsPath) {
+                                await vs.window.tabGroups.close(tab, true);
+                            }
+                        }
+                    }
                 } catch { /* ignore */ }
                 try {
                     if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);

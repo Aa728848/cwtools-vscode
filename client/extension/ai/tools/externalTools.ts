@@ -125,13 +125,18 @@ export class ExternalToolHandler {
         exitCode: number;
         timedOut?: boolean;
     }> {
-        // Safety: deny obviously dangerous commands and pipe operations
+        // Safety: deny obviously dangerous commands and pipe/chain operations
+        // P2 Fix: more targeted patterns to reduce false positives on safe commands
         const BLOCKED_PATTERNS = [
             /\brm\s+-rf\b/i, /\bdel\s+\/[fqs]/i, /\bformat\b/i,
             /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
             /\bpowershell\b/i, /\bpwsh\b/i, /\bnode\b\s+-e/i, /\bpython\b\s+-c/i,
             /\bcurl\b.*\|\s*bash/i, /\bwget\b.*\|\s*sh/i,
-            /\|/, /&&/, /;/, />/, /</ // Prevent command chaining and piping
+            /\|/,               // pipe operator
+            /&&/,               // command chaining
+            /;\s*\S/,           // semicolon followed by next command (allow trailing ;)
+            /\d*>{1,2}\s*\S/,   // output redirect (> file, >> file, 2> err)
+            /</,                // input redirect
         ];
         for (const pat of BLOCKED_PATTERNS) {
             if (pat.test(args.command)) {

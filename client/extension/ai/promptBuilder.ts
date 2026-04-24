@@ -117,6 +117,14 @@ When you see LSP/CWTools errors, classify before acting:
 1. Call \`get_diagnostics\` on your written files
 2. Fix all Type A errors — **by this point all forward references must resolve**
 
+### Error Fix Protocol (MANDATORY)
+When fixing a **Type A** error, you MUST NOT guess or hallucinate replacement code.
+Instead, follow this workflow:
+1. If the error is about an unknown effect/trigger/modifier → call \`query_rules(category="effect", name="...")\` or \`query_scripted_effects("...")\` to find the correct name
+2. If the error is about an invalid enum value → call \`query_enums("enum_name")\` to list valid values
+3. If the error is about an unknown modifier tag → call \`query_static_modifiers("...")\` to verify existing tags
+4. **Only use values confirmed by the rule database.** Never invent effect/trigger/modifier names.
+
 ---
 
 ## Step 3 — Context-Efficient Tool Use
@@ -143,7 +151,9 @@ If the request is vague, ask the user to clarify with 2-4 concrete suggestions.
 ---
 
 ## General Rules
+- **USER INSTRUCTIONS ARE SUPREME**: When the user gives a direct correction (e.g. "change X to Y", "the correct syntax for X is Y", "replace X with Y"), execute the change **EXACTLY as instructed** without second-guessing, modifying, or re-interpreting the content. The user knows their project. Apply the replacement verbatim.
 - **TOOL CALLS ARE MANDATORY**: Saying "I have updated the file" in chat does NOT perform the update. You MUST emit a valid \`tool_call\` to actually change files.
+- **COMMAND PERMISSION IS MANDATORY**: \`run_command\` ALWAYS requires explicit user approval. Never assume a command is safe enough to run automatically. Explain what the command does and why before calling \`run_command\`.
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **NO GUESSING**: Use \`query_types\` only when you genuinely don't know if an ID exists.
 - **MAX 3 RETRIES**: If validation still fails after 3 attempts, present the best version with notes.
@@ -171,6 +181,12 @@ If a \`<project-premise>\` block is provided above, you MUST:
 - **Generate localizations** for ALL listed Localization Target languages when creating new keys
 - **Match the detected encoding conventions**: scripts (.txt) and localisations (.yml) may use different BOM settings
 - **Follow the detected file naming pattern** when creating new files
+
+## Localisation Verification (MANDATORY after writing localisation files)
+The CWTools LSP does NOT instantly reflect newly written localisation keys. Therefore:
+1. **If \`get_diagnostics\` reports "Missing localisation key" errors**: Do NOT blindly re-add the key. Instead, call \`search_mod_files(query="KEY_NAME", fileExtension=".yml")\` to check if the key already exists in a .yml file. If found, the error is a stale LSP cache — ignore it.
+2. **When you create ANY new localisation key**: After writing the .yml file, verify the key was written correctly by calling \`search_mod_files(query="KEY_NAME", fileExtension=".yml")\` to confirm it appears in the expected file.
+3. **Never duplicate localisation keys**: If \`search_mod_files\` confirms the key exists, do NOT write it again.
 ${gameKnowledge}`;
 }
 

@@ -52,7 +52,7 @@ export interface FileToolContext {
 // ─── Handler class ───────────────────────────────────────────────────────────
 
 export class FileToolHandler {
-    constructor(private ctx: FileToolContext) {}
+    constructor(private ctx: FileToolContext) { }
 
     private resolveAndAssertInWorkspace(filePath: string): string {
         const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(this.ctx.workspaceRoot, filePath);
@@ -75,7 +75,7 @@ export class FileToolHandler {
     private writeTextFile(filePath: string, content: string, hasBom: boolean, requestedEncoding?: string): void {
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        
+
         let shouldAddBom = hasBom;
         if (requestedEncoding) {
             shouldAddBom = requestedEncoding === 'utf8bom';
@@ -191,6 +191,12 @@ export class FileToolHandler {
         replaceAll?: boolean;
         encoding?: string;
     }): Promise<import('../types').EditFileResult> {
+        if (!args.filePath || typeof args.filePath !== 'string') {
+            return {
+                success: false,
+                message: 'Error: Missing or invalid "filePath" argument. You must provide the absolute file path as a string. Example: edit_file({ "filePath": "/path/to/file.txt", "oldString": "...", "newString": "..." })',
+            } as any;
+        }
         try {
             args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
         } catch (e) {
@@ -237,13 +243,18 @@ export class FileToolHandler {
         // Only return diagnostics near the edited region to save context
         const editedLines = new Set<number>();
         const newLines = args.newString.split('\n');
-        const oldLines = args.oldString.split('\n');
-        // Approximate: find the edit region in the new content
+        // P2 Fix: read file once and use stricter matching (min 8 chars, unique-ish lines only)
         const newContent2 = fs.readFileSync(filePath, 'utf-8');
         const newContentLines = newContent2.split('\n');
         for (let li = 0; li < newContentLines.length; li++) {
-            if (newLines.some(nl => newContentLines[li].includes(nl.trim()) && nl.trim().length > 3)) {
-                for (let r = -10; r <= 10; r++) editedLines.add(li + r);
+            if (newLines.some(nl => {
+                const trimmed = nl.trim();
+                return trimmed.length > 8 && newContentLines[li].includes(trimmed);
+            })) {
+                for (let r = -10; r <= 10; r++) {
+                    const idx = li + r;
+                    if (idx >= 0 && idx < newContentLines.length) editedLines.add(idx);
+                }
             }
         }
         const nearbyDiags = editedLines.size > 0
@@ -268,6 +279,12 @@ export class FileToolHandler {
         edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }>;
         encoding?: string;
     }): Promise<import('../types').EditFileResult> {
+        if (!args.filePath || typeof args.filePath !== 'string') {
+            return {
+                success: false,
+                message: 'Error: Missing or invalid "filePath" argument. You must provide the absolute file path as a string.',
+            } as any;
+        }
         try {
             args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
         } catch (e) {
@@ -289,7 +306,10 @@ export class FileToolHandler {
             try {
                 content = this.replace(content, old, next, edit.replaceAll ?? false);
             } catch (e) {
+                // P1 Fix: fail-fast — stop on first error to avoid misleading messages
+                // from subsequent edits operating on an inconsistent intermediate state
                 errors.push(`Edit #${i + 1}: ${e instanceof Error ? e.message : String(e)}`);
+                break;
             }
         }
 
@@ -316,15 +336,22 @@ export class FileToolHandler {
         }
 
         const diagnostics = await this.getLspDiagnosticsForFile(filePath);
-        // Only return diagnostics near edited regions
+        // P1 Fix: read file once outside loop instead of per-edit
+        // P2 Fix: stricter matching (min 8 chars) to reduce false positives
         const editedRegionLines = new Set<number>();
+        const finalContent = fs.readFileSync(filePath, 'utf-8');
+        const finalLines = finalContent.split('\n');
         for (const edit of args.edits) {
-            const fileContent2 = fs.readFileSync(filePath, 'utf-8');
-            const fileLines = fileContent2.split('\n');
             const editLines = edit.newString.split('\n');
-            for (let li = 0; li < fileLines.length; li++) {
-                if (editLines.some(el => fileLines[li].includes(el.trim()) && el.trim().length > 3)) {
-                    for (let r = -10; r <= 10; r++) editedRegionLines.add(li + r);
+            for (let li = 0; li < finalLines.length; li++) {
+                if (editLines.some(el => {
+                    const trimmed = el.trim();
+                    return trimmed.length > 8 && finalLines[li].includes(trimmed);
+                })) {
+                    for (let r = -10; r <= 10; r++) {
+                        const idx = li + r;
+                        if (idx >= 0 && idx < finalLines.length) editedRegionLines.add(idx);
+                    }
                 }
             }
         }
@@ -451,20 +478,25 @@ export class FileToolHandler {
             return { success: false, filesChanged: [], errors };
         }
 
+        // P2 Fix: collect all user confirmations BEFORE writing any files
+        // to ensure atomicity — if user rejects any file, nothing is written
         const filesChanged: string[] = [];
-        for (const { filePath, newContent, hasBom } of pendingWrites) {
-            const { content: prevContent } = this.readTextFile(filePath);
-            this.ctx.onBeforeFileWrite?.(filePath, prevContent !== '' ? prevContent : null);
-
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite) {
+        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite) {
+            for (const { filePath, newContent } of pendingWrites) {
                 const messageId = `patch_${crypto.randomUUID()}`;
                 const confirmed = await this.ctx.onPendingWrite(filePath, newContent, messageId);
                 if (!confirmed) {
-                    errors.push(`${path.basename(filePath)}: 用户取消了写入操作`);
-                    continue;
+                    return {
+                        success: false,
+                        filesChanged: [],
+                        errors: [`${path.basename(filePath)}: 用户取消了写入操作，所有文件均未修改`],
+                    };
                 }
             }
-
+        }
+        for (const { filePath, newContent, hasBom } of pendingWrites) {
+            const { content: prevContent } = this.readTextFile(filePath);
+            this.ctx.onBeforeFileWrite?.(filePath, prevContent !== '' ? prevContent : null);
             try {
                 this.writeTextFile(filePath, newContent, hasBom);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
@@ -547,11 +579,17 @@ export class FileToolHandler {
         try {
             const uri = vs.Uri.file(filePath);
             try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
+            // P3 Fix: debounce diagnostic events — wait 300ms after last change
+            // to avoid returning incomplete diagnostics from intermediate LSP states
             await new Promise<void>((resolve) => {
-                const t = setTimeout(resolve, 2000);
+                const maxTimeout = setTimeout(() => { sub.dispose(); resolve(); }, 2000);
+                let debounce: ReturnType<typeof setTimeout> | null = null;
                 const sub = vs.languages.onDidChangeDiagnostics((e) => {
                     if (e.uris.some(u => u.fsPath === uri.fsPath)) {
-                        clearTimeout(t); sub.dispose(); resolve();
+                        if (debounce) clearTimeout(debounce);
+                        debounce = setTimeout(() => {
+                            clearTimeout(maxTimeout); sub.dispose(); resolve();
+                        }, 300);
                     }
                 });
             });
@@ -727,8 +765,8 @@ export class FileToolHandler {
             }
         }
         throw new Error(
-            '在文件中找不到 oldString。必须精确匹配（包括空白符、缩进和行尾符）。\n' +
-            '提示：先使用 read_file 读取文件内容，再将读取到的确切文本作为 oldString。'
+            '找不到该内容。严禁在 oldString 中省略上下文或使用 "..." 代表未修改代码！请完整包含从替换起点到终点的所有代码文本，确保空白符完全对齐。\n' +
+            '提示：务必先使用 read_file 获取确切文本，然后再在 oldString 中提供与文件完全相同的片段。'
         );
     }
 

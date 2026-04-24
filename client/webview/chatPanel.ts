@@ -1184,6 +1184,10 @@
                 setGenerating(false);
                 flushLiveText();
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
+                
+                // Clear any unresolved interactive cards (permission, diff)
+                document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el, 0));
+
                 const r = msg.result;
                 const completedMsg = buildAssistantMessage(
                     r.explanation || (r.steps && r.steps.length ? '' : '完成'),
@@ -1221,6 +1225,10 @@
                 setGenerating(false);
                 liveTextBubble = null; liveTextContent = '';
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
+                
+                // Clear any unresolved interactive cards
+                document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el, 0));
+
                 chatArea.appendChild(buildAssistantMessage('❌ ' + msg.error, [], formatTime(Date.now())));
                 scrollBottom();
                 break;

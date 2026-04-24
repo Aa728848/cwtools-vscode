@@ -163,6 +163,8 @@ export class AgentRunner {
 
         // Propagate runner options + accumulator to tool executor for sub-agent dispatch
         this.toolExecutor.parentRunnerOptions = options;
+        // P0 Fix: wire up permission callback so run_command can prompt user approval
+        this.toolExecutor.onPermissionRequest = options?.onPermissionRequest;
         // L8 Fix: wire up the parent accumulator so dispatchSubTask can merge sub-agent costs
         this.toolExecutor.parentTokenAccumulator = tokenAccumulator;
         // Wire up onStep for sub-task progress visualization
@@ -694,9 +696,17 @@ export class AgentRunner {
                 const toolName = toolCall.function.name as AgentToolName;
                 let toolArgs: Record<string, unknown>;
                 let toolArgsParseError: string | undefined;
-                try { toolArgs = JSON.parse(toolCall.function.arguments); } catch (e) {
-                    toolArgs = {};
-                    toolArgsParseError = `JSON parse error: ${e instanceof Error ? e.message : String(e)}. Raw arguments: ${toolCall.function.arguments?.substring(0, 200)}`;
+                try { 
+                    toolArgs = JSON.parse(toolCall.function.arguments); 
+                } catch (e) {
+                    // Attempt common JSON repairs before giving up (Issue #2 fix)
+                    const repaired = this.tryRepairJson(toolCall.function.arguments);
+                    if (repaired !== null) {
+                        toolArgs = repaired;
+                    } else {
+                        toolArgs = {};
+                        toolArgsParseError = `JSON parse error: ${e instanceof Error ? e.message : String(e)}. Raw arguments: ${toolCall.function.arguments?.substring(0, 200)}`;
+                    }
                 }
                 emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now() });
                 parsedCalls.push({ toolName, toolArgs, toolArgsParseError, toolCall });
@@ -962,6 +972,65 @@ export class AgentRunner {
         }
 
         return calls;
+    }
+
+    /**
+     * Attempt common JSON repairs for truncated or messy AI output (Issue #2 fix).
+     * If successful, returns the parsed object. Otherwise returns null.
+     */
+    private tryRepairJson(badJson: string | undefined): Record<string, unknown> | null {
+        if (!badJson) return null;
+        let s = badJson.trim();
+        
+        // Strategy 1: Missing closing brackets (common in truncation)
+        try {
+            const added = s + '"}';
+            return JSON.parse(added);
+        } catch { /* skip */ }
+        
+        try {
+            const added = s + ']}';
+            return JSON.parse(added);
+        } catch { /* skip */ }
+
+        try {
+            const added = s + '}';
+            return JSON.parse(added);
+        } catch { /* skip */ }
+
+        // Strategy 2: Remove trailing commas
+        try {
+            const noComma = s.replace(/,\s*([}\]])/g, '$1');
+            return JSON.parse(noComma);
+        } catch { /* skip */ }
+        
+        // Strategy 3: Try to find a valid JSON object within the string
+        let startIdx = s.indexOf('{');
+        let endIdx = s.lastIndexOf('}');
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+            try {
+                return JSON.parse(s.substring(startIdx, endIdx + 1));
+            } catch { /* skip */ }
+        }
+        
+        // Strategy 4: Handle aggressive string truncation where a property value is cut off
+        // e.g. {"filePath": "/a/b.txt", "oldStr": "some   ->  trim and close
+        if (startIdx !== -1) {
+            let lastQuote = s.lastIndexOf('"');
+            if (lastQuote > startIdx) {
+                try {
+                    return JSON.parse(s.substring(startIdx, lastQuote) + '"}');
+                } catch { /* skip */ }
+            }
+            let lastComma = s.lastIndexOf(',');
+            if (lastComma > startIdx) {
+                try {
+                    return JSON.parse(s.substring(startIdx, lastComma) + '}');
+                } catch { /* skip */ }
+            }
+        }
+
+        return null;
     }
 
     /** Strip all known text-format tool call markup from text.

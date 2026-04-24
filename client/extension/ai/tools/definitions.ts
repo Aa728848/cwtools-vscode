@@ -323,7 +323,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'run_command',
-            description: 'Run a shell command in the workspace directory. REQUIRES user permission for each new command. Safe commands (e.g. npm run lint, git status) are allowed; destructive commands are denied. Always explain what the command does before running it.',
+            description: '⚠️ PERMISSION REQUIRED — Run a shell command in the workspace directory. Every invocation ALWAYS requires explicit user approval regardless of the current mode, even for seemingly safe commands like "git status" or "npm run lint". You must explain in your chat output what the command does and why it is needed BEFORE calling this tool. Destructive commands (rm, del, format, shutdown) and pipe/chain operators (|, &&, ;, >, <) are permanently blocked. The user can deny any command.',
             parameters: {
                 type: 'object',
                 properties: {

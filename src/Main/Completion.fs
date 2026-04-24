@@ -351,50 +351,49 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
         else
             s
 
-    /// 计算智能补全范围
-    /// 如果是 script_value 参数输入（value:xxx|yyy），范围应从 | 之后开始
-    let computeSmartCompletionRanges (filetext: string) (line: int) (col: int) =
-        // line is 1-based from position.Line; col is 0-based
-        try
-            let lines = filetext.Split('\n')
-            if line > 0 && line <= lines.Length then
-                let currentLine = lines.[line - 1]
-                let textBefore = currentLine.Substring(0, min col currentLine.Length)
-                let valueIdx = textBefore.LastIndexOf("value:")
-                
-                if valueIdx <> -1 then
-                    let afterValue = textBefore.Substring(valueIdx + 6)
-                    let pipeIdx = afterValue.LastIndexOf('|')
-                    
-                    if pipeIdx <> -1 then
-                        // Insert point starts right after the last |
-                        let insertStartCol = valueIdx + 6 + pipeIdx + 1
-                        let insertRange = { start = { line = line - 1; character = insertStartCol }
-                                            ``end`` = { line = line - 1; character = col } }
-                        insertRange, insertRange
+    // Precompute completion ranges ONCE (position and filetext are the same for all items).
+    // Previously, computeSmartCompletionRanges called filetext.Split('\n') per item,
+    // causing 8000+ splits of a 4000-line file on every completion request (= ~3 seconds).
+    let precomputedRanges =
+        if supportsInsertReplaceEdit then
+            try
+                let lines = filetext.Split('\n')
+                let line = position.Line   // 1-based
+                let col = position.Column  // 0-based
+                if line > 0 && line <= lines.Length then
+                    let currentLine = lines.[line - 1]
+                    let textBefore = currentLine.Substring(0, min col currentLine.Length)
+                    let valueIdx = textBefore.LastIndexOf("value:")
+                    if valueIdx <> -1 then
+                        let afterValue = textBefore.Substring(valueIdx + 6)
+                        let pipeIdx = afterValue.LastIndexOf('|')
+                        if pipeIdx <> -1 then
+                            let insertStartCol = valueIdx + 6 + pipeIdx + 1
+                            let insertRange = { start = { line = line - 1; character = insertStartCol }
+                                                ``end`` = { line = line - 1; character = col } }
+                            Some (insertRange, insertRange)
+                        else
+                            Some (computeCompletionRanges filetext line col)
                     else
-                        computeCompletionRanges filetext line col
+                        Some (computeCompletionRanges filetext line col)
                 else
-                    computeCompletionRanges filetext line col
-            else
-                computeCompletionRanges filetext line col
-        with _ ->
-            computeCompletionRanges filetext line col
+                    Some (computeCompletionRanges filetext line col)
+            with _ ->
+                Some (computeCompletionRanges filetext position.Line position.Column)
+        else
+            None
 
     /// Create the appropriate textEdit based on client capabilities
     let createTextEdit text =
-        if supportsInsertReplaceEdit then
-            let (insertRange, replaceRange) =
-                computeSmartCompletionRanges filetext position.Line position.Column
-
+        match precomputedRanges with
+        | Some (insertRange, replaceRange) ->
             Some(
                 { newText = text
                   insert = insertRange
                   replace = replaceRange }
             )
-        else
-            // Fallback to regular TextEdit for older clients
-            None // Let the client use insertText instead
+        | None ->
+            None
 
     let items =
         comp

@@ -1759,6 +1759,7 @@
         // Auto-fill context size: prefer per-model lookup, then user-saved value
         const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
         document.getElementById('settingsCtx').value = initCtx;
+        document.getElementById('settingsReasoningEffort').value = current.reasoningEffort || 'high';
         document.getElementById('inlineEnabled').checked = current.inlineCompletion?.enabled ?? false;
         const overlapEl = document.getElementById('inlineOverlapStripping');
         if (overlapEl) overlapEl.checked = current.inlineCompletion?.overlapStripping ?? true;
@@ -2064,6 +2065,7 @@
                 endpoint: document.getElementById('settingsEndpoint').value.trim(),
                 maxContextTokens: parseInt(document.getElementById('settingsCtx').value) || 0,
                 agentFileWriteMode: document.getElementById('agentWriteMode').value,
+                reasoningEffort: document.getElementById('settingsReasoningEffort').value || 'high',
                 braveSearchApiKey: (document.getElementById('braveSearchApiKey')?.value || '').trim(),
                 inlineCompletion: {
                     enabled: document.getElementById('inlineEnabled').checked,
@@ -2089,6 +2091,7 @@
                 apiKey: document.getElementById('settingsApiKey').value,
                 endpoint: document.getElementById('settingsEndpoint').value.trim(),
                 maxContextTokens: 0, agentFileWriteMode: 'confirm',
+                reasoningEffort: document.getElementById('settingsReasoningEffort').value || 'high',
                 inlineCompletion: { enabled: false, provider: '', model: '', endpoint: '', debounceMs: 1500 },
                 mcp: { servers: [] }
             }

@@ -181,7 +181,7 @@ export class ExternalToolHandler {
                     resolve({
                         stdout: stdout.substring(0, 4000),
                         stderr: stderr.substring(0, 2000),
-                        exitCode: error?.code ?? 0,
+                        exitCode: error?.code ?? (error ? 1 : 0),
                         timedOut: error?.signal === 'SIGTERM',
                     });
                 }

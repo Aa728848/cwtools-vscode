@@ -459,6 +459,24 @@
 					"maximum": 5,
 					"description": "%configuration.cwtools.ai.maxRetries.description%"
 				},
+				"cwtools.ai.reasoningEffort": {
+					"scope": "window",
+					"type": "string",
+					"enum": [
+						"low",
+						"medium",
+						"high",
+						"max"
+					],
+					"enumDescriptions": [
+						"Low (fastest)",
+						"Medium",
+						"High (default)",
+						"Max (DeepSeek-V4 intensive thinking)"
+					],
+					"default": "high",
+					"description": "Thinking depth / Reasoning effort for supported AI models (DeepSeek, OpenAI o-series)."
+				},
 				"cwtools.ai.maxContextTokens": {
 					"scope": "window",
 					"type": "integer",

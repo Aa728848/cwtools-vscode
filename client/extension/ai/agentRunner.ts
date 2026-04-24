@@ -88,32 +88,38 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
     'get_file_context', 'search_mod_files', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'todo_write',
     'read_file', 'list_directory', 'get_diagnostics', 'web_fetch', 'search_web',
+    'glob_files',
 ];
 
-/** Explore mode: same as plan, plus workspace_symbols and web tools — no writes (OpenCode explore agent) */
+/** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
 const EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
-    'get_diagnostics', 'web_fetch', 'search_web',
+    'get_diagnostics', 'web_fetch', 'search_web', 'glob_files',
+    // CWTools Deep API tools (read-only, advertised in Explore mode prompt)
+    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
+    'get_entity_info', 'query_static_modifiers', 'query_variables',
+    'query_definition', 'query_definition_by_name',
 ];
 
 /** General mode: all tools EXCEPT todo_write (research without task tracking) */
 const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
 
-/** Review mode: same as explore, plus validate_code and query_definition */
+/** Review mode: same as explore, plus query_definition — NO validate_code (it creates temp files, violating read-only contract) */
 const REVIEW_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
-    'get_diagnostics', 'validate_code', 'query_definition', 'query_definition_by_name',
+    'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_static_modifiers', 'query_variables'
+    'get_entity_info', 'query_static_modifiers', 'query_variables',
+    'web_fetch', 'search_web', 'glob_files',
 ];
 
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'patch']);
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch']);
 const READ_ONLY_TOOLS = new Set<string>([
     'read_file', 'list_directory', 'search_mod_files',
     'get_file_context', 'document_symbols', 'workspace_symbols',
@@ -235,6 +241,9 @@ export class AgentRunner {
             // Phase 1: Agent reasoning loop (with tool calls)
             const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator);
 
+            // Auto-mark remaining in-progress todos as done on successful completion
+            this.autoCompleteTodos();
+
             // Phase 2: Extract code from the response
             const code = this.extractCode(finalMessage);
 
@@ -281,6 +290,27 @@ export class AgentRunner {
                 steps,
                 tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
             };
+        }
+    }
+
+    /**
+     * Auto-mark remaining in-progress todos as done when the run completes successfully.
+     * Prevents the task window from showing stale in-progress items after the AI finishes.
+     */
+    private autoCompleteTodos(): void {
+        const handler = this.toolExecutor.getExternalToolHandler();
+        const todos = handler.getTodos();
+        if (todos.length === 0) return;
+
+        let updated = false;
+        for (const item of todos) {
+            if (item.status === 'in_progress') {
+                item.status = 'done';
+                updated = true;
+            }
+        }
+        if (updated) {
+            handler.todoWrite({ todos });
         }
     }
 
@@ -641,7 +671,15 @@ export class AgentRunner {
                 );
             }
 
-            // Add assistant response (cleaned) to conversation history
+            // Add assistant response (cleaned) to conversation history.
+            // Preserve reasoning_content for DeepSeek-R1 API compatibility:
+            // DeepSeek requires reasoning_content on ALL assistant messages when
+            // in thinking mode, even if null. Without it, after several iterations
+            // the API returns 400: "reasoning_content must be passed back".
+            // The reasoningField was already extracted at line 640 from the raw response.
+            if (reasoningField !== undefined && assistantMessage.reasoning_content === undefined) {
+                assistantMessage.reasoning_content = reasoningField || null;
+            }
             messages.push(assistantMessage);
 
             // If no tool calls (either format), we're done
@@ -944,8 +982,8 @@ export class AgentRunner {
             return calls;
         }
 
-        // 2. Qwen/Hermes JSON in <tool_call>
-        const toolCallJsonRe = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
+        // 2. Qwen/Hermes/Minimax JSON in <tool_call>
+        const toolCallJsonRe = /<\s*(?:[\w-]+:)?tool_call(?:\s[^>]*)?\s*>([\s\S]*?)<\/\s*(?:[\w-]+:)?tool_call\s*>/gi;
         toolCallJsonRe.lastIndex = 0;
         let tm: RegExpExecArray | null;
         while ((tm = toolCallJsonRe.exec(content)) !== null) {
@@ -1046,12 +1084,13 @@ export class AgentRunner {
                 // DeepSeek DSML: <|DSML|function_calls>...</|DSML|function_calls>
                 .replace(/<\|DSML\|function_calls>[\s\S]*?<\/\|DSML\|function_calls>/gi, '')
                 .replace(/<\|DSML\|invoke(?:\s[^>]*)?>([\s\S]*?)<\/\|DSML\|invoke>/gi, '')
-                // Qwen / Hermes: <tool_call>...</tool_call>
-                .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+                // Qwen / Hermes / Minimax: <tool_call>...</tool_call>
+                .replace(/<\s*(?:[\w-]+:)?tool_call(?:\s[^>]*)?>[\s\S]*?<\/\s*(?:[\w-]+:)?tool_call\s*>/gi, '')
                 // Generic XML / Claude antml_
                 .replace(/<\s*(?:antml_)?function_calls\s*>[\s\S]*?<\/\s*(?:antml_)?function_calls\s*>/gi, '')
                 .replace(/<\s*(?:antml_)?invoke(?:\s[^>]*)?\s*>[\s\S]*?<\/\s*(?:antml_)?invoke\s*>/gi, '')
-                // Orphaned lone open/close tags (safety net for unmatched pairs)
+                // Orphaned lone open/close tags (safety net for unmatched pairs or broken tags)
+                .replace(/<\/?\s*(?:[\w-]+:)?tool_call(?:\s[^>]*)?\s*>/gi, '')
                 .replace(/<\/?\s*(?:antml_)?function_calls\s*>/gi, '')
                 .replace(/<\/?\s*(?:antml_)?invoke(?:\s[^>]*)?\s*>/gi, '')
                 .replace(/<\/?\s*(?:antml_)?parameter(?:\s[^>]*)?\s*>/gi, '')
@@ -1315,6 +1354,7 @@ export class AgentRunner {
                 }
             } else if (m.role === 'assistant' && i < aggressiveThreshold && content.length > 2000) {
                 // Aggressively compress old assistant reasoning
+                // reasoning_content is preserved by spread operator since it's a ChatMessage field
                 messages[i] = { ...m, content: content.substring(0, 1000) + '\n[... compacted]' };
             }
         }

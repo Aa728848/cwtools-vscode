@@ -243,9 +243,9 @@ export class FileToolHandler {
         // Only return diagnostics near the edited region to save context
         const editedLines = new Set<number>();
         const newLines = args.newString.split('\n');
-        // P2 Fix: read file once and use stricter matching (min 8 chars, unique-ish lines only)
-        const newContent2 = fs.readFileSync(filePath, 'utf-8');
-        const newContentLines = newContent2.split('\n');
+        // P2 Fix: use newContent directly instead of re-reading the file (eliminates
+        // redundant I/O and TOCTOU risk — newContent is exactly what was just written)
+        const newContentLines = newContent.split('\n');
         for (let li = 0; li < newContentLines.length; li++) {
             if (newLines.some(nl => {
                 const trimmed = nl.trim();

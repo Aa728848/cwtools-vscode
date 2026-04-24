@@ -96,6 +96,8 @@ export interface AIUserConfig {
     maxContextTokens: number;
     /** Agent file write mode */
     agentFileWriteMode: 'confirm' | 'auto';
+    /** DeepSeek V4 reasoning effort (thinking depth) */
+    reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     inlineCompletion: {
         enabled: boolean;
         debounceMs: number;
@@ -127,6 +129,12 @@ export interface ChatMessage {
     tool_calls?: ToolCall[];
     tool_call_id?: string;
     name?: string;
+    /**
+     * DeepSeek-R1 reasoning content (extended thinking).
+     * Must be preserved and sent back on ALL assistant messages when
+     * using DeepSeek's thinking mode, otherwise API returns 400.
+     */
+    reasoning_content?: string | null;
 }
 
 export interface ToolCall {
@@ -156,6 +164,8 @@ export interface ChatCompletionRequest {
     max_tokens?: number;
     stream?: boolean;
     stop?: string[];
+    /** Supported by DeepSeek and OpenAI for thinking depth */
+    reasoning_effort?: 'low' | 'medium' | 'high' | 'max';
     /** Extra provider-specific params to merge into the request body (e.g. thinking config) */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [key: string]: any;
@@ -756,6 +766,8 @@ export interface PanelSettings {
     endpoint: string;
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
+    /** DeepSeek V4 reasoning effort */
+    reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     /** Brave Search API key for web_search tool (optional) */
     braveSearchApiKey?: string;
     inlineCompletion: {

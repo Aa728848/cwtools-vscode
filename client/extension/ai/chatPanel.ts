@@ -293,6 +293,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             endpoint: config.endpoint || '',
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: config.agentFileWriteMode,
+            reasoningEffort: config.reasoningEffort,
             braveSearchApiKey: (() => {
                 const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
                 return k ? '••••••••' : '';  // mask if set; expose empty string if not
@@ -404,6 +405,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await cfg.update('endpoint', settings.endpoint, vs.ConfigurationTarget.Global);
         await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);
         await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
+        await cfg.update('reasoningEffort', settings.reasoningEffort, vs.ConfigurationTarget.Global);
         await cfg.update('enabled', true, vs.ConfigurationTarget.Global);
         // Inline completion settings
         if (settings.inlineCompletion) {
@@ -976,8 +978,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // WebView is hidden or the user ignores the confirmation card.
             const timeout = setTimeout(() => {
                 if (this.pendingWriteResolvers.has(messageId)) {
-                    console.warn(`[Eddy CWTool Code] Write confirm timeout for ${file} — auto-confirming`);
-                    this.resolveWriteConfirmation(messageId, true);
+                    console.warn(`[Eddy CWTool Code] Write confirm timeout for ${file} — auto-denying (safety default)`);
+                    this.resolveWriteConfirmation(messageId, false);
                 }
             }, AIChatPanelProvider.WRITE_CONFIRM_TIMEOUT_MS);
 
@@ -1603,15 +1605,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         command?: string
     ): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
+            let resolved = false;
             // Auto-deny after 60s to prevent hangs
             const timeout = setTimeout(() => {
-                if (this.pendingPermissionResolvers.has(id)) {
+                if (!resolved && this.pendingPermissionResolvers.has(id)) {
+                    resolved = true;
                     this.pendingPermissionResolvers.delete(id);
                     resolve(false);
                 }
             }, 60_000);
 
             this.pendingPermissionResolvers.set(id, (allowed: boolean) => {
+                if (resolved) return; // Guard: timeout already fired
+                resolved = true;
                 clearTimeout(timeout);
                 resolve(allowed);
             });
@@ -2454,6 +2460,15 @@ body.review-mode .mode-indicator { color: #f48771; }
                 <div class="settings-group">
                     <label class="settings-label">📏 上下文大小 (tokens)</label>
                     <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="0 = provider 默认" />
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">🧠 思考深度 / Reasoning Effort <span style="opacity:0.5;font-weight:400">(供支持的模型使用)</span></label>
+                    <select class="settings-select" id="settingsReasoningEffort">
+                        <option value="low">Low (快速)</option>
+                        <option value="medium">Medium (中等)</option>
+                        <option value="high">High (默认)</option>
+                        <option value="max">Max (DeepSeek-V4/o3 高强度思考)</option>
+                    </select>
                 </div>
             </div>
         </div>

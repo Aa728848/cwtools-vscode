@@ -126,6 +126,11 @@ export class AgentToolExecutor {
         return this.clientGetter();
     }
 
+    /** Expose the external handler so AgentRunner can auto-complete todos on task finish. */
+    getExternalToolHandler(): ExternalToolHandler {
+        return this.externalHandler;
+    }
+
     /**
      * Execute a tool by name with the given arguments.
      * Results are automatically truncated if too large.

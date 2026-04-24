@@ -29,6 +29,10 @@ import type {
 /** Structural type for the properties LspToolHandler reads from the executor. */
 export interface LspToolContext {
     readonly workspaceRoot: string;
+    /** Agent file write mode from config ('confirm' or 'auto') */
+    fileWriteMode?: 'confirm' | 'auto';
+    /** Callback when a file write needs user confirmation (confirm mode). */
+    onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -848,8 +852,14 @@ export class LspToolHandler {
                 const candidate = path.join(wsRoot, args.directory);
                 if (fs.existsSync(candidate)) searchRoots.push(candidate);
             }
+            // Security: only allow absolute paths that resolve within a workspace folder
             if (searchRoots.length === 0 && fs.existsSync(args.directory)) {
-                searchRoots.push(args.directory);
+                const resolvedDir = path.resolve(args.directory);
+                const isWithinWorkspace = workspaceFolders.some(ws => resolvedDir.startsWith(path.resolve(ws) + path.sep) || resolvedDir === path.resolve(ws));
+                if (isWithinWorkspace) {
+                    searchRoots.push(resolvedDir);
+                }
+                // If outside workspace, silently skip — fall through to workspace roots below
             }
         }
         if (searchRoots.length === 0) {
@@ -1047,6 +1057,15 @@ export class LspToolHandler {
                     edit.entries().forEach(([u, edits]) => {
                         changes.push({ file: path.relative(this.ctx.workspaceRoot, u.fsPath).replace(/\\/g, '/'), edits: edits.length });
                     });
+                    // Permission check: rename modifies multiple files, require user confirmation
+                    // in 'confirm' mode (consistent with edit_file/write_file permission model).
+                    if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite) {
+                        const summary = changes.map(c => `${c.file} (${c.edits} edits)`).join(', ');
+                        const confirmed = await this.ctx.onPendingWrite(
+                            args.file, `Rename: ${changes.length} file(s) affected: ${summary}`, `rename_${Date.now()}`
+                        );
+                        if (!confirmed) return { error: 'User rejected rename operation' };
+                    }
                     const applied = await vs.workspace.applyEdit(edit);
                     if (!applied) return { error: 'Rename apply failed — workspace rejected the edit' };
                     return {

@@ -119,11 +119,12 @@ export class AIService {
             model: this.modelOverride ?? cfg.get<string>('model', ''),
             endpoint: cfg.get<string>('endpoint', ''),
             apiKey: '',
-            maxRetries: cfg.get<number>('maxRetries', 3),
+            maxRetries: Math.max(1, cfg.get<number>('maxRetries') || 3),
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm'),
+            reasoningEffort: cfg.get<'low' | 'medium' | 'high' | 'max'>('reasoningEffort', 'high'),
             inlineCompletion: {
-                enabled: cfg.get<boolean>('inlineCompletion.enabled', false),
+                enabled: cfg.get<boolean>('inlineCompletion.enabled') || false,
                 debounceMs: cfg.get<number>('inlineCompletion.debounceMs', 500),
                 provider: cfg.get<string>('inlineCompletion.provider', ''),
                 model: cfg.get<string>('inlineCompletion.model', ''),
@@ -298,6 +299,7 @@ export class AIService {
             tools: options?.tools,
             tool_choice: options?.tools && options.tools.length > 0 ? 'auto' : undefined,
             temperature: options?.temperature ?? 0.3,
+            reasoning_effort: config.reasoningEffort || 'high',
             // M5 Fix: raise default from 4096 to 8192 — Claude Opus 4 / Gemini 2.5 Pro
             // support 64K+ output tokens; 4096 silently truncates long code generations.
             max_tokens: options?.maxTokens ?? 8192,
@@ -836,8 +838,10 @@ export class AIService {
                     role: 'assistant',
                     content: contentBuf || null,
                     tool_calls: toolCalls,
-                    ...(reasoningBuf ? { reasoning_content: reasoningBuf } : {}),
-                } as ChatMessage & { reasoning_content?: string; tool_calls?: typeof toolCalls },
+                    // DeepSeek-R1 requires reasoning_content on ALL assistant messages
+                    // when thinking mode is active — set to null when absent, not omitted
+                    reasoning_content: reasoningBuf || null,
+                } as ChatMessage & { tool_calls?: typeof toolCalls },
                 finish_reason: finishReason ?? 'stop',
             }],
             usage: usageBuf,

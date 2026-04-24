@@ -323,8 +323,12 @@ export async function activate(context: ExtensionContext) {
 			{ scheme: 'file', language: 'hoi4' }, { scheme: 'file', language: 'eu4' }, { scheme: 'file', language: 'ck2' }, { scheme: 'file', language: 'imperator' }
 				, { scheme: 'file', language: 'vic2' }, { scheme: 'file', language: 'vic3' }, { scheme: 'file', language: 'ck3' }, { scheme: 'file', language: 'eu5' }, { scheme: 'file', language: 'paradox' }],
 			synchronize: {
-				// Synchronize the setting section 'languageServerExample' to the server
-				configurationSection: 'cwtools',
+				// Prevent 'cwtools.ai.*' setting saves from restarting the LSP server
+				configurationSection: [
+					'cwtools.trace', 'cwtools.localisation', 'cwtools.errors', 'cwtools.experimental',
+					'cwtools.debug_mode', 'cwtools.showInlineText', 'cwtools.logging', 'cwtools.rules_version',
+					'cwtools.rules_folder', 'cwtools.ignore_patterns', 'cwtools.cache'
+				],
 				// Notify the server about file changes to F# project files contain in the workspace
 
 				fileEvents: fileEvents

@@ -1356,6 +1356,77 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 }
             }
 
+            // ── 3.3 P5: Detect encoding conventions ─────────────────────────
+            // Paradox convention: .txt scripts = UTF-8 (no BOM), .yml localisation = UTF-8 with BOM
+            // We verify against actual files to report the project's real convention.
+            let scriptEncoding = '';
+            let locEncoding = '';
+            // Check script files (.txt)
+            const scriptCheckDirs = ['events', 'common/scripted_triggers', 'common/scripted_effects'];
+            let scriptBom = 0, scriptNoBom = 0;
+            for (const relDir of scriptCheckDirs) {
+                const dir = path.join(root, ...relDir.split('/'));
+                if (!fs.existsSync(dir)) continue;
+                for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.txt')).slice(0, 3)) {
+                    try {
+                        const buf = fs.readFileSync(path.join(dir, file));
+                        if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) scriptBom++;
+                        else scriptNoBom++;
+                    } catch { /* skip */ }
+                }
+            }
+            if (scriptBom > 0 || scriptNoBom > 0) {
+                scriptEncoding = scriptNoBom >= scriptBom ? 'UTF-8 without BOM' : 'UTF-8 with BOM';
+            }
+            // Check localisation files (.yml)
+            const locCheckDir = path.join(root, 'localisation');
+            let locBom = 0, locNoBom = 0;
+            if (fs.existsSync(locCheckDir)) {
+                const ymlFiles = this.collectYmlFiles(locCheckDir, 6);
+                for (const ymlPath of ymlFiles) {
+                    try {
+                        const buf = fs.readFileSync(ymlPath);
+                        if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) locBom++;
+                        else locNoBom++;
+                    } catch { /* skip */ }
+                }
+            }
+            if (locBom > 0 || locNoBom > 0) {
+                locEncoding = locBom >= locNoBom ? 'UTF-8 with BOM' : 'UTF-8 without BOM';
+            }
+
+            // ── 3.4 P5: Detect file naming patterns ──────────────────────────
+            const namingPatterns = new Set<string>();
+            for (const subDir of ['common/scripted_triggers', 'common/scripted_effects', 'events']) {
+                const dir = path.join(root, ...subDir.split('/'));
+                if (!fs.existsSync(dir)) continue;
+                const files = fs.readdirSync(dir).filter(f => f.endsWith('.txt'));
+                if (files.length >= 2) {
+                    // Extract common prefix from file names
+                    const prefixes = files.map(f => f.replace('.txt', '').split('_')[0]).filter(Boolean);
+                    const freq = new Map<string, number>();
+                    for (const p of prefixes) freq.set(p, (freq.get(p) || 0) + 1);
+                    for (const [prefix, count] of freq) {
+                        if (count >= 2 && prefix.length > 2) namingPatterns.add(`${prefix}_*.txt (in ${subDir})`);
+                    }
+                }
+            }
+
+            // ── 3.5 P5: Sample on_actions ────────────────────────────────────
+            const onActionIds = this.sampleIds(path.join(root, 'common', 'on_actions'), 10);
+
+            // ── 3.6 P5: Sample static_modifiers ──────────────────────────────
+            const staticModifierIds = this.sampleIds(path.join(root, 'common', 'static_modifiers'), 10);
+
+            // ── 3.7 P5: Detect @variable prefix patterns ─────────────────────
+            const varPrefixes = new Set<string>();
+            if (variableIds.length > 0) {
+                for (const v of variableIds) {
+                    const prefix = v.replace(/^@/, '').split('_').slice(0, 1)[0];
+                    if (prefix && prefix.length > 1) varPrefixes.add(`@${prefix}_`);
+                }
+            }
+
             // ── 4. Build CWTOOLS.md content ───────────────────────────────────
             const now = new Date().toISOString().split('T')[0];
             const lines: string[] = [
@@ -1368,6 +1439,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 modVersion ? `- **Version**: ${modVersion}` : '',
                 modTags ? `- **Tags**: ${modTags}` : '',
                 `- **Root**: \`${root}\``,
+                scriptEncoding ? `- **Script Encoding**: ${scriptEncoding}` : '',
+                locEncoding ? `- **Localisation Encoding**: ${locEncoding}` : '',
                 ``,
                 `## Project Structure`,
                 '```',
@@ -1384,21 +1457,28 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     ? `\n### Global Variables (sample)\n${variableIds.map(id => `- \`${id}\``).join('\n')}`
                     : '',
                 triggerIds.length > 0
-                    ? `### Scripted Triggers (sample)
-${triggerIds.map(id => `- \`${id}\``).join('\n')}`
+                    ? `\n### Scripted Triggers (sample)\n${triggerIds.map(id => `- \`${id}\``).join('\n')}`
                     : '',
                 effectIds.length > 0
-                    ? `\n### Scripted Effects (sample)
-${effectIds.map(id => `- \`${id}\``).join('\n')}`
+                    ? `\n### Scripted Effects (sample)\n${effectIds.map(id => `- \`${id}\``).join('\n')}`
                     : '',
                 eventIds.length > 0
-                    ? `\n### Events (sample)
-${eventIds.map(id => `- \`${id}\``).join('\n')}`
+                    ? `\n### Events (sample)\n${eventIds.map(id => `- \`${id}\``).join('\n')}`
+                    : '',
+                onActionIds.length > 0
+                    ? `\n### On Actions (sample)\n${onActionIds.map(id => `- \`${id}\``).join('\n')}`
+                    : '',
+                staticModifierIds.length > 0
+                    ? `\n### Static Modifiers (sample)\n${staticModifierIds.map(id => `- \`${id}\``).join('\n')}`
                     : '',
                 ``,
                 `## Agent Guidelines`,
                 locLangs.size > 0 ? `- **Localization Target**: This project supports [${Array.from(locLangs).join(', ')}]. Always provide localizations for these languages when creating new keys.` : '',
                 namespaces.size > 0 ? `- **Namespaces**: Always prefix new events with one of the established namespaces.` : '',
+                scriptEncoding ? `- **Script Encoding**: All new .txt script files MUST use ${scriptEncoding}.` : '',
+                locEncoding ? `- **Localisation Encoding**: All new .yml localisation files MUST use ${locEncoding}.` : '',
+                namingPatterns.size > 0 ? `- **File Naming**: Follow existing patterns: ${Array.from(namingPatterns).join(', ')}.` : '',
+                varPrefixes.size > 0 ? `- **Variable Prefixes**: Use established prefixes: ${Array.from(varPrefixes).join(', ')}.` : '',
                 `- Always call \`query_types\` before using an identifier not listed above.`,
                 `- Distinguish Type A (code bug) from Type B (reference not yet defined) errors.`,
                 `- For multi-file tasks, check if referenced IDs are planned to be created later.`,
@@ -1486,6 +1566,25 @@ ${eventIds.map(id => `- \`${id}\``).join('\n')}`
             if (ids.length >= maxCount) break;
         }
         return ids.slice(0, maxCount);
+    }
+
+    /** Collect .yml file paths from a directory (recurses one level into subdirs) */
+    private collectYmlFiles(dir: string, maxCount: number): string[] {
+        const results: string[] = [];
+        if (!fs.existsSync(dir)) return results;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (results.length >= maxCount) break;
+            if (entry.isFile() && entry.name.endsWith('.yml')) {
+                results.push(path.join(dir, entry.name));
+            } else if (entry.isDirectory()) {
+                // Recurse one level (e.g. localisation/english/)
+                for (const sub of fs.readdirSync(path.join(dir, entry.name)).filter(f => f.endsWith('.yml')).slice(0, 2)) {
+                    results.push(path.join(dir, entry.name, sub));
+                    if (results.length >= maxCount) break;
+                }
+            }
+        }
+        return results;
     }
 
     // ─── Permission System (OpenCode-aligned) ────────────────────────────────────

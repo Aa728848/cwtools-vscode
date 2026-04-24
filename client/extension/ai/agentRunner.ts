@@ -1503,7 +1503,9 @@ export class AgentRunner {
         onStep?: (step: AgentStep) => void,
         parentAccumulator?: TokenUsage
     ): Promise<string> {
-        const subSystemPrompt = this.promptBuilder.buildSystemPromptForMode(
+        // P3: sub-agents use slim CWTOOLS.md (only mod info + namespaces)
+        // to avoid bloating narrow-scope sub-agent contexts with full project rules
+        const subSystemPrompt = this.promptBuilder.buildSlimSystemPromptForMode(
             mode,
             this.aiService.getConfig().provider
         );

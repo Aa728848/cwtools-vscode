@@ -13,6 +13,18 @@ import * as path from 'path';
 import type { ChatMessage, AgentMode } from './types';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 
+// ─── Parsed CWTOOLS.md Structure ─────────────────────────────────────────────
+
+interface ParsedProjectRules {
+    raw: string;
+    modInfo?: string;
+    projectStructure?: string;
+    knownIdentifiers?: string;
+    agentGuidelines?: string;
+    customRules?: string;
+    namespaces?: string[];
+}
+
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
 
 function buildBuildSystemPrompt(gameKnowledge: string, gameName: string): string {
@@ -151,6 +163,14 @@ When encountering any of the following constructs **for the first time** in a ta
 | Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |
 | Finding where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` — instant AST lookup |
 | Any vanilla game ID (tech, building, trait…) | \`query_types(typeName, filter)\` — confirm it exists |
+
+## Project Context Usage (MANDATORY when project-premise is present)
+If a \`<project-premise>\` block is provided above, you MUST:
+- **Check Known Identifiers** before creating new IDs — never shadow an existing trigger/effect/event name
+- **Use established Event Namespaces** for all new events (never invent new namespaces)
+- **Generate localizations** for ALL listed Localization Target languages when creating new keys
+- **Match the detected encoding conventions**: scripts (.txt) and localisations (.yml) may use different BOM settings
+- **Follow the detected file naming pattern** when creating new files
 ${gameKnowledge}`;
 }
 
@@ -184,6 +204,12 @@ Structure your plan as:
 - Prefer \`get_file_context(file, line, radius=20)\` over full \`read_file\` when inspecting specific code locations
 - Prefer AST-level tools (\`query_definition_by_name\`, \`query_scripted_effects\`, etc.) for verification — they return structured data, not raw code
 - When analyzing a large project, use \`list_directory\` + \`document_symbols\` to build an overview, then selectively deep-dive into specific files as needed
+
+## Project Context Usage
+If a \`<project-premise>\` block is provided above:
+- Reference the **Project Structure** when listing "Files to modify/create" in your plan
+- Use **Known Identifiers** to validate that referenced IDs exist
+- Note the **Localization Target** languages when planning localisation work
 ${gameKnowledge}`;
 }
 
@@ -210,6 +236,11 @@ Help the user understand: file structure, event chains, trigger/effect patterns,
 - **Structure first**: use \`document_symbols\` to understand a file's layout before deciding whether to read specific sections or the whole file
 - **AST tools are your fastest path**: \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\` return indexed results instantly — reach for these before \`search_mod_files\`
 - Tool results may contain deduplication metadata (\`_occurrences\`, \`_affectedFiles\`) — use these for accurate reporting
+
+## Project Context Usage
+If a \`<project-premise>\` block is provided above:
+- Use **Known Identifiers** to trace cross-file dependencies and explain entity relationships
+- Reference **Event Namespaces** when explaining event chain structure
 ${gameKnowledge}`;
 }
 
@@ -231,6 +262,9 @@ General mode has access to nearly all tools — choose the right tool for each s
 - **Need full file understanding?** Reading complete files is appropriate, just prefer \`document_symbols\` first to know what you're looking at
 - **Searching across files?** Use \`search_mod_files\` or \`workspace_symbols\` before resorting to reading multiple files
 - Tool results may be deduplicated/segmented — metadata fields like \`_occurrences\` and \`_diagnosticsNote\` contain aggregation info for accurate reporting
+
+## Project Context Usage
+If a \`<project-premise>\` block is provided above, incorporate the **Mod Info** and **Agent Guidelines** into your answers.
 ${gameKnowledge}`;
 }
 
@@ -286,6 +320,12 @@ Provide an actionable summary with:
 - Prefer \`query_definition_by_name\` and other AST tools over \`read_file\` for verification
 - Prefer \`get_file_context(file, line, radius=15)\` over reading entire files
 - If diagnostics results appear deduplicated (contain \`_occurrences\` fields), use those counts for accurate reporting
+
+## Project Context Usage
+If a \`<project-premise>\` block is provided above:
+- Cross-check **Known Identifiers** to distinguish project-defined IDs from missing/typo references
+- Use the **Project Structure** to prioritize review of directories with the most mod content
+- Check **Agent Guidelines** for project-specific conventions that should inform your review
 ${gameKnowledge}`;
 }
 
@@ -354,7 +394,7 @@ export class PromptBuilder {
         const gameName = getGameDisplayName(gameId);
         const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName);
         const supplement = this.getModelSupplement(providerId);
-        const projectRules = this.getProjectRulesPrompt();
+        const projectRules = this.getProjectRulesPrompt(mode);
         
         let finalPrompt = '';
         if (projectRules) finalPrompt += projectRules + '\n';
@@ -364,20 +404,132 @@ export class PromptBuilder {
         return finalPrompt;
     }
 
-    private getProjectRulesPrompt(): string {
+    /**
+     * Build a slim system prompt for sub-agents — includes only mod info + namespaces
+     * from CWTOOLS.md to avoid bloating narrow-scope sub-agent contexts.
+     */
+    buildSlimSystemPromptForMode(mode: AgentMode, providerId?: string, languageId?: string): string {
+        const gameId = languageId ?? this.detectGameLanguageId();
+        const gameKnowledge = getGameKnowledge(gameId);
+        const gameName = getGameDisplayName(gameId);
+        const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName);
+        const supplement = this.getModelSupplement(providerId);
+        const slimRules = this.getSlimProjectRulesPrompt();
+        
+        let finalPrompt = '';
+        if (slimRules) finalPrompt += slimRules + '\n';
+        finalPrompt += basePrompt;
+        if (supplement) finalPrompt += '\n' + supplement;
+        
+        return finalPrompt;
+    }
+
+    /** Parsed CWTOOLS.md cache — invalidated when file mtime changes */
+    private _parsedRulesCache: ParsedProjectRules | null = null;
+    private _parsedRulesMtime: number = 0;
+
+    /**
+     * Parse CWTOOLS.md into structured sections for selective injection.
+     * Returns null if file doesn't exist or is empty.
+     */
+    private parseProjectRules(): ParsedProjectRules | null {
         try {
-            if (!this.workspaceRoot) return '';
+            if (!this.workspaceRoot) return null;
             const rulesPath = path.join(this.workspaceRoot, 'CWTOOLS.md');
-            if (fs.existsSync(rulesPath)) {
-                const content = fs.readFileSync(rulesPath, 'utf8');
-                if (content.trim()) {
-                    return `<project-premise>\n# MANDATORY PROJECT RULES & CONTEXT (From CWTOOLS.md)\nYou MUST strictly read and follow these rules before attempting any task. These project-specific rules supersede all general instructions:\n\n${content.trim()}\n</project-premise>\n`;
-                }
+            if (!fs.existsSync(rulesPath)) { this._parsedRulesCache = null; return null; }
+
+            // Check mtime — return cached if file hasn't changed
+            const mtime = fs.statSync(rulesPath).mtimeMs;
+            if (this._parsedRulesCache && mtime === this._parsedRulesMtime) {
+                return this._parsedRulesCache;
             }
+
+            const content = fs.readFileSync(rulesPath, 'utf8').trim();
+            if (!content) { this._parsedRulesCache = null; return null; }
+
+            const parsed: ParsedProjectRules = { raw: content };
+
+            // Extract sections by ## headers
+            const modInfoMatch = content.match(/## Mod Info\n([\s\S]*?)(?=\n## |$)/);
+            if (modInfoMatch) parsed.modInfo = modInfoMatch[1].trim();
+
+            const structureMatch = content.match(/## Project Structure\n([\s\S]*?)(?=\n## |$)/);
+            if (structureMatch) parsed.projectStructure = structureMatch[1].trim();
+
+            const idsMatch = content.match(/## Known Identifiers\n([\s\S]*?)(?=\n## |$)/);
+            if (idsMatch) parsed.knownIdentifiers = idsMatch[1].trim();
+
+            const guidelinesMatch = content.match(/## Agent Guidelines\n([\s\S]*?)(?=\n## |$)/);
+            if (guidelinesMatch) parsed.agentGuidelines = guidelinesMatch[1].trim();
+
+            const customMatch = content.match(/## Custom Rules\n([\s\S]*)/);
+            if (customMatch && customMatch[1].trim() && !customMatch[1].includes('<!-- Add')) {
+                parsed.customRules = customMatch[1].trim();
+            }
+
+            // Extract namespaces list
+            const nsMatch = content.match(/### Event Namespaces\n([\s\S]*?)(?=\n### |\n## |$)/);
+            if (nsMatch) {
+                parsed.namespaces = (nsMatch[1].match(/`([^`]+)`/g) || []).map(s => s.replace(/`/g, ''));
+            }
+
+            this._parsedRulesCache = parsed;
+            this._parsedRulesMtime = mtime;
+            return parsed;
         } catch (e) {
             console.error('[PromptBuilder] Error reading CWTOOLS.md:', e);
+            this._parsedRulesCache = null;
+            return null;
         }
-        return '';
+    }
+
+    /**
+     * Build mode-aware project rules prompt.
+     * Different modes include different subsets of CWTOOLS.md to optimize context usage.
+     */
+    private getProjectRulesPrompt(mode?: AgentMode): string {
+        const parsed = this.parseProjectRules();
+        if (!parsed) return '';
+
+        // Build mode gets full content; other modes get selective sections
+        if (mode === 'build' || !mode) {
+            return `<project-premise>\n# MANDATORY PROJECT RULES & CONTEXT (From CWTOOLS.md)\nYou MUST strictly read and follow these rules before attempting any task. These project-specific rules supersede all general instructions:\n\n${parsed.raw}\n</project-premise>\n`;
+        }
+
+        const sections: string[] = [];
+        // All modes get mod info and custom rules
+        if (parsed.modInfo) sections.push(`## Mod Info\n${parsed.modInfo}`);
+
+        if (mode === 'plan') {
+            if (parsed.projectStructure) sections.push(`## Project Structure\n${parsed.projectStructure}`);
+            if (parsed.namespaces?.length) sections.push(`### Event Namespaces\n${parsed.namespaces.map(ns => `- \`${ns}\``).join('\n')}`);
+            if (parsed.agentGuidelines) sections.push(`## Agent Guidelines\n${parsed.agentGuidelines}`);
+        } else if (mode === 'explore') {
+            if (parsed.knownIdentifiers) sections.push(`## Known Identifiers\n${parsed.knownIdentifiers}`);
+        } else if (mode === 'review') {
+            if (parsed.knownIdentifiers) sections.push(`## Known Identifiers\n${parsed.knownIdentifiers}`);
+            if (parsed.agentGuidelines) sections.push(`## Agent Guidelines\n${parsed.agentGuidelines}`);
+        } else if (mode === 'general') {
+            if (parsed.agentGuidelines) sections.push(`## Agent Guidelines\n${parsed.agentGuidelines}`);
+        }
+
+        if (parsed.customRules) sections.push(`## Custom Rules\n${parsed.customRules}`);
+
+        if (sections.length === 0) return '';
+        return `<project-premise>\n# PROJECT CONTEXT (From CWTOOLS.md)\n${sections.join('\n\n')}\n</project-premise>\n`;
+    }
+
+    /**
+     * Build a slim project rules prompt for sub-agents — only mod info + namespaces.
+     */
+    private getSlimProjectRulesPrompt(): string {
+        const parsed = this.parseProjectRules();
+        if (!parsed) return '';
+        const parts: string[] = [];
+        if (parsed.modInfo) parts.push(`Mod: ${parsed.modInfo.replace(/\n/g, ' | ').replace(/- \*\*/g, '').replace(/\*\*/g, '')}`);
+        if (parsed.namespaces?.length) parts.push(`Namespaces: ${parsed.namespaces.join(', ')}`);
+        if (parts.length === 0) return '';
+        return `<project-hint>${parts.join(' | ')}</project-hint>`;
     }
 
     private getModePrompt(mode: AgentMode, gameKnowledge: string, gameName: string): string {
@@ -408,9 +560,36 @@ export class PromptBuilder {
 
     /**
      * Build a lightweight system prompt for inline completion.
+     * Injects slim project hints (namespaces, key IDs) for better completion accuracy.
      */
     buildInlineSystemPrompt(): string {
-        return INLINE_SYSTEM_PROMPT;
+        const hints = this.getInlineProjectHints();
+        return INLINE_SYSTEM_PROMPT + (hints ? `\n${hints}` : '');
+    }
+
+    /**
+     * Extract lightweight project hints for inline completion.
+     * Only namespaces + top-5 frequently used IDs, kept under ~200 chars.
+     */
+    private getInlineProjectHints(): string {
+        const parsed = this.parseProjectRules();
+        if (!parsed) return '';
+        const parts: string[] = [];
+        if (parsed.namespaces?.length) {
+            parts.push(`Project namespaces: ${parsed.namespaces.join(', ')}`);
+        }
+        // Extract a few key identifiers for completion hints
+        if (parsed.knownIdentifiers) {
+            const ids = (parsed.knownIdentifiers.match(/`([^`]+)`/g) || [])
+                .map((s: string) => s.replace(/`/g, ''))
+                .filter((s: string) => s.length > 3 && !s.includes('/') && !s.includes('\\'))
+                .slice(0, 8);
+            if (ids.length > 0) {
+                parts.push(`Known IDs: ${ids.join(', ')}`);
+            }
+        }
+        if (parts.length === 0) return '';
+        return `Project hints: ${parts.join(' | ')}`;
     }
 
     /**
@@ -418,6 +597,10 @@ export class PromptBuilder {
      * Preserves game-specific identifiers and modding context.
      */
     buildCompactionPrompt(): string {
+        // P4: inject project entity protection hints from CWTOOLS.md
+        const parsed = this.parseProjectRules();
+        const projectProtection = parsed ? this.buildCompactionProtectionHint(parsed) : '';
+
         return `You are a conversation summarizer for a Paradox PDXScript modding AI session.
 
 Produce a dense, information-preserving summary covering:
@@ -432,7 +615,28 @@ Rules:
 - Preserve ALL file paths verbatim
 - No preamble, no conclusion — just the dense information block
 - Use bullet points for clarity
-- Max 1000 words`;
+- Max 1000 words${projectProtection}`;
+    }
+
+    /**
+     * Build compaction protection hint from CWTOOLS.md — instructs the summarizer
+     * to always preserve project-specific identifiers and namespaces.
+     */
+    private buildCompactionProtectionHint(parsed: ParsedProjectRules): string {
+        const parts: string[] = [];
+        if (parsed.namespaces?.length) {
+            parts.push(`Event namespaces: ${parsed.namespaces.join(', ')}`);
+        }
+        // Extract key identifier names to protect
+        if (parsed.knownIdentifiers) {
+            const ids = (parsed.knownIdentifiers.match(/`([^`]+)`/g) || [])
+                .map((s: string) => s.replace(/`/g, ''))
+                .filter((s: string) => s.length > 3)
+                .slice(0, 15);
+            if (ids.length > 0) parts.push(`Key IDs: ${ids.join(', ')}`);
+        }
+        if (parts.length === 0) return '';
+        return `\n\nCRITICAL — These project-specific identifiers MUST be preserved verbatim in the summary (never omit or rephrase):\n${parts.join('\n')}`;
     }
 
     /**

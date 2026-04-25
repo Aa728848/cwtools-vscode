@@ -1002,6 +1002,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     /** Auto-deny on timeout (120 s) — prevents hangs if WebView is hidden or user missed the prompt */
     private static readonly WRITE_CONFIRM_TIMEOUT_MS = 120_000;
 
+    handleAutoWritten(file: string, isNewFile: boolean) {
+        this.postMessage({
+            type: 'autoWriteFile',
+            file,
+            isNewFile
+        });
+    }
+
     handlePendingWrite(file: string, newContent: string, messageId: string): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
             // ── Timeout guard: auto-deny after 120 s ───────────────────────

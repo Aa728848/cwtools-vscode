@@ -48,6 +48,7 @@ export interface FileToolContext {
     fileWriteMode: 'confirm' | 'auto';
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
+    onAutoWritten?: (file: string, isNewFile: boolean) => void;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -129,7 +130,7 @@ export class FileToolHandler {
                     }
                 }
             } catch (e) {
-                return { content: `Error reading file: ${String(e)}`, totalLines: 0, truncated: false };
+                return { content: `读取文件出错：${String(e)}`, totalLines: 0, truncated: false };
             }
 
             const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
@@ -139,9 +140,9 @@ export class FileToolHandler {
                     content: '',
                     totalLines,
                     truncated: true,
-                    _hint: `File has ${totalLines} lines — too large to read in full. ` +
-                        `Recommended: call document_symbols("${args.file}") first to identify the section you need, ` +
-                        `then re-call read_file with startLine and endLine (max ${threshold} lines per call).`,
+                    _hint: `文件共有 ${totalLines} 行 — 太长无法完整读取。` +
+                        `建议：先调用 document_symbols("${args.file}") 定位你所需的部分，` +
+                        `然后再使用 startLine 和 endLine 参数重新调用 read_file（每次最多读取 ${threshold} 行）。`,
                 };
             }
 
@@ -172,18 +173,18 @@ export class FileToolHandler {
 
             return {
                 content: truncated
-                    ? resultContent + `\n[... truncated at ~${MAX_READ_CHARS} chars ...]`
+                    ? resultContent + `\n[... 已在 ~${MAX_READ_CHARS} 字符处截断 ...]`
                     : resultContent,
                 totalLines,
                 truncated,
                 ...(truncated ? {
-                    _hint: `Output truncated. File has ${totalLines} lines total. ` +
-                        `Last line shown: ~${lastLineReturned}. ` +
-                        `To read the next section, call read_file with startLine=${lastLineReturned + 1}.`,
+                    _hint: `输出已截断。文件总行数为 ${totalLines}。` +
+                        `当前显示的最后一行约在 ~${lastLineReturned}。` +
+                        `要读取下一部分，请使用 startLine=${lastLineReturned + 1} 重新调用 read_file。`,
                 } : {}),
             };
         } catch (e) {
-            return { content: `Error reading file: ${String(e)}`, totalLines: 0, truncated: false };
+            return { content: `读取文件出错：${String(e)}`, totalLines: 0, truncated: false };
         }
     }
 
@@ -203,6 +204,9 @@ export class FileToolHandler {
                 if (!confirmed) {
                     return { success: false, message: '用户取消了写入操作' };
                 }
+            } else if (this.ctx.onAutoWritten) {
+                const isNewFile = !fs.existsSync(args.file);
+                this.ctx.onAutoWritten(args.file, isNewFile);
             }
 
             this.writeTextFile(args.file, args.content, hasBom, args.encoding);
@@ -224,7 +228,7 @@ export class FileToolHandler {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return {
                 success: false,
-                message: 'Error: Missing or invalid "filePath" argument. You must provide the absolute file path as a string. Example: edit_file({ "filePath": "/path/to/file.txt", "oldString": "...", "newString": "..." })',
+                message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。示例：edit_file({ "filePath": "/path/to/file.txt", "oldString": "...", "newString": "..." })',
             } as any;
         }
         try {
@@ -261,6 +265,8 @@ export class FileToolHandler {
             if (!confirmed) {
                 return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
             }
+        } else if (this.ctx.onAutoWritten) {
+            this.ctx.onAutoWritten(filePath, false);
         }
 
         try {
@@ -312,7 +318,7 @@ export class FileToolHandler {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return {
                 success: false,
-                message: 'Error: Missing or invalid "filePath" argument. You must provide the absolute file path as a string.',
+                message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。',
             } as any;
         }
         try {
@@ -338,7 +344,7 @@ export class FileToolHandler {
             } catch (e) {
                 // P1 Fix: fail-fast — stop on first error to avoid misleading messages
                 // from subsequent edits operating on an inconsistent intermediate state
-                errors.push(`Edit #${i + 1}: ${e instanceof Error ? e.message : String(e)}`);
+                errors.push(`编辑块 #${i + 1} 失败：${e instanceof Error ? e.message : String(e)}`);
                 break;
             }
         }
@@ -346,17 +352,19 @@ export class FileToolHandler {
         if (errors.length > 0) {
             return {
                 success: false,
-                message: `${errors.length} 个编辑失败，文件未修改：\n${errors.join('\n')}`,
+                message: `${errors.length} 个编辑块应用失败，文件未做任何修改：\n${errors.join('\n')}`,
             };
         }
 
         const diff = this.buildUnifiedDiff(filePath, originalContent, content);
-        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite) {
+        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
             const messageId = `multiedit_${crypto.randomUUID()}`;
             const confirmed = await this.ctx.onPendingWrite(filePath, content, messageId);
             if (!confirmed) {
                 return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
             }
+        } else if (this.ctx.onAutoWritten) {
+            this.ctx.onAutoWritten(filePath, false);
         }
 
         try {
@@ -472,7 +480,7 @@ export class FileToolHandler {
         }
 
         if (hunks.length === 0) {
-            return { success: false, filesChanged: [], errors: ['No valid hunks found in patch'] };
+            return { success: false, filesChanged: [], errors: ['补丁中未找到有效的修改块（hunks）'] };
         }
 
         const byFile = new Map<string, { content: string; hasBom: boolean; hunks: HunkPatch[] }>();
@@ -511,7 +519,7 @@ export class FileToolHandler {
         // P2 Fix: collect all user confirmations BEFORE writing any files
         // to ensure atomicity — if user rejects any file, nothing is written
         const filesChanged: string[] = [];
-        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite) {
+        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
             for (const { filePath, newContent } of pendingWrites) {
                 const messageId = `patch_${crypto.randomUUID()}`;
                 const confirmed = await this.ctx.onPendingWrite(filePath, newContent, messageId);
@@ -523,6 +531,10 @@ export class FileToolHandler {
                     };
                 }
             }
+        } else if (this.ctx.onAutoWritten) {
+            for (const { filePath } of pendingWrites) {
+                this.ctx.onAutoWritten(filePath, false);
+            }
         }
         for (const { filePath, newContent, hasBom } of pendingWrites) {
             const { content: prevContent } = this.readTextFile(filePath);
@@ -531,7 +543,7 @@ export class FileToolHandler {
                 this.writeTextFile(filePath, newContent, hasBom);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
             } catch (e) {
-                errors.push(`Write ${path.basename(filePath)}: ${e instanceof Error ? e.message : String(e)}`);
+                errors.push(`写入 ${path.basename(filePath)} 失败：${e instanceof Error ? e.message : String(e)}`);
             }
         }
 

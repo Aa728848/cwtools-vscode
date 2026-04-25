@@ -718,6 +718,7 @@ export type HostMessage =
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }
     | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean }
+    | { type: 'autoWriteFile'; file: string; isNewFile: boolean }
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
     | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string }

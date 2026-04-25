@@ -41,6 +41,8 @@ export class AgentToolExecutor {
     public onTodoUpdate?: (todos: TodoItem[]) => void;
     /** Callback when a file write needs user confirmation (confirm mode). */
     public onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
+    /** Callback when a file is automatically written (auto mode). */
+    public onAutoWritten?: (file: string, isNewFile: boolean) => void;
     /**
      * Callback fired BEFORE any file is written or created.
      * Used by the retract system to snapshot file state for later restoration.

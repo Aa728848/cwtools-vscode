@@ -259,7 +259,7 @@ export class LspToolHandler {
             const uri = vs.Uri.file(args.file);
             const raw = await this.lspRequest('cwtools.ai.queryDefinition', [uri.toString(), args.line, args.column]) as any;
             if (raw && raw.ok === true) return raw;
-            return { ok: false, error: 'No definition found' };
+            return { ok: false, error: '未找到定义' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }
@@ -270,12 +270,12 @@ export class LspToolHandler {
         if (!name) {
             return {
                 ok: false,
-                error: 'Missing required parameter: symbolName. You must pass the exact symbol name as a string. Example: query_definition_by_name({ "symbolName": "kuat_has_psionic_research" })',
+                error: '缺少必要的 symbolName 参数。你必须传入确切的符号名称。示例：query_definition_by_name({ "symbolName": "kuat_has_psionic_research" })',
             };
         }
         try {
             const raw = await this.lspRequest('cwtools.ai.queryDefinitionByName', [name]) as any;
-            return raw ?? { ok: false, error: 'No response from LSP' };
+            return raw ?? { ok: false, error: 'LSP 无响应' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }
@@ -288,9 +288,9 @@ export class LspToolHandler {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.queryScriptedEffects', [args.filter ?? '', limit], 20_000) as any;
                 if (!args.filter && raw?.ok && Array.isArray(raw.items) && raw.items.length >= limit) {
-                    raw._note = `Showing first ${limit} results. Use filter parameter for targeted queries.`;
+                    raw._note = `正显示前 ${limit} 个结果。请使用 filter 参数进行更精确的搜索。`;
                 }
-                return raw ?? { ok: false, error: 'No response' };
+                return raw ?? { ok: false, error: '无响应' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
@@ -302,9 +302,9 @@ export class LspToolHandler {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.queryScriptedTriggers', [args.filter ?? '', limit], 20_000) as any;
                 if (!args.filter && raw?.ok && Array.isArray(raw.items) && raw.items.length >= limit) {
-                    raw._note = `Showing first ${limit} results. Use filter parameter for targeted queries.`;
+                    raw._note = `正显示前 ${limit} 个结果。请使用 filter 参数进行更精确的搜索。`;
                 }
-                return raw ?? { ok: false, error: 'No response' };
+                return raw ?? { ok: false, error: '无响应' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
@@ -314,7 +314,7 @@ export class LspToolHandler {
         return this.cachedLspRead(cacheKey, async () => {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.queryEnums', [args.enumName ?? '', args.limit ?? 500], 20_000) as any;
-                return raw ?? { ok: false, error: 'No response' };
+                return raw ?? { ok: false, error: '无响应' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
@@ -323,7 +323,7 @@ export class LspToolHandler {
         try {
             const uri = vs.Uri.file(args.file);
             const raw = await this.lspRequest('cwtools.ai.getEntityInfo', [uri.toString()]) as any;
-            return raw ?? { ok: false, error: 'No response' };
+            return raw ?? { ok: false, error: '无响应' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }
@@ -334,7 +334,7 @@ export class LspToolHandler {
         return this.cachedLspRead(cacheKey, async () => {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.queryStaticModifiers', [args.filter ?? '', args.limit ?? 300], 20_000) as any;
-                return raw ?? { ok: false, error: 'No response' };
+                return raw ?? { ok: false, error: '无响应' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
@@ -342,7 +342,7 @@ export class LspToolHandler {
     async queryVariables(args: { filter?: string }): Promise<unknown> {
         try {
             const raw = await this.lspRequest('cwtools.ai.queryVariables', [args.filter ?? '']) as any;
-            return raw ?? { ok: false, error: 'No response' };
+            return raw ?? { ok: false, error: '无响应' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }
@@ -934,7 +934,7 @@ export class LspToolHandler {
                         description: typeof item.detail === 'string' ? item.detail : undefined,
                     })),
                     totalAvailable: completions.items.length,
-                    ...(completions.items.length > limit ? { _note: `Showing ${limit} of ${completions.items.length} completions. Increase limit for more.` } : {}),
+                    ...(completions.items.length > limit ? { _note: `正显示 ${limit}/${completions.items.length} 个补全项。如需查看更多请增加 limit 参数。` } : {}),
                 };
             }
             return { completions: [] };
@@ -1024,7 +1024,7 @@ export class LspToolHandler {
                     const defs = await this.vsCommand<vs.Location[]>(
                         'vscode.executeDefinitionProvider', [uri, position]
                     );
-                    if (!defs || defs.length === 0) return { locations: [], message: 'No definition found' };
+                    if (!defs || defs.length === 0) return { locations: [], message: '未找到定义' };
                     return {
                         locations: defs.map(d => ({
                             file: d.uri.fsPath,
@@ -1041,7 +1041,7 @@ export class LspToolHandler {
                     const refs = await this.vsCommand<vs.Location[]>(
                         'vscode.executeReferenceProvider', [uri, position]
                     );
-                    if (!refs || refs.length === 0) return { references: [], message: 'No references found' };
+                    if (!refs || refs.length === 0) return { references: [], message: '未找到引用' };
                     return {
                         references: refs.slice(0, 50).map(r => ({
                             file: path.relative(this.ctx.workspaceRoot, r.uri.fsPath).replace(/\\/g, '/'),
@@ -1055,18 +1055,18 @@ export class LspToolHandler {
                     const hovers = await this.vsCommand<vs.Hover[]>(
                         'vscode.executeHoverProvider', [uri, position]
                     );
-                    if (!hovers || hovers.length === 0) return { text: '', message: 'No hover info' };
+                    if (!hovers || hovers.length === 0) return { text: '', message: '无悬停提示信息' };
                     const text = hovers.flatMap(h =>
                         h.contents.map(c => typeof c === 'string' ? c : (c as vs.MarkdownString).value)
                     ).join('\n\n');
                     return { text };
                 }
                 case 'rename': {
-                    if (!args.newName) return { error: 'newName required for rename operation' };
+                    if (!args.newName) return { error: '重命名操作需要提供 newName 参数' };
                     const edit = await this.vsCommand<vs.WorkspaceEdit>(
                         'vscode.executeDocumentRenameProvider', [uri, position, args.newName]
                     );
-                    if (!edit) return { error: 'Rename not supported at this position' };
+                    if (!edit) return { error: '当前位置不支持重命名' };
                     const changes: Array<{ file: string; edits: number }> = [];
                     edit.entries().forEach(([u, edits]) => {
                         changes.push({ file: path.relative(this.ctx.workspaceRoot, u.fsPath).replace(/\\/g, '/'), edits: edits.length });
@@ -1078,20 +1078,20 @@ export class LspToolHandler {
                         const confirmed = await this.ctx.onPendingWrite(
                             args.file, `Rename: ${changes.length} file(s) affected: ${summary}`, `rename_${Date.now()}`
                         );
-                        if (!confirmed) return { error: 'User rejected rename operation' };
+                        if (!confirmed) return { error: '用户拒绝了重命名操作' };
                     }
                     const applied = await vs.workspace.applyEdit(edit);
-                    if (!applied) return { error: 'Rename apply failed — workspace rejected the edit' };
+                    if (!applied) return { error: '重命名应用失败 — 工作区拒绝了该修改' };
                     return {
                         changes,
-                        message: `Rename applied: ${changes.length} file(s) affected, ${changes.reduce((s, c) => s + c.edits, 0)} edit(s) total`,
+                        message: `重命名已应用：影响了 ${changes.length} 个文件，共计 ${changes.reduce((s, c) => s + c.edits, 0)} 处修改`,
                     };
                 }
                 default:
-                    return { error: `Unknown LSP operation: ${args.operation}` };
+                    return { error: `未知的 LSP 操作：${args.operation}` };
             }
         } catch (e) {
-            return { error: `LSP operation failed: ${e instanceof Error ? e.message : String(e)}` };
+            return { error: `LSP 操作失败：${e instanceof Error ? e.message : String(e)}` };
         }
     }
 }

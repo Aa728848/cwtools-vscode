@@ -1165,7 +1165,7 @@ export class AgentRunner {
                     totalLines: readResult.totalLines,
                     truncated: true,
                     _linesShown: kept,
-                    _hint: `Budget-truncated to ${kept} lines. Use startLine/endLine for targeted reads.`,
+                    _hint: `由于长度超出预算已截断至 ${kept} 行。进行精确读取请使用 startLine 和 endLine 参数。`,
                 }, null, 2);
             }
         }
@@ -1187,7 +1187,7 @@ export class AgentRunner {
 
         // Strategy 3: Generic truncation with structure hint
         return raw.substring(0, maxChars) +
-            `\n\n[... truncated — original: ${raw.length} chars. Ask for specific items if needed.]`;
+            `\n\n[... 已截断 — 原始长度：${raw.length} 字符。如需具体项请单独查询。]`;
     }
 
     /**
@@ -1282,9 +1282,9 @@ export class AgentRunner {
 
         const segmented = [
             ...head,
-            { _gap: `... ${totalCount - headCount - midCount - tailCount} items omitted ...` },
+            { _gap: `... 省略了 ${totalCount - headCount - midCount - tailCount} 项 ...` },
             ...mid,
-            { _gap: `... continuing to end ...` },
+            { _gap: `... 延续至结尾 ...` },
             ...tail,
         ];
 
@@ -1329,7 +1329,7 @@ export class AgentRunner {
             budgetedWrapper[`_${arrayKey}Shown`] = Math.min(keptCount, items.length);
             budgetedWrapper[`_${arrayKey}Total`] = totalCount;
             if (keptCount < totalCount) {
-                budgetedWrapper[`_${arrayKey}Note`] = `Showing ${Math.min(keptCount, items.length)} of ${totalCount} items (deduplicated/segmented to save context). Use targeted queries for specific files.`;
+                budgetedWrapper[`_${arrayKey}Note`] = `显示了 ${totalCount} 项中的 ${Math.min(keptCount, items.length)} 项（为节省上下文已去重/分段）。请使用带 filter 的查询以查找特定文件。`;
             }
             return JSON.stringify(budgetedWrapper, null, 2);
         }
@@ -1340,7 +1340,7 @@ export class AgentRunner {
             items: shown,
             _shown: Math.min(keptCount, items.length),
             _total: totalCount,
-            _note: `Showing ${Math.min(keptCount, items.length)} of ${totalCount} items. Use targeted queries for specific items.`,
+            _note: `显示了 ${totalCount} 项中的 ${Math.min(keptCount, items.length)} 项。请使用针对性的查询以查找特定项。`,
         }, null, 2);
     }
 
@@ -1377,7 +1377,7 @@ export class AgentRunner {
                         // Very likely a read_file result, try to extract file from context or earlier text if present, 
                         // but mostly preserve it's a read result of N lines.
                         // Since file tool args aren't in result, it's ok, AI usually knows what file it read.
-                        messages[i] = { ...m, content: `[Compacted read_file Tool Result] file read, total ${totalLinesMatch[1]} lines.` };
+                        messages[i] = { ...m, content: `[已压缩的 read_file 工具结果] 成功读取文件，共 ${totalLinesMatch[1]} 行。` };
                         continue;
                     }
 
@@ -1392,7 +1392,7 @@ export class AgentRunner {
                         errorMatch && successMatch?.[1] === 'false' ? `err=${errorMatch[1].substring(0, 80)}` : null,
                         countMatch ? `count=${countMatch[1]}` : null,
                     ].filter(Boolean).join(', ');
-                    messages[i] = { ...m, content: `[Compacted] ${meta || content.substring(0, 200)}` };
+                    messages[i] = { ...m, content: `[已压缩] ${meta || content.substring(0, 200)}` };
                 } else if (content.length > toolResultBudget) {
                     // Moderate: apply budgeting
                     try {
@@ -1400,14 +1400,14 @@ export class AgentRunner {
                         messages[i] = { ...m, content: this.budgetToolResult(parsed, toolResultBudget) };
                     } catch {
                         // Not valid JSON — just truncate
-                        messages[i] = { ...m, content: content.substring(0, toolResultBudget) + '\n[... compacted]' };
+                        messages[i] = { ...m, content: content.substring(0, toolResultBudget) + '\n[... 超限已截断]' };
                     }
                 }
             } else if (m.role === 'assistant' && i < aggressiveThreshold) {
                 // Aggressively compress old assistant reasoning
                 const newM: ChatMessage = { ...m };
                 if (content.length > 2000) {
-                    newM.content = content.substring(0, 1000) + '\n[... compacted]';
+                    newM.content = content.substring(0, 1000) + '\n[... 已压缩]';
                 }
                 // Delete reasoning_content to save massive token overhead from old DeepSeek-V4/etc thoughts.
                 // CRITICAL: must use `delete` (not set to placeholder). DeepSeek API requires

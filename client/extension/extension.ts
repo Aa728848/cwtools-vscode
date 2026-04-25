@@ -193,6 +193,9 @@ export async function activate(context: ExtensionContext) {
 	// onPendingWrite: route file-write confirmations through the WebView panel
 	toolExecutor.onPendingWrite = (file, newContent, messageId) =>
 		chatPanelProvider.handlePendingWrite(file, newContent, messageId);
+	// onAutoWritten: show a read-only notification UI for auto-applied changes
+	toolExecutor.onAutoWritten = (file, isNewFile) =>
+		chatPanelProvider.handleAutoWritten(file, isNewFile);
 	// onTodoUpdate: push todo list updates to the WebView panel
 	toolExecutor.onTodoUpdate = (todos) =>
 		chatPanelProvider.sendTodoUpdate(todos);

@@ -285,28 +285,23 @@ type Server(client: ILanguageClient) =
                     (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
             // logDiag (sprintf "lint le %A" (locCache.TryFind (doc.LocalPath) |> Option.defaultValue []))
             
-            // 优化：本地化文件（.yml）不需要调用 game.UpdateFile 进行语法验证
-            // 因为本地化错误已经通过 locCache 获取，避免重复处理和内存开销
             let errors =
-                if name.EndsWith(".yml") then
-                    // 本地化文件只使用 locCache 的错误，跳过 game.UpdateFile
-                    parserErrors @ locErrors
-                else
-                    // 普通文件需要进行完整的语法验证
-                    // UpdateFile 会修改 game 内部的 AST/errorCache，必须持写锁
-                    parserErrors
-                    @ locErrors
-                    @ match gameObj with
-                      | None -> []
-                      | Some game ->
-                          gameStateLock.EnterWriteLock()
-                          let results =
-                              try game.UpdateFile shallowAnalyze name filetext
-                              finally gameStateLock.ExitWriteLock()
-                          // logDiag (sprintf "lint uf %A" results)
-                          results
-                          |> List.map (fun e ->
-                              (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                match gameObj with
+                | None -> parserErrors @ locErrors
+                | Some game ->
+                    gameStateLock.EnterWriteLock()
+                    let astErrors = 
+                        try game.UpdateFile shallowAnalyze name filetext
+                        finally gameStateLock.ExitWriteLock()
+                        |> List.map (fun e ->
+                            (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                    
+                    if name.EndsWith(".yml") then
+                        // We still need to call game.UpdateFile so the VFS gets the new text,
+                        // but we rely on locCache/RefreshLocalisationCaches for the actual validation errors.
+                        parserErrors @ locErrors
+                    else
+                        parserErrors @ locErrors @ astErrors
 
             match errors with
             | [] -> client.PublishDiagnostics { uri = doc; diagnostics = [] }

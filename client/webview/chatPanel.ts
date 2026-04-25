@@ -1097,6 +1097,35 @@
     }
 
     // ── Diff card ──────────────────────────────────────────────────────────────
+    function showAutoWriteCard(file, isNewFile) {
+        const wrap = document.createElement('div');
+        wrap.className = 'msg-bubble assistant';
+        wrap.style.border = '1px solid var(--accent)';
+        wrap.style.background = 'rgba(100, 200, 100, 0.05)';
+
+        const fileName = (file || '').split(/[\\\/]/).pop() || file;
+
+        wrap.innerHTML = `
+            <div class="code-wrapper" style="margin: 0; border: none; background: transparent;">
+                <div class="code-header" style="justify-content: space-between;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size: 16px;">✨</span>
+                        <span style="color:var(--accent); font-weight:600;">自动应用更改 (Auto Applied)</span>
+                    </div>
+                </div>
+                <div class="code-content" style="padding: 12px; font-family: var(--vscode-editor-font-family, monospace);">
+                    <div style="margin-bottom: 8px;">
+                        <span style="opacity: 0.6;">文件:</span> 
+                        <span style="font-weight: 600; color: var(--vscode-textPreformat-foreground);">${escapeHtml(fileName)}</span>
+                        ${isNewFile ? '<span style="border: 1px solid var(--accent); color: var(--accent); border-radius: 3px; padding: 1px 4px; font-size: 10px; margin-left: 6px;">新文件</span>' : ''}
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.6; word-break: break-all; margin-bottom: 12px;">路径: ${escapeHtml(file)}</div>
+                </div>
+            </div>`;
+
+        chatArea.appendChild(wrap);
+        scrollBottom();
+    }
     function showPendingWriteCard(file, messageId, isNewFile) {
         const fileName = (file || '').split(/[\\\/]/).pop() || file;
         const div = document.createElement('div');
@@ -1350,6 +1379,8 @@
             }
 
             case 'todoUpdate': renderTodos(msg.todos); break;
+
+            case 'autoWriteFile': showAutoWriteCard(msg.file, msg.isNewFile); break;
 
             case 'settingsData':
                 if (msg.current && msg.current.maxContextTokens > 0) contextLimit = msg.current.maxContextTokens;

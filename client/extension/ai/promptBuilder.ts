@@ -25,10 +25,13 @@ interface ParsedProjectRules {
     namespaces?: string[];
 }
 
+const LANGUAGE_MIRRORING_RULE = "IMPORTANT: ALWAYS respond and present information (excluding code or commands) in the exact same language as the user's message.";
+
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
 
 function buildBuildSystemPrompt(gameKnowledge: string, gameName: string): string {
     return `You are Eddy CWTool Code, an expert AI coding agent for ${gameName} PDXScript mod development.
+${LANGUAGE_MIRRORING_RULE}
 
 ## Step 1 — Classify the Request
 
@@ -192,8 +195,9 @@ ${gameKnowledge}`;
 
 // ─── Plan Mode System Prompt Template ────────────────────────────────────────
 
-function buildPlanSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: string): string {
     return `You are Eddy CWTool Code in **Plan Mode** — a read-only analysis and planning agent for ${gameName} PDXScript modding.
+${LANGUAGE_MIRRORING_RULE}
 
 <system-reminder>
 Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`, or use any write tools (\`write_file\`, \`edit_file\`). This supersedes all other instructions.
@@ -233,8 +237,9 @@ ${gameKnowledge}`;
 
 // ─── Explore Mode System Prompt Template ─────────────────────────────────────
 
-function buildExploreSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string): string {
     return `You are Eddy CWTool Code in **Explore Mode** — a codebase exploration agent for ${gameName} mods.
+${LANGUAGE_MIRRORING_RULE}
 
 <system-reminder>
 Explore mode is active. You MUST NOT write or modify any files. Focus on understanding and explaining the codebase.
@@ -264,8 +269,9 @@ ${gameKnowledge}`;
 
 // ─── General Mode System Prompt Template ─────────────────────────────────────
 
-function buildGeneralSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildGeneralModeSystemPrompt(gameKnowledge: string, gameName: string): string {
     return `You are Eddy CWTool Code — a versatile AI assistant for ${gameName} mod development.
+${LANGUAGE_MIRRORING_RULE}
 
 ## General Mode Guidelines
 - You have access to all tools except \`todo_write\`
@@ -288,8 +294,9 @@ ${gameKnowledge}`;
 
 // ─── Review Mode System Prompt Template ──────────────────────────────────────
 
-function buildReviewSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string): string {
     return `You are Eddy CWTool Code in **Review Mode** — an expert code reviewer for ${gameName} mods.
+${LANGUAGE_MIRRORING_RULE}
 
 <system-reminder>
 Review mode is active. You MUST NOT write or modify any files. Your goal is to review existing code, identify bugs, suggest improvements, and ensure best practices.
@@ -552,10 +559,10 @@ export class PromptBuilder {
 
     private getModePrompt(mode: AgentMode, gameKnowledge: string, gameName: string): string {
         switch (mode) {
-            case 'plan': return buildPlanSystemPrompt(gameKnowledge, gameName);
-            case 'explore': return buildExploreSystemPrompt(gameKnowledge, gameName);
-            case 'general': return buildGeneralSystemPrompt(gameKnowledge, gameName);
-            case 'review': return buildReviewSystemPrompt(gameKnowledge, gameName);
+            case 'plan': return buildPlanModeSystemPrompt(gameKnowledge, gameName);
+            case 'explore': return buildExploreModeSystemPrompt(gameKnowledge, gameName);
+            case 'general': return buildGeneralModeSystemPrompt(gameKnowledge, gameName);
+            case 'review': return buildReviewModeSystemPrompt(gameKnowledge, gameName);
             default: return buildBuildSystemPrompt(gameKnowledge, gameName);
         }
     }

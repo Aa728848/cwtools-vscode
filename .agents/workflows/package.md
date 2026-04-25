@@ -78,4 +78,5 @@ Push-Location release; npx @vscode/vsce package; Pop-Location
 - 事件流程图功能已于 2026-04-19 移除，相关文件：`graph.ts`、`graphPanel.ts`、`graphTypes.ts`
 - 性能分析器功能已于 2026-04-18 移除，相关文件：`performanceHints.ts`
 - 星系可视化预览功能于 1.3.0 版本加入，相关文件：`solarSystemParser.ts`、`solarSystemPanel.ts`、`solarSystemPreview.ts`、`solarSystemPreview.css`
+- F# 后端 `IGameDispatcher` 多态化分发及 `agentRunner.ts` 代理核心模块化剥离已于 2026-04-25 完成重建，大幅消减了 10 向 `match` 匹配与代码冗余耦合。
 // turbo-all

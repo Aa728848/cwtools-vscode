@@ -11,6 +11,12 @@ open CWTools.Localisation
 
 module LanguageServerFeatures =
 
+    type IGameVisitor<'R> =
+        abstract Visit<'T when 'T :> ComputedData> : IGame<'T> -> 'R
+
+    type IGameDispatcher =
+        abstract Dispatch<'R> : IGameVisitor<'R> -> 'R option
+
     /// 预编译的正则表达式，避免每次 hover 时重新编译
     let private scriptedVarPattern =
         System.Text.RegularExpressions.Regex(
@@ -79,15 +85,7 @@ module LanguageServerFeatures =
 
 
     let hoverDocument
-        eu4GameObj
-        hoi4GameObj
-        stlGameObj
-        ck2GameObj
-        irGameObj
-        vic2GameObj
-        ck3GameObj
-        (vic3GameObj: 'h option)
-        customGameObj
+        (gameDispatcher: IGameDispatcher)
         (docs: DocumentStore)
         (doc: Uri)
         (pos: Position)
@@ -225,30 +223,13 @@ module LanguageServerFeatures =
                     { contents = MarkupContent("markdown", text)
                       range = None }
 
+            let visitor = 
+                { new IGameVisitor<_> with 
+                    member this.Visit game = hoverFunction game 
+                }
             return
-                match
-                    stlGameObj,
-                    hoi4GameObj,
-                    eu4GameObj,
-                    ck2GameObj,
-                    irGameObj,
-                    vic2GameObj,
-                    ck3GameObj,
-                    vic3GameObj,
-                    customGameObj
-                with
-                | Some game, _, _, _, _, _, _, _, _ -> hoverFunction game
-                | _, Some game, _, _, _, _, _, _, _ -> hoverFunction game
-                | _, _, Some game, _, _, _, _, _, _ -> hoverFunction game
-                | _, _, _, Some game, _, _, _, _, _ -> hoverFunction game
-                | _, _, _, _, Some game, _, _, _, _ -> hoverFunction game
-                | _, _, _, _, _, Some game, _, _, _ -> hoverFunction game
-                | _, _, _, _, _, _, Some game, _, _ -> hoverFunction game
-                | _, _, _, _, _, _, _, Some game, _ -> hoverFunction game
-                | _, _, _, _, _, _, _, _, Some game -> hoverFunction game
-                | _ ->
-                    { contents = MarkupContent("markdown", "")
-                      range = None }
+                gameDispatcher.Dispatch visitor
+                |> Option.defaultValue { contents = MarkupContent("markdown", ""); range = None }
 
         }
 

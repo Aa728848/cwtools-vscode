@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1] — 2026-04-25
+
+### 🏗️ 架构与维护性优化 (Architecture & Maintainability)
+
+- **[重构] F# LSP 后端多态重构**：剥离出 `IGameVisitor` 泛型访问器与 `IGameDispatcher` 任务分发器，彻底移除分散在 SemanticTokens、InlayHints、Hover 及符号查询等核心功能中的 10 向 `match` 冗余状态树。解耦并统一了各游戏平台（STL, HOI4, EU4 等）对游戏数据库 `AllEntities` 与 `References` 的查询逻辑，大幅度改善后端的拓展能力与代码整洁度。
+- **[重构] AI Agent 调度器拆解**：将原本长达 1716 行的 `agentRunner.ts` God Object 进行了模块化切分。提取出了独立的 `toolCallParser`、`jsonRepair` 及 `contextBudget` 等逻辑组件，并采取基于接口的内部 Delegate 转发模式。从根源上消除了杂乱的正则表达式提取器、异常修补器和计费控制系统逻辑污染，从而显著提升了主代理模块的内聚度。
+
 ## [1.6.0] — 2026-04-23
 
 ### 🤖 AI Agent — 新功能与深度集成

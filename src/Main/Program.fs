@@ -92,6 +92,23 @@ type Server(client: ILanguageClient) =
     let mutable eu5GameObj: option<IGame<EU5ComputedData>> = None
     let mutable customGameObj: option<IGame<JominiComputedData>> = None
 
+    let gameDispatcher =
+        { new IGameDispatcher with
+            member _.Dispatch visitor =
+                match stlGameObj, hoi4GameObj, eu4GameObj, ck2GameObj, irGameObj, vic2GameObj, ck3GameObj, vic3GameObj, eu5GameObj, customGameObj with
+                | Some game, _, _, _, _, _, _, _, _, _ -> Some(visitor.Visit game)
+                | _, Some game, _, _, _, _, _, _, _, _ -> Some(visitor.Visit game)
+                | _, _, Some game, _, _, _, _, _, _, _ -> Some(visitor.Visit game)
+                | _, _, _, Some game, _, _, _, _, _, _ -> Some(visitor.Visit game)
+                | _, _, _, _, Some game, _, _, _, _, _ -> Some(visitor.Visit game)
+                | _, _, _, _, _, Some game, _, _, _, _ -> Some(visitor.Visit game)
+                | _, _, _, _, _, _, Some game, _, _, _ -> Some(visitor.Visit game)
+                | _, _, _, _, _, _, _, Some game, _, _ -> Some(visitor.Visit game)
+                | _, _, _, _, _, _, _, _, Some game, _ -> Some(visitor.Visit game)
+                | _, _, _, _, _, _, _, _, _, Some game -> Some(visitor.Visit game)
+                | _ -> None
+        }
+
     let mutable languages: Lang array = [||]
     let mutable rootUri: Uri option = None
     let mutable workspaceFolders: WorkspaceFolder list = []
@@ -109,7 +126,7 @@ type Server(client: ILanguageClient) =
     // Getter function for stlVanillaPath
     let getSTLVanillaPath() = stlVanillaPath
 
-    /// Data-driven mapping: config key → (getter, setter) for vanilla paths.
+    /// Data-driven mapping: config key �?(getter, setter) for vanilla paths.
     /// Used by the config reader loop and checkOrSetGameCache to eliminate duplication.
     let vanillaPathMap =
         [ "stellaris", (fun () -> stlVanillaPath),  (fun v -> stlVanillaPath <- v)
@@ -140,16 +157,16 @@ type Server(client: ILanguageClient) =
     let mutable ignoreCodes: string array = [||]
     let mutable ignoreFiles: string array = [||]
     let mutable dontLoadPatterns: string array = [||]
-    /// key: FileName (使用 Dictionary 替代不可变 Map 以减少 GC 压力)
+    /// key: FileName (使用 Dictionary 替代不可�?Map 以减�?GC 压力)
     let locCache = System.Collections.Generic.Dictionary<string, CWError list>()
 
     let mutable effectTriggerVersion = 0
 
-    /// SemanticTokens cache: filePath → (contentHash, effectTriggerVersion, tokenData)
+    /// SemanticTokens cache: filePath �?(contentHash, effectTriggerVersion, tokenData)
     /// Avoids full AST re-traversal when file content hasn't changed.
     let semanticTokensCache = System.Collections.Generic.Dictionary<string, int * int * int list>()
 
-    /// CodeLens cache: filePath → (contentHash, lenses)
+    /// CodeLens cache: filePath �?(contentHash, lenses)
     let codeLensCache = System.Collections.Generic.Dictionary<string, int * CodeLens list>()
 
     /// Maximum entries before eviction.  512 files covers even very large mods;
@@ -175,7 +192,7 @@ type Server(client: ILanguageClient) =
 
     let mutable lastFocusedFile: string option = None
 
-    /// Atomic flag — 0 = idle, 1 = refreshing.  Use Interlocked.CompareExchange
+    /// Atomic flag �?0 = idle, 1 = refreshing.  Use Interlocked.CompareExchange
     /// instead of a plain mutable bool to prevent two DidOpenTextDocument handlers
     /// from both passing the "false" check and starting duplicate Tasks.
     let currentlyRefreshingFiles = ref 0
@@ -330,7 +347,7 @@ type Server(client: ILanguageClient) =
         match gameObj with
         | Some game ->
             let timestamp = Stopwatch.GetTimestamp()
-            // RefreshCaches rewrites infoService/ruleValidationService/completionService — exclusive write lock
+            // RefreshCaches rewrites infoService/ruleValidationService/completionService �?exclusive write lock
             gameStateLock.EnterWriteLock()
             try
                 game.RefreshCaches()
@@ -340,7 +357,7 @@ type Server(client: ILanguageClient) =
                     game.RefreshLocalisationCaches()
                     delayedLocUpdate <- false
 
-                    // 使用 Dictionary: 清空后重新填充
+                    // 使用 Dictionary: 清空后重新填�?
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
@@ -351,7 +368,7 @@ type Server(client: ILanguageClient) =
                     for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
 
-                // Effect/trigger sets may have changed — invalidate all semantic caches.
+                // Effect/trigger sets may have changed �?invalidate all semantic caches.
                 // Unlike the old Clear() which caused VSCode to lose all highlighting,
                 // we now keep stale entries: SemanticTokensFull will return cached data
                 // when the entity is not yet rebuilt, then VSCode re-requests once the
@@ -366,7 +383,7 @@ type Server(client: ILanguageClient) =
             delayTime <-
                 TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 3).Ticks, 2L * time.Ticks)))
             
-            // 定期清理不存在文件的缓存，防止内存泄漏
+            // 定期清理不存在文件的缓存，防止内存泄�?
             try
                 let existingFiles = 
                     docs.OpenFiles() 
@@ -485,7 +502,7 @@ type Server(client: ILanguageClient) =
 
             loop false Map.empty)
 
-    /// Debounce agent for DidChangeTextDocument → lintAgent.
+    /// Debounce agent for DidChangeTextDocument �?lintAgent.
     /// Waits 1.5 seconds of inactivity before forwarding the lint request.
     /// This prevents write-lock contention during rapid typing.
     let lintDebounceAgent =
@@ -496,13 +513,13 @@ type Server(client: ILanguageClient) =
                     let! msgOpt = agent.TryReceive(1500)
                     match msgOpt with
                     | Some (UpdateRequest(ur, force)) ->
-                        // New edit arrived — reset the debounce timer
+                        // New edit arrived �?reset the debounce timer
                         return! loop (Some (ur, force))
                     | Some (WorkComplete _) ->
                         // Ignore WorkComplete messages in debounce agent
                         return! loop pending
                     | None ->
-                        // Timeout: 1.5s of inactivity — forward to lintAgent
+                        // Timeout: 1.5s of inactivity �?forward to lintAgent
                         match pending with
                         | Some (ur, force) ->
                             lintAgent.Post(UpdateRequest(ur, force))
@@ -614,7 +631,7 @@ type Server(client: ILanguageClient) =
                       maxFileSize = maxFileSize
                       stlVanillaPath = stlVanillaPath }
 
-                // 加载新游戏前，清理旧的游戏对象引用释放内存
+                // 加载新游戏前，清理旧的游戏对象引用释放内�?
                 let cleanupOldGame () =
                     match gameObj with
                     | Some oldGame ->
@@ -623,7 +640,7 @@ type Server(client: ILanguageClient) =
                             oldGame.CleanupCache existingFiles
                         with _ -> ()
                     | None -> ()
-                    // 清除所有旧的类型特定引用
+                    // 清除所有旧的类型特定引�?
                     stlGameObj <- None; hoi4GameObj <- None; eu4GameObj <- None
                     ck2GameObj <- None; irGameObj <- None; vic2GameObj <- None
                     ck3GameObj <- None; vic3GameObj <- None; eu5GameObj <- None
@@ -742,7 +759,7 @@ type Server(client: ILanguageClient) =
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
                 valErrors @ locErrors |> List.map parserErrorToDiagnostics |> sendDiagnostics
-                // L6 Fix: non-blocking optimised GC — avoids a 100ms freeze on load
+                // L6 Fix: non-blocking optimised GC �?avoids a 100ms freeze on load
                 GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
             with e ->
                 eprintfn $"%A{e}"
@@ -905,7 +922,7 @@ type Server(client: ILanguageClient) =
                                     openClose = true
                                     willSave = true
                                     save = Some { includeText = true }
-                                    change = TextDocumentSyncKind.Full }
+                                    change = TextDocumentSyncKind.Incremental }
                             completionProvider =
                                 Some defaultCompletionOptions
                             codeActionProvider = true
@@ -1134,7 +1151,7 @@ type Server(client: ILanguageClient) =
                 | JsonValue.String "verbose" -> loglevel <- LogLevel.Verbose
                 | _ -> ()
 
-                // Data-driven vanilla path config reader — replaces 9 repetitive match blocks
+                // Data-driven vanilla path config reader �?replaces 9 repetitive match blocks
                 for (configKey, _, setter) in vanillaPathMap do
                     match config.Item("cache").Item(configKey) with
                     | JsonValue.String "" -> ()
@@ -1203,7 +1220,7 @@ type Server(client: ILanguageClient) =
 
                     let task =
                         new Task(fun () ->
-                            // M1 Fix: AllFiles() reads internal game state — acquire a shared
+                            // M1 Fix: AllFiles() reads internal game state �?acquire a shared
                             // read lock so we don't race against a concurrent game reload.
                             gameStateLock.EnterReadLock()
                             try
@@ -1266,7 +1283,7 @@ type Server(client: ILanguageClient) =
                 )
             }
 
-        // P0 Fix: was TODO() — return empty edit list instead of crashing
+        // P0 Fix: was TODO() �?return empty edit list instead of crashing
         member this.WillSaveWaitUntilTextDocument(_: WillSaveTextDocumentParams) = async { return [] }
 
         member this.DidSaveTextDocument(p: DidSaveTextDocumentParams) =
@@ -1302,15 +1319,7 @@ type Server(client: ILanguageClient) =
             async {
                 let! hover =
                     hoverDocument
-                        eu4GameObj
-                        hoi4GameObj
-                        stlGameObj
-                        ck2GameObj
-                        irGameObj
-                        vic2GameObj
-                        ck3GameObj
-                        vic3GameObj
-                        customGameObj
+                        gameDispatcher
                         docs
                         p.textDocument.uri
                         p.position
@@ -1459,7 +1468,7 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        // P0 Fix: was TODO() — return empty list instead of crashing
+        // P0 Fix: was TODO() �?return empty list instead of crashing
         member this.DocumentHighlight(_: TextDocumentPositionParams) = async { return [] }
 
         member this.DocumentSymbols(p: DocumentSymbolParams) =
@@ -1665,9 +1674,9 @@ type Server(client: ILanguageClient) =
                                 | None -> 0
 
                             let title =
-                                if refCount = 0 then $"%s{typeName}: %s{id} — no references"
-                                elif refCount = 1 then $"%s{typeName}: %s{id} — 1 reference"
-                                else $"%s{typeName}: %s{id} — %d{refCount} references"
+                                if refCount = 0 then $"%s{typeName}: %s{id} | no references"
+                                elif refCount = 1 then $"%s{typeName}: %s{id} | 1 reference"
+                                else $"%s{typeName}: %s{id} | %d{refCount} references"
 
                             let refLocations =
                                 match refs with
@@ -1717,7 +1726,7 @@ type Server(client: ILanguageClient) =
                             let locMap = game.References().Localisation |> Map.ofList
                             let hints = ResizeArray<InlayHint>()
                             let targetPath = entity.filepath
-
+    
                             // Build scripted variable lookup map
                             let globalVars = game.ScriptedVariables()
                             let fileContent = docs.GetText(FileInfo(targetPath)) |> Option.defaultValue ""
@@ -1737,7 +1746,7 @@ type Server(client: ILanguageClient) =
                                 let clean = System.Text.RegularExpressions.Regex.Replace(clean, "§[RGBYWHETLMSP!]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
                                 let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
                                 sprintf "💬 %s" truncated
-
+    
                             let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
                                 if rawVal.StartsWith("@") && not (rawVal.StartsWith("@[")) then
                                     match Map.tryFind rawVal varMap with
@@ -1750,7 +1759,7 @@ type Server(client: ILanguageClient) =
                                             paddingRight = false
                                         }
                                     | None -> ()
-
+    
                             let rec visitNode (n: CWTools.Process.Node) =
                                 n.Leaves |> Seq.iter (fun l ->
                                     if l.Position.FileName = targetPath then
@@ -1785,38 +1794,23 @@ type Server(client: ILanguageClient) =
                                         tryAddVarHint rawVal lv.Position
                                 )
                                 n.Nodes |> Seq.iter visitNode
-
+    
                             visitNode entity.entity
                             
                             hints 
                             |> Seq.distinctBy (fun h -> h.position.line, h.label)
                             |> Seq.toList
                         
+                    let visitor = 
+                        { new IGameVisitor<_> with 
+                            member this.Visit game = inlayHintFunction game 
+                        }
                     return
-                        match
-                            stlGameObj,
-                            hoi4GameObj,
-                            eu4GameObj,
-                            ck2GameObj,
-                            irGameObj,
-                            vic2GameObj,
-                            ck3GameObj,
-                            vic3GameObj,
-                            customGameObj
-                        with
-                        | Some game, _, _, _, _, _, _, _, _ -> inlayHintFunction game
-                        | _, Some game, _, _, _, _, _, _, _ -> inlayHintFunction game
-                        | _, _, Some game, _, _, _, _, _, _ -> inlayHintFunction game
-                        | _, _, _, Some game, _, _, _, _, _ -> inlayHintFunction game
-                        | _, _, _, _, Some game, _, _, _, _ -> inlayHintFunction game
-                        | _, _, _, _, _, Some game, _, _, _ -> inlayHintFunction game
-                        | _, _, _, _, _, _, Some game, _, _ -> inlayHintFunction game
-                        | _, _, _, _, _, _, _, Some game, _ -> inlayHintFunction game
-                        | _, _, _, _, _, _, _, _, Some game -> inlayHintFunction game
-                        | _ -> []
+                        gameDispatcher.Dispatch visitor
+                        |> Option.defaultValue []
             }
             |> catchError []
-        // P0 Fix: was TODO() — return empty list / identity instead of crashing
+        // P0 Fix: was TODO() �?return empty list / identity instead of crashing
         member this.DocumentLink(_: DocumentLinkParams) = async { return [] }
         member this.ResolveDocumentLink(link: DocumentLink) = async { return link }
 
@@ -1860,7 +1854,7 @@ type Server(client: ILanguageClient) =
                         let allEffects = game.ScriptedEffects() |> List.map (fun e -> e.Name.GetString()) |> Set.ofList
                         let allTriggers = game.ScriptedTriggers() |> List.map (fun e -> e.Name.GetString()) |> Set.ofList
 
-                        // Walk AST — only classify Leaves and LeafValues
+                        // Walk AST �?only classify Leaves and LeafValues
                         // Verify against source text to avoid position mismatches
                         let verifyAndAdd (line: int) (col: int) (len: int) (tokenType: int) =
                             if line >= 0 && line < lines.Length then
@@ -2026,30 +2020,13 @@ type Server(client: ILanguageClient) =
                         evictIfNeeded semanticTokensCache
                         Some { data = dataList }
 
+                let visitor = 
+                    { new IGameVisitor<_> with 
+                        member this.Visit game = semanticTokensFunction game 
+                    }
                 return
-                    match
-                        stlGameObj,
-                        hoi4GameObj,
-                        eu4GameObj,
-                        ck2GameObj,
-                        irGameObj,
-                        vic2GameObj,
-                        ck3GameObj,
-                        vic3GameObj,
-                        eu5GameObj,
-                        customGameObj
-                    with
-                    | Some game, _, _, _, _, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, Some game, _, _, _, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, Some game, _, _, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, Some game, _, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, Some game, _, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, Some game, _, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, _, Some game, _, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, _, _, Some game, _, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, _, _, _, Some game, _ -> semanticTokensFunction game
-                    | _, _, _, _, _, _, _, _, _, Some game -> semanticTokensFunction game
-                    | _ -> None
+                    gameDispatcher.Dispatch visitor
+                    |> Option.flatten
             }
             |> catchError None
 
@@ -2084,7 +2061,7 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        // P0 Fix: was TODO() — return empty results / no-op instead of crashing
+        // P0 Fix: was TODO() �?return empty results / no-op instead of crashing
         member this.DocumentRangeFormatting(_: DocumentRangeFormattingParams) = async { return [] }
         member this.DocumentOnTypeFormatting(_: DocumentOnTypeFormattingParams) = async { return [] }
         member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = async { () }
@@ -2440,10 +2417,10 @@ type Server(client: ILanguageClient) =
 
                         | { command = "cwtools.ai.validateCode"
                             arguments = codeArg :: targetFileArg :: _ } ->
-                            // In-memory code validation — no temp files, no 3s wait
+                            // In-memory code validation �?no temp files, no 3s wait
                             // NOTE: This handler runs inside runWriteRequest which already
                             // holds gameStateLock in Write mode. Do NOT re-acquire the lock
-                            // here — ReaderWriterLockSlim(NoRecursion) would throw LockRecursionException.
+                            // here �?ReaderWriterLockSlim(NoRecursion) would throw LockRecursionException.
                             let code       = codeArg.AsString()
                             let targetFile = targetFileArg.AsString()
                             let errorsJson =
@@ -2480,7 +2457,7 @@ type Server(client: ILanguageClient) =
                                         | Some orig ->
                                             try g.UpdateFile true targetFile (Some orig) |> ignore
                                             with ex ->
-                                                // Restoration failed — log the error so it doesn't silently corrupt state
+                                                // Restoration failed �?log the error so it doesn't silently corrupt state
                                                 eprintfn "validateCode: failed to restore original content for %s: %A" targetFile ex
                                         | None -> ()
 
@@ -2540,7 +2517,7 @@ type Server(client: ILanguageClient) =
                                                "totalCount", JsonValue.Number 0m
                                                "ok",         JsonValue.Boolean true |]
                                     | Some typeArr ->
-                                        // Single filter pass → reuse for both count and truncated result
+                                        // Single filter pass �?reuse for both count and truncated result
                                         let filtered =
                                             typeArr
                                             |> Array.filter (fun td ->
@@ -2632,7 +2609,7 @@ type Server(client: ILanguageClient) =
                         // is defined, by searching AllEntities for a top-level key that matches.
                         // Much more practical than position-based GoToType for AI use.
                         //
-                        // Optimization: Phase 1 uses g.Types() — an already-indexed Map<typeName, TypeDefInfo[]>
+                        // Optimization: Phase 1 uses g.Types() �?an already-indexed Map<typeName, TypeDefInfo[]>
                         // for O(1) lookup. Phase 2 falls back to AllEntities scan only if Types() misses.
                         | { command = "cwtools.ai.queryDefinitionByName"
                             arguments = args } ->
@@ -2685,16 +2662,13 @@ type Server(client: ILanguageClient) =
                                     // Try Types() first (fast), then AllEntities (slow)
                                     let found =
                                         (gameObj |> Option.bind tryFindInTypes)
-                                        |> Option.orElse (stlGameObj    |> Option.bind tryFindInGame)
-                                        |> Option.orElse (hoi4GameObj   |> Option.bind tryFindInGame)
-                                        |> Option.orElse (eu4GameObj    |> Option.bind tryFindInGame)
-                                        |> Option.orElse (ck2GameObj    |> Option.bind tryFindInGame)
-                                        |> Option.orElse (irGameObj     |> Option.bind tryFindInGame)
-                                        |> Option.orElse (vic2GameObj   |> Option.bind tryFindInGame)
-                                        |> Option.orElse (ck3GameObj    |> Option.bind tryFindInGame)
-                                        |> Option.orElse (vic3GameObj   |> Option.bind tryFindInGame)
-                                        |> Option.orElse (eu5GameObj    |> Option.bind tryFindInGame)
-                                        |> Option.orElse (customGameObj |> Option.bind tryFindInGame)
+                                        |> Option.orElse (
+                                            let visitor = 
+                                                { new IGameVisitor<_> with 
+                                                    member this.Visit game = tryFindInGame game 
+                                                }
+                                            gameDispatcher.Dispatch visitor |> Option.flatten
+                                        )
                                     match found with
                                     | Some json -> json
                                     | None ->
@@ -3013,7 +2987,7 @@ type Server(client: ILanguageClient) =
                             Some result
 
                         // M8 Fix: previously these were declared as isReadCmd=true in LanguageServer.fs
-                        // but had no implementation — they would silently return null.
+                        // but had no implementation �?they would silently return null.
                         // Return a structured not-implemented response so callers can detect the gap.
                         | { command = "typeGraphInfo"; arguments = _ }
                         | { command = "getFileTypes"; arguments = _ }

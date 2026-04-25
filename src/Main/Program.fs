@@ -169,6 +169,9 @@ type Server(client: ILanguageClient) =
     /// CodeLens cache: filePath �?(contentHash, lenses)
     let codeLensCache = System.Collections.Generic.Dictionary<string, int * CodeLens list>()
 
+    /// InlayHint cache: filePath -> (contentHash, hints)
+    let inlayHintCache = System.Collections.Generic.Dictionary<string, int * InlayHint list>()
+
     /// Maximum entries before eviction.  512 files covers even very large mods;
     /// each entry is small (hash + delta-encoded int list / CodeLens list).
     let cacheMaxEntries = 512
@@ -537,13 +540,13 @@ type Server(client: ILanguageClient) =
             client.CustomNotification(
                 "loadingBar",
                 JsonValue.Record
-                    [| "value", JsonValue.String("Updating validation rules...")
+                    [| "value", JsonValue.String(LangResources.loadingBar_UpdatingRules)
                        "enable", JsonValue.Boolean(true) |]
             )
 
             match initOrUpdateRules rp cp stable true with
             | true, Some date ->
-                let text = $"Validation rules for {activeGame} have been updated to {date}."
+                let text = String.Format(LangResources.rulesUpdated, activeGame, date)
                 logInfo text
             | _ -> ()
 
@@ -759,6 +762,125 @@ type Server(client: ILanguageClient) =
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
                 valErrors @ locErrors |> List.map parserErrorToDiagnostics |> sendDiagnostics
+                
+                // Precache CodeLens and InlayHints for all files in O(T)
+                client.CustomNotification(
+                    "loadingBar",
+                    JsonValue.Record [| "value", JsonValue.String(LangResources.loadingBar_PrecachingUI); "enable", JsonValue.Boolean(true) |]
+                )
+                try
+                    codeLensCache.Clear()
+                    inlayHintCache.Clear()
+                    
+                    let types = game.Types()
+                    let groupedTypes = 
+                        types 
+                        |> Map.toList
+                        |> Seq.collect (fun (typeName, vs) ->
+                            if typeName.Contains(".") then Seq.empty
+                            else 
+                                vs 
+                                |> Array.toSeq 
+                                |> Seq.map (fun tdi -> (FileInfo(tdi.range.FileName).FullName, typeName, tdi))
+                        )
+                        |> Seq.groupBy (fun (fname, _, _) -> fname)
+                        |> Map.ofSeq
+
+                    let precacheVisitor =
+                        { new IGameVisitor<bool> with
+                            member this.Visit (gameT: IGame<_>) =
+                                let globalLocMap = gameT.References().Localisation |> Map.ofList
+                                let globalVars = gameT.ScriptedVariables()
+                                let localVarPattern =
+                                    System.Text.RegularExpressions.Regex(
+                                        @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
+                                        System.Text.RegularExpressions.RegexOptions.Multiline)
+
+                                let formatHintLabel (desc: string) =
+                                    let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
+                                    let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
+                                    let clean = System.Text.RegularExpressions.Regex.Replace(clean, "§[RGBYWHETLMSP!]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                                    let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
+                                    sprintf "💬 %s" truncated
+
+                                for struct(entity, _) in gameT.AllEntities() do
+                                    let filePath = FileInfo(entity.filepath).FullName
+                                    let fileText = 
+                                        // Only use DocumentStore if it's already open, else Fallback to File system read
+                                        match docs.GetTextByPath(filePath) with
+                                        | Some t -> t
+                                        | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
+                                    let hash = contentHash fileText
+                                    
+                                    // 1. Precache CodeLens
+                                    match Map.tryFind filePath groupedTypes with
+                                    | Some items ->
+                                        let lenses =
+                                            items 
+                                            |> Seq.map (fun (_, typeName, tdi) ->
+                                                let range = convRangeToLSPRange tdi.range
+                                                { LSP.Types.CodeLens.range = range
+                                                  command = None
+                                                  data =
+                                                    JsonValue.Record
+                                                        [| "typeName", JsonValue.String typeName
+                                                           "id", JsonValue.String tdi.id
+                                                           "filePath", JsonValue.String filePath
+                                                           "line", JsonValue.Number(decimal range.start.line)
+                                                           "character", JsonValue.Number(decimal range.start.character) |] 
+                                                }
+                                            )
+                                            |> Seq.toList
+                                        codeLensCache.[filePath] <- (hash, lenses)
+                                    | None -> 
+                                        codeLensCache.[filePath] <- (hash, [])
+                                    
+                                    // 2. Precache InlayHints
+                                    let hints = ResizeArray<InlayHint>()
+                                    let localVars = [ for m in localVarPattern.Matches(fileText) -> (m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim()) ]
+                                    let varMap = (localVars @ globalVars) |> Map.ofList
+                                    
+                                    let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
+                                        if rawVal.StartsWith("@") && not (rawVal.StartsWith("@[")) then
+                                            match Map.tryFind rawVal varMap with
+                                            | Some value ->
+                                                let range = convRangeToLSPRange position
+                                                hints.Add { position = range.``end``; label = sprintf "= %s" value; paddingLeft = true; paddingRight = false }
+                                            | None -> ()
+
+                                    let rec visitNode (n: CWTools.Process.Node) =
+                                        n.Leaves |> Seq.iter (fun l ->
+                                            if l.Position.FileName = filePath then
+                                                let rawVal = l.Value.ToRawString().Trim('\"')
+                                                match Map.tryFind rawVal globalLocMap with
+                                                | Some tr ->
+                                                    let range = convRangeToLSPRange l.Position
+                                                    hints.Add { position = range.``end``; label = formatHintLabel tr.desc; paddingLeft = true; paddingRight = false }
+                                                | None -> ()
+                                                tryAddVarHint rawVal l.Position
+                                        )
+                                        n.LeafValues |> Seq.iter (fun lv ->
+                                            if lv.Position.FileName = filePath then
+                                                let rawVal = lv.Value.ToRawString().Trim('\"')
+                                                match Map.tryFind rawVal globalLocMap with
+                                                | Some tr ->
+                                                    let range = convRangeToLSPRange lv.Position
+                                                    hints.Add { position = range.``end``; label = formatHintLabel tr.desc; paddingLeft = true; paddingRight = false }
+                                                | None -> ()
+                                                tryAddVarHint rawVal lv.Position
+                                        )
+                                        n.Nodes |> Seq.iter visitNode
+                                    
+                                    visitNode entity.entity
+                                    let uniqueHints = hints |> Seq.distinctBy (fun h -> h.position.line, h.label) |> Seq.toList
+                                    inlayHintCache.[filePath] <- (hash, uniqueHints)
+                                true
+                        }
+                    
+                    gameDispatcher.Dispatch precacheVisitor |> ignore
+                        
+                with e -> eprintfn $"Precache failed: %A{e}"
+
                 // L6 Fix: non-blocking optimised GC �?avoids a 100ms freeze on load
                 GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
             with e ->
@@ -1086,32 +1208,35 @@ type Server(client: ILanguageClient) =
                     | _, EU5 -> [| Lang.EU5 EU5Lang.English |]
                     | _, Custom -> [| Lang.Custom CustomLang.English |]
 
-                languages <- newLanguages
+                let mutable requiresReload = false
+                let updateIfChanged current newVal =
+                    if current <> newVal then
+                        requiresReload <- true
+                        newVal
+                    else current
+
+                if languages <> newLanguages then
+                    languages <- newLanguages
+                    requiresReload <- true
 
                 match config.Item("localisation").Item("generated_strings") with
-                | JsonValue.String newString -> generatedStrings <- newString
+                | JsonValue.String newString -> generatedStrings <- updateIfChanged generatedStrings newString
                 | _ -> ()
 
                 let newVanillaOnly =
                     match config.Item("errors").Item("vanilla") with
                     | JsonValue.Boolean b -> b
-                    | _ -> false
+                    | _ -> validateVanilla
 
-                validateVanilla <- newVanillaOnly
+                validateVanilla <- updateIfChanged validateVanilla newVanillaOnly
 
-                let newExperimental =
-                    match config.Item("experimental") with
-                    | JsonValue.Boolean b -> b
-                    | _ -> false
+                match config.Item("experimental") with
+                | JsonValue.Boolean b -> experimental <- b
+                | _ -> ()
 
-                experimental <- newExperimental
-
-                let newDebugMode =
-                    match config.Item("debug_mode") with
-                    | JsonValue.Boolean b -> b
-                    | _ -> false
-
-                debugMode <- newDebugMode
+                match config.Item("debug_mode") with
+                | JsonValue.Boolean b -> debugMode <- b
+                | _ -> ()
 
                 let newIgnoreCodes =
                     match config.Item("errors").Item("ignore") with
@@ -1120,9 +1245,11 @@ type Server(client: ILanguageClient) =
                         |> Array.choose (function
                             | JsonValue.String s -> Some s
                             | _ -> None)
-                    | _ -> [||]
+                    | _ -> ignoreCodes
 
-                ignoreCodes <- newIgnoreCodes
+                if ignoreCodes <> newIgnoreCodes then
+                    ignoreCodes <- newIgnoreCodes
+                    requiresReload <- true
 
                 let newIgnoreFiles =
                     match config.Item("errors").Item("ignorefiles") with
@@ -1131,9 +1258,11 @@ type Server(client: ILanguageClient) =
                         |> Array.choose (function
                             | JsonValue.String s -> Some s
                             | _ -> None)
-                    | _ -> [||]
+                    | _ -> ignoreFiles
 
-                ignoreFiles <- newIgnoreFiles
+                if ignoreFiles <> newIgnoreFiles then
+                    ignoreFiles <- newIgnoreFiles
+                    requiresReload <- true
 
                 let excludePatterns =
                     match config.Item("ignore_patterns") with
@@ -1142,25 +1271,34 @@ type Server(client: ILanguageClient) =
                         |> Array.choose (function
                             | JsonValue.String s -> Some s
                             | _ -> None)
-                    | _ -> [||]
+                    | _ -> dontLoadPatterns
 
-                dontLoadPatterns <- excludePatterns
+                if dontLoadPatterns <> excludePatterns then
+                    dontLoadPatterns <- excludePatterns
+                    requiresReload <- true
 
                 match config.Item("trace").Item("server") with
                 | JsonValue.String "messages"
                 | JsonValue.String "verbose" -> loglevel <- LogLevel.Verbose
                 | _ -> ()
 
-                // Data-driven vanilla path config reader �?replaces 9 repetitive match blocks
-                for (configKey, _, setter) in vanillaPathMap do
+                for (configKey, getter, setter) in vanillaPathMap do
                     match config.Item("cache").Item(configKey) with
                     | JsonValue.String "" -> ()
-                    | JsonValue.String s -> setter (Some s)
+                    | JsonValue.String s -> 
+                        let old = getter () |> Option.defaultValue ""
+                        if old <> s then
+                            setter (Some s)
+                            requiresReload <- true
                     | _ -> ()
 
 
                 match config.Item("rules_folder") with
-                | JsonValue.String x -> manualRulesFolder <- Some x
+                | JsonValue.String x -> 
+                    let old = manualRulesFolder |> Option.defaultValue ""
+                    if old <> x then
+                        manualRulesFolder <- Some x
+                        requiresReload <- true
                 | _ -> ()
 
                 match config.Item("showInlineText") with
@@ -1171,7 +1309,7 @@ type Server(client: ILanguageClient) =
                 | JsonValue.Number x -> maxFileSize <- int x
                 | _ -> ()
 
-                logInfo $"New configuration %s{p.ToString()}"
+                logInfo $"New configuration %s{p.ToString()} - requiresReload: %b{requiresReload}"
 
                 match cachePath with
                 | Some dir ->
@@ -1181,20 +1319,21 @@ type Server(client: ILanguageClient) =
                         Directory.CreateDirectory dir |> ignore
                 | _ -> ()
 
-                let task =
-                    new Task(fun () ->
-                        // C3 Fix: processWorkspace mutates gameObj / stlGameObj / etc.
-                        // Acquire the write lock so no concurrent read request sees a
-                        // half-initialised game object while we are swapping it in.
-                        gameStateLock.EnterWriteLock()
-                        try
-                            setupRulesCaches ()
-                            checkOrSetGameCache false
-                            processWorkspace rootUri
-                        finally
-                            gameStateLock.ExitWriteLock())
+                if requiresReload then
+                    let task =
+                        new Task(fun () ->
+                            // C3 Fix: processWorkspace mutates gameObj / stlGameObj / etc.
+                            // Acquire the write lock so no concurrent read request sees a
+                            // half-initialised game object while we are swapping it in.
+                            gameStateLock.EnterWriteLock()
+                            try
+                                setupRulesCaches ()
+                                checkOrSetGameCache false
+                                processWorkspace rootUri
+                            finally
+                                gameStateLock.ExitWriteLock())
 
-                task.Start()
+                    task.Start()
             }
 
         member this.DidOpenTextDocument(p: DidOpenTextDocumentParams) =
@@ -1613,9 +1752,12 @@ type Server(client: ILanguageClient) =
                 return
                     match gameObj with
                     | Some game ->
-                        let filePath = p.textDocument.uri.LocalPath
+                        let filePath = FileInfo(p.textDocument.uri.LocalPath).FullName
                         // ── Content-hash cache: skip recalc if file unchanged ──
-                        let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                        let fileText = 
+                            match docs.GetTextByPath(filePath) with
+                            | Some t -> t
+                            | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
                         let hash = contentHash fileText
                         match codeLensCache.TryGetValue(filePath) with
                         | true, (cachedHash, cachedLenses) when cachedHash = hash ->
@@ -1629,7 +1771,7 @@ type Server(client: ILanguageClient) =
                                 |> List.collect (fun (typeName, vs) ->
                                     vs
                                     |> Array.toList
-                                    |> List.filter (fun tdi -> tdi.range.FileName = filePath && not (typeName.Contains(".")))
+                                    |> List.filter (fun tdi -> FileInfo(tdi.range.FileName).FullName = filePath && not (typeName.Contains(".")))
                                     |> List.map (fun tdi ->
                                         let range = convRangeToLSPRange tdi.range
                                         { range = range
@@ -1715,99 +1857,113 @@ type Server(client: ILanguageClient) =
             async {
                 if not showInlineText then return []
                 else
-                    let inlayHintFunction (game: IGame<_>) =
-                        let entityOpt = 
-                            game.AllEntities() 
-                            |> Seq.tryPick (fun struct (e, _) -> if e.filepath = p.textDocument.uri.LocalPath then Some e else None)
-                        
-                        match entityOpt with
-                        | None -> []
-                        | Some entity ->
-                            let locMap = game.References().Localisation |> Map.ofList
-                            let hints = ResizeArray<InlayHint>()
-                            let targetPath = entity.filepath
-    
-                            // Build scripted variable lookup map
-                            let globalVars = game.ScriptedVariables()
-                            let fileContent = docs.GetText(FileInfo(targetPath)) |> Option.defaultValue ""
-                            let localVarPattern =
-                                System.Text.RegularExpressions.Regex(
-                                    @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
-                                    System.Text.RegularExpressions.RegexOptions.Multiline)
-                            let localVars =
-                                [ for m in localVarPattern.Matches(fileContent) ->
-                                    m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() ]
-                            let varMap = (localVars @ globalVars) |> Map.ofList
+                    let filePath = FileInfo(p.textDocument.uri.LocalPath).FullName
+                    // Match the hash correctly
+                    let fileText = 
+                        match docs.GetTextByPath(filePath) with
+                        | Some t -> t
+                        | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
+                    let hash = contentHash fileText
+                    
+                    match inlayHintCache.TryGetValue(filePath) with
+                    | true, (cachedHash, cachedHints) when cachedHash = hash -> return cachedHints
+                    | _ ->
+                        let inlayHintFunction (game: IGame<_>) =
+                            let entityOpt = 
+                                game.AllEntities() 
+                                |> Seq.tryPick (fun struct (e, _) -> if FileInfo(e.filepath).FullName = filePath then Some e else None)
                             
-                            let formatHintLabel (desc: string) =
-                                let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
-                                let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
-                                // Strip Paradox color codes §X
-                                let clean = System.Text.RegularExpressions.Regex.Replace(clean, "§[RGBYWHETLMSP!]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
-                                let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
-                                sprintf "💬 %s" truncated
-    
-                            let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
-                                if rawVal.StartsWith("@") && not (rawVal.StartsWith("@[")) then
-                                    match Map.tryFind rawVal varMap with
-                                    | Some value ->
-                                        let range = convRangeToLSPRange position
-                                        hints.Add {
-                                            position = range.``end``
-                                            label = sprintf "= %s" value
-                                            paddingLeft = true
-                                            paddingRight = false
-                                        }
-                                    | None -> ()
-    
-                            let rec visitNode (n: CWTools.Process.Node) =
-                                n.Leaves |> Seq.iter (fun l ->
-                                    if l.Position.FileName = targetPath then
-                                        let rawVal = l.Value.ToRawString().Trim('\"')
-                                        // Localization hint
-                                        match Map.tryFind rawVal locMap with
-                                        | Some tr ->
-                                            let range = convRangeToLSPRange l.Position
+                            match entityOpt with
+                            | None -> []
+                            | Some entity ->
+                                let locMap = game.References().Localisation |> Map.ofList
+                                let hints = ResizeArray<InlayHint>()
+                                let targetPath = entity.filepath
+        
+                                // Build scripted variable lookup map
+                                let globalVars = game.ScriptedVariables()
+                                let fileContent = fileText
+                                let localVarPattern =
+                                    System.Text.RegularExpressions.Regex(
+                                        @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
+                                        System.Text.RegularExpressions.RegexOptions.Multiline)
+                                let localVars =
+                                    [ for m in localVarPattern.Matches(fileContent) ->
+                                        m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() ]
+                                let varMap = (localVars @ globalVars) |> Map.ofList
+                                
+                                let formatHintLabel (desc: string) =
+                                    let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
+                                    let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
+                                    // Strip Paradox color codes
+                                    let clean = System.Text.RegularExpressions.Regex.Replace(clean, "§[RGBYWHETLMSP!]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                                    let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
+                                    sprintf "💬 %s" truncated
+        
+                                let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
+                                    if rawVal.StartsWith("@") && not (rawVal.StartsWith("@[")) then
+                                        match Map.tryFind rawVal varMap with
+                                        | Some value ->
+                                            let range = convRangeToLSPRange position
                                             hints.Add {
                                                 position = range.``end``
-                                                label = formatHintLabel tr.desc
+                                                label = sprintf "= %s" value
                                                 paddingLeft = true
                                                 paddingRight = false
                                             }
                                         | None -> ()
-                                        // Scripted variable hint
-                                        tryAddVarHint rawVal l.Position
-                                )
-                                n.LeafValues |> Seq.iter (fun lv ->
-                                    if lv.Position.FileName = targetPath then
-                                        let rawVal = lv.Value.ToRawString().Trim('\"')
-                                        match Map.tryFind rawVal locMap with
-                                        | Some tr ->
-                                            let range = convRangeToLSPRange lv.Position
-                                            hints.Add {
-                                                position = range.``end``
-                                                label = formatHintLabel tr.desc
-                                                paddingLeft = true
-                                                paddingRight = false
-                                            }
-                                        | None -> ()
-                                        tryAddVarHint rawVal lv.Position
-                                )
-                                n.Nodes |> Seq.iter visitNode
-    
-                            visitNode entity.entity
+        
+                                let rec visitNode (n: CWTools.Process.Node) =
+                                    n.Leaves |> Seq.iter (fun l ->
+                                        if l.Position.FileName = targetPath then
+                                            let rawVal = l.Value.ToRawString().Trim('\"')
+                                            // Localization hint
+                                            match Map.tryFind rawVal locMap with
+                                            | Some tr ->
+                                                // Wait, tr might be obj if called from here, but formatHintLabel tr.desc was previously used.
+                                                // Actually let's assume `tr.desc` resolves because it was in original code.
+                                                let range = convRangeToLSPRange l.Position
+                                                hints.Add {
+                                                    position = range.``end``
+                                                    label = formatHintLabel tr.desc
+                                                    paddingLeft = true
+                                                    paddingRight = false
+                                                }
+                                            | None -> ()
+                                            // Scripted variable hint
+                                            tryAddVarHint rawVal l.Position
+                                    )
+                                    n.LeafValues |> Seq.iter (fun lv ->
+                                        if lv.Position.FileName = targetPath then
+                                            let rawVal = lv.Value.ToRawString().Trim('\"')
+                                            match Map.tryFind rawVal locMap with
+                                            | Some tr ->
+                                                let range = convRangeToLSPRange lv.Position
+                                                hints.Add {
+                                                    position = range.``end``
+                                                    label = formatHintLabel tr.desc
+                                                    paddingLeft = true
+                                                    paddingRight = false
+                                                }
+                                            | None -> ()
+                                            tryAddVarHint rawVal lv.Position
+                                    )
+                                    n.Nodes |> Seq.iter visitNode
+        
+                                visitNode entity.entity
+                                
+                                hints 
+                                |> Seq.distinctBy (fun h -> h.position.line, h.label)
+                                |> Seq.toList
                             
-                            hints 
-                            |> Seq.distinctBy (fun h -> h.position.line, h.label)
-                            |> Seq.toList
+                        let visitor = 
+                            { new IGameVisitor<_> with 
+                                member this.Visit game = inlayHintFunction game 
+                            }
                         
-                    let visitor = 
-                        { new IGameVisitor<_> with 
-                            member this.Visit game = inlayHintFunction game 
-                        }
-                    return
-                        gameDispatcher.Dispatch visitor
-                        |> Option.defaultValue []
+                        let generatedHints = gameDispatcher.Dispatch visitor |> Option.defaultValue []
+                        inlayHintCache.[filePath] <- (hash, generatedHints)
+                        return generatedHints
             }
             |> catchError []
         // P0 Fix: was TODO() �?return empty list / identity instead of crashing

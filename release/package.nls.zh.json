@@ -54,6 +54,7 @@
   // zoom sensitivity in the graph
   "configuration.cwtools.graph.zoomSensitivity.description": "控制滚轮缩放灵敏度，<1 降低灵敏度，>1 增加灵敏度",
   "configuration.cwtools.maxFileSize.description": "加载的最大脚本文件大小（以 MB 为单位）（警告：非常大的文件可能导致不稳定或无效诊断）",
+  "configuration.cwtools.checkForUpdates.description": "启用通过 GitHub Releases 对插件进行自动更新检查。",
   "configuration.cwtools.ai.enabled.description": "启用AI辅助代码生成与补全",
   "configuration.cwtools.ai.provider.enum.openai": "OpenAI (GPT-5.4)",
   "configuration.cwtools.ai.provider.enum.claude": "Claude (Anthropic)",
@@ -83,5 +84,23 @@
   "configuration.cwtools.ai.inlineCompletion.model.description": "行内补全的模型（可以与对话模型不同，例如使用更快的模型）",
   "configuration.cwtools.ai.inlineCompletion.endpoint.description": "行内补全的服务端点（留空则使用全局默认提供商配置）",
   "commands.cwtools.ai.configure": "配置 AI 提供商",
-  "commands.cwtools.ai.openChat": "打开 AI 对话面板"
+  "commands.cwtools.ai.openChat": "打开 AI 对话面板",
+  "viewsContainers.cwtools-ai-panel.title": "CWTools AI 助手",
+  "commands.cwtools.toggleInlineTextOn.title": "启用内联文本显示",
+  "commands.cwtools.toggleInlineTextOff.title": "禁用内联文本显示",
+  "commands.cwtools.previewGUI.title": "预览 GUI 布局",
+  "commands.cwtools.previewSolarSystem.title": "预览星系初始化系统",
+  "commands.cwtools.ai.selectModel.title": "从提供商选择 AI 模型...",
+  "commands.cwtools.ai.reviewFile.title": "AI: 审查当前文件",
+  "commands.cwtools.ai.explainSelection.title": "AI: 解释选中代码",
+  "commands.cwtools.ai.fixDiagnostics.title": "AI: 修复所有诊断问题",
+  "configuration.cwtools.showInlineText.description": "将本地化文本和引用直接显示在代码上方",
+  "configuration.cwtools.rulesProxy.description": "从 GitHub 拉取规则配置时的代理访问地址，例如 https://ghproxy.net/（留空则不使用，国内时区自动尝试使用镜像）",
+  "configuration.cwtools.ai.reasoningEffort.enum.low": "偏低 (最快)",
+  "configuration.cwtools.ai.reasoningEffort.enum.medium": "中等",
+  "configuration.cwtools.ai.reasoningEffort.enum.high": "偏高 (默认)",
+  "configuration.cwtools.ai.reasoningEffort.enum.max": "最大程度 (触发 DeepSeek-R1 等深度思考)",
+  "configuration.cwtools.ai.reasoningEffort.description": "控制支持深度思考特性模型的推算潜能上限（目前用于部分高阶模型）。",
+  "configuration.cwtools.ai.dynamicModels.description": "动态获取的附加第三方模型列表",
+  "configuration.cwtools.ai.dynamicModelsContext.description": "动态获取模型所支持的最大上下文 tokens"
 }

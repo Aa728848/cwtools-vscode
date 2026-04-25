@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 
 <root>
     <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
@@ -29,5 +29,14 @@
     </data>
     <data name="loadingBar.ValidatingFiles" xml:space="preserve">
         <value>Validating files...</value>
+    </data>
+    <data name="loadingBar.UpdatingRules" xml:space="preserve">
+        <value>Updating validation rules...</value>
+    </data>
+    <data name="rulesUpdated" xml:space="preserve">
+        <value>Validation rules for {0} have been updated to {1}.</value>
+    </data>
+    <data name="loadingBar.PrecachingUI" xml:space="preserve">
+        <value>Precaching UI Elements...</value>
     </data>
 </root>

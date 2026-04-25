@@ -17,6 +17,7 @@ import { SolarSystemPanel } from './solarSystemPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
 import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelProvider, AIInlineCompletionProvider, UsageTracker } from './ai';
+import { checkForUpdates } from './updateChecker';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
@@ -44,6 +45,9 @@ function safeRegisterCommand(context: ExtensionContext, commandId: string, handl
 }
 
 export async function activate(context: ExtensionContext) {
+
+	// 后台检查扩展更新
+	checkForUpdates(context).catch(console.error);
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
 	registerLocalizationFeatures(context);
@@ -288,19 +292,41 @@ export async function activate(context: ExtensionContext) {
 			serverExe = context.asAbsolutePath(path.join('bin', 'server', 'linux-x64', 'CWTools Server'))
 			fs.chmodSync(serverExe, '755');
 		}
-		let repoPath = undefined;
-		switch (language) {
-			case "stellaris": repoPath = stellarisRemote; break;
-			case "eu4": repoPath = eu4Remote; break;
-			case "hoi4": repoPath = hoi4Remote; break;
-			case "ck2": repoPath = ck2Remote; break;
-			case "imperator": repoPath = irRemote; break;
-			case "vic2": repoPath = vic2Remote; break;
-			case "vic3": repoPath = vic3Remote; break;
-			case "ck3": repoPath = ck3Remote; break;
-			case "eu5": repoPath = eu5Remote; break;
-			default: repoPath = stellarisRemote; break;
+		
+		async function getBestRepoPath(originalUrl: string): Promise<string> {
+			let customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '');
+			if (customProxy) {
+				return customProxy.endsWith('/') ? customProxy + originalUrl : customProxy + '/' + originalUrl;
+			}
+			const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+			const isCN = timeZone === 'Asia/Shanghai' || timeZone === 'Asia/Chongqing' || timeZone === 'Asia/Urumqi';
+			if (!isCN) {
+				return originalUrl;
+			}
+			return new Promise(resolve => {
+				const req = require('https').request('https://github.com', { method: 'HEAD', timeout: 1500 }, (res: any) => {
+					resolve(originalUrl); // Success within time, use direct connection
+				});
+				req.on('error', () => resolve(`https://ghproxy.net/${originalUrl}`));
+				req.on('timeout', () => { req.destroy(); resolve(`https://ghproxy.net/${originalUrl}`); });
+				req.end();
+			});
 		}
+
+		let repoPathStr = undefined;
+		switch (language) {
+			case "stellaris": repoPathStr = stellarisRemote; break;
+			case "eu4": repoPathStr = eu4Remote; break;
+			case "hoi4": repoPathStr = hoi4Remote; break;
+			case "ck2": repoPathStr = ck2Remote; break;
+			case "imperator": repoPathStr = irRemote; break;
+			case "vic2": repoPathStr = vic2Remote; break;
+			case "vic3": repoPathStr = vic3Remote; break;
+			case "ck3": repoPathStr = ck3Remote; break;
+			case "eu5": repoPathStr = eu5Remote; break;
+			default: repoPathStr = stellarisRemote; break;
+		}
+		let repoPath = await getBestRepoPath(repoPathStr);
 		console.log(language + " " + repoPath);
 
 		// If the extension is launched in debug mode then the debug server options are used
@@ -358,7 +384,7 @@ export async function activate(context: ExtensionContext) {
 		const promptVanillaPath = new NotificationType<string>('promptVanillaPath')
 		interface DidFocusFile { uri: string }
 		const didFocusFile = new NotificationType<DidFocusFile>('didFocusFile')
-		let status: Disposable;
+		let status: Disposable | undefined;
 		interface UpdateFileList { fileList: FileListItem[] }
 		const updateFileList = new NotificationType<UpdateFileList>('updateFileList');
 
@@ -425,21 +451,47 @@ export async function activate(context: ExtensionContext) {
 			}
 		}
 
+		let resolveLoadingBar: (() => void) | undefined;
+		let loadingReporter: vs.Progress<{ message?: string; increment?: number; }> | undefined;
+
 		client.onNotification(loadingBarNotification, (param: loadingBarParams) => {
 			if (param.enable) {
 				if (status !== undefined) {
 					status.dispose();
+					status = undefined;
 				}
 				status = window.setStatusBarMessage(param.value);
 				context.subscriptions.push(status);
-			} else if (!param.enable) {
-				// M5 Fix: guard against status never having been set (e.g. server sends
-				// enable:false before the first enable:true message).
+
+				if (!resolveLoadingBar) {
+					vs.window.withProgress({
+						location: vs.ProgressLocation.Window,
+						title: "CWTools",
+					}, (progress) => {
+						loadingReporter = progress;
+						progress.report({ message: param.value });
+						return new Promise<void>((resolve) => {
+							resolveLoadingBar = resolve;
+						});
+					}).then(() => {
+						loadingReporter = undefined;
+						resolveLoadingBar = undefined;
+					});
+				} else {
+					if (loadingReporter) {
+						loadingReporter.report({ message: param.value });
+					}
+				}
+			} else {
 				if (status !== undefined) {
 					status.dispose();
+					status = undefined;
 				}
-			} else if (status !== undefined) {
-				status.dispose();
+				if (resolveLoadingBar) {
+					resolveLoadingBar();
+					resolveLoadingBar = undefined;
+					loadingReporter = undefined;
+				}
 			}
 		})
 		const debugStatusBar = window.createStatusBarItem(vs.StatusBarAlignment.Left);

@@ -23,4 +23,13 @@
     <data name="loadingBar.ValidatingFiles" xml:space="preserve">
         <value>正在验证文件...</value>
     </data>
+    <data name="loadingBar.UpdatingRules" xml:space="preserve">
+        <value>更新验证规则中...</value>
+    </data>
+    <data name="rulesUpdated" xml:space="preserve">
+        <value>{0} 验证规则已更新至 {1}。</value>
+    </data>
+    <data name="loadingBar.PrecachingUI" xml:space="preserve">
+        <value>预加载 UI 缓存 (CodeLens / 内联文本)...</value>
+    </data>
 </root>

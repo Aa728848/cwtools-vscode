@@ -54,6 +54,7 @@
   // zoom sensitivity in the graph
   "configuration.cwtools.graph.zoomSensitivity.description": "Control scroll wheel zoom sensitivity, <1 reduces sensitivity, >1 increases sensitivity",
   "configuration.cwtools.maxFileSize.description": "Maximum script file size to load in megabytes (warning, very large files can cause instability or invalid diagnostics)",
+  "configuration.cwtools.checkForUpdates.description": "Enable automatic checking for extension updates via GitHub Releases.",
   "configuration.cwtools.ai.enabled.description": "Enable AI-assisted code generation and completion",
   "configuration.cwtools.ai.provider.enum.openai": "OpenAI",
   "configuration.cwtools.ai.provider.enum.claude": "Claude (Anthropic)",
@@ -83,5 +84,23 @@
   "configuration.cwtools.ai.inlineCompletion.model.description": "Model for inline completion (can differ from chat model, e.g. use a faster model)",
   "configuration.cwtools.ai.inlineCompletion.endpoint.description": "Custom endpoint for inline completion provider (leave empty to use provider default)",
   "commands.cwtools.ai.configure": "Configure AI Provider",
-  "commands.cwtools.ai.openChat": "Open AI Chat"
+  "commands.cwtools.ai.openChat": "Open AI Chat",
+  "viewsContainers.cwtools-ai-panel.title": "CWTools AI",
+  "commands.cwtools.toggleInlineTextOn.title": "Enable Inline Text",
+  "commands.cwtools.toggleInlineTextOff.title": "Disable Inline Text",
+  "commands.cwtools.previewGUI.title": "Preview GUI Layout",
+  "commands.cwtools.previewSolarSystem.title": "Preview Solar System",
+  "commands.cwtools.ai.selectModel.title": "Select AI Model from Provider...",
+  "commands.cwtools.ai.reviewFile.title": "AI: Review Current File",
+  "commands.cwtools.ai.explainSelection.title": "AI: Explain Selected Code",
+  "commands.cwtools.ai.fixDiagnostics.title": "AI: Fix All Diagnostics",
+  "configuration.cwtools.showInlineText.description": "Show localisation and references directly above the code instead of hovering.",
+  "configuration.cwtools.rulesProxy.description": "Proxy URL to prepend when pulling GitHub configurations, e.g. https://ghproxy.net/ (Empty for disable, auto-enabled in CN timezone)",
+  "configuration.cwtools.ai.reasoningEffort.enum.low": "Low (fastest)",
+  "configuration.cwtools.ai.reasoningEffort.enum.medium": "Medium",
+  "configuration.cwtools.ai.reasoningEffort.enum.high": "High (default)",
+  "configuration.cwtools.ai.reasoningEffort.enum.max": "Max (DeepSeek-V4 intensive thinking)",
+  "configuration.cwtools.ai.reasoningEffort.description": "Thinking depth / Reasoning effort for supported AI models (DeepSeek, OpenAI o-series).",
+  "configuration.cwtools.ai.dynamicModels.description": "Dynamically fetched AI models",
+  "configuration.cwtools.ai.dynamicModelsContext.description": "Dynamically fetched AI models context sizes"
 }

@@ -133,6 +133,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (!isGenerating) sendMessage();
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            const modes = ['build', 'plan', 'explore', 'general', 'review'];
+            const idx = modes.indexOf(currentMode);
+            const cycleDir = e.shiftKey ? -1 : 1;
+            const nextMode = modes[(idx + cycleDir + modes.length) % modes.length];
+            switchMode(nextMode, true);
         }
     });
     input.addEventListener('input', autoResizeInput);
@@ -219,11 +226,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         { cmd: '/clear', desc: '清空当前对话，开始新话题' },
         { cmd: '/fork', desc: '从当前位置分叉对话' },
         { cmd: '/archive', desc: '归档当前话题' },
-        { cmd: '/mode:build', desc: '切换到 Build 模式（生成代码）' },
-        { cmd: '/mode:plan', desc: '切换到 Plan 模式（只读规划）' },
-        { cmd: '/mode:explore', desc: '切换到 Explore 模式（分析代码库）' },
-        { cmd: '/mode:general', desc: '切换到 General 模式（通用问答）' },
-        { cmd: '/mode:review', desc: '切换到 Review 模式（代码审查）' },
+        { cmd: '/mode:build', desc: '切换到构建模式（生成代码）' },
+        { cmd: '/mode:plan', desc: '切换到计划模式（只读规划）' },
+        { cmd: '/mode:explore', desc: '切换到分析模式（探索代码库）' },
+        { cmd: '/mode:general', desc: '切换到问答模式（通用问答）' },
+        { cmd: '/mode:review', desc: '切换到审查模式（代码审查）' },
     ];
     const slashPopup = document.getElementById('slashPopup');
 
@@ -500,11 +507,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     const MODE_META = {
-        build: { icon: '📝', label: null, bodyClass: null },
-        plan: { icon: '📋', label: '📋 Plan Mode — 只读分析，不修改文件', bodyClass: 'plan-mode' },
-        explore: { icon: '🔭', label: '🔭 Explore Mode — 探索代码库结构', bodyClass: 'explore-mode' },
-        general: { icon: '💬', label: '💬 General Mode — 通用问答', bodyClass: 'general-mode' },
-        review: { icon: '🔎', label: '🔎 Review Mode — 代码审查', bodyClass: 'review-mode' },
+        build: { label: null, bodyClass: 'build-mode' },
+        plan: { label: '计划模式 — 只读分析，不修改文件', bodyClass: 'plan-mode' },
+        explore: { label: '分析模式 — 探索代码库结构', bodyClass: 'explore-mode' },
+        general: { label: '问答模式 — 通用问答', bodyClass: 'general-mode' },
+        review: { label: '审查模式 — 代码审查', bodyClass: 'review-mode' },
     };
 
     /**
@@ -521,13 +528,16 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         // Only post to backend when user initiated (avoids ping-pong)
         if (fromUI) vscode.postMessage({ type: 'switchMode', mode });
         // Remove all mode body classes, add correct one
-        document.body.classList.remove('plan-mode', 'explore-mode', 'general-mode');
+        document.body.classList.remove('build-mode', 'plan-mode', 'explore-mode', 'general-mode', 'review-mode');
         const meta = MODE_META[mode as keyof typeof MODE_META];
         if (meta && meta.bodyClass) document.body.classList.add(meta.bodyClass);
         // Update inline mode indicator text
         const ind = document.getElementById('modeIndicator');
         if (ind) ind.textContent = meta && meta.label ? meta.label : '';
     }
+    
+    // Give initial mode its body class
+    document.body.classList.add('build-mode');
 
     function setGenerating(val: boolean) {
         isGenerating = val;

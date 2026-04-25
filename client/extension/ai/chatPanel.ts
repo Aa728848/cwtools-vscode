@@ -2110,10 +2110,10 @@ body.plan-mode .plan-indicator { display: block; }
 .msg-role { font-family: Georgia, serif; font-weight: 500; }
 .user-role { opacity: 0.7; }
 .ai-star { flex-shrink: 0; }
-.msg-bubble { line-height: 1.65; word-break: break-word; padding: 1px 0; }
+.msg-bubble { line-height: 1.65; word-break: break-word; padding: 1px 0; font-size: 15px; }
 .user-bubble { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-left: 0; white-space: pre-wrap; }
-.msg-bubble code { background: rgba(255,255,255,0.1); border-radius: 3px; padding: 0 3px; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
-.msg-bubble pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 6px 0; font-size: 12px; font-family: var(--vscode-editor-font-family, monospace); }
+.msg-bubble code { background: rgba(255,255,255,0.1); border-radius: 3px; padding: 0 3px; font-family: var(--vscode-editor-font-family, monospace); font-size: 13.5px; }
+.msg-bubble pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 6px 0; font-size: 14px; font-family: var(--vscode-editor-font-family, monospace); }
 .msg-bubble pre code { background: none; padding: 0; }
 .retract-btn { display: none; background: none; border: none; cursor: pointer; font-size: 11px; opacity: 0.35; padding: 2px 5px; border-radius: 3px; color: var(--fg); }
 .message.user:hover .retract-btn { display: inline-flex; }
@@ -2186,8 +2186,8 @@ body.plan-mode .plan-indicator { display: block; }
 .msg-bubble .md-codeblock { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin:6px 0; }
 .msg-bubble .md-codeblock-lang { font-size:10px; opacity:0.5; padding:2px 8px; background:rgba(255,255,255,0.03); border-bottom:1px solid var(--border); letter-spacing:0.05em; text-transform:uppercase; }
 .msg-bubble .md-codeblock-lang:empty { display:none; }
-.msg-bubble .md-codeblock code { display:block; padding:8px 10px; font-family:var(--vscode-editor-font-family,monospace); font-size:12px; white-space:pre; overflow-x:auto; background:none; border-radius:0; }
-.msg-bubble code { background:rgba(255,255,255,0.1); border-radius:3px; padding:1px 4px; font-family:var(--vscode-editor-font-family,monospace); font-size:11px; }
+.msg-bubble .md-codeblock code { display:block; padding:8px 10px; font-family:var(--vscode-editor-font-family,monospace); font-size:14px; white-space:pre; overflow-x:auto; background:none; border-radius:0; }
+.msg-bubble code { background:rgba(255,255,255,0.1); border-radius:3px; padding:1px 4px; font-family:var(--vscode-editor-font-family,monospace); font-size:13.5px; }
 
 /* ── Diff card ── */
 .diff-card { border: 1px solid var(--warning); border-radius: 6px; overflow: hidden; margin: 4px 0; font-size: 11px; }
@@ -2217,12 +2217,26 @@ body.plan-mode .plan-indicator { display: block; }
 .model-selector:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
 .model-selector option { background: var(--input-bg); color: var(--fg); }
 
-/* ── Input area ── */
 .input-wrapper { padding: 10px 12px 12px; flex-shrink: 0; }
-.input-container { background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; overflow: hidden; transition: border-color 0.15s; }
-.input-container:focus-within { border-color: rgba(255,255,255,0.25); }
+.input-container { background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; overflow: hidden; transition: all 0.15s; }
+
+body.build-mode .input-container { border-color: rgba(255,255,255,0.15); }
+body.build-mode .input-container:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(217,90,67,0.2); }
+
+body.plan-mode .input-container { border-color: rgba(100,149,237,0.25); }
+body.plan-mode .input-container:focus-within { border-color: cornflowerblue; box-shadow: 0 0 0 1px rgba(100,149,237,0.2); }
+
+body.explore-mode .input-container { border-color: rgba(125,187,125,0.3); }
+body.explore-mode .input-container:focus-within { border-color: #7dbb7d; box-shadow: 0 0 0 1px rgba(125,187,125,0.2); }
+
+body.general-mode .input-container { border-color: rgba(199,146,234,0.3); }
+body.general-mode .input-container:focus-within { border-color: #c792ea; box-shadow: 0 0 0 1px rgba(199,146,234,0.2); }
+
+body.review-mode .input-container { border-color: rgba(244,135,113,0.3); }
+body.review-mode .input-container:focus-within { border-color: #f48771; box-shadow: 0 0 0 1px rgba(244,135,113,0.2); }
+
 .input-row { display: flex; padding: 10px 12px 4px; }
-.input-row textarea { flex: 1; background: transparent; color: var(--input-fg); border: none; padding: 2px 0; font-family: inherit; font-size: 13px; resize: none; min-height: 22px; max-height: 180px; outline: none; line-height: 1.55; }
+.input-row textarea { flex: 1; background: transparent; color: var(--input-fg); border: none; padding: 2px 0; font-family: inherit; font-size: 15px; resize: none; min-height: 22px; max-height: 180px; outline: none; line-height: 1.55; }
 .input-row textarea::placeholder { opacity: 0.3; transition: opacity 0.3s; }
 .input-controls { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px 8px; gap: 6px; }
 .ctrl-group { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
@@ -2467,11 +2481,11 @@ body.review-mode .mode-indicator { color: #f48771; }
         <div class="input-controls">
             <div class="ctrl-group">
                 <select class="mode-select" id="modeSel" title="切换模式">
-                    <option value="build">📝 Build — 生成代码</option>
-                    <option value="plan">📋 Plan — 只读规划</option>
-                    <option value="explore">🔭 Explore — 探索代码库</option>
-                    <option value="general">💬 General — 通用问答</option>
-                    <option value="review">🔎 Review — 代码审查</option>
+                    <option value="build">构建模式</option>
+                    <option value="plan">计划模式</option>
+                    <option value="explore">分析模式</option>
+                    <option value="general">问答模式</option>
+                    <option value="review">审查模式</option>
                 </select>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
                 <button class="img-pick-btn" id="imgPickBtn" title="上传图片">+</button>

@@ -667,37 +667,98 @@
                 continue;
             }
 
-            // Unordered list — collect consecutive list items
+            // Unordered list — collect consecutive list items, supporting nested lists
             if (/^[-*+]\s/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
-                const items = []; let cur = null;
+                // Stack of { tag:'ul'|'ol', indent:number } for nesting
+                const stack = [];
+                const htmlParts = [];
+                const getIndent = (line) => { const m = line.match(/^(\s*)/); return m ? m[1].length : 0; };
+                const startList = (tag, indent) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
+                const closeList = () => { const item = stack.pop(); htmlParts.push('</' + item.tag + '>'); };
+
+                startList('ul', getIndent(lines[i]));
                 while (i < lines.length) {
                     const ll = lines[i], lt = ll.trim();
                     if (!lt) { i++; break; }
-                    const mm = lt.match(/^[-*+]\s+(.+)/);
-                    if (mm) { if (cur !== null) items.push(cur); cur = mm[1]; i++; }
-                    else if (cur !== null && /^\s{2,}/.test(ll)) { cur += ' ' + lt; i++; }
-                    else break;
+                    const indent = getIndent(ll);
+                    const ulMatch = lt.match(/^[-*+]\s+(.*)/);
+                    const olMatch = lt.match(/^\d+\.\s+(.*)/);
+                    if (ulMatch || olMatch) {
+                        const content = ulMatch ? ulMatch[1] : olMatch[1];
+                        const listTag = ulMatch ? 'ul' : 'ol';
+                        // Close lists deeper than current indent
+                        while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+                            htmlParts.push('</li>');
+                            closeList();
+                        }
+                        // Open new nested list if deeper
+                        if (stack.length > 0 && indent > stack[stack.length - 1].indent) {
+                            startList(listTag, indent);
+                        } else if (stack.length > 0 && htmlParts[htmlParts.length - 1] !== '<' + stack[stack.length - 1].tag + '>') {
+                            htmlParts.push('</li>');
+                        }
+                        htmlParts.push('<li>' + inlineMd(content));
+                        i++;
+                    } else if (/^\s{2,}/.test(ll) && stack.length > 0) {
+                        // Continuation line — append to current item
+                        htmlParts.push(' ' + lt);
+                        i++;
+                    } else {
+                        break;
+                    }
                 }
-                if (cur !== null) items.push(cur);
-                out.push('<ul>' + items.map(it => '<li>' + inlineMd(it) + '</li>').join('') + '</ul>');
+                // Close all remaining open lists
+                while (stack.length > 0) {
+                    htmlParts.push('</li>');
+                    closeList();
+                }
+                out.push(htmlParts.join(''));
                 continue;
             }
 
-            // Ordered list — collect consecutive numbered items
+            // Ordered list — collect consecutive numbered items with nesting
             if (/^\d+\.\s/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
-                const items = []; let cur = null;
+                const stack = [];
+                const htmlParts = [];
+                const getIndent = (line) => { const m = line.match(/^(\s*)/); return m ? m[1].length : 0; };
+                const startList = (tag, indent) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
+                const closeList = () => { const item = stack.pop(); htmlParts.push('</' + item.tag + '>'); };
+
+                startList('ol', getIndent(lines[i]));
                 while (i < lines.length) {
                     const ll = lines[i], lt = ll.trim();
                     if (!lt) { i++; break; }
-                    const mm = lt.match(/^\d+\.\s+(.+)/);
-                    if (mm) { if (cur !== null) items.push(cur); cur = mm[1]; i++; }
-                    else if (cur !== null && /^\s{2,}/.test(ll)) { cur += ' ' + lt; i++; }
-                    else break;
+                    const indent = getIndent(ll);
+                    const olMatch = lt.match(/^\d+\.\s+(.*)/);
+                    const ulMatch = lt.match(/^[-*+]\s+(.*)/);
+                    if (olMatch || ulMatch) {
+                        const content = olMatch ? olMatch[1] : ulMatch[1];
+                        const listTag = olMatch ? 'ol' : 'ul';
+                        while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+                            htmlParts.push('</li>');
+                            closeList();
+                        }
+                        if (stack.length > 0 && indent > stack[stack.length - 1].indent) {
+                            startList(listTag, indent);
+                        } else if (stack.length > 0 && htmlParts[htmlParts.length - 1] !== '<' + stack[stack.length - 1].tag + '>') {
+                            htmlParts.push('</li>');
+                        }
+                        htmlParts.push('<li>' + inlineMd(content));
+                        i++;
+                    } else if (/^\s{2,}/.test(ll) && stack.length > 0) {
+                        htmlParts.push(' ' + lt);
+                        i++;
+                    } else {
+                        break;
+                    }
                 }
-                if (cur !== null) items.push(cur);
-                out.push('<ol>' + items.map(it => '<li>' + inlineMd(it) + '</li>').join('') + '</ol>');
+                while (stack.length > 0) {
+                    htmlParts.push('</li>');
+                    closeList();
+                }
+                out.push(htmlParts.join(''));
                 continue;
             }
 

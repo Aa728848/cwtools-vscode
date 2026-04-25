@@ -252,45 +252,24 @@ export class AIService {
         let extraBody: Record<string, any> | undefined;
 
         if (options?.disableThinking) {
-            // ── Qwen: enable_thinking=false + /no_think prompt fallback ──
-            // Applies to all Qwen3/3.5/3.6 models and qwen-max/qwen-turbo
-            if (lowerModel.startsWith('qwen') && (
-                lowerModel.includes('qwen3') || lowerModel.includes('qwen-max') || lowerModel.includes('qwen-turbo') || lowerModel.includes('qwen-long')
-            )) {
-                // Primary: API-level parameter (most reliable)
-                extraBody = { enable_thinking: false };
-                // Fallback: /no_think prompt injection (works even if API param is ignored)
-                finalMessages = messages.map(m => {
-                    if (m.role === 'system' && typeof m.content === 'string') {
-                        return { ...m, content: m.content + '\n/no_think' };
-                    }
-                    return m;
-                });
+            // Data-driven lookup: each provider's disable-thinking params are defined
+            // in providers.ts DISABLE_THINKING_PARAMS table instead of inline if-else.
+            const { getDisableThinkingParams } = await import('./providers');
+            const thinkingParams = getDisableThinkingParams(model);
+            if (thinkingParams) {
+                if (thinkingParams.extraBody) {
+                    extraBody = thinkingParams.extraBody as Record<string, any>;
+                }
+                if (thinkingParams.injectPrompt) {
+                    // Qwen-style: append /no_think to system prompt as fallback
+                    finalMessages = messages.map(m => {
+                        if (m.role === 'system' && typeof m.content === 'string') {
+                            return { ...m, content: m.content + '\n/no_think' };
+                        }
+                        return m;
+                    });
+                }
             }
-
-            // ── GLM thinking models: thinking.type="disabled" ──
-            // glm-4.1v-thinking* models support turn-level thinking control
-            else if (lowerModel.startsWith('glm-') && lowerModel.includes('thinking')) {
-                extraBody = { thinking: { type: 'disabled' } };
-            }
-
-            // ── Gemini 2.5 Flash: thinkingBudget=0 (fully disables thinking) ──
-            else if (lowerModel.startsWith('gemini-2.5-flash')) {
-                extraBody = { thinking_config: { thinking_budget: 0 } };
-            }
-
-            // ── Gemini 3.x: thinkingLevel="minimal" (cannot fully disable, but minimizes) ──
-            else if (lowerModel.startsWith('gemini-3')) {
-                extraBody = { thinking_config: { thinking_level: 'minimal' } };
-            }
-
-            // ── Claude: no special action needed ──
-            // Claude models default to no thinking when `thinking` param is not sent.
-            // Our callClaude() doesn't send thinking by default, so no extra handling.
-
-            // ── MiniMax: no API toggle, rely on post-processing <think> stripping ──
-            // ── DeepSeek chat: non-reasoning, no action needed ──
-            // ── OpenAI GPT: non-reasoning, no action needed ──
         }
 
         const request: ChatCompletionRequest & Record<string, any> = {

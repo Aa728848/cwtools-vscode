@@ -225,10 +225,69 @@ export class AgentToolExecutor {
         return this.truncateResult(result);
     }
 
+    // ─── MCP Connection Pool ─────────────────────────────────────────────────
+
+    /** Per-server MCP connection pool.  Avoids re-connecting on every tool call
+     *  during a reasoning loop (connect + initialize handshake can take 500ms+). */
+    private mcpPool = new Map<string, { client: import('./mcpClient').MCPClient; lastUsed: number; timer: ReturnType<typeof setTimeout> }>();
+    /** Idle timeout before an MCP connection is automatically disconnected (ms). */
+    private static readonly MCP_IDLE_TIMEOUT_MS = 60_000;
+
+    /** Get or create a pooled MCP client for the given server. */
+    private async getMcpClient(serverName: string): Promise<import('./mcpClient').MCPClient> {
+        const cached = this.mcpPool.get(serverName);
+        if (cached) {
+            cached.lastUsed = Date.now();
+            // Reset idle timer
+            clearTimeout(cached.timer);
+            cached.timer = setTimeout(() => this.evictMcpClient(serverName), AgentToolExecutor.MCP_IDLE_TIMEOUT_MS);
+            return cached.client;
+        }
+
+        // Create new connection
+        const { MCPClient } = await import('./mcpClient');
+        const config = vs.workspace.getConfiguration('cwtools.ai');
+        const servers = config.get<any[]>('mcp.servers') || [];
+        const serverConfig = servers.find((s: any) => s.name === serverName);
+        if (!serverConfig) throw new Error(`MCP server "${serverName}" not found in configuration`);
+
+        const client = new MCPClient({
+            name: serverConfig.name,
+            type: serverConfig.type,
+            command: serverConfig.command,
+            args: serverConfig.args,
+            env: serverConfig.env,
+            url: serverConfig.url,
+        });
+        await client.connect();
+
+        const timer = setTimeout(() => this.evictMcpClient(serverName), AgentToolExecutor.MCP_IDLE_TIMEOUT_MS);
+        this.mcpPool.set(serverName, { client, lastUsed: Date.now(), timer });
+        return client;
+    }
+
+    /** Disconnect and remove a pooled MCP client. */
+    private evictMcpClient(serverName: string): void {
+        const entry = this.mcpPool.get(serverName);
+        if (entry) {
+            clearTimeout(entry.timer);
+            try { entry.client.disconnect(); } catch { /* ignore */ }
+            this.mcpPool.delete(serverName);
+        }
+    }
+
+    /** Disconnect all pooled MCP clients (call on extension deactivate). */
+    disposeMcpPool(): void {
+        for (const [name] of this.mcpPool) {
+            this.evictMcpClient(name);
+        }
+    }
+
     // ─── MCP Tool Execution ──────────────────────────────────────────────────
 
     /**
      * Execute a tool call via MCP (Model Context Protocol).
+     * Uses a per-server connection pool to avoid reconnect overhead.
      * Supports both generic mcp_call (with server + tool in args) and
      * named mcp_<server>_<tool> patterns.
      */
@@ -240,10 +299,6 @@ export class AgentToolExecutor {
         [key: string]: unknown;
     }): Promise<{ success: boolean; result?: unknown; error?: string }> {
         try {
-            const { MCPClient } = await import('./mcpClient');
-            const config = vs.workspace.getConfiguration('cwtools.ai');
-            const servers = config.get<any[]>('mcp.servers') || [];
-
             let serverName = args.server;
             let toolName = args.tool;
 
@@ -260,26 +315,9 @@ export class AgentToolExecutor {
                 return { success: false, error: 'Missing server or tool name. Use mcp_call with server and tool args.' };
             }
 
-            const serverConfig = servers.find((s: any) => s.name === serverName);
-            if (!serverConfig) {
-                return { success: false, error: `MCP server "${serverName}" not found in configuration` };
-            }
-
-            const client = new MCPClient({
-                name: serverConfig.name,
-                type: serverConfig.type,
-                command: serverConfig.command,
-                args: serverConfig.args,
-                env: serverConfig.env,
-                url: serverConfig.url,
-            });
-            try {
-                await client.connect();
-                const result = await client.callTool(toolName, (args.arguments || {}) as Record<string, unknown>);
-                return { success: true, result };
-            } finally {
-                client.disconnect();
-            }
+            const client = await this.getMcpClient(serverName);
+            const result = await client.callTool(toolName, (args.arguments || {}) as Record<string, unknown>);
+            return { success: true, result };
         } catch (e) {
             return { success: false, error: `MCP tool call failed: ${e instanceof Error ? e.message : String(e)}` };
         }

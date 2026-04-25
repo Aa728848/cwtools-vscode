@@ -806,6 +806,67 @@ export function getEffectiveModel(providerId: string, userModel?: string): strin
     return provider.defaultModel;
 }
 
+// ─── Disable-Thinking Capability Descriptors ─────────────────────────────────
+
+/**
+ * Result of looking up how to disable thinking for a specific model.
+ * `extraBody`    → merged into the request body (e.g. enable_thinking, thinking_config)
+ * `injectPrompt` → if true, append "/no_think" to system prompt (Qwen fallback)
+ */
+export interface DisableThinkingResult {
+    extraBody?: Record<string, unknown>;
+    injectPrompt?: boolean;
+}
+
+/**
+ * Data-driven table: model-name prefix → disable-thinking parameters.
+ * Evaluated top-to-bottom; first match wins.
+ * Add new providers here instead of editing aiService.ts if-else trees.
+ */
+const DISABLE_THINKING_PARAMS: Array<{
+    match: (lowerModel: string) => boolean;
+    result: DisableThinkingResult;
+}> = [
+    // ── Qwen: enable_thinking=false + /no_think prompt fallback ──
+    {
+        match: (m) => m.startsWith('qwen') && (
+            m.includes('qwen3') || m.includes('qwen-max') || m.includes('qwen-turbo') || m.includes('qwen-long')
+        ),
+        result: { extraBody: { enable_thinking: false }, injectPrompt: true },
+    },
+    // ── GLM thinking models: thinking.type="disabled" ──
+    {
+        match: (m) => m.startsWith('glm-') && m.includes('thinking'),
+        result: { extraBody: { thinking: { type: 'disabled' } } },
+    },
+    // ── Gemini 2.5 Flash: thinkingBudget=0 (fully disables thinking) ──
+    {
+        match: (m) => m.startsWith('gemini-2.5-flash'),
+        result: { extraBody: { thinking_config: { thinking_budget: 0 } } },
+    },
+    // ── Gemini 3.x: thinkingLevel="minimal" (cannot fully disable, but minimizes) ──
+    {
+        match: (m) => m.startsWith('gemini-3'),
+        result: { extraBody: { thinking_config: { thinking_level: 'minimal' } } },
+    },
+    // ── Claude: no special action needed (thinking not sent by default)
+    // ── MiniMax: no API toggle (rely on post-processing <think> stripping)
+    // ── DeepSeek chat: non-reasoning, no action needed
+    // ── OpenAI GPT: non-reasoning, no action needed
+];
+
+/**
+ * Look up the disable-thinking parameters for a model.
+ * Returns undefined if the model doesn't need any special handling.
+ */
+export function getDisableThinkingParams(model: string): DisableThinkingResult | undefined {
+    const lower = model.toLowerCase();
+    for (const entry of DISABLE_THINKING_PARAMS) {
+        if (entry.match(lower)) return entry.result;
+    }
+    return undefined;
+}
+
 // ─── Claude API Adapter ──────────────────────────────────────────────────────
 
 /**

@@ -1391,6 +1391,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'loadTopicMessages':
                 msg.messages.forEach((m: any, idx: number) => {
+                    if (m.isHidden === true) return;
+                    
                     // M4 fix: pass images array when restoring user messages from history
                     if (m.role === 'user') addUserMessage(m.content, idx, m.images);
                     else {
@@ -1800,7 +1802,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     <span class="ap-header-hint">点击段落添加批注要求</span>
                     <div style="display:flex; gap:6px;">
                         <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">✅ 确认完成</button>
-                        <button class="ap-submit-btn" disabled>📤 让AI重新修改 (0)</button>
+                        <button class="ap-submit-btn" disabled>📤 重新修改 (0)</button>
                     </div>`;
                 wrap.appendChild(header);
 
@@ -1808,7 +1810,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 const approveBtn = header.querySelector('.ap-approve-btn') as HTMLButtonElement;
 
                 function updateSubmitBtn() {
-                    submitBtn.textContent = `📤 让AI重新修改 (${annotations.length})`;
+                    submitBtn.textContent = `📤 重新修改 (${annotations.length})`;
                     submitBtn.disabled = annotations.length === 0;
                 }
 

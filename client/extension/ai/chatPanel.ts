@@ -35,6 +35,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private conversationMessages: ChatMessage[] = [];
     private abortController: AbortController | null = null;
     private currentMode: AgentMode = 'build';
+    private previousMode: AgentMode = 'build';
     /** Live snapshot of agent steps emitted during the current generation */
     private _liveSteps: AgentStep[] = [];
     /** Whether an AI generation is currently running */
@@ -249,7 +250,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
                 }
                 const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
-                await this.handleUserMessage(prompt);
+                await this.handleUserMessage(prompt, undefined, undefined, true);
                 break;
             case 'revisePlanWithAnnotations':
                 let reviseContext = '';
@@ -258,7 +259,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 }
                 const revisePrompt = '请根据我的批注考虑改进现有的执行计划，重新完善计划。' + reviseContext;
                 // keep current mode ('plan'), do not auto-switch since it's just revising
-                await this.handleUserMessage(revisePrompt);
+                await this.handleUserMessage(revisePrompt, undefined, undefined, true);
                 break;
             case 'reviseWalkthroughWithAnnotations':
                 let reviseWtContext = '';
@@ -266,7 +267,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     reviseWtContext = '\n\n针对报告中需要修改的地方，我的批注（要求）如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `### 针对片段：\n${a.section}\n**要求**：${a.note}`).join('\n\n');
                 }
                 const reviseWtPrompt = '请根据我的批注，重新修改并输出一份新的 walkthrough.md 报告。' + reviseWtContext;
-                await this.handleUserMessage(reviseWtPrompt);
+                await this.handleUserMessage(reviseWtPrompt, undefined, undefined, true, true);
+                break;
+            case 'approveWalkthrough':
+                if (this.previousMode && this.previousMode !== this.currentMode) {
+                    this.switchMode(this.previousMode);
+                }
                 break;
             case 'searchTopics':
                 this.handleSearchTopics(msg.query);
@@ -606,11 +612,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(text);
     }
 
-    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[]): Promise<void> {
+    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], skipAutoModeSwitch = false, isBackground = false): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
         // Auto-switch from Plan to Build mode if user gives approval implicit keywords
-        if (this.currentMode === 'plan') {
+        if (this.currentMode === 'plan' && !skipAutoModeSwitch) {
             const lowerText = text.toLowerCase();
             const approvalKeywords = ['同意', '执行', '开始', 'approved', 'go ahead', 'proceed', 'looks good', '可以', '没问题'];
             if (approvalKeywords.some(keyword => lowerText.includes(keyword))) {
@@ -639,10 +645,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const messageIndex = this.currentTopic!.messages.length;
 
         // Add user message to UI — pass images array directly (not just a bool flag)
-        this.postMessage({ type: 'addUserMessage', text, messageIndex, images: images?.length ? images : undefined });
+        if (!isBackground) {
+            this.postMessage({ type: 'addUserMessage', text, messageIndex, images: images?.length ? images : undefined });
+        }
 
         // Add to history — store images for topic persistence
-        this.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now(), images: images?.length ? images : undefined });
+        this.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
 
         // Get current editor context
         const editor = vs.window.activeTextEditor;
@@ -1770,6 +1778,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private switchMode(mode: AgentMode): void {
+        if (this.currentMode !== mode) this.previousMode = this.currentMode;
         this.currentMode = mode;
         this.postMessage({ type: 'modeChanged', mode });
     }
@@ -2296,17 +2305,21 @@ body.plan-mode .plan-indicator { display: block; }
 body.build-mode .input-container { border-color: rgba(255,255,255,0.15); }
 body.build-mode .input-container:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(217,90,67,0.2); }
 
-body.plan-mode .input-container { border-color: rgba(100,149,237,0.25); }
-body.plan-mode .input-container:focus-within { border-color: cornflowerblue; box-shadow: 0 0 0 1px rgba(100,149,237,0.2); }
+body.plan-mode .input-container { border-color: cornflowerblue; box-shadow: 0 0 0 1px rgba(100,149,237,0.3); }
+body.plan-mode .input-container:focus-within { border-color: cornflowerblue; box-shadow: 0 0 0 1px cornflowerblue, 0 0 8px rgba(100,149,237,0.2); }
+body.plan-mode .send-btn { background: cornflowerblue; }
 
-body.explore-mode .input-container { border-color: rgba(125,187,125,0.3); }
-body.explore-mode .input-container:focus-within { border-color: #7dbb7d; box-shadow: 0 0 0 1px rgba(125,187,125,0.2); }
+body.explore-mode .input-container { border-color: #7dbb7d; box-shadow: 0 0 0 1px rgba(125,187,125,0.3); }
+body.explore-mode .input-container:focus-within { border-color: #7dbb7d; box-shadow: 0 0 0 1px #7dbb7d, 0 0 8px rgba(125,187,125,0.2); }
+body.explore-mode .send-btn { background: #7dbb7d; }
 
-body.general-mode .input-container { border-color: rgba(199,146,234,0.3); }
-body.general-mode .input-container:focus-within { border-color: #c792ea; box-shadow: 0 0 0 1px rgba(199,146,234,0.2); }
+body.general-mode .input-container { border-color: #c792ea; box-shadow: 0 0 0 1px rgba(199,146,234,0.3); }
+body.general-mode .input-container:focus-within { border-color: #c792ea; box-shadow: 0 0 0 1px #c792ea, 0 0 8px rgba(199,146,234,0.2); }
+body.general-mode .send-btn { background: #c792ea; }
 
-body.review-mode .input-container { border-color: rgba(244,135,113,0.3); }
-body.review-mode .input-container:focus-within { border-color: #f48771; box-shadow: 0 0 0 1px rgba(244,135,113,0.2); }
+body.review-mode .input-container { border-color: #f48771; box-shadow: 0 0 0 1px rgba(244,135,113,0.3); }
+body.review-mode .input-container:focus-within { border-color: #f48771; box-shadow: 0 0 0 1px #f48771, 0 0 8px rgba(244,135,113,0.2); }
+body.review-mode .send-btn { background: #f48771; }
 
 .input-row { display: flex; padding: 10px 12px 4px; }
 .input-row textarea { flex: 1; background: transparent; color: var(--input-fg); border: none; padding: 2px 0; font-family: inherit; font-size: 15px; resize: none; min-height: 22px; max-height: 180px; outline: none; line-height: 1.55; }

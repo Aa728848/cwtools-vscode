@@ -654,6 +654,8 @@ export interface ChatHistoryMessage {
     steps?: AgentStep[];
     /** Base64 data-URL images attached to this user message (persisted with topic) */
     images?: string[];
+    /** Whether this message should remain hidden from the UI (e.g. system programmatic instructions) */
+    isHidden?: boolean;
 }
 
 // ─── WebView Communication ───────────────────────────────────────────────────
@@ -686,6 +688,7 @@ export type WebViewMessage =
     | { type: 'submitPlanAnnotations'; annotations: Array<{ section: string; note: string }> }
     | { type: 'revisePlanWithAnnotations'; annotations: Array<{ section: string; note: string }> }
     | { type: 'reviseWalkthroughWithAnnotations'; annotations: Array<{ section: string; note: string }> }
+    | { type: 'approveWalkthrough' }
     /** Open the plan .md file in the VS Code editor */
     | { type: 'openPlanFile'; filePath: string }
     /** WebView is fully loaded and ready to receive messages */

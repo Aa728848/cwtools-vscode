@@ -1,42 +1,53 @@
-// @ts-nocheck  
+/* eslint-disable @typescript-eslint/no-explicit-any */
+declare const acquireVsCodeApi: () => {
+    postMessage(msg: unknown): void;
+    getState(): unknown;
+    setState(state: unknown): void;
+};
+
+/** Type-safe getElementById with generic cast */
+function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
+    return document.getElementById(id) as T | null;
+}
+
 (function () {
     const vscode = acquireVsCodeApi();
-    const chatArea = document.getElementById('chatArea');
-    const input = document.getElementById('input');
-    const sendBtn = document.getElementById('sendBtn');
-    const emptyState = document.getElementById('emptyState');
-    const topicsPanel = document.getElementById('topicsPanel');
-    const settingsPage = document.getElementById('settingsPage');
-    const chatHeader = document.querySelector('.header');
-    const inputWrapper = document.querySelector('.input-wrapper');
-    const planIndicator = document.getElementById('planIndicator');
-    const todoPanel = document.getElementById('todoPanel');
+    const chatArea = document.getElementById('chatArea') as HTMLDivElement;
+    const input = document.getElementById('input') as HTMLTextAreaElement;
+    const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement;
+    const emptyState = document.getElementById('emptyState') as HTMLDivElement;
+    const topicsPanel = document.getElementById('topicsPanel') as HTMLDivElement;
+    const settingsPage = document.getElementById('settingsPage') as HTMLDivElement;
+    const chatHeader = document.querySelector('.header') as HTMLElement;
+    const inputWrapper = document.querySelector('.input-wrapper') as HTMLElement;
+    const planIndicator = document.getElementById('planIndicator') as HTMLDivElement;
+    const todoPanel = document.getElementById('todoPanel') as HTMLDivElement;
 
     let isGenerating = false;
-    let currentAssistantDiv = null;
+    let currentAssistantDiv: HTMLDivElement | null = null;
     let currentMode = 'build';
-    const messageIndexMap = new Map();
-    let settingsProviders = [];
-    let settingsOllamaModels = [];
+    const messageIndexMap = new Map<number, HTMLDivElement>();
+    let settingsProviders: any[] = [];
+    let settingsOllamaModels: any[] = [];
 
     // Custom absolute positioned dropdown logic
-    function setupApDropdown(inputId, dropdownId, getOptions, onSelect) {
-        const input = document.getElementById(inputId);
-        const dropdown = document.getElementById(dropdownId);
+    function setupApDropdown(inputId: string, dropdownId: string, getOptions: () => string[], onSelect?: (val: string) => void) {
+        const input = document.getElementById(inputId) as HTMLInputElement | null;
+        const dropdown = document.getElementById(dropdownId) as HTMLDivElement | null;
         if (!input || !dropdown) return;
 
-        function render(filter) {
+        function render(filter: string) {
             const term = (filter || '').toLowerCase();
             const opts = getOptions() || [];
-            const html = opts.filter(m => m.toLowerCase().includes(term))
-                .map(m => '<div class="ap-dropdown-item">' + escapeHtml(m) + '</div>').join('');
-            dropdown.innerHTML = html;
-            Array.from(dropdown.children).forEach(el => {
-                el.onmousedown = (e) => {
+            const html = opts.filter((m: string) => m.toLowerCase().includes(term))
+                .map((m: string) => '<div class="ap-dropdown-item">' + escapeHtml(m) + '</div>').join('');
+            dropdown!.innerHTML = html;
+            Array.from(dropdown!.children).forEach(el => {
+                (el as HTMLElement).onmousedown = (e: MouseEvent) => {
                     e.preventDefault();
-                    input.value = el.textContent;
-                    dropdown.style.display = 'none';
-                    if (onSelect) onSelect(input.value);
+                    input!.value = el.textContent || '';
+                    dropdown!.style.display = 'none';
+                    if (onSelect) onSelect(input!.value);
                 };
             });
         }
@@ -48,17 +59,17 @@
     }
 
     /** Per-model context window sizes received from backend — used to auto-fill settingsCtx */
-    let settingsModelContextTokens = {};
+    let settingsModelContextTokens: Record<string, number> = {};
     /** Thinking model prefixes — these models are excluded from inline completion selectors */
-    let settingsThinkingPrefixes = [];
+    let settingsThinkingPrefixes: string[] = [];
     let totalConversationTokens = 0;
     let contextLimit = 128000;
     /** Pending images (base64 data URLs) to attach to next sent message */
-    let pendingImages = [];
+    let pendingImages: string[] = [];
     /** Pending @-mentioned file paths to attach */
-    let pendingFiles = [];
+    let pendingFiles: string[] = [];
     /** Available workspace files received from host for @ popup */
-    let workspaceFiles = [];
+    let workspaceFiles: string[] = [];
 
     // Notify host that WebView JS has fully loaded and is ready to receive messages
     vscode.postMessage({ type: 'ready' });
@@ -79,7 +90,7 @@
         '创建一个基于帝国科技等级的 modifier 公式',
     ];
     let placeholderIdx = Math.floor(Math.random() * PROMPT_EXAMPLES.length);
-    let placeholderTimer = null;
+    let placeholderTimer: ReturnType<typeof setInterval> | null = null;
 
     function startPlaceholderRotation() {
         stopPlaceholderRotation();
@@ -146,7 +157,7 @@
     const quickModelSel = document.getElementById('quickModelSelect');
     if (quickModelSel) {
         quickModelSel.addEventListener('change', () => {
-            vscode.postMessage({ type: 'quickChangeModel', model: quickModelSel.value });
+            vscode.postMessage({ type: 'quickChangeModel', model: (quickModelSel as HTMLSelectElement).value });
         });
     }
 
@@ -157,7 +168,7 @@
     bindBtn('settingsBackBtn', closeSettings);
     bindBtn('testConnBtn', testConnection);
     bindBtn('saveSettingsBtn', saveSettings);
-    bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey'); if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
+    bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey') as HTMLInputElement | null; if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
     bindBtn('fetchApiModelsBtn', () => { fetchApiModels(); });
     bindBtn('detectBtn', detectOllamaModels);
     bindBtn('accChat', () => toggleAccordion('chatModelSection'));
@@ -175,11 +186,11 @@
 
     // ── Topic search (debounced 300ms) ─────────────────────────────────────────
     (() => {
-        const si = document.getElementById('topicsSearch');
+        const si = document.getElementById('topicsSearch') as HTMLInputElement | null;
         if (!si) return;
-        let _timer = null;
+        let _timer: ReturnType<typeof setTimeout> | null = null;
         si.addEventListener('input', () => {
-            clearTimeout(_timer);
+            if (_timer) clearTimeout(_timer);
             _timer = setTimeout(() => {
                 vscode.postMessage({ type: 'searchTopics', query: si.value.trim() });
             }, 300);
@@ -200,7 +211,7 @@
 
 
     // ── Mode dropdown ──────────────────────────────────────────────────────────
-    const modeSel = document.getElementById('modeSel');
+    const modeSel = document.getElementById('modeSel') as HTMLSelectElement | null;
     if (modeSel) {
         modeSel.addEventListener('change', () => {
             switchMode(modeSel.value, /* fromUI */ true);
@@ -231,7 +242,7 @@
         ).join('');
         slashPopup.querySelectorAll('.slash-popup-item').forEach(el => {
             el.addEventListener('click', () => {
-                const cmd = el.dataset.cmd;
+                const cmd = (el as HTMLElement).dataset.cmd;
                 slashPopup.classList.remove('show');
                 vscode.postMessage({ type: 'slashCommand', command: cmd });
                 input.value = '';
@@ -255,8 +266,8 @@
             closeAtPopup();
         }
     });
-    document.addEventListener('click', e => { if (slashPopup && !slashPopup.contains(e.target) && e.target !== input) slashPopup.classList.remove('show'); });
-    document.addEventListener('click', e => { if (!e.target.closest('#atPopup') && e.target !== input) closeAtPopup(); });
+    document.addEventListener('click', e => { if (slashPopup && !slashPopup.contains(e.target as Node) && e.target !== input) slashPopup.classList.remove('show'); });
+    document.addEventListener('click', e => { const t = e.target as HTMLElement; if (t && !t.closest('#atPopup') && t !== input) closeAtPopup(); });
     input.addEventListener('keydown', e => {
         if (e.key === 'Escape' && slashPopup && slashPopup.classList.contains('show')) {
             e.stopPropagation();
@@ -291,7 +302,8 @@
         ).join('');
         atPopup.querySelectorAll('.slash-popup-item').forEach(el => {
             el.addEventListener('click', () => {
-                const file = el.dataset.file;
+                const file = (el as HTMLElement).dataset.file;
+                if (!file) return;
                 closeAtPopup();
                 // Replace the @partial in input with @filename display
                 const v = input.value;
@@ -320,7 +332,7 @@
         const badge = document.createElement('span');
         badge.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:rgba(100,120,255,0.15);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:11px;';
         badge.innerHTML = `📄 ${escapeHtml(file.split('/').pop())} <button style="background:none;border:none;cursor:pointer;color:inherit;padding:0;font-size:10px;" data-file="${escapeHtml(file)}">✕</button>`;
-        badge.querySelector('button').addEventListener('click', () => {
+        badge.querySelector('button')!.addEventListener('click', () => {
             pendingFiles = pendingFiles.filter(f => f !== file);
             badge.remove();
         });
@@ -350,7 +362,7 @@
                 const canvas = document.createElement('canvas');
                 canvas.width = w; canvas.height = h;
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, w, h);
+                ctx!.drawImage(img, 0, 0, w, h);
                 // toDataURL always returns a single-line string — no embedded newlines
                 const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
                 callback(dataUrl);
@@ -367,7 +379,7 @@
     input.addEventListener('paste', e => {
         const items = e.clipboardData && e.clipboardData.items;
         if (!items) return;
-        for (const item of items) {
+        for (const item of Array.from(items)) {
             if (item.type.startsWith('image/')) {
                 e.preventDefault();
                 const blob = item.getAsFile();
@@ -393,7 +405,7 @@
         inputWrapper.classList.remove('drag-over');
         const files = e.dataTransfer && e.dataTransfer.files;
         if (!files) return;
-        for (const file of files) {
+        for (const file of Array.from(files)) {
             if (!file.type.startsWith('image/')) continue;
             compressImage(file, dataUrl => {
                 pendingImages.push(dataUrl);
@@ -414,7 +426,7 @@
         document.body.appendChild(fileInput);
         imgPickBtn.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', () => {
-            for (const file of fileInput.files) {
+            for (const file of Array.from(fileInput.files || [])) {
                 compressImage(file, dataUrl => {
                     pendingImages.push(dataUrl);
                     addImagePreview(dataUrl);
@@ -509,7 +521,7 @@
         if (currentMode === mode && !fromUI) return; // avoid redundant update
         currentMode = mode;
         // Sync dropdown value without re-triggering change event
-        const sel = document.getElementById('modeSel');
+        const sel = document.getElementById('modeSel') as HTMLSelectElement | null;
         if (sel && sel.value !== mode) sel.value = mode;
         // Only post to backend when user initiated (avoids ping-pong)
         if (fromUI) vscode.postMessage({ type: 'switchMode', mode });
@@ -566,7 +578,7 @@
     // ── Markdown renderer ──────────────────────────────────────────────────────
     function inlineMd(raw) {
         let s = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const codeBlocks = [];
+        const codeBlocks: string[] = [];
         s = s.replace(/`([^`]+)`/g, (_, c) => {
             codeBlocks.push('<code>' + c.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') + '</code>');
             return '\x01CODE' + (codeBlocks.length - 1) + '\x01';
@@ -582,18 +594,18 @@
         return s;
     }
 
-    function renderMarkdown(rawText) {
+    function renderMarkdown(rawText: string): string {
         if (!rawText) return '';
 
         // Phase 1: extract fenced code blocks to avoid mis-parsing their content
-        const blocks = [];
+        const blocks: {lang: string; code: string}[] = [];
         let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
             const i = blocks.length; blocks.push({ lang: lang.trim(), code }); return '\x00BLOCK' + i + '\x00';
         });
 
         // Phase 2: line-by-line state machine — correctly handles ## headings at any position
         const lines = text.split('\n');
-        const out = [];
+        const out: string[] = [];
         let i = 0;
 
         function flushPara(paraLines) {
@@ -601,7 +613,7 @@
             const lineHtml = paraLines.map(line => {
                 const t = line.trim();
                 if (/^\x00BLOCK\d+\x00$/.test(t)) {
-                    const { lang, code } = blocks[+t.match(/\d+/)[0]];
+                    const { lang, code } = blocks[+t.match(/\d+/)![0]];
                     return '<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>';
                 }
                 return inlineMd(line);
@@ -609,7 +621,7 @@
             out.push('<p>' + lineHtml.join('<br>') + '</p>');
         }
 
-        let paraLines = [];
+        let paraLines: string[] = [];
 
         while (i < lines.length) {
             const line = lines[i];
@@ -621,7 +633,7 @@
             // Fenced code block placeholder (standalone line)
             if (/^\x00BLOCK\d+\x00$/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
-                const { lang, code } = blocks[+trimmed.match(/\d+/)[0]];
+                const { lang, code } = blocks[+trimmed.match(/\d+/)![0]];
                 out.push('<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>');
                 i++; continue;
             }
@@ -644,7 +656,7 @@
             // Blockquote — collect consecutive > lines
             if (/^>/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
-                const bqLines = [];
+                const bqLines: string[] = [];
                 while (i < lines.length && /^>/.test(lines[i].trim())) {
                     bqLines.push(lines[i].replace(/^>\s?/, '')); i++;
                 }
@@ -655,7 +667,7 @@
             // GFM Table — header row | separator row | data rows (all consecutive)
             if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[\|\s:-]+$/.test(lines[i + 1].trim())) {
                 flushPara(paraLines); paraLines = [];
-                const tblLines = [];
+                const tblLines: string[] = [];
                 while (i < lines.length && /^\|/.test(lines[i].trim())) { tblLines.push(lines[i]); i++; }
                 if (tblLines.length >= 2) {
                     const headers = tblLines[0].split('|').map(c => c.trim()).filter(Boolean);
@@ -671,11 +683,11 @@
             if (/^[-*+]\s/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
                 // Stack of { tag:'ul'|'ol', indent:number } for nesting
-                const stack = [];
-                const htmlParts = [];
-                const getIndent = (line) => { const m = line.match(/^(\s*)/); return m ? m[1].length : 0; };
-                const startList = (tag, indent) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
-                const closeList = () => { const item = stack.pop(); htmlParts.push('</' + item.tag + '>'); };
+                const stack: {tag: string; indent: number}[] = [];
+                const htmlParts: string[] = [];
+                const getIndent = (line: string) => { const m = line.match(/^(\s*)/); return m ? m[1].length : 0; };
+                const startList = (tag: string, indent: number) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
+                const closeList = () => { const item = stack.pop(); if (item) htmlParts.push('</' + item.tag + '>'); };
 
                 startList('ul', getIndent(lines[i]));
                 while (i < lines.length) {
@@ -685,7 +697,7 @@
                     const ulMatch = lt.match(/^[-*+]\s+(.*)/);
                     const olMatch = lt.match(/^\d+\.\s+(.*)/);
                     if (ulMatch || olMatch) {
-                        const content = ulMatch ? ulMatch[1] : olMatch[1];
+                        const content = ulMatch ? ulMatch[1] : olMatch![1];
                         const listTag = ulMatch ? 'ul' : 'ol';
                         // Close lists deeper than current indent
                         while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
@@ -720,11 +732,11 @@
             // Ordered list — collect consecutive numbered items with nesting
             if (/^\d+\.\s/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
-                const stack = [];
-                const htmlParts = [];
-                const getIndent = (line) => { const m = line.match(/^(\s*)/); return m ? m[1].length : 0; };
-                const startList = (tag, indent) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
-                const closeList = () => { const item = stack.pop(); htmlParts.push('</' + item.tag + '>'); };
+                const stack: {tag: string; indent: number}[] = [];
+                const htmlParts: string[] = [];
+                const getIndent = (line: string) => { const m = line.match(/^(\s*)/); return m ? m[1].length : 0; };
+                const startList = (tag: string, indent: number) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
+                const closeList = () => { const item = stack.pop(); if (item) htmlParts.push('</' + item.tag + '>'); };
 
                 startList('ol', getIndent(lines[i]));
                 while (i < lines.length) {
@@ -734,7 +746,7 @@
                     const olMatch = lt.match(/^\d+\.\s+(.*)/);
                     const ulMatch = lt.match(/^[-*+]\s+(.*)/);
                     if (olMatch || ulMatch) {
-                        const content = olMatch ? olMatch[1] : ulMatch[1];
+                        const content = olMatch ? olMatch[1] : ulMatch![1];
                         const listTag = olMatch ? 'ol' : 'ul';
                         while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
                             htmlParts.push('</li>');
@@ -971,7 +983,7 @@
     }
 
     // ── Streaming text-delta live bubble ──────────────────────────────────────
-    let liveTextBubble = null;
+    let liveTextBubble: HTMLDivElement | null = null;
     let liveTextContent = '';
 
     function ensureLiveTextBubble() {
@@ -1025,7 +1037,7 @@
                     tbd.textContent += (s.content || '');
                 }
                 if (tsum) {
-                    const est = Math.ceil(tbd.textContent.length / 4);
+                    const est = Math.ceil((tbd.textContent || '').length / 4);
                     tsum.innerHTML = '<span class="think-pulse spinning"></span>Thinking &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
                 }
             }
@@ -1054,7 +1066,7 @@
                 const pairs = Array.from(tb.querySelectorAll('.tool-pair[data-tool="' + s.toolName + '"]:not([data-resolved])'));
                 if (pairs.length > 0) {
                     const pair = pairs[0];
-                    pair.dataset.resolved = '1';
+                    (pair as HTMLElement).dataset.resolved = '1';
                     // Find the call step that matches this result
                     const callDiv = pair.querySelector('.tp-call');
                     // Build fresh pair with result
@@ -1138,11 +1150,11 @@
             '<button class="retract-ok">撤回</button>' +
             '<button class="retract-cancel">取消</button>' +
             '</div></div>';
-        overlay.querySelector('.retract-ok').addEventListener('click', () => {
+        overlay.querySelector('.retract-ok')!.addEventListener('click', () => {
             overlay.remove();
             vscode.postMessage({ type: 'retractMessage', messageIndex: messageIdx });
         });
-        overlay.querySelector('.retract-cancel').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('.retract-cancel')!.addEventListener('click', () => overlay.remove());
         overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
         document.body.appendChild(overlay);
     }
@@ -1202,14 +1214,14 @@
             '<button class="diff-accept-btn" data-msgid="' + safeId + '">✅ 接受</button>' +
             '<button class="diff-reject-btn" data-msgid="' + safeId + '">❌ 拒绝</button>' +
             '</div>';
-        card.querySelector('.diff-accept-btn').addEventListener('click', function () {
-            this.disabled = true; card.querySelector('.diff-reject-btn').disabled = true;
+        (card.querySelector('.diff-accept-btn') as HTMLButtonElement).addEventListener('click', function () {
+            this.disabled = true; (card.querySelector('.diff-reject-btn') as HTMLButtonElement).disabled = true;
             this.textContent = '已接受 ✅';
             vscode.postMessage({ type: 'confirmWriteFile', messageId });
             dismissCard(div, 400);
         });
-        card.querySelector('.diff-reject-btn').addEventListener('click', function () {
-            this.disabled = true; card.querySelector('.diff-accept-btn').disabled = true;
+        (card.querySelector('.diff-reject-btn') as HTMLButtonElement).addEventListener('click', function () {
+            this.disabled = true; (card.querySelector('.diff-accept-btn') as HTMLButtonElement).disabled = true;
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'cancelWriteFile', messageId });
             dismissCard(div, 400);
@@ -1236,14 +1248,14 @@
             `<button class="permission-allow-btn" data-permid="${safeId}">✅ 允许</button>` +
             `<button class="permission-deny-btn" data-permid="${safeId}">❌ 拒绝</button>` +
             `</div>`;
-        div.querySelector('.permission-allow-btn').addEventListener('click', function () {
-            this.disabled = true; div.querySelector('.permission-deny-btn').disabled = true;
+        (div.querySelector('.permission-allow-btn') as HTMLButtonElement).addEventListener('click', function () {
+            this.disabled = true; (div.querySelector('.permission-deny-btn') as HTMLButtonElement).disabled = true;
             this.textContent = '已允许 ✅';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
             dismissCard(div, 400);
         });
-        div.querySelector('.permission-deny-btn').addEventListener('click', function () {
-            this.disabled = true; div.querySelector('.permission-allow-btn').disabled = true;
+        (div.querySelector('.permission-deny-btn') as HTMLButtonElement).addEventListener('click', function () {
+            this.disabled = true; (div.querySelector('.permission-allow-btn') as HTMLButtonElement).disabled = true;
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
             dismissCard(div, 400);
@@ -1352,7 +1364,7 @@
             case 'topicTitleGenerated': {
                 const list = document.getElementById('topicsList');
                 if (list) {
-                    for (const item of list.querySelectorAll(`.topic-item[data-topic-id="${escapeHtml(msg.topicId)}"]`)) {
+                    for (const item of Array.from(list.querySelectorAll(`.topic-item[data-topic-id="${escapeHtml(msg.topicId)}"]`))) {
                         const span = item.querySelector('.topic-title');
                         if (span) span.textContent = msg.title;
                     }
@@ -1385,8 +1397,8 @@
                 const rd = messageIndexMap.get(msg.messageIndex);
                 if (rd) {
                     // Collect all nodes from rd onwards (inclusive) and remove them
-                    const toRemove = [];
-                    let cur = rd;
+                    const toRemove: Element[] = [];
+                    let cur: Element | null = rd;
                     while (cur) {
                         toRemove.push(cur);
                         cur = cur.nextElementSibling;
@@ -1432,8 +1444,10 @@
                 if (msg.isGenerating) {
                     // Show generating indicator
                     sendBtn.classList.add('cancel-mode');
-                    sendBtn.querySelector('.send-icon') && (sendBtn.querySelector('.send-icon').style.display = 'none');
-                    sendBtn.querySelector('.stop-icon') && (sendBtn.querySelector('.stop-icon').style.display = 'inline-block');
+                    const sendIcon = sendBtn.querySelector('.send-icon') as HTMLElement | null;
+                    const stopIcon = sendBtn.querySelector('.stop-icon') as HTMLElement | null;
+                    if (sendIcon) sendIcon.style.display = 'none';
+                    if (stopIcon) stopIcon.style.display = 'inline-block';
                 }
                 scrollBottom();
                 break;
@@ -1453,16 +1467,16 @@
                 break;
 
             case 'ollamaModels': {
-                const db = document.getElementById('detectBtn');
-                db.disabled = false; db.textContent = '🔍 检测';
-                if (msg.error) { document.getElementById('modelHint').textContent = msg.error; }
-                else { settingsOllamaModels = msg.models; updateModelUI(document.getElementById('settingsProvider').value, '', msg.models); }
+                const db = document.getElementById('detectBtn') as HTMLButtonElement | null;
+                if (db) { db.disabled = false; db.textContent = '🔍 检测'; }
+                if (msg.error) { document.getElementById('modelHint')!.textContent = msg.error; }
+                else { settingsOllamaModels = msg.models; updateModelUI((document.getElementById('settingsProvider') as HTMLSelectElement).value, '', msg.models); }
                 break;
             }
             case 'apiModelsFetched': {
-                const fb = document.getElementById('fetchApiModelsBtn');
+                const fb = document.getElementById('fetchApiModelsBtn') as HTMLButtonElement | null;
                 if (fb) { fb.disabled = false; fb.textContent = '☁️ 拉取支持的模型'; }
-                if (msg.error) { document.getElementById('apiKeyStatus').textContent = '获取失败: ' + msg.error; document.getElementById('apiKeyStatus').style.color = '#ff9800'; }
+                if (msg.error) { document.getElementById('apiKeyStatus')!.textContent = '获取失败: ' + msg.error; document.getElementById('apiKeyStatus')!.style.color = '#ff9800'; }
                 else {
                     const p = settingsProviders.find(p => p.id === msg.providerId);
                     if (p && msg.models && msg.models.length > 0) {
@@ -1475,17 +1489,19 @@
                         }
                         updateModelUI(msg.providerId, getSelectedModel(), null);
                         const ctxInfo = msg.ctxNote ? ` ${msg.ctxNote}` : '';
-                        document.getElementById('modelHint').textContent = `成功从端点加载了 ${newModels.length} 个模型！${ctxInfo}`;
-                        document.getElementById('apiKeyStatus').textContent = '✅ 已成功获取模型';
-                        document.getElementById('apiKeyStatus').style.color = '#4caf50';
+                        document.getElementById('modelHint')!.textContent = `成功从端点加载了 ${newModels.length} 个模型！${ctxInfo}`;
+                        document.getElementById('apiKeyStatus')!.textContent = '✅ 已成功获取模型';
+                        document.getElementById('apiKeyStatus')!.style.color = '#4caf50';
                     }
                 }
                 break;
             }
             case 'testConnectionResult': {
                 const tr = document.getElementById('testResult');
-                tr.className = 'test-result ' + (msg.ok ? 'ok' : 'fail');
-                tr.textContent = msg.message;
+                if (tr) {
+                    tr.className = 'test-result ' + (msg.ok ? 'ok' : 'fail');
+                    tr.textContent = msg.message;
+                }
                 break;
             }
             case 'usageStats': {
@@ -1574,8 +1590,8 @@
                     <div class="plan-file-actions">
                         <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">📂 打开文件</button>
                     </div>`;
-                card.querySelector('.plan-open-btn').addEventListener('click', e => {
-                    vscode.postMessage({ type: 'openPlanFile', filePath: e.currentTarget.dataset.path });
+                (card.querySelector('.plan-open-btn') as HTMLElement).addEventListener('click', e => {
+                    vscode.postMessage({ type: 'openPlanFile', filePath: (e.currentTarget as HTMLElement).dataset.path });
                 });
                 chatArea.appendChild(card);
                 scrollBottom();
@@ -1584,7 +1600,7 @@
 
             case 'renderPlan': {
                 // ── Interactive inline annotation view ──────────────────────────
-                const annotations = [];   // { sectionIdx, section, note }
+                const annotations: {sectionIdx: number; section: string; note: string}[] = [];   // { sectionIdx, section, note }
 
                 const wrap = document.createElement('div');
                 wrap.className = 'annotatable-plan';
@@ -1600,8 +1616,8 @@
                     </div>`;
                 wrap.appendChild(header);
 
-                const submitBtn = header.querySelector('.ap-submit-btn');
-                const approveBtn = header.querySelector('.ap-approve-btn');
+                const submitBtn = header.querySelector('.ap-submit-btn') as HTMLButtonElement;
+                const approveBtn = header.querySelector('.ap-approve-btn') as HTMLButtonElement;
 
                 function updateSubmitBtn() {
                     submitBtn.textContent = `📤 提交批注 (${annotations.length})`;
@@ -1667,7 +1683,7 @@
 
                     function openInput() {
                         const existingEntry = annotations.find(a => a.sectionIdx === idx);
-                        const ta = inputBox.querySelector('.ap-textarea');
+                        const ta = inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement;
                         ta.value = existingEntry ? existingEntry.note : '';
                         inputBox.style.display = 'block';
                         ta.focus();
@@ -1680,7 +1696,7 @@
                     }
 
                     function confirmAnnotation() {
-                        const val = inputBox.querySelector('.ap-textarea').value.trim();
+                        const val = (inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement).value.trim();
                         closeInput();
                         if (!val) {
                             // Remove annotation if cleared
@@ -1693,7 +1709,7 @@
                             if (existing) existing.note = val;
                             else annotations.push({ sectionIdx: idx, section, note: val });
                             bubble.innerHTML = `<span class="ap-bubble-icon">💬</span><span class="ap-bubble-text">${escapeHtml(val)}</span><button class="ap-bubble-edit">编辑</button>`;
-                            bubble.querySelector('.ap-bubble-edit').addEventListener('click', e => {
+                            bubble.querySelector('.ap-bubble-edit')!.addEventListener('click', e => {
                                 e.stopPropagation(); openInput();
                             });
                             bubble.style.display = 'flex';
@@ -1706,11 +1722,12 @@
                     row.addEventListener('click', () => {
                         if (inputBox.style.display === 'none') openInput();
                     });
-                    inputBox.querySelector('.ap-confirm-btn').addEventListener('click', confirmAnnotation);
-                    inputBox.querySelector('.ap-cancel-btn').addEventListener('click', closeInput);
-                    inputBox.querySelector('.ap-textarea').addEventListener('keydown', e => {
-                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) confirmAnnotation();
-                        if (e.key === 'Escape') closeInput();
+                    inputBox.querySelector('.ap-confirm-btn')!.addEventListener('click', confirmAnnotation);
+                    inputBox.querySelector('.ap-cancel-btn')!.addEventListener('click', closeInput);
+                    inputBox.querySelector('.ap-textarea')!.addEventListener('keydown', (e: Event) => {
+                        const ke = e as KeyboardEvent;
+                        if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)) confirmAnnotation();
+                        if (ke.key === 'Escape') closeInput();
                     });
                     // Prevent row click from triggering when clicking inside input
                     inputBox.addEventListener('click', e => e.stopPropagation());
@@ -1765,7 +1782,7 @@
                 // Re-attach click handlers
                 list.querySelectorAll('.topic-item').forEach(el => {
                     el.addEventListener('click', () => {
-                        vscode.postMessage({ type: 'loadTopic', topicId: el.dataset.topicId });
+                        vscode.postMessage({ type: 'loadTopic', topicId: (el as HTMLElement).dataset.topicId });
                         topicsPanel.classList.remove('show');
                     });
                 });
@@ -1777,7 +1794,7 @@
     // ── Topic list with date groups ────────────────────────────────────────────
     function groupTopicsByDate(topics) {
         const now = Date.now(); const DAY = 86400000;
-        const groups = [{ label: '今天', items: [] }, { label: '昨天', items: [] }, { label: '本周', items: [] }, { label: '更早', items: [] }];
+        const groups: {label: string; items: any[]}[] = [{ label: '今天', items: [] }, { label: '昨天', items: [] }, { label: '本周', items: [] }, { label: '更早', items: [] }];
         for (const t of topics) {
             const age = now - (t.updatedAt || 0);
             if (age < DAY) groups[0].items.push(t);
@@ -1789,7 +1806,7 @@
     }
 
     function renderTopics(topics) {
-        const list = document.getElementById('topicsList');
+        const list = document.getElementById('topicsList')!;
         if (!topics.length) {
             list.innerHTML = '<div style="text-align:center;opacity:0.5;padding:20px;font-size:12px;">暂无历史话题</div>';
             return;
@@ -1825,10 +1842,10 @@
     }
 
     function renderTodos(todos) {
-        if (!todos || !todos.length) { todoPanel.classList.remove('has-items'); document.getElementById('todoList').innerHTML = ''; return; }
+        if (!todos || !todos.length) { todoPanel.classList.remove('has-items'); document.getElementById('todoList')!.innerHTML = ''; return; }
         todoPanel.classList.add('has-items');
-        const icons = { pending: '○', in_progress: '●', done: '✓' };
-        document.getElementById('todoList').innerHTML = todos.map(t => {
+        const icons: Record<string,string> = { pending: '○', in_progress: '●', done: '✓' };
+        document.getElementById('todoList')!.innerHTML = todos.map(t => {
             const cls = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in_progress' : '';
             return '<div class="todo-item ' + cls + '"><span>' + (icons[t.status] || '○') + '</span>' + escapeHtml(t.content) + '</div>';
         }).join('');
@@ -1849,24 +1866,24 @@
         settingsProviders = providers;
         settingsOllamaModels = ollamaModels || [];
         updateQuickModelSelector(providers, current, ollamaModels);
-        const sel = document.getElementById('settingsProvider');
+        const sel = document.getElementById('settingsProvider') as HTMLSelectElement;
         sel.innerHTML = providers.map(p => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
-        const inlineSel = document.getElementById('inlineProvider');
+        const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement;
         inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map(p => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
-        document.getElementById('settingsApiKey').value = '';
-        document.getElementById('settingsEndpoint').value = current.endpoint || '';
+        (document.getElementById('settingsApiKey') as HTMLInputElement).value = '';
+        (document.getElementById('settingsEndpoint') as HTMLInputElement).value = current.endpoint || '';
         // Auto-fill context size: prefer per-model lookup, then user-saved value
         const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
-        document.getElementById('settingsCtx').value = initCtx;
-        document.getElementById('settingsReasoningEffort').value = current.reasoningEffort || 'high';
-        document.getElementById('inlineEnabled').checked = current.inlineCompletion?.enabled ?? false;
-        const overlapEl = document.getElementById('inlineOverlapStripping');
+        (document.getElementById('settingsCtx') as HTMLInputElement).value = initCtx;
+        (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value = current.reasoningEffort || 'high';
+        (document.getElementById('inlineEnabled') as HTMLInputElement).checked = current.inlineCompletion?.enabled ?? false;
+        const overlapEl = document.getElementById('inlineOverlapStripping') as HTMLInputElement | null;
         if (overlapEl) overlapEl.checked = current.inlineCompletion?.overlapStripping ?? true;
-        document.getElementById('inlineEndpoint').value = current.inlineCompletion?.endpoint || '';
-        document.getElementById('inlineDebounce').value = current.inlineCompletion?.debounceMs || 500;
-        document.getElementById('agentWriteMode').value = current.agentFileWriteMode || 'confirm';
+        (document.getElementById('inlineEndpoint') as HTMLInputElement).value = current.inlineCompletion?.endpoint || '';
+        (document.getElementById('inlineDebounce') as HTMLInputElement).value = current.inlineCompletion?.debounceMs || 500;
+        (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'confirm';
         // Brave Search API key — show masked placeholder if already set
-        const braveKeyEl = document.getElementById('braveSearchApiKey');
+        const braveKeyEl = document.getElementById('braveSearchApiKey') as HTMLInputElement | null;
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
 
         // Render MCP Servers
@@ -1877,7 +1894,7 @@
         }
 
         function updateInlineProviderSelect() {
-            const isFimChecked = document.getElementById('inlineFimMode')?.checked ?? false;
+            const isFimChecked = (document.getElementById('inlineFimMode') as HTMLInputElement | null)?.checked ?? false;
             const currentPid = inlineSel.value;
             const filteredProviders = isFimChecked
                 ? providers.filter(p => p.supportsFIM)
@@ -1896,7 +1913,7 @@
             ms = ms.filter(m => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
 
             // Filter out non-FIM models if FIM mode is enabled
-            const isFimNode = document.getElementById('inlineFimMode');
+            const isFimNode = document.getElementById('inlineFimMode') as HTMLInputElement | null;
             if (isFimNode && isFimNode.checked && p2) {
                 const fimCapableModels = {
                     'deepseek-v4-pro': true, 'deepseek-v4-flash': true, 'deepseek-coder': true,
@@ -1913,13 +1930,13 @@
                 });
             }
 
-            const inp = document.getElementById('inlineModelInput');
+            const inp = document.getElementById('inlineModelInput') as HTMLInputElement;
             inp.value = selectedModel || '';
 
             setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
         }
-        const inlineProviderSel = document.getElementById('inlineProvider');
-        const fimModeSel = document.getElementById('inlineFimMode');
+        const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement;
+        const fimModeSel = document.getElementById('inlineFimMode') as HTMLInputElement | null;
         if (fimModeSel) {
             fimModeSel.checked = current.inlineCompletion?.fimMode ?? false;
             fimModeSel.onchange = () => {
@@ -1933,14 +1950,14 @@
         updateModelUI(current.provider, current.model, ollamaModels);
         updateApiKeyStatus(current.provider, providers);
         chatHeader.style.display = 'none';
-        document.getElementById('chatArea').style.display = 'none';
+        document.getElementById('chatArea')!.style.display = 'none';
         if (inputWrapper) inputWrapper.style.display = 'none';
         const mi = document.getElementById('modeIndicator');
         if (mi) mi.style.display = 'none';
         if (todoPanel) todoPanel.style.display = 'none';
         settingsPage.classList.add('active');
-        document.getElementById('testResult').className = 'test-result';
-        document.getElementById('testResult').textContent = '';
+        const _tr = document.getElementById('testResult');
+        if (_tr) { _tr.className = 'test-result'; _tr.textContent = ''; }
     }
 
     /** Look up per-model context size with fallback to provider level */
@@ -1964,7 +1981,7 @@
     function closeSettings() {
         settingsPage.classList.remove('active');
         chatHeader.style.display = '';
-        document.getElementById('chatArea').style.display = 'flex';
+        document.getElementById('chatArea')!.style.display = 'flex';
         if (inputWrapper) inputWrapper.style.display = '';
         const mi = document.getElementById('modeIndicator');
         if (mi) mi.style.display = '';
@@ -1973,8 +1990,8 @@
 
     function updateApiKeyStatus(providerId, providers) {
         const p = (providers || settingsProviders).find(x => x.id === providerId);
-        const status = document.getElementById('apiKeyStatus');
-        const group = document.getElementById('apiKeyGroup');
+        const status = document.getElementById('apiKeyStatus')!;
+        const group = document.getElementById('apiKeyGroup')!;
         if (providerId === 'ollama') { group.style.display = 'none'; return; }
         group.style.display = '';
         if (p && p.hasKey) { status.textContent = '✅ 已配置 API Key'; status.style.color = '#4caf50'; }
@@ -1982,33 +1999,33 @@
     }
 
     function onProviderChange() {
-        const id = document.getElementById('settingsProvider').value;
+        const id = (document.getElementById('settingsProvider') as HTMLSelectElement).value;
         updateModelUI(id, '', settingsOllamaModels);
         updateEndpointHint(id);
         updateApiKeyStatus(id, settingsProviders);
         // Auto-fill context with provider default when user switches provider
         const provider = settingsProviders.find(p => p.id === id);
         if (provider && provider.maxContextTokens > 0) {
-            document.getElementById('settingsCtx').value = provider.maxContextTokens;
+            (document.getElementById('settingsCtx') as HTMLInputElement).value = provider.maxContextTokens;
         }
     }
 
     function updateModelUI(providerId, currentModel, ollamaModels) {
         const provider = settingsProviders.find(p => p.id === providerId);
-        const modelInput = document.getElementById('settingsModelInput');
-        const detectBtn = document.getElementById('detectBtn');
-        const modelHint = document.getElementById('modelHint');
+        const modelInput = document.getElementById('settingsModelInput') as HTMLInputElement;
+        const detectBtn = document.getElementById('detectBtn') as HTMLButtonElement;
+        const modelHint = document.getElementById('modelHint')!;
 
         /** Auto-fill settingsCtx when a model is chosen */
         function onModelSelected(model) {
             const ctx = autoFillContextForModel(model, providerId);
-            if (ctx > 0) document.getElementById('settingsCtx').value = ctx;
+            if (ctx > 0) (document.getElementById('settingsCtx') as HTMLInputElement).value = ctx;
         }
 
-        let currentDropdownOpts = [];
+        let currentDropdownOpts: string[] = [];
 
         if (providerId === 'ollama') {
-            document.getElementById('apiKeyGroup').style.display = 'none';
+            document.getElementById('apiKeyGroup')!.style.display = 'none';
             if (ollamaModels && ollamaModels.length > 0) {
                 currentDropdownOpts = ollamaModels.map(m => m.name);
                 modelHint.textContent = '已检测到 ' + ollamaModels.length + ' 个本地模型';
@@ -2043,29 +2060,29 @@
     function updateEndpointHint(providerId) {
         const provider = settingsProviders.find(p => p.id === providerId);
         const hint = document.getElementById('endpointHint');
-        const ep = document.getElementById('settingsEndpoint');
-        if (provider) { hint.textContent = '默认: ' + (provider.defaultEndpoint || '由 provider 决定'); if (!ep.value) ep.placeholder = provider.defaultEndpoint || '留空使用默认'; }
+        const ep = document.getElementById('settingsEndpoint') as HTMLInputElement | null;
+        if (provider && hint && ep) { hint.textContent = '默认: ' + (provider.defaultEndpoint || '由 provider 决定'); if (!ep.value) ep.placeholder = provider.defaultEndpoint || '留空使用默认'; }
     }
 
     function onEndpointChange() {
-        if (document.getElementById('settingsProvider').value === 'ollama') {
+        if ((document.getElementById('settingsProvider') as HTMLSelectElement).value === 'ollama') {
             settingsOllamaModels = [];
-            document.getElementById('settingsModelSelect').style.display = 'none';
-            document.getElementById('settingsModelInput').style.display = '';
-            document.getElementById('modelHint').textContent = '端点已更改，点击「检测」重新获取模型';
+            document.getElementById('settingsModelSelect')!.style.display = 'none';
+            document.getElementById('settingsModelInput')!.style.display = '';
+            document.getElementById('modelHint')!.textContent = '端点已更改，点击「检测」重新获取模型';
         }
     }
 
     function detectOllamaModels() {
-        const btn = document.getElementById('detectBtn'); const ep = document.getElementById('settingsEndpoint').value.trim();
+        const btn = document.getElementById('detectBtn') as HTMLButtonElement; const ep = (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim();
         btn.disabled = true; btn.textContent = '检测中...';
-        document.getElementById('modelHint').textContent = '正在连接 Ollama...';
+        document.getElementById('modelHint')!.textContent = '正在连接 Ollama...';
         vscode.postMessage({ type: 'detectOllamaModels', endpoint: ep || 'http://localhost:11434/v1' });
     }
 
-    document.getElementById('delModelBtn').addEventListener('click', () => {
-        const providerId = document.getElementById('settingsProvider').value;
-        const modelId = document.getElementById('settingsModelInput').value.trim();
+    document.getElementById('delModelBtn')!.addEventListener('click', () => {
+        const providerId = (document.getElementById('settingsProvider') as HTMLSelectElement).value;
+        const modelId = (document.getElementById('settingsModelInput') as HTMLInputElement).value.trim();
         if (providerId && modelId) {
             vscode.postMessage({ type: 'deleteDynamicModel', providerId, modelId });
         }
@@ -2093,8 +2110,8 @@
         `;
         list.appendChild(div);
 
-        const typeSel = div.querySelector('.mcp-type');
-        const contentDiv = div.querySelector('.mcp-transport-content');
+        const typeSel = div.querySelector('.mcp-type') as HTMLSelectElement;
+        const contentDiv = div.querySelector('.mcp-transport-content') as HTMLDivElement;
 
         function renderTransport() {
             if (typeSel.value === 'stdio') {
@@ -2104,7 +2121,7 @@
                 `;
             } else {
                 contentDiv.innerHTML = `
-                    <input class="settings-input mcp-url" type="text" placeholder="SSE URL (例如: http://localhost:3000/sse)" value="${t.type === 'sse' ? escapeHtml(t.url || '') : ''}" />
+                    <input class="settings-input mcp-url" type="text" placeholder="SSE URL (例如: http://localhost:3000/sse)" value="${t.type === 'sse' ? escapeHtml((t as any).url || '') : ''}" />
                 `;
             }
         }
@@ -2112,68 +2129,68 @@
         renderTransport();
         typeSel.addEventListener('change', renderTransport);
 
-        div.querySelector('.mcp-delete-btn').addEventListener('click', () => {
+        div.querySelector('.mcp-delete-btn')!.addEventListener('click', () => {
             div.remove();
         });
     }
 
-    document.getElementById('detectBtn').addEventListener('click', detectOllamaModels);
-    document.getElementById('fetchApiModelsBtn').addEventListener('click', fetchApiModels);
+    document.getElementById('detectBtn')!.addEventListener('click', detectOllamaModels);
+    document.getElementById('fetchApiModelsBtn')!.addEventListener('click', fetchApiModels);
 
     function fetchApiModels() {
-        const btn = document.getElementById('fetchApiModelsBtn');
+        const btn = document.getElementById('fetchApiModelsBtn') as HTMLButtonElement;
         btn.disabled = true; btn.textContent = '拉取中...';
-        document.getElementById('apiKeyStatus').textContent = '正在发起网络请求拉取支持模型...';
-        document.getElementById('apiKeyStatus').style.color = 'inherit';
+        document.getElementById('apiKeyStatus')!.textContent = '正在发起网络请求拉取支持模型...';
+        document.getElementById('apiKeyStatus')!.style.color = 'inherit';
         vscode.postMessage({
             type: 'fetchApiModels',
-            providerId: document.getElementById('settingsProvider').value,
-            endpoint: document.getElementById('settingsEndpoint').value.trim(),
-            apiKey: document.getElementById('settingsApiKey').value
+            providerId: (document.getElementById('settingsProvider') as HTMLSelectElement).value,
+            endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
+            apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value
         });
     }
 
     function getSelectedModel() {
-        return document.getElementById('settingsModelInput').value.trim();
+        return (document.getElementById('settingsModelInput') as HTMLInputElement).value.trim();
     }
 
-    function toggleAccordion(id) { document.getElementById(id).classList.toggle('open'); }
+    function toggleAccordion(id: string) { document.getElementById(id)!.classList.toggle('open'); }
 
     function saveSettings() {
         const mcpServers = Array.from(document.querySelectorAll('.mcp-server-block')).map(block => {
-            const type = block.querySelector('.mcp-type').value;
-            const transport = { type };
+            const type = (block.querySelector('.mcp-type') as HTMLSelectElement).value;
+            const transport: any = { type };
             if (type === 'stdio') {
-                transport.command = block.querySelector('.mcp-command')?.value.trim() || '';
-                const argsStr = block.querySelector('.mcp-args')?.value.trim() || '';
+                transport.command = (block.querySelector('.mcp-command') as HTMLInputElement | null)?.value.trim() || '';
+                const argsStr = (block.querySelector('.mcp-args') as HTMLInputElement | null)?.value.trim() || '';
                 transport.args = argsStr ? argsStr.split(/\s+/) : [];
             } else {
-                transport.url = block.querySelector('.mcp-url')?.value.trim() || '';
+                transport.url = (block.querySelector('.mcp-url') as HTMLInputElement | null)?.value.trim() || '';
             }
             return {
-                name: block.querySelector('.mcp-name').value.trim(),
+                name: (block.querySelector('.mcp-name') as HTMLInputElement).value.trim(),
                 transport
             };
         });
 
         vscode.postMessage({
             type: 'saveSettings', settings: {
-                provider: document.getElementById('settingsProvider').value,
+                provider: (document.getElementById('settingsProvider') as HTMLSelectElement).value,
                 model: getSelectedModel(),
-                apiKey: document.getElementById('settingsApiKey').value,
-                endpoint: document.getElementById('settingsEndpoint').value.trim(),
-                maxContextTokens: parseInt(document.getElementById('settingsCtx').value) || 0,
-                agentFileWriteMode: document.getElementById('agentWriteMode').value,
-                reasoningEffort: document.getElementById('settingsReasoningEffort').value || 'high',
-                braveSearchApiKey: (document.getElementById('braveSearchApiKey')?.value || '').trim(),
+                apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value,
+                endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
+                maxContextTokens: parseInt((document.getElementById('settingsCtx') as HTMLInputElement).value) || 0,
+                agentFileWriteMode: (document.getElementById('agentWriteMode') as HTMLSelectElement).value,
+                reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
+                braveSearchApiKey: ((document.getElementById('braveSearchApiKey') as HTMLInputElement | null)?.value || '').trim(),
                 inlineCompletion: {
-                    enabled: document.getElementById('inlineEnabled').checked,
-                    provider: document.getElementById('inlineProvider').value,
-                    model: document.getElementById('inlineModelInput').value.trim(),
-                    endpoint: document.getElementById('inlineEndpoint').value.trim(),
-                    debounceMs: parseInt(document.getElementById('inlineDebounce').value) || 500,
-                    overlapStripping: document.getElementById('inlineOverlapStripping')?.checked ?? true,
-                    fimMode: document.getElementById('inlineFimMode')?.checked ?? false,
+                    enabled: (document.getElementById('inlineEnabled') as HTMLInputElement).checked,
+                    provider: (document.getElementById('inlineProvider') as HTMLSelectElement).value,
+                    model: (document.getElementById('inlineModelInput') as HTMLInputElement).value.trim(),
+                    endpoint: (document.getElementById('inlineEndpoint') as HTMLInputElement).value.trim(),
+                    debounceMs: parseInt((document.getElementById('inlineDebounce') as HTMLInputElement).value) || 500,
+                    overlapStripping: (document.getElementById('inlineOverlapStripping') as HTMLInputElement | null)?.checked ?? true,
+                    fimMode: (document.getElementById('inlineFimMode') as HTMLInputElement | null)?.checked ?? false,
                 },
                 mcp: { servers: mcpServers }
             }
@@ -2182,15 +2199,15 @@
 
     function testConnection() {
         const tr = document.getElementById('testResult');
-        tr.className = 'test-result'; tr.textContent = '测试中...'; tr.style.display = 'block';
+        if (tr) { tr.className = 'test-result'; tr.textContent = '测试中...'; tr.style.display = 'block'; }
         vscode.postMessage({
             type: 'testConnection', settings: {
-                provider: document.getElementById('settingsProvider').value,
+                provider: (document.getElementById('settingsProvider') as HTMLSelectElement).value,
                 model: getSelectedModel(),
-                apiKey: document.getElementById('settingsApiKey').value,
-                endpoint: document.getElementById('settingsEndpoint').value.trim(),
+                apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value,
+                endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
                 maxContextTokens: 0, agentFileWriteMode: 'confirm',
-                reasoningEffort: document.getElementById('settingsReasoningEffort').value || 'high',
+                reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 inlineCompletion: { enabled: false, provider: '', model: '', endpoint: '', debounceMs: 1500 },
                 mcp: { servers: [] }
             }

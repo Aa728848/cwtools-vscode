@@ -1,0 +1,18 @@
+{
+    "compilerOptions": {
+        "module": "ES2020",
+        "target": "ES2021",
+        "noImplicitAny": true,
+        "noImplicitThis": true
+    },
+    "extends": "./tsconfig.json",
+    "include": [
+        "client/webview/chatPanel.ts"
+    ],
+    "exclude": [
+        "client/extension/**",
+        "client/test/**",
+        "client/webview/guiPreview.ts",
+        "client/webview/solarSystemPreview.ts"
+    ]
+}

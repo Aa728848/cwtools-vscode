@@ -63,7 +63,7 @@ export default [
         },
         plugins: [
             typescript({
-                tsconfig: "tsconfig.webview.json",
+                tsconfig: "tsconfig.webview-chat.json",
                 clean: false,
                 tsconfigOverride: {
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]

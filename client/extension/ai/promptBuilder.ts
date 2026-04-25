@@ -104,6 +104,12 @@ Write files in dependency order (dependencies first, consumers last).
 #### Rule 4 — Task Tracking
 Start with \`todo_write\` listing all files in dependency order. Mark \`in_progress\` when writing, \`done\` when complete.
 
+#### Rule 5 — Task Walkthrough Report
+When ALL tasks are complete and you have finished your work, you MUST use \`write_file\` to output a detailed completion report named \`walkthrough.md\` inside your Agent Workspace Dir (or project root if unknown). The Walkthrough must document (in Github Flavored Markdown):
+- Changes made
+- What was tested
+- Validation results
+
 ---
 
 ## Step 2 — Diagnostic Framework
@@ -678,8 +684,13 @@ Rules:
         cursorColumn?: number;
         selectedText?: string;
         fileContent?: string;
+        topicId?: string;
     }): ChatMessage[] {
         const contextParts: string[] = [];
+
+        if (options.topicId) {
+            contextParts.push(`**Agent Workspace Dir**: \`.cwtools-ai/${options.topicId}/\``);
+        }
 
         if (options.activeFile) {
             const relPath = path.relative(this.workspaceRoot, options.activeFile).replace(/\\/g, '/');

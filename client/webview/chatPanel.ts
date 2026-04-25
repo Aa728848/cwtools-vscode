@@ -1191,13 +1191,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         <span style="color:var(--accent); font-weight:600;">自动应用更改 (Auto Applied)</span>
                     </div>
                 </div>
-                <div class="code-content" style="padding: 12px; font-family: var(--vscode-editor-font-family, monospace);">
+                <div class="code-content" style="padding: 12px; font-family: var(--vscode-editor-font-family, monospace); white-space: normal;">
                     <div style="margin-bottom: 8px;">
                         <span style="opacity: 0.6;">文件:</span> 
                         <span style="font-weight: 600; color: var(--vscode-textPreformat-foreground);">${escapeHtml(fileName)}</span>
                         ${isNewFile ? '<span style="border: 1px solid var(--accent); color: var(--accent); border-radius: 3px; padding: 1px 4px; font-size: 10px; margin-left: 6px;">新文件</span>' : ''}
                     </div>
-                    <div style="font-size: 11px; opacity: 0.6; word-break: break-all; margin-bottom: 12px;">路径: ${escapeHtml(file)}</div>
+                    <div style="font-size: 11px; opacity: 0.6; word-break: break-all; margin-bottom: 4px;">路径: ${escapeHtml(file)}</div>
                 </div>
             </div>`;
 
@@ -1735,6 +1735,161 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         if (ke.key === 'Escape') closeInput();
                     });
                     // Prevent row click from triggering when clicking inside input
+                    inputBox.addEventListener('click', e => e.stopPropagation());
+
+                    row.appendChild(textDiv);
+                    row.appendChild(addBtn);
+                    row.appendChild(bubble);
+                    row.appendChild(inputBox);
+                    sectionsWrap.appendChild(row);
+                });
+
+                wrap.appendChild(sectionsWrap);
+                chatArea.appendChild(wrap);
+                scrollBottom();
+                break;
+            }
+
+            case 'walkthroughFileSaved': {
+                const card = document.createElement('div');
+                card.className = 'plan-file-card walkthrough-file-card';
+                card.innerHTML = `
+                    <div class="plan-file-icon">🏁</div>
+                    <div class="plan-file-info">
+                        <div class="plan-file-title">Walkthrough 报告已导出</div>
+                        <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
+                    </div>
+                    <div class="plan-file-actions">
+                        <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">📂 打开文件</button>
+                    </div>`;
+                (card.querySelector('.plan-open-btn') as HTMLElement).addEventListener('click', e => {
+                    vscode.postMessage({ type: 'openPlanFile', filePath: (e.currentTarget as HTMLElement).dataset.path });
+                });
+                chatArea.appendChild(card);
+                scrollBottom();
+                break;
+            }
+
+            case 'renderWalkthrough': {
+                const annotations: {sectionIdx: number; section: string; note: string}[] = [];
+
+                const wrap = document.createElement('div');
+                wrap.className = 'annotatable-plan';
+
+                const header = document.createElement('div');
+                header.className = 'ap-header';
+                header.innerHTML = `<span class="ap-header-title">🏁 Walkthrough 批注</span>
+                    <span class="ap-header-hint">点击段落添加批注要求</span>
+                    <div style="display:flex; gap:6px;">
+                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">✅ 确认完成</button>
+                        <button class="ap-submit-btn" disabled>📤 让AI重新修改 (0)</button>
+                    </div>`;
+                wrap.appendChild(header);
+
+                const submitBtn = header.querySelector('.ap-submit-btn') as HTMLButtonElement;
+                const approveBtn = header.querySelector('.ap-approve-btn') as HTMLButtonElement;
+
+                function updateSubmitBtn() {
+                    submitBtn.textContent = `📤 让AI重新修改 (${annotations.length})`;
+                    submitBtn.disabled = annotations.length === 0;
+                }
+
+                approveBtn.addEventListener('click', () => {
+                    approveBtn.textContent = '✅ 已确认';
+                    approveBtn.disabled = true;
+                    submitBtn.disabled = true;
+                    wrap.querySelectorAll('.ap-section').forEach(el => el.classList.remove('selected'));
+                });
+
+                submitBtn.addEventListener('click', () => {
+                    if (annotations.length === 0) return;
+                    vscode.postMessage({
+                        type: 'reviseWalkthroughWithAnnotations',
+                        annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
+                    });
+                    submitBtn.textContent = '✅ 已提交';
+                    submitBtn.disabled = true;
+                    approveBtn.disabled = true;
+                });
+
+                const sectionsWrap = document.createElement('div');
+                sectionsWrap.className = 'ap-sections';
+
+                msg.sections.forEach((section: string, idx: number) => {
+                    const row = document.createElement('div');
+                    row.className = 'ap-row';
+                    row.dataset.idx = String(idx);
+
+                    const textDiv = document.createElement('div');
+                    textDiv.className = 'ap-section-text markdown-body msg-bubble';
+                    textDiv.innerHTML = renderMarkdown(section);
+
+                    const addBtn = document.createElement('button');
+                    addBtn.className = 'ap-add-btn';
+                    addBtn.title = '提出修改要求';
+                    addBtn.textContent = '💬';
+
+                    const bubble = document.createElement('div');
+                    bubble.className = 'ap-bubble';
+                    bubble.style.display = 'none';
+
+                    const inputBox = document.createElement('div');
+                    inputBox.className = 'ap-input-box';
+                    inputBox.style.display = 'none';
+                    inputBox.innerHTML = `
+                        <textarea class="ap-textarea" rows="3" placeholder="告诉 AI 哪里需要如何修改…"></textarea>
+                        <div class="ap-input-actions">
+                            <button class="ap-confirm-btn">确定</button>
+                            <button class="ap-cancel-btn">取消</button>
+                        </div>`;
+
+                    function openInput() {
+                        const existingEntry = annotations.find(a => a.sectionIdx === idx);
+                        const ta = inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement;
+                        ta.value = existingEntry ? existingEntry.note : '';
+                        inputBox.style.display = 'block';
+                        ta.focus();
+                        row.classList.add('ap-row-active');
+                    }
+
+                    function closeInput() {
+                        inputBox.style.display = 'none';
+                        row.classList.remove('ap-row-active');
+                    }
+
+                    function confirmAnnotation() {
+                        const val = (inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement).value.trim();
+                        closeInput();
+                        if (!val) {
+                            const i = annotations.findIndex(a => a.sectionIdx === idx);
+                            if (i >= 0) annotations.splice(i, 1);
+                            bubble.style.display = 'none';
+                            row.classList.remove('ap-row-annotated');
+                        } else {
+                            const existing = annotations.find(a => a.sectionIdx === idx);
+                            if (existing) existing.note = val;
+                            else annotations.push({ sectionIdx: idx, section, note: val });
+                            bubble.innerHTML = `<span class="ap-bubble-icon">💬</span><span class="ap-bubble-text">${escapeHtml(val)}</span><button class="ap-bubble-edit">编辑</button>`;
+                            bubble.querySelector('.ap-bubble-edit')!.addEventListener('click', e => {
+                                e.stopPropagation(); openInput();
+                            });
+                            bubble.style.display = 'flex';
+                            row.classList.add('ap-row-annotated');
+                        }
+                        updateSubmitBtn();
+                    }
+
+                    addBtn.addEventListener('click', e => { e.stopPropagation(); openInput(); });
+                    row.addEventListener('click', () => {
+                        if (inputBox.style.display === 'none') openInput();
+                    });
+                    inputBox.querySelector('.ap-confirm-btn')!.addEventListener('click', confirmAnnotation);
+                    inputBox.querySelector('.ap-cancel-btn')!.addEventListener('click', closeInput);
+                    inputBox.querySelector('.ap-textarea')!.addEventListener('keydown', (e: Event) => {
+                        const ke = e as KeyboardEvent;
+                        if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)) confirmAnnotation();
+                        if (ke.key === 'Escape') closeInput();
+                    });
                     inputBox.addEventListener('click', e => e.stopPropagation());
 
                     row.appendChild(textDiv);

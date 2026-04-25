@@ -157,6 +157,7 @@ export class AgentRunner {
             cursorColumn?: number;
             selectedText?: string;
             fileContent?: string;
+            topicId?: string;
         },
         conversationHistory: ChatMessage[],
         options?: AgentRunnerOptions,

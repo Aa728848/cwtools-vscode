@@ -684,6 +684,7 @@ export type WebViewMessage =
     /** Submit inline annotations collected in the webview back to AI for revision */
     | { type: 'submitPlanAnnotations'; annotations: Array<{ section: string; note: string }> }
     | { type: 'revisePlanWithAnnotations'; annotations: Array<{ section: string; note: string }> }
+    | { type: 'reviseWalkthroughWithAnnotations'; annotations: Array<{ section: string; note: string }> }
     /** Open the plan .md file in the VS Code editor */
     | { type: 'openPlanFile'; filePath: string }
     /** WebView is fully loaded and ready to receive messages */
@@ -728,8 +729,10 @@ export type HostMessage =
     | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
     /** Plan file saved to disk — tells webview to show the Open/Submit card */
     | { type: 'planFileSaved'; filePath: string; relPath: string }
+    | { type: 'walkthroughFileSaved'; filePath: string; relPath: string }
     /** Send plan sections to webview for interactive inline annotation */
-    | { type: 'renderPlan'; sections: string[]; planText: string }
+    | { type: 'renderPlan'; sections: string[]; planText?: string }
+    | { type: 'renderWalkthrough'; sections: string[] }
     /** Return workspace file list for @ mention popup */
     | { type: 'fileList'; files: string[] }
     /** Token usage stats after generation completes */

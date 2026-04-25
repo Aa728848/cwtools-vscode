@@ -248,7 +248,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 if (msg.annotations && msg.annotations.length > 0) {
                     contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
                 }
-                const prompt = '同意执行。请根据最新生成的计划进行构建。' + contextStr;
+                const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
                 await this.handleUserMessage(prompt);
                 break;
             case 'revisePlanWithAnnotations':
@@ -259,6 +259,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const revisePrompt = '请根据我的批注考虑改进现有的执行计划，重新完善计划。' + reviseContext;
                 // keep current mode ('plan'), do not auto-switch since it's just revising
                 await this.handleUserMessage(revisePrompt);
+                break;
+            case 'reviseWalkthroughWithAnnotations':
+                let reviseWtContext = '';
+                if (msg.annotations && msg.annotations.length > 0) {
+                    reviseWtContext = '\n\n针对报告中需要修改的地方，我的批注（要求）如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `### 针对片段：\n${a.section}\n**要求**：${a.note}`).join('\n\n');
+                }
+                const reviseWtPrompt = '请根据我的批注，重新修改并输出一份新的 walkthrough.md 报告。' + reviseWtContext;
+                await this.handleUserMessage(reviseWtPrompt);
                 break;
             case 'searchTopics':
                 this.handleSearchTopics(msg.query);
@@ -670,7 +678,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         try {
             const result = await this.agentRunner.run(
                 text,
-                context,
+                { ...context, topicId: this.currentTopic?.id },
                 this.conversationMessages,
                 {
                     mode: this.currentMode,
@@ -729,6 +737,22 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 });
             }
             this.saveTopics();
+
+            // ── Check if Walkthrough was generated ──
+            const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (wsRoot) {
+                const topicId = this.currentTopic?.id || 'default';
+                const wtPath = path.join(wsRoot, '.cwtools-ai', topicId, 'walkthrough.md');
+                // Use normalize for safter comparisons
+                const normWtPath = path.normalize(wtPath).toLowerCase();
+                const wroteWalkthrough = this._currentMessageSnapshots.some(s => 
+                    path.normalize(s.filePath).toLowerCase() === normWtPath
+                );
+                
+                if (wroteWalkthrough) {
+                    this.renderWalkthroughUI(wtPath, topicId);
+                }
+            }
 
             // ── Send token usage stats to UI ────────────────────────────────────
             if (result.tokenUsage && result.tokenUsage.total > 0) {
@@ -966,17 +990,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         let filePath = '';
         let relPath = '';
         if (wsRoot) {
-            const planDir = path.join(wsRoot, '.cwtools-ai');
+            const baseDir = path.join(wsRoot, '.cwtools-ai');
+            const topicId = this.currentTopic?.id || 'default';
+            // Put under topic folder to scope "同一个对话系列" (same conversation series) while keeping exactly "Implementation_Plan.md"
+            const planDir = path.join(baseDir, topicId);
             await fs.promises.mkdir(planDir, { recursive: true });
-            const slug = userPrompt
-                .replace(/[^\u4e00-\u9fa5a-z0-9]/gi, '_')
-                .substring(0, 30)
-                .replace(/_+/g, '_')
-                .replace(/^_|_$/g, '');
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
-            const fileName = `plan_${slug}_${timestamp}.md`;
+            
+            const fileName = 'Implementation_Plan.md';
             filePath = path.join(planDir, fileName);
-            relPath = path.posix.join('.cwtools-ai', fileName);
+            relPath = path.posix.join('.cwtools-ai', topicId, fileName);
+            
             // Register plan file in the current message snapshot so retract can delete it
             this._recordFileSnapshot(filePath);
             await fs.promises.writeFile(filePath, '\uFEFF' + planText, 'utf-8');
@@ -1014,6 +1037,36 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     { viewColumn: vs.ViewColumn.Beside, preview: true }
                 );
             }
+        }
+    }
+
+    private async renderWalkthroughUI(filePath: string, topicId: string) {
+        try {
+            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const relPath = path.posix.join('.cwtools-ai', topicId, 'walkthrough.md');
+            
+            this.postMessage({ type: 'walkthroughFileSaved', filePath, relPath });
+            
+            const sections: string[] = [];
+            let currentSection = '';
+            let inCodeBlock = false;
+            for (const line of content.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+                if (line.startsWith('```')) {
+                    inCodeBlock = !inCodeBlock;
+                }
+                if (!inCodeBlock && line.match(/^#{1,3}\s/)) {
+                    if (currentSection.trim()) sections.push(currentSection.trim());
+                    currentSection = line + '\n';
+                } else {
+                    currentSection += line + '\n';
+                }
+            }
+            if (currentSection.trim()) sections.push(currentSection.trim());
+            if (sections.length === 0 && content.trim()) sections.push(content.trim());
+            this.postMessage({ type: 'renderWalkthrough', sections });
+            
+        } catch(e) {
+            console.error('Failed to parse walkthrough.md', e);
         }
     }
 
@@ -1120,6 +1173,26 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) */
     sendTodoUpdate(todos: import('./types').TodoItem[]): void {
         this.postMessage({ type: 'todoUpdate', todos });
+        
+        // Natively save task.md in the topic folder
+        const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (wsRoot && todos.length > 0) {
+            const topicId = this.currentTopic?.id || 'default';
+            const taskPath = path.join(wsRoot, '.cwtools-ai', topicId, 'task.md');
+            
+            const lines: string[] = ['# Task List\n'];
+            for (const t of todos) {
+                const mark = t.status === 'done' ? '[x]' : (t.status === 'in_progress' ? '[/]' : '[ ]');
+                lines.push(`- ${mark} ${t.content}`);
+            }
+            
+            // Register task.md in the current message snapshot so retract can delete/restore it
+            this._recordFileSnapshot(taskPath);
+            
+            fs.promises.mkdir(path.dirname(taskPath), { recursive: true }).then(() => {
+                fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch(() => {});
+            });
+        }
     }
 
     // ─── Code Insertion ──────────────────────────────────────────────────────
@@ -2102,10 +2175,10 @@ body.plan-mode .plan-indicator { display: block; }
 .todo-item.done { opacity: 0.4; text-decoration: line-through; }
 .todo-item.in_progress { color: var(--accent); }
 
-.chat-area { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 20px; }
+.chat-area { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 20px; min-height: 0; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes spin { to { transform: rotate(360deg); } }
-.message { display: flex; flex-direction: column; animation: fadeIn 0.2s ease; gap: 4px; }
+.message { display: flex; flex-direction: column; animation: fadeIn 0.2s ease; gap: 4px; flex-shrink: 0; }
 .msg-header { display: flex; align-items: center; gap: 6px; font-size: 11.5px; opacity: 0.65; }
 .msg-role { font-family: Georgia, serif; font-weight: 500; }
 .user-role { opacity: 0.7; }
@@ -2304,14 +2377,14 @@ body.review-mode .input-container:focus-within { border-color: #f48771; box-shad
 .plan-submit-btn:hover { opacity: 0.85; }
 
 /* ── Annotatable plan view ── */
-.annotatable-plan { border: 1px solid rgba(100,149,237,0.2); border-radius: 8px; overflow: hidden; margin: 8px 0; font-size: 12px; display: flex; flex-direction: column; }
-.ap-header { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: rgba(100,149,237,0.08); border-bottom: 1px solid rgba(100,149,237,0.15); }
-.ap-header-title { font-weight: 600; color: cornflowerblue; font-size: 12px; }
-.ap-header-hint { flex: 1; font-size: 11px; opacity: 0.5; }
-.ap-submit-btn { font-size: 11px; border-radius: 5px; padding: 4px 12px; cursor: pointer; border: none; background: var(--accent); color: #1a1a1a; font-weight: 600; font-family: inherit; transition: opacity 0.15s; }
+.annotatable-plan { border: 1px solid rgba(100,149,237,0.2); border-radius: 8px; overflow: hidden; margin: 8px 0; font-size: 13px; display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; }
+.ap-header { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: rgba(100,149,237,0.08); border-bottom: 1px solid rgba(100,149,237,0.15); flex-shrink: 0; }
+.ap-header-title { font-weight: 600; color: cornflowerblue; font-size: 13px; }
+.ap-header-hint { flex: 1; font-size: 12px; opacity: 0.5; }
+.ap-submit-btn { font-size: 12px; border-radius: 5px; padding: 4px 12px; cursor: pointer; border: none; background: var(--accent); color: #1a1a1a; font-weight: 600; font-family: inherit; transition: opacity 0.15s; }
 .ap-submit-btn:disabled { opacity: 0.35; cursor: default; }
 .ap-submit-btn:not(:disabled):hover { opacity: 0.85; }
-.ap-sections { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; resize: vertical; }
+.ap-sections { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; resize: vertical; min-height: 0; }
 .ap-row { position: relative; padding: 7px 36px 7px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; transition: background 0.12s; }
 .ap-row:last-child { border-bottom: none; }
 .ap-row:hover, .ap-row-active { background: rgba(100,149,237,0.06); }

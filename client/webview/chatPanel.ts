@@ -1529,8 +1529,8 @@
                 submitBtn.addEventListener('click', () => {
                     if (annotations.length === 0) return;
                     vscode.postMessage({
-                        type: 'submitPlanAnnotations',
-                        annotations: annotations.map(a => ({ section: a.section, note: a.note }))
+                        type: 'revisePlanWithAnnotations',
+                        annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
                     });
                     // Visual feedback
                     submitBtn.textContent = '✅ 已提交';

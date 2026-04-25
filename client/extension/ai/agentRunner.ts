@@ -1144,6 +1144,32 @@ export class AgentRunner {
         const raw = JSON.stringify(result, null, 2);
         if (raw.length <= maxChars) return raw;
 
+        // P2 Optimization: Smart line-boundary truncation for read_file text content.
+        // We already know raw.length > maxChars. If result looks like a ReadFileResult,
+        // truncate the content at line boundaries instead of doing generic JSON truncation.
+        if (typeof result === 'object' && result !== null && 'content' in result && 'totalLines' in result) {
+            const readResult = result as { content: string; totalLines: number; truncated?: boolean; _hint?: string };
+            const lines = readResult.content.split('\n');
+            // Reserve space for the JSON wrapper and metadata (~200 chars)
+            const contentBudget = maxChars - 200;
+            let charCount = 0;
+            let kept = 0;
+            for (const line of lines) {
+                if (charCount + line.length + 1 > contentBudget) break;
+                charCount += line.length + 1;
+                kept++;
+            }
+            if (kept < lines.length) {
+                return JSON.stringify({
+                    content: lines.slice(0, kept).join('\n'),
+                    totalLines: readResult.totalLines,
+                    truncated: true,
+                    _linesShown: kept,
+                    _hint: `Budget-truncated to ${kept} lines. Use startLine/endLine for targeted reads.`,
+                }, null, 2);
+            }
+        }
+
         // Strategy 1: Detect and handle diagnostic-like arrays
         // Common shapes: { diagnostics: [...] }, { entries: [...] }, or raw [...]
         const arrayTarget = this.extractBudgetableArray(result);
@@ -1344,6 +1370,17 @@ export class AgentRunner {
 
             if (m.role === 'tool' || (m.role === 'user' && content.startsWith('[Tool Result'))) {
                 if (i < aggressiveThreshold) {
+                    // P3 Optimization: Handle read_file metadata gracefully
+                    const contentMatch = content.match(/"content"\s*:/);
+                    const totalLinesMatch = content.match(/"totalLines"\s*:\s*(\d+)/);
+                    if (contentMatch && totalLinesMatch) {
+                        // Very likely a read_file result, try to extract file from context or earlier text if present, 
+                        // but mostly preserve it's a read result of N lines.
+                        // Since file tool args aren't in result, it's ok, AI usually knows what file it read.
+                        messages[i] = { ...m, content: `[Compacted read_file Tool Result] file read, total ${totalLinesMatch[1]} lines.` };
+                        continue;
+                    }
+
                     // Aggressive: extract only key metadata
                     const successMatch = content.match(/"success"\s*:\s*(true|false)/);
                     const fileMatch = content.match(/"(?:file|filePath|logicalPath)"\s*:\s*"([^"]+)"/);
@@ -1372,9 +1409,13 @@ export class AgentRunner {
                 if (content.length > 2000) {
                     newM.content = content.substring(0, 1000) + '\n[... compacted]';
                 }
-                // Clear reasoning_content to save massive token overhead from old DeepSeek-V4/etc thoughts
+                // Delete reasoning_content to save massive token overhead from old DeepSeek-V4/etc thoughts.
+                // CRITICAL: must use `delete` (not set to placeholder). DeepSeek API requires
+                // reasoning_content to be either the ORIGINAL value or completely absent.
+                // A modified value (e.g. '[Compacted]') triggers HTTP 400:
+                // "The reasoning_content in the thinking mode must be passed back to the API."
                 if (newM.reasoning_content) {
-                    newM.reasoning_content = '[Compacted]';
+                    delete newM.reasoning_content;
                 }
                 messages[i] = newM;
             }

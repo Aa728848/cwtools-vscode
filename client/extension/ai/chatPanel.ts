@@ -251,6 +251,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const prompt = '同意执行。请根据最新生成的计划进行构建。' + contextStr;
                 await this.handleUserMessage(prompt);
                 break;
+            case 'revisePlanWithAnnotations':
+                let reviseContext = '';
+                if (msg.annotations && msg.annotations.length > 0) {
+                    reviseContext = '\n\n需要修改的地方批注如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
+                }
+                const revisePrompt = '请根据我的批注考虑改进现有的执行计划，重新完善计划。' + reviseContext;
+                // keep current mode ('plan'), do not auto-switch since it's just revising
+                await this.handleUserMessage(revisePrompt);
+                break;
             case 'searchTopics':
                 this.handleSearchTopics(msg.query);
                 break;
@@ -990,12 +999,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private pendingWriteResolvers = new Map<string, (confirmed: boolean) => void>();
     /** Maps messageId → temp file path used for the diff view (for cleanup) */
     private pendingDiffTempFiles = new Map<string, string>();
-    /** Auto-confirm timeout (120 s) — prevents hangs if WebView is hidden */
+    /** Auto-deny on timeout (120 s) — prevents hangs if WebView is hidden or user missed the prompt */
     private static readonly WRITE_CONFIRM_TIMEOUT_MS = 120_000;
 
     handlePendingWrite(file: string, newContent: string, messageId: string): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
-            // ── Timeout guard: auto-confirm after 120 s ───────────────────────
+            // ── Timeout guard: auto-deny after 120 s ───────────────────────
             // Prevents the agent reasoning loop from hanging indefinitely if the
             // WebView is hidden or the user ignores the confirmation card.
             const timeout = setTimeout(() => {

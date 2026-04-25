@@ -872,26 +872,38 @@ export class LspToolHandler {
         for (const searchRoot of searchRoots) {
             try {
                 const files = this.findFilesFn(searchRoot, ext, 1000);
-                for (const file of files) {
+                
+                // Process in chunks of 50 to avoid running out of file descriptors or memory
+                const CHUNK_SIZE = 50;
+                for (let i = 0; i < files.length; i += CHUNK_SIZE) {
                     if (results.length >= 50) break;
-                    try {
-                        const content = fs.readFileSync(file, 'utf-8');
-                        const contentLower = content.toLowerCase();
-                        if (!contentLower.includes(queryLower)) continue;
+                    
+                    const chunk = files.slice(i, i + CHUNK_SIZE);
+                    await Promise.all(chunk.map(async (file) => {
+                        if (results.length >= 50) return;
+                        try {
+                            const content = await fs.promises.readFile(file, 'utf-8');
+                            const contentLower = content.toLowerCase();
+                            if (!contentLower.includes(queryLower)) return;
 
-                        const lines = content.split('\n');
-                        const matchingLines: Array<{ line: number; content: string }> = [];
-                        for (let i = 0; i < lines.length; i++) {
-                            if (lines[i].toLowerCase().includes(queryLower)) {
-                        matchingLines.push({ line: i, content: lines[i].trim().substring(0, 120) });
+                            const lines = content.split('\n');
+                            const matchingLines: Array<{ line: number; content: string }> = [];
+                            for (let j = 0; j < lines.length; j++) {
+                                if (lines[j].toLowerCase().includes(queryLower)) {
+                                    matchingLines.push({ line: j, content: lines[j].trim().substring(0, 120) });
+                                }
+                                if (matchingLines.length >= 20) break;
                             }
-                            if (matchingLines.length >= 20) break;
-                        }
-                        results.push({
-                            logicalPath: path.relative(searchRoot, file).replace(/\\/g, '/'),
-                            matchingLines,
-                        });
-                    } catch { /* skip unreadable */ }
+                            
+                            // Because we're in parallel, check one last time before pushing
+                            if (results.length < 50) {
+                                results.push({
+                                    logicalPath: path.relative(searchRoot, file).replace(/\\/g, '/'),
+                                    matchingLines,
+                                });
+                            }
+                        } catch { /* skip unreadable */ }
+                    }));
                 }
             } catch { /* skip inaccessible dirs */ }
         }
@@ -934,36 +946,38 @@ export class LspToolHandler {
     // ─── documentSymbols ─────────────────────────────────────────────────────
 
     async documentSymbols(args: { file: string }): Promise<DocumentSymbolsResult> {
-        try {
-            const uri = vs.Uri.file(args.file);
-            const symbols = await this.vsCommand<vs.DocumentSymbol[]>(
-                'vscode.executeDocumentSymbolProvider', [uri]
-            );
+        return this.cachedLspRead(`dsym:${args.file}`, async () => {
+            try {
+                const uri = vs.Uri.file(args.file);
+                const symbols = await this.vsCommand<vs.DocumentSymbol[]>(
+                    'vscode.executeDocumentSymbolProvider', [uri]
+                );
 
-            if (!symbols || symbols.length === 0) {
+                if (!symbols || symbols.length === 0) {
+                    return { symbols: [] };
+                }
+
+                const MAX_DEPTH = 2;
+                const mapSymbol = (s: vs.DocumentSymbol, depth: number = 0): DocumentSymbolInfo => ({
+                    name: s.name,
+                    kind: vs.SymbolKind[s.kind],
+                    range: {
+                        startLine: s.range.start.line,
+                        endLine: s.range.end.line,
+                    },
+                    children: depth < MAX_DEPTH && s.children && s.children.length > 0
+                        ? s.children.map(c => mapSymbol(c, depth + 1))
+                        : undefined,
+                    _hasDeeper: depth >= MAX_DEPTH && s.children && s.children.length > 0
+                        ? true
+                        : undefined,
+                });
+
+                return { symbols: symbols.map(s => mapSymbol(s, 0)) };
+            } catch {
                 return { symbols: [] };
             }
-
-            const MAX_DEPTH = 2;
-            const mapSymbol = (s: vs.DocumentSymbol, depth: number = 0): DocumentSymbolInfo => ({
-                name: s.name,
-                kind: vs.SymbolKind[s.kind],
-                range: {
-                    startLine: s.range.start.line,
-                    endLine: s.range.end.line,
-                },
-                children: depth < MAX_DEPTH && s.children && s.children.length > 0
-                    ? s.children.map(c => mapSymbol(c, depth + 1))
-                    : undefined,
-                _hasDeeper: depth >= MAX_DEPTH && s.children && s.children.length > 0
-                    ? true
-                    : undefined,
-            });
-
-            return { symbols: symbols.map(s => mapSymbol(s, 0)) };
-        } catch {
-            return { symbols: [] };
-        }
+        }, 8000);
     }
 
     // ─── workspaceSymbols ────────────────────────────────────────────────────

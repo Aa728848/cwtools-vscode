@@ -9,6 +9,7 @@ import * as vs from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import * as readline from 'readline';
 import type {
     ValidationError,
 } from '../types';
@@ -92,14 +93,46 @@ export class FileToolHandler {
     async readFile(args: { file: string; startLine?: number; endLine?: number }): Promise<import('../types').ReadFileResult> {
         try {
             args.file = this.resolveAndAssertInWorkspace(args.file);
-            const { content } = this.readTextFile(args.file);
-            const lines = content.split('\n');
-            const totalLines = lines.length;
 
             let threshold = 150;
-            if (args.file.endsWith('.gui') || args.file.endsWith('.gfx') || args.file.endsWith('.txt')) {
+            if (args.file.endsWith('.gui') || args.file.endsWith('.gfx') || args.file.endsWith('.txt') || args.file.endsWith('.yml')) {
                 threshold = 500;
             }
+
+            // Single-pass streaming: count total lines AND extract the requested slice simultaneously.
+            // When no range is specified, we need the full count to decide whether the file is too large.
+            // When a range IS specified, we still need totalLines for the response metadata.
+            const start = args.startLine ? Math.max(1, args.startLine) : 1;
+            const requestedEnd = args.endLine ?? Infinity; // resolved after counting
+
+            const slice: string[] = [];
+            let totalLines = 0;
+            let sliceFinished = false;
+
+            try {
+                const rl = readline.createInterface({
+                    input: fs.createReadStream(args.file, { encoding: 'utf-8' }),
+                    crlfDelay: Infinity,
+                });
+                for await (const line of rl) {
+                    totalLines++;
+                    if (!sliceFinished) {
+                        if (totalLines >= start && totalLines <= requestedEnd) {
+                            slice.push(line);
+                        }
+                        if (totalLines > requestedEnd) {
+                            sliceFinished = true;
+                            // If we also have startLine/endLine, we still need totalLines,
+                            // so we continue counting. But if no endLine was given and file
+                            // is small, we just collect everything anyway.
+                        }
+                    }
+                }
+            } catch (e) {
+                return { content: `Error reading file: ${String(e)}`, totalLines: 0, truncated: false };
+            }
+
+            const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
 
             if (totalLines > threshold && !args.startLine && !args.endLine) {
                 return {
@@ -112,11 +145,8 @@ export class FileToolHandler {
                 };
             }
 
-            const start = args.startLine ? Math.max(1, args.startLine) - 1 : 0;
-            const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
-            const slice = lines.slice(start, end);
-
-            const numbered = slice.map((l, i) => `${start + i + 1}: ${l}`).join('\n');
+            // Format with succinct line prefix (saves ~1 token per line vs "1234: ")
+            const numbered = slice.map((l, i) => `${start + i} | ${l}`).join('\n');
 
             const MAX_READ_CHARS = 12000;
             const truncated = numbered.length > MAX_READ_CHARS;
@@ -137,12 +167,12 @@ export class FileToolHandler {
             }
 
             const lastLineReturned = start + (truncated
-                ? resultContent.split('\n').length
-                : slice.length);
+                ? resultContent.split('\n').length - 1
+                : slice.length - 1);
 
             return {
                 content: truncated
-                    ? resultContent + `\n[... truncated at char ${MAX_READ_CHARS} ...]`
+                    ? resultContent + `\n[... truncated at ~${MAX_READ_CHARS} chars ...]`
                     : resultContent,
                 totalLines,
                 truncated,

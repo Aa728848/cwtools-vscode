@@ -240,6 +240,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 // Simply open the plan markdown file in the native VSCode editor
                 vs.commands.executeCommand('vscode.open', vs.Uri.file(msg.filePath));
                 break;
+            case 'submitPlanAnnotations':
+                // Auto-switch to build mode on plan approval and send execution command
+                this.switchMode('build');
+                // The annotations array gives context on what the user wants changed
+                let contextStr = '';
+                if (msg.annotations && msg.annotations.length > 0) {
+                    contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
+                }
+                const prompt = '同意执行。请根据最新生成的计划进行构建。' + contextStr;
+                await this.handleUserMessage(prompt);
+                break;
             case 'searchTopics':
                 this.handleSearchTopics(msg.query);
                 break;
@@ -580,6 +591,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
+
+        // Auto-switch from Plan to Build mode if user gives approval implicit keywords
+        if (this.currentMode === 'plan') {
+            const lowerText = text.toLowerCase();
+            const approvalKeywords = ['同意', '执行', '开始', 'approved', 'go ahead', 'proceed', 'looks good', '可以', '没问题'];
+            if (approvalKeywords.some(keyword => lowerText.includes(keyword))) {
+                this.switchMode('build');
+                // Add a small delay to ensure UI updates before the agent starts processing
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        }
 
         // Check if AI is enabled
         const config = this.aiService.getConfig();

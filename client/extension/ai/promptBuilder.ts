@@ -215,6 +215,8 @@ Structure your plan as:
 4. **Scope chain** — Where code will execute
 5. **Potential issues** — Edge cases and scope errors
 
+**Important**: At the end of your plan, remind the user to click "同意执行" or switch to "Build" mode to actually generate the code.
+
 ## Context Efficiency
 - **Skim before deep-reading**: use \`document_symbols\` to understand file structure first, then \`read_file\` with \`startLine\`/\`endLine\` to read only the section you need
 - Prefer \`get_file_context(file, line, radius=20)\` over full \`read_file\` when inspecting specific code locations

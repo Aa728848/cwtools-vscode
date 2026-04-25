@@ -293,24 +293,32 @@ export class AIService {
             // ── OpenAI GPT: non-reasoning, no action needed ──
         }
 
-        const request: ChatCompletionRequest = {
+        const request: ChatCompletionRequest & Record<string, any> = {
             model,
             messages: finalMessages,
             tools: options?.tools,
             tool_choice: options?.tools && options.tools.length > 0 ? 'auto' : undefined,
             temperature: options?.temperature ?? 0.3,
-            reasoning_effort: config.reasoningEffort || 'high',
             // M5 Fix: raise default from 4096 to 8192 — Claude Opus 4 / Gemini 2.5 Pro
             // support 64K+ output tokens; 4096 silently truncates long code generations.
             max_tokens: options?.maxTokens ?? 8192,
             stream: false,
-            // Merge provider-specific thinking-disable parameters into the request body.
-            // Different providers expect different params at the root level:
-            //   Qwen: enable_thinking=false
-            //   GLM:  thinking={type:'disabled'}
-            //   Gemini: thinking_config={thinking_budget:0} or {thinking_level:'minimal'}
             ...(extraBody ?? {}),
         };
+
+        // Inject reasoning effort / thinking preferences based on provider
+        if (!options?.disableThinking) {
+            const rEffort = config.reasoningEffort || 'high';
+            if (config.provider === 'deepseek' || config.provider === 'openai') {
+                request.reasoning_effort = rEffort;
+            } else if (config.provider === 'qwen' && (lowerModel.includes('qwen3') || lowerModel.includes('qwen-max'))) {
+                request.enable_thinking = true;
+            } else if (config.provider === 'gemini' && lowerModel.startsWith('gemini-3')) {
+                // Map max to high for Gemini
+                const mappedLevel = rEffort === 'max' ? 'high' : rEffort;
+                request.thinking_config = { thinking_level: mappedLevel };
+            }
+        }
 
         // C1 Fix: create a per-call controller; register it so cancel() can abort it.
         const controller = new AbortController();

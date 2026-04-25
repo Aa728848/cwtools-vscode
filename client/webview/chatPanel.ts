@@ -1502,15 +1502,29 @@
                 header.className = 'ap-header';
                 header.innerHTML = `<span class="ap-header-title">✏️ 在线批注</span>
                     <span class="ap-header-hint">点击段落添加批注</span>
-                    <button class="ap-submit-btn" disabled>📤 提交批注 (0)</button>`;
+                    <div style="display:flex; gap:6px;">
+                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">✅ 同意执行</button>
+                        <button class="ap-submit-btn" disabled>📤 提交批注 (0)</button>
+                    </div>`;
                 wrap.appendChild(header);
 
                 const submitBtn = header.querySelector('.ap-submit-btn');
+                const approveBtn = header.querySelector('.ap-approve-btn');
 
                 function updateSubmitBtn() {
                     submitBtn.textContent = `📤 提交批注 (${annotations.length})`;
                     submitBtn.disabled = annotations.length === 0;
                 }
+
+                approveBtn.addEventListener('click', () => {
+                    vscode.postMessage({
+                        type: 'submitPlanAnnotations',
+                        annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
+                    });
+                    approveBtn.textContent = '✅ 已开始执行...';
+                    approveBtn.disabled = true;
+                    submitBtn.disabled = true;
+                });
 
                 submitBtn.addEventListener('click', () => {
                     if (annotations.length === 0) return;

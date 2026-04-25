@@ -37,8 +37,8 @@ import { PromptBuilder } from './promptBuilder';
 import { getProvider, isModelVisionCapable } from './providers';
 import { getModelPricing } from './pricing';
 
-// Maximum tool-call iterations per generation (matches OpenCode's permissive default)
-const MAX_TOOL_ITERATIONS = 50;
+// Base fallback tool iterations (dynamically scaled in reasoningLoop)
+const MAX_TOOL_ITERATIONS_BASE = 50;
 // Doom-loop detection threshold: N consecutive identical call-signatures = loop (OpenCode: DOOM_LOOP_THRESHOLD)
 const DOOM_LOOP_THRESHOLD = 3;
 // Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
@@ -125,6 +125,10 @@ const READ_ONLY_TOOLS = new Set<string>([
     'get_file_context', 'document_symbols', 'workspace_symbols',
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_diagnostics', 'get_completion_at',
+    // Newly added Deep API tools for parallel execution
+    'query_definition', 'query_definition_by_name',
+    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
+    'get_entity_info', 'query_static_modifiers', 'query_variables', 'glob_files'
     // validate_code is intentionally omitted: it modifies the LSP game state temporarily
 ]);
 
@@ -572,7 +576,17 @@ export class AgentRunner {
             Math.max(TOOL_RESULT_BUDGET_MIN, Math.floor(TOOL_RESULT_BUDGET_BASE * (contextLimit / DEFAULT_CONTEXT_LIMIT)))
         );
 
-        while (iteration < MAX_TOOL_ITERATIONS) {
+        // Dynamic iteration limit based on context scale
+        // 128K → 50, 200K → ~78→cap80, 1M → cap80.  Min 30, Max 80.
+        const maxToolIterations = Math.min(
+            80, // Cap: beyond 80 iterations, compaction overhead dominates
+            Math.max(
+                30, // Absolute minimum iterations
+                Math.floor(MAX_TOOL_ITERATIONS_BASE * (contextLimit / DEFAULT_CONTEXT_LIMIT))
+            )
+        );
+
+        while (iteration < maxToolIterations) {
             options?.abortSignal?.throwIfAborted();
             iteration++;
 
@@ -1352,10 +1366,17 @@ export class AgentRunner {
                         messages[i] = { ...m, content: content.substring(0, toolResultBudget) + '\n[... compacted]' };
                     }
                 }
-            } else if (m.role === 'assistant' && i < aggressiveThreshold && content.length > 2000) {
+            } else if (m.role === 'assistant' && i < aggressiveThreshold) {
                 // Aggressively compress old assistant reasoning
-                // reasoning_content is preserved by spread operator since it's a ChatMessage field
-                messages[i] = { ...m, content: content.substring(0, 1000) + '\n[... compacted]' };
+                const newM: ChatMessage = { ...m };
+                if (content.length > 2000) {
+                    newM.content = content.substring(0, 1000) + '\n[... compacted]';
+                }
+                // Clear reasoning_content to save massive token overhead from old DeepSeek-V4/etc thoughts
+                if (newM.reasoning_content) {
+                    newM.reasoning_content = '[Compacted]';
+                }
+                messages[i] = newM;
             }
         }
     }

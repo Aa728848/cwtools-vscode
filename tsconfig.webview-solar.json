@@ -4,7 +4,8 @@
     },
     "extends": "./tsconfig.json",
     "include": [
-        "client/webview/solarSystemPreview.ts"
+        "client/webview/solarSystemPreview.ts",
+        "client/webview/vscode.d.ts"
     ],
     "exclude": [
         "client/extension/**",

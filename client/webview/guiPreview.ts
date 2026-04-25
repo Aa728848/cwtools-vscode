@@ -3,9 +3,7 @@
  * Runs inside the VS Code webview context.
  */
 
-interface vscode { postMessage(message: unknown): void; }
-declare const acquireVsCodeApi: () => vscode;
-const vscode: vscode = acquireVsCodeApi();
+const vscode = acquireVsCodeApi();
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

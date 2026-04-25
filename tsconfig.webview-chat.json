@@ -7,7 +7,8 @@
     },
     "extends": "./tsconfig.json",
     "include": [
-        "client/webview/chatPanel.ts"
+        "client/webview/chatPanel.ts",
+        "client/webview/vscode.d.ts"
     ],
     "exclude": [
         "client/extension/**",

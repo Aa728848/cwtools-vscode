@@ -3,9 +3,7 @@
  * Uses HTML5 Canvas for high-performance rendering with perspective projection.
  */
 
-interface vscode { postMessage(message: unknown): void; }
-declare const acquireVsCodeApi: () => vscode;
-const vscode: vscode = acquireVsCodeApi();
+const vscode = acquireVsCodeApi();
 
 // ─── Types (mirrors parser output) ──────────────────────────────────────────
 

@@ -1,9 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-declare const acquireVsCodeApi: () => {
-    postMessage(msg: unknown): void;
-    getState(): unknown;
-    setState(state: unknown): void;
-};
 
 /** Type-safe getElementById with generic cast */
 function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -149,7 +144,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         input.style.height = Math.min(input.scrollHeight, 180) + 'px';
     }
 
-    function bindBtn(id, handler) {
+    function bindBtn(id: string, handler: () => void) {
         const el = document.getElementById(id);
         if (el) el.addEventListener('click', handler);
     }
@@ -232,7 +227,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     ];
     const slashPopup = document.getElementById('slashPopup');
 
-    function showSlashPopup(filter) {
+    function showSlashPopup(filter: string) {
         if (!slashPopup) return;
         const q = filter.toLowerCase();
         const matches = SLASH_COMMANDS.filter(c => c.cmd.includes(q));
@@ -286,7 +281,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     })();
     let _atPopupVisible = false;
 
-    function showAtPopup(filter) {
+    function showAtPopup(filter: string) {
         if (!atPopup) return;
         if (workspaceFiles.length === 0) {
             vscode.postMessage({ type: 'requestFileList' });
@@ -321,7 +316,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
     function closeAtPopup() { if (atPopup) { atPopup.style.display = 'none'; _atPopupVisible = false; } }
 
-    function addFileBadge(file) {
+    function addFileBadge(file: string) {
         let area = document.getElementById('fileBadgeArea');
         if (!area) {
             area = document.createElement('div');
@@ -346,7 +341,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     //   • No base64 line-breaks that break Claude / GLM regex matching on the backend
     //   • Consistent "data:image/jpeg;base64,..." format accepted by all providers
     //   • Payload is always ≤ ~400 KB (well within postMessage limits)
-    function compressImage(file, callback) {
+    function compressImage(file: Blob, callback: (dataUrl: string) => void) {
         const reader = new FileReader();
         reader.onload = ev => {
             const original = ev.target && ev.target.result;
@@ -437,7 +432,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     })();
 
     // ── Lightbox for full-size image preview ───────────────────────────────────
-    function showImageLightbox(dataUrl) {
+    function showImageLightbox(dataUrl: string) {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
         const img = document.createElement('img');
@@ -448,7 +443,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         document.body.appendChild(overlay);
     }
 
-    function addImagePreview(dataUrl) {
+    function addImagePreview(dataUrl: string) {
         let area = document.getElementById('imagePreviewArea');
         if (!area) {
             area = document.createElement('div');
@@ -517,7 +512,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
      * fromUI=true  → user clicked dropdown → send message to backend + update UI
      * fromUI=false → backend sent modeChanged message → only update UI (no echo back)
      */
-    function switchMode(mode, fromUI) {
+    function switchMode(mode: string, fromUI?: boolean) {
         if (currentMode === mode && !fromUI) return; // avoid redundant update
         currentMode = mode;
         // Sync dropdown value without re-triggering change event
@@ -527,14 +522,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (fromUI) vscode.postMessage({ type: 'switchMode', mode });
         // Remove all mode body classes, add correct one
         document.body.classList.remove('plan-mode', 'explore-mode', 'general-mode');
-        const meta = MODE_META[mode];
+        const meta = MODE_META[mode as keyof typeof MODE_META];
         if (meta && meta.bodyClass) document.body.classList.add(meta.bodyClass);
         // Update inline mode indicator text
         const ind = document.getElementById('modeIndicator');
         if (ind) ind.textContent = meta && meta.label ? meta.label : '';
     }
 
-    function setGenerating(val) {
+    function setGenerating(val: boolean) {
         isGenerating = val;
         if (val) {
             sendBtn.innerHTML = '<span class="stop-icon"></span>';
@@ -549,7 +544,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     // ── Token usage bar ────────────────────────────────────────────────────────
-    function updateTokenUsage(used, limit) {
+    function updateTokenUsage(used: number, limit: number) {
         if (!used) return;
         const bar = document.getElementById('tokenUsageBar');
         const fill = document.getElementById('tokenUsageFill');
@@ -562,24 +557,24 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         bar.style.display = '';
     }
 
-    function formatNum(n) { return n >= 1000 ? (n / 1000).toFixed(0) + 'k' : String(n); }
+    function formatNum(n: number) { return n >= 1000 ? (n / 1000).toFixed(0) + 'k' : String(n); }
 
-    function formatTime(ts) {
+    function formatTime(ts: number | string | null) {
         if (!ts) return '';
         const d = new Date(ts);
         return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
     }
 
     // ── HTML escape ────────────────────────────────────────────────────────────
-    function escapeHtml(t) {
+    function escapeHtml(t: any): string {
         return String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     // ── Markdown renderer ──────────────────────────────────────────────────────
-    function inlineMd(raw) {
+    function inlineMd(raw: string) {
         let s = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const codeBlocks: string[] = [];
-        s = s.replace(/`([^`]+)`/g, (_, c) => {
+        s = s.replace(/`([^`]+)`/g, (_: string, c: string) => {
             codeBlocks.push('<code>' + c.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') + '</code>');
             return '\x01CODE' + (codeBlocks.length - 1) + '\x01';
         });
@@ -590,7 +585,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         s = s.replace(/(^|\W)_([^_\n]+)_(\W|$)/g, '$1<em>$2</em>$3');
         s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
         s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-        s = s.replace(/\x01CODE(\d+)\x01/g, (_, i) => codeBlocks[parseInt(i)]);
+        s = s.replace(/\x01CODE(\d+)\x01/g, (_: string, i: string) => codeBlocks[parseInt(i)]);
         return s;
     }
 
@@ -608,7 +603,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const out: string[] = [];
         let i = 0;
 
-        function flushPara(paraLines) {
+        function flushPara(paraLines: string[]) {
             if (!paraLines.length) return;
             const lineHtml = paraLines.map(line => {
                 const t = line.trim();
@@ -800,10 +795,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
      *   ┌─ ToolIcon  tool_name → file.txt
      *   └─ (result summary, only when toolResult is present)
      */
-    function buildToolPair(callStep, resultStep) {
-        const toolName = callStep.toolName || '';
+    function buildToolPair(callStep: any, resultStep?: any) {
+        const toolName: string = callStep.toolName || '';
         const args = callStep.toolArgs || {};
-        const icon = TOOL_ICONS[toolName] || '⚙';
+        const icon = TOOL_ICONS[toolName as keyof typeof TOOL_ICONS] || '⚙';
         const fp = args.filePath || args.file || args.path || args.directory || '';
         const fname = fp ? String(fp).split(/[\\/]/).pop() : '';
 
@@ -837,7 +832,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     //   2. [Tool calls block] — list of tool-pair rows (call + result)
     //   3. [Text response]   — the final markdown answer
 
-    function buildAssistantMessage(content, steps, msgTime) {
+    function buildAssistantMessage(content: string, steps: any[], msgTime: number | null) {
         const div = document.createElement('div');
         div.className = 'message assistant';
 
@@ -851,9 +846,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         if (steps && steps.length > 0) {
             // 1. Thinking block (thinking_content AND narrative 'thinking' type)
-            const thinkSteps = steps.filter(s => s.type === 'thinking_content' || s.type === 'thinking');
+            const thinkSteps = steps.filter((s: any) => s.type === 'thinking_content' || s.type === 'thinking');
             if (thinkSteps.length > 0) {
-                const thinkText = thinkSteps.map(s => s.content || '').join('\n\n').trim();
+                const thinkText = thinkSteps.map((s: any) => s.content || '').join('\n\n').trim();
                 const estTokens = Math.ceil(thinkText.length / 4);
 
                 const det = document.createElement('details');
@@ -870,8 +865,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
 
             // 2. Tool calls block — pair each tool_call with its tool_result
-            const toolCallSteps = steps.filter(s => s.type === 'tool_call');
-            const toolResultSteps = steps.filter(s => s.type === 'tool_result');
+            const toolCallSteps = steps.filter((s: any) => s.type === 'tool_call');
+            const toolResultSteps = steps.filter((s: any) => s.type === 'tool_result');
 
             if (toolCallSteps.length > 0) {
                 const det = document.createElement('details');
@@ -887,7 +882,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 for (let i = 0; i < toolCallSteps.length; i++) {
                     const call = toolCallSteps[i];
                     // Match corresponding result by index or toolName
-                    const result = toolResultSteps.find(r => r.toolName === call.toolName && !r._matched);
+                    const result = toolResultSteps.find((r: any) => r.toolName === call.toolName && !r._matched);
                     if (result) result._matched = true;
                     body.innerHTML += buildToolPair(call, result);
                 }
@@ -896,9 +891,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
 
             // 2.5 Text Delta block (raw streaming chunks)
-            const textDeltaSteps = steps.filter(s => s.type === 'text_delta');
+            const textDeltaSteps = steps.filter((s: any) => s.type === 'text_delta');
             if (textDeltaSteps.length > 0) {
-                const textDeltaContent = textDeltaSteps.map(s => s.content || '').join('').trim();
+                const textDeltaContent = textDeltaSteps.map((s: any) => s.content || '').join('').trim();
                 if (textDeltaContent) {
                     const det = document.createElement('details');
                     det.className = 'thinking-block';
@@ -916,7 +911,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
 
             // Also show non-tool, non-thinking special steps (errors, compaction, etc.)
-            const specialSteps = steps.filter(s =>
+            const specialSteps = steps.filter((s: any) =>
                 s.type !== 'tool_call' && s.type !== 'tool_result' &&
                 s.type !== 'thinking_content' && s.type !== 'thinking' &&
                 s.type !== 'text_delta'
@@ -1005,7 +1000,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         liveTextContent = '';
     }
 
-    function applyLiveStep(s) {
+    function applyLiveStep(s: any) {
         if (!currentAssistantDiv) return;
 
         // ── text_delta: streaming token ────────────────────────────────────────
@@ -1087,7 +1082,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
     // ── User message ───────────────────────────────────────────────────────────
     // Builds inline image thumbnails (clickable lightbox) from images array
-    function buildImageRow(images) {
+    function buildImageRow(images: string[]) {
         if (!images || !images.length) return null;
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
@@ -1104,11 +1099,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         return row;
     }
 
-    function addUserMessage(text, msgIdx, images) {
+    function addUserMessage(text: string, msgIdx: number, images?: string[]) {
         emptyState.style.display = 'none';
         const div = document.createElement('div');
         div.className = 'message user';
-        if (msgIdx !== undefined && msgIdx >= 0) div.dataset.msgIndex = msgIdx;
+        if (msgIdx !== undefined && msgIdx >= 0) div.dataset.msgIndex = String(msgIdx);
 
         const hdr = document.createElement('div');
         hdr.className = 'msg-header';
@@ -1119,7 +1114,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         bubble.textContent = text;
 
         // M6 fix: display image thumbnails from the actual images array
-        const imgRow = buildImageRow(images);
+        const imgRow = buildImageRow(images || []);
         if (imgRow) bubble.appendChild(imgRow);
 
         div.appendChild(hdr);
@@ -1139,7 +1134,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     // P3: Retract confirmation dialog
-    function showRetractConfirm(messageIdx) {
+    function showRetractConfirm(messageIdx: number) {
         const overlay = document.createElement('div');
         overlay.className = 'retract-confirm';
         overlay.innerHTML = '<div class="retract-confirm-box">' +
@@ -1160,7 +1155,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     // ── Card dismiss helper ────────────────────────────────────────────────────
-    function dismissCard(el, delay) {
+    function dismissCard(el: HTMLElement, delay: number) {
         setTimeout(() => {
             el.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
             el.style.opacity = '0';
@@ -1170,7 +1165,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     // ── Diff card ──────────────────────────────────────────────────────────────
-    function showAutoWriteCard(file, isNewFile) {
+    function showAutoWriteCard(file: string, isNewFile: boolean) {
         const wrap = document.createElement('div');
         wrap.className = 'msg-bubble assistant';
         wrap.style.border = '1px solid var(--accent)';
@@ -1199,7 +1194,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         chatArea.appendChild(wrap);
         scrollBottom();
     }
-    function showPendingWriteCard(file, messageId, isNewFile) {
+    function showPendingWriteCard(file: string, messageId: string, isNewFile: boolean) {
         const fileName = (file || '').split(/[\\\/]/).pop() || file;
         const div = document.createElement('div');
         const card = document.createElement('div');
@@ -1232,7 +1227,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     // ── Permission request card ─────────────────────────────────────────────────
-    function showPermissionCard(permissionId, tool, description, command) {
+    function showPermissionCard(permissionId: string, tool: string, description: string, command: string) {
         const div = document.createElement('div');
         div.className = 'permission-card';
         div.dataset.permId = permissionId;
@@ -1288,13 +1283,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 
                 // Clear any unresolved interactive cards (permission, diff)
-                document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el, 0));
+                document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
                 const r = msg.result;
                 const completedMsg = buildAssistantMessage(
                     r.explanation || (r.steps && r.steps.length ? '' : '完成'),
                     r.steps,
-                    formatTime(Date.now())
+                    Date.now()
                 );
                 chatArea.appendChild(completedMsg);
                 // Use real tokenUsage from result if available, else fall back to rough estimate
@@ -1311,7 +1306,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     }
                 } else {
                     // Rough estimate fallback (no API usage data)
-                    const stepTokens = r.steps ? r.steps.reduce((sum, s) => {
+                    const stepTokens = r.steps ? r.steps.reduce((sum: number, s: any) => {
                         if (s.type === 'thinking_content' || s.type === 'thinking')
                             return sum + Math.ceil((s.content || '').length / 4);
                         return sum;
@@ -1329,9 +1324,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 
                 // Clear any unresolved interactive cards
-                document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el, 0));
+                document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
-                chatArea.appendChild(buildAssistantMessage('❌ ' + msg.error, [], formatTime(Date.now())));
+                chatArea.appendChild(buildAssistantMessage('❌ ' + msg.error, [], Date.now()));
                 scrollBottom();
                 break;
 
@@ -1387,8 +1382,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             case 'loadTopicMessages':
                 for (const m of msg.messages) {
                     // M4 fix: pass images array when restoring user messages from history
-                    if (m.role === 'user') addUserMessage(m.content, undefined, m.images);
-                    else { chatArea.appendChild(buildAssistantMessage(m.content, m.steps, '')); scrollBottom(); }
+                    if (m.role === 'user') addUserMessage(m.content, undefined as any, m.images);
+                    else { chatArea.appendChild(buildAssistantMessage(m.content, m.steps, null)); scrollBottom(); }
                 }
                 break;
 
@@ -1480,7 +1475,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 else {
                     const p = settingsProviders.find(p => p.id === msg.providerId);
                     if (p && msg.models && msg.models.length > 0) {
-                        const newModels = msg.models.map(m => m.id);
+                        const newModels = msg.models.map((m: any) => m.id);
                         for (const m of newModels) {
                             if (!p.models.includes(m)) p.models.push(m);
                         }
@@ -1557,7 +1552,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 // ── Daily trend (last 14 days) ──
                 if (stats.dailyStats && stats.dailyStats.length > 0) {
                     const recent = stats.dailyStats.slice(0, 14);
-                    const maxTokens = Math.max(...recent.map(d => d.tokens), 1);
+                    const maxTokens = Math.max(...recent.map((d: any) => d.tokens), 1);
                     html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px;">';
                     html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">近期趋势 (每日)</div>';
                     html += '<div style="display:flex; justify-content:flex-end; align-items:flex-end; gap:4px; height:60px;">';
@@ -1649,10 +1644,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 const sectionsWrap = document.createElement('div');
                 sectionsWrap.className = 'ap-sections';
 
-                msg.sections.forEach((section, idx) => {
+                msg.sections.forEach((section: string, idx: number) => {
                     const row = document.createElement('div');
                     row.className = 'ap-row';
-                    row.dataset.idx = idx;
+                    row.dataset.idx = String(idx);
 
                     // Section text (rendered using full markdown parser)
                     const textDiv = document.createElement('div');
@@ -1773,7 +1768,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     list.innerHTML = '<div style="padding:12px 8px;opacity:0.5;font-size:11px;text-align:center;">无匹配结果</div>';
                     break;
                 }
-                list.innerHTML = msg.results.map(t =>
+                list.innerHTML = msg.results.map((t: any) =>
                     `<div class="topic-item" data-topic-id="${escapeHtml(t.id)}" onclick="this.dispatchEvent(new CustomEvent('topic-click',{bubbles:true,detail:'${escapeHtml(t.id)}'}))">
                         <span class="topic-title">${escapeHtml(t.title)}</span>
                         <span class="topic-date" style="font-size:10px;opacity:0.5">${new Date(t.updatedAt).toLocaleDateString('zh-CN')}</span>
@@ -1792,7 +1787,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     });
 
     // ── Topic list with date groups ────────────────────────────────────────────
-    function groupTopicsByDate(topics) {
+    function groupTopicsByDate(topics: any[]) {
         const now = Date.now(); const DAY = 86400000;
         const groups: {label: string; items: any[]}[] = [{ label: '今天', items: [] }, { label: '昨天', items: [] }, { label: '本周', items: [] }, { label: '更早', items: [] }];
         for (const t of topics) {
@@ -1805,7 +1800,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         return groups.filter(g => g.items.length > 0);
     }
 
-    function renderTopics(topics) {
+    function renderTopics(topics: any[]) {
         const list = document.getElementById('topicsList')!;
         if (!topics.length) {
             list.innerHTML = '<div style="text-align:center;opacity:0.5;padding:20px;font-size:12px;">暂无历史话题</div>';
@@ -1841,35 +1836,35 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
     }
 
-    function renderTodos(todos) {
+    function renderTodos(todos: any[]) {
         if (!todos || !todos.length) { todoPanel.classList.remove('has-items'); document.getElementById('todoList')!.innerHTML = ''; return; }
         todoPanel.classList.add('has-items');
         const icons: Record<string,string> = { pending: '○', in_progress: '●', done: '✓' };
-        document.getElementById('todoList')!.innerHTML = todos.map(t => {
+        document.getElementById('todoList')!.innerHTML = todos.map((t: any) => {
             const cls = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in_progress' : '';
             return '<div class="todo-item ' + cls + '"><span>' + (icons[t.status] || '○') + '</span>' + escapeHtml(t.content) + '</div>';
         }).join('');
     }
 
-    function updateQuickModelSelector(providers, current, ollamaModels) {
+    function updateQuickModelSelector(providers: any[], current: any, ollamaModels: any[]) {
         const qms = document.getElementById('quickModelSelect');
         if (!qms) return;
-        const provider = providers.find(p => p.id === current.provider);
-        const models = current.provider === 'ollama' ? (ollamaModels || []).map(m => m.name) : (provider ? provider.models : []);
+        const provider = providers.find((p: any) => p.id === current.provider);
+        const models: string[] = current.provider === 'ollama' ? (ollamaModels || []).map((m: any) => m.name) : (provider ? provider.models : []);
         qms.innerHTML = '';
         if (models.length > 0) {
             for (const m of models) { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; opt.selected = m === current.model; qms.appendChild(opt); }
         } else { const opt = document.createElement('option'); opt.value = current.model || ''; opt.textContent = current.model || '(未设置)'; qms.appendChild(opt); }
     }
 
-    function showSettingsPage(providers, current, ollamaModels) {
+    function showSettingsPage(providers: any[], current: any, ollamaModels: any[]) {
         settingsProviders = providers;
         settingsOllamaModels = ollamaModels || [];
         updateQuickModelSelector(providers, current, ollamaModels);
         const sel = document.getElementById('settingsProvider') as HTMLSelectElement;
-        sel.innerHTML = providers.map(p => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        sel.innerHTML = providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement;
-        inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map(p => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         (document.getElementById('settingsApiKey') as HTMLInputElement).value = '';
         (document.getElementById('settingsEndpoint') as HTMLInputElement).value = current.endpoint || '';
         // Auto-fill context size: prefer per-model lookup, then user-saved value
@@ -1890,27 +1885,27 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const mcpList = document.getElementById('mcpServersList');
         if (mcpList) mcpList.innerHTML = '';
         if (current.mcp?.servers) {
-            current.mcp.servers.forEach(s => addMcpServerBlock(s));
+            current.mcp.servers.forEach((s: any) => addMcpServerBlock(s));
         }
 
         function updateInlineProviderSelect() {
             const isFimChecked = (document.getElementById('inlineFimMode') as HTMLInputElement | null)?.checked ?? false;
             const currentPid = inlineSel.value;
             const filteredProviders = isFimChecked
-                ? providers.filter(p => p.supportsFIM)
+                ? providers.filter((p: any) => p.supportsFIM)
                 : providers;
-            inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + filteredProviders.map(p => '<option value="' + p.id + '"' + (p.id === currentPid ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+            inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + filteredProviders.map((p: any) => '<option value="' + p.id + '"' + (p.id === currentPid ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
             // If previously selected provider is no longer in list, reset
-            if (isFimChecked && currentPid && !filteredProviders.find(p => p.id === currentPid)) {
+            if (isFimChecked && currentPid && !filteredProviders.find((p: any) => p.id === currentPid)) {
                 inlineSel.value = '';
             }
         }
 
-        function updateInlineModelSelect(pid, selectedModel, ollamaModels) {
-            const p2 = providers.find(p => p.id === (pid || current.provider));
-            let ms = (pid || current.provider) === 'ollama' ? (ollamaModels || []).map(m => m.name) : (p2 ? p2.models : []);
+        function updateInlineModelSelect(pid: string, selectedModel: string, ollamaModels: any[]) {
+            const p2 = providers.find((p: any) => p.id === (pid || current.provider));
+            let ms: string[] = (pid || current.provider) === 'ollama' ? (ollamaModels || []).map((m: any) => m.name) : (p2 ? p2.models : []);
             // Filter out thinking/reasoning models — they can't do inline completion
-            ms = ms.filter(m => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
+            ms = ms.filter((m: string) => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
 
             // Filter out non-FIM models if FIM mode is enabled
             const isFimNode = document.getElementById('inlineFimMode') as HTMLInputElement | null;
@@ -1920,7 +1915,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     'qwen2.5-coder': true, 'codellama': true, 'starcoder': true,
                     'qwen': false, 'gpt-': false, 'claude-': false
                 };
-                ms = ms.filter(m => {
+                ms = ms.filter((m: string) => {
                     if (!m) return p2.supportsFIM;
                     const lower = m.toLowerCase();
                     for (const [key, capable] of Object.entries(fimCapableModels)) {
@@ -1961,7 +1956,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     /** Look up per-model context size with fallback to provider level */
-    function autoFillContextForModel(model, providerId) {
+    function autoFillContextForModel(model: string, providerId: string) {
         if (!model) return 0;
         // 1. Exact match
         if (settingsModelContextTokens[model]) return settingsModelContextTokens[model];
@@ -1988,8 +1983,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (todoPanel) todoPanel.style.display = '';
     }
 
-    function updateApiKeyStatus(providerId, providers) {
-        const p = (providers || settingsProviders).find(x => x.id === providerId);
+    function updateApiKeyStatus(providerId: string, providers?: any[]) {
+        const p = (providers || settingsProviders).find((x: any) => x.id === providerId);
         const status = document.getElementById('apiKeyStatus')!;
         const group = document.getElementById('apiKeyGroup')!;
         if (providerId === 'ollama') { group.style.display = 'none'; return; }
@@ -2010,14 +2005,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
     }
 
-    function updateModelUI(providerId, currentModel, ollamaModels) {
-        const provider = settingsProviders.find(p => p.id === providerId);
+    function updateModelUI(providerId: string, currentModel: string, ollamaModels: any[] | null) {
+        const provider = settingsProviders.find((p: any) => p.id === providerId);
         const modelInput = document.getElementById('settingsModelInput') as HTMLInputElement;
         const detectBtn = document.getElementById('detectBtn') as HTMLButtonElement;
         const modelHint = document.getElementById('modelHint')!;
 
         /** Auto-fill settingsCtx when a model is chosen */
-        function onModelSelected(model) {
+        function onModelSelected(model: string) {
             const ctx = autoFillContextForModel(model, providerId);
             if (ctx > 0) (document.getElementById('settingsCtx') as HTMLInputElement).value = ctx;
         }
@@ -2027,7 +2022,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (providerId === 'ollama') {
             document.getElementById('apiKeyGroup')!.style.display = 'none';
             if (ollamaModels && ollamaModels.length > 0) {
-                currentDropdownOpts = ollamaModels.map(m => m.name);
+                currentDropdownOpts = ollamaModels.map((m: any) => m.name);
                 modelHint.textContent = '已检测到 ' + ollamaModels.length + ' 个本地模型';
             } else { currentDropdownOpts = []; modelHint.textContent = '点击「检测」获取 Ollama 模型'; }
             detectBtn.style.display = '';
@@ -2044,7 +2039,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         modelInput.value = currentModel || '';
 
         // Bind auto-fill to model input changes
-        let _modelInputTimer;
+        let _modelInputTimer: ReturnType<typeof setTimeout> | undefined;
         modelInput.oninput = () => {
             clearTimeout(_modelInputTimer);
             _modelInputTimer = setTimeout(() => onModelSelected(modelInput.value.trim()), 400);
@@ -2057,7 +2052,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         updateEndpointHint(providerId);
     }
 
-    function updateEndpointHint(providerId) {
+    function updateEndpointHint(providerId: string) {
         const provider = settingsProviders.find(p => p.id === providerId);
         const hint = document.getElementById('endpointHint');
         const ep = document.getElementById('settingsEndpoint') as HTMLInputElement | null;

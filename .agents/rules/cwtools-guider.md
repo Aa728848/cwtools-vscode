@@ -1,5 +1,5 @@
 ---
-trigger: manual
+trigger: always_on
 ---
 
 This file provides guidance to AI coding assistants when working with code in this repository.

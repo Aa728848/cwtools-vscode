@@ -1390,11 +1390,29 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
 
             case 'loadTopicMessages':
-                for (const m of msg.messages) {
+                msg.messages.forEach((m: any, idx: number) => {
                     // M4 fix: pass images array when restoring user messages from history
-                    if (m.role === 'user') addUserMessage(m.content, undefined as any, m.images);
-                    else { chatArea.appendChild(buildAssistantMessage(m.content, m.steps, null)); scrollBottom(); }
-                }
+                    if (m.role === 'user') addUserMessage(m.content, idx, m.images);
+                    else {
+                        chatArea.appendChild(buildAssistantMessage(m.content, m.steps, null));
+                        scrollBottom();
+                        // Restore custom UI cards from steps
+                        if (m.steps) {
+                            const pCard = m.steps.find((s: any) => s.type === 'plan_card');
+                            if (pCard && pCard.toolResult) {
+                                window.dispatchEvent(new MessageEvent('message', {
+                                    data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content }
+                                }));
+                            }
+                            const wtCard = m.steps.find((s: any) => s.type === 'walkthrough_card');
+                            if (wtCard && wtCard.toolResult) {
+                                window.dispatchEvent(new MessageEvent('message', {
+                                    data: { type: 'renderWalkthrough', sections: wtCard.toolResult }
+                                }));
+                            }
+                        }
+                    }
+                });
                 break;
 
             case 'messageRetracted': {

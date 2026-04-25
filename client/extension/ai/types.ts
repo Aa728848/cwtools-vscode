@@ -605,7 +605,8 @@ export interface AgentStep {
     | 'text_delta' | 'step_finish'
     | 'code_generated' | 'validation' | 'error' | 'compaction'
     | 'todo_update' | 'permission_request'
-    | 'subtask_start' | 'subtask_complete' | 'diff_summary';
+    | 'subtask_start' | 'subtask_complete' | 'diff_summary'
+    | 'plan_card' | 'walkthrough_card';
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;

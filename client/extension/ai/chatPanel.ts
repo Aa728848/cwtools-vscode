@@ -724,7 +724,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     timestamp: Date.now(),
                     steps: result.steps,
                 });
-                this.savePlanFile(result.explanation, text);
+                this.savePlanFile(result.explanation, text, result.steps);
             } else {
                 this.postMessage({ type: 'generationComplete', result });
                 this.addHistoryMessage({
@@ -750,7 +750,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 );
                 
                 if (wroteWalkthrough) {
-                    this.renderWalkthroughUI(wtPath, topicId);
+                    this.renderWalkthroughUI(wtPath, topicId, result.steps);
                 }
             }
 
@@ -984,7 +984,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
 
-    private async savePlanFile(planText: string, userPrompt: string): Promise<void> {
+    private async savePlanFile(planText: string, userPrompt: string, steps?: any[]): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────
         const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         let filePath = '';
@@ -1027,20 +1027,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (sections.length === 0 && planText.trim()) sections.push(planText.trim());
 
             this.postMessage({ type: 'renderPlan', sections, planText });
-
-            // ── Auto-open plan file beside the chat panel only if write mode is auto ──
-            const config = this.aiService.getConfig();
-            if (config.agentFileWriteMode === 'auto') {
-                vs.commands.executeCommand(
-                    'vscode.open',
-                    vs.Uri.file(filePath),
-                    { viewColumn: vs.ViewColumn.Beside, preview: true }
-                );
+            
+            if (steps) {
+                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, timestamp: Date.now() });
             }
+
         }
     }
 
-    private async renderWalkthroughUI(filePath: string, topicId: string) {
+    private async renderWalkthroughUI(filePath: string, topicId: string, steps?: any[]) {
         try {
             const content = await fs.promises.readFile(filePath, 'utf-8');
             const relPath = path.posix.join('.cwtools-ai', topicId, 'walkthrough.md');
@@ -1064,6 +1059,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (currentSection.trim()) sections.push(currentSection.trim());
             if (sections.length === 0 && content.trim()) sections.push(content.trim());
             this.postMessage({ type: 'renderWalkthrough', sections });
+            
+            if (steps) {
+                steps.push({ type: 'walkthrough_card', content: filePath, toolResult: sections, timestamp: Date.now() });
+                this.saveTopics();
+            }
             
         } catch(e) {
             console.error('Failed to parse walkthrough.md', e);

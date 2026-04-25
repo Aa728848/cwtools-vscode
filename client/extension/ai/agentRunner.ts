@@ -906,7 +906,9 @@ export class AgentRunner {
      * Replaces fragile regex parsing to handle nested brackets, code blocks,
      * and escaped sequences elegantly.
      */
-    private parseDsmlToolCalls(content: string): import('./types').ToolCall[] {
+    private parseDsmlToolCalls(content: string, depth: number = 0): import('./types').ToolCall[] {
+        // Safety valve: prevent unbounded recursion from deeply-nested tool_call/function tags
+        if (depth > 3) return [];
         const calls: import('./types').ToolCall[] = [];
         
         // Normalize full-width pipes common in DeepSeek
@@ -1005,7 +1007,7 @@ export class AgentRunner {
             // If it contains embedded <function> tag
             if (raw.trimStart().startsWith('<function=') || raw.trimStart().startsWith('<function ')) {
                 // Re-process recursively or rely on the normalized XML flow
-                const parsed = this.parseDsmlToolCalls(raw);
+                const parsed = this.parseDsmlToolCalls(raw, depth + 1);
                 calls.push(...parsed);
             } else {
                 try {

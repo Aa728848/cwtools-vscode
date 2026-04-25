@@ -152,6 +152,19 @@ type Server(client: ILanguageClient) =
     /// CodeLens cache: filePath → (contentHash, lenses)
     let codeLensCache = System.Collections.Generic.Dictionary<string, int * CodeLens list>()
 
+    /// Maximum entries before eviction.  512 files covers even very large mods;
+    /// each entry is small (hash + delta-encoded int list / CodeLens list).
+    let cacheMaxEntries = 512
+
+    /// Evict ~25% of entries when a Dictionary exceeds cacheMaxEntries.
+    /// Uses enumerator order (effectively random for Dictionary) so we don't
+    /// need to track access timestamps.
+    let evictIfNeeded (cache: System.Collections.Generic.Dictionary<'K, 'V>) =
+        if cache.Count > cacheMaxEntries then
+            let toRemove = cache.Count / 4
+            let keys = cache.Keys |> Seq.take toRemove |> Seq.toArray
+            for k in keys do cache.Remove(k) |> ignore
+
     /// Deterministic content hash using FNV-1a instead of string.GetHashCode()
     /// because string.GetHashCode() is randomized per-process in .NET Core.
     let contentHash (text: string) =
@@ -162,7 +175,10 @@ type Server(client: ILanguageClient) =
 
     let mutable lastFocusedFile: string option = None
 
-    let mutable currentlyRefreshingFiles: bool = false
+    /// Atomic flag — 0 = idle, 1 = refreshing.  Use Interlocked.CompareExchange
+    /// instead of a plain mutable bool to prevent two DidOpenTextDocument handlers
+    /// from both passing the "false" check and starting duplicate Tasks.
+    let currentlyRefreshingFiles = ref 0
 
     let (|TrySuccess|TryFailure|) tryResult =
         match tryResult with
@@ -1182,9 +1198,8 @@ type Server(client: ILanguageClient) =
                     | FileResource(f, r) -> r.scope, f, r.logicalpath
                     | FileWithContentResource(f, r) -> r.scope, f, r.logicalpath
 
-                match gameObj, currentlyRefreshingFiles with
-                | Some game, false ->
-                    currentlyRefreshingFiles <- true
+                match gameObj with
+                | Some game when System.Threading.Interlocked.CompareExchange(currentlyRefreshingFiles, 1, 0) = 0 ->
 
                     let task =
                         new Task(fun () ->
@@ -1210,7 +1225,7 @@ type Server(client: ILanguageClient) =
                             finally
                                 gameStateLock.ExitReadLock()
                                 // Reset the flag inside the task so writers can see it.
-                                currentlyRefreshingFiles <- false)
+                                System.Threading.Interlocked.Exchange(currentlyRefreshingFiles, 0) |> ignore)
 
                     task.Start()
                 | _ -> ()
@@ -1285,8 +1300,8 @@ type Server(client: ILanguageClient) =
 
         member this.Hover(p: TextDocumentPositionParams) =
             async {
-                return
-                    (hoverDocument
+                let! hover =
+                    hoverDocument
                         eu4GameObj
                         hoi4GameObj
                         stlGameObj
@@ -1298,9 +1313,8 @@ type Server(client: ILanguageClient) =
                         customGameObj
                         docs
                         p.textDocument.uri
-                        p.position)
-                    |> Async.RunSynchronously
-                    |> Some
+                        p.position
+                return Some hover
             }
             |> catchError None
 
@@ -1620,6 +1634,7 @@ type Server(client: ILanguageClient) =
                                                    "character", JsonValue.Number(decimal range.start.character) |] }))
 
                             codeLensCache.[filePath] <- (hash, lenses)
+                            evictIfNeeded codeLensCache
                             lenses
                     | None -> []
             }
@@ -2008,6 +2023,7 @@ type Server(client: ILanguageClient) =
 
                         let dataList = data |> Seq.toList
                         semanticTokensCache.[filePath] <- (hash, effectTriggerVersion, dataList)
+                        evictIfNeeded semanticTokensCache
                         Some { data = dataList }
 
                 return
@@ -2425,14 +2441,14 @@ type Server(client: ILanguageClient) =
                         | { command = "cwtools.ai.validateCode"
                             arguments = codeArg :: targetFileArg :: _ } ->
                             // In-memory code validation — no temp files, no 3s wait
-                            // Uses WRITE LOCK because UpdateFile mutates internal AST+error caches
+                            // NOTE: This handler runs inside runWriteRequest which already
+                            // holds gameStateLock in Write mode. Do NOT re-acquire the lock
+                            // here — ReaderWriterLockSlim(NoRecursion) would throw LockRecursionException.
                             let code       = codeArg.AsString()
                             let targetFile = targetFileArg.AsString()
                             let errorsJson =
                                 match gameObj with
                                 | Some g ->
-                                    gameStateLock.EnterWriteLock()
-                                    try
                                         // Save original content so we can restore after temp validation
                                         let originalContent =
                                             match docs.GetText(FileInfo(targetFile)) with
@@ -2463,7 +2479,9 @@ type Server(client: ILanguageClient) =
                                         match originalContent with
                                         | Some orig ->
                                             try g.UpdateFile true targetFile (Some orig) |> ignore
-                                            with _ -> ()
+                                            with ex ->
+                                                // Restoration failed — log the error so it doesn't silently corrupt state
+                                                eprintfn "validateCode: failed to restore original content for %s: %A" targetFile ex
                                         | None -> ()
 
                                         // Filter and adjust line numbers
@@ -2494,8 +2512,6 @@ type Server(client: ILanguageClient) =
                                             [| "isValid", JsonValue.Boolean(not hasErrors)
                                                "errors",  JsonValue.Array(adjustedErrors |> Array.ofList)
                                                "ok",      JsonValue.Boolean true |]
-                                    finally
-                                        gameStateLock.ExitWriteLock()
                                 | None ->
                                     JsonValue.Record
                                         [| "ok",    JsonValue.Boolean false

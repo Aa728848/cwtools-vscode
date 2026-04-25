@@ -19,7 +19,7 @@ const COLOR_MAP: Record<string, string> = {
     '§L': '#CCAA55',   // Light brown
     '§M': '#FF44FF',   // Magenta
     '§S': '#AADDAA',   // Soft green
-    '§P': '#AA88CC',   // Purple
+    '§P': '#FFA4E4',   // Purple
     '§!': '#CCCCCC',   // Reset (gray)
 };
 
@@ -249,7 +249,7 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
     // Set up file system watchers for background tracking of .yml files
     const watcher = vs.workspace.createFileSystemWatcher('**/*.yml');
     context.subscriptions.push(watcher);
-    
+
     watcher.onDidChange(async uri => {
         try {
             const data = await vs.workspace.fs.readFile(uri);

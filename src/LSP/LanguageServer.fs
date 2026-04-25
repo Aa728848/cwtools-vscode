@@ -261,7 +261,9 @@ type RealClient(send: BinaryWriter) =
 
 
 type private PendingTask =
-    | ProcessNotification of method: string * task: Async<unit>
+    /// needsWriteLock = true  → notification mutates game state (e.g. DidChangeConfiguration)
+    /// needsWriteLock = false → notification only touches DocumentStore / MailboxProcessor (thread-safe)
+    | ProcessNotification of method: string * task: Async<unit> * needsWriteLock: bool
     /// isReadOnly = true  → can execute concurrently on the thread pool (read lock)
     /// isReadOnly = false → must execute serially, blocking the loop (write lock)
     | ProcessRequest of id: int * task: Async<string option> * cancel: CancellationTokenSource * isReadOnly: bool
@@ -327,18 +329,23 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | Rename(p)                 -> server.Rename(p)                 |> thenMap serializeWorkspaceEdit |> thenSome, false
         | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenNone,                             false
 
-    let processNotification (n: Notification) =
+    /// Returns (task, needsWriteLock).
+    /// needsWriteLock = true  → game state mutation (DidChangeConfiguration triggers processWorkspace)
+    /// needsWriteLock = false → only touches DocumentStore, MailboxProcessor, or mutable flags (thread-safe)
+    let processNotification (n: Notification) : Async<unit> * bool =
         match n with
-        | Initialized -> server.Initialized()
-        | DidChangeConfiguration(p) -> server.DidChangeConfiguration(p)
-        | DidOpenTextDocument(p) -> server.DidOpenTextDocument(p)
-        | DidChangeTextDocument(p) -> server.DidChangeTextDocument(p)
-        | WillSaveTextDocument(p) -> server.WillSaveTextDocument(p)
-        | DidSaveTextDocument(p) -> server.DidSaveTextDocument(p)
-        | DidCloseTextDocument(p) -> server.DidCloseTextDocument(p)
-        | DidChangeWatchedFiles(p) -> server.DidChangeWatchedFiles(p)
-        | DidFocusFile(p) -> server.DidFocusFile(p)
-        | OtherNotification _ -> async { () }
+        // These two mutate gameObj / start processWorkspace → need exclusive Write Lock
+        | Initialized            -> server.Initialized(), true
+        | DidChangeConfiguration(p) -> server.DidChangeConfiguration(p), true
+        // All others only touch DocumentStore + MailboxProcessor (both thread-safe) → no lock needed
+        | DidOpenTextDocument(p)  -> server.DidOpenTextDocument(p), false
+        | DidChangeTextDocument(p)-> server.DidChangeTextDocument(p), false
+        | WillSaveTextDocument(p) -> server.WillSaveTextDocument(p), false
+        | DidSaveTextDocument(p)  -> server.DidSaveTextDocument(p), false
+        | DidCloseTextDocument(p) -> server.DidCloseTextDocument(p), false
+        | DidChangeWatchedFiles(p)-> server.DidChangeWatchedFiles(p), false
+        | DidFocusFile(p)         -> server.DidFocusFile(p), false
+        | OtherNotification _     -> async { () }, false
     // Read messages and process cancellations on a separate thread
     let pendingRequests =
         System.Collections.Concurrent.ConcurrentDictionary<int, CancellationTokenSource>()
@@ -369,8 +376,8 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 // Process other requests on worker thread
                 | Parser.NotificationMessage(method, json) ->
                     let n = Parser.parseNotification (method, json)
-                    let task = processNotification n
-                    processQueue.Add(ProcessNotification(method, task))
+                    let task, needsWriteLock = processNotification n
+                    processQueue.Add(ProcessNotification(method, task, needsWriteLock))
                 | Parser.RequestMessage(id, method, json) ->
                     let task, isReadOnly = processRequest (Parser.parseRequest (method, json))
                     let cancel = new CancellationTokenSource()
@@ -434,14 +441,18 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     while not quit do
         match processQueue.Take() with
         | Quit -> quit <- true
-        // Notifications (DidChange, Initialized, etc.) modify state — always serial.
-        // We acquire the write lock so any in-flight read tasks finish first.
-        | ProcessNotification(_, task) ->
+        // Notifications: only acquire Write Lock if the notification mutates game state.
+        // Most notifications (DidOpen, DidChange, etc.) only touch DocumentStore and
+        // MailboxProcessor — both thread-safe — so they run lock-free, keeping
+        // Completion/Hover/SemanticTokens responsive during rapid typing.
+        | ProcessNotification(_, task, true  (* needsWriteLock *)) ->
             gameStateLock.EnterWriteLock()
             try
                 Async.RunSynchronously(task)
             finally
                 gameStateLock.ExitWriteLock()
+        | ProcessNotification(_, task, false (* no lock needed *)) ->
+            Async.RunSynchronously(task)
         | ProcessRequest(id, task, cancel, true  (* isReadOnly *)) ->
             startReadOnlyRequest id task cancel
         | ProcessRequest(id, task, cancel, false (* isWrite    *)) ->

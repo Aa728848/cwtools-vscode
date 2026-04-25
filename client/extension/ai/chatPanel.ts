@@ -960,15 +960,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
 
-    /**
-     * Save plan as .md for export, and emit renderPlan so the webview can
-     * display an interactive inline annotation interface.
-     */
-    // Fix #12: async to avoid blocking extension host
     private async savePlanFile(planText: string, userPrompt: string): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────
         const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         let filePath = '';
+        let relPath = '';
         if (wsRoot) {
             const planDir = path.join(wsRoot, '.cwtools-ai');
             await fs.promises.mkdir(planDir, { recursive: true });
@@ -980,17 +976,44 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
             const fileName = `plan_${slug}_${timestamp}.md`;
             filePath = path.join(planDir, fileName);
+            relPath = path.posix.join('.cwtools-ai', fileName);
             // Register plan file in the current message snapshot so retract can delete it
             this._recordFileSnapshot(filePath);
             await fs.promises.writeFile(filePath, '\uFEFF' + planText, 'utf-8');
         }
-        // ── Auto-open plan file beside the chat panel ────────────────────────
+
         if (filePath) {
-            vs.commands.executeCommand(
-                'vscode.open',
-                vs.Uri.file(filePath),
-                { viewColumn: vs.ViewColumn.Beside, preview: true }
-            );
+            // Post plan file saved card and render interactive annotation UI
+            this.postMessage({ type: 'planFileSaved', filePath, relPath });
+            
+            const sections: string[] = [];
+            let currentSection = '';
+            let inCodeBlock = false;
+            for (const line of planText.split(/\r?\n/)) {
+                if (line.startsWith('```')) {
+                    inCodeBlock = !inCodeBlock;
+                }
+                if (!inCodeBlock && line.match(/^#{1,3}\s/)) {
+                    if (currentSection.trim()) sections.push(currentSection.trim());
+                    currentSection = line + '\n';
+                } else {
+                    currentSection += line + '\n';
+                }
+            }
+            if (currentSection.trim()) sections.push(currentSection.trim());
+            if (sections.length === 0 && planText.trim()) sections.push(planText.trim());
+
+            this.postMessage({ type: 'renderPlan', sections, planText });
+
+            // ── Auto-open plan file beside the chat panel only if write mode is auto ──
+            const config = this.aiService.getConfig();
+            if (config.agentFileWriteMode === 'auto') {
+                vs.commands.executeCommand(
+                    'vscode.open',
+                    vs.Uri.file(filePath),
+                    { viewColumn: vs.ViewColumn.Beside, preview: true }
+                );
+            }
         }
     }
 
@@ -2267,14 +2290,14 @@ body.plan-mode .plan-indicator { display: block; }
 .plan-submit-btn:hover { opacity: 0.85; }
 
 /* ── Annotatable plan view ── */
-.annotatable-plan { border: 1px solid rgba(100,149,237,0.2); border-radius: 8px; overflow: hidden; margin: 8px 0; font-size: 12px; }
+.annotatable-plan { border: 1px solid rgba(100,149,237,0.2); border-radius: 8px; overflow: hidden; margin: 8px 0; font-size: 12px; display: flex; flex-direction: column; }
 .ap-header { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: rgba(100,149,237,0.08); border-bottom: 1px solid rgba(100,149,237,0.15); }
 .ap-header-title { font-weight: 600; color: cornflowerblue; font-size: 12px; }
 .ap-header-hint { flex: 1; font-size: 11px; opacity: 0.5; }
 .ap-submit-btn { font-size: 11px; border-radius: 5px; padding: 4px 12px; cursor: pointer; border: none; background: var(--accent); color: #1a1a1a; font-weight: 600; font-family: inherit; transition: opacity 0.15s; }
 .ap-submit-btn:disabled { opacity: 0.35; cursor: default; }
 .ap-submit-btn:not(:disabled):hover { opacity: 0.85; }
-.ap-sections { display: flex; flex-direction: column; }
+.ap-sections { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; resize: vertical; }
 .ap-row { position: relative; padding: 7px 36px 7px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; transition: background 0.12s; }
 .ap-row:last-child { border-bottom: none; }
 .ap-row:hover, .ap-row-active { background: rgba(100,149,237,0.06); }

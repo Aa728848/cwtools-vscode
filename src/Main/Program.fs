@@ -370,6 +370,7 @@ type Server(client: ILanguageClient) =
     let lintAgent =
         MailboxProcessor.Start(fun agent ->
             let mutable nextAnalyseTime = DateTime.Now
+            let mutable needsDeepAnalyse = false
 
             let analyzeTask uri force =
                 new Task(fun () ->
@@ -387,8 +388,9 @@ type Server(client: ILanguageClient) =
                                 // Somehow get updated localisation errors after loccache is updated
                                 lint uri true false |> Async.RunSynchronously
                                 nextTime <- DateTime.Now.Add(delayTime)
+                                needsDeepAnalyse <- false
                             else
-                                ()
+                                needsDeepAnalyse <- true
                         with e ->
                             logError $"uri %A{uri.LocalPath} \n exception %A{e}"
                     finally
@@ -401,16 +403,26 @@ type Server(client: ILanguageClient) =
 
             let rec loop (inprogress: bool) (state: Map<string, VersionedTextDocumentIdentifier * bool>) =
                 async {
-                    let! msg = agent.Receive()
+                    let waitTimeMs =
+                        if not inprogress && state.IsEmpty && needsDeepAnalyse then
+                            // If the user is completely idle, cap the wait time to 2.5 seconds.
+                            // This ensures phantom diagnostic errors clear quickly instead of lingering 
+                            // for the full adaptive delayTime (up to 30s).
+                            let remaining = int (nextAnalyseTime - DateTime.Now).TotalMilliseconds
+                            Math.Max(500, Math.Min(2500, remaining))
+                        else
+                            -1
+
+                    let! msgOpt = agent.TryReceive(waitTimeMs)
 
                     if state.Count > 0 then
                         logDiag $"queue length: %i{state.Count}"
 
-                    match msg, inprogress with
-                    | UpdateRequest(ur, force), false ->
+                    match msgOpt, inprogress with
+                    | Some (UpdateRequest(ur, force)), false ->
                         analyze ur force
                         return! loop true state
-                    | UpdateRequest(ur, force), true ->
+                    | Some (UpdateRequest(ur, force)), true ->
                         if Map.containsKey ur.uri.LocalPath state then
                             if
                                 (Map.find ur.uri.LocalPath state)
@@ -421,7 +433,7 @@ type Server(client: ILanguageClient) =
                                 return! loop inprogress state
                         else
                             return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, force))
-                    | WorkComplete time, _ ->
+                    | Some (WorkComplete time), _ ->
                         nextAnalyseTime <- time
 
                         if Map.isEmpty state then
@@ -440,6 +452,19 @@ type Server(client: ILanguageClient) =
                             let newstate = state |> Map.remove key
                             analyze next force
                             return! loop true newstate
+                    | None, false ->
+                        logDiag "Idle timeout: triggering background delayedAnalyze"
+                        delayedAnalyze ()
+                        needsDeepAnalyse <- false
+                        nextAnalyseTime <- DateTime.Now.Add(delayTime)
+
+                        for doc in docs.OpenFiles() do
+                            let uri = Uri(doc.FullName)
+                            lint uri true false |> Async.RunSynchronously
+
+                        return! loop false state
+                    | None, true ->
+                        return! loop inprogress state
                 }
 
             loop false Map.empty)

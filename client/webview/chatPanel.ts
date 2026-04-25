@@ -1577,17 +1577,10 @@
                     row.className = 'ap-row';
                     row.dataset.idx = idx;
 
-                    // Section text (rendered as simple markdown-lite)
+                    // Section text (rendered using full markdown parser)
                     const textDiv = document.createElement('div');
-                    textDiv.className = 'ap-section-text';
-                    // Basic heading/bold rendering
-                    const html = section
-                        .replace(/^(#{1,3})\s+(.+)$/m, (_, hashes, text) =>
-                            `<strong class="ap-heading ap-h${hashes.length}">${escapeHtml(text)}</strong>`)
-                        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                        .replace(/`(.+?)`/g, '<code>$1</code>')
-                        .replace(/\n/g, '<br>');
-                    textDiv.innerHTML = html === section ? escapeHtml(section).replace(/\n/g, '<br>') : html;
+                    textDiv.className = 'ap-section-text markdown-body msg-bubble';
+                    textDiv.innerHTML = renderMarkdown(section);
 
                     // Add-comment button (shows on hover)
                     const addBtn = document.createElement('button');

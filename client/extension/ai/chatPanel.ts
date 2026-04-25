@@ -250,7 +250,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
                 }
                 const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
-                await this.handleUserMessage(prompt, undefined, undefined, true);
+                await this.handleUserMessage(prompt, undefined, undefined, true, true);
                 break;
             case 'revisePlanWithAnnotations':
                 let reviseContext = '';
@@ -259,7 +259,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 }
                 const revisePrompt = '请根据我的批注考虑改进现有的执行计划，重新完善计划。' + reviseContext;
                 // keep current mode ('plan'), do not auto-switch since it's just revising
-                await this.handleUserMessage(revisePrompt, undefined, undefined, true);
+                await this.handleUserMessage(revisePrompt, undefined, undefined, true, true);
                 break;
             case 'reviseWalkthroughWithAnnotations':
                 let reviseWtContext = '';

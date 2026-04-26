@@ -1,0 +1,21 @@
+name: Sync to Gitee
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published, edited]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Yikun/hub-mirror-action@v1.4
+        with:
+          src: github/Aa728848
+          dst: gitee/cChen2422
+          dst_key: ${{ secrets.GITEE_PRIVATE_KEY }}
+          dst_token: ${{ secrets.GITEE_TOKEN }}
+          static_list: cwtools-vscode
+          force_update: true
+          account_type: user

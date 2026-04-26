@@ -53,6 +53,7 @@ jobs:
               STATUS=$(curl -s -o /tmp/gitee_check.json -w "%{http_code}" \
                 "$GITEE_API/repos/$REPO/releases/tags/$TAG?access_token=$GITEE_TOKEN" 2>&1)
               echo "Check existing: HTTP $STATUS"
+              echo "Gitee response: $(cat /tmp/gitee_check.json | head -c 500)"
               if [ "$STATUS" = "200" ]; then
                 echo "Skipping (already exists)"
                 continue

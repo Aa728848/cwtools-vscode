@@ -74,6 +74,7 @@
   "configuration.cwtools.ai.agentFileWriteMode.enum.confirm": "写操作前弹出 diff 确认（默认，安全）",
   "configuration.cwtools.ai.agentFileWriteMode.enum.auto": "自动写入，无需确认（高级用户）",
   "configuration.cwtools.ai.agentFileWriteMode.description": "Agent 文件写入模式：confirm=弹出diff确认后写入，auto=直接写入",
+  "configuration.cwtools.ai.forcedThinkingMode.description": "强制思考引擎，在使用工具前进行更深入推理，牺牲速度换取更低幻觉率",
   "configuration.cwtools.ai.maxRetries.description": "生成代码的最大验证重试轮数",
   "configuration.cwtools.ai.maxContextTokens.description": "覆盖最大上下文大小（tokens）。0 = 使用提供商默认值。主要用于 Ollama 或自定义提供商。",
   "configuration.cwtools.ai.inlineCompletion.enabled.description": "启用AI行内代码补全",

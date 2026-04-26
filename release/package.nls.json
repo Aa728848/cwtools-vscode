@@ -74,6 +74,7 @@
   "configuration.cwtools.ai.agentFileWriteMode.enum.confirm": "Show diff confirmation before writing (Default, Safe)",
   "configuration.cwtools.ai.agentFileWriteMode.enum.auto": "Write automatically without confirmation (Advanced)",
   "configuration.cwtools.ai.agentFileWriteMode.description": "Agent file write mode: confirm=Show diff before saving, auto=Direct save",
+  "configuration.cwtools.ai.forcedThinkingMode.description": "Force the AI to use reasoning analysis tools before outputting structured answers.",
   "configuration.cwtools.ai.maxRetries.description": "Maximum validation-retry rounds for generated code",
   "configuration.cwtools.ai.maxContextTokens.description": "Override max context window size (tokens). 0 = use provider default. Useful for Ollama or custom providers.",
   "configuration.cwtools.ai.inlineCompletion.enabled.description": "Enable AI inline code completion",

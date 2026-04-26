@@ -463,6 +463,12 @@
 					"default": "confirm",
 					"description": "%configuration.cwtools.ai.agentFileWriteMode.description%"
 				},
+				"cwtools.ai.forcedThinkingMode": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.cwtools.ai.forcedThinkingMode.description%"
+				},
 				"cwtools.ai.maxRetries": {
 					"scope": "window",
 					"type": "integer",

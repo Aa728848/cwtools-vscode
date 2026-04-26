@@ -105,11 +105,20 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
 }
 
 async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string) {
-    const mirrors = [
+    let mirrors = [
         originalUrl, // 首选直连
-        `https://ghproxy.net/${originalUrl}`,
-        `https://github.moeyy.xyz/${originalUrl}`
+        `https://gh-proxy.org/${originalUrl}`,
+        `https://hk.gh-proxy.org/${originalUrl}`,
+        `https://cdn.gh-proxy.org/${originalUrl}`,
+        `https://edgeone.gh-proxy.org/${originalUrl}`,
+        originalUrl.replace('github.com', 'kkgithub.com')
     ];
+
+    const configProxy = vscode.workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim().toLowerCase();
+    if (configProxy === 'none' || configProxy === 'direct' || process.env.http_proxy || process.env.https_proxy || process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
+        // 如果用户明确指定不用代理源，或者系统存在本地代理环境变量，我们就不去试无效镜像白白浪费时间了
+        mirrors = [originalUrl];
+    }
 
     vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,

@@ -299,10 +299,19 @@ export async function activate(context: ExtensionContext) {
 		}
 		
 		async function getBestRepoPath(originalUrl: string): Promise<string> {
-			const customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '');
+			const customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim();
 			if (customProxy) {
+				if (customProxy.toLowerCase() === 'none' || customProxy.toLowerCase() === 'direct') {
+					return originalUrl;
+				}
 				return customProxy.endsWith('/') ? customProxy + originalUrl : customProxy + '/' + originalUrl;
 			}
+			
+			// If the user has a local proxy environment configured, assume direct connection works
+			if (process.env.http_proxy || process.env.https_proxy || process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
+				return originalUrl;
+			}
+
 			const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 			const isCN = timeZone === 'Asia/Shanghai' || timeZone === 'Asia/Chongqing' || timeZone === 'Asia/Urumqi';
 			if (!isCN) {
@@ -312,8 +321,32 @@ export async function activate(context: ExtensionContext) {
 				const req = require('https').request('https://github.com', { method: 'HEAD', timeout: 1500 }, (res: any) => {
 					resolve(originalUrl); // Success within time, use direct connection
 				});
-				req.on('error', () => resolve(`https://ghproxy.net/${originalUrl}`));
-				req.on('timeout', () => { req.destroy(); resolve(`https://ghproxy.net/${originalUrl}`); });
+				
+				const fallback = () => {
+					const proxies = [
+						`https://gh-proxy.org/${originalUrl}`,
+						`https://hk.gh-proxy.org/${originalUrl}`,
+						`https://cdn.gh-proxy.org/${originalUrl}`,
+						`https://edgeone.gh-proxy.org/${originalUrl}`,
+						originalUrl.replace('github.com', 'kkgithub.com')
+					];
+					if (typeof (Promise as any).any === 'function') {
+						(Promise as any).any(proxies.map(p => new Promise<string>((res, rej) => {
+							const preq = require('https').request(p, { method: 'HEAD', timeout: 2500 }, (pres: any) => {
+								if (pres.statusCode === 200 || pres.statusCode === 301 || pres.statusCode === 302) res(p);
+								else rej();
+							});
+							preq.on('error', rej);
+							preq.on('timeout', () => { preq.destroy(); rej(); });
+							preq.end();
+						}))).then((res: string) => resolve(res)).catch(() => resolve(proxies[0]!));
+					} else {
+						resolve(proxies[0]!);
+					}
+				};
+
+				req.on('error', fallback);
+				req.on('timeout', () => { req.destroy(); fallback(); });
 				req.end();
 			});
 		}

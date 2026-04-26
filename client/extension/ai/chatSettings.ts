@@ -54,6 +54,10 @@ export class ChatSettingsManager {
                 const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
                 return k ? '••••••••' : '';
             })(),
+            exaApiKey: (() => {
+                const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('exaApiKey') ?? '';
+                return k ? '••••••••' : '';
+            })(),
             inlineCompletion: {
                 enabled: config.inlineCompletion.enabled,
                 provider: config.inlineCompletion.provider,
@@ -149,6 +153,10 @@ export class ChatSettingsManager {
         if (settings.braveSearchApiKey && settings.braveSearchApiKey.trim().length > 0
             && !settings.braveSearchApiKey.startsWith('•')) {
             await cfg.update('braveSearchApiKey', settings.braveSearchApiKey.trim(), vs.ConfigurationTarget.Global);
+        }
+        if (settings.exaApiKey && settings.exaApiKey.trim().length > 0
+            && !settings.exaApiKey.startsWith('•')) {
+            await cfg.update('exaApiKey', settings.exaApiKey.trim(), vs.ConfigurationTarget.Global);
         }
         await cfg.update('endpoint', settings.endpoint, vs.ConfigurationTarget.Global);
         await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);

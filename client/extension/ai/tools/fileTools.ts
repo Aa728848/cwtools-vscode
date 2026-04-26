@@ -11,9 +11,8 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as readline from 'readline';
 import { parsePdx, PdxNode } from '../../guiParser';
-import type {
-    ValidationError,
-} from '../types';
+import type { ValidationError } from '../types';
+import { getCachedFile, setCachedFile } from '../fileCache';
 
 // ─── Shared file-system helpers ──────────────────────────────────────────────
 
@@ -96,6 +95,29 @@ export class FileToolHandler {
         try {
             args.file = this.resolveAndAssertInWorkspace(args.file);
 
+            // ── Cache: serve full-file reads from memory ───────────────────
+            if (!args.startLine && !args.endLine) {
+                const cached = getCachedFile(args.file);
+                if (cached !== null) {
+                    const lines = cached.split('\n');
+                    const totalLines = lines.length;
+                    let threshold = 150;
+                    if (args.file.endsWith('.gui') || args.file.endsWith('.gfx') || args.file.endsWith('.txt') || args.file.endsWith('.yml')) {
+                        threshold = 500;
+                    }
+                    if (totalLines > threshold) {
+                        return {
+                            content: '',
+                            totalLines,
+                            truncated: true,
+                            _hint: `文件共有 ${totalLines} 行 — 太长无法完整读取。建议：先调用 document_symbols("${args.file}") 定位你所需的部分，然后再使用 startLine 和 endLine 参数重新调用 read_file（每次最多读取 ${threshold} 行）。`,
+                        };
+                    }
+                    return { content: cached, totalLines, truncated: false };
+                }
+            }
+            // ────────────────────────────────────────────────────────────────
+
             let threshold = 150;
             if (args.file.endsWith('.gui') || args.file.endsWith('.gfx') || args.file.endsWith('.txt') || args.file.endsWith('.yml')) {
                 threshold = 500;
@@ -134,6 +156,17 @@ export class FileToolHandler {
                 return { content: `读取文件出错：${String(e)}`, totalLines: 0, truncated: false };
             }
 
+            // Cache the full content for potential re-reads within this loop
+            try {
+                const fullContent = (args.startLine !== undefined || args.endLine !== undefined)
+                    ? null  // partial read — don't cache
+                    : slice.join('\n');
+                if (fullContent !== null) {
+                    const stat = fs.statSync(args.file);
+                    setCachedFile(args.file, fullContent, stat.mtimeMs);
+                }
+            } catch { /* stat may fail; skip cache */ }
+            
             const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
 
             if (totalLines > threshold && !args.startLine && !args.endLine) {

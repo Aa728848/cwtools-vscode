@@ -139,7 +139,7 @@ export class AgentToolExecutor {
      */
     async execute(toolName: string, args: Record<string, unknown>): Promise<unknown> {
         let result: unknown;
-        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'apply_patch' | 'multiedit' | 'task' | 'analyze_diagnostic_error') {
+        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'codesearch' | 'apply_patch' | 'multiedit' | 'task' | 'analyze_diagnostic_error') {
             // ── LSP / CWTools query tools ─────────────────────────────────
             case 'query_scope':
                 result = await this.lspHandler.queryScope(args as any); break;
@@ -205,6 +205,8 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.runCommand(args as any); break;
             case 'search_web':
                 result = await this.externalHandler.searchWeb(args as any); break;
+            case 'codesearch':
+                result = await this.externalHandler.searchCode(args as any); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any); break;
             case 'spawn_sub_agents':

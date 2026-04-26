@@ -28,7 +28,8 @@ export interface ExternalToolContext {
             mode: 'explore' | 'general' | 'build',
             parentOptions?: import('../agentRunner').AgentRunnerOptions,
             onStep?: (step: import('../types').AgentStep) => void,
-            parentAccumulator?: import('../types').TokenUsage
+            parentAccumulator?: import('../types').TokenUsage,
+            onFileWrite?: (filePath: string, prevContent: string | null) => void,
         ): Promise<string>;
     };
     parentRunnerOptions?: import('../agentRunner').AgentRunnerOptions;
@@ -197,21 +198,62 @@ export class ExternalToolHandler {
         }
 
         const timeoutMs = Math.min(args.timeoutMs ?? 15000, 60000);
-        const { exec } = await import('child_process');
+        const { spawn } = await import('child_process');
+
+        // Parse command into binary + args on the platform shell
+        const isWindows = process.platform === 'win32';
+        const shell = isWindows ? 'cmd.exe' : '/bin/sh';
+        const shellArgs = isWindows ? ['/c', args.command] : ['-c', args.command];
+
+        let stdoutBuf = '';
+        let stderrBuf = '';
+        const MAX_OUTPUT = 4000;
 
         return new Promise(resolve => {
-            const _proc = exec(
-                args.command,
-                { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 },
-                (error, stdout, stderr) => {
-                    resolve({
-                        stdout: stdout.substring(0, 4000),
-                        stderr: stderr.substring(0, 2000),
-                        exitCode: error?.code ?? (error ? 1 : 0),
-                        timedOut: error?.signal === 'SIGTERM',
-                    });
-                }
-            );
+            const proc = spawn(shell, shellArgs, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+
+            const timer = setTimeout(() => {
+                proc.kill();
+                resolve({
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + '\n[... 超时已终止]',
+                    stderr: stderrBuf.substring(0, 2000),
+                    exitCode: -1,
+                    timedOut: true,
+                });
+            }, timeoutMs);
+
+            proc.stdout?.on('data', (chunk: Buffer) => {
+                const text = chunk.toString();
+                stdoutBuf += text;
+                // Stream chunks to UI in real time
+                this.ctx.onStep?.({
+                    type: 'thinking',
+                    content: text.substring(0, 200),
+                    timestamp: Date.now(),
+                });
+            });
+
+            proc.stderr?.on('data', (chunk: Buffer) => {
+                stderrBuf += chunk.toString();
+            });
+
+            proc.on('close', code => {
+                clearTimeout(timer);
+                resolve({
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT),
+                    stderr: stderrBuf.substring(0, 2000),
+                    exitCode: code ?? 0,
+                });
+            });
+
+            proc.on('error', err => {
+                clearTimeout(timer);
+                resolve({
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT),
+                    stderr: `spawn error: ${err.message}`,
+                    exitCode: 1,
+                });
+            });
         });
     }
 
@@ -294,6 +336,53 @@ export class ExternalToolHandler {
         }
     }
 
+    // ─── searchCode ────────────────────────────────────────────────────────────
+
+    async searchCode(args: { query: string; maxResults?: number }): Promise<{
+        results: Array<{ title: string; url: string; description: string }>;
+        source: 'exa' | 'brave';
+        query: string;
+    }> {
+        const maxResults = Math.min(args.maxResults ?? 5, 10);
+        const query = args.query.trim();
+
+        // Try Exa semantic code search first
+        const exaKey = vs.workspace.getConfiguration('cwtools.ai').get<string>('exaApiKey') ?? '';
+        if (exaKey) {
+            try {
+                const resp = await fetch('https://api.exa.ai/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': exaKey,
+                    },
+                    body: JSON.stringify({
+                        query,
+                        numResults: maxResults,
+                        type: 'auto',
+                        contents: { text: { maxCharacters: 300 } },
+                    }),
+                });
+                if (resp.ok) {
+                    const data = await resp.json() as {
+                        results?: Array<{ title?: string; url?: string; text?: string }>;
+                    };
+                    const results = (data.results ?? []).slice(0, maxResults).map(r => ({
+                        title: r.title ?? '',
+                        url: r.url ?? '',
+                        description: r.text ?? '',
+                    }));
+                    return { results, source: 'exa', query };
+                }
+            } catch { /* fall through to Brave fallback */ }
+        }
+
+        // Fallback: use Brave Search (or DuckDuckGo) with code-oriented query modifiers
+        const codeQuery = `site:github.com OR site:stackoverflow.com OR site:stellaris.paradoxwikis.com ${query}`;
+        const webResult = await this.searchWeb({ query: codeQuery, maxResults });
+        return { ...webResult, source: 'brave' as const, query };
+    }
+
     // ─── spawnSubAgents ──────────────────────────────────────────────────────
 
     async spawnSubAgents(args: import('../types').SpawnSubAgentsArgs): Promise<import('../types').SpawnSubAgentsResult> {
@@ -334,28 +423,27 @@ export class ExternalToolHandler {
                     timestamp: Date.now(),
                 });
 
-                // C5: Per-sub-agent file write isolation.
-                // Track writes so we can roll back on failure.
+                // new logic
                 const subAgentSnapshots: Array<{ filePath: string; previousContent: string | null }> = [];
-                const originalHook = this.ctx.onBeforeFileWrite;
-                this.ctx.onBeforeFileWrite = (filePath, prevContent) => {
-                    // Record for rollback — only first write per file per sub-agent
-                    if (!subAgentSnapshots.some(s => s.filePath === filePath)) {
-                        subAgentSnapshots.push({ filePath, previousContent: prevContent });
-                    }
-                    // Also call the original hook (chatPanel's snapshot collector)
-                    originalHook?.(filePath, prevContent);
-                };
 
                 try {
                     const result = await this.ctx.agentRunnerRef!.runSubAgent(
                         task.prompt,
                         mode,
                         this.ctx.parentRunnerOptions,
-                        undefined,
-                        this.ctx.parentTokenAccumulator
+                        (step) => {
+                            // Forward sub-agent steps upward; emit subtask_start/complete ourselves
+                        },
+                        this.ctx.parentTokenAccumulator,
+                        // Pass snapshot collector — eliminates Hook hijacking
+                        (filePath, prevContent) => {
+                            if (!subAgentSnapshots.some(s => s.filePath === filePath)) {
+                                subAgentSnapshots.push({ filePath, previousContent: prevContent });
+                            }
+                            this.ctx.onBeforeFileWrite?.(filePath, prevContent);
+                        }
                     );
-                    // Emit subtask_complete for UI
+                    // ... subtask_complete emit
                     this.ctx.onStep?.({
                         type: 'subtask_complete',
                         content: `✓ ${task.description}`,
@@ -364,35 +452,26 @@ export class ExternalToolHandler {
                     });
                     return { description: task.description, result };
                 } catch (e) {
-                    // C5: Roll back all file writes from this failed sub-agent
+                    // Rollback unchanged
                     for (const snap of subAgentSnapshots.reverse()) {
                         try {
                             if (snap.previousContent === null) {
-                                // File was created by sub-agent — delete it
-                                if (fs.existsSync(snap.filePath)) {
-                                    fs.unlinkSync(snap.filePath);
-                                }
+                                if (fs.existsSync(snap.filePath)) fs.unlinkSync(snap.filePath);
                             } else {
-                                // Restore original content
                                 fs.writeFileSync(snap.filePath, snap.previousContent, 'utf-8');
                             }
                         } catch (re) {
                             console.error(`[SubAgent] Rollback failed for ${snap.filePath}:`, re);
                         }
                     }
+                    // ... subtask_complete emit
                     this.ctx.onStep?.({
                         type: 'subtask_complete',
                         content: `✗ ${task.description}: ${e instanceof Error ? e.message : String(e)} (${subAgentSnapshots.length} file(s) rolled back)`,
                         subagentType: mode,
                         timestamp: Date.now(),
                     });
-                    return {
-                        description: task.description,
-                        result: `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}`,
-                    };
-                } finally {
-                    // Restore original hook
-                    this.ctx.onBeforeFileWrite = originalHook;
+                    return { description: task.description, result: `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}` };
                 }
             });
 

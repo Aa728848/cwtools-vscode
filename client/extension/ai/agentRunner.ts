@@ -54,18 +54,67 @@ function estimateTokenCount(text: string): number {
     const charsPerToken = CHARS_PER_TOKEN_ASCII * (1 - cjkRatio) + CHARS_PER_TOKEN_CJK * cjkRatio;
     return Math.ceil(text.length / charsPerToken);
 }
+const COMPACTION_SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
+---
+## Goal
+- [single-sentence task summary]
+
+## Constraints & Preferences
+- [user constraints, preferences, specs, or "(none)"]
+
+## Progress
+### Done
+- [completed work or "(none)"]
+
+### In Progress
+- [current work or "(none)"]
+
+### Blocked
+- [blockers or "(none)"]
+
+## Key Decisions
+- [decision and why, or "(none)"]
+
+## Next Steps
+- [ordered next actions or "(none)"]
+
+## Critical Context
+- [important technical facts, errors, open questions, or "(none)"]
+
+## Relevant Files
+- [file or directory path: why it matters, or "(none)"]
+---
+
+Rules:
+- Keep every section, even when empty.
+- Use terse bullets, not prose paragraphs.
+- Preserve exact file paths, commands, error strings, and identifiers when known.
+- Do not mention the summary process or that context was compacted.`;
+
+// WriteQueue: serializes write operations to prevent race conditions on AST/file state.
+// Each AgentRunner owns one; sub-agents get their own instance for isolated tracking.
+class WriteQueue {
+    private queue: Promise<void> = Promise.resolve();
+
+    enqueue<T>(fn: () => Promise<T>): Promise<T> {
+        return new Promise((resolve, reject) => {
+            this.queue = this.queue.then(() => fn().then(resolve, reject));
+        });
+    }
+}
+
 // Backward-compat alias for non-text token estimation (images etc.)
 const CHARS_PER_TOKEN = 4;
 // Compact when conversation exceeds this fraction of provider context
-const COMPACTION_THRESHOLD_RATIO = 0.7;
+const COMPACTION_THRESHOLD_RATIO = 0.95;
 // Default context limit if unknown
 const DEFAULT_CONTEXT_LIMIT = 128000;
 // How many recent messages to keep un-compressed during compaction
-const COMPACTION_KEEP_LAST_N = 4;
+const COMPACTION_KEEP_LAST_N = 8;
 // Mid-loop compaction: check every N iterations within reasoningLoop
 const MID_LOOP_COMPACTION_INTERVAL = 3;
 // Mid-loop compaction triggers at this fraction of context limit
-const MID_LOOP_COMPACTION_RATIO = 0.80;
+const MID_LOOP_COMPACTION_RATIO = 0.95;
 // Tool result budget: max chars per individual tool result (scaled by context limit)
 const TOOL_RESULT_BUDGET_BASE = 8000;
 // Minimum tool result budget (even for tiny context windows)
@@ -99,7 +148,7 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
     'get_file_context', 'search_mod_files', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'todo_write',
     'read_file', 'list_directory', 'get_diagnostics', 'web_fetch', 'search_web',
-    'glob_files',
+    'glob_files', 'codesearch',
 ];
 
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
@@ -111,7 +160,7 @@ const EXPLORE_MODE_TOOLS: AgentToolName[] = [
     // CWTools Deep API tools (read-only, advertised in Explore mode prompt)
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
-    'query_definition', 'query_definition_by_name',
+    'query_definition', 'query_definition_by_name', 'codesearch',
 ];
 
 /** General mode: all tools EXCEPT todo_write (research without task tracking) */
@@ -125,7 +174,7 @@ const REVIEW_MODE_TOOLS: AgentToolName[] = [
     'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
-    'web_fetch', 'search_web', 'glob_files',
+    'web_fetch', 'search_web', 'glob_files', 'codesearch',
 ];
 
 
@@ -139,11 +188,12 @@ const READ_ONLY_TOOLS = new Set<string>([
     // Newly added Deep API tools for parallel execution
     'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_static_modifiers', 'query_variables', 'glob_files'
+    'get_entity_info', 'query_static_modifiers', 'query_variables', 'glob_files', 'codesearch'
     // validate_code is intentionally omitted: it modifies the LSP game state temporarily
 ]);
 
 export class AgentRunner {
+    private writeQueue = new WriteQueue();
     constructor(
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
@@ -440,15 +490,14 @@ export class AgentRunner {
                 ? `\n\n## Pinned Context (do NOT omit):\n${[...new Set(pinnedContext)].slice(0, 30).join('\n')}`
                 : '';
 
-            // Build per-message summaries with structured tool result preservation
-            const summaryText = olderMessages
-                .filter(m => m.role !== 'system')   // L3 Fix
+             // Build structured message context for the compaction AI call.
+            // Tool results preserve file path + success/error as dense metadata.
+            const messageContext = olderMessages
+                .filter(m => m.role !== 'system')
                 .map(m => {
                     const role = m.role === 'user' ? 'User' : m.role === 'tool' ? 'Tool' : 'Assistant';
-                    // Tool messages: preserve file path + action + success/error as structured data
                     if (m.role === 'tool') {
                         const content = contentToString(m.content);
-                        // Extract key result info: success/error + file path
                         const successMatch = content.match(/"success"\s*:\s*(true|false)/);
                         const fileMatch = content.match(/"(?:file|filePath)"\s*:\s*"([^"]+)"/);
                         const errorMatch = content.match(/"(?:error|message)"\s*:\s*"([^"]{0,200})"/);
@@ -457,18 +506,31 @@ export class AgentRunner {
                             successMatch ? `success=${successMatch[1]}` : null,
                             errorMatch && successMatch?.[1] === 'false' ? `error=${errorMatch[1]}` : null,
                         ].filter(Boolean).join(' ');
-                        return `[Tool]: ${summary || content.substring(0, 500)}`;
+                        return `<${role}>: ${summary || content.substring(0, 500)}`;
                     }
-                    // M4 Fix: user messages get 500 chars; assistant get 2000
                     const maxLen = m.role === 'user' ? 500 : 2000;
                     const content = contentToString(m.content).substring(0, maxLen);
-                    return `[${role}]: ${content}`;
+                    return `<${role}>: ${content}`;
                 }).join('\n');
 
-            // If there's an existing summary, ask the AI to merge it with the new messages
-            const compactionInstruction = existingSummaryText
-                ? `Merge the existing conversation summary with the new messages below into a single updated summary.\n\n## Existing Summary:\n${existingSummaryText}\n\n## New Messages:${pinnedSection}\n\n${summaryText}`
-                : `Summarize this conversation:${pinnedSection}\n\n${summaryText}`;
+            // Build compaction instruction with the structured template.
+            // Incremental merge: prepend existing summary as <previous-summary>.
+            const compactionSystemPrompt = existingSummaryText
+                ? [
+                    `Update the anchored summary below using the conversation history above.`,
+                    `Preserve still-true details, remove stale details, and merge in the new facts.`,
+                    `<previous-summary>`,
+                    existingSummaryText,
+                    `</previous-summary>`,
+                  ].join('\n')
+                : `Create a new anchored summary from the conversation history above.`;
+
+            const compactionInstruction = [
+                compactionSystemPrompt,
+                COMPACTION_SUMMARY_TEMPLATE,
+                pinnedSection,
+                messageContext,
+            ].filter(Boolean).join('\n\n');
 
             const compactionMessages: ChatMessage[] = [
                 { role: 'system', content: this.promptBuilder.buildCompactionPrompt() },
@@ -540,7 +602,8 @@ export class AgentRunner {
         emitStep: (step: AgentStep) => void,
         mode: AgentMode,
         options?: AgentRunnerOptions,
-        tokenAccumulator?: TokenUsage
+        tokenAccumulator?: TokenUsage,
+        onFileWrite?: (filePath: string, prevContent: string | null) => void
     ): Promise<string> {
         let iteration = 0;
         // M2 Fix: track consecutive identical signatures via counter,
@@ -776,79 +839,116 @@ export class AgentRunner {
                 parsedCalls.push({ toolName, toolArgs, toolArgsParseError, toolCall });
             }
 
-            const toolResults: unknown[] = new Array(parsedCalls.length);
-            let i = 0;
-            while (i < parsedCalls.length) {
-                options?.abortSignal?.throwIfAborted();
-                const ci = parsedCalls[i]!;  
-                const { toolName, toolArgs, toolArgsParseError, toolCall } = ci;
+            // Tool Call Repair: case-insensitive correction of hallucinated tool names.
+            // Prevents doom-loop false positives when LLM emits slightly misspelled names.
+            const knownNames = availableTools.map(t => t.function.name);
+            for (const tc of toolCalls) {
+                const raw = tc.function.name;
+                // Quick check: if exact match, skip
+                if (knownNames.includes(raw)) continue;
+                // Case-insensitive match
+                const matched = knownNames.find(n => n.toLowerCase() === raw.toLowerCase());
+                if (matched) {
+                    emitStep({
+                        type: 'tool_call',
+                        content: `修复工具名: ${raw} → ${matched}`,
+                        toolName: matched as AgentToolName,
+                        timestamp: Date.now(),
+                    });
+                    tc.function.name = matched;
+                }
+                // If completely unmatched, leave as-is — the tool will fail with a clear
+                // error, which triggers analyze_diagnostic_error reflection rather than doom-loop.
+            }
 
-                // If arguments failed to parse as JSON, short-circuit and return an error
-                // so the AI knows to retry with properly formatted arguments.
-                if (toolArgsParseError) {
-                    toolResults[i] = { ok: false, error: `Tool argument JSON parse failed — ${toolArgsParseError}. Please retry with valid JSON arguments.` };
-                    // Fix #10: toolCall unused in error path — no need for void statement
-                    i++;
+            const toolResults: unknown[] = new Array(parsedCalls.length);
+
+            // Fetch fs module lazily if we need it for snapshots
+            let fsModule: typeof import('fs') | undefined;
+
+            for (let i = 0; i < parsedCalls.length; i++) {
+                const ci = parsedCalls[i]!;
+                const { toolName, toolArgs, toolCall } = ci;
+
+                if (ci.toolArgsParseError) {
+                    toolResults[i] = { ok: false, error: `Tool argument JSON parse failed — ${ci.toolArgsParseError}. Please retry with valid JSON arguments.` };
                     continue;
                 }
 
                 if (READ_ONLY_TOOLS.has(toolName)) {
-                    // Collect a batch of consecutive read-only tools (skip any with parse errors)
-                    const batch: Array<{ idx: number; toolName: AgentToolName; toolArgs: Record<string, unknown>; toolCall: typeof toolCalls[0] }> = [];
-                    while (i < parsedCalls.length && READ_ONLY_TOOLS.has(parsedCalls[i]!.toolName) && !parsedCalls[i]!.toolArgsParseError) {  
-                        const pc = parsedCalls[i]!;  
-                        batch.push({ idx: i, toolName: pc.toolName, toolArgs: pc.toolArgs, toolCall: pc.toolCall });
+                    // Collect consecutive read-only tools to batch them in parallel
+                    const batchIndices: number[] = [i];
+                    while (i + 1 < parsedCalls.length && READ_ONLY_TOOLS.has(parsedCalls[i + 1]!.toolName) && !parsedCalls[i + 1]!.toolArgsParseError) {
                         i++;
+                        batchIndices.push(i);
                     }
-                    // Execute batch in parallel
-                    await Promise.all(batch.map(async ({ idx, toolName: tn, toolArgs: ta }) => {
+                    await Promise.all(batchIndices.map(async idx => {
                         try {
-                            toolResults[idx] = await this.toolExecutor.execute(tn, ta);
+                            const callInfo = parsedCalls[idx]!;
+                            toolResults[idx] = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs);
                         } catch (e) {
                             toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
                         }
                     }));
-                    // Fix #10: batchStart was only used by void — removed
                 } else {
-                    // Write or interactive tool — execute serially
-                    const callIndex = i;
+                    // Write tool: execute serially taking advantage of WriteQueue
                     const filePath = (toolArgs['filePath'] as string) ?? (toolArgs['file'] as string) ?? '';
                     const isSupersededWrite = WRITE_TOOLS.has(toolName) && filePath &&
-                        lastWriteIndexByFile.get(filePath) !== callIndex;
+                        lastWriteIndexByFile.get(filePath) !== i;
 
-                    try {
-                        if (isSupersededWrite) {
-                            toolResults[i] = { skipped: true, message: `已被后续对 ${filePath} 的写入操作覆盖，跳过本次写入` };
-                        } else if (toolName === 'write_file') {
-                            const content = (toolArgs['content'] as string) || '';
-                            let openCount = 0, closeCount = 0;
-                            for (let c = 0; c < content.length; c++) {
-                                if (content[c] === '{') openCount++;
-                                if (content[c] === '}') closeCount++;
+                    await this.writeQueue.enqueue(async () => {
+                        try {
+                            // Sub-agent snapshot isolate hook
+                            if (onFileWrite && filePath) {
+                                if (!fsModule) fsModule = await import('fs');
+                                const prev = fsModule.existsSync(filePath) ? fsModule.readFileSync(filePath, 'utf8') : null;
+                                onFileWrite(filePath, prev);
                             }
-                            if (openCount !== closeCount) {
-                                toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). Please fix your code, use analyze_diagnostic_error to reflect, and retry.` };
+
+                            if (isSupersededWrite) {
+                                toolResults[i] = { skipped: true, message: `已被后续对 ${filePath} 的写入操作覆盖，跳过本次写入` };
+                            } else if (toolName === 'write_file') {
+                                const content = (toolArgs['content'] as string) || '';
+                                let openCount = 0, closeCount = 0;
+                                for (let c = 0; c < content.length; c++) {
+                                    if (content[c] === '{') openCount++;
+                                    if (content[c] === '}') closeCount++;
+                                }
+                                if (openCount !== closeCount) {
+                                    toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). Please fix your code, use analyze_diagnostic_error to reflect, and retry.` };
+                                } else {
+                                    const args = (confirmedWrittenFiles.has(filePath)) ? { ...toolArgs, _autoApply: true } : toolArgs;
+                                    toolResults[i] = await this.toolExecutor.execute(toolName, args);
+                                    const r = toolResults[i] as Record<string, unknown>;
+                                    if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
+                                }
+                            } else if (WRITE_TOOLS.has(toolName) && filePath && confirmedWrittenFiles.has(filePath)) {
+                                toolResults[i] = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true });
                             } else {
-                                const args = (confirmedWrittenFiles.has(filePath)) ? { ...toolArgs, _autoApply: true } : toolArgs;
-                                toolResults[i] = await this.toolExecutor.execute(toolName, args);
-                                const r = toolResults[i] as Record<string, unknown>;
-                                if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
+                                toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs);
+                                if (WRITE_TOOLS.has(toolName) && filePath) {
+                                    const r = toolResults[i] as Record<string, unknown>;
+                                    if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
+                                }
                             }
-                        } else if (WRITE_TOOLS.has(toolName) && filePath && confirmedWrittenFiles.has(filePath)) {
-                            toolResults[i] = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true });
-                        } else {
-                            toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs);
-                            if (WRITE_TOOLS.has(toolName) && filePath) {
-                                const r = toolResults[i] as Record<string, unknown>;
-                                if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
-                            }
+                        } catch (e) {
+                            toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
                         }
-                    } catch (e) {
-                        toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
-                    }
-                    // Fix #10: removed void toolCall — variable unused in this branch
-                    i++;
+                    });
                 }
+            }
+
+            // Emergency compaction: if a single batch of tool results pushed the
+            // conversation past 98% of context limit, force-compact immediately
+            // rather than waiting for the next MID_LOOP_COMPACTION_INTERVAL check.
+            const emergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+            if (emergencyTokens > contextLimit * 0.98) {
+                emitStep({
+                    type: 'compaction',
+                    content: `紧急上下文压缩 (${emergencyTokens} tokens > ${contextLimit} 上限)`,
+                    timestamp: Date.now(),
+                });
+                this.compactMessagesInPlace(messages, toolResultBudget);
             }
 
             // If forceStop was set in the inner loop, exit the outer while now
@@ -1185,7 +1285,8 @@ export class AgentRunner {
         mode: 'explore' | 'general' | 'build',
         parentOptions?: AgentRunnerOptions,
         onStep?: (step: AgentStep) => void,
-        parentAccumulator?: TokenUsage
+        parentAccumulator?: TokenUsage,
+        onFileWrite?: (filePath: string, prevContent: string | null) => void,
     ): Promise<string> {
         // P3: sub-agents use slim CWTOOLS.md (only mod info + namespaces)
         // to avoid bloating narrow-scope sub-agent contexts with full project rules
@@ -1210,7 +1311,7 @@ export class AgentRunner {
         const subTokens: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
 
         try {
-            const result = await this.reasoningLoop(messages, onStep ?? (() => { }), mode, subOptions, subTokens);
+            const result = await this.reasoningLoop(messages, onStep ?? (() => { }), mode, subOptions, subTokens, onFileWrite);
             // L8 Fix: merge sub-agent token usage into parent accumulator
             if (parentAccumulator) {
                 parentAccumulator.total += subTokens.total;

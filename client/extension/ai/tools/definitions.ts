@@ -369,6 +369,21 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'codesearch',
+            description: 'Search code repositories and developer documentation semantically (powered by Exa API if configured). Use for finding examples of PDXScript patterns, mod implementation references, or any code-level search. Falls back to Brave Search with code-specific query modifiers if no Exa key configured.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Code search query. Be specific about the pattern, API, or function name. Example: "Stellaris on_action on_fleet_combat implementation"' },
+                    maxResults: { type: 'number', description: 'Max results to return (default 5, max 10)' },
+                },
+                required: ['query'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'apply_patch',
             description: 'Apply a unified diff patch to one or more files atomically. Use this instead of multiple edit_file calls when you have a git-style patch. All hunks must succeed or none are written.',
             parameters: {

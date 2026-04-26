@@ -219,7 +219,7 @@ Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`
 ## Plan Mode Workflow
 
 ### Phase 1 — Explore (read-only tools only)
-\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`web_fetch\`, \`search_web\`
+\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
 
 ### Phase 2 — Analyze
 Use \`query_scope\`, \`query_rules\`, \`query_references\` to understand patterns.
@@ -261,7 +261,7 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 ## Explore Mode Guidelines
 - **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
 - **AST-level tools** (read-only, faster): \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\`, \`get_entity_info\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`
-- **Web tools**: \`web_fetch\`, \`search_web\` — look up game wiki, Paradox forum, or modding docs
+- **Web tools**: \`web_fetch\`, \`search_web\`, \`codesearch\` — look up game wiki, Paradox forum, or modding docs
 - **ALWAYS prefer AST-level tools over file-system search** — they are indexed, scope-aware, and consume far less context
 
 ## Goal
@@ -647,25 +647,11 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
      * Preserves game-specific identifiers and modding context.
      */
     buildCompactionPrompt(): string {
-        // P4: inject project entity protection hints from CWTOOLS.md
+        // Inject project entity protection hints from CWTOOLS.md
         const parsed = this.parseProjectRules();
         const projectProtection = parsed ? this.buildCompactionProtectionHint(parsed) : '';
 
-        return `You are a conversation summarizer for a Paradox PDXScript modding AI session.
-
-Produce a dense, information-preserving summary covering:
-- Files modified or created, their purpose, and key code within them
-- PDXScript identifiers defined (event IDs, trigger names, effect names, relic keys, etc.)
-- Decisions made about architecture or naming conventions
-- Current task state: what was completed, what is still pending
-- Any LSP errors encountered and how they were resolved
-
-Rules:
-- Preserve ALL PDXScript identifiers verbatim (e.g. kuat_ancient.dig.1, r_kuat_matrix, building_kuat_nexus)
-- Preserve ALL file paths verbatim
-- No preamble, no conclusion — just the dense information block
-- Use bullet points for clarity
-- Max 1000 words${projectProtection}`;
+        return `You are a conversation summarizer. Follow the template in the user message exactly. Output ONLY the filled template, no preamble, no commentary.${projectProtection}`;
     }
 
     /**

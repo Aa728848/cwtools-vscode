@@ -408,6 +408,7 @@ export type ToolArgs =
     | EditFileArgs
     | ListDirectoryArgs
     | SpawnSubAgentsArgs
+    | CodesearchArgs
     | AnalyzeDiagnosticErrorArgs;
 
 export type ToolResult =
@@ -450,6 +451,7 @@ export type AgentToolName =
     | 'lsp_operation'
     | 'web_fetch'
     | 'search_web'
+    | 'codesearch'
     | 'run_command'
     | 'apply_patch'
     | 'multiedit'
@@ -542,6 +544,11 @@ export interface ListDirectoryResult {
         size?: number;
     }>;
     path: string;
+}
+
+export interface CodesearchArgs {
+    query: string;
+    maxResults?: number;
 }
 
 export interface SpawnSubAgentsArgs {
@@ -814,6 +821,7 @@ export interface PanelSettings {
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     /** Brave Search API key for web_search tool (optional) */
     braveSearchApiKey?: string;
+    exaApiKey?: string;
     inlineCompletion: {
         enabled: boolean;
         provider: string;

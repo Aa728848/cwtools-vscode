@@ -321,10 +321,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Opens the chat panel if it's not visible.
      */
     async sendProgrammaticMessage(text: string): Promise<void> {
-        // Ensure the panel is visible
         await vs.commands.executeCommand('cwtools.aiChat.focus');
-        // Short delay to allow panel to initialize if just opened
-        await new Promise(r => setTimeout(r, 200));
+        if (this.view && !this.view.visible) {
+            await new Promise<void>(resolve => {
+                const d = vs.Disposable.from(
+                    this.view!.onDidChangeVisibility(() => {
+                        if (this.view!.visible) { d.dispose(); resolve(); }
+                    }),
+                );
+                setTimeout(() => { d.dispose(); resolve(); }, 5000);
+            });
+        }
         await this.handleUserMessage(text);
     }
 

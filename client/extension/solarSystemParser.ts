@@ -5,6 +5,7 @@
  */
 
 // ─── Data Types ─────────────────────────────────────────────────────────────
+import { safeEval } from './exprEval';
 
 export type ValueOrRange =
     | { type: 'fixed'; value: number }
@@ -299,7 +300,7 @@ class Parser {
         }
         try {
             if (/^[0-9.+\-*/\s()]+$/.test(inner)) {
-                const result = new Function(`return (${inner})`)();
+                const result = safeEval(inner);
                 return typeof result === 'number' && !isNaN(result) ? result : expr;
             }
         } catch {

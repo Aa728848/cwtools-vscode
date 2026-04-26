@@ -241,7 +241,7 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
     // Update LocMap on document changes (active unsaved typing)
     context.subscriptions.push(
         vs.workspace.onDidChangeTextDocument(event => {
-            if (event.document.fileName.endsWith('.yml')) {
+            if (/localisation[^/\\]*[\/\\].*\.yml$/.test(event.document.fileName)) {
                 parseYmlContent(event.document.uri, event.document.getText());
             }
             const editor = vs.window.activeTextEditor;
@@ -259,7 +259,7 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
     }
 
     // Set up file system watchers for background tracking of .yml files
-    const watcher = vs.workspace.createFileSystemWatcher('**/*.yml');
+    const watcher = vs.workspace.createFileSystemWatcher('**/{localisation,localisation_synced,localization}/**/*.yml');
     context.subscriptions.push(watcher);
 
     watcher.onDidChange(async uri => {

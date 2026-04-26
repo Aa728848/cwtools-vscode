@@ -688,7 +688,7 @@ function showTip(el: GuiElement, e: MouseEvent) {
     const c = COLORS[el.type] ?? DEFAULT_COLOR;
     const { w, h } = effectiveSize(el);
     let html = `<div class="tip-type" style="color:${c.border}">${c.tag}</div>`;
-    html += `<div class="tip-name">${el.name || '(unnamed)'}</div>`;
+    html += `<div class="tip-name">${escHtml(el.name || '(unnamed)')}</div>`;
     html += `<table>`;
     html += `<tr><td>Pos</td><td>(${el.position.x}, ${el.position.y})</td></tr>`;
     html += `<tr><td>Size</td><td>${w} × ${h}</td></tr>`;
@@ -698,16 +698,16 @@ function showTip(el: GuiElement, e: MouseEvent) {
     if (el.rotation !== undefined && el.rotation !== 0) html += `<tr><td>Rotation</td><td>${el.rotation} rad</td></tr>`;
     if (el.alpha !== undefined && el.alpha !== 1) html += `<tr><td>Alpha</td><td>${el.alpha}</td></tr>`;
     if (el.centerPosition) html += `<tr><td>CenterPos</td><td>yes</td></tr>`;
-    if (el.spriteKey) html += `<tr><td>Sprite</td><td>${el.spriteKey}</td></tr>`;
+    if (el.spriteKey) html += `<tr><td>Sprite</td><td>${escHtml(el.spriteKey)}</td></tr>`;
     if (el.spriteTexture) {
         const texPath = el.spriteTexture.startsWith('dds:') || el.spriteTexture.startsWith('tga:')
             ? el.spriteTexture.substring(4) : el.spriteTexture;
         html += `<tr><td>Texture</td><td>${texPath}</td></tr>`;
     }
-    if (el.text) html += `<tr><td>Text</td><td>${el.text}</td></tr>`;
+    if (el.text) html += `<tr><td>Text</td><td>${escHtml(el.text)}</td></tr>`;
     if (el.font) html += `<tr><td>Font</td><td>${el.font}</td></tr>`;
     for (const [k, v] of Object.entries(el.properties)) {
-        html += `<tr><td>${k}</td><td>${v}</td></tr>`;
+        html += `<tr><td>${escHtml(k)}</td><td>${escHtml(String(v))}</td></tr>`;
     }
     html += `</table>`;
     html += `<div class="tip-line">Line ${el.line} · Click to jump</div>`;

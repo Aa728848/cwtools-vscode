@@ -486,7 +486,8 @@ export class LspToolHandler {
             path.join(this.ctx.workspaceRoot, 'submodules', 'cwtools-stellaris-config', 'config'),
         ];
 
-        const ext = vs.extensions.getExtension('tboby.cwtools-vscode') ??
+        const ext = vs.extensions.getExtension('Eddy.eddy-stellaris-cwt') ??
+            vs.extensions.getExtension('tboby.cwtools-vscode') ??
             vs.extensions.getExtension('cwtools.cwtools-vscode');
         if (ext) {
             configPaths.push(path.join(ext.extensionPath, 'config'));

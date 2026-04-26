@@ -66,10 +66,14 @@ jobs:
               PRERELEASE=$(jq -r '.isPrerelease // false' /tmp/release.json)
 
               echo "Creating release on Gitee..."
+              BODY_SANITIZED=$(echo "$BODY" | head -c 65535)
+              if [ -z "$BODY_SANITIZED" ]; then
+                BODY_SANITIZED="$TAG"
+              fi
               RESP=$(curl -s -w "\n%{http_code}" -X POST "$GITEE_API/repos/$REPO/releases?access_token=$GITEE_TOKEN" \
                 -H "Content-Type: application/json" \
-                -d "$(jq -n --arg tag "$TAG" --arg name "$NAME" --arg prerelease "$PRERELEASE" \
-                  '{tag_name: $tag, name: $name, body: "", prerelease: $prerelease, target_commitish: "main"}')")
+                -d "$(jq -n --arg tag "$TAG" --arg name "$NAME" --arg body "$BODY_SANITIZED" --arg prerelease "$PRERELEASE" \
+                  '{tag_name: $tag, name: $name, body: $body, prerelease: $prerelease, target_commitish: "main"}')")
               HTTP_CODE=$(echo "$RESP" | tail -1)
               RESP_BODY=$(echo "$RESP" | sed '$d')
               echo "Create release response: HTTP $HTTP_CODE"

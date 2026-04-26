@@ -228,9 +228,9 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     </div>
                     <div class="settings-hint">填写后 web_search 工具将使用 Brave Search API，结果质量更高。Key 请在 <a href="https://api.search.brave.com/" target="_blank" rel="noopener">api.search.brave.com</a> 获取。</div>
                     <label class="settings-label">🔎 Exa API Key <span style="opacity:0.5;font-weight:400">(可选，用于 codesearch 工具)</span></label>
-                    <div class="key-row">
+                    <div class="settings-key-row">
                         <input class="settings-input" id="exaApiKey" type="password" placeholder="留空则使用 Brave/DuckDuckGo 降级搜索" autocomplete="off" />
-                        <button class="key-toggle-btn" onclick="var k=document.getElementById('exaApiKey');k.type=k.type==='password'?'text':'password';">👁</button>
+                        <button class="key-toggle-btn" id="exaKeyToggleBtn" onclick="var k=document.getElementById('exaApiKey');k.type=k.type==='password'?'text':'password';">👁</button>
                     </div>
                     <div class="settings-hint">填写后 codesearch 工具将使用 Exa 语义代码搜索，结果质量更高。Key 请在 <a href="https://dashboard.exa.ai/" target="_blank" rel="noopener">dashboard.exa.ai</a> 获取。</div>
                 </div>

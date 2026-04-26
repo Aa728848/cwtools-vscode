@@ -28,53 +28,68 @@ jobs:
 
   sync-releases:
     if: github.event_name == 'release' || inputs.sync_all_releases
+    needs: sync-repo
     runs-on: ubuntu-latest
     steps:
       - name: Sync releases to Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -e
           REPO="cChen2422/cwtools-vscode"
           GH_REPO="Aa728848/cwtools-vscode"
           GITEE_API="https://gitee.com/api/v5"
 
+          echo "=== Waiting for tags to sync ==="
+          sleep 10
+
           gh release list --repo "$GH_REPO" --limit 100 --json tagName |
             jq -r '.[].tagName' |
             while IFS= read -r TAG; do
               echo "=== Syncing release: $TAG ==="
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-                "$GITEE_API/repos/$REPO/releases/tags/$TAG?access_token=$GITEE_TOKEN")
+
+              STATUS=$(curl -s -o /tmp/gitee_check.json -w "%{http_code}" \
+                "$GITEE_API/repos/$REPO/releases/tags/$TAG?access_token=$GITEE_TOKEN" 2>&1)
+              echo "Check existing: HTTP $STATUS"
               if [ "$STATUS" = "200" ]; then
                 echo "Skipping (already exists)"
                 continue
               fi
 
-              gh release view "$TAG" --repo "$GH_REPO" --json name,body,isPrerelease,isDraft > /tmp/release.json
-
+              echo "Fetching release info from GitHub..."
+              gh release view "$TAG" --repo "$GH_REPO" --json name,body,isPrerelease > /tmp/release.json
               NAME=$(jq -r '.name // empty' /tmp/release.json)
               BODY=$(jq -r '.body // empty' /tmp/release.json)
               PRERELEASE=$(jq -r '.isPrerelease // false' /tmp/release.json)
 
-              BODY_FILE="/tmp/body.txt"
-              echo "$BODY" > "$BODY_FILE"
-
               echo "Creating release on Gitee..."
-              curl -s -X POST "$GITEE_API/repos/$REPO/releases?access_token=$GITEE_TOKEN" \
+              RESP=$(curl -s -w "\n%{http_code}" -X POST "$GITEE_API/repos/$REPO/releases?access_token=$GITEE_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "$(jq -n --arg tag "$TAG" --arg name "$NAME" --arg prerelease "$PRERELEASE" \
-                  '{tag_name: $tag, name: $name, body: "", prerelease: $prerelease, target_commitish: "main"}')" \
-                > /dev/null
+                  '{tag_name: $tag, name: $name, body: "", prerelease: $prerelease, target_commitish: "main"}')")
+              HTTP_CODE=$(echo "$RESP" | tail -1)
+              RESP_BODY=$(echo "$RESP" | sed '$d')
+              echo "Create release response: HTTP $HTTP_CODE"
+              echo "Response: $RESP_BODY"
 
+              if [ "$HTTP_CODE" != "201" ]; then
+                echo "Failed to create release, skipping assets"
+                continue
+              fi
+
+              mkdir -p /tmp/assets
               gh release view "$TAG" --repo "$GH_REPO" --json assets -q '.assets[]?.name // empty' |
                 while IFS= read -r ASSET_NAME; do
                   [ -z "$ASSET_NAME" ] && continue
                   echo "  Downloading asset: $ASSET_NAME"
-                  gh release download "$TAG" --repo "$GH_REPO" -p "$ASSET_NAME" -D /tmp/assets/
+                  gh release download "$TAG" --repo "$GH_REPO" -p "$ASSET_NAME" -D /tmp/assets/ 2>&1
                   echo "  Uploading to Gitee..."
-                  curl -s -X POST \
+                  RESP=$(curl -s -w "\n%{http_code}" -X POST \
                     "$GITEE_API/repos/$REPO/releases/tags/$TAG/attach_files?access_token=$GITEE_TOKEN" \
-                    -F "file=@/tmp/assets/$ASSET_NAME" > /dev/null
+                    -F "file=@/tmp/assets/$ASSET_NAME")
+                  HTTP_CODE=$(echo "$RESP" | tail -1)
+                  echo "  Asset upload: HTTP $HTTP_CODE"
                 done
             done

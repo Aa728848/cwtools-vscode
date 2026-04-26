@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as readline from 'readline';
+import { parsePdx, PdxNode } from '../../guiParser';
 import type {
     ValidationError,
 } from '../types';
@@ -306,6 +307,109 @@ export class FileToolHandler {
             success: true, message, diff, diagnostics: nearbyDiags,
             ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
         } as any;
+    }
+
+    // ─── astMutate ───────────────────────────────────────────────────────────
+
+    async astMutate(args: import('../types').AstMutateArgs): Promise<import('../types').AstMutateResult> {
+        if (!args.filePath || typeof args.filePath !== 'string') {
+            return {
+                success: false,
+                message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。',
+            } as any;
+        }
+        try {
+            args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
+        } catch (e) {
+            return { success: false, message: String(e) };
+        }
+
+        const filePath = args.filePath;
+        const { content: originalContent, hasBom } = this.readTextFile(filePath);
+        this.ctx.onBeforeFileWrite?.(filePath, originalContent);
+
+        let nodes: PdxNode[] = [];
+        try {
+            nodes = parsePdx(originalContent);
+        } catch (e) {
+            return { success: false, message: `AST parsing failed: ${e}` };
+        }
+
+        let currentLevel = nodes;
+        let matchedNode: PdxNode | undefined;
+        let parentContext = '';
+
+        for (const target of args.targetPath) {
+            const fuzzyMatch = currentLevel.find(n => {
+                const kv = n.value !== undefined ? `${n.key}=${n.value}` : n.key;
+                return kv.toLowerCase().includes(target.toLowerCase());
+            });
+
+            if (!fuzzyMatch) {
+                const available = currentLevel.map(n => n.value !== undefined ? `${n.key}=${n.value}` : n.key).slice(0, 10).join(', ');
+                return {
+                    success: false,
+                    message: `AST traversal failed. Could not find node matching '${target}' in ${parentContext || 'root'}. Available nodes: [${available}${currentLevel.length > 10 ? '...' : ''}]`
+                };
+            }
+
+            matchedNode = fuzzyMatch;
+            currentLevel = fuzzyMatch.children || [];
+            parentContext = target;
+        }
+
+        if (!matchedNode) {
+            return { success: false, message: 'AST traversal failed. Empty target path?' };
+        }
+
+        if ((args.action === 'append' || args.action === 'prepend') && matchedNode.endLine === undefined) {
+             return { success: false, message: `AST node '${matchedNode.key}' is not a block. Cannot ${args.action}.` };
+        }
+
+        const lines = originalContent.split('\n');
+        const startLineIdx = Math.max(0, matchedNode.line - 1);
+        const endLineIdx = matchedNode.endLine ? Math.max(0, matchedNode.endLine - 1) : startLineIdx;
+
+        const ending = originalContent.includes('\r\n') ? '\r\n' : '\n';
+        const payloadLines = args.payload ? args.payload.replace(/\r\n/g, '\n').split('\n').map((l: string) => l + (ending === '\r\n' ? '\r' : '')) : [];
+
+        let newLines = [...lines];
+        if (args.action === 'replace') {
+            newLines.splice(startLineIdx, endLineIdx - startLineIdx + 1, ...payloadLines);
+        } else if (args.action === 'delete') {
+            newLines.splice(startLineIdx, endLineIdx - startLineIdx + 1);
+        } else if (args.action === 'prepend') {
+            newLines.splice(startLineIdx + 1, 0, ...payloadLines);
+        } else if (args.action === 'append') {
+            newLines.splice(endLineIdx, 0, ...payloadLines);
+        }
+
+        const newContent = newLines.join('\n');
+        const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
+
+        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
+            const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `ast_${Date.now()}`);
+            if (!confirmed) {
+                return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
+            }
+        } else if (this.ctx.onAutoWritten) {
+            this.ctx.onAutoWritten(filePath, false);
+        }
+
+        try {
+            this.writeTextFile(filePath, newContent, hasBom, args.encoding);
+        } catch (e) {
+            return { success: false, message: `写入失败: ${String(e)}` };
+        }
+
+        const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+        return {
+            success: true,
+            nodeFound: true,
+            message: `AST surgery successful (${args.action} on ${args.targetPath.join(' -> ')}). 文件已更新: ${path.basename(filePath)}`,
+            diff,
+            diagnostics
+        };
     }
 
     // ─── multiEdit ───────────────────────────────────────────────────────────

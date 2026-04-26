@@ -407,7 +407,7 @@ export type ToolArgs =
     | WriteFileArgs
     | EditFileArgs
     | ListDirectoryArgs
-    | TaskArgs
+    | SpawnSubAgentsArgs
     | AnalyzeDiagnosticErrorArgs;
 
 export type ToolResult =
@@ -426,7 +426,7 @@ export type ToolResult =
     | WriteFileResult
     | EditFileResult
     | ListDirectoryResult
-    | TaskResult
+    | SpawnSubAgentsResult
     | AnalyzeDiagnosticErrorResult;
 
 export type AgentToolName =
@@ -453,7 +453,8 @@ export type AgentToolName =
     | 'run_command'
     | 'apply_patch'
     | 'multiedit'
-    | 'task'
+    | 'ast_mutate'
+    | 'spawn_sub_agents'
     | 'analyze_diagnostic_error'
     // ── CWTools Deep API tools ──
     | 'query_definition'
@@ -517,6 +518,18 @@ export interface EditFileResult {
     pendingDiff?: string;
 }
 
+export interface AstMutateArgs {
+    filePath: string;
+    targetPath: string[];
+    action: 'replace' | 'append' | 'prepend' | 'delete';
+    payload?: string;
+    encoding?: string;
+}
+
+export interface AstMutateResult extends EditFileResult {
+    nodeFound?: boolean;
+}
+
 export interface ListDirectoryArgs {
     directory: string;
     recursive?: boolean;
@@ -531,19 +544,19 @@ export interface ListDirectoryResult {
     path: string;
 }
 
-export interface TaskArgs {
+export interface SpawnSubAgentsArgs {
     tasks?: Array<{
         description: string;
         prompt: string;
-        subagent_type?: 'explore' | 'general';
+        subagent_type?: 'build' | 'explore' | 'general';
     }>;
     // Legacy single task support
     description?: string;
     prompt?: string;
-    subagent_type?: 'explore' | 'general';
+    subagent_type?: 'build' | 'explore' | 'general';
 }
 
-export interface TaskResult {
+export interface SpawnSubAgentsResult {
     results: Array<{
         description: string;
         result: string;

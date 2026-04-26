@@ -207,8 +207,8 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.searchWeb(args as any); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any); break;
-            case 'task':
-                result = await this.externalHandler.dispatchSubTask(args as any); break;
+            case 'spawn_sub_agents':
+                result = await this.externalHandler.spawnSubAgents(args as any); break;
             case 'analyze_diagnostic_error':
                 result = {
                     success: true,

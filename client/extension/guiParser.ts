@@ -153,7 +153,7 @@ function isIdentCont(ch: string): boolean {
 
 // ─── Parser ─────────────────────────────────────────────────────────────────
 
-interface PdxNode {
+export interface PdxNode {
     key: string;
     line: number;
     endLine?: number;  // line of closing brace for block nodes
@@ -539,6 +539,12 @@ function buildElement(type: string, nodes: PdxNode[], line: number, endLine: num
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
+
+export function parsePdx(content: string): PdxNode[] {
+    const tokens = tokenize(content);
+    const parser = new Parser(tokens);
+    return parser.parse();
+}
 
 export function parseGuiFile(content: string, spriteIndex: Map<string, SpriteInfo>): GuiElement[] {
     const tokens = tokenize(content);

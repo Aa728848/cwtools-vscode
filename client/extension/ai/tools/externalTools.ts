@@ -24,7 +24,7 @@ export interface ExternalToolContext {
     agentRunnerRef?: {
         runSubAgent(
             prompt: string,
-            mode: 'explore' | 'general',
+            mode: 'explore' | 'general' | 'build',
             parentOptions?: import('../agentRunner').AgentRunnerOptions,
             onStep?: (step: import('../types').AgentStep) => void,
             parentAccumulator?: import('../types').TokenUsage
@@ -262,9 +262,9 @@ export class ExternalToolHandler {
         }
     }
 
-    // ─── dispatchSubTask ─────────────────────────────────────────────────────
+    // ─── spawnSubAgents ──────────────────────────────────────────────────────
 
-    async dispatchSubTask(args: import('../types').TaskArgs): Promise<import('../types').TaskResult> {
+    async spawnSubAgents(args: import('../types').SpawnSubAgentsArgs): Promise<import('../types').SpawnSubAgentsResult> {
         if (!this.ctx.agentRunnerRef) {
             return {
                 results: [{
@@ -293,7 +293,7 @@ export class ExternalToolHandler {
         
         try {
             const promises = tasksToRun.map(async (task, idx) => {
-                const mode = (task.subagent_type ?? 'general') as 'explore' | 'general';
+                const mode = (task.subagent_type ?? 'build') as 'explore' | 'general' | 'build';
                 // Emit subtask_start for UI progress visualization
                 this.ctx.onStep?.({
                     type: 'subtask_start',

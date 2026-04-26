@@ -412,8 +412,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
-            name: 'task',
-            description: 'Dispatch one or more sub-tasks to specialized sub-agents for research/exploration. They run independently and in parallel (up to 3). They return findings as text and CANNOT write files. Use "explore" for codebase exploration (read-only), "general" for research (all read + web tools).',
+            name: 'spawn_sub_agents',
+            description: 'Dispatch one or more sub-tasks to specialized sub-agents. They run independently and in parallel (up to 3). They return findings as text. Use "build" for editing code directly, "explore" for codebase exploration (read-only), "general" for research (all read + web tools).',
             parameters: {
                 type: 'object',
                 properties: {
@@ -425,7 +425,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                             properties: {
                                 description: { type: 'string', description: 'Short label for this sub-task (shown in UI)' },
                                 prompt: { type: 'string', description: 'Detailed prompt for the sub-agent. Include all context it needs.' },
-                                subagent_type: { type: 'string', enum: ['explore', 'general'], description: 'Sub-agent mode. Default: "general"' },
+                                subagent_type: { type: 'string', enum: ['build', 'explore', 'general'], description: 'Sub-agent mode. Default: "build"' },
                             },
                             required: ['description', 'prompt'],
                         },

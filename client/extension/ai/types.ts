@@ -96,6 +96,8 @@ export interface AIUserConfig {
     maxContextTokens: number;
     /** Agent file write mode */
     agentFileWriteMode: 'confirm' | 'auto';
+    /** Forced Reflection/Thinking Mode */
+    forcedThinkingMode: boolean;
     /** Reasoning effort / thinking depth (used by DeepSeek, OpenAI, Qwen, Gemini etc.) */
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     inlineCompletion: {
@@ -405,7 +407,8 @@ export type ToolArgs =
     | WriteFileArgs
     | EditFileArgs
     | ListDirectoryArgs
-    | TaskArgs;
+    | TaskArgs
+    | AnalyzeDiagnosticErrorArgs;
 
 export type ToolResult =
     | QueryScopeResult
@@ -423,7 +426,8 @@ export type ToolResult =
     | WriteFileResult
     | EditFileResult
     | ListDirectoryResult
-    | TaskResult;
+    | TaskResult
+    | AnalyzeDiagnosticErrorResult;
 
 export type AgentToolName =
     | 'query_scope'
@@ -450,6 +454,7 @@ export type AgentToolName =
     | 'apply_patch'
     | 'multiedit'
     | 'task'
+    | 'analyze_diagnostic_error'
     // ── CWTools Deep API tools ──
     | 'query_definition'
     | 'query_definition_by_name'
@@ -543,6 +548,18 @@ export interface TaskResult {
         description: string;
         result: string;
     }>;
+}
+
+export interface AnalyzeDiagnosticErrorArgs {
+    file: string;
+    errorCode: string;
+    reflection: string;
+}
+
+export interface AnalyzeDiagnosticErrorResult {
+    success: boolean;
+    acknowledged: boolean;
+    message: string;
 }
 
 /** Single diagnostic entry from CWTools LSP */
@@ -776,6 +793,7 @@ export interface PanelSettings {
     endpoint: string;
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
+    forcedThinkingMode: boolean;
     /** Reasoning effort / thinking depth (multi-provider) */
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     /** Brave Search API key for web_search tool (optional) */

@@ -122,6 +122,7 @@ export class AIService {
             maxRetries: Math.max(1, cfg.get<number>('maxRetries') || 3),
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm'),
+            forcedThinkingMode: cfg.get<boolean>('forcedThinkingMode', false),
             reasoningEffort: cfg.get<'low' | 'medium' | 'high' | 'max'>('reasoningEffort', 'high'),
             inlineCompletion: {
                 enabled: cfg.get<boolean>('inlineCompletion.enabled') || false,

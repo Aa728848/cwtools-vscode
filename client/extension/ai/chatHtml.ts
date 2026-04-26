@@ -215,6 +215,11 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                         <option value="auto">自动模式 — 直接写入（高级）</option>
                     </select>
                 </div>
+                <div class="settings-toggle-row">
+                    <span class="settings-toggle-label">强制思考引擎 (Forced Reflection)</span>
+                    <label class="toggle-switch"><input type="checkbox" id="forcedThinkingMode"><span class="toggle-track"></span></label>
+                    <div class="settings-hint" style="margin-top:4px;">在出错自动修复时，强制 AI 优先调用分析工具“口述”修正方案以降低幻觉率。会增加一些请求延迟。</div>
+                </div>
                 <div class="settings-group">
                     <label class="settings-label">🔍 Brave Search API Key <span style="opacity:0.5;font-weight:400">(可选，用于 web_search 工具)</span></label>
                     <div class="settings-key-row">

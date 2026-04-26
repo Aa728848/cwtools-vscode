@@ -2048,6 +2048,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         (document.getElementById('inlineEndpoint') as HTMLInputElement).value = current.inlineCompletion?.endpoint || '';
         (document.getElementById('inlineDebounce') as HTMLInputElement).value = current.inlineCompletion?.debounceMs || 500;
         (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'confirm';
+        const ftmEl = document.getElementById('forcedThinkingMode') as HTMLInputElement | null;
+        if (ftmEl) ftmEl.checked = current.forcedThinkingMode ?? false;
         // Brave Search API key — show masked placeholder if already set
         const braveKeyEl = document.getElementById('braveSearchApiKey') as HTMLInputElement | null;
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
@@ -2347,6 +2349,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
                 maxContextTokens: parseInt((document.getElementById('settingsCtx') as HTMLInputElement).value) || 0,
                 agentFileWriteMode: (document.getElementById('agentWriteMode') as HTMLSelectElement).value,
+                forcedThinkingMode: (document.getElementById('forcedThinkingMode') as HTMLInputElement | null)?.checked ?? false,
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 braveSearchApiKey: ((document.getElementById('braveSearchApiKey') as HTMLInputElement | null)?.value || '').trim(),
                 inlineCompletion: {

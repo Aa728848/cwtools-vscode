@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ChatMessage, AgentMode } from './types';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
+import { MemoryParser } from './memoryParser';
 
 // ─── Parsed CWTOOLS.md Structure ─────────────────────────────────────────────
 
@@ -401,7 +402,11 @@ When multiple independent pieces of information are needed, batch your tool call
 
 // ─── Prompt Builder ───────────────────────────────────────────────────────────
 export class PromptBuilder {
-    constructor(private workspaceRoot: string) { }
+    private memoryParser: MemoryParser;
+
+    constructor(private workspaceRoot: string) {
+        this.memoryParser = new MemoryParser(workspaceRoot);
+    }
 
     /**
      * Detect the active game languageId from the currently open editor.
@@ -433,10 +438,25 @@ export class PromptBuilder {
         const supplement = this.getModelSupplement(providerId);
         const projectRules = this.getProjectRulesPrompt(mode);
         
+        const config = vs.workspace.getConfiguration('cwtools.ai');
+        const forcedThinkingMode = config.get<boolean>('forcedThinkingMode') === true;
+        
         let finalPrompt = '';
         if (projectRules) finalPrompt += projectRules + '\n';
+
+        const memoryPrompt = this.memoryParser.getMemoryPrompt();
+        if (memoryPrompt) finalPrompt += memoryPrompt + '\n';
+
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
+
+        if (forcedThinkingMode) {
+            finalPrompt += `
+
+## Forced Thinking Mode Active
+You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error fix. Do not guess or modify code blindly upon encountering an issue. First, reflect on the error using the tool, and only then proceed.
+`;
+        }
         
         return finalPrompt;
     }

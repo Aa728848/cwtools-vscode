@@ -46,6 +46,7 @@ export class ChatSettingsManager {
             endpoint: config.endpoint || '',
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: config.agentFileWriteMode,
+            forcedThinkingMode: config.forcedThinkingMode,
             reasoningEffort: config.reasoningEffort,
             braveSearchApiKey: (() => {
                 const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
@@ -149,6 +150,7 @@ export class ChatSettingsManager {
         await cfg.update('endpoint', settings.endpoint, vs.ConfigurationTarget.Global);
         await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);
         await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
+        await cfg.update('forcedThinkingMode', settings.forcedThinkingMode, vs.ConfigurationTarget.Global);
         await cfg.update('reasoningEffort', settings.reasoningEffort, vs.ConfigurationTarget.Global);
         await cfg.update('enabled', true, vs.ConfigurationTarget.Global);
         if (settings.inlineCompletion) {

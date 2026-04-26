@@ -139,7 +139,7 @@ export class AgentToolExecutor {
      */
     async execute(toolName: string, args: Record<string, unknown>): Promise<unknown> {
         let result: unknown;
-        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'apply_patch' | 'multiedit' | 'task') {
+        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'apply_patch' | 'multiedit' | 'task' | 'analyze_diagnostic_error') {
             // ── LSP / CWTools query tools ─────────────────────────────────
             case 'query_scope':
                 result = await this.lspHandler.queryScope(args as any); break;
@@ -209,6 +209,13 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.todoWrite(args as any); break;
             case 'task':
                 result = await this.externalHandler.dispatchSubTask(args as any); break;
+            case 'analyze_diagnostic_error':
+                result = {
+                    success: true,
+                    acknowledged: true,
+                    message: "Reflection recorded. Proceed with your planned fix in the next step."
+                };
+                break;
 
             // ── MCP tool call ────────────────────────────────────────────
             case 'mcp_call':

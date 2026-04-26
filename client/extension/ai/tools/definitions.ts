@@ -274,6 +274,22 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'analyze_diagnostic_error',
+            description: 'MANDATORY when an error occurs during file modification. Use this tool to perform a deep reflection on the error before attempting another fix. Explain what the error means, trace its root cause in the context of the current file or workspace, and outline a planned solution. The tool will simply acknowledge the reflection, forcing the engine into a thinking step.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'File where the error occurred' },
+                    errorCode: { type: 'string', description: 'The error code or message' },
+                    reflection: { type: 'string', description: 'Detailed analysis of why the error occurred and how to fix it' }
+                },
+                required: ['file', 'reflection'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'glob_files',
             description: 'Find files in the workspace using glob patterns (e.g. "**/*.txt", "common/scripted_triggers/*.txt"). Faster than list_directory for targeted file discovery. Returns absolute paths.',
             parameters: {

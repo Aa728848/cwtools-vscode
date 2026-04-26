@@ -809,6 +809,21 @@ export class AgentRunner {
                     try {
                         if (isSupersededWrite) {
                             toolResults[i] = { skipped: true, message: `已被后续对 ${filePath} 的写入操作覆盖，跳过本次写入` };
+                        } else if (toolName === 'write_file') {
+                            const content = (toolArgs['content'] as string) || '';
+                            let openCount = 0, closeCount = 0;
+                            for (let c = 0; c < content.length; c++) {
+                                if (content[c] === '{') openCount++;
+                                if (content[c] === '}') closeCount++;
+                            }
+                            if (openCount !== closeCount) {
+                                toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). Please fix your code, use analyze_diagnostic_error to reflect, and retry.` };
+                            } else {
+                                const args = (confirmedWrittenFiles.has(filePath)) ? { ...toolArgs, _autoApply: true } : toolArgs;
+                                toolResults[i] = await this.toolExecutor.execute(toolName, args);
+                                const r = toolResults[i] as Record<string, unknown>;
+                                if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
+                            }
                         } else if (WRITE_TOOLS.has(toolName) && filePath && confirmedWrittenFiles.has(filePath)) {
                             toolResults[i] = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true });
                         } else {

@@ -322,6 +322,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'trinity-large-preview-free (免费)',
             'nemotron-3-super-free (免费)',
             'hy3-preview-free (免费)',
+            'gpt-5-nano (免费)',
             // Other Supported Models
             'claude-sonnet-4-6',
             'claude-sonnet-4-5',
@@ -553,7 +554,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-5.4-mini': 200000,
     'gpt-5.4-nano': 128000,
     'gpt-5-mini': 200000,
-    'gpt-5-nano': 128000,
+    'gpt-5-nano': 400000,
     'gpt-4-vision': 128000,
 
     // ── Anthropic Claude ─────────────────────────────────────────────────────────

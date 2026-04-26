@@ -25,6 +25,7 @@ import type {
 import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
 import { UsageTracker } from './usageTracker';
+import { getChatPanelHtml } from './chatHtml';
 
 export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public static readonly viewType = 'cwtools.aiChat';
@@ -393,7 +394,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async saveSettings(settings: import('./types').PanelSettings): Promise<void> {
         const cfg = vs.workspace.getConfiguration('cwtools.ai');
         const { BUILTIN_PROVIDERS } = await import('./providers');
-        
+
         const handleDynamicModel = async (providerId: string, modelId: string, contextTokens: number) => {
             const provider = BUILTIN_PROVIDERS[providerId];
             if (provider && providerId !== 'ollama' && modelId) {
@@ -451,7 +452,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.fimMode', settings.inlineCompletion.fimMode, vs.ConfigurationTarget.Global);
         }
-        
+
         // MCP Settings
         if (settings.mcp?.servers) {
             await cfg.update('mcp.servers', settings.mcp.servers, vs.ConfigurationTarget.Global);
@@ -476,7 +477,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const { getEffectiveEndpoint } = await import('./providers');
         const saved = this.aiService.getConfig();
         const endpoint = endpointOverride || getEffectiveEndpoint(providerId, saved.endpoint);
-        
+
         let apiKey = apiKeyOverride;
         if (!apiKey) apiKey = await this.aiService.getKeyForProvider(providerId) || '';
 
@@ -509,7 +510,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     const dynModels = modelList.map((m: any) => m.id);
                     const dynContexts: Record<string, number> = {};
                     const { getModelContextTokens } = await import('./providers');
-                    
+
                     modelList.forEach((m: any) => {
                         // Tier 1: Direct from API response (OpenRouter, Together, DeepInfra, etc.)
                         let c = m.context_length
@@ -517,21 +518,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                             || m.max_context_length
                             || m.top_provider?.context_length
                             || 0;
-                        
+
                         // Tier 2: Infer from model family using canonical knowledge base
                         if (!c && m.id) {
                             c = getModelContextTokens(m.id, providerId);
                         }
-                        
+
                         if (c) dynContexts[m.id] = c;
                     });
-                    
+
                     const apiHasContext = modelList.some((m: any) => m.context_length || m.context_window || m.top_provider?.context_length);
                     const inferredCount = Object.keys(dynContexts).length;
                     const ctxNote = apiHasContext
                         ? `（已从 API 获取 ${inferredCount} 个模型的上下文大小）`
                         : `（API 未返回上下文大小，已通过模型族推断 ${inferredCount}/${dynModels.length} 个）`;
-                    
+
                     this.postMessage({ type: 'apiModelsFetched', providerId, models: modelList, dynContexts, ctxNote });
                     return;
                 }
@@ -712,7 +713,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     ? [
                         { type: 'text' as const, text },
                         ...images.map(url => ({ type: 'image_url' as const, image_url: { url, detail: 'auto' as const } })),
-                      ]
+                    ]
                     : text;
             const assistantContent = result.code
                 ? `${result.explanation}\n\`\`\`pdx\n${result.code}\n\`\`\``
@@ -753,10 +754,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const wtPath = path.join(wsRoot, '.cwtools-ai', topicId, 'walkthrough.md');
                 // Use normalize for safter comparisons
                 const normWtPath = path.normalize(wtPath).toLowerCase();
-                const wroteWalkthrough = this._currentMessageSnapshots.some(s => 
+                const wroteWalkthrough = this._currentMessageSnapshots.some(s =>
                     path.normalize(s.filePath).toLowerCase() === normWtPath
                 );
-                
+
                 if (wroteWalkthrough) {
                     this.renderWalkthroughUI(wtPath, topicId, result.steps);
                 }
@@ -803,7 +804,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     files: messageSnapshots,
                     convLength: this.conversationMessages.length,
                 });
-                
+
                 const MAX_SNAPSHOTS = 20;
                 if (this._messageFileSnapshots.size > MAX_SNAPSHOTS) {
                     const keys = Array.from(this._messageFileSnapshots.keys()).sort((a, b) => a - b);
@@ -1003,11 +1004,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // Put under topic folder to scope "同一个对话系列" (same conversation series) while keeping exactly "Implementation_Plan.md"
             const planDir = path.join(baseDir, topicId);
             await fs.promises.mkdir(planDir, { recursive: true });
-            
+
             const fileName = 'Implementation_Plan.md';
             filePath = path.join(planDir, fileName);
             relPath = path.posix.join('.cwtools-ai', topicId, fileName);
-            
+
             // Register plan file in the current message snapshot so retract can delete it
             this._recordFileSnapshot(filePath);
             await fs.promises.writeFile(filePath, '\uFEFF' + planText, 'utf-8');
@@ -1016,7 +1017,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (filePath) {
             // Post plan file saved card and render interactive annotation UI
             this.postMessage({ type: 'planFileSaved', filePath, relPath });
-            
+
             const sections: string[] = [];
             let currentSection = '';
             let inCodeBlock = false;
@@ -1035,7 +1036,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (sections.length === 0 && planText.trim()) sections.push(planText.trim());
 
             this.postMessage({ type: 'renderPlan', sections, planText });
-            
+
             if (steps) {
                 steps.push({ type: 'plan_card', content: filePath, toolResult: sections, timestamp: Date.now() });
             }
@@ -1047,9 +1048,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         try {
             const content = await fs.promises.readFile(filePath, 'utf-8');
             const relPath = path.posix.join('.cwtools-ai', topicId, 'walkthrough.md');
-            
+
             this.postMessage({ type: 'walkthroughFileSaved', filePath, relPath });
-            
+
             const sections: string[] = [];
             let currentSection = '';
             let inCodeBlock = false;
@@ -1067,13 +1068,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (currentSection.trim()) sections.push(currentSection.trim());
             if (sections.length === 0 && content.trim()) sections.push(content.trim());
             this.postMessage({ type: 'renderWalkthrough', sections });
-            
+
             if (steps) {
                 steps.push({ type: 'walkthrough_card', content: filePath, toolResult: sections, timestamp: Date.now() });
                 this.saveTopics();
             }
-            
-        } catch(e) {
+
+        } catch (e) {
             console.error('Failed to parse walkthrough.md', e);
         }
     }
@@ -1181,24 +1182,24 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) */
     sendTodoUpdate(todos: import('./types').TodoItem[]): void {
         this.postMessage({ type: 'todoUpdate', todos });
-        
+
         // Natively save task.md in the topic folder
         const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (wsRoot && todos.length > 0) {
             const topicId = this.currentTopic?.id || 'default';
             const taskPath = path.join(wsRoot, '.cwtools-ai', topicId, 'task.md');
-            
+
             const lines: string[] = ['# Task List\n'];
             for (const t of todos) {
                 const mark = t.status === 'done' ? '[x]' : (t.status === 'in_progress' ? '[/]' : '[ ]');
                 lines.push(`- ${mark} ${t.content}`);
             }
-            
+
             // Register task.md in the current message snapshot so retract can delete/restore it
             this._recordFileSnapshot(taskPath);
-            
+
             fs.promises.mkdir(path.dirname(taskPath), { recursive: true }).then(() => {
-                fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch(() => {});
+                fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch(() => { });
             });
         }
     }
@@ -2000,15 +2001,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             .replace(/_+/g, '_')
             .replace(/^_|_$/g, '')
             .substring(0, 60);
-        
+
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
         const outPath = path.join(workspaceRoot, `.cwtools-ai-exports`, `${safeName || 'chat'}_${timestamp}.json`);
         const outDir = path.dirname(outPath);
-        
+
         if (!fs.existsSync(outDir)) {
             await fs.promises.mkdir(outDir, { recursive: true });
         }
-        
+
         // Export the full topic object, including steps, messages, images, etc.
         const jsonContent = JSON.stringify(topic, null, 2);
         await fs.promises.writeFile(outPath, jsonContent, 'utf-8');
@@ -2024,12 +2025,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async importTopicFromJson(jsonString: string): Promise<void> {
         try {
             const data = JSON.parse(jsonString) as Partial<import('./types').ChatTopic>;
-            
+
             // Simple schema validation
             if (!data.title || !Array.isArray(data.messages)) {
                 throw new Error('无效的会话文件格式 (缺少 title 或 messages 数组)');
             }
-            
+
             // Generate a new ID to avoid collisions
             const importedTopic: import('./types').ChatTopic = {
                 id: `topic_imported_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -2039,7 +2040,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 messages: data.messages as import('./types').ChatHistoryMessage[],
                 archived: false,
             };
-            
+
             // Validate messages
             for (let i = 0; i < importedTopic.messages.length; i++) {
                 const msg = importedTopic.messages[i];
@@ -2054,10 +2055,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.topics.unshift(importedTopic);
             this.saveTopics();
             this.sendTopicList();
-            
+
             this.loadTopic(importedTopic.id);
             this.postMessage({ type: 'topicImported', topicId: importedTopic.id, title: importedTopic.title });
-            
+
             vs.window.showInformationMessage(`成功导入会话: ${importedTopic.title}`);
         } catch (e) {
             const err = e instanceof Error ? e.message : String(e);
@@ -2112,617 +2113,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // ─── HTML Content ────────────────────────────────────────────────────────
 
     private getHtmlContent(webview: vs.Webview): string {
-        const scriptUri = webview.asWebviewUri(
-            vs.Uri.joinPath(this.extensionUri, 'bin', 'client', 'webview', 'chatPanel.js')
-        );
-        const csp = webview.cspSource;
-        return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp}; img-src data: blob:;">
-<title>Eddy CWTool Code</title>
-<style>
-:root {
-    --bg: var(--vscode-editor-background, #1e1e1e);
-    --fg: var(--vscode-editor-foreground, #cccccc);
-    --border: var(--vscode-panel-border, #333);
-    --input-bg: var(--vscode-input-background, #252525);
-    --input-fg: var(--vscode-input-foreground, #ccc);
-    --btn-hover: var(--vscode-list-hoverBackground, #2a2d2e);
-    --accent: #d95a43;
-    --success: #4caf50;
-    --error: #f44336;
-    --warning: #ff9800;
-    --code-bg: var(--vscode-textCodeBlock-background, #1a1a1a);
-    --thinking-bg: rgba(100,149,237,0.06);
-    --thinking-border: rgba(100,149,237,0.25);
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
-
-/* ── Custom Scrollbar ── */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(136, 136, 136, 0.4); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(136, 136, 136, 0.7); }
-
-.header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
-.header-title { display: flex; align-items: center; gap: 8px; }
-.header-brand-icon { width: 18px; height: 18px; flex-shrink: 0; filter: drop-shadow(0 0 3px rgba(232,200,64,0.4)); }
-.brand-text { font-family: Georgia, Cambria, serif; font-size: 15px; font-weight: 600; letter-spacing: 0.3px; color: #f0f0f0; }
-.header-actions { display: flex; gap: 4px; }
-.icon-btn { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: var(--fg); cursor: pointer; padding: 5px 9px; border-radius: 6px; font-size: 14px; opacity: 0.75; transition: opacity 0.15s, background 0.15s, border-color 0.15s; font-weight: 400; }
-.icon-btn:hover { opacity: 1; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2); }
-
-/* ── Topics panel ── */
-.topics-panel { display: none; position: absolute; top: 41px; left: 0; right: 0; bottom: 70px; background: var(--bg); border: 1px solid var(--border); z-index: 100; overflow-y: auto; }
-.topics-panel.show { display: flex; flex-direction: column; }
-.topics-panel-header { padding: 8px 8px 4px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
-.new-topic-btn { width: 100%; background: none; border: 1px dashed var(--border); border-radius: 5px; color: var(--fg); cursor: pointer; padding: 6px 10px; font-size: 12px; text-align: left; opacity: 0.7; display: flex; align-items: center; gap: 5px; transition: opacity 0.15s, background 0.15s; }
-.new-topic-btn:hover { opacity: 1; background: var(--btn-hover); border-color: var(--accent); }
-.topics-list { flex: 1; overflow-y: auto; padding: 6px 8px 8px; }
-.topics-search-row { display: flex; gap: 5px; align-items: center; margin-top: 5px; }
-.topics-search-input { flex: 1; background: var(--input-bg); border: 1px solid var(--border); color: var(--fg); border-radius: 5px; padding: 4px 8px; font-size: 11px; outline: none; font-family: inherit; }
-.topics-search-input:focus { border-color: var(--accent); }
-.topics-search-input::placeholder { opacity: 0.4; }
-.topic-item { padding: 8px; cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
-.topic-item:hover { background: var(--btn-hover); }
-.topic-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.topic-delete { opacity: 0; cursor: pointer; color: var(--error); padding: 2px 6px; font-size: 12px; border-radius: 3px; background: none; border: none; }
-.topic-item:hover .topic-delete { opacity: 0.7; }
-.topic-delete:hover { opacity: 1 !important; background: rgba(244,67,54,0.1); }
-
-/* ── Indicators ── */
-.plan-indicator { display: none; padding: 5px 16px; font-size: 11px; color: cornflowerblue; background: rgba(100,149,237,0.07); border-bottom: 1px solid var(--border); text-align: center; }
-body.plan-mode .plan-indicator { display: block; }
-.todo-panel { display: none; padding: 8px 14px; border-bottom: 1px solid var(--border); }
-.todo-panel.has-items { display: block; }
-.todo-panel-title { font-size: 10px; font-weight: 600; opacity: 0.5; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
-.todo-item { font-size: 12px; padding: 2px 0; display: flex; align-items: flex-start; gap: 6px; }
-.todo-item.done { opacity: 0.4; text-decoration: line-through; }
-.todo-item.in_progress { color: var(--accent); }
-
-.chat-area { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 20px; min-height: 0; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-@keyframes spin { to { transform: rotate(360deg); } }
-.message { display: flex; flex-direction: column; animation: fadeIn 0.2s ease; gap: 4px; flex-shrink: 0; }
-.msg-header { display: flex; align-items: center; gap: 6px; font-size: 11.5px; opacity: 0.65; }
-.msg-role { font-family: Georgia, serif; font-weight: 500; }
-.user-role { opacity: 0.7; }
-.ai-star { flex-shrink: 0; }
-.msg-bubble { line-height: 1.65; word-break: break-word; padding: 1px 0; font-size: 15px; }
-.user-bubble { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-left: 0; white-space: pre-wrap; }
-.msg-bubble code { background: rgba(255,255,255,0.1); border-radius: 3px; padding: 0 3px; font-family: var(--vscode-editor-font-family, monospace); font-size: 13.5px; }
-.msg-bubble pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 6px 0; font-size: 14px; font-family: var(--vscode-editor-font-family, monospace); }
-.msg-bubble pre code { background: none; padding: 0; }
-.retract-btn { display: none; background: none; border: none; cursor: pointer; font-size: 11px; opacity: 0.35; padding: 2px 5px; border-radius: 3px; color: var(--fg); }
-.message.user:hover .retract-btn { display: inline-flex; }
-.retract-btn:hover { opacity: 1; background: var(--btn-hover); }
-.message.retracted .msg-bubble { opacity: 0.4; font-style: italic; pointer-events: none; }
-.message.retracted .retract-btn { display: none !important; }
-
-/* ── Thinking block (OpenCode style) ── */
-.thinking-block { margin: 6px 0; border: 1px solid var(--thinking-border); border-radius: 8px; overflow: hidden; background: var(--thinking-bg); }
-.thinking-block > summary { cursor: pointer; padding: 7px 12px; user-select: none; display: flex; align-items: center; gap: 7px; list-style: none; color: cornflowerblue; font-size: 11.5px; }
-.thinking-block > summary::-webkit-details-marker { display: none; }
-.thinking-block > summary::before { content: '▶'; font-size: 8px; opacity: 0.45; transition: transform 0.15s; flex-shrink: 0; }
-.thinking-block[open] > summary::before { transform: rotate(90deg); }
-.think-pulse { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: cornflowerblue; flex-shrink: 0; opacity: 0.8; }
-.think-pulse.spinning { animation: spin 1s linear infinite; border: 2px solid rgba(100,149,237,0.3); background: none; border-top-color: cornflowerblue; }
-.think-tokens { font-size: 10px; opacity: 0.5; }
-.thinking-body { padding: 10px 12px; border-top: 1px solid var(--thinking-border); font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; white-space: pre-wrap; word-break: break-word; opacity: 0.7; max-height: 320px; overflow-y: auto; }
-
-/* ── Tool group (OpenCode paired style) ── */
-.tool-group { margin: 4px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.tool-group > summary { cursor: pointer; padding: 7px 12px; background: rgba(255,255,255,0.025); user-select: none; display: flex; align-items: center; gap: 7px; list-style: none; font-size: 11.5px; opacity: 0.75; }
-.tool-group > summary::-webkit-details-marker { display: none; }
-.tool-group > summary::before { content: '▶'; font-size: 8px; opacity: 0.4; transition: transform 0.15s; flex-shrink: 0; }
-.tool-group[open] > summary::before { transform: rotate(90deg); }
-.tg-icon { opacity: 0.6; }
-.tool-group-body { padding: 4px 0; border-top: 1px solid var(--border); }
-/* Tool pair row */
-.tool-pair { display: flex; align-items: center; justify-content: space-between; padding: 4px 12px; gap: 8px; }
-.tool-pair:not(:last-child) { border-bottom: 1px solid rgba(255,255,255,0.04); }
-.tp-call { display: flex; align-items: center; gap: 6px; font-size: 11px; opacity: 0.75; min-width: 0; flex: 1; }
-.tp-icon { flex-shrink: 0; font-size: 12px; }
-.tp-name { font-family: var(--vscode-editor-font-family, monospace); }
-.tp-file { color: #7ab4d4; font-family: var(--vscode-editor-font-family, monospace); opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
-.tp-result { font-size: 10.5px; flex-shrink: 0; padding: 1px 6px; border-radius: 4px; }
-.tp-result.ok { color: var(--success); }
-.tp-result.err { color: var(--error); }
-.tp-result.skip { opacity: 0.35; }
-/* Special steps (errors, compaction) */
-.special-step { font-size: 11px; padding: 3px 0; opacity: 0.65; }
-
-/* ── Code block ── */
-.code-block { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; margin: 6px 0; overflow: hidden; }
-.code-header { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.04); border-bottom: 1px solid var(--border); font-size: 11px; }
-.code-status.valid { color: var(--success); }
-.code-status.invalid { color: var(--error); }
-.code-actions { display: flex; gap: 4px; }
-.code-btn { background: none; color: var(--fg); border: 1px solid var(--border); padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px; opacity: 0.7; }
-.code-btn:hover { opacity: 1; background: var(--btn-hover); }
-.code-content { padding: 8px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; overflow-x: auto; white-space: pre; }
-
-/* ── Markdown rendering (inside .msg-bubble) ── */
-.msg-bubble h1,.msg-bubble h2,.msg-bubble h3,.msg-bubble h4,.msg-bubble h5,.msg-bubble h6 { font-family: Georgia,serif; font-weight:600; margin:10px 0 4px; line-height:1.3; }
-.msg-bubble h1 { font-size:1.2em; border-bottom:1px solid var(--border); padding-bottom:4px; }
-.msg-bubble h2 { font-size:1.1em; }
-.msg-bubble h3 { font-size:1.0em; }
-.msg-bubble h4,.msg-bubble h5,.msg-bubble h6 { font-size:0.95em; opacity:0.85; }
-.msg-bubble p  { margin:5px 0; }
-.msg-bubble ul,.msg-bubble ol { margin:5px 0 5px 18px; padding:0; }
-.msg-bubble li { margin:2px 0; }
-.msg-bubble blockquote { margin:6px 0; padding:4px 10px; border-left:3px solid var(--accent); background:rgba(255,255,255,0.04); border-radius:0 4px 4px 0; opacity:0.85; }
-.msg-bubble hr { border:none; border-top:1px solid var(--border); margin:8px 0; }
-.msg-bubble table { border-collapse:collapse; width:100%; margin:6px 0; font-size:12px; }
-.msg-bubble th,.msg-bubble td { border:1px solid var(--border); padding:4px 8px; text-align:left; }
-.msg-bubble th { background:rgba(255,255,255,0.05); font-weight:600; }
-.msg-bubble strong { font-weight:700; }
-.msg-bubble em { font-style:italic; }
-.msg-bubble del { text-decoration:line-through; opacity:0.6; }
-.msg-bubble a { color:#7ab4d4; text-decoration:none; }
-.msg-bubble a:hover { text-decoration:underline; }
-.msg-bubble .md-codeblock { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin:6px 0; }
-.msg-bubble .md-codeblock-lang { font-size:10px; opacity:0.5; padding:2px 8px; background:rgba(255,255,255,0.03); border-bottom:1px solid var(--border); letter-spacing:0.05em; text-transform:uppercase; }
-.msg-bubble .md-codeblock-lang:empty { display:none; }
-.msg-bubble .md-codeblock code { display:block; padding:8px 10px; font-family:var(--vscode-editor-font-family,monospace); font-size:14px; white-space:pre; overflow-x:auto; background:none; border-radius:0; }
-.msg-bubble code { background:rgba(255,255,255,0.1); border-radius:3px; padding:1px 4px; font-family:var(--vscode-editor-font-family,monospace); font-size:13.5px; }
-
-/* ── Diff card ── */
-.diff-card { border: 1px solid var(--warning); border-radius: 6px; overflow: hidden; margin: 4px 0; font-size: 11px; }
-.diff-card-header { background: rgba(255,152,0,0.12); padding: 8px 12px; font-size: 12px; display:flex; align-items:center; gap:6px; }
-.diff-card-hint { font-size:11px; opacity:0.6; flex:1; }
-.diff-card-actions { padding: 6px 10px; display: flex; gap: 6px; background: var(--bg); border-top:1px solid var(--border); }
-.diff-accept-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
-.diff-reject-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
-
-/* ── Empty state + Suggestion cards ── */
-.empty-state { margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 32px 16px; gap: 6px; }
-
-/* ── Custom Dropdown (Datalist Replacement) ── */
-.ap-dropdown { position: absolute; top: calc(100% + 2px); left: 0; max-height: 200px; overflow-y: auto; background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); width: calc(100% - 2px); z-index: 1000; box-shadow: 0 4px 8px rgba(0,0,0,0.3); border-radius: 4px; display: none; }
-.ap-dropdown-item { padding: 5px 8px; cursor: pointer; color: var(--vscode-foreground); font-size: 12px; }
-.ap-dropdown-item:hover { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-.empty-icon { font-size: 40px; color: var(--accent); margin-bottom: 8px; }
-.empty-tagline { font-size: 11px; opacity: 0.45; margin-bottom: 16px; }
-.suggest-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; max-width: 280px; }
-.suggest-card { background: var(--input-bg); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; cursor: pointer; text-align: left; font-size: 11px; color: var(--fg); opacity: 0.7; transition: all 0.15s; line-height: 1.4; font-family: inherit; }
-.suggest-card:hover { opacity: 1; border-color: #555; background: var(--btn-hover); transform: translateY(-1px); }
-.suggest-card-icon { font-size: 14px; display: block; margin-bottom: 3px; }
-.mode-select { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: all 0.15s; flex-shrink: 0; max-width: 160px; }
-.mode-select:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
-.mode-select option { background: var(--input-bg); color: var(--fg); }
-.model-selector { flex: 1; min-width: 0; max-width: 170px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: all 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-selector:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
-.model-selector option { background: var(--input-bg); color: var(--fg); }
-
-.input-wrapper { padding: 10px 12px 12px; flex-shrink: 0; }
-.input-container { background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; overflow: hidden; transition: all 0.15s; }
-
-body.build-mode .input-container { border-color: rgba(255,255,255,0.15); }
-body.build-mode .input-container:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(217,90,67,0.2); }
-
-body.plan-mode .input-container { border-color: cornflowerblue; box-shadow: 0 0 0 1px rgba(100,149,237,0.3); }
-body.plan-mode .input-container:focus-within { border-color: cornflowerblue; box-shadow: 0 0 0 1px cornflowerblue, 0 0 8px rgba(100,149,237,0.2); }
-body.plan-mode .send-btn { background: cornflowerblue; }
-
-body.explore-mode .input-container { border-color: #7dbb7d; box-shadow: 0 0 0 1px rgba(125,187,125,0.3); }
-body.explore-mode .input-container:focus-within { border-color: #7dbb7d; box-shadow: 0 0 0 1px #7dbb7d, 0 0 8px rgba(125,187,125,0.2); }
-body.explore-mode .send-btn { background: #7dbb7d; }
-
-body.general-mode .input-container { border-color: #c792ea; box-shadow: 0 0 0 1px rgba(199,146,234,0.3); }
-body.general-mode .input-container:focus-within { border-color: #c792ea; box-shadow: 0 0 0 1px #c792ea, 0 0 8px rgba(199,146,234,0.2); }
-body.general-mode .send-btn { background: #c792ea; }
-
-body.review-mode .input-container { border-color: #f48771; box-shadow: 0 0 0 1px rgba(244,135,113,0.3); }
-body.review-mode .input-container:focus-within { border-color: #f48771; box-shadow: 0 0 0 1px #f48771, 0 0 8px rgba(244,135,113,0.2); }
-body.review-mode .send-btn { background: #f48771; }
-
-.input-row { display: flex; padding: 10px 12px 4px; }
-.input-row textarea { flex: 1; background: transparent; color: var(--input-fg); border: none; padding: 2px 0; font-family: inherit; font-size: 15px; resize: none; min-height: 22px; max-height: 180px; outline: none; line-height: 1.55; }
-.input-row textarea::placeholder { opacity: 0.3; transition: opacity 0.3s; }
-.input-controls { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px 8px; gap: 6px; }
-.ctrl-group { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
-/* Gold send button matching reference image */
-.send-btn { background: var(--accent); color: #1a1a1a; border: none; border-radius: 6px; width: 32px; height: 32px; cursor: pointer; font-size: 16px; line-height: 1; transition: opacity 0.15s, background 0.15s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.send-btn:hover { opacity: 0.85; }
-.send-btn.cancel-mode { background: rgba(244,67,54,0.15); color: var(--error); border: 1px solid rgba(244,67,54,0.35); }
-.send-icon { font-weight: 700; }
-.stop-icon { display: inline-block; width: 9px; height: 9px; background: var(--error); border-radius: 2px; }
-/* Image pick button — compact, sits beside model selector */
-.img-pick-btn { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.15s, border-color 0.15s; }
-.img-pick-btn:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.28); }
-/* Drag-over highlight for input wrapper */
-.input-wrapper.drag-over .input-container { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99,179,237,0.18); }
-.token-usage-bar { height: 2px; background: var(--border); overflow: hidden; margin: 2px 0 1px; border-radius: 1px; }
-.token-usage-fill { height: 100%; background: var(--accent); transition: width 0.4s; border-radius: 1px; }
-.token-usage-label { font-size: 11px; opacity: 0.7; text-align: right; padding: 0 8px 3px; letter-spacing: 0.02em; }
-#tokenUsageBar { padding: 2px 4px 0; background: transparent; border-top: 1px solid var(--border); }
-/* Message timestamp */
-.msg-time.settings-hint a { color: var(--accent); opacity: 0.8; text-decoration: none; transition: opacity 0.15s; }
-.settings-hint a:hover { opacity: 1; text-decoration: underline; }
-
-/* MCP specific CSS */
-.mcp-server-block { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-.mcp-row { display: flex; gap: 6px; align-items: center; }
-.mcp-delete-btn { color: var(--error); background: none; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; opacity: 0.6; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
-.mcp-delete-btn:hover { opacity: 1; border-color: var(--error); background: rgba(244,67,54,0.1); }
-.msg-time { font-size: 10px; opacity: 0.3; margin-left: auto; font-family: monospace; }
-/* Topic date groups */
-.topic-date-group { font-size: 10px; opacity: 0.38; padding: 8px 8px 3px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 600; }
-.topic-date-group:first-child { padding-top: 4px; }
-/* Retract confirm */
-.retract-confirm { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 999; display: flex; align-items: center; justify-content: center; }
-.retract-confirm-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 18px 22px; max-width: 260px; text-align: center; }
-.retract-confirm-title { font-size: 13px; margin-bottom: 8px; }
-.retract-confirm-hint { font-size: 11px; opacity: 0.5; margin-bottom: 14px; }
-.retract-confirm-btns { display: flex; gap: 8px; justify-content: center; }
-.retract-ok { background: var(--error); color: #fff; border: none; border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }
-.retract-cancel { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }
-
-/* ── Permission request card ── */
-.permission-card { border: 1px solid #d9a020; border-radius: 8px; overflow: hidden; margin: 6px 0; }
-.permission-card-header { background: rgba(217,160,32,0.12); padding: 9px 13px; font-size: 12px; display: flex; align-items: flex-start; gap: 8px; }
-.permission-card-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
-.permission-card-body { flex: 1; }
-.permission-card-title { font-weight: 600; margin-bottom: 3px; }
-.permission-card-cmd { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; background: rgba(0,0,0,0.25); border-radius: 4px; padding: 3px 6px; margin-top: 4px; opacity: 0.9; word-break: break-all; }
-.permission-card-actions { padding: 7px 10px; display: flex; gap: 6px; background: var(--bg); border-top: 1px solid rgba(255,255,255,0.07); }
-.permission-allow-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
-.permission-deny-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
-
-/* ── Plan file card ── */
-.plan-file-card { display: flex; align-items: flex-start; gap: 10px; background: rgba(100,149,237,0.07); border: 1px solid rgba(100,149,237,0.25); border-radius: 8px; padding: 10px 12px; margin: 6px 0; }
-.plan-file-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
-.plan-file-info { flex: 1; min-width: 0; }
-.plan-file-title { font-size: 12px; font-weight: 600; color: cornflowerblue; margin-bottom: 2px; }
-.plan-file-path { font-size: 11px; font-family: var(--vscode-editor-font-family, monospace); opacity: 0.65; word-break: break-all; margin-bottom: 4px; }
-.plan-file-hint { font-size: 11px; opacity: 0.5; }
-.plan-file-hint code { background: rgba(255,255,255,0.08); border-radius: 3px; padding: 1px 4px; font-family: inherit; }
-.plan-file-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
-.plan-open-btn, .plan-submit-btn { font-size: 11px; border-radius: 5px; padding: 4px 10px; cursor: pointer; border: none; font-family: inherit; white-space: nowrap; transition: opacity 0.15s; }
-.plan-open-btn { background: rgba(100,149,237,0.2); color: cornflowerblue; border: 1px solid rgba(100,149,237,0.3); }
-.plan-open-btn:hover { background: rgba(100,149,237,0.35); }
-.plan-submit-btn { background: var(--accent); color: #1a1a1a; font-weight: 600; }
-.plan-submit-btn:hover { opacity: 0.85; }
-
-/* ── Annotatable plan view ── */
-.annotatable-plan { border: 1px solid rgba(100,149,237,0.2); border-radius: 8px; overflow: hidden; margin: 8px 0; font-size: 13px; display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; }
-.ap-header { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: rgba(100,149,237,0.08); border-bottom: 1px solid rgba(100,149,237,0.15); flex-shrink: 0; }
-.ap-header-title { font-weight: 600; color: cornflowerblue; font-size: 13px; }
-.ap-header-hint { flex: 1; font-size: 12px; opacity: 0.5; }
-.ap-submit-btn { font-size: 12px; border-radius: 5px; padding: 4px 12px; cursor: pointer; border: none; background: var(--accent); color: #1a1a1a; font-weight: 600; font-family: inherit; transition: opacity 0.15s; }
-.ap-submit-btn:disabled { opacity: 0.35; cursor: default; }
-.ap-submit-btn:not(:disabled):hover { opacity: 0.85; }
-.ap-sections { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; resize: vertical; min-height: 0; }
-.ap-row { position: relative; padding: 7px 36px 7px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; transition: background 0.12s; }
-.ap-row:last-child { border-bottom: none; }
-.ap-row:hover, .ap-row-active { background: rgba(100,149,237,0.06); }
-.ap-row-annotated { background: rgba(255,200,50,0.05); }
-.ap-section-text { font-size: 12px; line-height: 1.55; color: var(--fg); opacity: 0.9; pointer-events: none; }
-.ap-heading { display: block; margin-bottom: 2px; }
-.ap-h1 { font-size: 13px; color: var(--fg); }
-.ap-h2 { font-size: 12px; opacity: 0.9; }
-.ap-h3 { font-size: 11px; opacity: 0.75; }
-.ap-add-btn { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 14px; opacity: 0; transition: opacity 0.15s; line-height: 1; padding: 2px; }
-.ap-row:hover .ap-add-btn, .ap-row-active .ap-add-btn { opacity: 0.6; }
-.ap-row.ap-row-annotated .ap-add-btn { opacity: 0; }
-.ap-bubble { display: flex; align-items: flex-start; gap: 5px; margin-top: 5px; padding: 5px 8px; background: rgba(255,200,50,0.1); border-left: 2px solid #ffc832; border-radius: 0 4px 4px 0; font-size: 11px; }
-.ap-bubble-icon { flex-shrink: 0; font-size: 12px; }
-.ap-bubble-text { flex: 1; color: var(--fg); opacity: 0.85; word-break: break-word; }
-.ap-bubble-edit { flex-shrink: 0; background: none; border: none; color: cornflowerblue; cursor: pointer; font-size: 10px; opacity: 0.7; padding: 0 2px; font-family: inherit; }
-.ap-bubble-edit:hover { opacity: 1; }
-.ap-input-box { margin-top: 6px; border: 1px solid rgba(100,149,237,0.3); border-radius: 6px; overflow: hidden; background: var(--input-bg); }
-.ap-textarea { display: block; width: 100%; box-sizing: border-box; background: transparent; border: none; color: var(--fg); font-size: 12px; font-family: inherit; padding: 7px 10px; resize: vertical; outline: none; min-height: 56px; line-height: 1.5; }
-.ap-input-actions { display: flex; gap: 5px; padding: 5px 8px; border-top: 1px solid rgba(100,149,237,0.15); background: rgba(0,0,0,0.1); }
-.ap-confirm-btn { background: var(--accent); color: #1a1a1a; border: none; border-radius: 4px; padding: 3px 14px; font-size: 11px; cursor: pointer; font-family: inherit; font-weight: 600; }
-.ap-confirm-btn:hover { opacity: 0.85; }
-.ap-cancel-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: inherit; }
-
-/* ── Streaming text cursor ── */
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-.stream-cursor::after { content: '|'; display: inline-block; animation: blink 0.8s ease-in-out infinite; color: var(--accent); margin-left: 1px; font-weight: 300; }
-
-/* ── Topic action buttons ── */
-.topic-actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s; }
-.topic-item:hover .topic-actions { opacity: 1; }
-.topic-action-btn { padding: 2px 5px; font-size: 11px; border-radius: 3px; background: none; border: none; cursor: pointer; color: var(--fg); opacity: 0.55; }
-.topic-action-btn:hover { opacity: 1; background: var(--btn-hover); }
-.topic-fork-btn:hover { color: cornflowerblue; }
-.topic-archive-btn:hover { color: var(--warning); }
-
-/* ── Mode indicator (replaces plan-indicator) ── */
-.mode-indicator { display: none; padding: 4px 16px; font-size: 11px; background: rgba(100,149,237,0.07); border-bottom: 1px solid var(--border); text-align: center; }
-body.plan-mode .mode-indicator,
-body.explore-mode .mode-indicator,
-body.general-mode .mode-indicator,
-body.review-mode .mode-indicator { display: block; }
-body.plan-mode .mode-indicator { color: cornflowerblue; }
-body.explore-mode .mode-indicator { color: #7dbb7d; }
-body.general-mode .mode-indicator { color: #c792ea; }
-body.review-mode .mode-indicator { color: #f48771; }
-
-/* ── Slash command popup ── */
-.slash-popup { display: none; position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
-.slash-popup.show { display: block; }
-.slash-popup-item { padding: 7px 12px; cursor: pointer; display: flex; gap: 10px; align-items: center; font-size: 12px; }
-.slash-popup-item:hover { background: var(--btn-hover); }
-.slash-popup-cmd { font-family: var(--vscode-editor-font-family, monospace); color: var(--accent); font-weight: 600; flex-shrink: 0; }
-.slash-popup-desc { opacity: 0.55; font-size: 11px; }
-
-/* ── Settings page ── */
-.settings-page { display: none; flex-direction: column; flex: 1; min-height: 0; width: 100%; overflow: hidden; }
-.settings-page.active { display: flex; }
-.settings-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.settings-back-btn { background: none; border: none; color: var(--fg); cursor: pointer; font-size: 16px; padding: 0 4px; opacity: 0.7; line-height: 1; }
-.settings-back-btn:hover { opacity: 1; }
-.settings-body { padding: 12px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow-y: auto; min-height: 0; }
-.settings-body > * { flex-shrink: 0; }
-.settings-title { font-size: 13px; font-weight: 600; }
-.settings-group { display: flex; flex-direction: column; gap: 5px; }
-.settings-label { font-size: 11px; font-weight: 600; opacity: 0.75; letter-spacing: 0.03em; }
-.settings-input, .settings-select { background: var(--input-bg); border: 1px solid var(--border); color: var(--fg); border-radius: 5px; padding: 6px 8px; font-size: 12px; width: 100%; outline: none; font-family: inherit; }
-.settings-input:focus, .settings-select:focus { border-color: var(--accent); }
-.settings-select option { background: var(--bg); }
-.settings-key-row { display: flex; gap: 6px; }
-.settings-key-row .settings-input { flex: 1; }
-.key-toggle-btn { background: var(--input-bg); border: 1px solid var(--border); color: var(--fg); border-radius: 5px; padding: 0 8px; cursor: pointer; font-size: 13px; flex-shrink: 0; }
-.model-row { display: flex; gap: 6px; }
-.model-row .settings-input, .model-row .settings-select { flex: 1; }
-.detect-btn { background: none; color: var(--fg); border: 1px solid var(--border); border-radius: 5px; padding: 0 10px; cursor: pointer; font-size: 11px; flex-shrink: 0; white-space: nowrap; }
-.detect-btn:hover { background: var(--btn-hover); }
-.detect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.settings-hint { font-size: 10px; opacity: 0.45; margin-top: 2px; }
-.settings-footer { padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--border); flex-shrink: 0; }
-.settings-save-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px; cursor: pointer; font-size: 13px; font-weight: 600; width: 100%; }
-.settings-save-btn:hover { opacity: 0.9; }
-.settings-test-btn { background: none; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 7px; cursor: pointer; font-size: 12px; width: 100%; }
-.settings-test-btn:hover { border-color: var(--accent); }
-.test-result { font-size: 11px; text-align: center; padding: 4px; border-radius: 4px; display: none; }
-.test-result.ok { background: rgba(80,200,80,0.15); color: #5c5; display: block; }
-.test-result.fail { background: rgba(200,80,80,0.15); color: #e66; display: block; }
-.accordion-section { border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
-.accordion-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; cursor: pointer; font-size: 12px; font-weight: 600; user-select: none; background: rgba(255,255,255,0.02); }
-.accordion-header:hover { background: rgba(255,255,255,0.05); }
-.accordion-arrow { font-size: 9px; opacity: 0.4; transition: transform 0.15s; }
-.accordion-section.open .accordion-arrow { transform: rotate(90deg); }
-.accordion-body { display: none; padding: 10px 12px; border-top: 1px solid var(--border); flex-direction: column; gap: 10px; }
-.accordion-section.open .accordion-body { display: flex; }
-.settings-toggle-row { display: flex; align-items: center; justify-content: space-between; }
-.settings-toggle-label { font-size: 12px; }
-.toggle-switch { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
-.toggle-switch input { opacity: 0; width: 0; height: 0; }
-.toggle-track { position: absolute; cursor: pointer; inset: 0; background: var(--border); border-radius: 20px; transition: 0.2s; }
-.toggle-switch input:checked + .toggle-track { background: var(--accent); }
-.toggle-track::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
-.toggle-switch input:checked + .toggle-track::before { transform: translateX(16px); }
-
-/* MCP specific CSS */
-.mcp-server-block { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-.mcp-row { display: flex; gap: 6px; align-items: start; }
-.mcp-delete-btn { color: var(--error); background: none; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; opacity: 0.6; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.mcp-delete-btn:hover { opacity: 1; border-color: var(--error); background: rgba(244,67,54,0.1); }
-</style>
-</head>
-<body>
-<div class="header">
-    <div class="header-title">
-        <svg class="header-brand-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/>
-            <circle fill="#e8c840" cx="13" cy="3" r="1"/>
-        </svg>
-        <span class="brand-text">Eddy CWTool Code</span>
-    </div>
-    <div class="header-actions">
-        <button class="icon-btn" id="btnNewTopic" title="新话题">+</button>
-        <button class="icon-btn" id="btnTopics" title="历史话题">≡</button>
-        <button class="icon-btn" id="btnSettings" title="设置">⋯</button>
-    </div>
-</div>
-
-<div class="topics-panel" id="topicsPanel">
-    <div class="topics-panel-header">
-        <button class="new-topic-btn" id="btnNewTopicPanel">＋ 新话题</button>
-        <div class="topics-search-row">
-            <input type="text" id="topicsSearch" class="topics-search-input" placeholder="🔍 搜索对话..." autocomplete="off" />
-            <button class="icon-btn topics-export-btn" id="btnExportTopic" title="导出当前对话 (Markdown)" style="font-size:11px;padding:4px 7px;">⬇ 导出</button>
-        </div>
-    </div>
-    <div class="topics-list" id="topicsList"></div>
-</div>
-<div class="mode-indicator" id="modeIndicator">📋 Plan Mode — 只读分析，不修改文件</div>
-<div class="todo-panel" id="todoPanel">
-    <div class="todo-panel-title">Tasks</div>
-    <div id="todoList"></div>
-</div>
-
-<div class="chat-area" id="chatArea">
-    <div class="empty-state" id="emptyState">
-        <div class="empty-icon"><svg width="40" height="40" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/><circle fill="#e8c840" cx="13" cy="3" r="1"/></svg></div>
-        <div style="font-size:13px;font-family:Georgia,serif;">Eddy CWTool Code Assistant</div>
-        <div class="empty-tagline">描述你的需求，AI 将生成并验证 Paradox 脚本</div>
-        <div class="suggest-cards">
-            <button class="suggest-card" data-suggest="检查当前文件的 LSP 错误并修复"><span class="suggest-card-icon">🔍</span>检查 LSP 错误</button>
-            <button class="suggest-card" data-suggest="解释 from、root、prev 这三个作用域的区别和用法"><span class="suggest-card-icon">📖</span>作用域解释</button>
-            <button class="suggest-card" data-suggest="为当前触发器添加详细注释说明其逻辑"><span class="suggest-card-icon">✏️</span>添加注释</button>
-            <button class="suggest-card" data-suggest="分析当前文件并列出潜在的语法和逻辑问题"><span class="suggest-card-icon">🛡️</span>代码审查</button>
-        </div>
-    </div>
-</div>
-
-<div id="tokenUsageBar" style="display:none">
-    <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
-    <div class="token-usage-label" id="tokenUsageLabel"></div>
-</div>
-
-<div class="input-wrapper" style="position:relative">
-    <div id="slashPopup" class="slash-popup"></div>
-    <div class="input-container input-wrapper">
-        <div class="input-row">
-            <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1"></textarea>
-        </div>
-        <div class="input-controls">
-            <div class="ctrl-group">
-                <select class="mode-select" id="modeSel" title="切换模式">
-                    <option value="build">构建模式</option>
-                    <option value="plan">计划模式</option>
-                    <option value="explore">分析模式</option>
-                    <option value="general">问答模式</option>
-                    <option value="review">审查模式</option>
-                </select>
-                <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
-                <button class="img-pick-btn" id="imgPickBtn" title="上传图片">+</button>
-            </div>
-            <button class="send-btn" id="sendBtn" title="发送 (Enter)">↑</button>
-        </div>
-    </div>
-</div>
-
-<!-- Settings Page -->
-<div class="settings-page" id="settingsPage">
-    <div class="settings-header">
-        <button class="settings-back-btn" id="settingsBackBtn">←</button>
-        <span class="settings-title">⚙ AI 设置</span>
-    </div>
-    <div class="settings-body">
-        <div class="accordion-section open" id="chatModelSection">
-            <div class="accordion-header" id="accChat"><span>🤖 对话模型</span><span class="accordion-arrow">▶</span></div>
-            <div class="accordion-body">
-                <div class="settings-group">
-                    <label class="settings-label">Provider</label>
-                    <select class="settings-select" id="settingsProvider"></select>
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">Model</label>
-                    <div class="model-row" style="position:relative">
-                        <input class="settings-input" id="settingsModelInput" type="text" placeholder="输入模型名，或点右侧下拉框搜索" autocomplete="off" />
-                        <div id="settingsModelDatalist" class="ap-dropdown"></div>
-                        <button class="detect-btn" id="delModelBtn" style="margin-left:4px; padding:0 8px; width:auto;" title="删除列表中当前字面的模型">🗑️ 删除</button>
-                        <button class="detect-btn" id="detectBtn" style="display:none; margin-left:4px;">🔍 检测</button>
-                    </div>
-                    <div class="settings-hint" id="modelHint"></div>
-                </div>
-                <div class="settings-group" id="apiKeyGroup">
-                    <label class="settings-label">🔑 API Key</label>
-                    <div class="settings-hint" id="apiKeyStatus" style="color:#4caf50;margin-bottom:3px;"></div>
-                    <div class="settings-key-row">
-                        <input class="settings-input" id="settingsApiKey" type="password" placeholder="输入新 Key（留空保留已有）" autocomplete="off" />
-                        <button class="key-toggle-btn" id="keyToggleBtn">👁</button>
-                        <button class="detect-btn" id="fetchApiModelsBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="用此 Key 去对应端点拉取模型">☁️ 获取模型</button>
-                    </div>
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">🌐 Endpoint <span style="opacity:0.5;font-weight:400">(可选)</span></label>
-                    <input class="settings-input" id="settingsEndpoint" type="text" placeholder="留空使用默认" />
-                    <div class="settings-hint" id="endpointHint"></div>
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">📏 上下文大小 (tokens)</label>
-                    <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="0 = provider 默认" />
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">🧠 思考深度 / Reasoning Effort <span style="opacity:0.5;font-weight:400">(供支持的模型使用)</span></label>
-                    <select class="settings-select" id="settingsReasoningEffort">
-                        <option value="low">Low (快速)</option>
-                        <option value="medium">Medium (中等)</option>
-                        <option value="high">High (默认)</option>
-                        <option value="max">Max (DeepSeek-V4/o3 高强度思考)</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-        <div class="accordion-section" id="inlineSection">
-            <div class="accordion-header" id="accInline"><span>✏️ 补全模型</span><span class="accordion-arrow">▶</span></div>
-            <div class="accordion-body">
-                <div class="settings-toggle-row">
-                    <span class="settings-toggle-label">启用 AI 补全</span>
-                    <label class="toggle-switch"><input type="checkbox" id="inlineEnabled"><span class="toggle-track"></span></label>
-                </div>
-                <div class="settings-toggle-row" style="margin-top:12px;">
-                    <span class="settings-toggle-label" style="display:block;">启用 FIM 模式 (需选择支持的模型)</span>
-                    <label class="toggle-switch"><input type="checkbox" id="inlineFimMode"><span class="toggle-track"></span></label>
-                    <div class="settings-hint" style="margin-top:4px;">使用针对补全优化的高速 Endpoint。启用后将在列表内过滤不支持的模型。</div>
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">Provider</label>
-                    <select class="settings-select" id="inlineProvider"><option value="">- 与对话相同 -</option></select>
-                </div>
-                <div class="settings-group">
-                    <div class="model-row" style="position:relative">
-                        <input class="settings-input" id="inlineModelInput" type="text" placeholder="例如 gpt-4" autocomplete="off" />
-                        <div id="inlineModelDatalist" class="ap-dropdown"></div>
-                    </div>
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">Endpoint</label>
-                    <input class="settings-input" id="inlineEndpoint" type="text" placeholder="留空与对话相同" />
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">防抖延迟 (ms)</label>
-                    <input class="settings-input" id="inlineDebounce" type="number" min="100" step="100" placeholder="500" />
-                </div>
-                <div class="settings-toggle-row" style="margin-top:12px;">
-                    <span class="settings-toggle-label">防重叠代码修剪 (Overlap Stripping)</span>
-                    <label class="toggle-switch"><input type="checkbox" id="inlineOverlapStripping"><span class="toggle-track"></span></label>
-                </div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid var(--border); margin: 12px 0 8px; padding-top: 6px;">
-            <span style="font-size:11px; opacity:0.5; letter-spacing:0.05em;">行为与工具</span>
-        </div>
-        <div class="accordion-section" id="mcpSection" style="margin-top: 12px;">
-            <div class="accordion-header" id="accMcp"><span>🔌 MCP (模型上下文协议)</span><span class="accordion-arrow">▶</span></div>
-            <div class="accordion-body">
-                <div class="settings-hint" style="margin-bottom: 5px;">配置外部数据源为 AI 代理注入额外的上下文上下文信息。</div>
-                <div id="mcpServersList" style="display:flex; flex-direction:column; gap:8px;"></div>
-                <button class="settings-test-btn" id="addMcpServerBtn" style="margin-top: 4px;">➕ 新增 MCP Server</button>
-            </div>
-        </div>
-        <div class="accordion-section" id="agentSection" style="margin-top: 12px;">
-            <div class="accordion-header" id="accAgent"><span>🛡️ Agent 设置</span><span class="accordion-arrow">▶</span></div>
-            <div class="accordion-body">
-                <div class="settings-group">
-                    <label class="settings-label">文件写入模式</label>
-                    <select class="settings-select" id="agentWriteMode">
-                        <option value="confirm">确认模式 — 写操作前 diff 确认（推荐）</option>
-                        <option value="auto">自动模式 — 直接写入（高级）</option>
-                    </select>
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">🔍 Brave Search API Key <span style="opacity:0.5;font-weight:400">(可选，用于 web_search 工具)</span></label>
-                    <div class="settings-key-row">
-                        <input class="settings-input" id="braveSearchApiKey" type="password" placeholder="留空则使用 DuckDuckGo 降级搜索" autocomplete="off" />
-                        <button class="key-toggle-btn" id="braveKeyToggleBtn" onclick="var k=document.getElementById('braveSearchApiKey');k.type=k.type==='password'?'text':'password';">👁</button>
-                    </div>
-                    <div class="settings-hint">填写后 web_search 工具将使用 Brave Search API，结果质量更高。Key 请在 <a href="https://api.search.brave.com/" target="_blank" rel="noopener">api.search.brave.com</a> 获取。</div>
-                </div>
-            </div>
-        </div>
-        <div class="accordion-section" id="usageSection" style="margin-top: 12px; border-color: rgba(100,149,237,0.3);">
-            <div class="accordion-header" id="accUsage"><span>📊 Token 消耗统计</span><span class="accordion-arrow">▶</span></div>
-            <div class="accordion-body">
-                <div class="settings-group">
-                    <div id="usageStatsContent" style="font-size:12px; line-height: 1.6; opacity: 0.9;">
-                        加载中...
-                    </div>
-                    <button class="settings-test-btn" id="refreshUsageBtn" style="margin-top: 8px;">🔄 刷新统计</button>
-                    <button class="settings-test-btn" id="clearUsageBtn" style="margin-top: 5px; color: #e66; border-color: rgba(200,80,80,0.3);">🗑️ 清空统计</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="settings-footer">
-        <div class="test-result" id="testResult"></div>
-        <button class="settings-test-btn" id="testConnBtn">🧪 测试连接</button>
-        <button class="settings-save-btn" id="saveSettingsBtn">💾 保存设置</button>
-    </div>
-</div>
-
-<script src="${scriptUri}"></script>
-</body>
-</html>`;
+        return getChatPanelHtml(webview, this.extensionUri);
     }
 }

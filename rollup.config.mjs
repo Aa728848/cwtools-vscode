@@ -69,6 +69,7 @@ export default [
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
                 }
             }),
+            copyFile('client/webview/chatPanel.css', 'release/bin/client/webview/chatPanel.css'),
         ],
     },
 ];

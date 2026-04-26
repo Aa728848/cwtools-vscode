@@ -99,18 +99,20 @@ export class LspToolHandler {
         timeoutMs = LspToolHandler.LSP_TIMEOUT_MS,
     ): Promise<T> {
         await this.acquireLspSlot();
+        let timer: ReturnType<typeof setTimeout>;
         try {
             const promise = this.client.sendRequest('workspace/executeCommand', {
                 command,
                 arguments: args,
             });
-            const timeout = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error(
+            const timeout = new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(
                     `LSP request "${command}" timed out after ${timeoutMs / 1000}s`
-                )), timeoutMs),
-            );
+                )), timeoutMs);
+            });
             return await Promise.race([promise, timeout]) as T;
         } finally {
+            clearTimeout(timer!);
             this.releaseLspSlot();
         }
     }
@@ -147,15 +149,17 @@ export class LspToolHandler {
         timeoutMs = LspToolHandler.LSP_TIMEOUT_MS,
     ): Promise<T | undefined> {
         await this.acquireLspSlot();
+        let timer: ReturnType<typeof setTimeout>;
         try {
             const promise = vs.commands.executeCommand<T>(command, ...args);
-            const timeout = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error(
+            const timeout = new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(
                     `VS Code command "${command}" timed out after ${timeoutMs / 1000}s`
-                )), timeoutMs),
-            );
+                )), timeoutMs);
+            });
             return await Promise.race([promise, timeout]);
         } finally {
+            clearTimeout(timer!);
             this.releaseLspSlot();
         }
     }
@@ -600,7 +604,35 @@ export class LspToolHandler {
                         };
                     }
                 }
-            } catch { /* fall through to temp-file validation */ }
+            } catch { /* fall through */ }
+
+            // C3: Strategy 1.5 — incremental: if targetFile is already open in the editor
+            // and has active diagnostics, return those directly without creating a temp file.
+            // This avoids unnecessary disk I/O and temp-file flickering.
+            if (args.targetFile && fs.existsSync(args.targetFile)) {
+                try {
+                    const targetUri = vs.Uri.file(args.targetFile);
+                    const existingDiags = vs.languages.getDiagnostics(targetUri);
+                    if (existingDiags.length > 0) {
+                        for (const d of existingDiags) {
+                            errors.push({
+                                code: String(d.code ?? ''),
+                                severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                                    : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+                                message: d.message,
+                                line: d.range.start.line,
+                                column: d.range.start.character,
+                            });
+                        }
+                        return {
+                            isValid: errors.filter(e => e.severity === 'error').length === 0,
+                            errors,
+                            _strategy: 'incremental',
+                        } as ValidateCodeResult;
+                    }
+                } catch { /* fall through to temp-file */ }
+            }
 
             // Fallback: Temp-file approach
             let tempSubdir = '.cwtools-ai-tmp';

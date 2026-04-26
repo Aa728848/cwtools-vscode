@@ -20,16 +20,9 @@ import type {
     ContentPart,
     TokenUsage,
 } from './types';
+import { contentToString } from './types';
 
-/** Safely coerce ChatMessage.content (string | ContentPart[] | null) to a string for text operations. */
-function contentToString(content: string | ContentPart[] | null | undefined): string {
-    if (!content) return '';
-    if (typeof content === 'string') return content;
-    // ContentPart[] — join text parts
-    return content.filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text')
-        .map(p => p.text)
-        .join('');
-}
+// P1-7: contentToString is now imported from './types' — see import above.
 
 import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
@@ -46,7 +39,22 @@ const MAX_TOOL_ITERATIONS_BASE = 50;
 const DOOM_LOOP_THRESHOLD = 3;
 // Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
 const MAX_VALIDATION_RETRIES = 2;
-// Token estimation: ~4 chars per token (rough approximation)
+// Token estimation: adaptive based on content character distribution.
+// English-dominated text ≈ 4 chars/token; CJK-dominated ≈ 1.5 chars/token.
+// Uses a fast CJK regex sample to interpolate between the two extremes.
+const CHARS_PER_TOKEN_ASCII = 4;
+const CHARS_PER_TOKEN_CJK = 1.5;
+// eslint-disable-next-line no-control-regex
+const CJK_RANGE = /[\u3000-\u9fff\uf900-\ufaff\ufe30-\ufe4f]/g;
+function estimateTokenCount(text: string): number {
+    // Sample the first 4000 chars — sufficient for ratio estimation, avoids scanning huge strings
+    const sample = text.length > 4000 ? text.substring(0, 4000) : text;
+    const cjkMatches = sample.match(CJK_RANGE);
+    const cjkRatio = cjkMatches ? cjkMatches.length / sample.length : 0;
+    const charsPerToken = CHARS_PER_TOKEN_ASCII * (1 - cjkRatio) + CHARS_PER_TOKEN_CJK * cjkRatio;
+    return Math.ceil(text.length / charsPerToken);
+}
+// Backward-compat alias for non-text token estimation (images etc.)
 const CHARS_PER_TOKEN = 4;
 // Compact when conversation exceeds this fraction of provider context
 const COMPACTION_THRESHOLD_RATIO = 0.7;
@@ -337,25 +345,25 @@ export class AgentRunner {
         // No early-return based on message count alone — a single large message (e.g. with
         // images) can exceed the context limit. Let the token estimate decide.
 
-        // Estimate total token usage. For ContentPart[] messages, also add image token overhead:
+        // Estimate total token usage using CJK-aware estimation.
+        // For ContentPart[] messages, also add image token overhead:
         // a typical 512×512 screenshot in base64 ≈ 800 tokens; we use the data URL byte length
         // divided by ~3 (base64 overhead factor) divided by CHARS_PER_TOKEN as a rough estimate.
-        const totalChars = history.reduce((sum, m) => {
-            if (typeof m.content === 'string') return sum + m.content.length;
+        const estimatedTokens = history.reduce((sum, m) => {
+            if (typeof m.content === 'string') return sum + estimateTokenCount(m.content);
             if (Array.isArray(m.content)) {
                 return sum + (m.content as import('./types').ContentPart[]).reduce((s, part) => {
-                    if (part.type === 'text') return s + part.text.length;
+                    if (part.type === 'text') return s + estimateTokenCount(part.text);
                     if (part.type === 'image_url') {
                         // base64 data URL byte length / 3 ≈ raw bytes; divide by 4 chars/token
                         const urlLen = part.image_url.url.length;
-                        return s + Math.ceil(urlLen / 3);  // rough token estimate for image
+                        return s + Math.ceil(urlLen / 3 / CHARS_PER_TOKEN);
                     }
                     return s;
                 }, 0);
             }
             return sum;
         }, 0);
-        const estimatedTokens = Math.ceil(totalChars / CHARS_PER_TOKEN);
 
         // Get provider context limit (user override takes precedence)
         const config = this.aiService.getConfig();
@@ -598,8 +606,7 @@ export class AgentRunner {
             // Every MID_LOOP_COMPACTION_INTERVAL iterations, estimate message size
             // and compact if approaching the context window limit.
             if (iteration > 1 && (iteration - 1) % MID_LOOP_COMPACTION_INTERVAL === 0) {
-                const loopChars = messages.reduce((s, m) => s + contentToString(m.content).length, 0);
-                const loopTokens = Math.ceil(loopChars / CHARS_PER_TOKEN);
+                const loopTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
                 if (loopTokens > midLoopThreshold) {
                     emitStep({
                         type: 'compaction',

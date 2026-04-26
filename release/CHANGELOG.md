@@ -1,6 +1,27 @@
 # Changelog
 
-## [1.6.3] — 2026-04-26
+## [1.6.5] — 2026-04-26
+
+### 🛡️ 安全加固与缺陷修复 (Audit Hardening)
+
+- **[P0 修复] `multiEdit` TOCTOU 竞态消除**：写入文件后不再重新读取文件来计算诊断行号，改为直接引用内存中的 `content` 变量，消除了写入和读取之间其他进程修改文件导致诊断偏移的竞态风险。(`fileTools.ts`)
+- **[P0 修复] 9-Slice Canvas DOM 泄漏**：`corneredTileSpriteType` 的 `drawNineSlice()` 现在在追加新 Canvas 前清理已有的旧 Canvas 元素，防止分辨率切换或重渲染时 DOM 中累积无用节点。(`guiPreview.ts`)
+- **[P1 修复] LSP 超时定时器泄漏**：`lspRequest` 和 `vsCommand` 的 `setTimeout` 定时器现在通过 `try/finally + clearTimeout` 正确清理，防止长时间会话中无用定时器的积累。(`lspTools.ts`)
+- **[P1 修复] `retractMessage` 硬编码 `-2` 偏移**：`convLength` 改为在消息交换前记录（而非交换后），`retractMessage` 直接 slice 到该位置而无需任何偏移。修复了消息生成失败时过度截断对话历史的潜在问题。(`chatPanel.ts`)
+- **[P1 修复] `applyPatch` 快照时机**：将文件原始内容的快照捕获移到了确认循环之前。修复了用户在确认弹窗期间手动编辑文件后，撤回操作无法恢复到真实原始状态的问题。(`fileTools.ts`)
+- **[P1 修复] `contentToString` 去重**：从 `agentRunner.ts` 和 `contextBudget.ts` 中提取为 `types.ts` 中的唯一共享实现，消除 DRY 违规与未来不一致风险。
+
+### ⚡ 性能优化
+
+- **Levenshtein 滚动数组**：模糊匹配的 Levenshtein 距离计算从 O(n×m) 空间优化为 O(min(n,m)) 空间，减少大文件编辑时的 GC 压力。(`fileTools.ts`)
+- **CJK 自适应 Token 估算**：上下文压缩的 token 计数器现在根据内容中 CJK 字符的比例动态调整（英文 ≈4 字符/token，中文 ≈1.5 字符/token），修复了中文密集场景下 2× 低估导致的意外上下文溢出。(`agentRunner.ts`)
+
+### 🔧 改进
+
+- **命令安全白名单 (P2-11)**：`run_command` 的安全过滤器现在采用两级策略——危险命令（`rm -rf`、`shutdown` 等）始终拦截；管道/重定向检查允许已知安全前缀（`git log`、`dir`、`echo` 等）通过，减少对合法只读命令的误拦截。(`externalTools.ts`)
+- **增量验证 (C3)**：`validateCode` 新增 Strategy 1.5——当目标文件已在编辑器中打开且有现有诊断时，直接返回 VSCode 已有的诊断结果，避免创建临时文件导致的 I/O 开销和文件闪烁。(`lspTools.ts`)
+- **子代理任务隔离 (C5)**：每个子代理现在维护独立的文件修改追踪。失败的子代理会自动回滚其所有文件写入，防止部分完成的任务留下不一致状态。(`externalTools.ts`)
+
 
 ### 🐛 Bug 修复与体验优化
 

@@ -478,11 +478,11 @@ export class FileToolHandler {
         }
 
         const diagnostics = await this.getLspDiagnosticsForFile(filePath);
-        // P1 Fix: read file once outside loop instead of per-edit
+        // P0-1 Fix: use in-memory `content` directly instead of re-reading the file
+        // (eliminates redundant I/O and TOCTOU risk — `content` is exactly what was just written)
         // P2 Fix: stricter matching (min 8 chars) to reduce false positives
         const editedRegionLines = new Set<number>();
-        const finalContent = fs.readFileSync(filePath, 'utf-8');
-        const finalLines = finalContent.split('\n');
+        const finalLines = content.split('\n');
         for (const edit of args.edits) {
             const editLines = edit.newString.split('\n');
             for (let li = 0; li < finalLines.length; li++) {
@@ -620,8 +620,15 @@ export class FileToolHandler {
             return { success: false, filesChanged: [], errors };
         }
 
-        // P2 Fix: collect all user confirmations BEFORE writing any files
-        // to ensure atomicity — if user rejects any file, nothing is written
+        // P1-5 Fix: capture snapshots of original content BEFORE the confirmation loop.
+        // This prevents a bug where user hand-edits a file between the confirm prompt
+        // and the actual write — ensuring retract restores the true pre-AI state.
+        const originalContents = new Map<string, string | null>();
+        for (const { filePath } of pendingWrites) {
+            const { content: prevContent } = this.readTextFile(filePath);
+            originalContents.set(filePath, prevContent !== '' ? prevContent : null);
+        }
+
         const filesChanged: string[] = [];
         if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
             for (const { filePath, newContent } of pendingWrites) {
@@ -641,8 +648,7 @@ export class FileToolHandler {
             }
         }
         for (const { filePath, newContent, hasBom } of pendingWrites) {
-            const { content: prevContent } = this.readTextFile(filePath);
-            this.ctx.onBeforeFileWrite?.(filePath, prevContent !== '' ? prevContent : null);
+            this.ctx.onBeforeFileWrite?.(filePath, originalContents.get(filePath) ?? null);
             try {
                 this.writeTextFile(filePath, newContent, hasBom);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
@@ -760,16 +766,22 @@ export class FileToolHandler {
         return ending === '\n' ? text : text.split('\n').join('\r\n');
     }
 
+    // P2-12 Fix: Rolling-array Levenshtein — O(min(n,m)) space instead of O(n*m)
     private levenshtein(a: string, b: string): number {
         if (!a.length || !b.length) return Math.max(a.length, b.length);
-        const m = Array.from({ length: a.length + 1 }, (_, i) =>
-            Array.from({ length: b.length + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0));
-        for (let i = 1; i <= a.length; i++)
+        // Ensure b is the shorter string for minimal memory usage
+        if (a.length < b.length) { const t = a; a = b; b = t; }
+        let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+        let curr = new Array<number>(b.length + 1);
+        for (let i = 1; i <= a.length; i++) {
+            curr[0] = i;
             for (let j = 1; j <= b.length; j++) {
                 const c = a[i - 1] === b[j - 1] ? 0 : 1;
-                m[i][j] = Math.min(m[i - 1][j] + 1, m[i][j - 1] + 1, m[i - 1][j - 1] + c);
+                curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + c);
             }
-        return m[a.length][b.length];
+            [prev, curr] = [curr, prev];
+        }
+        return prev[b.length];
     }
 
     private *simpleReplacer(_c: string, find: string): Generator<string> { yield find; }

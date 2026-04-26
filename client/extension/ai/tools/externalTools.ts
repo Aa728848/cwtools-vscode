@@ -5,6 +5,7 @@
 
 import * as vs from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import type { TodoItem, TodoWriteResult } from '../types';
 
 // ─── Context type ────────────────────────────────────────────────────────────
@@ -32,6 +33,8 @@ export interface ExternalToolContext {
     };
     parentRunnerOptions?: import('../agentRunner').AgentRunnerOptions;
     parentTokenAccumulator?: import('../types').TokenUsage;
+    /** C5: File write hook for sub-agent isolation (mirrors FileToolContext.onBeforeFileWrite) */
+    onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -126,21 +129,44 @@ export class ExternalToolHandler {
         timedOut?: boolean;
     }> {
         // Safety: deny obviously dangerous commands and pipe/chain operations
-        // P2 Fix: more targeted patterns to reduce false positives on safe commands
-        const BLOCKED_PATTERNS = [
+        // P2-11 Fix: two-tier filter — destructive commands always blocked; pipe/redirect
+        // checked separately with a whitelist for known-safe tools.
+        const ALWAYS_BLOCKED = [
             /\brm\s+-rf\b/i, /\bdel\s+\/[fqs]/i, /\bformat\b/i,
             /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
             /\bpowershell\b/i, /\bpwsh\b/i, /\bnode\b\s+-e/i, /\bpython\b\s+-c/i,
             /\bcurl\b.*\|\s*bash/i, /\bwget\b.*\|\s*sh/i,
+        ];
+        const PIPE_REDIRECT_BLOCKED = [
             /\|/,               // pipe operator
             /&&/,               // command chaining
             /;\s*\S/,           // semicolon followed by next command (allow trailing ;)
             /\d*>{1,2}\s*\S/,   // output redirect (> file, >> file, 2> err)
             /</,                // input redirect
         ];
-        for (const pat of BLOCKED_PATTERNS) {
+        // P2-11: Commands that are inherently read-only skip pipe/redirect checks
+        // (they still go through the user permission prompt)
+        const SAFE_COMMAND_PREFIXES = [
+            'git log', 'git status', 'git diff', 'git show', 'git branch',
+            'git tag', 'git stash list', 'git remote', 'git rev-parse',
+            'dotnet --version', 'dotnet --info', 'node --version',
+            'npm list', 'npm ls', 'npm --version', 'npx --version',
+            'cat ', 'type ', 'echo ', 'dir ', 'ls ', 'find ', 'grep ',
+            'wc ', 'head ', 'tail ', 'which ', 'where ',
+        ];
+        const cmdLower = args.command.trim().toLowerCase();
+        const isSafePrefix = SAFE_COMMAND_PREFIXES.some(p => cmdLower.startsWith(p));
+
+        for (const pat of ALWAYS_BLOCKED) {
             if (pat.test(args.command)) {
                 return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${pat.source}). Please use built-in tools instead of generic shell pipes/chains.`, exitCode: 1 };
+            }
+        }
+        if (!isSafePrefix) {
+            for (const pat of PIPE_REDIRECT_BLOCKED) {
+                if (pat.test(args.command)) {
+                    return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${pat.source}). Please use built-in tools instead of generic shell pipes/chains.`, exitCode: 1 };
+                }
             }
         }
 
@@ -301,6 +327,20 @@ export class ExternalToolHandler {
                     subagentType: mode,
                     timestamp: Date.now(),
                 });
+
+                // C5: Per-sub-agent file write isolation.
+                // Track writes so we can roll back on failure.
+                const subAgentSnapshots: Array<{ filePath: string; previousContent: string | null }> = [];
+                const originalHook = this.ctx.onBeforeFileWrite;
+                this.ctx.onBeforeFileWrite = (filePath, prevContent) => {
+                    // Record for rollback — only first write per file per sub-agent
+                    if (!subAgentSnapshots.some(s => s.filePath === filePath)) {
+                        subAgentSnapshots.push({ filePath, previousContent: prevContent });
+                    }
+                    // Also call the original hook (chatPanel's snapshot collector)
+                    originalHook?.(filePath, prevContent);
+                };
+
                 try {
                     const result = await this.ctx.agentRunnerRef!.runSubAgent(
                         task.prompt,
@@ -318,9 +358,25 @@ export class ExternalToolHandler {
                     });
                     return { description: task.description, result };
                 } catch (e) {
+                    // C5: Roll back all file writes from this failed sub-agent
+                    for (const snap of subAgentSnapshots.reverse()) {
+                        try {
+                            if (snap.previousContent === null) {
+                                // File was created by sub-agent — delete it
+                                if (fs.existsSync(snap.filePath)) {
+                                    fs.unlinkSync(snap.filePath);
+                                }
+                            } else {
+                                // Restore original content
+                                fs.writeFileSync(snap.filePath, snap.previousContent, 'utf-8');
+                            }
+                        } catch (re) {
+                            console.error(`[SubAgent] Rollback failed for ${snap.filePath}:`, re);
+                        }
+                    }
                     this.ctx.onStep?.({
                         type: 'subtask_complete',
-                        content: `✗ ${task.description}: ${e instanceof Error ? e.message : String(e)}`,
+                        content: `✗ ${task.description}: ${e instanceof Error ? e.message : String(e)} (${subAgentSnapshots.length} file(s) rolled back)`,
                         subagentType: mode,
                         timestamp: Date.now(),
                     });
@@ -328,6 +384,9 @@ export class ExternalToolHandler {
                         description: task.description,
                         result: `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}`,
                     };
+                } finally {
+                    // Restore original hook
+                    this.ctx.onBeforeFileWrite = originalHook;
                 }
             });
 

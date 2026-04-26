@@ -390,6 +390,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Collect file snapshots for retract/undo: wire up the tool executor callback
         // for the duration of this message exchange.
         const messageSnapshots: Array<{ filePath: string; previousContent: string | null; _tooLarge?: boolean }> = [];
+        // P1-6 Fix: capture conversation length BEFORE message exchange, so retract
+        // can slice directly without the fragile `-2` hardcode.
+        const convLengthBeforeExchange = this.conversationMessages.length;
         this._currentMessageSnapshots = messageSnapshots;
         this.agentRunner.toolExecutor.onBeforeFileWrite = (filePath, previousContent) => {
             // Only record the first snapshot for each file (earliest = true "before" state)
@@ -521,7 +524,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (messageSnapshots.length > 0) {
                 this._messageFileSnapshots.set(messageIndex, {
                     files: messageSnapshots,
-                    convLength: this.conversationMessages.length,
+                    convLength: convLengthBeforeExchange,
                 });
 
                 const MAX_SNAPSHOTS = 20;
@@ -632,7 +635,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // using messageIndex (which may diverge from conversationMessages after fork/load).
         this.topicManager.currentTopic.messages = this.topicManager.currentTopic.messages.slice(0, messageIndex);
         if (convRollbackLength !== undefined) {
-            this.conversationMessages = this.conversationMessages.slice(0, convRollbackLength - 2);
+            // P1-6 Fix: convLength now records the state BEFORE the message exchange,
+            // so we slice directly to it without any offset.
+            this.conversationMessages = this.conversationMessages.slice(0, convRollbackLength);
         } else {
             // Fallback: best-effort slice by messageIndex
             this.conversationMessages = this.conversationMessages.slice(0, messageIndex);

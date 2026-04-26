@@ -7,15 +7,9 @@
  */
 
 import type { ChatMessage, ContentPart } from './types';
+import { contentToString } from './types';
 
-/** Safely coerce ChatMessage.content (string | ContentPart[] | null) to a string. */
-function contentToString(content: string | ContentPart[] | null | undefined): string {
-    if (!content) return '';
-    if (typeof content === 'string') return content;
-    return content.filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text')
-        .map(p => p.text)
-        .join('');
-}
+// P1-7: contentToString moved to types.ts — single shared definition
 
 /** Default budget per tool result (characters). */
 const TOOL_RESULT_BUDGET_BASE = 15000;

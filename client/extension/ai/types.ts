@@ -827,3 +827,17 @@ export interface PanelSettings {
         servers: MCPServerConfig[];
     };
 }
+
+// ─── Shared Utilities ────────────────────────────────────────────────────────
+
+/**
+ * Safely coerce ChatMessage.content (string | ContentPart[] | null) to a string.
+ * P1-7 Fix: extracted from agentRunner.ts / contextBudget.ts to eliminate duplication.
+ */
+export function contentToString(content: string | ContentPart[] | null | undefined): string {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    return content.filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text')
+        .map(p => p.text)
+        .join('');
+}

@@ -161,6 +161,10 @@ function applyImageStyles(img: HTMLImageElement, div: HTMLElement, el: GuiElemen
                 if (scw > 0 && sb > 0) ctx.drawImage(img, sl, sh - sb, scw, sb, dl, dh - db, dcw, db);
                 if (sr > 0 && sb > 0) ctx.drawImage(img, sw - sr, sh - sb, sr, sb, dw - dr, dh - db, dr, db);
 
+                // P0-3 Fix: remove any stale 9-slice canvas from previous renders
+                // (e.g. resolution switch or re-render) to prevent DOM leak
+                div.querySelectorAll('canvas').forEach(c => c.remove());
+
                 div.appendChild(canvas);
             };
 

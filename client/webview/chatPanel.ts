@@ -261,9 +261,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         else slashPopup && slashPopup.classList.remove('show');
         // @ file mention: request file list on first @
         const atIdx = v.lastIndexOf('@');
-        if (atIdx >= 0 && (atIdx === 0 || v[atIdx - 1] === ' ' || v[atIdx - 1] === '\n')) {
+        if (atIdx >= 0) {
             const afterAt = v.slice(atIdx + 1);
-            showAtPopup(afterAt);
+            if (!/[\s\n]/.test(afterAt)) {
+                showAtPopup(afterAt);
+            } else {
+                closeAtPopup();
+            }
         } else {
             closeAtPopup();
         }

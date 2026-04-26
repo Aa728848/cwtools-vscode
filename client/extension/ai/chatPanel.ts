@@ -317,6 +317,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], skipAutoModeSwitch = false, isBackground = false): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
+        if (text.trim().startsWith('/')) {
+            await this.handleSlashCommand(text.trim());
+            return;
+        }
+
         // Auto-switch from Plan to Build mode if user gives approval implicit keywords
         if (this.currentMode === 'plan' && !skipAutoModeSwitch) {
             const lowerText = text.toLowerCase();

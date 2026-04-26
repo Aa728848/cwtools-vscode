@@ -25,7 +25,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp}; script-src ${csp}; img-src data: blob:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp}; img-src data: blob:;">
 <title>Eddy CWTool Code</title>
 <link rel="stylesheet" href="${cssUri}">
 </head>
@@ -82,7 +82,9 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 
 <div class="input-wrapper" style="position:relative">
     <div id="slashPopup" class="slash-popup"></div>
-    <div class="input-container input-wrapper">
+    <div class="input-container">
+        <div class="file-badge-area" id="fileBadgeArea"></div>
+        <div class="image-preview-area" id="imagePreviewArea"></div>
         <div class="input-row">
             <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1"></textarea>
         </div>

@@ -3,4 +3,4 @@
 	url = https://github.com/cwtools/cwtools
 [submodule "submodules/cwtools-stellaris-config"]
 	path = submodules/cwtools-stellaris-config
-	url = https://github.com/Aa728848/cwtools-stellaris-config
+	url = https://gitee.com/cChen2422/cwtools-stellaris-config.git

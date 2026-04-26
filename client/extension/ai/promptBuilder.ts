@@ -527,7 +527,8 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
             // Extract namespaces list
             const nsMatch = content.match(/### Event Namespaces\n([\s\S]*?)(?=\n### |\n## |$)/);
             if (nsMatch) {
-                parsed.namespaces = (nsMatch[1].match(/`([^`]+)`/g) || []).map(s => s.replace(/`/g, ''));
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                parsed.namespaces = (nsMatch[1]!.match(/`([^`]+)`/g) || []).map(s => s.replace(/`/g, ''));
             }
 
             this._parsedRulesCache = parsed;
@@ -783,14 +784,18 @@ Rules:
         let blockStart = cursorLine;
 
         for (let i = cursorLine; i >= 0; i--) {
-            const line = lines[i];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const line = lines[i]!;
             for (let c = line.length - 1; c >= 0; c--) {
-                if (line[c] === '}') braceDepth++;
-                if (line[c] === '{') braceDepth--;
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                if (line[c]! === '}') braceDepth++;
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                if (line[c]! === '{') braceDepth--;
             }
             if (braceDepth <= 0 && i < cursorLine) {
                 // Check if this line looks like a block opener (e.g. "country_event = {")
-                const trimmed = lines[i].trim();
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                const trimmed = lines[i]!.trim();
                 if (trimmed.match(/^[\w.]+\s*=\s*\{/) || trimmed.match(/^[\w.]+\s*=\s*$/)) {
                     blockStart = i;
                     break;
@@ -807,7 +812,8 @@ Rules:
         braceDepth = 0;
         let blockEnd = cursorLine;
         for (let i = blockStart; i < lines.length; i++) {
-            const line = lines[i];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const line = lines[i]!;
             for (const ch of line) {
                 if (ch === '{') braceDepth++;
                 if (ch === '}') braceDepth--;
@@ -853,14 +859,18 @@ Rules:
         const scopeChain: string[] = [];
         let braceDepth = 0;
         for (let i = endLine; i >= 0; i--) {
-            const line = lines[i];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const line = lines[i]!;
             for (const ch of line) {
                 if (ch === '}') braceDepth++;
                 if (ch === '{') braceDepth--;
             }
             if (braceDepth < 0) {
                 const blockMatch = line.match(/^\s*([\w][\w.]*)\s*=/);
-                if (blockMatch) scopeChain.unshift(blockMatch[1]);
+                if (blockMatch) {
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    scopeChain.unshift(blockMatch[1]!);
+                }
                 braceDepth = 0;  // Continue scanning for outer blocks
             }
         }

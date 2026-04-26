@@ -236,7 +236,10 @@ export class LspToolHandler {
                         for (const line of lines) {
                             const match = line.match(/\|\s*(\w+)\s*\|\s*(\w+)\s*\|/);
                             if (match) {
-                                const [, ctx, scope] = match;
+                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                const ctx = match[1]!;
+                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                const scope = match[2]!;
                                 if (ctx === 'ROOT') result.root = scope;
                                 else if (ctx === 'THIS') {
                                     result.thisScope = scope;
@@ -424,7 +427,8 @@ export class LspToolHandler {
                             const keyPattern = /^(\w[\w.-]*)\s*=/gm;
                             let match;
                             while ((match = keyPattern.exec(content)) !== null && instances.length < limit) {
-                                const id = match[1];
+                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                const id = match[1]!;
                                 if (!args.filter || id.includes(args.filter)) {
                                     instances.push({ id, file: path.relative(this.ctx.workspaceRoot, file) });
                                 }
@@ -511,11 +515,13 @@ export class LspToolHandler {
             let currentDesc = '';
 
             for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                const line = lines[i]!.trim();
 
                 const scopeMatch = line.match(aliasPattern);
                 if (scopeMatch) {
-                    currentScopes = scopeMatch[1].split(/\s+/).filter(s => s.length > 0);
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    currentScopes = scopeMatch[1]!.split(/\s+/).filter(s => s.length > 0);
                     continue;
                 }
 
@@ -526,7 +532,10 @@ export class LspToolHandler {
 
                 const nameMatch = line.match(namePattern);
                 if (nameMatch) {
-                    const [, name, syntax] = nameMatch;
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    const name = nameMatch[1]!;
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    const syntax = nameMatch[2]!;
                     results.push({
                         name,
                         description: currentDesc,
@@ -553,11 +562,13 @@ export class LspToolHandler {
                     const content = fs.readFileSync(file, 'utf-8');
                     const lines = content.split('\n');
                     for (let i = 0; i < lines.length; i++) {
-                        if (lines[i].includes(args.identifier)) {
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                        if (lines[i]!.includes(args.identifier)) {
                             references.push({
                                 file: path.relative(this.ctx.workspaceRoot, file),
                                 line: i,
-                                context: lines[i].trim().substring(0, 120),
+                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                context: lines[i]!.trim().substring(0, 120),
                             });
                         }
                     }
@@ -577,7 +588,8 @@ export class LspToolHandler {
         try {
             const wsFolders = vs.workspace.workspaceFolders;
             const wsRoot = wsFolders && wsFolders.length > 0
-                ? wsFolders[0].uri.fsPath
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                ? wsFolders[0]!.uri.fsPath
                 : this.ctx.workspaceRoot;
 
             // Strategy 1: In-memory validation via LSP server command
@@ -921,8 +933,10 @@ export class LspToolHandler {
                             const lines = content.split('\n');
                             const matchingLines: Array<{ line: number; content: string }> = [];
                             for (let j = 0; j < lines.length; j++) {
-                                if (lines[j].toLowerCase().includes(queryLower)) {
-                                    matchingLines.push({ line: j, content: lines[j].trim().substring(0, 120) });
+                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                if (lines[j]!.toLowerCase().includes(queryLower)) {
+                                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                    matchingLines.push({ line: j, content: lines[j]!.trim().substring(0, 120) });
                                 }
                                 if (matchingLines.length >= 20) break;
                             }

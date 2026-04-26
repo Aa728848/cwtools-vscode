@@ -526,7 +526,7 @@ function drawRingWorld(
     // Label for the ring group
     if (showLabels) {
         const coverage = ringGroup.totalAngle * Math.min(1, arcScale);
-        const labelAngle = ringGroup.segments[0].startAngle * Math.PI / 180;
+        const labelAngle = ringGroup.segments[0]!.startAngle * Math.PI / 180;
         const labelWx = parentWorldX + Math.cos(labelAngle) * (orbitR + bandWidth);
         const labelWy = parentWorldY + Math.sin(labelAngle) * (orbitR + bandWidth);
         const lp = project(labelWx, labelWy, 0);
@@ -785,7 +785,7 @@ function darkenColor(hex: string, amount: number): string {
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
     const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     if (!m) return null;
-    return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+    return { r: parseInt(m[1]!, 16), g: parseInt(m[2]!, 16), b: parseInt(m[3]!, 16) };
 }
 
 function clamp(v: number): number {
@@ -1282,7 +1282,7 @@ function setupControls() {
                     // Orbit lock: orbit_distance=0 bodies only change angle (but NOT ring worlds)
                     isLockedOrbit: !ringGroup && body.orbitDistance.type === 'fixed' && body.orbitDistance.value === 0,
                     // Ring world specific data
-                    isRingWorld: !!ringGroup,
+                    isRingWorld: !ringGroup,
                     ringChangeOrbitLine: ringGroup?.changeOrbitLine ?? -1,
                     ringOldOrbitRadius: ringGroup ? ((ringGroup as any)._dragOrigRadius || ringGroup.orbitRadius) : 0,
                     ringFirstLine: ringGroup?.firstLine ?? 0,
@@ -1375,11 +1375,11 @@ function hitTest(clientX: number, clientY: number): RenderedBody | null {
     // Check in reverse order (top-most first)
     for (let i = renderedBodies.length - 1; i >= 0; i--) {
         const rb = renderedBodies[i];
-        const dx = mx - rb.screenX;
-        const dy = my - rb.screenY;
+        const dx = mx - rb!.screenX;
+        const dy = my - rb!.screenY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist <= rb.screenRadius + 4) {
-            return rb;
+        if (dist <= rb!.screenRadius + 4) {
+            return rb!;
         }
     }
     return null;
@@ -1766,7 +1766,7 @@ function setupClassAutocomplete(inputEl: HTMLInputElement, dataSource: string[])
         dropdown.querySelectorAll('.class-option').forEach((opt, i) => {
             (opt as HTMLElement).addEventListener('mousedown', (e) => {
                 e.preventDefault();
-                inputEl.value = matches[i];
+                inputEl.value = matches[i]!;
                 hideDD();
                 inputEl.dispatchEvent(new Event('change'));
             });
@@ -1799,7 +1799,7 @@ function setupClassAutocomplete(inputEl: HTMLInputElement, dataSource: string[])
             e.preventDefault(); ddIndex = Math.max(ddIndex - 1, 0);
         } else if (e.key === 'Enter' && ddIndex >= 0) {
             e.preventDefault();
-            inputEl.value = (items[ddIndex] as HTMLElement).textContent!.split(' ')[0].trim();
+            inputEl.value = (items[ddIndex]! as HTMLElement).textContent!.split(' ')[0]!.trim();
             hideDD();
             inputEl.dispatchEvent(new Event('change'));
             return;
@@ -1809,7 +1809,7 @@ function setupClassAutocomplete(inputEl: HTMLInputElement, dataSource: string[])
         items.forEach((it, i) => {
             (it as HTMLElement).style.background = i === ddIndex ? 'var(--accent, #0078d4)' : '';
         });
-        if (ddIndex >= 0) items[ddIndex].scrollIntoView({ block: 'nearest' });
+        if (ddIndex >= 0) items[ddIndex]!.scrollIntoView({ block: 'nearest' });
     });
 }
 

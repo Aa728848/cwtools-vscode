@@ -188,8 +188,10 @@ export class SolarSystemPanel {
             );
             const match = propPattern.exec(lineText);
             if (match) {
-                const startCol = match.index + match[1].length;
-                const endCol = startCol + match[2].length;
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                const startCol = match.index + match[1]!.length;
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                const endCol = startCol + match[2]!.length;
                 const range = new vscode.Range(
                     new vscode.Position(i, startCol),
                     new vscode.Position(i, endCol),
@@ -218,7 +220,8 @@ export class SolarSystemPanel {
                         break;
                     }
                 }
-                const startCol = multiMatch.index + multiMatch[1].length;
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                const startCol = multiMatch.index + multiMatch[1]!.length;
                 const endLine = doc.lineAt(endLineIdx);
                 const closeBraceCol = endLine.text.indexOf('}') + 1;
                 const range = new vscode.Range(
@@ -556,8 +559,10 @@ export class SolarSystemPanel {
                 const distPattern = /(orbit_distance\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
                 const m = distPattern.exec(lineText);
                 if (m) {
-                    const startCol = m.index + m[1].length;
-                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2].length), distStr);
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    const startCol = m.index + m[1]!.length;
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), distStr);
                     foundDist = true;
                 }
             }
@@ -565,8 +570,10 @@ export class SolarSystemPanel {
                 const anglePattern = /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
                 const m = anglePattern.exec(lineText);
                 if (m) {
-                    const startCol = m.index + m[1].length;
-                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2].length), angleStr);
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    const startCol = m.index + m[1]!.length;
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), angleStr);
                     foundAngle = true;
                 }
             }
@@ -603,8 +610,10 @@ export class SolarSystemPanel {
                 const anglePattern = /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
                 const m = anglePattern.exec(lineText);
                 if (m) {
-                    const startCol = m.index + m[1].length;
-                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2].length), angleStr);
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    const startCol = m.index + m[1]!.length;
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), angleStr);
                     found = true;
                 }
             }
@@ -711,7 +720,8 @@ export class SolarSystemPanel {
             const content = doc.getText();
             const lines = content.split(/\r?\n/);
             const changeOrbitIdx = msg.ringChangeOrbitLine - 1;
-            const oldLine = lines[changeOrbitIdx];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const oldLine = lines[changeOrbitIdx]!;
             log.appendLine(`  RING: changeOrbitLine=${msg.ringChangeOrbitLine} oldLine="${oldLine}"`);
 
             // Compute the delta
@@ -739,7 +749,8 @@ export class SolarSystemPanel {
             // Parse old change_orbit value and compute new
             const match = oldLine.match(/change_orbit\s*=\s*(-?\d+)/);
             if (match) {
-                const oldValue = parseInt(match[1]);
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                const oldValue = parseInt(match[1]!);
                 const newValue = oldValue + Math.round(delta);
                 const newLine = oldLine.replace(/change_orbit\s*=\s*-?\d+/, `change_orbit = ${newValue}`);
                 lines[changeOrbitIdx] = newLine;
@@ -757,8 +768,10 @@ export class SolarSystemPanel {
                     //    Must search all lines within each segment's block (multi-line planets)
                     for (const seg of ringGroup.segments) {
                         for (let li = seg.line - 1; li < seg.endLine && li < lines.length; li++) {
-                            if (/orbit_angle\s*=/.test(lines[li])) {
-                                lines[li] = lines[li].replace(
+                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                            if (/orbit_angle\s*=/.test(lines[li]!)) {
+                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                lines[li] = lines[li]!.replace(
                                     /orbit_angle\s*=\s*\S+/,
                                     `orbit_angle = ${newAngle}`,
                                 );
@@ -799,8 +812,10 @@ export class SolarSystemPanel {
                     for (let si = 0; si < targetSegCount; si++) {
                         const seg = ringGroup.segments[si];
                         for (let li = seg.line - 1; li < seg.endLine && li < lines.length; li++) {
-                            if (/orbit_angle\s*=/.test(lines[li])) {
-                                lines[li] = lines[li].replace(
+                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                            if (/orbit_angle\s*=/.test(lines[li]!)) {
+                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                lines[li] = lines[li]!.replace(
                                     /orbit_angle\s*=\s*\S+/,
                                     `orbit_angle = ${newAngle}`,
                                 );
@@ -905,7 +920,8 @@ export class SolarSystemPanel {
         const prevBody = currentIdx > 0 ? planets[currentIdx - 1] : null;
         let nextBody: CelestialBody | null = null;
         for (let ni = currentIdx + 1; ni < planets.length; ni++) {
-            const candidate = planets[ni];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const candidate = planets[ni]!;
             const candDist = candidate.orbitDistance.type === 'fixed' ? candidate.orbitDistance.value : -1;
             if (candDist !== 0) {
                 nextBody = candidate;
@@ -960,14 +976,18 @@ export class SolarSystemPanel {
         let insertBefore = rePlanets.length;
         for (let i = 0; i < rePlanets.length; i++) {
             // Skip hidden ring segments (they belong to the previous anchor)
-            if (rePlanets[i].ringSegmentHidden) continue;
-            if (msg.targetResolvedOrbit <= rePlanets[i].resolvedOrbitRadius) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            if (rePlanets[i]!.ringSegmentHidden) continue;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            if (msg.targetResolvedOrbit <= rePlanets[i]!.resolvedOrbitRadius) {
                 insertBefore = i;
                 break;
             }
             // If this is a ring group anchor, skip past all its hidden segments
-            if (rePlanets[i].ringGroup) {
-                while (i + 1 < rePlanets.length && rePlanets[i + 1].ringSegmentHidden) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            if (rePlanets[i]!.ringGroup) {
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                while (i + 1 < rePlanets.length && rePlanets[i + 1]!.ringSegmentHidden) {
                     i++;
                 }
             }
@@ -980,15 +1000,18 @@ export class SolarSystemPanel {
         if (insertBefore > 0) {
             // Find the actual "previous" body (skip hidden ring segments backwards)
             let prevIdx = insertBefore - 1;
-            while (prevIdx > 0 && rePlanets[prevIdx].ringSegmentHidden) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            while (prevIdx > 0 && rePlanets[prevIdx]!.ringSegmentHidden) {
                 prevIdx--;
             }
-            const prevPlanet = rePlanets[prevIdx];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const prevPlanet = rePlanets[prevIdx]!;
             // If previous is a ring group anchor, use the ring's orbit + its trailing changeOrbit
             if (prevPlanet.ringGroup) {
                 // After a ring group, cumulative = ring orbit + any change_orbit after the ring
                 const lastSegIdx = insertBefore - 1;
-                const lastSeg = rePlanets[lastSegIdx];
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                const lastSeg = rePlanets[lastSegIdx]!;
                 cumOrbit = lastSeg.resolvedOrbitRadius + lastSeg.changeOrbit;
             } else {
                 cumOrbit = prevPlanet.resolvedOrbitRadius + prevPlanet.changeOrbit;
@@ -1024,10 +1047,12 @@ export class SolarSystemPanel {
         if (insertBefore > 0) {
             // Find the end of the previous body (or ring group)
             let prevIdx = insertBefore - 1;
-            while (prevIdx > 0 && rePlanets[prevIdx].ringSegmentHidden) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            while (prevIdx > 0 && rePlanets[prevIdx]!.ringSegmentHidden) {
                 prevIdx--;
             }
-            const prevPlanet = rePlanets[prevIdx];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const prevPlanet = rePlanets[prevIdx]!;
             if (prevPlanet.ringGroup) {
                 insertLineIdx = prevPlanet.ringGroup.lastEndLine;
             } else {
@@ -1036,7 +1061,8 @@ export class SolarSystemPanel {
         } else if (rePlanets.length > 0) {
             // Before first planet but after star
             const star = reSystem.bodies.find(b => b.bodyType === 'star');
-            insertLineIdx = star ? star.endLine : rePlanets[0].line - 1;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            insertLineIdx = star ? star.endLine : rePlanets[0]!.line - 1;
         } else {
             insertLineIdx = reSystem.endLine - 1;
         }

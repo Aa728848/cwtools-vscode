@@ -101,7 +101,8 @@ function tokenize(input: string): Token[] {
     let line = 1;
 
     while (i < input.length) {
-        const ch = input[i];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const ch = input[i]!;
 
         if (ch === '\n') { line++; i++; continue; }
         if (ch === '\r') { line++; i++; if (i < input.length && input[i] === '\n') i++; continue; }
@@ -128,10 +129,12 @@ function tokenize(input: string): Token[] {
         }
 
         // Numbers
-        if ((ch >= '0' && ch <= '9') || ((ch === '-' || ch === '+') && i + 1 < input.length && input[i + 1] >= '0' && input[i + 1] <= '9')) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        if ((ch >= '0' && ch <= '9') || ((ch === '-' || ch === '+') && i + 1 < input.length && input[i + 1]! >= '0' && input[i + 1]! <= '9')) {
             const start = i;
             if (ch === '-' || ch === '+') i++;
-            while (i < input.length && ((input[i] >= '0' && input[i] <= '9') || input[i] === '.')) i++;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            while (i < input.length && ((input[i]! >= '0' && input[i]! <= '9') || input[i]! === '.')) i++;
             tokens.push({ type: TokenType.Number, value: input.slice(start, i), line });
             continue;
         }
@@ -154,7 +157,8 @@ function tokenize(input: string): Token[] {
         // Identifiers
         if (isIdentStart(ch)) {
             const start = i;
-            while (i < input.length && isIdentCont(input[i])) i++;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            while (i < input.length && isIdentCont(input[i]!)) i++;
             tokens.push({ type: TokenType.Identifier, value: input.slice(start, i), line });
             continue;
         }
@@ -207,7 +211,8 @@ class Parser {
     }
 
     private advance(): Token {
-        return this.tokens[this.pos++];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        return this.tokens[this.pos++]!;
     }
 
     parse(): PdxNode[] {
@@ -447,7 +452,8 @@ function buildBody(
 function resolveMoonsRecursive(parent: CelestialBody): void {
     let moonCumulativeOrbit = 0;
     for (let mi = 0; mi < parent.moons.length; mi++) {
-        const moon = parent.moons[mi];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const moon = parent.moons[mi]!;
         // Apply parent-block change_orbit that precedes this moon (delta from cumulative offsets)
         const parentOffset = (parent.moonChangeOrbitOffsets[mi] ?? 0)
             - (mi > 0 ? (parent.moonChangeOrbitOffsets[mi - 1] ?? 0) : 0);
@@ -622,16 +628,20 @@ function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: nu
     let i = 0;
     while (i < bodies.length) {
         // Skip non-ring bodies
-        if (!isRingWorldClass(bodies[i].planetClass)) { i++; continue; }
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        if (!isRingWorldClass(bodies[i]!.planetClass)) { i++; continue; }
 
         // Start a potential ring group
         const groupStart = i;
-        const orbitRadius = bodies[i].resolvedOrbitRadius;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const orbitRadius = bodies[i]!.resolvedOrbitRadius;
 
         // Collect consecutive ring segments at same orbit radius
         while (i < bodies.length
-            && isRingWorldClass(bodies[i].planetClass)
-            && bodies[i].resolvedOrbitRadius === orbitRadius) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            && isRingWorldClass(bodies[i]!.planetClass)
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            && bodies[i]!.resolvedOrbitRadius === orbitRadius) {
             i++;
         }
 
@@ -643,9 +653,11 @@ function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: nu
 
         // Build ring segments with angular positions
         const segments: RingSegment[] = [];
-        let runningAngle = bodies[groupStart].resolvedOrbitAngle;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        let runningAngle = bodies[groupStart]!.resolvedOrbitAngle;
         for (let j = groupStart; j < groupEnd; j++) {
-            const body = bodies[j];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const body = bodies[j]!;
             const segAngle = resolveValue(body.orbitAngle);
             if (j > groupStart) {
                 runningAngle += segAngle;
@@ -664,29 +676,36 @@ function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: nu
         }
 
         // Total arc covered
-        const totalAngle = runningAngle - (bodies[groupStart].resolvedOrbitAngle - resolveValue(bodies[groupStart].orbitAngle));
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const totalAngle = runningAngle - (bodies[groupStart]!.resolvedOrbitAngle - resolveValue(bodies[groupStart]!.orbitAngle));
 
         // Get the change_orbit line that precedes this ring group
         const changeOrbitInfo = bodyChangeOrbitMap[groupStart];
 
         // Set ring group on the first segment (anchor)
-        const anchorLine = bodies[groupStart].line;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const anchorLine = bodies[groupStart]!.line;
         const ringGroup: RingGroup = {
             orbitRadius,
             segments,
             totalAngle,
             firstLine: anchorLine,
-            lastEndLine: bodies[groupEnd - 1].endLine,
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            lastEndLine: bodies[groupEnd - 1]!.endLine,
             changeOrbitLine: changeOrbitInfo?.line ?? -1,
             changeOrbitValue: changeOrbitInfo?.value ?? 0,
         };
-        bodies[groupStart].ringGroup = ringGroup;
-        bodies[groupStart].ringGroupAnchorLine = anchorLine;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        bodies[groupStart]!.ringGroup = ringGroup;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        bodies[groupStart]!.ringGroupAnchorLine = anchorLine;
 
         // Mark non-anchor segments as hidden, set anchor line
         for (let j = groupStart + 1; j < groupEnd; j++) {
-            bodies[j].ringSegmentHidden = true;
-            bodies[j].ringGroupAnchorLine = anchorLine;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            bodies[j]!.ringSegmentHidden = true;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            bodies[j]!.ringGroupAnchorLine = anchorLine;
         }
     }
 }

@@ -57,9 +57,11 @@ function parseYmlContent(uri: vs.Uri, text: string) {
     const locPattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i++) {
-        const match = locPattern.exec(lines[i]);
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const match = locPattern.exec(lines[i]!);
         if (match) {
-            fileLocs.set(match[1], { value: match[2], uri, line: i });
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            fileLocs.set(match[1]!, { value: match[2]!, uri, line: i });
         }
     }
     documentLocCache.set(uri.toString(), fileLocs);
@@ -120,7 +122,8 @@ function updateColorDecorations(editor: vs.TextEditor) {
     // Parse each line for color codes
     const lines = text.split('\n');
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-        const line = lines[lineIdx];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const line = lines[lineIdx]!;
 
         // Find all color markers in this line
         const markers: { code: string; offset: number }[] = [];
@@ -128,8 +131,10 @@ function updateColorDecorations(editor: vs.TextEditor) {
         const linePattern = /§([RGBYWHETLMSP!])/gi;
 
         while ((match = linePattern.exec(line)) !== null) {
-            const code = '§' + match[1].toUpperCase();
-            markers.push({ code, offset: match.index });
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const code = '\u00A7' + match[1]!.toUpperCase();
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            markers.push({ code, offset: match.index! });
 
             // Mark the §X itself as dim
             markerRanges.push({
@@ -139,12 +144,14 @@ function updateColorDecorations(editor: vs.TextEditor) {
 
         // Apply color ranges between markers
         for (let i = 0; i < markers.length; i++) {
-            const marker = markers[i];
-            if (marker.code === '§!') continue; // Reset marker, skip
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const marker = markers[i]!;
+            if (marker.code === '\u00A7!') continue; // Reset marker, skip
 
-            const startOffset = marker.offset + 2; // After §X
+            const startOffset = marker.offset + 2; // After \u00A7X
             const endOffset = i + 1 < markers.length
-                ? markers[i + 1].offset
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                ? markers[i + 1]!.offset
                 : line.length;
 
             if (startOffset < endOffset) {

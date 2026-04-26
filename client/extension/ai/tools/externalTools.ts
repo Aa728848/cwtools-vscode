@@ -266,20 +266,26 @@ export class ExternalToolHandler {
             const snippets: string[] = [];
             let m: RegExpExecArray | null;
             while ((m = linkRe.exec(html)) !== null && links.length < maxResults) {
-                let url = m[1];
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                let url = m[1]!;
                 if (url.startsWith('/l/?uddg=')) {
                     try { url = decodeURIComponent(url.replace('/l/?uddg=', '')); } catch { /* keep */ }
                 }
-                links.push({ url, title: m[2].trim() });
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                links.push({ url, title: m[2]!.trim() });
             }
             while ((m = snippetRe.exec(html)) !== null && snippets.length < maxResults) {
-                snippets.push(m[1].trim());
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                snippets.push(m[1]!.trim());
             }
             for (let i = 0; i < links.length; i++) {
                 results.push({
-                    title: links[i].title,
-                    url: links[i].url,
-                    description: snippets[i] ?? '',
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    title: links[i]!.title,
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    url: links[i]!.url,
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    description: snippets[i]! ?? '',
                 });
             }
             return { results, source: 'duckduckgo', query };

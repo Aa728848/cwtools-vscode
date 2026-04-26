@@ -760,8 +760,8 @@ function renderAll(elements: GuiElement[], fileName: string) {
     let screenW: number, screenH: number;
     if (currentResolution !== 'auto') {
         const [rw, rh] = currentResolution.split('x').map(Number);
-        screenW = rw;
-        screenH = rh;
+        screenW = rw!;
+        screenH = rh!;
     } else if (hasAnchoredOrientation) {
         // When orientation-anchored elements exist, use the standard Stellaris resolution
         // so that CENTER/RIGHT/BOTTOM anchors resolve to the positions the modder designed for.
@@ -1179,13 +1179,13 @@ function setupSearch() {
         // Remove previous active
         document.querySelectorAll('.el.search-active').forEach(el => el.classList.remove('search-active'));
         const el = searchResults[searchIndex];
-        el.classList.add('search-active');
+        el!.classList.add('search-active');
         searchCount!.textContent = `${searchIndex + 1}/${searchResults.length}`;
 
         // Pan viewport to element
         const vp = document.getElementById('viewport')!;
         const vpRect = vp.getBoundingClientRect();
-        const elRect = el.getBoundingClientRect();
+        const elRect = el!.getBoundingClientRect();
         const cx = elRect.left + elRect.width / 2;
         const cy = elRect.top + elRect.height / 2;
         const vpCx = vpRect.left + vpRect.width / 2;
@@ -1271,8 +1271,8 @@ function selectElement(el: GuiElement, div: HTMLElement) {
 function toggleSelection(el: GuiElement, div: HTMLElement) {
     const idx = selectedElements.findIndex(s => s.el.line === el.line);
     if (idx >= 0) {
-        selectedElements[idx].div.classList.remove('selected');
-        removeResizeHandles(selectedElements[idx].div);
+        selectedElements[idx]!.div.classList.remove('selected');
+        removeResizeHandles(selectedElements[idx]!.div);
         selectedElements.splice(idx, 1);
         // Unhighlight in layers
         const layerItem = document.querySelector(`.layer-item[data-line="${el.line}"]`);
@@ -1532,8 +1532,8 @@ function handleResizeMove(e: MouseEvent) {
         syncDivVisuals(s.el, s.div);
     }
     const primary = resizeState.items[0];
-    const displayW = primary.useScale ? Math.round((primary.origW / primary.origScale) * (primary.el.scale ?? 1)) : primary.el.size.width;
-    const displayH = primary.useScale ? Math.round((primary.origH / primary.origScale) * (primary.el.scale ?? 1)) : primary.el.size.height;
+    const displayW = primary!.useScale ? Math.round((primary!.origW / primary!.origScale) * (primary!.el.scale ?? 1)) : primary!.el.size.width;
+    const displayH = primary!.useScale ? Math.round((primary!.origH / primary!.origScale) * (primary!.el.scale ?? 1)) : primary!.el.size.height;
     showDragTooltip(e.clientX, e.clientY, displayW, displayH, true);
     updatePropertiesPanel();
 }
@@ -1728,7 +1728,9 @@ function computeSnap(el: GuiElement, newX: number, newY: number): SnapResult {
     // Snap X
     let bestDx = SNAP_THRESHOLD + 1;
     for (const s of siblings) {
-        for (const [myVal, sVal] of [[myEdges.left, s.left], [myEdges.left, s.right], [myEdges.right, s.left], [myEdges.right, s.right], [myEdges.cx, s.cx]]) {
+        for (const tuple of [[myEdges.left, s.left], [myEdges.left, s.right], [myEdges.right, s.left], [myEdges.right, s.right], [myEdges.cx, s.cx]]) {
+            const myVal = tuple[0]!;
+            const sVal = tuple[1]!;
             const d = Math.abs(myVal - sVal);
             if (d < bestDx) {
                 bestDx = d;
@@ -1740,7 +1742,9 @@ function computeSnap(el: GuiElement, newX: number, newY: number): SnapResult {
     // Snap Y
     let bestDy = SNAP_THRESHOLD + 1;
     for (const s of siblings) {
-        for (const [myVal, sVal] of [[myEdges.top, s.top], [myEdges.top, s.bottom], [myEdges.bottom, s.top], [myEdges.bottom, s.bottom], [myEdges.cy, s.cy]]) {
+        for (const tuple of [[myEdges.top, s.top], [myEdges.top, s.bottom], [myEdges.bottom, s.top], [myEdges.bottom, s.bottom], [myEdges.cy, s.cy]]) {
+            const myVal = tuple[0]!;
+            const sVal = tuple[1]!;
             const d = Math.abs(myVal - sVal);
             if (d < bestDy) {
                 bestDy = d;
@@ -1847,8 +1851,8 @@ function updatePropertiesPanel() {
     if (selectedElements.length > 1) {
         // Batch edit: show shared properties for multi-selection
         const elems = selectedElements.map(s => s.el);
-        const allSameType = elems.every(e => e.type === elems[0].type);
-        const c = allSameType ? (COLORS[elems[0].type] ?? DEFAULT_COLOR) : DEFAULT_COLOR;
+        const allSameType = elems.every(e => e.type === elems[0]!.type);
+        const c = allSameType ? (COLORS[elems[0]!.type] ?? DEFAULT_COLOR) : DEFAULT_COLOR;
         let html = `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">已选择 ${selectedElements.length} 个元素</div>`;
         html += `<div style="padding:4px 8px;font-size:11px;color:#6878b0">修改值将应用到所有选中元素（偏移量模式）</div>`;
         html += propRow('偏移 X', `<input class="prop-input" type="number" data-prop="batch-offset-x" value="0" step="1" />`);
@@ -1887,7 +1891,7 @@ function updatePropertiesPanel() {
         });
         return;
     }
-    const { el } = selectedElements[0];
+    const { el } = selectedElements[0]!;
     const c = COLORS[el.type] ?? DEFAULT_COLOR;
     let html = '';
 
@@ -2004,7 +2008,7 @@ function setupAutocomplete(content: HTMLElement, inputSelector: string, dropdown
         dropdown.querySelectorAll('.sprite-option').forEach((opt, i) => {
             opt.addEventListener('mousedown', (e) => {
                 e.preventDefault();
-                inputEl.value = matches[i];
+                inputEl.value = matches[i]!;
                 dropdown.classList.add('hidden');
                 inputEl.dispatchEvent(new Event('change'));
             });
@@ -2027,7 +2031,7 @@ function setupAutocomplete(content: HTMLElement, inputSelector: string, dropdown
         } else if (e.key === 'Escape') { dropdown.classList.add('hidden'); return; }
         else return;
         items.forEach((it, i) => it.classList.toggle('active', i === ddIndex));
-        if (ddIndex >= 0) items[ddIndex].scrollIntoView({ block: 'nearest' });
+        if (ddIndex >= 0) items[ddIndex]!.scrollIntoView({ block: 'nearest' });
     });
 }
 
@@ -2225,7 +2229,7 @@ function handleContextAction(action: string) {
                 }
             }
         }
-        if (!parentEl && allElements.length > 0) parentEl = allElements[0];
+        if (!parentEl && allElements.length > 0) parentEl = allElements[0]!;
         if (!parentEl) return;
         vscode.postMessage({
             command: 'addBackground',
@@ -2257,7 +2261,7 @@ function handleContextAction(action: string) {
                 }
             }
         }
-        if (!parentEl && allElements.length > 0) parentEl = allElements[0];
+        if (!parentEl && allElements.length > 0) parentEl = allElements[0]!;
         if (!parentEl) return;
         const newName = `new_${type.replace('Type', '')}_${Date.now() % 10000}`;
         // Compute position relative to the parent container
@@ -2336,18 +2340,18 @@ function getElementCanvasPos(el: GuiElement): { x: number; y: number } {
 /** Reparent selected element: move into the given container */
 function reparentSelectedInto(targetContainer: GuiElement) {
     if (selectedElements.length !== 1) return;
-    const sel = selectedElements[0];
+    const sel = selectedElements[0]!;
     // Can't reparent into itself or a descendant
-    if (sel.el.line === targetContainer.line) return;
-    if (findChild(sel.el, targetContainer.line)) return;
+    if (sel!.el.line === targetContainer.line) return;
+    if (findChild(sel!.el, targetContainer.line)) return;
     // Can't reparent into non-container
     if (targetContainer.type !== 'containerWindowType' && targetContainer.type !== 'windowType') return;
     // Already a child of this container?
-    const currentParent = findParentOf(sel.el.line, allElements);
+    const currentParent = findParentOf(sel!.el.line, allElements);
     if (currentParent?.line === targetContainer.line) return;
 
     // Compute position adjustment to preserve visual location
-    const elPos = getElementCanvasPos(sel.el);
+    const elPos = getElementCanvasPos(sel!.el);
     const targetPos = getElementCanvasPos(targetContainer);
     const dx = -(targetPos.x - (currentParent ? getElementCanvasPos(currentParent).x : 0));
     const dy = -(targetPos.y - (currentParent ? getElementCanvasPos(currentParent).y : 0));
@@ -2355,8 +2359,8 @@ function reparentSelectedInto(targetContainer: GuiElement) {
     pushUndo({ type: 'structural' });
     vscode.postMessage({
         command: 'reparentElement',
-        startLine: sel.el.line,
-        endLine: sel.el.endLine,
+        startLine: sel!.el.line,
+        endLine: sel!.el.endLine,
         newParentEndLine: targetContainer.endLine,
         positionAdjust: { dx, dy },
     });
@@ -2366,8 +2370,8 @@ function reparentSelectedInto(targetContainer: GuiElement) {
 /** Unparent selected element: move out of current parent one level up */
 function unparentSelected() {
     if (selectedElements.length !== 1) return;
-    const sel = selectedElements[0];
-    const parent = findParentOf(sel.el.line, allElements);
+    const sel = selectedElements[0]!;
+    const parent = findParentOf(sel!.el.line, allElements);
     if (!parent) return; // already top-level
 
     // Compute position adjustment
@@ -2380,8 +2384,8 @@ function unparentSelected() {
     pushUndo({ type: 'structural' });
     vscode.postMessage({
         command: 'unparentElement',
-        startLine: sel.el.line,
-        endLine: sel.el.endLine,
+        startLine: sel!.el.line,
+        endLine: sel!.el.endLine,
         parentEndLine: parent.endLine,
         positionAdjust: { dx, dy },
     });
@@ -2394,7 +2398,7 @@ let reparentSource: GuiElement | null = null;
 
 function startReparentTargetSelection() {
     if (selectedElements.length !== 1) return;
-    reparentSource = selectedElements[0].el;
+    reparentSource = selectedElements[0]!.el;
     reparentMode = true;
     // Show visual indicator
     document.body.classList.add('reparent-mode');

@@ -106,8 +106,10 @@ export class UsageTracker {
             if (!byProvider[r.provider]) {
                 byProvider[r.provider] = { tokens: 0, costUsd: 0 };
             }
-            byProvider[r.provider].tokens += r.totalTokens;
-            byProvider[r.provider].costUsd += r.costUsd;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            byProvider[r.provider]!.tokens += r.totalTokens;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            byProvider[r.provider]!.costUsd += r.costUsd;
 
             // By day
             const day = new Date(r.timestamp).toISOString().slice(0, 10);

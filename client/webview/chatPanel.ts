@@ -92,14 +92,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         placeholderTimer = setInterval(() => {
             if (input.value.trim() === '' && !isGenerating) {
                 placeholderIdx = (placeholderIdx + 1) % PROMPT_EXAMPLES.length;
-                input.placeholder = PROMPT_EXAMPLES[placeholderIdx];
+                input.placeholder = PROMPT_EXAMPLES[placeholderIdx]!;
             }
         }, 6500);
     }
     function stopPlaceholderRotation() {
         if (placeholderTimer) { clearInterval(placeholderTimer); placeholderTimer = null; }
     }
-    input.placeholder = PROMPT_EXAMPLES[placeholderIdx];
+    input!.placeholder = PROMPT_EXAMPLES[placeholderIdx]!;
     startPlaceholderRotation();
 
     document.addEventListener('keydown', e => {
@@ -138,7 +138,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             const modes = ['build', 'plan', 'explore', 'general', 'review'];
             const idx = modes.indexOf(currentMode);
             const cycleDir = e.shiftKey ? -1 : 1;
-            const nextMode = modes[(idx + cycleDir + modes.length) % modes.length];
+            const nextMode = modes[(idx + cycleDir + modes.length) % modes.length]!;
             switchMode(nextMode, true);
         }
     });
@@ -601,7 +601,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
         s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
         // eslint-disable-next-line no-control-regex
-        s = s.replace(/\x01CODE(\d+)\x01/g, (_: string, i: string) => codeBlocks[parseInt(i)]);
+        s = s.replace(/\x01CODE(\d+)\x01/g, (_: string, i: string) => codeBlocks[parseInt(i)]!);
         return s;
     }
 
@@ -625,7 +625,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 const t = line.trim();
                 // eslint-disable-next-line no-control-regex
                 if (/^\x00BLOCK\d+\x00$/.test(t)) {
-                    const { lang, code } = blocks[+t.match(/\d+/)![0]];
+                    const { lang, code } = blocks[+t.match(/\d+/)![0]!]!;
                     return '<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>';
                 }
                 return inlineMd(line);
@@ -636,7 +636,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         let paraLines: string[] = [];
 
         while (i < lines.length) {
-            const line = lines[i];
+            const line = lines[i]!;
             const trimmed = line.trim();
 
             // Empty line: flush current paragraph
@@ -646,7 +646,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             // eslint-disable-next-line no-control-regex
             if (/^\x00BLOCK\d+\x00$/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
-                const { lang, code } = blocks[+trimmed.match(/\d+/)![0]];
+                const { lang, code } = blocks[+trimmed.match(/\d+/)![0]!]!;
                 out.push('<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>');
                 i++; continue;
             }
@@ -655,8 +655,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             const hdm = trimmed.match(/^(#{1,6})\s+(.+)$/);
             if (hdm) {
                 flushPara(paraLines); paraLines = [];
-                const lv = hdm[1].length;
-                out.push('<h' + lv + '>' + inlineMd(hdm[2]) + '</h' + lv + '>');
+                const lv = hdm[1]!.length;
+                out.push('<h' + lv + '>' + inlineMd(hdm[2]!) + '</h' + lv + '>');
                 i++; continue;
             }
 
@@ -670,20 +670,20 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             if (/^>/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
                 const bqLines: string[] = [];
-                while (i < lines.length && /^>/.test(lines[i].trim())) {
-                    bqLines.push(lines[i].replace(/^>\s?/, '')); i++;
+                while (i < lines.length && /^>/.test(lines[i]!.trim())) {
+                    bqLines.push(lines[i]!.replace(/^>\s?/, '')); i++;
                 }
                 out.push('<blockquote>' + renderMarkdown(bqLines.join('\n')) + '</blockquote>');
                 continue;
             }
 
             // GFM Table — header row | separator row | data rows (all consecutive)
-            if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[/|\s:-]+$/.test(lines[i + 1].trim())) {
+            if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[/|\s:-]+$/.test(lines[i + 1]!.trim())) {
                 flushPara(paraLines); paraLines = [];
                 const tblLines: string[] = [];
-                while (i < lines.length && /^\|/.test(lines[i].trim())) { tblLines.push(lines[i]); i++; }
+                while (i < lines.length && /^\|/.test(lines[i]!.trim())) { tblLines.push(lines[i]!); i++; }
                 if (tblLines.length >= 2) {
-                    const headers = tblLines[0].split('|').map(c => c.trim()).filter(Boolean);
+                    const headers = tblLines[0]!.split('|').map(c => c.trim()).filter(Boolean);
                     const rows = tblLines.slice(2).map(r => r.split('|').map(c => c.trim()).filter(Boolean));
                     let tbl = '<table><thead><tr>' + headers.map(h => '<th>' + inlineMd(h) + '</th>').join('') + '</tr></thead><tbody>';
                     rows.forEach(r => { tbl += '<tr>' + r.map(c => '<td>' + inlineMd(c) + '</td>').join('') + '</tr>'; });
@@ -698,29 +698,29 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 // Stack of { tag:'ul'|'ol', indent:number } for nesting
                 const stack: {tag: string; indent: number}[] = [];
                 const htmlParts: string[] = [];
-                const getIndent = (line: string) => { const m = line.match(/^(\s*)/); return m ? m[1].length : 0; };
+                const getIndent = (line: string) => { const m = line.match(/^(\s*)/); return m ? m[1]!.length : 0; };
                 const startList = (tag: string, indent: number) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
                 const closeList = () => { const item = stack.pop(); if (item) htmlParts.push('</' + item.tag + '>'); };
 
-                startList('ul', getIndent(lines[i]));
+                startList('ul', getIndent(lines[i]!));
                 while (i < lines.length) {
-                    const ll = lines[i], lt = ll.trim();
+                    const ll = lines[i]!, lt = ll.trim();
                     if (!lt) { i++; break; }
                     const indent = getIndent(ll);
                     const ulMatch = lt.match(/^[-*+]\s+(.*)/);
                     const olMatch = lt.match(/^\d+\.\s+(.*)/);
                     if (ulMatch || olMatch) {
-                        const content = ulMatch ? ulMatch[1] : olMatch![1];
+                        const content = ulMatch ? ulMatch[1]! : olMatch![1]!;
                         const listTag = ulMatch ? 'ul' : 'ol';
                         // Close lists deeper than current indent
-                        while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+                        while (stack.length > 1 && stack[stack.length - 1]!.indent >= indent) {
                             htmlParts.push('</li>');
                             closeList();
                         }
                         // Open new nested list if deeper
-                        if (stack.length > 0 && indent > stack[stack.length - 1].indent) {
+                        if (stack.length > 0 && indent > stack[stack.length - 1]!.indent) {
                             startList(listTag, indent);
-                        } else if (stack.length > 0 && htmlParts[htmlParts.length - 1] !== '<' + stack[stack.length - 1].tag + '>') {
+                        } else if (stack.length > 0 && htmlParts[htmlParts.length - 1] !== '<' + stack[stack.length - 1]!.tag + '>') {
                             htmlParts.push('</li>');
                         }
                         htmlParts.push('<li>' + inlineMd(content));
@@ -747,27 +747,27 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 flushPara(paraLines); paraLines = [];
                 const stack: {tag: string; indent: number}[] = [];
                 const htmlParts: string[] = [];
-                const getIndent = (line: string) => { const m = line.match(/^(\s*)/); return m ? m[1].length : 0; };
+                const getIndent = (line: string) => { const m = line.match(/^(\s*)/); return m ? m[1]!.length : 0; };
                 const startList = (tag: string, indent: number) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
                 const closeList = () => { const item = stack.pop(); if (item) htmlParts.push('</' + item.tag + '>'); };
 
-                startList('ol', getIndent(lines[i]));
+                startList('ol', getIndent(lines[i]!));
                 while (i < lines.length) {
-                    const ll = lines[i], lt = ll.trim();
+                    const ll = lines[i]!, lt = ll.trim();
                     if (!lt) { i++; break; }
                     const indent = getIndent(ll);
                     const olMatch = lt.match(/^\d+\.\s+(.*)/);
                     const ulMatch = lt.match(/^[-*+]\s+(.*)/);
                     if (olMatch || ulMatch) {
-                        const content = olMatch ? olMatch[1] : ulMatch![1];
+                        const content = olMatch ? olMatch[1]! : ulMatch![1]!;
                         const listTag = olMatch ? 'ol' : 'ul';
-                        while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+                        while (stack.length > 1 && stack[stack.length - 1]!.indent >= indent) {
                             htmlParts.push('</li>');
                             closeList();
                         }
-                        if (stack.length > 0 && indent > stack[stack.length - 1].indent) {
+                        if (stack.length > 0 && indent > stack[stack.length - 1]!.indent) {
                             startList(listTag, indent);
-                        } else if (stack.length > 0 && htmlParts[htmlParts.length - 1] !== '<' + stack[stack.length - 1].tag + '>') {
+                        } else if (stack.length > 0 && htmlParts[htmlParts.length - 1] !== '<' + stack[stack.length - 1]!.tag + '>') {
                             htmlParts.push('</li>');
                         }
                         htmlParts.push('<li>' + inlineMd(content));
@@ -1054,10 +1054,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     const pair = pairs[0];
                     (pair as HTMLElement).dataset.resolved = '1';
                     // Find the call step that matches this result
-                    const callDiv = pair.querySelector('.tp-call');
+                    const callDiv = pair!.querySelector('.tp-call');
                     // Build fresh pair with result
                     const fakeCall = { toolName: s.toolName, toolArgs: {} };
-                    pair.innerHTML = buildToolPair(fakeCall, s);
+                    pair!.innerHTML = buildToolPair(fakeCall, s);
                 }
             }
         } else if (s.type === 'error' || s.type === 'validation' || s.type === 'compaction') {
@@ -1969,10 +1969,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const groups: {label: string; items: any[]}[] = [{ label: '今天', items: [] }, { label: '昨天', items: [] }, { label: '本周', items: [] }, { label: '更早', items: [] }];
         for (const t of topics) {
             const age = now - (t.updatedAt || 0);
-            if (age < DAY) groups[0].items.push(t);
-            else if (age < DAY * 2) groups[1].items.push(t);
-            else if (age < DAY * 7) groups[2].items.push(t);
-            else groups[3].items.push(t);
+            if (age < DAY) groups[0]!.items.push(t);
+            else if (age < DAY * 2) groups[1]!.items.push(t);
+            else if (age < DAY * 7) groups[2]!.items.push(t);
+            else groups[3]!.items.push(t);
         }
         return groups.filter(g => g.items.length > 0);
     }

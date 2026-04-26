@@ -284,9 +284,10 @@ export class FileToolHandler {
         // redundant I/O and TOCTOU risk — newContent is exactly what was just written)
         const newContentLines = newContent.split('\n');
         for (let li = 0; li < newContentLines.length; li++) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             if (newLines.some(nl => {
                 const trimmed = nl.trim();
-                return trimmed.length > 8 && newContentLines[li].includes(trimmed);
+                return trimmed.length > 8 && newContentLines[li]!.includes(trimmed);
             })) {
                 for (let r = -10; r <= 10; r++) {
                     const idx = li + r;
@@ -439,7 +440,8 @@ export class FileToolHandler {
         const errors: string[] = [];
 
         for (let i = 0; i < args.edits.length; i++) {
-            const edit = args.edits[i];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const edit = args.edits[i]!;
             if (edit.oldString === edit.newString) continue;
             const old = this.convertLineEnding(this.normalizeLineEndings(edit.oldString), ending);
             const next = this.convertLineEnding(this.normalizeLineEndings(edit.newString), ending);
@@ -488,7 +490,7 @@ export class FileToolHandler {
             for (let li = 0; li < finalLines.length; li++) {
                 if (editLines.some(el => {
                     const trimmed = el.trim();
-                    return trimmed.length > 8 && finalLines[li].includes(trimmed);
+                    return trimmed.length > 8 && finalLines[li]!.includes(trimmed);
                 })) {
                     for (let r = -10; r <= 10; r++) {
                         const idx = li + r;
@@ -539,7 +541,8 @@ export class FileToolHandler {
         let i = 0;
 
         while (i < lines.length) {
-            const line = lines[i];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const line = lines[i]!;
             if (line.startsWith('--- ')) {
                 const nextLine = lines[i + 1] ?? '';
                 if (nextLine.startsWith('+++ ')) {
@@ -561,8 +564,9 @@ export class FileToolHandler {
                 i++;
                 const oldLines: string[] = [];
                 const newLines: string[] = [];
-                while (i < lines.length && !lines[i].startsWith('@@') && !lines[i].startsWith('--- ')) {
-                    const hunkLine = lines[i];
+                while (i < lines.length && !lines[i]!.startsWith('@@') && !lines[i]!.startsWith('--- ')) {
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    const hunkLine = lines[i]!;
                     if (hunkLine.startsWith('-')) {
                         oldLines.push(hunkLine.slice(1));
                     } else if (hunkLine.startsWith('+')) {
@@ -777,11 +781,12 @@ export class FileToolHandler {
             curr[0] = i;
             for (let j = 1; j <= b.length; j++) {
                 const c = a[i - 1] === b[j - 1] ? 0 : 1;
-                curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + c);
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + c);
             }
             [prev, curr] = [curr, prev];
         }
-        return prev[b.length];
+        return prev[b.length]!;
     }
 
     private *simpleReplacer(_c: string, find: string): Generator<string> { yield find; }
@@ -790,9 +795,12 @@ export class FileToolHandler {
         const oL = content.split('\n'), sL = find.split('\n');
         if (sL[sL.length - 1] === '') sL.pop();
         for (let i = 0; i <= oL.length - sL.length; i++) {
-            if (sL.every((s, j) => oL[i + j].trim() === s.trim())) {
-                let st = 0; for (let k = 0; k < i; k++) st += oL[k].length + 1;
-                let en = st; for (let k = 0; k < sL.length; k++) { en += oL[i + k].length; if (k < sL.length - 1) en += 1; }
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            if (sL.every((s, j) => oL[i + j]!.trim() === s.trim())) {
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                let st = 0; for (let k = 0; k < i; k++) st += oL[k]!.length + 1;
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                let en = st; for (let k = 0; k < sL.length; k++) { en += oL[i + k]!.length; if (k < sL.length - 1) en += 1; }
                 yield content.substring(st, en);
             }
         }
@@ -802,11 +810,12 @@ export class FileToolHandler {
         const oL = content.split('\n'), sL = find.split('\n');
         if (sL.length < 3) return;
         if (sL[sL.length - 1] === '') sL.pop();
-        const first = sL[0].trim(), last = sL[sL.length - 1].trim();
+        const first = sL[0]!.trim(), last = sL[sL.length - 1]!.trim();
         const cands: { s: number; e: number }[] = [];
         for (let i = 0; i < oL.length; i++) {
-            if (oL[i].trim() !== first) continue;
-            for (let j = i + 2; j < oL.length; j++) { if (oL[j].trim() === last) { cands.push({ s: i, e: j }); break; } }
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            if (oL[i]!.trim() !== first) continue;
+            for (let j = i + 2; j < oL.length; j++) { if (oL[j]!.trim() === last) { cands.push({ s: i, e: j }); break; } }
         }
         if (!cands.length) return;
         const score = (s: number, e: number) => {
@@ -814,18 +823,22 @@ export class FileToolHandler {
             if (check <= 0) return 1.0;
             let sim = 0;
             for (let j = 1; j < sL.length - 1 && j < e - s; j++) {
-                const mx = Math.max(oL[s + j].trim().length, sL[j].trim().length);
-                if (mx) sim += (1 - this.levenshtein(oL[s + j].trim(), sL[j].trim()) / mx) / check;
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                const mx = Math.max(oL[s + j]!.trim().length, sL[j]!.trim().length);
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                if (mx) sim += (1 - this.levenshtein(oL[s + j]!.trim(), sL[j]!.trim()) / mx) / check;
             }
             return sim;
         };
         const extract = (s: number, e: number) => {
-            let st = 0; for (let k = 0; k < s; k++) st += oL[k].length + 1;
-            let en = st; for (let k = s; k <= e; k++) { en += oL[k].length; if (k < e) en += 1; }
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            let st = 0; for (let k = 0; k < s; k++) st += oL[k]!.length + 1;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            let en = st; for (let k = s; k <= e; k++) { en += oL[k]!.length; if (k < e) en += 1; }
             return content.substring(st, en);
         };
-        if (cands.length === 1) { if (score(cands[0].s, cands[0].e) >= 0) yield extract(cands[0].s, cands[0].e); return; }
-        let best = cands[0], bestSim = -1;
+        if (cands.length === 1) { if (score(cands[0]!.s, cands[0]!.e) >= 0) yield extract(cands[0]!.s, cands[0]!.e); return; }
+        let best = cands[0]!, bestSim = -1;
         for (const { s, e } of cands) { const sim = score(s, e); if (sim > bestSim) { bestSim = sim; best = { s, e }; } }
         if (bestSim >= 0.3) yield extract(best.s, best.e);
     }
@@ -842,7 +855,7 @@ export class FileToolHandler {
         const strip = (text: string) => {
             const lns = text.split('\n'), ne = lns.filter(l => l.trim().length > 0);
             if (!ne.length) return text;
-            const min = Math.min(...ne.map(l => { const m = l.match(/^(\s*)/); return m ? m[1].length : 0; }));
+            const min = Math.min(...ne.map(l => { const m = l.match(/^(\s*)/); return m ? m[1]!.length : 0; }));
             return lns.map(l => l.trim().length === 0 ? l : l.slice(min)).join('\n');
         };
         const nF = strip(find), lns = content.split('\n'), fL = find.split('\n');
@@ -880,16 +893,19 @@ export class FileToolHandler {
         if (fL.length < 3) return;
         if (fL[fL.length - 1] === '') fL.pop();
         const cL = content.split('\n');
-        const fl = fL[0].trim(), ll = fL[fL.length - 1].trim();
+        const fl = fL[0]!.trim(), ll = fL[fL.length - 1]!.trim();
         for (let i = 0; i < cL.length; i++) {
-            if (cL[i].trim() !== fl) continue;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            if (cL[i]!.trim() !== fl) continue;
             for (let j = i + 2; j < cL.length; j++) {
-                if (cL[j].trim() !== ll) continue;
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                if (cL[j]!.trim() !== ll) continue;
                 const b = cL.slice(i, j + 1);
                 if (b.length !== fL.length) break;
                 let hit = 0, tot = 0;
                 for (let k = 1; k < b.length - 1; k++) {
-                    if (b[k].trim().length || fL[k].trim().length) { tot++; if (b[k].trim() === fL[k].trim()) hit++; }
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                    if (b[k]!.trim().length || fL[k]!.trim().length) { tot++; if (b[k]!.trim() === fL[k]!.trim()) hit++; }
                 }
                 if (tot === 0 || hit / tot >= 0.5) { yield b.join('\n'); break; }
                 break;

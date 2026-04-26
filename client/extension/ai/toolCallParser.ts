@@ -45,8 +45,10 @@ export function parseDsmlToolCalls(content: string, depth: number = 0): ToolCall
     invokeRe.lastIndex = 0;
     let im: RegExpExecArray | null;
     while ((im = invokeRe.exec(norm)) !== null) {
-        const toolName = im[1];
-        const body = im[2];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const toolName = im[1]!;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const body = im[2]!;
         const args: Record<string, string> = {};
 
         // Extract parameters
@@ -54,7 +56,8 @@ export function parseDsmlToolCalls(content: string, depth: number = 0): ToolCall
         paramRe.lastIndex = 0;
         let pm: RegExpExecArray | null;
         while ((pm = paramRe.exec(body)) !== null) {
-            args[pm[1]] = pm[2];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            args[pm[1]!] = pm[2]!;
         }
         calls.push({
             id: `sm_${crypto.randomUUID()}`, type: 'function',
@@ -68,7 +71,8 @@ export function parseDsmlToolCalls(content: string, depth: number = 0): ToolCall
     toolCallJsonRe.lastIndex = 0;
     let tm: RegExpExecArray | null;
     while ((tm = toolCallJsonRe.exec(content)) !== null) {
-        const raw = tm[1];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const raw = tm[1]!;
         // If it contains embedded <function> tag
         if (raw.trimStart().startsWith('<function=') || raw.trimStart().startsWith('<function ')) {
             // Re-process recursively or rely on the normalized XML flow

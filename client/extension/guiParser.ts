@@ -73,7 +73,8 @@ function tokenize(input: string): Token[] {
     let line = 1;
 
     while (i < input.length) {
-        const ch = input[i];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const ch = input[i]!;
 
         if (ch === '\n') { line++; i++; continue; }
         if (ch === '\r') { line++; i++; if (i < input.length && input[i] === '\n') i++; continue; }
@@ -101,10 +102,12 @@ function tokenize(input: string): Token[] {
 
         // Numbers: must be a sign followed by digit, or a digit
         // Also consume trailing % for percentage values (e.g. 100%)
-        if ((ch >= '0' && ch <= '9') || ((ch === '-' || ch === '+') && i + 1 < input.length && input[i + 1] >= '0' && input[i + 1] <= '9')) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        if ((ch >= '0' && ch <= '9') || ((ch === '-' || ch === '+') && i + 1 < input.length && input[i + 1]! >= '0' && input[i + 1]! <= '9')) {
             const start = i;
             if (ch === '-' || ch === '+') i++;
-            while (i < input.length && ((input[i] >= '0' && input[i] <= '9') || input[i] === '.')) i++;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            while (i < input.length && ((input[i]! >= '0' && input[i]! <= '9') || input[i]! === '.')) i++;
             if (i < input.length && input[i] === '%') i++; // consume trailing %
             tokens.push({ type: TokenType.Number, value: input.slice(start, i), line });
             continue;
@@ -128,7 +131,8 @@ function tokenize(input: string): Token[] {
         // Identifiers
         if (isIdentStart(ch)) {
             const start = i;
-            while (i < input.length && isIdentCont(input[i])) i++;
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            while (i < input.length && isIdentCont(input[i]!)) i++;
             tokens.push({ type: TokenType.Identifier, value: input.slice(start, i), line });
             continue;
         }
@@ -177,7 +181,8 @@ class Parser {
     }
 
     private advance(): Token {
-        return this.tokens[this.pos++];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        return this.tokens[this.pos++]!;
     }
 
     parse(): PdxNode[] {
@@ -575,7 +580,8 @@ export function parseGuiFile(content: string, spriteIndex: Map<string, SpriteInf
     const templates = new Map<string, GuiElement>();
     function extractTemplates(els: GuiElement[]) {
         for (let i = els.length - 1; i >= 0; i--) {
-            const el = els[i];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const el = els[i]!;
             if (el.type === 'scrollbarType' || el.type === 'extendedScrollbarType') {
                 templates.set(el.name, el);
                 els.splice(i, 1);
@@ -628,7 +634,8 @@ export function parseGuiFile(content: string, spriteIndex: Map<string, SpriteInf
     // These are list-item templates used by listBoxType elements
     const optionTemplates: GuiElement[] = [];
     for (let i = elements.length - 1; i >= 0; i--) {
-        const el = elements[i];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const el = elements[i]!;
         if ((el.type === 'containerWindowType' || el.type === 'windowType')
             && el.children.some(c => c.name === 'option_button')) {
             optionTemplates.push(el);

@@ -154,11 +154,13 @@ suite('LSP Hover Tests', function () {
                 position
             );
 
-            const hover = hovers[0];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const hover = hovers[0]!;
             assert.ok(hover.contents.length > 0, 'Hover should contain content');
 
             // Check if the hover content is meaningful
-            const content = hover.contents[0];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const content = hover.contents[0]!;
             if (content instanceof vscode.MarkdownString) {
                 assert.ok(content.value.length > 0, 'Hover content should not be empty');
                 expect(content.value).to.contain("Checks if the country is a specific type")
@@ -180,11 +182,13 @@ suite('LSP Hover Tests', function () {
                 position
             );
 
-            const hover = hovers[0];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const hover = hovers[0]!;
             assert.ok(hover.contents.length > 0, 'Hover should contain content');
 
             // Check if the hover content is meaningful
-            const content = hover.contents[0];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const content = hover.contents[0]!;
             if (content instanceof vscode.MarkdownString) {
                 assert.ok(content.value.length > 0, 'Hover content should not be empty');
                 expect(content.value).to.contain("Checks if the planet is its owner's homeworld")
@@ -216,11 +220,13 @@ suite('LSP Hover Tests', function () {
 
 
 
-            const hover = hovers[0];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const hover = hovers[0]!;
             assert.ok(hover.contents.length > 0, 'Hover should contain content');
 
             // Check if the hover content is meaningful
-            const content = hover.contents[0];
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            const content = hover.contents[0]!;
             if (content instanceof vscode.MarkdownString) {
                 assert.ok(content.value.length > 0, 'Hover content should not be empty');
                 expect(content.value).to.contain("Faction Governance");

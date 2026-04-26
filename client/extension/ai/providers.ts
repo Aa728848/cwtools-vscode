@@ -703,15 +703,18 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
 export function getModelContextTokens(model: string, providerId?: string): number {
     if (!model) return 0;
     // 1. Exact match
-    if (model in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[model];
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    if (model in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[model]!;
     // 2. Prefix match (e.g. "claude-sonnet-4-6-20251020" → "claude-sonnet-4-6")
     const keys = Object.keys(MODEL_CONTEXT_TOKENS).sort((a, b) => b.length - a.length);
     for (const key of keys) {
-        if (model.startsWith(key)) return MODEL_CONTEXT_TOKENS[key];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        if (model.startsWith(key)) return MODEL_CONTEXT_TOKENS[key]!;
     }
     // 3. Substring match
     for (const key of keys) {
-        if (model.includes(key)) return MODEL_CONTEXT_TOKENS[key];
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        if (model.includes(key)) return MODEL_CONTEXT_TOKENS[key]!;
     }
     // 4. Fall back to provider-level context limit
     if (providerId) {
@@ -728,7 +731,8 @@ export function getProvider(id: string): AIProviderConfig {
     if (id && !(id in BUILTIN_PROVIDERS)) {
         console.warn(`[Eddy AI] Unknown provider "${id}", falling back to openai.`);
     }
-    return BUILTIN_PROVIDERS[id] ?? BUILTIN_PROVIDERS['openai'];
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return BUILTIN_PROVIDERS[id] ?? BUILTIN_PROVIDERS['openai']!;
 }
 
 /**

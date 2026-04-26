@@ -641,6 +641,7 @@ export class AgentRunner {
                 tokenAccumulator.output += response.usage.completion_tokens;
                 tokenAccumulator.total += response.usage.total_tokens;
                 tokenAccumulator.estimatedCostUsd += inputCost + outputCost;
+                tokenAccumulator.contextWindowTokens = response.usage.prompt_tokens;
             }
 
             const choice = response.choices[0];

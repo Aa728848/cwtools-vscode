@@ -609,6 +609,8 @@ export interface TokenUsage {
     output: number;
     /** Estimated cost in USD (based on provider pricing table) */
     estimatedCostUsd: number;
+    /** Final prompt tokens for the conversation window, used to drive the UI fullness progress bar */
+    contextWindowTokens?: number;
 }
 
 // ─── Agent Execution ─────────────────────────────────────────────────────────

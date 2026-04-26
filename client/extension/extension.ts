@@ -47,7 +47,7 @@ function safeRegisterCommand(context: ExtensionContext, commandId: string, handl
 export async function activate(context: ExtensionContext) {
 
 	// 后台检查扩展更新
-	checkForUpdates(context).catch(console.error);
+	await checkForUpdates(context).catch(console.error);
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
 	registerLocalizationFeatures(context);

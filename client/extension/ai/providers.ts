@@ -705,11 +705,12 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
     // 1. Exact match
     if (model in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[model];
     // 2. Prefix match (e.g. "claude-sonnet-4-6-20251020" → "claude-sonnet-4-6")
-    for (const key of Object.keys(MODEL_CONTEXT_TOKENS)) {
+    const keys = Object.keys(MODEL_CONTEXT_TOKENS).sort((a, b) => b.length - a.length);
+    for (const key of keys) {
         if (model.startsWith(key)) return MODEL_CONTEXT_TOKENS[key];
     }
     // 3. Substring match
-    for (const key of Object.keys(MODEL_CONTEXT_TOKENS)) {
+    for (const key of keys) {
         if (model.includes(key)) return MODEL_CONTEXT_TOKENS[key];
     }
     // 4. Fall back to provider-level context limit

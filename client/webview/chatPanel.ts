@@ -1290,8 +1290,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 chatArea.appendChild(completedMsg);
                 // Use real tokenUsage from result if available, else fall back to rough estimate
                 if (r.tokenUsage && r.tokenUsage.total > 0) {
+                    const gaugeUsage = r.tokenUsage.contextWindowTokens ?? r.tokenUsage.input ?? r.tokenUsage.total;
                     totalConversationTokens = r.tokenUsage.total;
-                    updateTokenUsage(r.tokenUsage.total, contextLimit);
+                    updateTokenUsage(gaugeUsage, contextLimit);
                     // Show cost badge
                     const label = document.getElementById('tokenUsageLabel');
                     if (label && r.tokenUsage.estimatedCostUsd > 0) {
@@ -1917,12 +1918,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 // only update if we don't already have real data (avoid double-counting).
                 const u = msg.usage;
                 if (u && u.total > 0) {
+                    const gaugeUsage = u.contextWindowTokens ?? u.input ?? u.total;
                     totalConversationTokens = u.total;
-                    updateTokenUsage(u.total, contextLimit);
+                    updateTokenUsage(gaugeUsage, contextLimit);
                     // Completely replace the label with token + cost info
                     const label = document.getElementById('tokenUsageLabel');
                     if (label) {
-                        const base = `~${formatNum(u.total)} / ${formatNum(contextLimit)} tokens`;
+                        const base = `~${formatNum(gaugeUsage)} / ${formatNum(contextLimit)} tokens`;
                         const cost = u.estimatedCostUsd > 0
                             ? '  ·  ' + (u.estimatedCostUsd < 0.001 ? '<$0.001' : '$' + u.estimatedCostUsd.toFixed(4))
                             : '';
@@ -2134,11 +2136,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         // 1. Exact match
         if (settingsModelContextTokens[model]) return settingsModelContextTokens[model];
         // 2. Prefix match
-        for (const key of Object.keys(settingsModelContextTokens)) {
+        const keys = Object.keys(settingsModelContextTokens).sort((a, b) => b.length - a.length);
+        for (const key of keys) {
             if (model.startsWith(key)) return settingsModelContextTokens[key];
         }
         // 3. Substring match
-        for (const key of Object.keys(settingsModelContextTokens)) {
+        for (const key of keys) {
             if (model.includes(key)) return settingsModelContextTokens[key];
         }
         // 4. Provider-level fallback

@@ -14,12 +14,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
     const stateKeyLastCheck = 'cwtools.updateCheck.lastCheck';
     const stateKeyIgnoreVersion = 'cwtools.updateCheck.ignoreVersion';
 
-    const lastCheck = context.globalState.get<number>(stateKeyLastCheck) || 0;
     const now = Date.now();
-    // 检查间隔 24 小时
-    if (now - lastCheck < 24 * 60 * 60 * 1000) {
-        return;
-    }
 
     try {
         const release = await fetchLatestRelease();

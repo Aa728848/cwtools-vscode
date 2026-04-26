@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Dayshine",
 	"license": "MIT",
-	"version": "1.6.3",
+	"version": "1.6.4",
 	"preview": true,
 	"publisher": "Eddy",
 	"icon": "docs/stellaris.png",

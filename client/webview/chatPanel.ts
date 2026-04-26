@@ -166,7 +166,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     bindBtn('btnNewTopic', () => vscode.postMessage({ type: 'newTopic' }));
     bindBtn('btnTopics', () => topicsPanel.classList.toggle('show'));
     bindBtn('btnNewTopicPanel', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); });
-    bindBtn('btnSettings', () => vscode.postMessage({ type: 'openSettings' }));
+    bindBtn('btnSettings', () => {
+        vscode.postMessage({ type: 'openSettings' });
+        topicsPanel.classList.remove('show');
+    });
     bindBtn('settingsBackBtn', closeSettings);
     bindBtn('testConnBtn', testConnection);
     bindBtn('saveSettingsBtn', saveSettings);
@@ -1472,8 +1475,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 // Cache model context token map for use in updateModelUI
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
+                updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
                 if (msg.showPanel) showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
-                else updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
                 break;
 
             case 'ollamaModels': {
@@ -2326,6 +2329,17 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     function toggleAccordion(id: string) { document.getElementById(id)!.classList.toggle('open'); }
 
     function saveSettings() {
+        const btn = document.getElementById('saveSettingsBtn') as HTMLButtonElement | null;
+        if (btn) {
+            const originalText = btn.textContent;
+            btn.textContent = '✔ 已保存';
+            btn.style.backgroundColor = '#28a745';
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.backgroundColor = '';
+            }, 1500);
+        }
+
         const mcpServers = Array.from(document.querySelectorAll('.mcp-server-block')).map(block => {
             const type = (block.querySelector('.mcp-type') as HTMLSelectElement).value;
             const transport: any = { type };

@@ -14,25 +14,23 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type {
     ChatMessage,
-    ChatTopic,
-    ChatHistoryMessage,
     WebViewMessage,
     HostMessage,
     AgentStep,
     AgentMode,
-    GenerationResult,
 } from './types';
 import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
 import { UsageTracker } from './usageTracker';
 import { getChatPanelHtml } from './chatHtml';
+import { ChatTopicManager } from './chatTopics';
+import { generateInitFile } from './chatInit';
+import { ChatSettingsManager } from './chatSettings';
 
 export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public static readonly viewType = 'cwtools.aiChat';
 
     private view?: vs.WebviewView;
-    private currentTopic: ChatTopic | null = null;
-    private topics: ChatTopic[] = [];
     private conversationMessages: ChatMessage[] = [];
     private abortController: AbortController | null = null;
     private currentMode: AgentMode = 'build';
@@ -66,6 +64,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private _previewProviderRegistration?: vs.Disposable;
     /** Fix #2: disposables for WebView event listeners, cleaned up on dispose() */
     private _viewDisposables: vs.Disposable[] = [];
+    private topicManager!: ChatTopicManager;
+    private settingsManager!: ChatSettingsManager;
 
     constructor(
         private extensionUri: vs.Uri,
@@ -74,7 +74,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         private usageTracker: UsageTracker,
         private storageUri: vs.Uri | undefined
     ) {
-        this.loadTopics();
+        this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
+        this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg));
     }
 
     /**
@@ -135,9 +136,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         );
 
         // Send topic list and initial model data on load
-        this.sendTopicList();
+        this.topicManager.sendTopicList();
         // Push provider/model list immediately so the quick selector is populated
-        this.buildAndSendSettingsData().catch(() => { /* ignore on startup */ });
+        this.settingsManager.buildAndSendSettingsData().catch(() => { /* ignore on startup */ });
         // Restore current conversation if any
         this._restoreViewState();
     }
@@ -150,8 +151,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      */
     private _restoreViewState(): void {
         // 1. Restore persisted topic messages
-        if (this.currentTopic && this.currentTopic.messages.length > 0) {
-            this.postMessage({ type: 'loadTopicMessages', messages: this.currentTopic.messages });
+        if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
+            this.postMessage({ type: 'loadTopicMessages', messages: this.topicManager.currentTopic.messages });
         }
         // 2. Restore current mode
         this.postMessage({ type: 'setMode', mode: this.currentMode });
@@ -196,22 +197,22 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'configureProvider':
             case 'openSettings':
-                await this.openSettingsPage();
+                await this.settingsManager.openSettingsPage();
                 break;
             case 'saveSettings':
-                await this.saveSettings(msg.settings);
+                await this.settingsManager.saveSettings(msg.settings);
                 break;
             case 'detectOllamaModels':
-                await this.detectOllamaModels(msg.endpoint);
+                await this.settingsManager.detectOllamaModels(msg.endpoint);
                 break;
             case 'fetchApiModels':
-                await this.fetchApiModels(msg.providerId, msg.endpoint, msg.apiKey);
+                await this.settingsManager.fetchApiModels(msg.providerId, msg.endpoint, msg.apiKey);
                 break;
             case 'testConnection':
-                await this.testConnection(msg.settings);
+                await this.settingsManager.testConnection(msg.settings);
                 break;
             case 'deleteDynamicModel':
-                await this.deleteDynamicModel(msg.providerId, msg.modelId);
+                await this.settingsManager.deleteDynamicModel(msg.providerId, msg.modelId);
                 break;
             case 'cancelGeneration':
                 this.cancelGeneration();
@@ -230,7 +231,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.resolveWriteConfirmation(msg.messageId, false);
                 break;
             case 'quickChangeModel':
-                await this.quickChangeModel(msg.model);
+                await this.settingsManager.quickChangeModel(msg.model);
                 break;
             case 'slashCommand':
                 await this.handleSlashCommand(msg.command);
@@ -276,16 +277,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 }
                 break;
             case 'searchTopics':
-                this.handleSearchTopics(msg.query);
+                this.topicManager.handleSearchTopics(msg.query);
                 break;
             case 'exportTopic':
-                await this.exportTopicAsMarkdown(msg.topicId);
+                await this.topicManager.exportTopicAsMarkdown(msg.topicId);
                 break;
             case 'exportTopicJson':
-                await this.exportTopicAsJson(msg.topicId);
+                await this.topicManager.exportTopicAsJson(msg.topicId);
                 break;
             case 'importTopic':
-                await this.importTopicFromJson(msg.data);
+                { const msgs = await this.topicManager.importTopicFromJson(msg.data); if (msgs) this.conversationMessages = msgs; };
                 break;
             case 'requestFileList':
                 this.sendWorkspaceFileList();
@@ -297,306 +298,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.usageTracker.clearStats();
                 this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
                 break;
-        }
-    }
-
-    /** Build the settingsData payload and send it to the WebView (no UI activation side-effect) */
-    private async buildAndSendSettingsData(showPanel = false): Promise<void> {
-        const { BUILTIN_PROVIDERS, fetchOllamaModels, MODEL_CONTEXT_TOKENS } = await import('./providers');
-        const config = this.aiService.getConfig();
-
-        const providers = Object.values(BUILTIN_PROVIDERS).map(p => ({
-            id: p.id,
-            name: p.name,
-            models: p.models,
-            defaultModel: p.defaultModel,
-            requiresApiKey: p.id !== 'ollama',
-            defaultEndpoint: p.endpoint,
-            maxContextTokens: p.maxContextTokens,
-            supportsFIM: p.supportsFIM,
-        }));
-
-        const hasKeyMap: Record<string, boolean> = {};
-        for (const p of providers) {
-            hasKeyMap[p.id] = !!(await this.aiService.getKeyForProvider(p.id));
-        }
-
-        const current: import('./types').PanelSettings = {
-            provider: config.provider,
-            model: config.model,
-            apiKey: '',
-            endpoint: config.endpoint || '',
-            maxContextTokens: config.maxContextTokens,
-            agentFileWriteMode: config.agentFileWriteMode,
-            reasoningEffort: config.reasoningEffort,
-            braveSearchApiKey: (() => {
-                const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
-                return k ? '••••••••' : '';  // mask if set; expose empty string if not
-            })(),
-            inlineCompletion: {
-                enabled: config.inlineCompletion.enabled,
-                provider: config.inlineCompletion.provider,
-                model: config.inlineCompletion.model,
-                endpoint: config.inlineCompletion.endpoint,
-                debounceMs: config.inlineCompletion.debounceMs,
-                overlapStripping: config.inlineCompletion.overlapStripping,
-                fimMode: config.inlineCompletion.fimMode,
-            },
-            mcp: {
-                servers: config.mcp.servers
-            }
-        };
-
-        let ollamaModels: Array<{ name: string; size: string; parameterSize?: string }> | undefined;
-        if (config.provider === 'ollama') {
-            const ep = config.endpoint || BUILTIN_PROVIDERS['ollama']?.endpoint;
-            if (ep) ollamaModels = await fetchOllamaModels(ep);
-        }
-
-        const vscodeConfig = vs.workspace.getConfiguration('cwtools.ai');
-        const dynamicModelsConfig = vscodeConfig.get<Record<string, string[]>>('dynamicModels') || {};
-
-        const dynamicContexts = vscodeConfig.get<Record<string, number>>('dynamicModelsContext') || {};
-
-        // Fix #4: import shared list from providers.ts instead of maintaining a duplicate
-        const { ALWAYS_THINKING_PREFIXES } = await import('./providers');
-
-        this.postMessage({
-            type: 'settingsData',
-            providers: providers.map(p => ({
-                ...p,
-                hasKey: hasKeyMap[p.id] ?? false,
-                models: Array.from(new Set([...p.models, ...(dynamicModelsConfig[p.id] || [])]))
-            })) as any,
-            current,
-            ollamaModels,
-            showPanel,
-            // Merge static MODEL_CONTEXT_TOKENS with any dynamic contexts grabbed from OpenRouter/etc.
-            modelContextTokens: { ...MODEL_CONTEXT_TOKENS, ...dynamicContexts },
-            thinkingModelPrefixes: ALWAYS_THINKING_PREFIXES,
-        });
-    }
-
-
-    private async openSettingsPage(): Promise<void> {
-        await this.buildAndSendSettingsData(true);
-    }
-
-    /** Quickly switch model from the input-area selector without opening settings page */
-    private async quickChangeModel(model: string): Promise<void> {
-        if (!model) return;
-        // Use in-memory override ONLY — writing to workspace config triggers cwtools LS restart
-        this.aiService.setModelOverride(model);
-        // Sync selector UI without opening settings page
-        await this.buildAndSendSettingsData();
-    }
-
-    private async saveSettings(settings: import('./types').PanelSettings): Promise<void> {
-        const cfg = vs.workspace.getConfiguration('cwtools.ai');
-        const { BUILTIN_PROVIDERS } = await import('./providers');
-
-        const handleDynamicModel = async (providerId: string, modelId: string, contextTokens: number) => {
-            const provider = BUILTIN_PROVIDERS[providerId];
-            if (provider && providerId !== 'ollama' && modelId) {
-                if (!provider.models.includes(modelId)) {
-                    let currentDynamic = cfg.get<Record<string, string[]>>('dynamicModels') || {};
-                    let providerDyns = currentDynamic[providerId] || [];
-                    if (!providerDyns.includes(modelId)) {
-                        providerDyns.push(modelId);
-                        currentDynamic = { ...currentDynamic, [providerId]: providerDyns };
-                        await cfg.update('dynamicModels', currentDynamic, vs.ConfigurationTarget.Global);
-                    }
-                    if (contextTokens > 0) {
-                        let currContexts = cfg.get<Record<string, number>>('dynamicModelsContext') || {};
-                        if (currContexts[modelId] !== contextTokens) {
-                            currContexts = { ...currContexts, [modelId]: contextTokens };
-                            await cfg.update('dynamicModelsContext', currContexts, vs.ConfigurationTarget.Global);
-                        }
-                    }
-                }
-            }
-        };
-
-        if (settings.model) {
-            await handleDynamicModel(settings.provider, settings.model, settings.maxContextTokens || 0);
-        }
-        if (settings.inlineCompletion && settings.inlineCompletion.model) {
-            await handleDynamicModel(settings.inlineCompletion.provider, settings.inlineCompletion.model, 0);
-        }
-
-        await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
-        await cfg.update('model', settings.model, vs.ConfigurationTarget.Global);
-        // API key: store in SecretStorage, NEVER in settings.json
-        if (settings.apiKey && settings.apiKey.trim().length > 0) {
-            await this.aiService.getKeyManager().setKey(settings.provider, settings.apiKey.trim());
-            // Ensure plaintext key is cleared from settings.json
-            await cfg.update('apiKey', '', vs.ConfigurationTarget.Global);
-        }
-        // Brave Search API key — stored in workspace config (not secret, not sensitive enough)
-        if (settings.braveSearchApiKey && settings.braveSearchApiKey.trim().length > 0
-            && !settings.braveSearchApiKey.startsWith('•')) {
-            await cfg.update('braveSearchApiKey', settings.braveSearchApiKey.trim(), vs.ConfigurationTarget.Global);
-        }
-        await cfg.update('endpoint', settings.endpoint, vs.ConfigurationTarget.Global);
-        await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);
-        await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
-        await cfg.update('reasoningEffort', settings.reasoningEffort, vs.ConfigurationTarget.Global);
-        await cfg.update('enabled', true, vs.ConfigurationTarget.Global);
-        // Inline completion settings
-        if (settings.inlineCompletion) {
-            await cfg.update('inlineCompletion.enabled', settings.inlineCompletion.enabled, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.provider', settings.inlineCompletion.provider, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.model', settings.inlineCompletion.model, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.endpoint', settings.inlineCompletion.endpoint, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.fimMode', settings.inlineCompletion.fimMode, vs.ConfigurationTarget.Global);
-        }
-
-        // MCP Settings
-        if (settings.mcp?.servers) {
-            await cfg.update('mcp.servers', settings.mcp.servers, vs.ConfigurationTarget.Global);
-        }
-
-        vs.window.showInformationMessage('Eddy CWTool Code 设置已保存，部分 MCP 连接更改可能需要重载窗口生效');
-        // Immediately push fresh settings data (with updated hasKey) back to the WebView
-        await this.openSettingsPage();
-    }
-
-    private async detectOllamaModels(endpoint: string): Promise<void> {
-        const { fetchOllamaModels } = await import('./providers');
-        const models = await fetchOllamaModels(endpoint || 'http://localhost:11434/v1');
-        if (models.length > 0) {
-            this.postMessage({ type: 'ollamaModels', models });
-        } else {
-            this.postMessage({ type: 'ollamaModels', models: [], error: '未检测到 Ollama 模型，请确认 Ollama 正在运行' });
-        }
-    }
-
-    private async fetchApiModels(providerId: string, endpointOverride: string, apiKeyOverride: string): Promise<void> {
-        const { getEffectiveEndpoint } = await import('./providers');
-        const saved = this.aiService.getConfig();
-        const endpoint = endpointOverride || getEffectiveEndpoint(providerId, saved.endpoint);
-
-        let apiKey = apiKeyOverride;
-        if (!apiKey) apiKey = await this.aiService.getKeyForProvider(providerId) || '';
-
-        if (!apiKey) {
-            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: '需要 API Key 才能拉取模型列表' });
-            return;
-        }
-
-        if (providerId.startsWith('minimax') || providerId === 'opencode') {
-            // Minimax API and OpenCode Zen do not currently have a standard /v1/models endpoint for listing.
-            // Return the hardcoded fallback list smoothly so the UI doesn't crash.
-            const { BUILTIN_PROVIDERS } = await import('./providers');
-            const models = (BUILTIN_PROVIDERS[providerId]?.models || []).map(m => ({ id: m }));
-            this.postMessage({ type: 'apiModelsFetched', providerId, models, error: '' });
-            return;
-        }
-
-        try {
-            const modelsUrl = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '') + '/models';
-            const res = await fetch(modelsUrl, {
-                headers: { 'Authorization': `Bearer ${apiKey}` }
-            });
-            if (res.ok) {
-                const data = await res.json() as any;
-                // Some providers return { data: [...] }, others return a flat array
-                const modelList: any[] = Array.isArray(data)
-                    ? data
-                    : (Array.isArray(data?.data) ? data.data : null);
-                if (modelList) {
-                    const dynModels = modelList.map((m: any) => m.id);
-                    const dynContexts: Record<string, number> = {};
-                    const { getModelContextTokens } = await import('./providers');
-
-                    modelList.forEach((m: any) => {
-                        // Tier 1: Direct from API response (OpenRouter, Together, DeepInfra, etc.)
-                        let c = m.context_length
-                            || m.context_window
-                            || m.max_context_length
-                            || m.top_provider?.context_length
-                            || 0;
-
-                        // Tier 2: Infer from model family using canonical knowledge base
-                        if (!c && m.id) {
-                            c = getModelContextTokens(m.id, providerId);
-                        }
-
-                        if (c) dynContexts[m.id] = c;
-                    });
-
-                    const apiHasContext = modelList.some((m: any) => m.context_length || m.context_window || m.top_provider?.context_length);
-                    const inferredCount = Object.keys(dynContexts).length;
-                    const ctxNote = apiHasContext
-                        ? `（已从 API 获取 ${inferredCount} 个模型的上下文大小）`
-                        : `（API 未返回上下文大小，已通过模型族推断 ${inferredCount}/${dynModels.length} 个）`;
-
-                    this.postMessage({ type: 'apiModelsFetched', providerId, models: modelList, dynContexts, ctxNote });
-                    return;
-                }
-            }
-            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: `接口返回未知数据结构 (状态码: ${res.status})` });
-        } catch (e: unknown) {
-            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: String(e) });
-        }
-    }
-
-    private async deleteDynamicModel(providerId: string, modelId: string): Promise<void> {
-        const vscodeConfig = vs.workspace.getConfiguration('cwtools.ai');
-        const dynamicModelsConfig = vscodeConfig.get<Record<string, string[]>>('dynamicModels') || {};
-        if (dynamicModelsConfig[providerId]) {
-            dynamicModelsConfig[providerId] = dynamicModelsConfig[providerId].filter(m => m !== modelId);
-            await vscodeConfig.update('dynamicModels', dynamicModelsConfig, vs.ConfigurationTarget.Global);
-            vs.window.showInformationMessage(`✅ 已删除动态拉取的模型: ${modelId}`);
-            await this.openSettingsPage(); // Refresh settings data
-        }
-    }
-
-    private async testConnection(settings?: import('./types').PanelSettings): Promise<void> {
-        const { getEffectiveEndpoint } = await import('./providers');
-        const saved = this.aiService.getConfig();
-        const providerId = settings?.provider ?? saved.provider;
-        // If the settings page shows a masked key (starts with '•'), the user hasn't
-        // entered a new key — fall back to the one stored in SecretStorage.
-        const rawSettingsKey = settings?.apiKey ?? '';
-        const apiKey = (rawSettingsKey && !rawSettingsKey.startsWith('\u2022'))
-            ? rawSettingsKey
-            : await this.aiService.getKeyForProvider(providerId);
-        const endpoint = settings?.endpoint || getEffectiveEndpoint(providerId, saved.endpoint);
-        const model = settings?.model || undefined;
-
-        if (!providerId) {
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: '请先选择 Provider' });
-            return;
-        }
-        if (providerId !== 'ollama' && !apiKey) {
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: '请填写 API Key' });
-            return;
-        }
-
-        try {
-            await this.aiService.chatCompletion(
-                [{ role: 'user', content: 'Hi' }],
-                { maxTokens: 5, providerId, model, apiKey, endpoint }
-            );
-            this.postMessage({ type: 'testConnectionResult', ok: true, message: '连接成功 ✅' });
-        } catch (e: unknown) {
-            const raw = e instanceof Error ? e.message : String(e);
-            let friendly = raw;
-            if (raw.includes('fetch failed') || raw.includes('ECONNREFUSED') || raw.includes('ETIMEDOUT')) {
-                friendly = '网络连接失败 — 请检查网络或 Endpoint 地址是否正确';
-            } else if (raw.includes('401') || raw.includes('Unauthorized') || raw.includes('invalid_api_key')) {
-                friendly = 'API Key 无效或已过期';
-            } else if (raw.includes('403') || raw.includes('Forbidden')) {
-                friendly = 'API Key 权限不足';
-            } else if (raw.includes('429')) {
-                friendly = '请求过于频繁 (429) — Key 有效 ✅';
-            } else if (raw.includes('404')) {
-                friendly = 'Endpoint 地址不存在 (404) — 请检查 URL';
-            }
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: '连接失败: ' + friendly });
         }
     }
 
@@ -638,12 +339,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         // Ensure we have a topic
-        if (!this.currentTopic) {
-            this.createNewTopic(text);
+        if (!this.topicManager.currentTopic) {
+            this.topicManager.createNewTopic(text);
         }
 
         // Track message index for retract support
-        const messageIndex = this.currentTopic!.messages.length;
+        const messageIndex = this.topicManager.currentTopic!.messages.length;
 
         // Add user message to UI — pass images array directly (not just a bool flag)
         if (!isBackground) {
@@ -651,7 +352,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         // Add to history — store images for topic persistence
-        this.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
+        this.topicManager.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
 
         // Get current editor context
         const editor = vs.window.activeTextEditor;
@@ -687,7 +388,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         try {
             const result = await this.agentRunner.run(
                 text,
-                { ...context, topicId: this.currentTopic?.id },
+                { ...context, topicId: this.topicManager.currentTopic?.id },
                 this.conversationMessages,
                 {
                     mode: this.currentMode,
@@ -727,7 +428,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (this.currentMode === 'plan' && result.explanation) {
                 // Chat shows only tool-call steps (no full plan text)
                 this.postMessage({ type: 'generationComplete', result: { ...result, explanation: '', code: '' } });
-                this.addHistoryMessage({
+                this.topicManager.addHistoryMessage({
                     role: 'assistant',
                     content: '📋 计划已生成，已在批注视图中打开',
                     timestamp: Date.now(),
@@ -736,7 +437,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.savePlanFile(result.explanation, text, result.steps);
             } else {
                 this.postMessage({ type: 'generationComplete', result });
-                this.addHistoryMessage({
+                this.topicManager.addHistoryMessage({
                     role: 'assistant',
                     content: result.explanation,
                     code: result.code || undefined,
@@ -745,12 +446,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     steps: result.steps,
                 });
             }
-            this.saveTopics();
+            this.topicManager.saveTopics();
 
             // ── Check if Walkthrough was generated ──
             const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
             if (wsRoot) {
-                const topicId = this.currentTopic?.id || 'default';
+                const topicId = this.topicManager.currentTopic?.id || 'default';
                 const wtPath = path.join(wsRoot, '.cwtools-ai', topicId, 'walkthrough.md');
                 // Use normalize for safter comparisons
                 const normWtPath = path.normalize(wtPath).toLowerCase();
@@ -776,18 +477,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             // ── Auto-title: generate a short AI title after the first exchange ─
             // Matches OpenCode's title-agent pattern: fire-and-forget, no blocking
-            const isFirstExchange = this.currentTopic &&
-                this.currentTopic.messages.filter(m => m.role === 'user').length === 1;
-            if (isFirstExchange && this.currentTopic) {
-                const topicId = this.currentTopic.id;
+            const isFirstExchange = this.topicManager.currentTopic &&
+                this.topicManager.currentTopic.messages.filter(m => m.role === 'user').length === 1;
+            if (isFirstExchange && this.topicManager.currentTopic) {
+                const topicId = this.topicManager.currentTopic.id;
                 const replyText = result.explanation || (result.code ? result.code.substring(0, 400) : '');
                 // Non-blocking: run in background, update UI when done
                 this.agentRunner.generateTopicTitle(text, replyText).then(title => {
                     if (!title) return;
-                    const topic = this.topics.find(t => t.id === topicId);
+                    const topic = this.topicManager.topics.find(t => t.id === topicId);
                     if (topic) {
                         topic.title = title;
-                        this.saveTopics();
+                        this.topicManager.saveTopics();
                         this.postMessage({ type: 'topicTitleGenerated', topicId, title });
                     }
                 }).catch(() => { /* ignore title generation failures silently */ });
@@ -831,7 +532,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     /** Retract a user message, its AI response, AND any file changes made during that exchange */
     private async retractMessage(messageIndex: number): Promise<void> {
-        if (!this.currentTopic) return;
+        if (!this.topicManager.currentTopic) return;
 
         // ── P0 Fix: validate file paths are within workspace boundaries ──────
         const workspaceFolders = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
@@ -911,7 +612,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // ── Roll back conversation history ─────────────────────────────────
         // Use the accurately recorded convLength if available; otherwise fall back to
         // using messageIndex (which may diverge from conversationMessages after fork/load).
-        this.currentTopic.messages = this.currentTopic.messages.slice(0, messageIndex);
+        this.topicManager.currentTopic.messages = this.topicManager.currentTopic.messages.slice(0, messageIndex);
         if (convRollbackLength !== undefined) {
             this.conversationMessages = this.conversationMessages.slice(0, convRollbackLength - 2);
         } else {
@@ -920,7 +621,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         this.postMessage({ type: 'messageRetracted', messageIndex });
-        this.saveTopics();
+        this.topicManager.saveTopics();
 
         if (restoredFiles > 0 || skippedFiles > 0) {
             const msg = skippedFiles > 0
@@ -1000,7 +701,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         let relPath = '';
         if (wsRoot) {
             const baseDir = path.join(wsRoot, '.cwtools-ai');
-            const topicId = this.currentTopic?.id || 'default';
+            const topicId = this.topicManager.currentTopic?.id || 'default';
             // Put under topic folder to scope "同一个对话系列" (same conversation series) while keeping exactly "Implementation_Plan.md"
             const planDir = path.join(baseDir, topicId);
             await fs.promises.mkdir(planDir, { recursive: true });
@@ -1071,7 +772,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             if (steps) {
                 steps.push({ type: 'walkthrough_card', content: filePath, toolResult: sections, timestamp: Date.now() });
-                this.saveTopics();
+                this.topicManager.saveTopics();
             }
 
         } catch (e) {
@@ -1186,7 +887,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Natively save task.md in the topic folder
         const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (wsRoot && todos.length > 0) {
-            const topicId = this.currentTopic?.id || 'default';
+            const topicId = this.topicManager.currentTopic?.id || 'default';
             const taskPath = path.join(wsRoot, '.cwtools-ai', topicId, 'task.md');
 
             const lines: string[] = ['# Task List\n'];
@@ -1278,7 +979,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private createNewTopic(firstMessage: string): void {
         const title = firstMessage.substring(0, 40) + (firstMessage.length > 40 ? '...' : '');
-        this.currentTopic = {
+        this.topicManager.currentTopic = {
             id: `topic_${Date.now()}`,
             title,
             createdAt: Date.now(),
@@ -1286,42 +987,27 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             messages: [],
         };
         this.conversationMessages = [];
-        this.topics.unshift(this.currentTopic);
+        this.topicManager.topics.unshift(this.topicManager.currentTopic);
     }
 
     private startNewTopic(): void {
-        this.currentTopic = null;
+        this.topicManager.startNewTopic();
         this.conversationMessages = [];
-        // Clear file snapshots associated with the previous topic to prevent memory leaks
         this._messageFileSnapshots.clear();
         this._currentMessageSnapshots = null;
-        this.postMessage({ type: 'clearChat' });
-        this.sendTopicList();
     }
 
     private loadTopic(topicId: string): void {
-        const topic = this.topics.find(t => t.id === topicId);
-        if (!topic) return;
-
-        this.currentTopic = topic;
-        this.conversationMessages = topic.messages
-            .filter(m => m.role === 'user' || m.role === 'assistant')
-            .map(m => ({
-                role: m.role,
-                content: m.code ? `${m.content}\n\`\`\`pdx\n${m.code}\n\`\`\`` : m.content,
-            }));
-
-        this.postMessage({ type: 'clearChat' });
-        this.postMessage({ type: 'loadTopicMessages', messages: topic.messages });
+        this.conversationMessages = this.topicManager.loadTopic(topicId);
     }
 
     private deleteTopic(topicId: string): void {
-        this.topics = this.topics.filter(t => t.id !== topicId);
-        if (this.currentTopic?.id === topicId) {
-            this.startNewTopic();
+        const wasCurrentDeleted = this.topicManager.deleteTopic(topicId);
+        if (wasCurrentDeleted) {
+            this.conversationMessages = [];
+            this._messageFileSnapshots.clear();
+            this._currentMessageSnapshots = null;
         }
-        this.saveTopics();
-        this.sendTopicList();
     }
 
     /**
@@ -1329,68 +1015,34 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Creates a new topic with messages[0..messageIndex], switches to it.
      */
     private forkTopic(topicId: string, messageIndex: number): void {
-        const source = this.topics.find(t => t.id === topicId);
-        if (!source) return;
-
-        const forkedMessages = source.messages.slice(0, messageIndex + 1);
-        const titlePreview = source.title + ' [分支]';
-
-        const forked: ChatTopic = {
-            id: `topic_${Date.now()}`,
-            title: titlePreview,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            messages: forkedMessages,
-            parentTopicId: topicId,
-            forkedFromMessageIndex: messageIndex,
-        };
-
-        this.topics.unshift(forked);
-        this.currentTopic = forked;
-        this.conversationMessages = forkedMessages
-            .filter(m => m.role === 'user' || m.role === 'assistant')
-            .map(m => ({ role: m.role, content: m.code ? `${m.content}\n\`\`\`pdx\n${m.code}\n\`\`\`` : m.content }));
-
-        this.postMessage({ type: 'clearChat' });
-        this.postMessage({ type: 'loadTopicMessages', messages: forkedMessages });
-        this.postMessage({ type: 'topicForked', newTopicId: forked.id, title: forked.title });
-        this.saveTopics();
-        this.sendTopicList();
+        this.conversationMessages = this.topicManager.forkTopic(topicId, messageIndex);
     }
 
     /** Archive/unarchive a topic (hidden from main list but not deleted) */
     private archiveTopic(topicId: string): void {
-        const topic = this.topics.find(t => t.id === topicId);
-        if (!topic) return;
-        topic.archived = !topic.archived;
-        if (this.currentTopic?.id === topicId && topic.archived) {
-            this.startNewTopic();
+        const wasCurrentArchived = this.topicManager.archiveTopic(topicId);
+        if (wasCurrentArchived) {
+            this.conversationMessages = [];
+            this._messageFileSnapshots.clear();
+            this._currentMessageSnapshots = null;
         }
-        this.saveTopics();
-        this.sendTopicList();
     }
 
-    private addHistoryMessage(msg: ChatHistoryMessage): void {
-        if (this.currentTopic) {
-            this.currentTopic.messages.push(msg);
-            this.currentTopic.updatedAt = Date.now();
-        }
-    }
 
     private async regenerateLastResponse(): Promise<void> {
-        if (!this.currentTopic || this.currentTopic.messages.length < 2) return;
+        if (!this.topicManager.currentTopic || this.topicManager.currentTopic.messages.length < 2) return;
 
         // Remove last assistant message
-        const lastMsg = this.currentTopic.messages[this.currentTopic.messages.length - 1];
+        const lastMsg = this.topicManager.currentTopic.messages[this.topicManager.currentTopic.messages.length - 1];
         if (lastMsg.role === 'assistant') {
-            this.currentTopic.messages.pop();
+            this.topicManager.currentTopic.messages.pop();
             this.conversationMessages.pop();
         }
 
         // Re-send the last user message
-        const lastUserMsg = this.currentTopic.messages[this.currentTopic.messages.length - 1];
+        const lastUserMsg = this.topicManager.currentTopic.messages[this.topicManager.currentTopic.messages.length - 1];
         if (lastUserMsg?.role === 'user') {
-            this.currentTopic.messages.pop();
+            this.topicManager.currentTopic.messages.pop();
             this.conversationMessages.pop();
             await this.handleUserMessage(lastUserMsg.content);
         }
@@ -1417,12 +1069,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.switchMode(mode);
             }
         } else if (cmd === 'fork' || cmd === '/fork') {
-            if (this.currentTopic && this.currentTopic.messages.length > 0) {
-                this.forkTopic(this.currentTopic.id, this.currentTopic.messages.length - 1);
+            if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
+                this.forkTopic(this.topicManager.currentTopic.id, this.topicManager.currentTopic.messages.length - 1);
             }
         } else if (cmd === 'archive' || cmd === '/archive') {
-            if (this.currentTopic) {
-                this.archiveTopic(this.currentTopic.id);
+            if (this.topicManager.currentTopic) {
+                this.archiveTopic(this.topicManager.currentTopic.id);
             }
         } else if (cmd === 'init' || cmd === '/init') {
             await this.generateInitFile();
@@ -1435,303 +1087,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * The file is written to the workspace root and loaded into every future session.
      */
     private async generateInitFile(): Promise<void> {
-        const folders = vs.workspace.workspaceFolders;
-        if (!folders || folders.length === 0) {
-            vs.window.showWarningMessage('Eddy CWTool Code /init: 当前没有打开的工作区');
-            return;
-        }
-        const root = folders[0].uri.fsPath;
-
-        // Notify WebView that init is running
-        this.postMessage({ type: 'agentStep', step: { type: 'thinking', content: '正在扫描工作区，生成项目规则文件...', timestamp: Date.now() } });
-
-        try {
-            // ── 1. Collect directory structure (top 2 levels) ──────────────────
-            const topLevel = this.listDirShallow(root, 2);
-
-            // ── 2. Detect mod descriptor ──────────────────────────────────────
-            let modName = path.basename(root);
-            let modVersion = '';
-            let modTags = '';
-            const descriptorPath = path.join(root, 'descriptor.mod');
-            if (fs.existsSync(descriptorPath)) {
-                const desc = fs.readFileSync(descriptorPath, 'utf-8');
-                const nameMatch = desc.match(/^name\s*=\s*"?([^"\r\n]+)"?/m);
-                const versionMatch = desc.match(/^version\s*=\s*"?([^"\r\n]+)"?/m);
-                const tagsMatch = desc.match(/^tags\s*=\s*\{([^}]+)\}/ms);
-                if (nameMatch) modName = nameMatch[1].trim();
-                if (versionMatch) modVersion = versionMatch[1].trim();
-                if (tagsMatch) modTags = tagsMatch[1].replace(/\s+/g, ' ').trim();
-            }
-
-            // ── 3. Sample key identifiers (scripted triggers & effects) ────────
-            const triggerIds = this.sampleIds(path.join(root, 'common', 'scripted_triggers'), 20);
-            const effectIds = this.sampleIds(path.join(root, 'common', 'scripted_effects'), 20);
-            const eventIds = this.sampleIds(path.join(root, 'events'), 10);
-            const variableIds = this.sampleIds(path.join(root, 'common', 'scripted_variables'), 20);
-
-            // ── 3.1 Extract Namespaces ────────────────────────────────────────
-            const namespaces = new Set<string>();
-            const eventsDir = path.join(root, 'events');
-            if (fs.existsSync(eventsDir)) {
-                for (const file of fs.readdirSync(eventsDir).filter(f => f.endsWith('.txt'))) {
-                    try {
-                        const content = fs.readFileSync(path.join(eventsDir, file), 'utf-8');
-                        const nsMatch = content.match(/^namespace\s*=\s*"?([\w.:-]+)"?/m);
-                        if (nsMatch) namespaces.add(nsMatch[1]);
-                    } catch { /* skip */ }
-                }
-            }
-
-            // ── 3.2 Extract Localization Languages ────────────────────────────
-            const locLangs = new Set<string>();
-            const locDir = path.join(root, 'localisation');
-            if (fs.existsSync(locDir)) {
-                for (const file of fs.readdirSync(locDir)) {
-                    if (file.endsWith('.yml')) {
-                        const m = file.match(/([a-z_]+)\.yml$/i);
-                        if (m && m[1].includes('chinese')) locLangs.add('simp_chinese');
-                        else if (m && m[1].includes('english')) locLangs.add('english');
-                        else if (['russian', 'french', 'german', 'spanish', 'polish'].some(l => m && m[1].includes(l))) {
-                            const matched = ['russian', 'french', 'german', 'spanish', 'polish'].find(l => m && m[1].includes(l));
-                            if (matched) locLangs.add(matched);
-                        }
-                    } else if (fs.statSync(path.join(locDir, file)).isDirectory()) {
-                        locLangs.add(file);
-                    }
-                }
-            }
-
-            // ── 3.3 P5: Detect encoding conventions ─────────────────────────
-            // Paradox convention: .txt scripts = UTF-8 (no BOM), .yml localisation = UTF-8 with BOM
-            // We verify against actual files to report the project's real convention.
-            let scriptEncoding = '';
-            let locEncoding = '';
-            // Check script files (.txt)
-            const scriptCheckDirs = ['events', 'common/scripted_triggers', 'common/scripted_effects'];
-            let scriptBom = 0, scriptNoBom = 0;
-            for (const relDir of scriptCheckDirs) {
-                const dir = path.join(root, ...relDir.split('/'));
-                if (!fs.existsSync(dir)) continue;
-                for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.txt')).slice(0, 3)) {
-                    try {
-                        const buf = fs.readFileSync(path.join(dir, file));
-                        if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) scriptBom++;
-                        else scriptNoBom++;
-                    } catch { /* skip */ }
-                }
-            }
-            if (scriptBom > 0 || scriptNoBom > 0) {
-                scriptEncoding = scriptNoBom >= scriptBom ? 'UTF-8 without BOM' : 'UTF-8 with BOM';
-            }
-            // Check localisation files (.yml)
-            const locCheckDir = path.join(root, 'localisation');
-            let locBom = 0, locNoBom = 0;
-            if (fs.existsSync(locCheckDir)) {
-                const ymlFiles = this.collectYmlFiles(locCheckDir, 6);
-                for (const ymlPath of ymlFiles) {
-                    try {
-                        const buf = fs.readFileSync(ymlPath);
-                        if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) locBom++;
-                        else locNoBom++;
-                    } catch { /* skip */ }
-                }
-            }
-            if (locBom > 0 || locNoBom > 0) {
-                locEncoding = locBom >= locNoBom ? 'UTF-8 with BOM' : 'UTF-8 without BOM';
-            }
-
-            // ── 3.4 P5: Detect file naming patterns ──────────────────────────
-            const namingPatterns = new Set<string>();
-            for (const subDir of ['common/scripted_triggers', 'common/scripted_effects', 'events']) {
-                const dir = path.join(root, ...subDir.split('/'));
-                if (!fs.existsSync(dir)) continue;
-                const files = fs.readdirSync(dir).filter(f => f.endsWith('.txt'));
-                if (files.length >= 2) {
-                    // Extract common prefix from file names
-                    const prefixes = files.map(f => f.replace('.txt', '').split('_')[0]).filter(Boolean);
-                    const freq = new Map<string, number>();
-                    for (const p of prefixes) freq.set(p, (freq.get(p) || 0) + 1);
-                    for (const [prefix, count] of freq) {
-                        if (count >= 2 && prefix.length > 2) namingPatterns.add(`${prefix}_*.txt (in ${subDir})`);
-                    }
-                }
-            }
-
-            // ── 3.5 P5: Sample on_actions ────────────────────────────────────
-            const onActionIds = this.sampleIds(path.join(root, 'common', 'on_actions'), 10);
-
-            // ── 3.6 P5: Sample static_modifiers ──────────────────────────────
-            const staticModifierIds = this.sampleIds(path.join(root, 'common', 'static_modifiers'), 10);
-
-            // ── 3.7 P5: Detect @variable prefix patterns ─────────────────────
-            const varPrefixes = new Set<string>();
-            if (variableIds.length > 0) {
-                for (const v of variableIds) {
-                    const prefix = v.replace(/^@/, '').split('_').slice(0, 1)[0];
-                    if (prefix && prefix.length > 1) varPrefixes.add(`@${prefix}_`);
-                }
-            }
-
-            // ── 4. Build CWTOOLS.md content ───────────────────────────────────
-            const now = new Date().toISOString().split('T')[0];
-            const lines: string[] = [
-                `# Eddy CWTool Code Project Rules — ${modName}`,
-                ``,
-                `> Auto-generated by \`/init\` on ${now}. Edit freely.`,
-                ``,
-                `## Mod Info`,
-                `- **Name**: ${modName}`,
-                modVersion ? `- **Version**: ${modVersion}` : '',
-                modTags ? `- **Tags**: ${modTags}` : '',
-                `- **Root**: \`${root}\``,
-                scriptEncoding ? `- **Script Encoding**: ${scriptEncoding}` : '',
-                locEncoding ? `- **Localisation Encoding**: ${locEncoding}` : '',
-                ``,
-                `## Project Structure`,
-                '```',
-                topLevel,
-                '```',
-                ``,
-                `## Known Identifiers`,
-                `When generating code that references these IDs, verify they exist before use.`,
-                ``,
-                namespaces.size > 0
-                    ? `### Event Namespaces\n${Array.from(namespaces).map(ns => `- \`${ns}\``).join('\n')}`
-                    : '',
-                variableIds.length > 0
-                    ? `\n### Global Variables (sample)\n${variableIds.map(id => `- \`${id}\``).join('\n')}`
-                    : '',
-                triggerIds.length > 0
-                    ? `\n### Scripted Triggers (sample)\n${triggerIds.map(id => `- \`${id}\``).join('\n')}`
-                    : '',
-                effectIds.length > 0
-                    ? `\n### Scripted Effects (sample)\n${effectIds.map(id => `- \`${id}\``).join('\n')}`
-                    : '',
-                eventIds.length > 0
-                    ? `\n### Events (sample)\n${eventIds.map(id => `- \`${id}\``).join('\n')}`
-                    : '',
-                onActionIds.length > 0
-                    ? `\n### On Actions (sample)\n${onActionIds.map(id => `- \`${id}\``).join('\n')}`
-                    : '',
-                staticModifierIds.length > 0
-                    ? `\n### Static Modifiers (sample)\n${staticModifierIds.map(id => `- \`${id}\``).join('\n')}`
-                    : '',
-                ``,
-                `## Agent Guidelines`,
-                locLangs.size > 0 ? `- **Localization Target**: This project supports [${Array.from(locLangs).join(', ')}]. Always provide localizations for these languages when creating new keys.` : '',
-                namespaces.size > 0 ? `- **Namespaces**: Always prefix new events with one of the established namespaces.` : '',
-                scriptEncoding ? `- **Script Encoding**: All new .txt script files MUST use ${scriptEncoding}.` : '',
-                locEncoding ? `- **Localisation Encoding**: All new .yml localisation files MUST use ${locEncoding}.` : '',
-                namingPatterns.size > 0 ? `- **File Naming**: Follow existing patterns: ${Array.from(namingPatterns).join(', ')}.` : '',
-                varPrefixes.size > 0 ? `- **Variable Prefixes**: Use established prefixes: ${Array.from(varPrefixes).join(', ')}.` : '',
-                `- Always call \`query_types\` before using an identifier not listed above.`,
-                `- Distinguish Type A (code bug) from Type B (reference not yet defined) errors.`,
-                `- For multi-file tasks, check if referenced IDs are planned to be created later.`,
-                `- Prefer \`edit_file\` over \`write_file\` for existing files.`,
-                ``,
-                `## Custom Rules`,
-                `<!-- Add your project-specific rules here. This section survives /init re-runs. -->`,
-            ];
-
-            const content = lines.filter(l => l !== undefined && l !== null).join('\n');
-            const outPath = path.join(root, 'CWTOOLS.md');
-
-            // Preserve the "Custom Rules" section if file already exists
-            let finalContent = content;
-            if (fs.existsSync(outPath)) {
-                const existing = fs.readFileSync(outPath, 'utf-8');
-                const customMatch = existing.match(/## Custom Rules\n([\s\S]*)/);
-                if (customMatch && customMatch[1].trim().length > 0 && !customMatch[1].includes('<!-- Add')) {
-                    finalContent = content.replace(
-                        /## Custom Rules\n<!-- Add[^]*$/,
-                        `## Custom Rules\n${customMatch[1]}`
-                    );
-                }
-            }
-
-            // Register CWTOOLS.md in the current message snapshot so /init can be retracted.
-            // This allows `retractMessage` to delete or restore the file if the user undoes the /init.
-            this._recordFileSnapshot(outPath);
-            fs.writeFileSync(outPath, finalContent, 'utf-8');
-
-            // Open the file in editor
-            const doc = await vs.workspace.openTextDocument(vs.Uri.file(outPath));
-            await vs.window.showTextDocument(doc, { preview: false });
-
-            // Notify in chat
-            this.postMessage({
-                type: 'agentStep',
-                step: { type: 'validation', content: `CWTOOLS.md 已生成 → ${outPath}`, timestamp: Date.now() }
-            });
-
-            vs.window.showInformationMessage(`Eddy CWTool Code: CWTOOLS.md 已写入 ${path.basename(root)} 根目录`);
-
-        } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            this.postMessage({ type: 'agentStep', step: { type: 'error', content: `/init 失败: ${msg}`, timestamp: Date.now() } });
-        }
+        await generateInitFile(
+            (msg) => this.postMessage(msg),
+            (filePath) => this._recordFileSnapshot(filePath)
+        );
     }
 
-    /** List directory shallowly (max depth), return tree string */
-    private listDirShallow(dir: string, maxDepth: number, depth = 0, prefix = ''): string {
-        if (!fs.existsSync(dir) || depth > maxDepth) return '';
-        const IGNORE = new Set(['node_modules', '.git', '.cwtools', '__pycache__', 'bin', 'obj', 'release']);
-        const entries = fs.readdirSync(dir, { withFileTypes: true })
-            .filter(e => !IGNORE.has(e.name) && !e.name.startsWith('.'))
-            .slice(0, 30); // cap at 30 per level
-        const lines: string[] = [];
-        for (let i = 0; i < entries.length; i++) {
-            const e = entries[i];
-            const isLast = i === entries.length - 1;
-            const connector = isLast ? '└── ' : '├── ';
-            lines.push(prefix + connector + e.name + (e.isDirectory() ? '/' : ''));
-            if (e.isDirectory() && depth < maxDepth) {
-                const childPrefix = prefix + (isLast ? '    ' : '│   ');
-                lines.push(this.listDirShallow(path.join(dir, e.name), maxDepth, depth + 1, childPrefix));
-            }
-        }
-        return lines.filter(Boolean).join('\n');
-    }
-
-    /** Sample identifier keys from .txt files in a directory */
-    private sampleIds(dir: string, maxCount: number): string[] {
-        if (!fs.existsSync(dir)) return [];
-        const ids: string[] = [];
-        for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.txt')).slice(0, 10)) {
-            try {
-                const content = fs.readFileSync(path.join(dir, file), 'utf-8');
-                // Match top-level identifier keys: key = {...} or @var = value
-                const matches = content.match(/^([@\w][\w.:-]*)\s*=/gm) || [];
-                for (const m of matches) {
-                    const id = m.replace(/\s*=$/, '').trim();
-                    if (id && !ids.includes(id) && id.length > 2) ids.push(id);
-                    if (ids.length >= maxCount) break;
-                }
-            } catch { /* skip unreadable file */ }
-            if (ids.length >= maxCount) break;
-        }
-        return ids.slice(0, maxCount);
-    }
-
-    /** Collect .yml file paths from a directory (recurses one level into subdirs) */
-    private collectYmlFiles(dir: string, maxCount: number): string[] {
-        const results: string[] = [];
-        if (!fs.existsSync(dir)) return results;
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-            if (results.length >= maxCount) break;
-            if (entry.isFile() && entry.name.endsWith('.yml')) {
-                results.push(path.join(dir, entry.name));
-            } else if (entry.isDirectory()) {
-                // Recurse one level (e.g. localisation/english/)
-                for (const sub of fs.readdirSync(path.join(dir, entry.name)).filter(f => f.endsWith('.yml')).slice(0, 2)) {
-                    results.push(path.join(dir, entry.name, sub));
-                    if (results.length >= maxCount) break;
-                }
-            }
-        }
-        return results;
-    }
 
     // ─── Permission System (OpenCode-aligned) ────────────────────────────────────
 
@@ -1784,287 +1145,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.postMessage({ type: 'modeChanged', mode });
     }
 
-    // ─── Persistence ─────────────────────────────────────────────────────────
 
-    private get topicsFilePath(): string | undefined {
-        if (!this.storageUri) return undefined;
-        return path.join(this.storageUri.fsPath, 'ai-chat-topics.json');
-    }
 
-    private loadTopics(): void {
-        const filePath = this.topicsFilePath;
-        if (!filePath) return;
-        try {
-            if (fs.existsSync(filePath)) {
-                const data = fs.readFileSync(filePath, 'utf-8');
-                this.topics = JSON.parse(data);
-            }
-        } catch { /* ignore */ }
-    }
-
-    private saveTopics(): void {
-        const filePath = this.topicsFilePath;
-        if (!filePath) return;
-        try {
-            const dir = path.dirname(filePath);
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-            // Keep only the last 50 topics to limit file size
-            const toSave = this.topics.slice(0, 50);
-            fs.writeFileSync(filePath, JSON.stringify(toSave, null, 2), 'utf-8');
-        } catch { /* ignore */ }
-    }
-
-    private sendTopicList(): void {
-        this.postMessage({
-            type: 'topicList',
-            topics: this.topics
-                .filter(t => !t.archived)
-                .map(t => ({
-                    id: t.id,
-                    title: t.title,
-                    updatedAt: t.updatedAt,
-                    archived: t.archived,
-                })),
-        });
-    }
-
-    // ─── Topic Search ─────────────────────────────────────────────────────────
-
-    /**
-     * Search topics by keyword — scans title and full message content.
-     * Returns top 20 matches sorted by relevance (title match first, then recency).
-     * Includes context preview showing where the match was found.
-     */
-    private handleSearchTopics(query: string): void {
-        const q = query.toLowerCase().trim();
-        if (!q) {
-            this.sendTopicList();
-            return;
-        }
-
-        const scored: Array<{
-            id: string; title: string; updatedAt: number;
-            matchContext?: string; score: number;
-        }> = [];
-
-        for (const t of this.topics) {
-            if (t.archived) continue;
-
-            let score = 0;
-            let matchContext: string | undefined;
-
-            // Title match (highest priority)
-            if (t.title.toLowerCase().includes(q)) {
-                score += 100;
-            }
-
-            // Message content match — find first matching message and extract context
-            for (const m of t.messages) {
-                const content = m.content.toLowerCase();
-                const codeContent = (m.code ?? '').toLowerCase();
-                const idx = content.indexOf(q);
-                const codeIdx = codeContent.indexOf(q);
-
-                if (idx >= 0) {
-                    score += (m.role === 'user' ? 10 : 5);
-                    if (!matchContext) {
-                        // Extract snippet around match (±40 chars)
-                        const start = Math.max(0, idx - 40);
-                        const end = Math.min(m.content.length, idx + q.length + 40);
-                        matchContext = (start > 0 ? '...' : '') +
-                            m.content.substring(start, end).replace(/\n/g, ' ') +
-                            (end < m.content.length ? '...' : '');
-                    }
-                } else if (codeIdx >= 0) {
-                    score += 8;
-                    if (!matchContext) {
-                        const start = Math.max(0, codeIdx - 40);
-                        const end = Math.min(m.code!.length, codeIdx + q.length + 40);
-                        matchContext = '📄 ' + (start > 0 ? '...' : '') +
-                            m.code!.substring(start, end).replace(/\n/g, ' ') +
-                            (end < m.code!.length ? '...' : '');
-                    }
-                }
-            }
-
-            if (score > 0) {
-                scored.push({ id: t.id, title: t.title, updatedAt: t.updatedAt, matchContext, score });
-            }
-        }
-
-        // Sort by score descending, then by recency
-        scored.sort((a, b) => b.score - a.score || b.updatedAt - a.updatedAt);
-
-        const results = scored.slice(0, 20).map(s => ({
-            id: s.id,
-            title: s.title,
-            updatedAt: s.updatedAt,
-            matchContext: s.matchContext,
-        }));
-
-        this.postMessage({ type: 'topicSearchResults', results });
-    }
-
-    // ─── Topic Export ─────────────────────────────────────────────────────────
-
-    /**
-     * Export a topic (or the current topic) as a Markdown file.
-     * Saves to the workspace root and opens in VSCode.
-     */
-    private async exportTopicAsMarkdown(topicId?: string): Promise<void> {
-        const topic = topicId
-            ? this.topics.find(t => t.id === topicId)
-            : this.currentTopic;
-
-        if (!topic) {
-            vs.window.showWarningMessage('没有可导出的对话');
-            return;
-        }
-
-        const lines: string[] = [
-            `# ${topic.title}`,
-            ``,
-            `> 导出时间: ${new Date().toLocaleString('zh-CN')}  `,
-            `> 创建时间: ${new Date(topic.createdAt).toLocaleString('zh-CN')}`,
-            ``,
-        ];
-
-        for (const msg of topic.messages) {
-            if (msg.role === 'user') {
-                lines.push(`## 👤 用户`);
-                lines.push(``);
-                lines.push(msg.content);
-                lines.push(``);
-            } else if (msg.role === 'assistant') {
-                lines.push(`## 🤖 Eddy CWTool Code`);
-                lines.push(``);
-                if (msg.content) {
-                    lines.push(msg.content);
-                    lines.push(``);
-                }
-                if (msg.code) {
-                    lines.push('```pdx');
-                    lines.push(msg.code);
-                    lines.push('```');
-                    lines.push(``);
-                }
-            }
-        }
-
-        const content = lines.join('\n');
-        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!workspaceRoot) {
-            vs.window.showWarningMessage('没有打开的工作区');
-            return;
-        }
-
-        const safeName = topic.title
-            .replace(/[<>:"/\\|?*\uFF1A\uFF1F\uFF0F\u3000\u300A\u300B]/g, '_')
-            .replace(/\s+/g, '_')
-            .replace(/_+/g, '_')
-            .replace(/^_|_$/g, '')
-            .substring(0, 60);
-        const outPath = path.join(workspaceRoot, `.cwtools-ai-exports`, `${safeName || 'chat'}.md`);
-        const outDir = path.dirname(outPath);
-        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-        fs.writeFileSync(outPath, content, 'utf-8');
-
-        const doc = await vs.workspace.openTextDocument(outPath);
-        await vs.window.showTextDocument(doc, { preview: true });
-        vs.window.showInformationMessage(`对话已导出: ${path.basename(outPath)}`);
-    }
 
     /**
      * Export a topic as a full JSON file (preserving all metadata and steps).
      */
-    private async exportTopicAsJson(topicId?: string): Promise<void> {
-        const topic = topicId
-            ? this.topics.find(t => t.id === topicId)
-            : this.currentTopic;
-
-        if (!topic) {
-            vs.window.showWarningMessage('没有可导出的对话');
-            return;
-        }
-
-        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!workspaceRoot) {
-            vs.window.showWarningMessage('没有打开的工作区');
-            return;
-        }
-
-        const safeName = topic.title
-            .replace(/[<>:"/\\|?*\uFF1A\uFF1F\uFF0F\u3000\u300A\u300B]/g, '_')
-            .replace(/\s+/g, '_')
-            .replace(/_+/g, '_')
-            .replace(/^_|_$/g, '')
-            .substring(0, 60);
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
-        const outPath = path.join(workspaceRoot, `.cwtools-ai-exports`, `${safeName || 'chat'}_${timestamp}.json`);
-        const outDir = path.dirname(outPath);
-
-        if (!fs.existsSync(outDir)) {
-            await fs.promises.mkdir(outDir, { recursive: true });
-        }
-
-        // Export the full topic object, including steps, messages, images, etc.
-        const jsonContent = JSON.stringify(topic, null, 2);
-        await fs.promises.writeFile(outPath, jsonContent, 'utf-8');
-
-        const doc = await vs.workspace.openTextDocument(outPath);
-        await vs.window.showTextDocument(doc, { preview: true });
-        vs.window.showInformationMessage(`对话已导出为 JSON: ${path.basename(outPath)}`);
-    }
 
     /**
      * Import a topic from a JSON string, perform schema validation, and load it.
      */
-    private async importTopicFromJson(jsonString: string): Promise<void> {
-        try {
-            const data = JSON.parse(jsonString) as Partial<import('./types').ChatTopic>;
-
-            // Simple schema validation
-            if (!data.title || !Array.isArray(data.messages)) {
-                throw new Error('无效的会话文件格式 (缺少 title 或 messages 数组)');
-            }
-
-            // Generate a new ID to avoid collisions
-            const importedTopic: import('./types').ChatTopic = {
-                id: `topic_imported_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                title: `${data.title} (导入)`,
-                createdAt: data.createdAt || Date.now(),
-                updatedAt: Date.now(),
-                messages: data.messages as import('./types').ChatHistoryMessage[],
-                archived: false,
-            };
-
-            // Validate messages
-            for (let i = 0; i < importedTopic.messages.length; i++) {
-                const msg = importedTopic.messages[i];
-                if (!msg.role || (msg.role !== 'user' && msg.role !== 'assistant')) {
-                    throw new Error(`消息 ${i} 格式无效: role 必须为 'user' 或 'assistant'`);
-                }
-                if (msg.content === undefined || msg.content === null) {
-                    throw new Error(`消息 ${i} 格式无效: 缺少 content field`);
-                }
-            }
-
-            this.topics.unshift(importedTopic);
-            this.saveTopics();
-            this.sendTopicList();
-
-            this.loadTopic(importedTopic.id);
-            this.postMessage({ type: 'topicImported', topicId: importedTopic.id, title: importedTopic.title });
-
-            vs.window.showInformationMessage(`成功导入会话: ${importedTopic.title}`);
-        } catch (e) {
-            const err = e instanceof Error ? e.message : String(e);
-            vs.window.showErrorMessage(`导入对话失败: ${err}`);
-        }
-    }
 
     // ─── Workspace File List ──────────────────────────────────────────────────
 

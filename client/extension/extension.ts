@@ -299,6 +299,26 @@ export async function activate(context: ExtensionContext) {
 		}
 		
 		async function getBestRepoPath(originalUrl: string): Promise<string> {
+			const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+			const isCN = timeZone === 'Asia/Shanghai' || timeZone === 'Asia/Chongqing' || timeZone === 'Asia/Urumqi';
+
+			if (isCN && originalUrl === stellarisRemote) {
+				const giteeUrl = 'https://gitee.com/cChen2422/cwtools-stellaris-config';
+				try {
+					await new Promise<void>((resolve, reject) => {
+						const req = require('https').request('https://gitee.com', { method: 'HEAD', timeout: 1500 }, (res: any) => {
+							resolve();
+						});
+						req.on('error', reject);
+						req.on('timeout', () => { req.destroy(); reject(); });
+						req.end();
+					});
+					return giteeUrl;
+				} catch (e) {
+					// Fallback to github logic below if Gitee is completely down
+				}
+			}
+
 			const customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim();
 			if (customProxy) {
 				if (customProxy.toLowerCase() === 'none' || customProxy.toLowerCase() === 'direct') {
@@ -312,11 +332,10 @@ export async function activate(context: ExtensionContext) {
 				return originalUrl;
 			}
 
-			const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-			const isCN = timeZone === 'Asia/Shanghai' || timeZone === 'Asia/Chongqing' || timeZone === 'Asia/Urumqi';
 			if (!isCN) {
 				return originalUrl;
 			}
+
 			return new Promise(resolve => {
 				const req = require('https').request('https://github.com', { method: 'HEAD', timeout: 1500 }, (res: any) => {
 					resolve(originalUrl); // Success within time, use direct connection

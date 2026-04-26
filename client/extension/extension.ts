@@ -216,6 +216,8 @@ export async function activate(context: ExtensionContext) {
 	const docSelector2 = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder, usageTracker);
 	context.subscriptions.push(
+		inlineProvider,
+		chatPanelProvider,
 		vs.languages.registerInlineCompletionItemProvider(docSelector2, inlineProvider)
 	);
 	safeRegisterCommand(context, "cwtools.ai.configure", async () => {

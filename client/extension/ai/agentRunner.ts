@@ -1180,7 +1180,7 @@ export class AgentRunner {
      */
     async runSubAgent(
         prompt: string,
-        mode: 'explore' | 'general',
+        mode: 'explore' | 'general' | 'build',
         parentOptions?: AgentRunnerOptions,
         onStep?: (step: AgentStep) => void,
         parentAccumulator?: TokenUsage

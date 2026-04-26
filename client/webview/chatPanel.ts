@@ -181,9 +181,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     bindBtn('accUsage', () => { toggleAccordion('usageSection'); vscode.postMessage({ type: 'requestUsageStats' }); });
     bindBtn('refreshUsageBtn', () => vscode.postMessage({ type: 'requestUsageStats' }));
     bindBtn('clearUsageBtn', () => {
-        if (confirm('确定要清空所有 Token 消耗统计吗？此操作不可逆转。')) {
-            vscode.postMessage({ type: 'clearUsageStats' });
-        }
+        vscode.postMessage({ type: 'promptClearUsageStats' });
     });
 
     // ── Topic search (debounced 300ms) ─────────────────────────────────────────

@@ -736,6 +736,7 @@ export type WebViewMessage =
     /** Import topic from JSON */
     | { type: 'importTopic'; data: string }
     | { type: 'requestUsageStats' }
+    | { type: 'promptClearUsageStats' }
     | { type: 'clearUsageStats' };
 
 export type HostMessage =

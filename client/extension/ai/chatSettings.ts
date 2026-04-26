@@ -12,6 +12,8 @@ import type { AIService } from './aiService';
 
 type PostMessageFn = (msg: HostMessage) => void;
 
+export let lastAISettingsWriteTime = 0;
+
 export class ChatSettingsManager {
     constructor(
         private aiService: AIService,
@@ -137,6 +139,7 @@ export class ChatSettingsManager {
             await handleDynamicModel(settings.inlineCompletion.provider, settings.inlineCompletion.model, 0);
         }
 
+        lastAISettingsWriteTime = Date.now();
         await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
         await cfg.update('model', settings.model, vs.ConfigurationTarget.Global);
         if (settings.apiKey && settings.apiKey.trim().length > 0) {
@@ -167,6 +170,7 @@ export class ChatSettingsManager {
             await cfg.update('mcp.servers', settings.mcp.servers, vs.ConfigurationTarget.Global);
         }
 
+        lastAISettingsWriteTime = Date.now();
         vs.window.showInformationMessage('Eddy CWTool Code 设置已保存，部分 MCP 连接更改可能需要重载窗口生效');
         await this.openSettingsPage();
     }

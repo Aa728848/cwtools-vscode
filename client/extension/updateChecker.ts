@@ -17,7 +17,13 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
     const now = Date.now();
 
     try {
-        const release = await fetchLatestRelease();
+        const release = await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Window,
+            title: '正在检查 CWTools 更新...'
+        }, async () => {
+            return await fetchLatestRelease();
+        });
+
         if (!release || !release.tag_name) {
             return;
         }

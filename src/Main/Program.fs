@@ -803,7 +803,18 @@ type Server(client: ILanguageClient) =
                                     let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
                                     sprintf "💬 %s" truncated
 
-                                for struct(entity, _) in gameT.AllEntities() do
+                                let entities = gameT.AllEntities() |> Seq.toArray
+                                let totalEntities = entities.Length
+                                let mutable entityCount = 0
+
+                                for struct(entity, _) in entities do
+                                    entityCount <- entityCount + 1
+                                    if entityCount % 500 = 0 then
+                                        client.CustomNotification(
+                                            "loadingBar",
+                                            JsonValue.Record [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_PrecachingUI entityCount totalEntities); "enable", JsonValue.Boolean(true) |]
+                                        )
+
                                     let filePath = FileInfo(entity.filepath).FullName
                                     let fileText = 
                                         // Only use DocumentStore if it's already open, else Fallback to File system read

@@ -17,6 +17,7 @@ import { SolarSystemPanel } from './solarSystemPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
 import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelProvider, AIInlineCompletionProvider, UsageTracker } from './ai';
+import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
@@ -357,6 +358,18 @@ export async function activate(context: ExtensionContext) {
 				// Notify the server about file changes to F# project files contain in the workspace
 
 				fileEvents: fileEvents
+			},
+			middleware: {
+				workspace: {
+					didChangeConfiguration: async (sections: any, next: (sections: any) => Promise<void>) => {
+						// Drop config changes if they were just triggered by our own AI Settings Manager
+						// This prevents the F# server from resetting the workspace because of pure UI changes.
+						if (Date.now() - lastAISettingsWriteTime < 1500) {
+							return;
+						}
+						await next(sections);
+					}
+				}
 			},
 			initializationOptions: {
 				language: language === 'eu5' ? 'paradox' : language,

@@ -161,6 +161,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this._isGenerating && this._liveSteps.length > 0) {
             this.postMessage({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
         }
+        // 4. Restore model lists and settings bindings
+        this.settingsManager.buildAndSendSettingsData();
     }
 
     // ─── Message Handling ────────────────────────────────────────────────────
@@ -293,6 +295,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'requestUsageStats':
                 this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
+                break;
+            case 'promptClearUsageStats':
+                vs.window.showWarningMessage('确定要清空所有 Token 消耗统计吗？此操作不可逆转。', '确定清空', '取消').then(sel => {
+                    if (sel === '确定清空') {
+                        this.usageTracker.clearStats();
+                        this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
+                        vs.window.showInformationMessage('Token 消耗统计已清空');
+                    }
+                });
                 break;
             case 'clearUsageStats':
                 this.usageTracker.clearStats();

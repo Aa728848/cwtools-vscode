@@ -708,6 +708,7 @@ export type WebViewMessage =
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[] }
+    | { type: 'startBackgroundGeneration' }
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string }

@@ -121,21 +121,22 @@ When you see LSP/CWTools errors, classify before acting:
 
 | Type | Description | Action |
 |------|-------------|--------|
-| **A — Code Logic Error** | Wrong operator (\`=\` vs \`==\`), wrong boolean (\`true\` instead of \`yes\`), invalid scope, syntax error | Fix immediately |
-| **B — Forward Reference** | ID you are about to create in this task hasn't been written yet | Add to todo, continue |
-| **C — Vanilla Warning** | CWTools warns about vanilla IDs it doesn't recognise (harmless) | Ignore |
+    | **A — Code Logic Error** | Wrong operator (\`=\` vs \`==\`), wrong boolean (\`true\` instead of \`yes\`), invalid scope, syntax error | Fix immediately |
+    | **B — Forward Reference** | ID you are about to create in this task hasn't been written yet | Add to todo, continue |
+    | **C — Vanilla Warning** | CWTools warns about vanilla IDs it doesn't recognise (harmless) | Ignore |
 
-**MANDATORY FINAL CHECK** — after ALL files in a task are written:
-1. Call \`get_diagnostics\` on your written files
-2. Fix all Type A errors — **by this point all forward references must resolve**
+    **MANDATORY FINAL CHECK** — after ALL files in a task are written:
+    1. Call \`get_diagnostics\` on your written files
+    2. Fix all Type A errors — **by this point all forward references must resolve**
 
-### Error Fix Protocol (MANDATORY)
-When fixing a **Type A** error, you MUST NOT guess or hallucinate replacement code.
-Instead, follow this workflow:
-1. If the error is about an unknown effect/trigger/modifier → call \`query_rules(category="effect", name="...")\` or \`query_scripted_effects("...")\` to find the correct name
-2. If the error is about an invalid enum value → call \`query_enums("enum_name")\` to list valid values
-3. If the error is about an unknown modifier tag → call \`query_static_modifiers("...")\` to verify existing tags
-4. **Only use values confirmed by the rule database.** Never invent effect/trigger/modifier names.
+    ### Error Fix Protocol (MANDATORY)
+    When fixing a **Type A** error, you MUST NOT guess or hallucinate replacement code.
+    Instead, follow this workflow:
+    1. If the error is about an unknown effect/trigger → call \`query_rules(category="effect", name="...")\` or \`query_rules(category="trigger", name="...")\`
+    2. If the error is about an unknown modifier property (e.g. \`planet_storm_devastation_mult = X\`) → call \`query_rules(category="modifier", name="...")\` to find it in .cwt rules
+    3. If the error is about an invalid enum value → call \`query_enums("enum_name")\` to list valid values
+    4. If the error is about an unknown modifier **tag** (e.g. in \`has_modifier = X\`) → call \`query_static_modifiers("...")\` to verify existing tags
+    5. **Only use values confirmed by the rule database.** Never invent effect/trigger/modifier names.
 
 ---
 
@@ -182,6 +183,7 @@ When encountering any of the following constructs **for the first time** in a ta
 | Any scripted_trigger usage | \`query_scripted_triggers("my_trigger")\` — verify exists + check scope |
 | Any enum field value | \`query_enums("enum_name")\` — get valid values list |
 | Any \`add_modifier = { modifier = X }\` | \`query_static_modifiers("X")\` — verify tag exists |
+| Any modifier property (e.g. \`planet_storm_devastation_mult\`) | \`query_rules(category="modifier", name="the_property")\` — verify existence in .cwt rules |
 | Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |
 | Finding where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` — instant AST lookup |
 | Any vanilla game ID (tech, building, trait…) | \`query_types(typeName, filter)\` — confirm it exists |

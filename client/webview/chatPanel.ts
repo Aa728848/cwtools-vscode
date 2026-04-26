@@ -859,8 +859,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         div.appendChild(hdr);
 
         if (steps && steps.length > 0) {
-            // 1. Thinking block (thinking_content AND narrative 'thinking' type)
-            const thinkSteps = steps.filter((s: any) => s.type === 'thinking_content' || s.type === 'thinking');
+            // 1. Thinking block (thinking_content, text_delta AND narrative 'thinking' type)
+            const thinkSteps = steps.filter((s: any) => s.type === 'thinking_content' || s.type === 'thinking' || s.type === 'text_delta');
             if (thinkSteps.length > 0) {
                 const thinkText = thinkSteps.map((s: any) => s.content || '').join('\n\n').trim();
                 const estTokens = Math.ceil(thinkText.length / 4);
@@ -902,26 +902,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 }
                 det.appendChild(body);
                 div.appendChild(det);
-            }
-
-            // 2.5 Text Delta block (raw streaming chunks)
-            const textDeltaSteps = steps.filter((s: any) => s.type === 'text_delta');
-            if (textDeltaSteps.length > 0) {
-                const textDeltaContent = textDeltaSteps.map((s: any) => s.content || '').join('').trim();
-                if (textDeltaContent) {
-                    const det = document.createElement('details');
-                    det.className = 'thinking-block';
-                    const sum = document.createElement('summary');
-                    sum.innerHTML = '<span class="think-pulse" style="background:#5da2ff"></span>Text_Delta · ' + textDeltaSteps.length + ' chunks';
-                    det.appendChild(sum);
-                    const body = document.createElement('div');
-                    body.className = 'thinking-body';
-                    body.style.whiteSpace = 'pre-wrap';
-                    body.style.fontFamily = 'var(--vscode-editor-font-family)';
-                    body.textContent = textDeltaContent;
-                    det.appendChild(body);
-                    div.appendChild(det);
-                }
             }
 
             // Also show non-tool, non-thinking special steps (errors, compaction, etc.)
@@ -1018,28 +998,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (!currentAssistantDiv) return;
 
         // ── text_delta: streaming token ────────────────────────────────────────
-        if (s.type === 'text_delta') {
-            const bubble = ensureLiveTextBubble();
-            if (bubble) {
-                liveTextContent += s.content || '';
-                // Show raw text with cursor while streaming (fast path, no markdown parse)
-                bubble.textContent = liveTextContent;
-            }
-            scrollBottom();
-            return;
-        }
-
-        // Non-text-delta: flush any pending streaming text first
-        if (liveTextContent) flushLiveText();
-
-        if (s.type === 'thinking_content' || s.type === 'thinking') {
+        if (s.type === 'text_delta' || s.type === 'thinking_content' || s.type === 'thinking') {
             const tb = document.getElementById('liveThink');
             const tbd = document.getElementById('liveThinkBody');
             const tsum = document.getElementById('liveThinkSum');
             if (tb) tb.style.display = '';
             if (tbd) {
                 // Append: use separator only for distinct reasoning blocks (type='thinking'),
-                // streaming delta tokens (type='thinking_content') are appended directly
+                // streaming delta tokens (type='thinking_content' or 'text_delta') are appended directly
                 if (s.type === 'thinking' && tbd.textContent) {
                     tbd.textContent += '\n\n---\n\n' + (s.content || '');
                 } else {
@@ -1050,7 +1016,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     tsum.innerHTML = '<span class="think-pulse spinning"></span>Thinking &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
                 }
             }
-        } else if (s.type === 'tool_call') {
+            scrollBottom();
+            return;
+        }
+
+        // Non-text-delta: flush any pending streaming text first
+        if (liveTextContent) flushLiveText();
+
+        if (s.type === 'tool_call') {
             const tg = document.getElementById('liveToolGroup');
             const tb = document.getElementById('liveToolBody');
             const tc = document.getElementById('liveToolCount');
@@ -1282,6 +1255,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 setGenerating(true);
                 liveTextBubble = null; liveTextContent = '';
                 addUserMessage(msg.text, msg.messageIndex, msg.images);
+                currentAssistantDiv = initLiveAssistantDiv();
+                chatArea.appendChild(currentAssistantDiv);
+                scrollBottom();
+                break;
+
+            case 'startBackgroundGeneration':
+                setGenerating(true);
+                liveTextBubble = null; liveTextContent = '';
+                // Do not add user message bubble, but still render the assistant div
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
                 scrollBottom();

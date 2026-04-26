@@ -354,6 +354,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Add user message to UI — pass images array directly (not just a bool flag)
         if (!isBackground) {
             this.postMessage({ type: 'addUserMessage', text, messageIndex, images: images?.length ? images : undefined });
+        } else {
+            this.postMessage({ type: 'startBackgroundGeneration' });
         }
 
         // Add to history — store images for topic persistence

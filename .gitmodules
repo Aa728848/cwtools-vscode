@@ -1,6 +1,6 @@
 [submodule "submodules/cwtools"]
 	path = submodules/cwtools
-	url = https://github.com/cwtools/cwtools
+	url = https://gitee.com/cChen2422/cwtools.git
 [submodule "submodules/cwtools-stellaris-config"]
 	path = submodules/cwtools-stellaris-config
 	url = https://gitee.com/cChen2422/cwtools-stellaris-config.git

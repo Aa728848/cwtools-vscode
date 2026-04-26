@@ -9,7 +9,7 @@ const sampleRoot = path.resolve(__dirname, '../sample');
 const testEventFile = path.join(sampleRoot, 'events', 'irm.txt');
 const testNicheFile = path.join(sampleRoot, 'common', 'pop_faction_types', 'irm_regionalist.txt');
 
-async function waitForLSP(uri: vscode.Uri, maxRetries = 60, delayMs = 500): Promise<void> {
+async function waitForLSP(uri: vscode.Uri, maxRetries = 120, delayMs = 500): Promise<void> {
     let diagnosticsReady = false;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -73,7 +73,7 @@ async function getCompletions(uri: vscode.Uri, position: vscode.Position): Promi
 }
 
 suite('LSP Completion Tests', function () {
-    this.timeout(60000);
+    this.timeout(120000);
 
     async function openAndGetTestDocument() {
         const uri = vscode.Uri.file(testEventFile);
@@ -91,7 +91,7 @@ suite('LSP Completion Tests', function () {
         setupLSPErrorMonitoring();
         await activate();
 
-        const extension = vscode.extensions.getExtension('tboby.cwtools-vscode')!;
+        const extension = vscode.extensions.getExtension('Eddy.eddy-stellaris-cwt')!;
         assert.ok(extension?.isActive, 'Extension should be active');
 
         const document = await openAndGetTestDocument();

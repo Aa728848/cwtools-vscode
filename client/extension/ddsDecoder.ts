@@ -642,12 +642,6 @@ export function decodeDds(filePath: string): DdsResult | null {
     }
 }
 
-/** @deprecated Use decodeDds instead */
-export function ddsToDataUri(filePath: string): string | null {
-    const result = decodeDds(filePath);
-    return result?.dataUri ?? null;
-}
-
 /**
  * Decode a TGA file to a data URI PNG.
  * Supports: uncompressed true-color (type 2) and RLE true-color (type 10),
@@ -671,7 +665,7 @@ export function decodeTga(filePath: string): DdsResult | null {
         const bytesPerPixel = bpp / 8;
         const pixelCount = width * height;
         const rgba = new Uint8Array(pixelCount * 4);
-        let dataOffset = 18 + idLen;
+        const dataOffset = 18 + idLen;
 
         if (imgType === 2) {
             // Uncompressed

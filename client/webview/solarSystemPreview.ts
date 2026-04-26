@@ -821,7 +821,7 @@ function setupControls() {
                 scale = 1.2; viewRotation = 0; tiltAngle = 55; panX = 0; panY = 0;
                 updateZoomDisplay(); updateTiltDisplay();
                 break;
-            case 'btn-edit':
+            case 'btn-edit': {
                 editMode = !editMode;
                 target.classList.toggle('active', editMode);
                 const sp = document.getElementById('side-panel');
@@ -829,6 +829,7 @@ function setupControls() {
                 canvas.style.cursor = editMode ? 'crosshair' : 'grab';
                 updatePropertiesPanel();
                 break;
+            }
             case 'btn-labels':
                 showLabels = !showLabels;
                 target.classList.toggle('active', showLabels);

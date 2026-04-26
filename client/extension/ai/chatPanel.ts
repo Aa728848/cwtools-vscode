@@ -123,7 +123,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Handle messages from WebView
         // Fix #2: capture disposables so they are released with the view
         webviewView.webview.onDidReceiveMessage(
-            (msg: WebViewMessage) => { this.handleWebViewMessage(msg); },
+            (msg: WebViewMessage) => { if (msg?.type) void this.handleWebViewMessage(msg); },
             this,
             this._viewDisposables
         );
@@ -162,7 +162,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
         }
         // 4. Restore model lists and settings bindings
-        this.settingsManager.buildAndSendSettingsData();
+        void this.settingsManager.buildAndSendSettingsData();
     }
 
     // ─── Message Handling ────────────────────────────────────────────────────
@@ -227,10 +227,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.retractMessage(msg.messageIndex);
                 break;
             case 'confirmWriteFile':
-                this.resolveWriteConfirmation(msg.messageId, true);
+                void this.resolveWriteConfirmation(msg.messageId, true);
                 break;
             case 'cancelWriteFile':
-                this.resolveWriteConfirmation(msg.messageId, false);
+                void this.resolveWriteConfirmation(msg.messageId, false);
                 break;
             case 'quickChangeModel':
                 await this.settingsManager.quickChangeModel(msg.model);
@@ -245,7 +245,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 // Simply open the plan markdown file in the native VSCode editor
                 vs.commands.executeCommand('vscode.open', vs.Uri.file(msg.filePath));
                 break;
-            case 'submitPlanAnnotations':
+            case 'submitPlanAnnotations': {
                 // Auto-switch to build mode on plan approval and send execution command
                 this.switchMode('build');
                 // The annotations array gives context on what the user wants changed
@@ -256,7 +256,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
                 await this.handleUserMessage(prompt, undefined, undefined, true, true);
                 break;
-            case 'revisePlanWithAnnotations':
+            }
+            case 'revisePlanWithAnnotations': {
                 let reviseContext = '';
                 if (msg.annotations && msg.annotations.length > 0) {
                     reviseContext = '\n\n需要修改的地方批注如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
@@ -265,7 +266,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 // keep current mode ('plan'), do not auto-switch since it's just revising
                 await this.handleUserMessage(revisePrompt, undefined, undefined, true, true);
                 break;
-            case 'reviseWalkthroughWithAnnotations':
+            }
+            case 'reviseWalkthroughWithAnnotations': {
                 let reviseWtContext = '';
                 if (msg.annotations && msg.annotations.length > 0) {
                     reviseWtContext = '\n\n针对报告中需要修改的地方，我的批注（要求）如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `### 针对片段：\n${a.section}\n**要求**：${a.note}`).join('\n\n');
@@ -273,6 +275,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const reviseWtPrompt = '请根据我的批注，重新修改并输出一份新的 walkthrough.md 报告。' + reviseWtContext;
                 await this.handleUserMessage(reviseWtPrompt, undefined, undefined, true, true);
                 break;
+            }
             case 'approveWalkthrough':
                 if (this.previousMode && this.previousMode !== this.currentMode) {
                     this.switchMode(this.previousMode);
@@ -455,7 +458,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     timestamp: Date.now(),
                     steps: result.steps,
                 });
-                this.savePlanFile(result.explanation, text, result.steps);
+                void this.savePlanFile(result.explanation, text, result.steps);
             } else {
                 this.postMessage({ type: 'generationComplete', result });
                 this.topicManager.addHistoryMessage({
@@ -481,7 +484,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 );
 
                 if (wroteWalkthrough) {
-                    this.renderWalkthroughUI(wtPath, topicId, result.steps);
+                    void this.renderWalkthroughUI(wtPath, topicId, result.steps);
                 }
             }
 
@@ -665,7 +668,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         for (const snap of snapshots) {
             const currentContentExists = fs.existsSync(snap.filePath);
-            const currentContent = currentContentExists ? await fs.promises.readFile(snap.filePath, 'utf-8').catch(() => null) : null;
+            const currentContent = currentContentExists ? await fs.promises.readFile(snap.filePath, 'utf-8').catch((e: any) => {
+                if (e.code !== 'ENOENT') console.debug('[cwtools] snapshot read failed:', snap.filePath, e?.message ?? e);
+                return null;
+            }) : null;
 
             if (snap.previousContent === null && currentContent !== null) {
                 files.push({
@@ -827,7 +833,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const timeout = setTimeout(() => {
                 if (this.pendingWriteResolvers.has(messageId)) {
                     console.warn(`[Eddy CWTool Code] Write confirm timeout for ${file} — auto-denying (safety default)`);
-                    this.resolveWriteConfirmation(messageId, false);
+                    void this.resolveWriteConfirmation(messageId, false);
                 }
             }, AIChatPanelProvider.WRITE_CONFIRM_TIMEOUT_MS);
 
@@ -922,8 +928,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // Register task.md in the current message snapshot so retract can delete/restore it
             this._recordFileSnapshot(taskPath);
 
-            fs.promises.mkdir(path.dirname(taskPath), { recursive: true }).then(() => {
-                fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch(() => { });
+            void fs.promises.mkdir(path.dirname(taskPath), { recursive: true }).then(() => {
+                fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch((e: any) => console.debug('[cwtools] task.md write failed:', e?.message ?? e));
             });
         }
     }
@@ -956,6 +962,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const scheme = 'cwtools-ai-preview';
         this._previewContent = newContent;
         if (!this._previewProviderRegistration) {
+            // eslint-disable-next-line @typescript-eslint/no-this-alias
             const self = this;
             this._previewProviderRegistration = vs.workspace.registerTextDocumentContentProvider(
                 scheme,
@@ -1057,7 +1064,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Remove last assistant message
         const lastMsg = this.topicManager.currentTopic.messages[this.topicManager.currentTopic.messages.length - 1];
-        if (lastMsg.role === 'assistant') {
+        if (lastMsg?.role === 'assistant') {
             this.topicManager.currentTopic.messages.pop();
             this.conversationMessages.pop();
         }

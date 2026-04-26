@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 /** Type-safe getElementById with generic cast */
 function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -259,7 +259,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         autoResizeInput();
         const v = input.value;
         if (v.startsWith('/') && v.length > 0) showSlashPopup(v);
-        else slashPopup && slashPopup.classList.remove('show');
+        else slashPopup?.classList.remove('show');
         // @ file mention: request file list on first @
         const atIdx = v.lastIndexOf('@');
         if (atIdx >= 0) {
@@ -288,7 +288,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         el.id = 'atPopup';
         el.className = 'slash-popup'; // reuse slash-popup styles
         el.style.cssText = 'display:none;position:absolute;bottom:100%;left:0;right:0;max-height:200px;overflow-y:auto;z-index:200;';
-        inputWrapper && inputWrapper.appendChild(el);
+        inputWrapper?.appendChild(el);
         return el;
     })();
     let _atPopupVisible = false;
@@ -334,7 +334,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             area = document.createElement('div');
             area.id = 'fileBadgeArea';
             area.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 0;';
-            inputWrapper && inputWrapper.insertBefore(area, inputWrapper.firstChild);
+            inputWrapper?.insertBefore(area, inputWrapper.firstChild);
         }
         const badge = document.createElement('span');
         badge.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:rgba(100,120,255,0.15);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:11px;';
@@ -400,14 +400,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     });
 
     // ── Drag-and-drop images onto input area ───────────────────────────────────
-    inputWrapper && inputWrapper.addEventListener('dragover', e => {
+    inputWrapper?.addEventListener('dragover', e => {
         e.preventDefault();
         inputWrapper.classList.add('drag-over');
     });
-    inputWrapper && inputWrapper.addEventListener('dragleave', () => {
+    inputWrapper?.addEventListener('dragleave', () => {
         inputWrapper.classList.remove('drag-over');
     });
-    inputWrapper && inputWrapper.addEventListener('drop', e => {
+    inputWrapper?.addEventListener('drop', e => {
         e.preventDefault();
         inputWrapper.classList.remove('drag-over');
         const files = e.dataTransfer && e.dataTransfer.files;
@@ -461,7 +461,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             area = document.createElement('div');
             area.id = 'imagePreviewArea';
             area.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px 0;';
-            inputWrapper && inputWrapper.insertBefore(area, inputWrapper.firstChild);
+            inputWrapper?.insertBefore(area, inputWrapper.firstChild);
         }
         const wrap = document.createElement('div');
         wrap.style.cssText = 'position:relative;';
@@ -600,6 +600,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         s = s.replace(/(^|\W)_([^_\n]+)_(\W|$)/g, '$1<em>$2</em>$3');
         s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
         s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        // eslint-disable-next-line no-control-regex
         s = s.replace(/\x01CODE(\d+)\x01/g, (_: string, i: string) => codeBlocks[parseInt(i)]);
         return s;
     }
@@ -609,7 +610,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         // Phase 1: extract fenced code blocks to avoid mis-parsing their content
         const blocks: {lang: string; code: string}[] = [];
-        let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+        const text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
             const i = blocks.length; blocks.push({ lang: lang.trim(), code }); return '\x00BLOCK' + i + '\x00';
         });
 
@@ -622,6 +623,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             if (!paraLines.length) return;
             const lineHtml = paraLines.map(line => {
                 const t = line.trim();
+                // eslint-disable-next-line no-control-regex
                 if (/^\x00BLOCK\d+\x00$/.test(t)) {
                     const { lang, code } = blocks[+t.match(/\d+/)![0]];
                     return '<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>';
@@ -641,6 +643,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             if (!trimmed) { flushPara(paraLines); paraLines = []; i++; continue; }
 
             // Fenced code block placeholder (standalone line)
+            // eslint-disable-next-line no-control-regex
             if (/^\x00BLOCK\d+\x00$/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
                 const { lang, code } = blocks[+trimmed.match(/\d+/)![0]];
@@ -675,7 +678,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
 
             // GFM Table — header row | separator row | data rows (all consecutive)
-            if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[\|\s:-]+$/.test(lines[i + 1].trim())) {
+            if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[/|\s:-]+$/.test(lines[i + 1].trim())) {
                 flushPara(paraLines); paraLines = [];
                 const tblLines: string[] = [];
                 while (i < lines.length && /^\|/.test(lines[i].trim())) { tblLines.push(lines[i]); i++; }
@@ -934,7 +937,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     // ── Live thinking/tool state builders ─────────────────────────────────────
     // We maintain a structured state for the live (streaming) assistant message.
     // liveState = { thinkSteps: AgentStep[], toolCalls: Map<toolName, {call,result}[]>, specialSteps }
-    let liveState = null;
+    const liveState = null;
 
     function initLiveAssistantDiv() {
         const div = document.createElement('div');
@@ -1159,7 +1162,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         wrap.style.border = '1px solid var(--accent)';
         wrap.style.background = 'rgba(100, 200, 100, 0.05)';
 
-        const fileName = (file || '').split(/[\\\/]/).pop() || file;
+        const fileName = (file || '').split(/[\\/]/).pop() || file;
 
         wrap.innerHTML = `
             <div class="code-wrapper" style="margin: 0; border: none; background: transparent;">
@@ -1183,7 +1186,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         scrollBottom();
     }
     function showPendingWriteCard(file: string, messageId: string, isNewFile: boolean) {
-        const fileName = (file || '').split(/[\\\/]/).pop() || file;
+        const fileName = (file || '').split(/[\\/]/).pop() || file;
         const div = document.createElement('div');
         const card = document.createElement('div');
         card.className = 'diff-card';

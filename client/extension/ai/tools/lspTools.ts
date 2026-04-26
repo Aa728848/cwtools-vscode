@@ -730,14 +730,14 @@ export class LspToolHandler {
                             }
                         }
                     }
-                } catch { /* ignore */ }
+                } catch { /* ignore tab close failure */ }
                 try {
                     if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
                     try {
                         const remaining = fs.readdirSync(tempDir);
                         if (remaining.length === 0) fs.rmdirSync(tempDir);
-                    } catch { /* ignore */ }
-                } catch { /* ignore */ }
+                    } catch { /* ignore dir cleanup failure */ }
+                } catch { /* ignore temp file cleanup failure */ }
             }
         } catch (outerErr) {
             errors.push({

@@ -322,7 +322,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 const kvMatch = linePrefix.match(/^\s*[\w.]+\s*=\s*$/);
                 if (kvMatch) {
                     const item = new vs.InlineCompletionItem(
-                        lspSuggestions[0],
+                        lspSuggestions[0] ?? '',
                         new vs.Range(position, position)
                     );
                     const result = [item];
@@ -516,7 +516,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             if (config.inlineCompletion.overlapStripping) {
                 const lineSuffix = document.lineAt(position.line).text.substring(position.character);
                 if (lineSuffix) {
-                    const firstLine = completionText.split('\n')[0];
+                    const firstLine = completionText.split('\n')[0]!;  
                     for (let i = 0; i < firstLine.length; i++) {
                         const overlapCandidate = firstLine.slice(i);
                         if (overlapCandidate.trim().length === 0) continue;

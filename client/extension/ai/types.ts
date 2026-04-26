@@ -169,7 +169,7 @@ export interface ChatCompletionRequest {
     /** Supported by DeepSeek and OpenAI for thinking depth */
     reasoning_effort?: 'low' | 'medium' | 'high' | 'max';
     /** Extra provider-specific params to merge into the request body (e.g. thinking config) */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     [key: string]: any;
 }
 

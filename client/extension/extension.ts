@@ -99,9 +99,9 @@ export async function activate(context: ExtensionContext) {
 					// Fallback: search all .txt files in workspace for exact word match
 					const files = await vs.workspace.findFiles('**/*.txt', '**/.*/**');
 					const wordBoundary = new RegExp(`(?<![A-Za-z0-9_])${oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_])`, 'g');
-					for (const fileUri of files) {
+					for (const fileUri of files.slice(0, 2000)) {
 						let text: string;
-						try { text = fs.readFileSync(fileUri.fsPath, 'utf8'); } catch { continue; }
+						try { const buf = await vs.workspace.fs.readFile(fileUri); text = new TextDecoder('utf-8').decode(buf); } catch { continue; }
 						// L4 Fix: avoid openTextDocument (never freed — memory leak)
 						const offs: number[] = [0];
 						for (let j = 0; j < text.length; j++) { if (text[j] === '\n') { offs.push(j + 1); } }
@@ -297,7 +297,7 @@ export async function activate(context: ExtensionContext) {
 		}
 		
 		async function getBestRepoPath(originalUrl: string): Promise<string> {
-			let customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '');
+			const customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '');
 			if (customProxy) {
 				return customProxy.endsWith('/') ? customProxy + originalUrl : customProxy + '/' + originalUrl;
 			}
@@ -329,7 +329,7 @@ export async function activate(context: ExtensionContext) {
 			case "eu5": repoPathStr = eu5Remote; break;
 			default: repoPathStr = stellarisRemote; break;
 		}
-		let repoPath = await getBestRepoPath(repoPathStr);
+		const repoPath = await getBestRepoPath(repoPathStr);
 		console.log(language + " " + repoPath);
 
 		// If the extension is launched in debug mode then the debug server options are used

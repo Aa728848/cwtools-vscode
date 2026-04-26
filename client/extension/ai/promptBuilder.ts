@@ -508,20 +508,20 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
 
             // Extract sections by ## headers
             const modInfoMatch = content.match(/## Mod Info\n([\s\S]*?)(?=\n## |$)/);
-            if (modInfoMatch) parsed.modInfo = modInfoMatch[1].trim();
+            if (modInfoMatch) parsed.modInfo = modInfoMatch[1]!.trim();  
 
             const structureMatch = content.match(/## Project Structure\n([\s\S]*?)(?=\n## |$)/);
-            if (structureMatch) parsed.projectStructure = structureMatch[1].trim();
+            if (structureMatch) parsed.projectStructure = structureMatch[1]!.trim();  
 
             const idsMatch = content.match(/## Known Identifiers\n([\s\S]*?)(?=\n## |$)/);
-            if (idsMatch) parsed.knownIdentifiers = idsMatch[1].trim();
+            if (idsMatch) parsed.knownIdentifiers = idsMatch[1]!.trim();  
 
             const guidelinesMatch = content.match(/## Agent Guidelines\n([\s\S]*?)(?=\n## |$)/);
-            if (guidelinesMatch) parsed.agentGuidelines = guidelinesMatch[1].trim();
+            if (guidelinesMatch) parsed.agentGuidelines = guidelinesMatch[1]!.trim();  
 
             const customMatch = content.match(/## Custom Rules\n([\s\S]*)/);
-            if (customMatch && customMatch[1].trim() && !customMatch[1].includes('<!-- Add')) {
-                parsed.customRules = customMatch[1].trim();
+            if (customMatch && customMatch[1]!.trim() && !customMatch[1]!.includes('<!-- Add')) {  
+                parsed.customRules = customMatch[1]!.trim();  
             }
 
             // Extract namespaces list
@@ -605,14 +605,6 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         if (id === 'claude' || id.includes('anthropic')) return ANTHROPIC_SUPPLEMENT;
         if (id === 'gemini' || id.includes('google')) return GEMINI_SUPPLEMENT;
         return OPENAI_SUPPLEMENT;
-    }
-
-    /**
-     * @deprecated Use buildSystemPromptForMode instead.
-     * Kept for backward compatibility.
-     */
-    buildSystemPrompt(mode: AgentMode = 'build'): string {
-        return this.buildSystemPromptForMode(mode);
     }
 
     /**

@@ -394,7 +394,7 @@ export class ChatTopicManager {
             // Validate messages
             for (let i = 0; i < importedTopic.messages.length; i++) {
                 const msg = importedTopic.messages[i];
-                if (!msg.role || (msg.role !== 'user' && msg.role !== 'assistant')) {
+                if (!msg?.role || (msg.role !== 'user' && msg.role !== 'assistant')) {
                     throw new Error(`消息 ${i} 格式无效: role 必须为 'user' 或 'assistant'`);
                 }
                 if (msg.content === undefined || msg.content === null) {

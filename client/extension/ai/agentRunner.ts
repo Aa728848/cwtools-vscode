@@ -44,7 +44,7 @@ const MAX_VALIDATION_RETRIES = 2;
 // Uses a fast CJK regex sample to interpolate between the two extremes.
 const CHARS_PER_TOKEN_ASCII = 4;
 const CHARS_PER_TOKEN_CJK = 1.5;
-// eslint-disable-next-line no-control-regex
+ 
 const CJK_RANGE = /[\u3000-\u9fff\uf900-\ufaff\ufe30-\ufe4f]/g;
 function estimateTokenCount(text: string): number {
     // Sample the first 4000 chars — sufficient for ratio estimation, avoids scanning huge strings
@@ -326,7 +326,7 @@ export class AgentRunner {
             }
         }
         if (updated) {
-            handler.todoWrite({ todos });
+            void handler.todoWrite({ todos });
         }
     }
 
@@ -399,7 +399,7 @@ export class AgentRunner {
             let olderMessages: ChatMessage[];
             if (existingSummaryIdx >= 0 && existingSummaryIdx < history.length - recentCount) {
                 // Extract existing summary content (strip the header)
-                existingSummaryText = contentToString(history[existingSummaryIdx].content)
+                existingSummaryText = contentToString(history[existingSummaryIdx]!.content)  
                     .replace(/^## Conversation Summary \(compacted\)\n?/, '').trim();
                 // New L1 messages = everything between the old summary and the recent window
                 olderMessages = history.slice(existingSummaryIdx + 1, history.length - recentCount);
@@ -671,7 +671,7 @@ export class AgentRunner {
                 let tm: RegExpExecArray | null;
                 thinkBlockRe.lastIndex = 0;
                 while ((tm = thinkBlockRe.exec(rawContent)) !== null) {
-                    thinkMatches.push(tm[1].trim());
+                    thinkMatches.push(tm[1]!.trim());  
                 }
                 thinkContent = thinkMatches.join('\n\n');
             }
@@ -738,9 +738,9 @@ export class AgentRunner {
             // in one response, only keep the LAST one for each file.
             const lastWriteIndexByFile = new Map<string, number>();
             for (let i = 0; i < toolCalls.length; i++) {
-                if (!WRITE_TOOLS.has(toolCalls[i].function.name)) continue;
+                if (!WRITE_TOOLS.has(toolCalls[i]!.function.name)) continue;  
                 try {
-                    const a = JSON.parse(toolCalls[i].function.arguments);
+                    const a = JSON.parse(toolCalls[i]!.function.arguments);  
                     // edit_file uses filePath, write_file uses file
                     const filePath: string = a.filePath ?? a.file ?? '';
                     if (filePath) lastWriteIndexByFile.set(filePath, i);
@@ -780,7 +780,8 @@ export class AgentRunner {
             let i = 0;
             while (i < parsedCalls.length) {
                 options?.abortSignal?.throwIfAborted();
-                const { toolName, toolArgs, toolArgsParseError, toolCall } = parsedCalls[i];
+                const ci = parsedCalls[i]!;  
+                const { toolName, toolArgs, toolArgsParseError, toolCall } = ci;
 
                 // If arguments failed to parse as JSON, short-circuit and return an error
                 // so the AI knows to retry with properly formatted arguments.
@@ -794,8 +795,9 @@ export class AgentRunner {
                 if (READ_ONLY_TOOLS.has(toolName)) {
                     // Collect a batch of consecutive read-only tools (skip any with parse errors)
                     const batch: Array<{ idx: number; toolName: AgentToolName; toolArgs: Record<string, unknown>; toolCall: typeof toolCalls[0] }> = [];
-                    while (i < parsedCalls.length && READ_ONLY_TOOLS.has(parsedCalls[i].toolName) && !parsedCalls[i].toolArgsParseError) {
-                        batch.push({ idx: i, ...parsedCalls[i] });
+                    while (i < parsedCalls.length && READ_ONLY_TOOLS.has(parsedCalls[i]!.toolName) && !parsedCalls[i]!.toolArgsParseError) {  
+                        const pc = parsedCalls[i]!;  
+                        batch.push({ idx: i, toolName: pc.toolName, toolArgs: pc.toolArgs, toolCall: pc.toolCall });
                         i++;
                     }
                     // Execute batch in parallel
@@ -855,7 +857,7 @@ export class AgentRunner {
             // Emit results in original order and feed back to AI
             for (let j = 0; j < parsedCalls.length; j++) {
                 // Fix #10: use _prefix for intentionally unused destructured vars
-                const { toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j];
+                const { toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j]!;  
                 const toolResult = toolResults[j];
 
                 emitStep({ type: 'tool_result', content: `工具结果: ${toolName}`, toolName, toolResult, timestamp: Date.now() });
@@ -1088,7 +1090,7 @@ export class AgentRunner {
         if (matches.length > 0) {
             // Return the largest code block
             return matches
-                .map(match => match[1].trim())
+                .map(match => match[1]!.trim())  
                 .sort((a, b) => b.length - a.length)[0] || null;
         }
 

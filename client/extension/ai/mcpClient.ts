@@ -38,8 +38,13 @@ export class MCPClient {
 
         const workspaceFolder = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         
+        const safeEnv = Object.fromEntries(
+            Object.entries(process.env).filter(([k]) =>
+                !/API[_-]?KEY|TOKEN|SECRET|PASSWORD|PRIVATE[_-]?KEY|CREDENTIAL|AUTH/i.test(k)
+            )
+        );
         this.process = cp.spawn(this.config.command, this.config.args || [], {
-            env: { ...process.env, ...this.config.env },
+            env: { ...safeEnv, PATH: process.env.PATH, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, ...this.config.env },
             cwd: workspaceFolder,
         });
 

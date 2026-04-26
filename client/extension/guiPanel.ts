@@ -63,6 +63,7 @@ export class GuiPanel {
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._disposables.push(
             this._panel.webview.onDidReceiveMessage(async msg => {
+                if (!msg?.command) return;
                 switch (msg.command) {
                     case 'goToLine': {
                         const ed = await vscode.window.showTextDocument(document.uri, { viewColumn: vscode.ViewColumn.One });
@@ -117,9 +118,15 @@ export class GuiPanel {
             }),
         );
 
-        // Watch .gfx files for sprite index invalidation
+        // Watch .gfx files for sprite index invalidation — incremental by directory
         const gfxWatcher = vscode.workspace.createFileSystemWatcher('**/*.gfx');
-        const invalidateSpriteCache = () => { this._spriteIndexCache = null; };
+        const invalidateSpriteCache = (uri: vscode.Uri) => {
+            if (!this._spriteIndexCache) return;
+            const dir = path.dirname(uri.fsPath);
+            for (const key of this._spriteIndexCache.keys()) {
+                if (key.startsWith(dir)) this._spriteIndexCache.delete(key);
+            }
+        };
         gfxWatcher.onDidChange(invalidateSpriteCache);
         gfxWatcher.onDidCreate(invalidateSpriteCache);
         gfxWatcher.onDidDelete(invalidateSpriteCache);
@@ -189,7 +196,7 @@ export class GuiPanel {
 
         // Collect button effect names (cached)
         if (!this._effectNamesCache) {
-            this._effectNamesCache = this._collectButtonEffects(searchRoots);
+            this._effectNamesCache = await this._collectButtonEffects(searchRoots);
         }
         const effectNames = this._effectNamesCache;
 
@@ -204,35 +211,40 @@ export class GuiPanel {
 
     private async _buildSpriteIndex(searchRoots: string[]): Promise<Map<string, import('./guiParser').SpriteInfo>> {
         const gfxContents: Array<{ path: string; content: string }> = [];
+        const maxGfxFiles = 500;
 
         for (const root of searchRoots) {
-            // Search both interface/ and gfx/ directories for .gfx files
+            if (gfxContents.length >= maxGfxFiles) break;
             const searchDirs = [
                 path.join(root, 'interface'),
                 path.join(root, 'gfx'),
             ];
 
             for (const dir of searchDirs) {
-                if (!fs.existsSync(dir)) continue;
-                this._findGfxFiles(dir, gfxContents);
+                if (gfxContents.length >= maxGfxFiles) break;
+                try { await fs.promises.access(dir); } catch { continue; }
+                await this._findGfxFiles(dir, gfxContents, maxGfxFiles);
             }
         }
 
         return buildSpriteIndex(gfxContents);
     }
 
-    private _findGfxFiles(dir: string, result: Array<{ path: string; content: string }>) {
+    private async _findGfxFiles(dir: string, result: Array<{ path: string; content: string }>, maxFiles: number) {
         try {
-            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (result.length >= maxFiles) return;
+            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+            await Promise.all(entries.map(async (entry) => {
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
-                    this._findGfxFiles(full, result);
+                    await this._findGfxFiles(full, result, maxFiles);
                 } else if (entry.name.endsWith('.gfx')) {
                     try {
-                        result.push({ path: full, content: fs.readFileSync(full, 'utf-8') });
+                        const content = await fs.promises.readFile(full, 'utf-8');
+                        result.push({ path: full, content });
                     } catch { /* skip unreadable */ }
                 }
-            }
+            }));
         } catch { /* skip inaccessible dirs */ }
     }
 
@@ -240,16 +252,16 @@ export class GuiPanel {
      * Collect button effect names from common/button_effects/*.txt in all search roots.
      * Extracts top-level keys (e.g. `my_effect = { ... }`) from these files.
      */
-    private _collectButtonEffects(searchRoots: string[]): string[] {
+    private async _collectButtonEffects(searchRoots: string[]): Promise<string[]> {
         const names = new Set<string>();
         for (const root of searchRoots) {
             const dir = path.join(root, 'common', 'button_effects');
-            if (!fs.existsSync(dir)) continue;
             try {
-                for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-                    if (!entry.isFile() || !entry.name.endsWith('.txt')) continue;
+                const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+                await Promise.all(entries.map(async (entry) => {
+                    if (!entry.isFile() || !entry.name.endsWith('.txt')) return;
                     try {
-                        const content = fs.readFileSync(path.join(dir, entry.name), 'utf-8');
+                        const content = await fs.promises.readFile(path.join(dir, entry.name), 'utf-8');
                         // Match only top-level keys: no leading whitespace
                         const regex = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{/gm;
                         let m;
@@ -257,8 +269,8 @@ export class GuiPanel {
                             names.add(m[1]);
                         }
                     } catch { /* skip unreadable */ }
-                }
-            } catch { /* skip inaccessible */ }
+                }));
+            } catch { /* skip inaccessible dir */ }
         }
         return Array.from(names).sort();
     }
@@ -857,7 +869,7 @@ export class GuiPanel {
         // Adjust indentation: remove one level of indentation
         const currentIndent = sourceLines[0].match(/^(\s*)/)?.[1] ?? '';
         const newIndent = currentIndent.length > 0
-            ? currentIndent.replace(/\t$/, '').replace(/    $/, '')  // remove one tab or 4 spaces
+            ? currentIndent.replace(/\t$/, '').replace(/ {4}$/, '')  // remove one tab or 4 spaces
             : '';
 
         let block = sourceLines.map(line => {

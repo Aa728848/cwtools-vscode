@@ -24,7 +24,14 @@ const TOOL_RESULT_BUDGET_BASE = 15000;
  * 4. **Structured truncation**: Truncate strings while preserving structure
  */
 export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT_BUDGET_BASE): string {
-    const raw = JSON.stringify(result, null, 2);
+    if (result === undefined) return 'undefined';
+    if (result === null) return 'null';
+    if (typeof result === 'string') {
+        if (result.length <= maxChars) return result;
+        return result.substring(0, maxChars) + `\n\n[... 已截断 — 原始长度：${result.length} 字符。]`;
+    }
+
+    const raw = JSON.stringify(result, null, 2) || '';
     if (raw.length <= maxChars) return raw;
 
     // Optimization: Smart line-boundary truncation for read_file text content.
@@ -234,7 +241,7 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
     const aggressiveThreshold = messages.length - 12;
 
     for (let i = keepHead; i < messages.length - keepTail; i++) {
-        const m = messages[i];
+        const m = messages[i]!;
         const content = contentToString(m.content);
         if (content.length <= 500) continue;
 
@@ -244,7 +251,7 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
                 const contentMatch = content.match(/"content"\s*:/);
                 const totalLinesMatch = content.match(/"totalLines"\s*:\s*(\d+)/);
                 if (contentMatch && totalLinesMatch) {
-                    messages[i] = { ...m, content: `[已压缩的 read_file 工具结果] 成功读取文件，共 ${totalLinesMatch[1]} 行。` };
+                    messages[i] = { ...m, content: `[已压缩的 read_file 工具结果] 成功读取文件，共 ${totalLinesMatch[1]!} 行。` };  
                     continue;
                 }
 
@@ -256,7 +263,7 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
                 const meta = [
                     fileMatch ? `file=${fileMatch[1]}` : null,
                     successMatch ? `ok=${successMatch[1]}` : null,
-                    errorMatch && successMatch?.[1] === 'false' ? `err=${errorMatch[1].substring(0, 80)}` : null,
+                    errorMatch && successMatch?.[1] === 'false' ? `err=${errorMatch[1]!.substring(0, 80)}` : null,  
                     countMatch ? `count=${countMatch[1]}` : null,
                 ].filter(Boolean).join(', ');
                 messages[i] = { ...m, content: `[已压缩] ${meta || content.substring(0, 200)}` };

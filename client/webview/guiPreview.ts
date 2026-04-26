@@ -1510,8 +1510,8 @@ function handleResizeMove(e: MouseEvent) {
 
         const deltaPosX = deltaLeft + (newW - s.origW) * origoFracX;
         const deltaPosY = deltaTop + (newH - s.origH) * origoFracY;
-        let newX = s.origPosX + deltaPosX;
-        let newY = s.origPosY + deltaPosY;
+        const newX = s.origPosX + deltaPosX;
+        const newY = s.origPosY + deltaPosY;
 
         if (s.useScale) {
             // Scale-based resize: compute new scale from size ratio

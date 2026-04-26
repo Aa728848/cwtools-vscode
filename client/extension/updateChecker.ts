@@ -86,9 +86,9 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
                         await context.globalState.update(stateKeyKnownAssetUpdate, latestAssetUpdate);
                     }
                     if (vsixDownloadUrl) {
-                        downloadAndInstallUpdate(vsixDownloadUrl, releaseUrl);
+                        void downloadAndInstallUpdate(vsixDownloadUrl, releaseUrl);
                     } else {
-                        vscode.env.openExternal(vscode.Uri.parse(releaseUrl));
+                        void vscode.env.openExternal(vscode.Uri.parse(releaseUrl));
                     }
                 } else if (selection === '忽略此更新') {
                     if (currentVersion === latestVersion) {

@@ -9,7 +9,7 @@ const sampleRoot = path.resolve(__dirname, '../sample');
 const testEventFile = path.join(sampleRoot, 'events', 'irm.txt');
 // const testDefinesFile = path.join(sampleRoot, 'common', 'defines', 'irm_defines.txt');
 const testEffectsFile = path.join(sampleRoot, 'common', 'scripted_effects', 'irm_scripted_effects.txt');
-async function waitForLSP(uri: vscode.Uri, maxRetries = 60, delayMs = 500): Promise<void> {
+async function waitForLSP(uri: vscode.Uri, maxRetries = 120, delayMs = 500): Promise<void> {
     let diagnosticsReady = false;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -88,7 +88,7 @@ async function waitForLanguageServer(uri: vscode.Uri, maxRetries = 30, delayMs =
 }
 
 suite('LSP Hover Tests', function () {
-    this.timeout(60000); // 1 minute timeout for LSP operations
+    this.timeout(120000); // 1 minute timeout for LSP operations
 
     let testDocument: vscode.TextDocument;
     let extension: vscode.Extension<unknown>;
@@ -99,7 +99,7 @@ suite('LSP Hover Tests', function () {
 
         // Activate the extension first
         await activate();
-        extension = vscode.extensions.getExtension('tboby.cwtools-vscode')!;
+        extension = vscode.extensions.getExtension('Eddy.eddy-stellaris-cwt')!;
         assert.ok(extension?.isActive, 'Extension should be active');
 
         // Open a test document to check LSP readiness

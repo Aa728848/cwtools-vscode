@@ -50,6 +50,7 @@ export class SolarSystemPanel {
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._disposables.push(
             this._panel.webview.onDidReceiveMessage(async msg => {
+                if (!msg?.command) return;
                 switch (msg.command) {
                     case 'goToLine': {
                         const ed = await vscode.window.showTextDocument(document.uri, { viewColumn: vscode.ViewColumn.One });

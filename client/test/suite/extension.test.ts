@@ -20,18 +20,12 @@ const root = path.resolve(__dirname, '../../../../client/test/sample');  // Assu
 
 // Defines a Mocha test suite to group tests of similar kind together
 suite("Extension Tests", () => {
-
-    // Defines a Mocha unit test
-    test("Something 1", () => {
-        assert.equal(-1, [1, 2, 3].indexOf(5));
-        assert.equal(-1, [1, 2, 3].indexOf(0));
-    });
 });
 // retryAsync moved to shared test utils
 
 suite(`Debug Integration Test: `, function() {
 	test('Extension should be present', () => {
-		assert.ok(vscode.extensions.getExtension('tboby.cwtools-vscode'));
+		assert.ok(vscode.extensions.getExtension('Eddy.eddy-stellaris-cwt'));
 	});
 
 	test('should activate', async function () {
@@ -46,7 +40,7 @@ suite(`Debug Integration Test: `, function() {
 
 	test('Extension activation status', async function () {
 		this.timeout(1 * 60 * 1000);
-		const extension = vscode.extensions.getExtension('tboby.cwtools-vscode');
+		const extension = vscode.extensions.getExtension('Eddy.eddy-stellaris-cwt');
 		assert.ok(extension, 'Extension should be found');
 
 		// Test activation status
@@ -106,7 +100,7 @@ suite(`Debug Integration Test: `, function() {
 			// Test that language configurations are set
 			// This is harder to test directly, but we can verify the extension activated
 			// and the language server client should be initialized
-			const extension = vscode.extensions.getExtension('tboby.cwtools-vscode');
+			const extension = vscode.extensions.getExtension('Eddy.eddy-stellaris-cwt');
 			assert.ok(extension?.isActive, 'Extension should be active');
 
 			// The extension exports might be undefined due to server startup issues in test env

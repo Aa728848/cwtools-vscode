@@ -54,7 +54,7 @@ let initialScanPromise: Promise<void> | null = null;
 
 function parseYmlContent(uri: vs.Uri, text: string) {
     const fileLocs = new Map<string, { value: string; uri: vs.Uri; line: number }>();
-    const locPattern = /^\s*([a-zA-Z0-9_.:\-]+)\s*:\d*\s*"(.*)"\s*$/;
+    const locPattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i++) {
         const match = locPattern.exec(lines[i]);
@@ -65,18 +65,23 @@ function parseYmlContent(uri: vs.Uri, text: string) {
     documentLocCache.set(uri.toString(), fileLocs);
 }
 
-async function performInitialScan() {
+async function performInitialScan(batchSize = 50) {
     try {
         const uris = await vs.workspace.findFiles('**/*.yml');
-        await Promise.all(uris.map(async (uri) => {
-            try {
-                const data = await vs.workspace.fs.readFile(uri);
-                const text = new TextDecoder('utf-8').decode(data);
-                parseYmlContent(uri, text);
-            } catch (e) {
-                // Ignore read errors
-            }
-        }));
+        for (let i = 0; i < uris.length; i += batchSize) {
+            const batch = uris.slice(i, i + batchSize);
+            await Promise.all(batch.map(async (uri) => {
+                try {
+                    const stat = await vs.workspace.fs.stat(uri);
+                    if (stat.size > 512 * 1024) return;
+                    const data = await vs.workspace.fs.readFile(uri);
+                    const text = new TextDecoder('utf-8').decode(data);
+                    parseYmlContent(uri, text);
+                } catch {
+                    // Ignore read errors on individual files
+                }
+            }));
+        }
     } catch {
         // Ignore search errors
     }
@@ -166,7 +171,7 @@ function updateColorDecorations(editor: vs.TextEditor) {
  */
 class LocRefHoverProvider implements vs.HoverProvider {
     async provideHover(document: vs.TextDocument, position: vs.Position): Promise<vs.Hover | null> {
-        const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:\-]*\$/);
+        const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:-]*\$/);
         if (!range) return null;
 
         const word = document.getText(range);
@@ -193,7 +198,7 @@ class LocRefHoverProvider implements vs.HoverProvider {
  */
 class LocRefDefinitionProvider implements vs.DefinitionProvider {
     async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
-        const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:\-]*\$/);
+        const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:-]*\$/);
         if (!range) return null;
 
         const word = document.getText(range);

@@ -11,7 +11,7 @@
  */
 export function tryRepairJson(badJson: string | undefined): Record<string, unknown> | null {
     if (!badJson) return null;
-    let s = badJson.trim();
+    const s = badJson.trim();
 
     // Strategy 1: Missing closing brackets (common in truncation)
     try {
@@ -36,8 +36,8 @@ export function tryRepairJson(badJson: string | undefined): Record<string, unkno
     } catch { /* skip */ }
 
     // Strategy 3: Try to find a valid JSON object within the string
-    let startIdx = s.indexOf('{');
-    let endIdx = s.lastIndexOf('}');
+    const startIdx = s.indexOf('{');
+    const endIdx = s.lastIndexOf('}');
     if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
         try {
             return JSON.parse(s.substring(startIdx, endIdx + 1));
@@ -46,13 +46,13 @@ export function tryRepairJson(badJson: string | undefined): Record<string, unkno
 
     // Strategy 4: Handle aggressive string truncation where a property value is cut off
     if (startIdx !== -1) {
-        let lastQuote = s.lastIndexOf('"');
+        const lastQuote = s.lastIndexOf('"');
         if (lastQuote > startIdx) {
             try {
                 return JSON.parse(s.substring(startIdx, lastQuote) + '"}');
             } catch { /* skip */ }
         }
-        let lastComma = s.lastIndexOf(',');
+        const lastComma = s.lastIndexOf(',');
         if (lastComma > startIdx) {
             try {
                 return JSON.parse(s.substring(startIdx, lastComma) + '}');

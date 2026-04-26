@@ -26,7 +26,8 @@ export async function generateInitFile(
         vs.window.showWarningMessage('Eddy CWTool Code /init: 当前没有打开的工作区');
         return;
     }
-    const root = folders[0].uri.fsPath;
+     
+    const root = folders[0]!.uri.fsPath;
 
     // Notify WebView that init is running
     postMessage({ type: 'agentStep', step: { type: 'thinking', content: '正在扫描工作区，生成项目规则文件...', timestamp: Date.now() } });
@@ -45,9 +46,12 @@ export async function generateInitFile(
             const nameMatch = desc.match(/^name\s*=\s*"?([^"\r\n]+)"?/m);
             const versionMatch = desc.match(/^version\s*=\s*"?([^"\r\n]+)"?/m);
             const tagsMatch = desc.match(/^tags\s*=\s*\{([^}]+)\}/ms);
-            if (nameMatch) modName = nameMatch[1].trim();
-            if (versionMatch) modVersion = versionMatch[1].trim();
-            if (tagsMatch) modTags = tagsMatch[1].replace(/\s+/g, ' ').trim();
+             
+            if (nameMatch) modName = nameMatch[1]!.trim();
+             
+            if (versionMatch) modVersion = versionMatch[1]!.trim();
+             
+            if (tagsMatch) modTags = tagsMatch[1]!.replace(/\s+/g, ' ').trim();
         }
 
         // ── 3. Sample key identifiers (scripted triggers & effects) ────────
@@ -64,7 +68,8 @@ export async function generateInitFile(
                 try {
                     const content = fs.readFileSync(path.join(eventsDir, file), 'utf-8');
                     const nsMatch = content.match(/^namespace\s*=\s*"?([\w.:-]+)"?/m);
-                    if (nsMatch) namespaces.add(nsMatch[1]);
+                     
+                    if (nsMatch) namespaces.add(nsMatch[1]!);
                 } catch { /* skip */ }
             }
         }
@@ -76,10 +81,14 @@ export async function generateInitFile(
             for (const file of fs.readdirSync(locDir)) {
                 if (file.endsWith('.yml')) {
                     const m = file.match(/([a-z_]+)\.yml$/i);
-                    if (m && m[1].includes('chinese')) locLangs.add('simp_chinese');
-                    else if (m && m[1].includes('english')) locLangs.add('english');
-                    else if (['russian', 'french', 'german', 'spanish', 'polish'].some(l => m && m[1].includes(l))) {
-                        const matched = ['russian', 'french', 'german', 'spanish', 'polish'].find(l => m && m[1].includes(l));
+                     
+                    if (m && m[1]!.includes('chinese')) locLangs.add('simp_chinese');
+                     
+                    else if (m && m[1]!.includes('english')) locLangs.add('english');
+                     
+                    else if (['russian', 'french', 'german', 'spanish', 'polish'].some(l => m && m[1]!.includes(l))) {
+                         
+                        const matched = ['russian', 'french', 'german', 'spanish', 'polish'].find(l => m && m[1]!.includes(l));
                         if (matched) locLangs.add(matched);
                     }
                 } else if (fs.statSync(path.join(locDir, file)).isDirectory()) {
@@ -132,7 +141,8 @@ export async function generateInitFile(
             if (files.length >= 2) {
                 const prefixes = files.map(f => f.replace('.txt', '').split('_')[0]).filter(Boolean);
                 const freq = new Map<string, number>();
-                for (const p of prefixes) freq.set(p, (freq.get(p) || 0) + 1);
+                 
+                for (const p of prefixes) freq.set(p!, (freq.get(p!) || 0) + 1);
                 for (const [prefix, count] of freq) {
                     if (count >= 2 && prefix.length > 2) namingPatterns.add(`${prefix}_*.txt (in ${subDir})`);
                 }
@@ -220,7 +230,8 @@ export async function generateInitFile(
         if (fs.existsSync(outPath)) {
             const existing = fs.readFileSync(outPath, 'utf-8');
             const customMatch = existing.match(/## Custom Rules\n([\s\S]*)/);
-            if (customMatch && customMatch[1].trim().length > 0 && !customMatch[1].includes('<!-- Add')) {
+             
+            if (customMatch && customMatch[1]!.trim().length > 0 && !customMatch[1]!.includes('<!-- Add')) {
                 finalContent = content.replace(
                     /## Custom Rules\n<!-- Add[^]*$/,
                     `## Custom Rules\n${customMatch[1]}`
@@ -261,7 +272,8 @@ function listDirShallow(dir: string, maxDepth: number, depth = 0, prefix = ''): 
         .slice(0, 30); // cap at 30 per level
     const lines: string[] = [];
     for (let i = 0; i < entries.length; i++) {
-        const e = entries[i];
+         
+        const e = entries[i]!;
         const isLast = i === entries.length - 1;
         const connector = isLast ? '└── ' : '├── ';
         lines.push(prefix + connector + e.name + (e.isDirectory() ? '/' : ''));

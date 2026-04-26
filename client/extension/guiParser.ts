@@ -195,7 +195,7 @@ class Parser {
             const node = this.parseStatement();
             if (node) nodes.push(node);
         }
-        let endLine = this.peek().line;
+        const endLine = this.peek().line;
         if (this.peek().type === TokenType.RBrace) this.advance();
         return { nodes, endLine };
     }
@@ -277,7 +277,7 @@ class Parser {
         
         try {
             // Only allow basic math characters to prevent injection/errors
-            if (/^[0-9\.\+\-\*\/\s\(\)]+$/.test(inner)) {
+            if (/^[0-9.+\-*/\s()]+$/.test(inner)) {
                 const result = new Function(`return (${inner})`)();
                 return typeof result === 'number' && !isNaN(result) ? result : expr;
             } else {

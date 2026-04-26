@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 export async function activate() {
-  const ext = vscode.extensions.getExtension('tboby.cwtools-vscode')!;
+  const ext = vscode.extensions.getExtension('Eddy.eddy-stellaris-cwt')!;
   try {
     await ext.activate();
     return ext.exports;

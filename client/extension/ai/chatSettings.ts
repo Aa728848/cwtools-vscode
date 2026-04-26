@@ -115,7 +115,7 @@ export class ChatSettingsManager {
             if (provider && providerId !== 'ollama' && modelId) {
                 if (!provider.models.includes(modelId)) {
                     let currentDynamic = cfg.get<Record<string, string[]>>('dynamicModels') || {};
-                    let providerDyns = currentDynamic[providerId] || [];
+                    const providerDyns = currentDynamic[providerId] || [];
                     if (!providerDyns.includes(modelId)) {
                         providerDyns.push(modelId);
                         currentDynamic = { ...currentDynamic, [providerId]: providerDyns };

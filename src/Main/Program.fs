@@ -157,20 +157,20 @@ type Server(client: ILanguageClient) =
     let mutable ignoreCodes: string array = [||]
     let mutable ignoreFiles: string array = [||]
     let mutable dontLoadPatterns: string array = [||]
-    /// key: FileName (使用 Dictionary 替代不可�?Map 以减�?GC 压力)
-    let locCache = System.Collections.Generic.Dictionary<string, CWError list>()
+    /// key: FileName (使用 ConcurrentDictionary 替代不可变的 Map 以减少 GC 压力)
+    let locCache = System.Collections.Concurrent.ConcurrentDictionary<string, CWError list>()
 
     let mutable effectTriggerVersion = 0
 
-    /// SemanticTokens cache: filePath �?(contentHash, effectTriggerVersion, tokenData)
+    /// SemanticTokens cache: filePath ?(contentHash, effectTriggerVersion, tokenData)
     /// Avoids full AST re-traversal when file content hasn't changed.
-    let semanticTokensCache = System.Collections.Generic.Dictionary<string, int * int * int list>()
+    let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * int * int list>()
 
     /// CodeLens cache: filePath �?(contentHash, lenses)
-    let codeLensCache = System.Collections.Generic.Dictionary<string, int * CodeLens list>()
+    let codeLensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * CodeLens list>()
 
     /// InlayHint cache: filePath -> (contentHash, hints)
-    let inlayHintCache = System.Collections.Generic.Dictionary<string, int * InlayHint list>()
+    let inlayHintCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * InlayHint list>()
 
     /// Maximum entries before eviction.  512 files covers even very large mods;
     /// each entry is small (hash + delta-encoded int list / CodeLens list).
@@ -179,11 +179,11 @@ type Server(client: ILanguageClient) =
     /// Evict ~25% of entries when a Dictionary exceeds cacheMaxEntries.
     /// Uses enumerator order (effectively random for Dictionary) so we don't
     /// need to track access timestamps.
-    let evictIfNeeded (cache: System.Collections.Generic.Dictionary<'K, 'V>) =
+    let evictIfNeeded (cache: System.Collections.Concurrent.ConcurrentDictionary<'K, 'V>) =
         if cache.Count > cacheMaxEntries then
             let toRemove = cache.Count / 4
             let keys = cache.Keys |> Seq.take toRemove |> Seq.toArray
-            for k in keys do cache.Remove(k) |> ignore
+            for k in keys do (cache :> System.Collections.Generic.IDictionary<'K, 'V>).Remove(k) |> ignore
 
     /// Deterministic content hash using FNV-1a instead of string.GetHashCode()
     /// because string.GetHashCode() is randomized per-process in .NET Core.
@@ -283,7 +283,7 @@ type Server(client: ILanguageClient) =
         async {
             let name = getPathFromDoc doc
             // Invalidate codelens cache for THIS file only
-            codeLensCache.Remove(doc.LocalPath) |> ignore
+            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(doc.LocalPath) |> ignore
 
             if name.EndsWith(".yml") then
                 delayedLocUpdate <- true
@@ -1449,7 +1449,7 @@ type Server(client: ILanguageClient) =
 
         member this.DidCloseTextDocument(p: DidCloseTextDocumentParams) = async { 
             docs.Close p 
-            semanticTokensCache.Remove(p.textDocument.uri.LocalPath) |> ignore
+            (semanticTokensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(p.textDocument.uri.LocalPath) |> ignore
         }
 
         member this.DidChangeWatchedFiles(p: DidChangeWatchedFilesParams) =

@@ -154,8 +154,5 @@ import * as vscode from 'vscode';
 
     refresh(files : FileListItem[]): void {
         this.treeDataProvider.refresh(files);
-        // this.fileExplorer.dispose();
-        // const treeDataProvider = new FilesProvider(files);
-        // this.fileExplorer = vscode.window.createTreeView('cwtools-files', { treeDataProvider });
     }
 }

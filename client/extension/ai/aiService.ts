@@ -144,7 +144,7 @@ export class AIService {
      */
     async getKeyForProvider(providerId: string): Promise<string> {
         // 1. Try SecretStorage
-        let key = await this.keyManager.getKey(providerId);
+        const key = await this.keyManager.getKey(providerId);
         if (key) return key;
 
         // 2. Migration path: read plaintext from settings.json and move to SecretStorage
@@ -249,7 +249,7 @@ export class AIService {
         // Each provider has a different mechanism to disable thinking/reasoning.
         // This is critical for inline completion where latency must be minimal.
         let finalMessages = messages;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         let extraBody: Record<string, any> | undefined;
 
         if (options?.disableThinking) {
@@ -605,7 +605,7 @@ export class AIService {
             const cleaned = (msg.content as import('./types').ContentPart[]).map(part => {
                 if (part.type !== 'image_url') return part;
                 // Drop `detail` — destructure it away so JSON.stringify never sees it
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                 
                 const { detail: _d, ...urlOnly } = part.image_url;
                 return { type: 'image_url' as const, image_url: urlOnly };
             });
@@ -639,7 +639,7 @@ export class AIService {
         // Error 2013 causes: multiple system msgs, developer role, tool_choice, parallel_tool_calls
         // Note: minimax-token-plan uses Anthropic adapter (isOpenAICompatible=false) and doesn't need this
         if (providerId === 'minimax') {
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+             
             const { tool_choice, parallel_tool_calls, ...rest } = request as unknown as Record<string, unknown>;
             void tool_choice; void parallel_tool_calls;
             const sanitized = rest as unknown as ChatCompletionRequest;
@@ -773,9 +773,9 @@ export class AIService {
                 if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
                 if (chunk.usage) { const u = chunk.usage as Record<string, number>; usageBuf = { prompt_tokens: u.prompt_tokens ?? u.input_tokens ?? 0, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? ((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)) }; }
                 if (!choices || choices.length === 0) continue;
-                const delta = choices[0].delta as Record<string, unknown> | undefined;
-                if (!delta) { finishReason = (choices[0].finish_reason as string) ?? finishReason; continue; }
-                if (choices[0].finish_reason) finishReason = choices[0].finish_reason as string;
+                const delta = choices[0]!.delta as Record<string, unknown> | undefined;  
+                if (!delta) { finishReason = (choices[0]!.finish_reason as string) ?? finishReason; continue; }  
+                if (choices[0]!.finish_reason) finishReason = choices[0]!.finish_reason as string;  
 
                 // Accumulate text content
                 if (typeof delta.content === 'string') {

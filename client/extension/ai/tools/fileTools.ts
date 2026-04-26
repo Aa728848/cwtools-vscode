@@ -197,7 +197,7 @@ export class FileToolHandler {
             const { content: originalContent, hasBom } = this.readTextFile(args.file);
             this.ctx.onBeforeFileWrite?.(args.file, originalContent);
 
-            const _diff = this.generateSimpleDiff(args.file, originalContent ?? '', args.content);
+            const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
 
             if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
                 const messageId = `write_${crypto.randomUUID()}`;
@@ -373,7 +373,7 @@ export class FileToolHandler {
         const ending = originalContent.includes('\r\n') ? '\r\n' : '\n';
         const payloadLines = args.payload ? args.payload.replace(/\r\n/g, '\n').split('\n').map((l: string) => l + (ending === '\r\n' ? '\r' : '')) : [];
 
-        let newLines = [...lines];
+        const newLines = [...lines];
         if (args.action === 'replace') {
             newLines.splice(startLineIdx, endLineIdx - startLineIdx + 1, ...payloadLines);
         } else if (args.action === 'delete') {
@@ -938,10 +938,5 @@ export class FileToolHandler {
             else { changed++; if (i < oL.length) { diff += `- ${oL[i++]}\n`; } if (j < mL.length) { diff += `+ ${mL[j++]}\n`; } }
         }
         return changed === 0 ? diff + '(无变更)\n' : diff;
-    }
-
-    /** @deprecated kept for compatibility with writeFile's existing call */
-    private generateSimpleDiff(filePath: string, original: string, modified: string): string {
-        return this.buildUnifiedDiff(filePath, original, modified);
     }
 }

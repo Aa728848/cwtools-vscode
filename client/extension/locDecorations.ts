@@ -19,7 +19,8 @@ const COLOR_MAP: Record<string, string> = {
     '§L': '#CCAA55',   // Light brown
     '§M': '#FF44FF',   // Magenta
     '§S': '#AADDAA',   // Soft green
-    '§P': '#FFA4E4',   // Purple
+    '§P': '#FFA4E4',   // Pink
+    '§r': '#9849FF',   // Purple
     '§!': '#CCCCCC',   // Reset (gray)
 };
 
@@ -41,7 +42,7 @@ const markerDecorationType = vs.window.createTextEditorDecorationType({
 });
 
 // Pattern to match §X...§! or §X...end-of-value
-const colorPattern = /§([RGBYWHETLMSP!])/gi;
+const colorPattern = /§([RGBYWHETLMSPr!])/g;
 
 // Pattern to match $REF$ references
 const refPattern = /\$([A-Za-z_][A-Za-z0-9_.:]*)\$/g;
@@ -128,11 +129,11 @@ function updateColorDecorations(editor: vs.TextEditor) {
         // Find all color markers in this line
         const markers: { code: string; offset: number }[] = [];
         let match: RegExpExecArray | null;
-        const linePattern = /§([RGBYWHETLMSP!])/gi;
+        const linePattern = /§([RGBYWHETLMSPr!])/g;
 
         while ((match = linePattern.exec(line)) !== null) {
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            const code = '\u00A7' + match[1]!.toUpperCase();
+            const code = '\u00A7' + match[1]!;
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             markers.push({ code, offset: match.index! });
 
@@ -189,7 +190,7 @@ class LocRefHoverProvider implements vs.HoverProvider {
         if (!entry) return null;
 
         // Strip color codes for display
-        const cleanValue = entry.value.replace(/§[RGBYWHETLMSP!]/gi, '');
+        const cleanValue = entry.value.replace(/§[RGBYWHETLMSPr!]/g, '');
 
         const md = new vs.MarkdownString();
         md.appendMarkdown(`**${refName}**\n\n`);

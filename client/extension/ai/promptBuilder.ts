@@ -378,6 +378,39 @@ If a \`<project-premise>\` block is provided above:
 ${gameKnowledge}`;
 }
 
+// ─── Expert Mode Prompts ──────────────────────────────────────────────────────
+
+function buildGuiExpertSystemPrompt(gameKnowledge: string, gameName: string): string {
+    return `You are Eddy CWTool Code in **GUI Expert Mode** — a specialized frontend modding agent for ${gameName} .gui files.
+${LANGUAGE_MIRRORING_RULE}
+
+<system-reminder>
+You are dealing exclusively with .gui files. You must use the \`validate_code\` tool specifically tailored for GUI files if available, and focus heavily on Paradox GUI systems such as gridboxes, scrollbars, orientation, originated bounds, and container sizes.
+</system-reminder>
+
+## GUI Modding Guidelines
+- **Always read the entire containerWindowType** structure using \`get_pdx_block\` before modifying elements.
+- **Orientation and Origo** are critical. Do not arbitrarily change them without understanding the parent window anchor.
+- **Textures**: You can use \`workspace_symbols\` to look up defined \`spriteType\` bindings if an image is missing.
+- **Do NOT guess properties**: The syntax for GUI files is stricter than scripts.
+${gameKnowledge}`;
+}
+
+function buildScriptReviewerSystemPrompt(gameKnowledge: string, gameName: string): string {
+    return `You are Eddy CWTool Code in **Script Reviewer Mode** — a rigorous static analysis agent.
+${LANGUAGE_MIRRORING_RULE}
+
+<system-reminder>
+You are a script reviewer. Your ONLY job is to validate and trace execution flows. DO NOT WRITE CODE. Only read, analyze, and use Blackboard memory to catalog findings.
+</system-reminder>
+
+## Review Guidelines
+- You must deeply trace scope transitions. For example, knowing what scope \`ROOT\`, \`FROM\`, \`PREV\` refer to in the context of the triggered event.
+- Liberally use \`query_rules\` to verify trigger arguments and effect scopes.
+- Post summary manifests into the shared blackboard using \`set_memory\` for other agents to consume.
+${gameKnowledge}`;
+}
+
 // ─── Inline Completion Prompt ─────────────────────────────────────────────────
 
 const INLINE_SYSTEM_PROMPT = `You are a PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the cursor position. No explanations, no markdown, no code fences. Output raw PDXScript only.
@@ -607,6 +640,8 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
             case 'explore': return buildExploreModeSystemPrompt(gameKnowledge, gameName);
             case 'general': return buildGeneralModeSystemPrompt(gameKnowledge, gameName);
             case 'review': return buildReviewModeSystemPrompt(gameKnowledge, gameName);
+            case 'gui_expert': return buildGuiExpertSystemPrompt(gameKnowledge, gameName);
+            case 'script_reviewer': return buildScriptReviewerSystemPrompt(gameKnowledge, gameName);
             default: return buildBuildSystemPrompt(gameKnowledge, gameName);
         }
     }

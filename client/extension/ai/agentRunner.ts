@@ -140,6 +140,8 @@ export interface AgentRunnerOptions {
      * Resolve with true=allow, false=deny.
      */
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
+    /** If provided, file mutations are written to this memory overlay instead of disk. */
+    vfsOverlay?: Map<string, string>;
 }
 
 /** Tools allowed in Plan mode (read-only, no validate_code / write operations) */

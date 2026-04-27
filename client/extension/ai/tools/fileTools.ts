@@ -49,6 +49,7 @@ export interface FileToolContext {
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
     onAutoWritten?: (file: string, isNewFile: boolean) => void;
+    vfsOverlay?: Map<string, string>;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -67,6 +68,12 @@ export class FileToolHandler {
     }
 
     private readTextFile(filePath: string): { content: string; hasBom: boolean } {
+        if (this.ctx.vfsOverlay && this.ctx.vfsOverlay.has(filePath)) {
+            let content = this.ctx.vfsOverlay.get(filePath)!;
+            const hasBom = content.charCodeAt(0) === 0xFEFF;
+            if (hasBom) content = content.slice(1);
+            return { content, hasBom };
+        }
         if (!fs.existsSync(filePath)) return { content: '', hasBom: false };
         let content = fs.readFileSync(filePath, 'utf-8');
         const hasBom = content.charCodeAt(0) === 0xFEFF;
@@ -89,7 +96,11 @@ export class FileToolHandler {
         }
 
         const finalContent = shouldAddBom ? '\uFEFF' + content : content;
-        fs.writeFileSync(filePath, finalContent, 'utf-8');
+        if (this.ctx.vfsOverlay) {
+            this.ctx.vfsOverlay.set(filePath, finalContent);
+        } else {
+            fs.writeFileSync(filePath, finalContent, 'utf-8');
+        }
     }
 
     // ─── readFile ────────────────────────────────────────────────────────────

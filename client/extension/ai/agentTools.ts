@@ -136,6 +136,13 @@ export class AgentToolExecutor {
         try { this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
     }
 
+    /** Blackboard memory store shared by all agents branching from this executor */
+    public sharedMemory = new Map<string, string>();
+    
+    get vfsOverlay(): Map<string, string> | undefined {
+        return this.parentRunnerOptions?.vfsOverlay;
+    }
+
     /** Expose the external handler so AgentRunner can auto-complete todos on task finish. */
     getExternalToolHandler(): ExternalToolHandler {
         return this.externalHandler;
@@ -230,6 +237,28 @@ export class AgentToolExecutor {
                     message: "Reflection recorded. Proceed with your planned fix in the next step."
                 };
                 break;
+            case 'set_memory': {
+                const { key, value } = args as unknown as import('./types').SetMemoryArgs;
+                if (!key || typeof value !== 'string') {
+                    result = { success: false, message: 'Invalid arguments' };
+                } else if (value.length > 50000) {
+                    result = { success: false, message: 'Value too large max 50000 characters' };
+                } else {
+                    this.sharedMemory.set(key, value);
+                    result = { success: true, message: `Stored value in memory under key '${key}'.` };
+                }
+                break;
+            }
+            case 'get_memory': {
+                const { key } = args as unknown as import('./types').GetMemoryArgs;
+                if (!key) {
+                    result = { found: false };
+                } else {
+                    const value = this.sharedMemory.get(key);
+                    result = value === undefined ? { found: false } : { found: true, value };
+                }
+                break;
+            }
 
             // ── MCP tool call ────────────────────────────────────────────
             case 'mcp_call':

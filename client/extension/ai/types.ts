@@ -12,7 +12,7 @@
  * - general: Full tool access like build, but no todo_write; suited for research tasks
  * - review:  Read-only mode focused on code review, finding issues, and providing feedback.
  */
-export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'review';
+export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'review' | 'gui_expert' | 'script_reviewer';
 
 export interface AgentModeConfig {
     mode: AgentMode;
@@ -392,6 +392,27 @@ export interface GetCompletionAtResult {
     _note?: string;
 }
 
+// ─── Blackboard Memory Tool Types ──────────────────────────────────────────────
+
+export interface SetMemoryArgs {
+    key: string;
+    value: string;
+}
+
+export interface SetMemoryResult {
+    success: boolean;
+    message: string;
+}
+
+export interface GetMemoryArgs {
+    key: string;
+}
+
+export interface GetMemoryResult {
+    found: boolean;
+    value?: string;
+}
+
 // Union type for all tool args/results
 export type ToolArgs =
     | QueryScopeArgs
@@ -411,7 +432,9 @@ export type ToolArgs =
     | ListDirectoryArgs
     | SpawnSubAgentsArgs
     | CodesearchArgs
-    | AnalyzeDiagnosticErrorArgs;
+    | AnalyzeDiagnosticErrorArgs
+    | SetMemoryArgs
+    | GetMemoryArgs;
 
 export type ToolResult =
     | QueryScopeResult
@@ -430,7 +453,9 @@ export type ToolResult =
     | EditFileResult
     | ListDirectoryResult
     | SpawnSubAgentsResult
-    | AnalyzeDiagnosticErrorResult;
+    | AnalyzeDiagnosticErrorResult
+    | SetMemoryResult
+    | GetMemoryResult;
 
 export type AgentToolName =
     | 'query_scope'
@@ -460,6 +485,8 @@ export type AgentToolName =
     | 'ast_mutate'
     | 'spawn_sub_agents'
     | 'analyze_diagnostic_error'
+    | 'set_memory'
+    | 'get_memory'
     // ── CWTools Deep API tools ──
     | 'query_definition'
     | 'query_definition_by_name'
@@ -558,16 +585,18 @@ export interface CodesearchArgs {
 
 export interface SpawnSubAgentsArgs {
     tasks?: Array<{
+        id: string;
+        dependsOn?: string[];
         description: string;
         prompt: string;
-        subagent_type?: 'build' | 'explore' | 'general';
+        subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer';
     }>;
-    /** If true, executes tasks sequentially instead of concurrently. */
+    /** If true, executes tasks sequentially instead of concurrently (overridden by DAG logic if dependsOn is used). */
     sequential?: boolean;
     // Legacy single task support
     description?: string;
     prompt?: string;
-    subagent_type?: 'build' | 'explore' | 'general';
+    subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer';
 }
 
 export interface SpawnSubAgentsResult {
@@ -652,7 +681,7 @@ export interface AgentStep {
     | 'code_generated' | 'validation' | 'error' | 'compaction'
     | 'todo_update' | 'permission_request'
     | 'subtask_start' | 'subtask_complete' | 'diff_summary'
-    | 'plan_card' | 'walkthrough_card';
+    | 'plan_card' | 'walkthrough_card' | 'transaction_card';
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;
@@ -662,6 +691,11 @@ export interface AgentStep {
     permissionId?: string;
     /** For subtask steps: the sub-agent type */
     subagentType?: string;
+    transactionCard?: {
+        id: string;
+        filesRequested: string[];
+        status: 'pending' | 'approved' | 'rejected';
+    };
 }
 
 export interface GenerationResult {

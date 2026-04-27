@@ -601,6 +601,36 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // ─── Blackboard Memory Tools ────────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'set_memory',
+            description: 'Store a string in the shared Agent Blackboard memory. Extremely useful for storing parsed ASTs, file manifests, or data maps that would otherwise overwhelm the prompt context. The data is available to all sub-agents running in the current session. Max length: 50,000 characters per value.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    key: { type: 'string', description: 'Unique string identifier for this data.' },
+                    value: { type: 'string', description: 'The string data to store.' },
+                },
+                required: ['key', 'value'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'get_memory',
+            description: 'Retrieve a string from the shared Agent Blackboard memory by its key. Useful to read data stored by other parallel or sequential sub-agents without passing it through prompt context strings.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    key: { type: 'string', description: 'Unique string identifier.' },
+                },
+                required: ['key'],
+            },
+        },
+    },
     // ─── MCP Tools ──────────────────────────────────────────────────────
     {
         type: 'function',

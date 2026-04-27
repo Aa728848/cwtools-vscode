@@ -91,6 +91,21 @@ export class AIService {
     /** In-memory model override — avoids writing to workspace config (which triggers LS restart) */
     private modelOverride: string | null = null;
 
+    /** Global budget tracking to prevent runaway multi-agent costs */
+    private sessionTokenUsage = 0;
+    private readonly MAX_SESSION_TOKENS = 1500000; // 1.5M tokens default ceiling
+
+    public resetSessionBudget(): void {
+        this.sessionTokenUsage = 0;
+    }
+
+    public reportUsage(tokens: number): void {
+        this.sessionTokenUsage += tokens;
+        if (this.sessionTokenUsage > this.MAX_SESSION_TOKENS) {
+            throw new Error(`Global Context Budget Exceeded: The session has used ${this.sessionTokenUsage} tokens, exceeding the hard limit of ${this.MAX_SESSION_TOKENS}. Please start a new session or consolidate context.`);
+        }
+    }
+
     constructor(private context: vs.ExtensionContext) {
         this.keyManager = new ApiKeyManager(context.secrets);
     }
@@ -682,6 +697,32 @@ export class AIService {
 
         return request;
     }
+
+    // ─── Fetch with Exponential Backoff ──────────────────────────────────────
+
+    /**
+     * Executes fetch with exponential backoff for 429 Too Many Requests.
+     * Prevents multi-agent swarms from crashing API limits.
+     */
+    private async fetchWithRetry(url: string, init: RequestInit, providerId: string): Promise<Response> {
+        let retries = 0;
+        const maxRetries = 3;
+        const delays = [2000, 4000, 8000];
+
+        while (true) {
+            const response = await fetch(url, init);
+            
+            // Check for 429 (Rate Limit / Too Many Requests)
+            if (response.status === 429 && retries < maxRetries) {
+                console.warn(`[AIService] 429 Rate Limit hit for ${providerId}. Retrying in ${delays[retries]}ms...`);
+                await new Promise(r => setTimeout(r, delays[retries]));
+                retries++;
+                continue;
+            }
+            return response;
+        }
+    }
+
     // ─── Private API callers ─────────────────────────────────────────────────
 
     private async callOpenAICompatible(
@@ -698,12 +739,12 @@ export class AIService {
             ...this.buildAuthHeaders(providerId, apiKey),
         };
 
-        const response = await fetch(url, {
+        const response = await this.fetchWithRetry(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(this.sanitizeRequest(providerId, request)),
             signal: controller.signal,   // C1 Fix: use local per-call controller
-        });
+        }, providerId);
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -734,12 +775,12 @@ export class AIService {
             ...this.buildAuthHeaders(providerId, apiKey),
         };
 
-        const response = await fetch(url, {
+        const response = await this.fetchWithRetry(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(this.sanitizeRequest(providerId, { ...request, stream: true })),
             signal: controller.signal,
-        });
+        }, providerId);
 
         if (!response.ok) {
             const errorText = await response.text();
@@ -871,7 +912,7 @@ export class AIService {
         // Force stream=true so we get SSE — enables thinking tokens and unblocks UI
         const claudeRequest = toClaudeRequest({ ...request, stream: true });
 
-        const response = await fetch(url, {
+        const response = await this.fetchWithRetry(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -880,7 +921,7 @@ export class AIService {
             },
             body: JSON.stringify(claudeRequest),
             signal: controller.signal,
-        });
+        }, 'claude');
 
         if (!response.ok) {
             const errorText = await response.text();

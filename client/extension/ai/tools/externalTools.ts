@@ -438,6 +438,7 @@ export class ExternalToolHandler {
         const taskList = args.tasks && Array.isArray(args.tasks) ? args.tasks : [];
         if (taskList.length === 0 && args.prompt && args.description) {
             taskList.push({
+                id: `task_${Date.now()}`,
                 description: args.description,
                 prompt: args.prompt,
                 subagent_type: args.subagent_type || 'general'
@@ -448,13 +449,16 @@ export class ExternalToolHandler {
             return { results: [{ description: 'Error', result: 'No tasks provided' }] };
         }
 
-        // Limit to max 3 parallel tasks
-        const tasksToRun = taskList.slice(0, 3);
+        // Limit to max 5 parallel tasks for DAG
+        const tasksToRun = taskList.slice(0, 5);
         const globalSnapshots: Array<{ filePath: string; previousContent: string | null }> = [];
         let hasError = false;
         let errorMessage = '';
 
         this.ctx.suspendLsp?.();
+
+        const vfsOverlay = new Map<string, string>();
+        const subAgentOptions = { ...this.ctx.parentRunnerOptions, vfsOverlay };
 
         try {
             const executeTask = async (task: any, idx: number) => {
@@ -470,7 +474,7 @@ export class ExternalToolHandler {
                     const result = await this.ctx.agentRunnerRef!.runSubAgent(
                         task.prompt,
                         mode,
-                        this.ctx.parentRunnerOptions,
+                        subAgentOptions,
                         () => { /* no-op */ },
                         this.ctx.parentTokenAccumulator,
                         (filePath, prevContent) => {
@@ -510,33 +514,97 @@ export class ExternalToolHandler {
                     completed.push(await executeTask(tasksToRun[i], i));
                 }
             } else {
-                // Execute concurrently (Promise.all -> fail fast triggers rollback)
-                completed = await Promise.all(tasksToRun.map((t, i) => executeTask(t, i)));
+                // Topological DAG Runner
+                const taskMap = new Map<string, any>();
+                const inDegree = new Map<string, number>();
+                const adj = new Map<string, string[]>();
+
+                tasksToRun.forEach(t => {
+                    const id = (t as any).id || Math.random().toString(36).substring(7);
+                    (t as any)._id = id;
+                    taskMap.set(id, t);
+                    inDegree.set(id, 0);
+                    if (!adj.has(id)) adj.set(id, []);
+                });
+
+                tasksToRun.forEach(t => {
+                    const id = (t as any)._id;
+                    if (t.dependsOn && Array.isArray(t.dependsOn)) {
+                        t.dependsOn.forEach((dep: string) => {
+                            if (taskMap.has(dep)) {
+                                if (!adj.has(dep)) adj.set(dep, []);
+                                adj.get(dep)!.push(id);
+                                inDegree.set(id, (inDegree.get(id) || 0) + 1);
+                            }
+                        });
+                    }
+                });
+
+                await new Promise<void>((resolve, reject) => {
+                    const running = new Set<string>();
+                    
+                    const checkQueue = () => {
+                        if (hasError) return;
+                        if (taskMap.size === 0 && running.size === 0) {
+                            resolve();
+                            return;
+                        }
+                        
+                        for (const [id, t] of taskMap.entries()) {
+                            if (inDegree.get(id) === 0 && !running.has(id)) {
+                                running.add(id);
+                                taskMap.delete(id); // remove from pending
+                                
+                                executeTask(t, completed.length).then((res) => {
+                                    completed.push(res);
+                                    running.delete(id);
+                                    for (const dependent of adj.get(id) || []) {
+                                        inDegree.set(dependent, inDegree.get(dependent)! - 1);
+                                    }
+                                    checkQueue();
+                                }).catch(reject);
+                            }
+                        }
+                    };
+                    checkQueue();
+                });
+            }
+
+            // At the end, if there are files in vfsOverlay, we emit a batch request
+            if (vfsOverlay.size > 0) {
+                const filesRequested = Array.from(vfsOverlay.keys());
+                const txId = `tx_${Date.now()}`;
+                
+                this.ctx.onStep?.({
+                    type: 'thinking',
+                    content: `Batching ${filesRequested.length} file modifications for human review...`,
+                    timestamp: Date.now(),
+                    transactionCard: {
+                        id: txId,
+                        filesRequested,
+                        status: 'pending'
+                    }
+                });
+                
+                completed.push({
+                    description: 'Transaction Batch Emit',
+                    result: `Emitted transaction ${txId} with ${filesRequested.length} files. Awaiting user approval.`
+                });
             }
 
             this.ctx.resumeLsp?.();
             return { results: completed };
 
         } catch (e) {
-            // Transactional Rollback for ALL tasks in this batch
-            for (const snap of globalSnapshots.reverse()) {
-                try {
-                    if (snap.previousContent === null) {
-                        if (fs.existsSync(snap.filePath)) fs.unlinkSync(snap.filePath);
-                    } else {
-                        fs.writeFileSync(snap.filePath, snap.previousContent, 'utf-8');
-                    }
-                } catch (re) {
-                    console.error(`[SubAgent] Rollback failed for ${snap.filePath}:`, re);
-                }
-            }
+            // Transactional Rollback is practically instantaneous because writes were memory-bound
+            vfsOverlay.clear();
             
             this.ctx.resumeLsp?.();
             const actualError = errorMessage || (e instanceof Error ? e.message : String(e));
             return {
                 results: [{
                     description: 'Transaction Rollback',
-                    result: `Dispatch failed: ${actualError}. All modifications across the cluster (${globalSnapshots.length} files) have been rolled back.`,
+                    result: `Dispatch failed: ${actualError}. Memory batch dropped.`,
                 }]
             };
         }

@@ -261,9 +261,9 @@ export class FileToolHandler {
             try {
                 args.file = this.resolveAndAssertInWorkspace(args.file);
                 
-                // 安全阻断：禁止覆写
-                if (fs.existsSync(args.file) && !this.ctx.vfsOverlay) {
-                    return { success: false, message: "文件已存在！为防止破坏性覆盖，严禁使用 write_file 覆写已有文件。请使用 edit_file 或 multiedit 进行局部改写。" };
+                // 安全阻断：禁止覆写（但允许 .md 格式的计划/文档被覆写）
+                if (fs.existsSync(args.file) && !this.ctx.vfsOverlay && !args.file.toLowerCase().endsWith('.md')) {
+                    return { success: false, message: "文件已存在！为防止破坏性覆盖，严禁使用 write_file 覆写已有文件。请使用 edit_file 或 multiedit 进行局部改写。仅允许通过此工具覆写 .md 格式的文档！" };
                 }
 
                 const { content: originalContent, hasBom } = this.readTextFile(args.file);

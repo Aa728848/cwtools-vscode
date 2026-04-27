@@ -242,7 +242,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_file',
-            description: 'Write content to a file. **CRITICAL: You are ONLY allowed to use this tool to create BRAND-NEW files.** If you try to overwrite an existing file with this tool, it will crash and block you. To edit an existing file, you MUST use `edit_file` or `multiedit`.',
+            description: 'Write content to a file. **CRITICAL: You are ONLY allowed to use this tool to create BRAND-NEW files or overwrite Markdown (.md) documents/plans.** If you try to overwrite an existing code file with this tool, it will crash and block you. To edit an existing code file, you MUST use `edit_file` or `multiedit`.',
             parameters: {
                 type: 'object',
                 properties: {

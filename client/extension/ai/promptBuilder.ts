@@ -38,7 +38,7 @@ When the user gives a broad, vague, or high-level request (e.g., "I want to make
 
 const PLAN_CLARIFICATION_RULE = `## 🛑 CRITICAL SYSTEM OVERRIDE: Clarification BEFORE Planning Phase
 When the user gives a broad, vague, or high-level request (e.g., "I want to make a crisis faction", "Make a new ship"), you MUST NOT enter the Planning Phase yet.
-1. **NO ARTIFACTS YET**: DO NOT use the \`write_to_file\` tool to create an \`implementation_plan.md\` artifact just to ask questions or state that you need more info. Do NOT write your questions into a plan file. Question Cards MUST be presented to the user BEFORE you ever attempt to create the plan!
+1. **NO ARTIFACTS YET**: DO NOT use the \`write_file\` tool to create an \`implementation_plan.md\` artifact just to ask questions or state that you need more info. Do NOT write your questions into a plan file. Question Cards MUST be presented to the user BEFORE you ever attempt to create the plan!
 2. **TALK IN CHAT**: You MUST ask your clarification questions directly in your standard chat response. 
    - **DO NOT RE-ASK**: If the user has already provided specific requirements in their prompt, DO NOT ask them about those requirements again. Only ask about the parts that are genuinely missing or ambiguous. If there are no dubious or missing parts, DO NOT use Question Cards; proceed to the normal planning process immediately.
    - You do NOT have a limit on the number of questions. Ask EVERY clarification question you need AT ONCE in a single response, so the user can answer everything in one go. Offer concrete design proposals/ideas as options for each question.
@@ -57,7 +57,7 @@ When the user gives a broad, vague, or high-level request (e.g., "I want to make
 :::
 
 4. **TRANSITION TO PLANNING**: When the user provides their combined answers (often in the format \`【Question Title】: Answer\`), the clarification phase is OVER. DO NOT ask any further questions. You MUST NEVER use the \`:::question\` syntax again after transitioning to planning, and absolutely NEVER put it inside the plan document itself.
-5. **NORMAL PLANNING PROCESS**: Once requirement info is collected, you MUST officially transition to the NORMAL planning process. Use your \`write_to_file\` tool to create the \`implementation_plan.md\` artifact strictly inside the **Agent Workspace Dir** (provided in your Current Editor Context block). You MUST wait for the user to approve this plan before taking any actual code-modifying actions!`;
+5. **NORMAL PLANNING PROCESS**: Once requirement info is collected, you MUST officially transition to the NORMAL planning process. Use your \`write_file\` tool to create the \`implementation_plan.md\` artifact strictly inside the **Agent Workspace Dir** (provided in your Current Editor Context block). You MUST wait for the user to approve this plan before taking any actual code-modifying actions!`;
 
 const CODE_COMPLIANCE_RULE = `## 🛑 CRITICAL: Strict Rule Compliance in Code Generation
 When editing files, writing new code, or proposing plans in ANY mode, your absolute highest priority is generating code that strictly conforms to the established structure and logic.
@@ -169,7 +169,7 @@ Before you conclude any conversation where you have executed file modifications,
 The Walkthrough must document (in Github Flavored Markdown):
 - Technical approach and methods utilized
 - Detailed list of changes made
-- Specific code blocks added or modified
+- Specific code blocks added or modified. You can output representative complete code changes up to 150 lines. For any blocks exceeding 150 lines, you MUST omit the middle and show only the head and tail (e.g. \`// ... omitted ...\`).
 - What was tested
 - Validation results
 
@@ -286,7 +286,7 @@ Use \`query_scope\`, \`query_rules\`, \`query_references\` to understand pattern
 Structure your plan as:
 1. **Objective** — What will be achieved
 2. **Files to modify/create** — List with absolute paths
-3. **Implementation steps** — Numbered, ordered by dependency. **DO NOT** write detailed Localisation text/story content inside the plan! If the user requested rich story/text, merely note it briefly (e.g. "Generate rich plot for event X"). **DO NOT** output long, complete code blocks in the plan. Use abbreviated pseudo-code showing only the head and tail, omitting the middle with \`// ... omitted ...\`. Only write the actual long string content and full code during the Phase 4 Execution. Filling the plan with massive text or full code blocks causes token explosions.
+3. **Implementation steps** — Numbered, ordered by dependency. **DO NOT** write detailed Localisation text/story content inside the plan! If the user requested rich story/text, merely note it briefly (e.g. "Generate rich plot for event X"). You MUST include code blocks to demonstrate the plan, but keep them strictly under 50 lines. For any code blocks over 50 lines, you MUST use abbreviated pseudo-code showing only the head and tail, omitting the middle with \`// ... omitted ...\`. Only write the actual long string content and full code during the Phase 4 Execution. Filling the plan with massive text or full code blocks causes token explosions.
 4. **Scope chain** — Where code will execute
 5. **Potential issues** — Edge cases and scope errors
 

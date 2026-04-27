@@ -1024,7 +1024,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             // 1. Thinking block (thinking_content, text_delta AND narrative 'thinking' type)
             const thinkSteps = steps.filter((s: any) => s.type === 'thinking_content' || s.type === 'thinking' || s.type === 'text_delta');
             if (thinkSteps.length > 0) {
-                const thinkText = thinkSteps.map((s: any) => s.content || '').join('\n\n').trim();
+                let thinkText = '';
+                for (const s of thinkSteps) {
+                    if (s.type === 'thinking' && thinkText) thinkText += '\n\n---\n\n' + (s.content || '');
+                    else thinkText += (s.content || '');
+                }
+                thinkText = thinkText.trim();
                 const estTokens = Math.ceil(thinkText.length / 4);
 
                 const det = document.createElement('details');
@@ -1034,8 +1039,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     thinkSteps.length + ' block(s) &nbsp;<span class="think-tokens">~' + formatNum(estTokens) + ' tokens</span>';
                 det.appendChild(sum);
                 const body = document.createElement('div');
-                body.className = 'thinking-body';
-                body.textContent = thinkText;
+                body.className = 'thinking-body markdown-body';
+                body.innerHTML = renderMarkdown(thinkText);
                 det.appendChild(body);
                 div.appendChild(det);
             }
@@ -1136,6 +1141,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     // ── Streaming text-delta live bubble ──────────────────────────────────────
     let liveTextBubble: HTMLDivElement | null = null;
     let liveTextContent = '';
+    let liveThinkContent = '';
 
     function ensureLiveTextBubble() {
         if (!currentAssistantDiv) return null;
@@ -1168,13 +1174,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             if (tbd) {
                 // Append: use separator only for distinct reasoning blocks (type='thinking'),
                 // streaming delta tokens (type='thinking_content' or 'text_delta') are appended directly
-                if (s.type === 'thinking' && tbd.textContent) {
-                    tbd.textContent += '\n\n---\n\n' + (s.content || '');
+                if (s.type === 'thinking' && liveThinkContent) {
+                    liveThinkContent += '\n\n---\n\n' + (s.content || '');
                 } else {
-                    tbd.textContent += (s.content || '');
+                    liveThinkContent += (s.content || '');
                 }
+                tbd.className = 'thinking-body markdown-body';
+                tbd.innerHTML = renderMarkdown(liveThinkContent);
                 if (tsum) {
-                    const est = Math.ceil((tbd.textContent || '').length / 4);
+                    const est = Math.ceil(liveThinkContent.length / 4);
                     tsum.innerHTML = '<span class="think-pulse spinning"></span>Thinking &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
                 }
             }
@@ -1452,7 +1460,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'addUserMessage':
                 setGenerating(true);
-                liveTextBubble = null; liveTextContent = '';
+                liveTextBubble = null; liveTextContent = ''; liveThinkContent = '';
                 addUserMessage(msg.text, msg.messageIndex, msg.images);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
@@ -1461,7 +1469,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'startBackgroundGeneration':
                 setGenerating(true);
-                liveTextBubble = null; liveTextContent = '';
+                liveTextBubble = null; liveTextContent = ''; liveThinkContent = '';
                 // Do not add user message bubble, but still render the assistant div
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
@@ -1516,7 +1524,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'generationError':
                 setGenerating(false);
-                liveTextBubble = null; liveTextContent = '';
+                liveTextBubble = null; liveTextContent = ''; liveThinkContent = '';
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 
                 // Clear any unresolved interactive cards
@@ -1533,7 +1541,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 messageIndexMap.clear();
                 setGenerating(false);
                 currentAssistantDiv = null;
-                liveTextBubble = null; liveTextContent = '';
+                liveTextBubble = null; liveTextContent = ''; liveThinkContent = '';
                 totalConversationTokens = 0;
                 { const bar = document.getElementById('tokenUsageBar'); if (bar) bar.style.display = 'none'; }
                 startPlaceholderRotation();

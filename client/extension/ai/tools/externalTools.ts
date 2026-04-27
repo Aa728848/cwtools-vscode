@@ -59,6 +59,40 @@ export class ExternalToolHandler {
     getTodos(): TodoItem[] { return [...this.currentTodos]; }
     clearTodos(): void { this.currentTodos = []; }
 
+    // ─── ignoreValidationError ───────────────────────────────────────────────
+
+    async ignoreValidationError(args: { errorId: string; reason: string }): Promise<{ success: boolean; message: string }> {
+        if (!this.ctx.onPermissionRequest) {
+            return { success: false, message: 'Permission handler not configured. Cannot ignore validation errors.' };
+        }
+
+        const permId = `perm_${Date.now()}`;
+        const allowed = await this.ctx.onPermissionRequest(
+            permId,
+            'ignore_validation_error',
+            `AI 请求忽略（IGNORE）此 LSP 验证错误：\n\n【错误详情】：${args.errorId}\n【判断理由】：${args.reason}\n\n您是否同意将此规则永久加入本地白名单 (.cwtools-ai-memory.md) 以免除后续报错？`
+        );
+
+        if (!allowed) {
+            return { success: false, message: 'User denied the request to ignore the validation error.' };
+        }
+
+        try {
+            const memoryPath = path.join(this.ctx.workspaceRoot, '.cwtools-ai-memory.md');
+            const entry = `\n- **Ignored Validation Error / Whitelist**: \`${args.errorId}\` (Reason: ${args.reason})\n`;
+            
+            if (fs.existsSync(memoryPath)) {
+                fs.appendFileSync(memoryPath, entry, 'utf8');
+            } else {
+                fs.writeFileSync(memoryPath, `# CWTools AI Local Memory\n${entry}`, 'utf8');
+            }
+
+            return { success: true, message: 'Error successfully whitelisted and saved to local memory.' };
+        } catch (e) {
+            return { success: false, message: `Failed to save memory: ${e instanceof Error ? e.message : String(e)}` };
+        }
+    }
+
     // ─── webFetch ────────────────────────────────────────────────────────────
 
     async webFetch(args: { url: string; maxChars?: number }): Promise<{ content: string; url: string; truncated: boolean }> {
@@ -71,14 +105,18 @@ export class ExternalToolHandler {
         try {
             const urlObj = new URL(args.url);
             const host = urlObj.hostname;
-            const isLocalIPv4 = /^(127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+)$/.test(host);
-            const isLocalIPv6 = /^(::1|fd[0-9a-f]{2}:.+|fe80::.+)$/i.test(host);
+            
+            const dns = await import('dns');
+            const { address } = await dns.promises.lookup(host);
+
+            const isLocalIPv4 = /^(127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+)$/.test(address);
+            const isLocalIPv6 = /^(::1|fd[0-9a-f]{2}:.+|fe80::.+)$/i.test(address);
             
             if (host === 'localhost' || isLocalIPv4 || isLocalIPv6 || host.endsWith('.local')) {
-                return { content: 'Error: Access to local/internal network addresses is prohibited for security reasons.', url: args.url, truncated: false };
+                return { content: 'Error: Access to local/internal network addresses via SSRF is prohibited for security reasons.', url: args.url, truncated: false };
             }
         } catch (e) {
-            return { content: 'Error: Invalid URL format', url: args.url, truncated: false };
+            return { content: `Error: DNS resolution failed or Invalid URL format. ${e instanceof Error ? e.message : String(e)}`, url: args.url, truncated: false };
         }
 
         try {
@@ -187,7 +225,7 @@ export class ExternalToolHandler {
             const allowed = await this.ctx.onPermissionRequest(
                 permId,
                 'run_command',
-                `AI wants to run: ${args.command}`,
+                `AI 请求执行终端命令：${args.command}`,
                 args.command
             );
             if (!allowed) {

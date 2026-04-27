@@ -24,6 +24,7 @@ import {
     fromClaudeResponse,
     fetchOllamaModels,
     BUILTIN_PROVIDERS,
+    getModelOutputTokens,
 } from './providers';
 
 // ─── API Key Management ──────────────────────────────────────────────────────
@@ -196,6 +197,8 @@ export class AIService {
             onThinking?: (text: string) => void;
             /** Real-time callback for incremental text content tokens (streaming typewriter effect) */
             onTextDelta?: (text: string) => void;
+            /** Real-time callback for incremental tool call fragments */
+            onToolCallDelta?: (toolName: string, argsBuf: string) => void;
             /** External AbortSignal for caller-controlled cancellation */
             abortSignal?: AbortSignal;
             /**
@@ -279,9 +282,10 @@ export class AIService {
             tools: options?.tools,
             tool_choice: options?.tools && options.tools.length > 0 ? 'auto' : undefined,
             temperature: options?.temperature ?? 0.3,
-            // M5 Fix: raise default from 4096 to 8192 — Claude Opus 4 / Gemini 2.5 Pro
-            // support 64K+ output tokens; 4096 silently truncates long code generations.
-            max_tokens: options?.maxTokens ?? 8192,
+            // M5 Fix: dynamically set maxTokens based on model/provider.
+            // Reasoning models (like DeepSeek-R1) generate >20K thinking tokens 
+            // and will self-truncate if capped at 8192.
+            max_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId),
             stream: false,
             ...(extraBody ?? {}),
         };
@@ -313,11 +317,11 @@ export class AIService {
             const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan';
             // Use streaming for OpenAI-compat providers when they support it.
             if (provider.supportsStreaming && provider.isOpenAICompatible && !isAnthropicCompat) {
-                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta);
+                return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta);
             } else if (isAnthropicCompat) {
                 // L4 Fix: fully migrate callClaude to SSE — enables real-time thinking tokens
                 // and eliminates the previous blocking response.json() approach.
-                return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking, options?.onTextDelta);
+                return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta);
             } else {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
             }
@@ -486,7 +490,7 @@ export class AIService {
             model,
             messages,
             temperature: options?.temperature ?? 0.3,
-            max_tokens: options?.maxTokens ?? 8192,
+            max_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId),
             stream: true,
         };
 
@@ -719,9 +723,10 @@ export class AIService {
         apiKey: string,
         request: ChatCompletionRequest,
         providerId: string,
-        onThinking?: (text: string) => void,
-        controller?: AbortController,   // C1 Fix: accept local controller
-        onTextDelta?: (text: string) => void
+        onThinking: ((text: string) => void) | undefined,
+        controller: AbortController,
+        onTextDelta?: (text: string) => void,
+        onToolCallDelta?: (toolName: string, argsBuf: string) => void
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/chat/completions`;
         const headers: Record<string, string> = {
@@ -733,7 +738,7 @@ export class AIService {
             method: 'POST',
             headers,
             body: JSON.stringify(this.sanitizeRequest(providerId, { ...request, stream: true })),
-            signal: controller?.signal ?? this.activeControllers.values().next().value?.signal,
+            signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -805,7 +810,12 @@ export class AIService {
                         const fn = tc.function as Record<string, string> | undefined;
                         if (fn) {
                             if (fn.name) toolCallMap[idx].function.name += fn.name;
-                            if (fn.arguments) toolCallMap[idx].function.arguments += fn.arguments;
+                            if (fn.arguments) {
+                                toolCallMap[idx].function.arguments += fn.arguments;
+                                if (onToolCallDelta) {
+                                    onToolCallDelta(toolCallMap[idx].function.name, toolCallMap[idx].function.arguments);
+                                }
+                            }
                         }
                     }
                 }
@@ -854,7 +864,8 @@ export class AIService {
         request: ChatCompletionRequest,
         controller: AbortController,
         onThinking?: (text: string) => void,
-        onTextDelta?: (text: string) => void
+        onTextDelta?: (text: string) => void,
+        onToolCallDelta?: (toolName: string, argsBuf: string) => void
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/messages`;
         // Force stream=true so we get SSE — enables thinking tokens and unblocks UI
@@ -883,6 +894,7 @@ export class AIService {
 
         // Accumulation state (mirroring callOpenAICompatibleStreaming)
         let textBuf = '';
+        let reasoningBuf = '';
         let modelBuf = '';
         let stopReason: string | null = null;
         let inputTokens = 0;
@@ -945,6 +957,7 @@ export class AIService {
                             const idx = (evt.index as number) ?? currentBlockIdx;
                             if (toolBlocks[idx]) {
                                 toolBlocks[idx].argsBuf += (delta?.partial_json as string) ?? '';
+                                onToolCallDelta?.(toolBlocks[idx].name, toolBlocks[idx].argsBuf);
                             }
                         }
                         break;

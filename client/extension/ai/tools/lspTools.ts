@@ -38,7 +38,7 @@ export interface LspToolContext {
 // ─── Handler class ───────────────────────────────────────────────────────────
 
 export class LspToolHandler {
-    private cwtRulesCache: { triggers: RuleInfo[]; effects: RuleInfo[] } | null = null;
+    private cwtRulesCache: { triggers: RuleInfo[]; effects: RuleInfo[]; modifiers: RuleInfo[] } | null = null;
     /** 5-second TTL cache for heavy read-only LSP commands */
     private lspReadCache = new Map<string, { data: unknown; expiresAt: number }>();
 
@@ -402,6 +402,7 @@ export class LspToolHandler {
                 authority: 'common/governments/authorities',
                 ethic: 'common/ethics',
                 static_modifier: 'common/static_modifiers',
+                scripted_modifier: 'common/scripted_modifiers',
                 pop_job: 'common/pop_jobs',
                 scripted_trigger: 'common/scripted_triggers',
                 scripted_effect: 'common/scripted_effects',
@@ -448,7 +449,25 @@ export class LspToolHandler {
         }
     }
 
-    // ─── queryRules ──────────────────────────────────────────────────────────
+    private levenshtein(a: string, b: string): number {
+        const matrix: number[][] = [];
+        for (let i = 0; i <= b.length; i++) {
+            matrix[i] = [i];
+        }
+        for (let j = 0; j <= a.length; j++) {
+            matrix[0]![j] = j;
+        }
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                    matrix[i]![j] = matrix[i - 1]![j - 1]!;
+                } else {
+                    matrix[i]![j] = Math.min(matrix[i - 1]![j - 1]! + 1, Math.min(matrix[i]![j - 1]! + 1, matrix[i - 1]![j]! + 1));
+                }
+            }
+        }
+        return matrix[b.length]![a.length]!;
+    }
 
     async queryRules(args: { category: string; name?: string; scope?: string }): Promise<QueryRulesResult> {
         if (!this.cwtRulesCache) {
@@ -461,26 +480,87 @@ export class LspToolHandler {
             rules = cache.triggers;
         } else if (args.category === 'effect') {
             rules = cache.effects;
+        } else if (args.category === 'modifier') {
+            rules = cache.modifiers;
         } else {
-            rules = [...cache.triggers, ...cache.effects];
+            rules = [...cache.triggers, ...cache.effects, ...cache.modifiers];
         }
 
         if (args.name) {
-            rules = rules.filter(r => r.name.toLowerCase().includes(args.name!.toLowerCase()));
+            const filtered = rules.filter(r => r.name.toLowerCase().includes(args.name!.toLowerCase()));
+            if (filtered.length === 0 && rules.length > 0) {
+                // Fuzzy searching fallback
+                const scored = rules.map(r => ({ rule: r, score: this.levenshtein(args.name!.toLowerCase(), r.name.toLowerCase()) }));
+                scored.sort((a, b) => a.score - b.score);
+                rules = scored.slice(0, 5).map(s => ({
+                    ...s.rule,
+                    description: `[FUZZY SUGGESTION] Did you mean this? -> Original desc: ${s.rule.description}`
+                }));
+            } else {
+                rules = filtered;
+            }
         }
+        
         if (args.scope) {
             rules = rules.filter(r =>
                 r.scopes.length === 0 ||
-                r.scopes.some(s => s.toLowerCase() === args.scope!.toLowerCase() || s.toLowerCase() === 'all')
+                r.scopes.some(s => s.toLowerCase() === args.scope!.toLowerCase() || s.toLowerCase() === 'all' || s.toLowerCase() === 'any')
             );
         }
 
         return { rules: rules.slice(0, 80), totalCount: rules.length, truncated: rules.length > 80 };
     }
 
-    private async loadCWTRules(): Promise<{ triggers: RuleInfo[]; effects: RuleInfo[] }> {
+    // ─── getPdxBlock ─────────────────────────────────────────────────────────
+
+    async getPdxBlock(args: { file: string; symbol: string }): Promise<{ content: string; truncated: boolean }> {
+        try {
+            const symbols = await this.documentSymbols({ file: args.file });
+            if (symbols.symbols.length === 0) {
+                return { content: `Error: Could not parse symbols in file (or file is empty/invalid).`, truncated: false };
+            }
+
+            let targetSymbol: DocumentSymbolInfo | null = null;
+            const findSymbol = (syms: DocumentSymbolInfo[]) => {
+                for (const sym of syms) {
+                    if (sym.name === args.symbol) {
+                        targetSymbol = sym;
+                        return;
+                    }
+                    if (sym.children && sym.children.length > 0) {
+                        findSymbol(sym.children);
+                    }
+                }
+            };
+            findSymbol(symbols.symbols);
+
+            if (!targetSymbol) {
+                return { content: `Error: Symbol '${args.symbol}' not found in file. Check spelling or use document_symbols first.`, truncated: false };
+            }
+
+            const tsym = targetSymbol as DocumentSymbolInfo;
+            const content = fs.readFileSync(args.file, 'utf-8');
+            const lines = content.split('\n');
+            // document_symbols is 0-indexed line numbers
+            const slice = lines.slice(tsym.range.startLine, tsym.range.endLine + 1);
+            
+            let resultText = slice.join('\n');
+            const MAX_CHARS = 16000;
+            const truncated = resultText.length > MAX_CHARS;
+            if (truncated) {
+                resultText = resultText.substring(0, MAX_CHARS) + '\n... [Block truncated due to extreme size]';
+            }
+
+            return { content: resultText, truncated };
+        } catch (e) {
+            return { content: `Error reading PDX Block: ${e instanceof Error ? e.message : String(e)}`, truncated: false };
+        }
+    }
+
+    private async loadCWTRules(): Promise<{ triggers: RuleInfo[]; effects: RuleInfo[]; modifiers: RuleInfo[] }> {
         const triggers: RuleInfo[] = [];
         const effects: RuleInfo[] = [];
+        const modifiers: RuleInfo[] = [];
 
         const configPaths: string[] = [
             path.join(this.ctx.workspaceRoot, 'submodules', 'cwtools-stellaris-config', 'config'),
@@ -496,12 +576,34 @@ export class LspToolHandler {
         for (const configPath of configPaths) {
             const triggersFile = path.join(configPath, 'triggers.cwt');
             const effectsFile = path.join(configPath, 'effects.cwt');
+            const modifiersLog = path.join(configPath, 'logs', 'modifiers.log');
             if (fs.existsSync(triggersFile)) { this.parseCWTFile(triggersFile, triggers); }
             if (fs.existsSync(effectsFile)) { this.parseCWTFile(effectsFile, effects); }
-            if (triggers.length > 0 || effects.length > 0) break;
+            if (fs.existsSync(modifiersLog)) { this.parseModifiersLog(modifiersLog, modifiers); }
+            if (triggers.length > 0 || effects.length > 0 || modifiers.length > 0) break;
         }
 
-        return { triggers, effects };
+        return { triggers, effects, modifiers };
+    }
+
+    private parseModifiersLog(filePath: string, results: RuleInfo[]): void {
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const lines = content.split('\n');
+            const modifierPattern = /^- ([\w.-]+), Category: (.*)/;
+            
+            for (const line of lines) {
+                const match = line.trim().match(modifierPattern);
+                if (match) {
+                    results.push({
+                        name: match[1]!,
+                        description: `Categories: ${match[2]!}`,
+                        scopes: [],
+                        syntax: match[1]!,
+                    });
+                }
+            }
+        } catch { /* skip */ }
     }
 
     private parseCWTFile(filePath: string, results: RuleInfo[]): void {
@@ -884,35 +986,66 @@ export class LspToolHandler {
         }
     }
 
-    // ─── searchModFiles ──────────────────────────────────────────────────────
-
-    async searchModFiles(args: { query: string; directory?: string; fileExtension?: string }): Promise<SearchModFilesResult> {
+    async searchModFiles(args: { query: string; directory?: string; fileExtension?: string; exactMatch?: boolean; searchContext?: 'mod' | 'vanilla' | 'both' }): Promise<SearchModFilesResult> {
         const results: SearchModFilesResult['files'] = [];
 
         const workspaceFolders = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [this.ctx.workspaceRoot];
 
         const searchRoots: string[] = [];
-        if (args.directory) {
-            for (const wsRoot of workspaceFolders) {
-                const candidate = path.join(wsRoot, args.directory);
-                if (fs.existsSync(candidate)) searchRoots.push(candidate);
-            }
-            // Security: only allow absolute paths that resolve within a workspace folder
-            if (searchRoots.length === 0 && fs.existsSync(args.directory)) {
-                const resolvedDir = path.resolve(args.directory);
-                const isWithinWorkspace = workspaceFolders.some(ws => resolvedDir.startsWith(path.resolve(ws) + path.sep) || resolvedDir === path.resolve(ws));
-                if (isWithinWorkspace) {
-                    searchRoots.push(resolvedDir);
+        const ctxStr = args.searchContext || 'mod';
+
+        // Add Mod roots
+        if (ctxStr === 'mod' || ctxStr === 'both') {
+            if (args.directory) {
+                for (const wsRoot of workspaceFolders) {
+                    const candidate = path.join(wsRoot, args.directory);
+                    if (fs.existsSync(candidate)) searchRoots.push(candidate);
                 }
-                // If outside workspace, silently skip — fall through to workspace roots below
+                if (searchRoots.length === 0 && fs.existsSync(args.directory)) {
+                    const resolvedDir = path.resolve(args.directory);
+                    const isWithinWorkspace = workspaceFolders.some(ws => resolvedDir.startsWith(path.resolve(ws) + path.sep) || resolvedDir === path.resolve(ws));
+                    if (isWithinWorkspace) {
+                        searchRoots.push(resolvedDir);
+                    }
+                }
+            } else {
+                searchRoots.push(...workspaceFolders);
             }
         }
-        if (searchRoots.length === 0) {
-            searchRoots.push(...workspaceFolders);
+
+        // Add Vanilla root
+        if (ctxStr === 'vanilla' || ctxStr === 'both') {
+            const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
+            // Check Stellaris cache, fall back to language specific paths if added later
+            const vanillaStellaris = cwtoolsConfig.get<string>('cache.stellaris');
+            // Assuming we also check cache.hoi4 etc. if needed
+            const vanillaMods = [vanillaStellaris].filter(Boolean) as string[];
+            for (const vMod of vanillaMods) {
+                if (args.directory) {
+                    const candidate = path.join(vMod, args.directory);
+                    if (fs.existsSync(candidate)) searchRoots.push(candidate);
+                } else if (fs.existsSync(vMod)) {
+                    searchRoots.push(vMod);
+                }
+            }
         }
 
         const ext = args.fileExtension ?? '.txt';
         const queryLower = args.query.toLowerCase();
+        
+        let exactRegex: RegExp | null = null;
+        if (args.exactMatch) {
+            // Escape query and wrap in boundaries.
+            const escapedQuery = args.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            try {
+                exactRegex = new RegExp('\\b' + escapedQuery + '\\b', 'i');
+            } catch (e) {
+                exactRegex = new RegExp(escapedQuery, 'i');
+            }
+        }
+
+        const MAX_SEARCH_RESULTS = 15;
+        let limitReached = false;
 
         for (const searchRoot of searchRoots) {
             try {
@@ -921,33 +1054,45 @@ export class LspToolHandler {
                 // Process in chunks of 50 to avoid running out of file descriptors or memory
                 const CHUNK_SIZE = 50;
                 for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-                    if (results.length >= 50) break;
+                    if (results.length >= MAX_SEARCH_RESULTS) { limitReached = true; break; }
                     
                     const chunk = files.slice(i, i + CHUNK_SIZE);
                     await Promise.all(chunk.map(async (file) => {
-                        if (results.length >= 50) return;
+                        if (results.length >= MAX_SEARCH_RESULTS) { limitReached = true; return; }
                         try {
                             const content = await fs.promises.readFile(file, 'utf-8');
+                            // Early rejection based on loose text search
                             const contentLower = content.toLowerCase();
                             if (!contentLower.includes(queryLower)) return;
+                            
+                            // If exact match is required, perform regex test
+                            if (args.exactMatch && exactRegex && !exactRegex.test(content)) {
+                                return;
+                            }
 
                             const lines = content.split('\n');
                             const matchingLines: Array<{ line: number; content: string }> = [];
                             for (let j = 0; j < lines.length; j++) {
                                 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                                if (lines[j]!.toLowerCase().includes(queryLower)) {
-                                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                                    matchingLines.push({ line: j, content: lines[j]!.trim().substring(0, 120) });
+                                const lineStr = lines[j]!;
+                                if (args.exactMatch && exactRegex) {
+                                    if (exactRegex.test(lineStr)) {
+                                        matchingLines.push({ line: j, content: lineStr.trim().substring(0, 120) });
+                                    }
+                                } else if (lineStr.toLowerCase().includes(queryLower)) {
+                                    matchingLines.push({ line: j, content: lineStr.trim().substring(0, 120) });
                                 }
-                                if (matchingLines.length >= 20) break;
+                                if (matchingLines.length >= 10) break;
                             }
                             
                             // Because we're in parallel, check one last time before pushing
-                            if (results.length < 50) {
+                            if (results.length < MAX_SEARCH_RESULTS) {
                                 results.push({
                                     logicalPath: path.relative(searchRoot, file).replace(/\\/g, '/'),
                                     matchingLines,
                                 });
+                            } else {
+                                limitReached = true;
                             }
                         } catch { /* skip unreadable */ }
                     }));
@@ -955,11 +1100,15 @@ export class LspToolHandler {
             } catch { /* skip inaccessible dirs */ }
         }
 
-        return {
+        const returnObj: any = {
             files: results,
             searchedRoot: searchRoots.join(', '),
             totalFound: results.length,
-        } as SearchModFilesResult;
+        };
+        if (limitReached) {
+            returnObj._warning = `[CRITICAL TRUNCATION] 截断：已达到 ${MAX_SEARCH_RESULTS} 个文件的输出上限，剩余匹配项文件（可能包含几百个）已被强制抛弃以保护大模型上下文！请使用更精确的 \`query\` 或 \`directory\` 参数缩小搜索范围。`;
+        }
+        return returnObj as SearchModFilesResult;
     }
 
     // ─── getCompletionAt ─────────────────────────────────────────────────────

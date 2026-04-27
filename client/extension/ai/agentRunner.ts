@@ -606,10 +606,9 @@ export class AgentRunner {
         onFileWrite?: (filePath: string, prevContent: string | null) => void
     ): Promise<string> {
         let iteration = 0;
-        // M2 Fix: track consecutive identical signatures via counter,
-        // not a sliding window (A-B-A-B never triggered the old window approach).
-        let consecutiveSameSignature = 0;
-        let lastCallSignature = '';
+        // M2 Fix: Track signature frequencies throughout the entire loop.
+        // Prevents alternating patterns (A-B-A-B) from escaping loop detection.
+        const callFrequency = new Map<string, number>();
         let consecutiveErrorCount = 0;
         // Flag set to true when we need to exit the outer while loop
         let forceStop = false;
@@ -680,27 +679,85 @@ export class AgentRunner {
                 }
             }
 
-            const response = await this.aiService.chatCompletion(messages, {
-                tools: availableTools,
-                providerId: options?.providerId,
-                model: options?.model,
-                // Stream thinking tokens to UI in real-time (OpenCode-style)
-                onThinking: (text) => {
+            const announcedPaths = new Set<string>();
+            const WRITE_TOOLS_PEEK = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate']);
+            
+            const tryAnnouncePath = (name: string, content: string) => {
+                if (!WRITE_TOOLS_PEEK.has(name)) return;
+                const pathMatch = content.match(/"file(?:Path)?"\s*:\s*"([^"]+)"/);
+                if (pathMatch && pathMatch[1]) {
+                    const extractedPath = pathMatch[1];
+                    if (!announcedPaths.has(extractedPath)) {
+                        announcedPaths.add(extractedPath);
+                        emitStep({
+                            type: 'text_delta',
+                            content: `\n> ⏳ 正在解析修改策略... 锁定目标文件: \`${extractedPath}\`\n`,
+                            timestamp: Date.now()
+                        });
+                    }
+                }
+            };
+            
+            let dsmlToolNameBuf = '';
+            let dsmlArgsBuf = '';
+            let isInsideDsml = false;
+
+            let response;
+            try {
+                response = await this.aiService.chatCompletion(messages, {
+                    tools: availableTools,
+                    providerId: options?.providerId,
+                    model: options?.model,
+                    // Stream thinking tokens to UI in real-time (OpenCode-style)
+                    onThinking: (text) => {
+                        emitStep({
+                            type: 'thinking_content',
+                            content: text,
+                            timestamp: Date.now(),
+                        });
+                    },
+                    // Stream text content tokens for typewriter effect
+                    onTextDelta: options?.streaming ? (text) => {
+                        if (text.includes('<tool_call>')) isInsideDsml = true;
+                        if (text.includes('</tool_call>')) {
+                            isInsideDsml = false;
+                            dsmlToolNameBuf = '';
+                            dsmlArgsBuf = '';
+                        }
+                        if (isInsideDsml) {
+                            dsmlArgsBuf += text;
+                            if (!dsmlToolNameBuf) {
+                                const nameMatch = dsmlArgsBuf.match(/"name"\s*:\s*"([^"]+)"/);
+                                if (nameMatch && nameMatch[1]) dsmlToolNameBuf = nameMatch[1];
+                            }
+                            if (dsmlToolNameBuf) tryAnnouncePath(dsmlToolNameBuf, dsmlArgsBuf);
+                        }
+
+                        emitStep({
+                            type: 'text_delta',
+                            content: text,
+                            timestamp: Date.now(),
+                        });
+                    } : undefined,
+                    onToolCallDelta: (toolName, argsBuf) => {
+                        tryAnnouncePath(toolName, argsBuf);
+                    }
+                });
+            } catch (err: any) {
+                if (err && err.message && (err.message.includes('terminated') || err.message.includes('socket hang up') || err.message.includes('ECONNRESET'))) {
                     emitStep({
-                        type: 'thinking_content',
-                        content: text,
+                        type: 'error',
+                        content: `服务端异常断开 (${err.message}). 这通常是因为输出超出物理上限。自动触发切片恢复...`,
                         timestamp: Date.now(),
                     });
-                },
-                // Stream text content tokens for typewriter effect
-                onTextDelta: options?.streaming ? (text) => {
-                    emitStep({
-                        type: 'text_delta',
-                        content: text,
-                        timestamp: Date.now(),
+                    messages.push({
+                        role: 'user',
+                        content: `[SYSTEM] Your previous response was forcefully terminated by the API server (likely due to hard length limits or timeout). Please DO NOT output massive text blocks, and DO NOT use write_file for files over 150 lines. Break your task into small steps using multiedit.`
                     });
-                } : undefined,
-            });
+                    continue;
+                }
+                throw err;
+            }
 
             // Accumulate token usage from this API call
             if (tokenAccumulator && response.usage) {
@@ -771,26 +828,36 @@ export class AgentRunner {
             }
             messages.push(assistantMessage);
 
+            // ── M3: Length Truncation Fallback ──
+            if (choice.finish_reason === 'length') {
+                emitStep({
+                    type: 'error',
+                    content: '模型输出因长度限制(max_tokens)被截断。不抛出致命解析错误，自动触发切片引导...',
+                    timestamp: Date.now(),
+                });
+                messages.push({
+                    role: 'user',
+                    content: `[SYSTEM] Your previous response was truncated by the API max_tokens length limit. Please DO NOT output massive blocks of text. Break down your modifications into smaller steps. Use todo_write to plan them, and execute a single multiedit/apply_patch per response.`
+                });
+                continue;
+            }
+
             // If no tool calls (either format), we're done
             if (!toolCalls || toolCalls.length === 0) {
                 return this.cleanFinalContent(contentToString(assistantMessage.content));
             }
 
-            // ── M2 Fix: Doom loop detection via consecutive-call counter ──────
-            // Count consecutive iterations with identical call signatures.
-            // Works for both exact repeats AND alternating patterns if we track
-            // only the latest signature (pure repeat = doom loop).
+            // ── M2 Fix: Doom loop detection via global map ──────
+            // Count iterations with identical call signatures.
+            // Works for exact repeats and alternating patterns (A-B-A-B).
             const callSignature = toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`).join('|');
-            if (callSignature === lastCallSignature) {
-                consecutiveSameSignature++;
-            } else {
-                consecutiveSameSignature = 1;
-                lastCallSignature = callSignature;
-            }
-            if (consecutiveSameSignature >= DOOM_LOOP_THRESHOLD) {
+            const freq = (callFrequency.get(callSignature) || 0) + 1;
+            callFrequency.set(callSignature, freq);
+            
+            if (freq >= DOOM_LOOP_THRESHOLD) {
                 emitStep({
                     type: 'error',
-                    content: '检测到循环工具调用，已强制停止',
+                    content: '检测到同质化高频无死锁调用循环 (Doom-Loop)，已强制停止',
                     timestamp: Date.now(),
                 });
                 break;

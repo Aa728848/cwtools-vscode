@@ -1,4 +1,4 @@
- 
+import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 
 /** Type-safe getElementById with generic cast */
 function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -800,11 +800,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     // ── OpenCode-style step rendering ─────────────────────────────────────────
     // Tool step icons — minimal, professional
     const TOOL_ICONS = {
-        read_file: '📄', write_file: '💾', edit_file: '✏️',
-        list_directory: '📁', search_mod_files: '🔍', validate_code: '✅',
-        get_file_context: '📄', get_diagnostics: '🩺', get_completion_at: '💡',
-        document_symbols: '🔖', workspace_symbols: '🔖', query_scope: '🔭',
-        query_types: '📐', query_rules: '📏', query_references: '🔗', todo_write: '📋',
+        read_file: Icons.file, write_file: Icons.save, edit_file: Icons.edit,
+        list_directory: Icons.folder, search_mod_files: Icons.search, validate_code: Icons.check,
+        get_file_context: Icons.file, get_diagnostics: Icons.stethoscope, get_completion_at: Icons.lightbulb,
+        document_symbols: Icons.bookmark, workspace_symbols: Icons.bookmark, query_scope: Icons.telescope,
+        query_types: Icons.ruler, query_rules: Icons.ruler, query_references: Icons.link, todo_write: Icons.clipboard,
     };
     const WRITE_TOOL_NAMES = new Set(['edit_file', 'write_file', 'read_file', 'delete_file']);
 
@@ -916,7 +916,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             );
             for (const s of specialSteps) {
                 const el = document.createElement('div');
-                const icon = s.type === 'error' ? '❌' : s.type === 'validation' ? '✅' : s.type === 'compaction' ? '🗜' : '·';
+                const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : s.type === 'compaction' ? svgIconNoMargin('gear') : '·';
                 el.className = 'special-step';
                 el.textContent = icon + ' ' + (s.content || '');
                 div.appendChild(el);
@@ -1064,7 +1064,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             if (!currentAssistantDiv) return;
             const el = document.createElement('div');
             el.className = 'special-step';
-            const icon = s.type === 'error' ? '❌' : s.type === 'validation' ? '✅' : '🗜';
+            const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : svgIconNoMargin('gear');
             el.textContent = icon + ' ' + (s.content || '');
             currentAssistantDiv.appendChild(el);
         }
@@ -1194,15 +1194,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const hint = isNewFile ? '新文件已在编辑器中打开，请确认内容后决定' : '文件对比已在 VSCode 差异编辑器中打开';
         card.innerHTML =
             '<div class="diff-card-header">' +
-            '✏️ 请求' + (isNewFile ? '创建' : '修改') + ': <strong>' + escapeHtml(fileName) + '</strong>' +
+            svgIcon('edit') + '请求' + (isNewFile ? '创建' : '修改') + ': <strong>' + escapeHtml(fileName) + '</strong>' +
             '<span class="diff-card-hint">' + hint + '</span></div>' +
             '<div class="diff-card-actions">' +
-            '<button class="diff-accept-btn" data-msgid="' + safeId + '">✅ 接受</button>' +
-            '<button class="diff-reject-btn" data-msgid="' + safeId + '">❌ 拒绝</button>' +
+            '<button class="diff-accept-btn" data-msgid="' + safeId + '">' + svgIcon('check') + '接受</button>' +
+            '<button class="diff-reject-btn" data-msgid="' + safeId + '">' + svgIcon('x') + '拒绝</button>' +
             '</div>';
         (card.querySelector('.diff-accept-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; (card.querySelector('.diff-reject-btn') as HTMLButtonElement).disabled = true;
-            this.textContent = '已接受 ✅';
+            this.innerHTML = svgIcon('check') + '已接受';
             vscode.postMessage({ type: 'confirmWriteFile', messageId });
             dismissCard(div, 400);
         });
@@ -1231,12 +1231,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             (command ? `<div class="permission-card-cmd">${escapeHtml(command)}</div>` : '') +
             `</div></div>` +
             `<div class="permission-card-actions">` +
-            `<button class="permission-allow-btn" data-permid="${safeId}">✅ 允许</button>` +
-            `<button class="permission-deny-btn" data-permid="${safeId}">❌ 拒绝</button>` +
+            `<button class="permission-allow-btn" data-permid="${safeId}">${svgIcon('check')}允许</button>` +
+            `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}拒绝</button>` +
             `</div>`;
         (div.querySelector('.permission-allow-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; (div.querySelector('.permission-deny-btn') as HTMLButtonElement).disabled = true;
-            this.textContent = '已允许 ✅';
+            this.innerHTML = svgIcon('check') + '已允许';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
             dismissCard(div, 400);
         });
@@ -1327,7 +1327,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 // Clear any unresolved interactive cards
                 document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
-                chatArea.appendChild(buildAssistantMessage('❌ ' + msg.error, [], Date.now()));
+                chatArea.appendChild(buildAssistantMessage(svgIcon('x') + ' ' + msg.error, [], Date.now()));
                 scrollBottom();
                 break;
 
@@ -1484,14 +1484,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'ollamaModels': {
                 const db = document.getElementById('detectBtn') as HTMLButtonElement | null;
-                if (db) { db.disabled = false; db.textContent = '🔍 检测'; }
+                if (db) { db.disabled = false; db.innerHTML = svgIcon('search') + '检测'; }
                 if (msg.error) { document.getElementById('modelHint')!.textContent = msg.error; }
                 else { settingsOllamaModels = msg.models; updateModelUI((document.getElementById('settingsProvider') as HTMLSelectElement).value, '', msg.models); }
                 break;
             }
             case 'apiModelsFetched': {
                 const fb = document.getElementById('fetchApiModelsBtn') as HTMLButtonElement | null;
-                if (fb) { fb.disabled = false; fb.textContent = '☁️ 拉取支持的模型'; }
+                if (fb) { fb.disabled = false; fb.innerHTML = svgIcon('cloud') + '拉取支持的模型'; }
                 if (msg.error) { document.getElementById('apiKeyStatus')!.textContent = '获取失败: ' + msg.error; document.getElementById('apiKeyStatus')!.style.color = '#ff9800'; }
                 else {
                     const p = settingsProviders.find(p => p.id === msg.providerId);
@@ -1506,7 +1506,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         updateModelUI(msg.providerId, getSelectedModel(), null);
                         const ctxInfo = msg.ctxNote ? ` ${msg.ctxNote}` : '';
                         document.getElementById('modelHint')!.textContent = `成功从端点加载了 ${newModels.length} 个模型！${ctxInfo}`;
-                        document.getElementById('apiKeyStatus')!.textContent = '✅ 已成功获取模型';
+                        document.getElementById('apiKeyStatus')!.innerHTML = svgIcon('check') + '已成功获取模型';
                         document.getElementById('apiKeyStatus')!.style.color = '#4caf50';
                     }
                 }
@@ -1624,10 +1624,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 // Header row
                 const header = document.createElement('div');
                 header.className = 'ap-header';
-                header.innerHTML = `<span class="ap-header-title">✏️ 在线批注</span>
+                header.innerHTML = `<span class="ap-header-title">${svgIcon('edit')}在线批注</span>
                     <span class="ap-header-hint">点击段落添加批注</span>
                     <div style="display:flex; gap:6px;">
-                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">✅ 同意执行</button>
+                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">${svgIcon('check')}同意执行</button>
                         <button class="ap-submit-btn" disabled>📤 提交批注 (0)</button>
                     </div>`;
                 wrap.appendChild(header);
@@ -1645,7 +1645,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         type: 'submitPlanAnnotations',
                         annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
                     });
-                    approveBtn.textContent = '✅ 已开始执行...';
+                    approveBtn.innerHTML = svgIcon('check') + '已开始执行...';
                     approveBtn.disabled = true;
                     submitBtn.disabled = true;
                 });
@@ -1657,7 +1657,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
                     });
                     // Visual feedback
-                    submitBtn.textContent = '✅ 已提交';
+                    submitBtn.innerHTML = svgIcon('check') + '已提交';
                     submitBtn.disabled = true;
                 });
 
@@ -1792,7 +1792,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 header.innerHTML = `<span class="ap-header-title">🏁 Walkthrough 批注</span>
                     <span class="ap-header-hint">点击段落添加批注要求</span>
                     <div style="display:flex; gap:6px;">
-                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">✅ 确认完成</button>
+                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">${svgIcon('check')}确认完成</button>
                         <button class="ap-submit-btn" disabled>📤 重新修改 (0)</button>
                     </div>`;
                 wrap.appendChild(header);
@@ -1806,7 +1806,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 }
 
                 approveBtn.addEventListener('click', () => {
-                    approveBtn.textContent = '✅ 已确认';
+                    approveBtn.innerHTML = svgIcon('check') + '已确认';
                     approveBtn.disabled = true;
                     submitBtn.disabled = true;
                     wrap.querySelectorAll('.ap-section').forEach(el => el.classList.remove('selected'));
@@ -1818,7 +1818,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         type: 'reviseWalkthroughWithAnnotations',
                         annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
                     });
-                    submitBtn.textContent = '✅ 已提交';
+                    submitBtn.innerHTML = svgIcon('check') + '已提交';
                     submitBtn.disabled = true;
                     approveBtn.disabled = true;
                 });
@@ -2169,8 +2169,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const group = document.getElementById('apiKeyGroup')!;
         if (providerId === 'ollama') { group.style.display = 'none'; return; }
         group.style.display = '';
-        if (p && p.hasKey) { status.textContent = '✅ 已配置 API Key'; status.style.color = '#4caf50'; }
-        else { status.textContent = '⚠️ 尚未配置 API Key'; status.style.color = '#ff9800'; }
+        if (p && p.hasKey) { status.innerHTML = svgIcon('check') + '已配置 API Key'; status.style.color = '#4caf50'; }
+        else { status.innerHTML = svgIcon('warning') + '尚未配置 API Key'; status.style.color = '#ff9800'; }
     }
 
     function onProviderChange() {

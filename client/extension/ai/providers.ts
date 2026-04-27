@@ -726,6 +726,51 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
 }
 
 /**
+ * Dynamic output token limits for API calls to prevent self-truncation.
+ * Deep reasoning models (like DeepSeek R1) consume their output budget with 
+ * <think> tokens and can easily exceed 8k boundary limit.
+ */
+export function getModelOutputTokens(model: string, providerId?: string): number {
+    if (!model) return 8192;
+    const lower = model.toLowerCase();
+
+    // Strict provider constraints that error out if exceeded
+    if (providerId === 'openai') {
+        return 16384; 
+    }
+    if (providerId === 'deepseek') {
+        // Official DeepSeek API hard cap is 8192. If exceeded, it throws 400.
+        return 8192;
+    }
+    if (providerId === 'claude' || lower.includes('claude')) {
+        return 8192;
+    }
+    if (providerId === 'minimax' || providerId === 'minimax-token-plan' || providerId?.includes('minimax') || lower.includes('minimax')) {
+        // MiniMax strictly limits output; large values cause ungraceful stream termination
+        return 8192;
+    }
+    if (providerId === 'glm' || lower.includes('glm')) {
+        // Zhipu restricts to 8K
+        return 8192;
+    }
+
+    // OpenAI-compatible / Proxy providers (OpenCode, OpenRouter, SiliconFlow, Ollama)
+    // usually auto-cap or support massive limits natively.
+    if (lower.includes('deepseek') || lower.includes('r1')) {
+        return 65536; // Necessary for massive reasoning loops
+    }
+    if (lower.includes('gemini')) {
+        return 65536; // Gemini 2.5/3.0 supports 64k+ output
+    }
+    if (lower.includes('qwen') && (lower.includes('3') || lower.includes('max') || lower.includes('plus'))) {
+        return 32768; 
+    }
+    
+    // Default to a safe large value for OpenAI-compatibles instead of 8192
+    return 32768;
+}
+
+/**
  * Get a provider config by ID, falling back to custom.
  */
 export function getProvider(id: string): AIProviderConfig {

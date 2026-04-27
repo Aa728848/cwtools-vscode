@@ -43,15 +43,45 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_rules',
-            description: 'Query the syntax rules for triggers, effects, scope changes, or modifiers. Returns the valid syntax, required parameters, and supported scopes for each rule. Use this to understand the correct syntax before generating code.',
+            description: 'Query the syntax rules for triggers, effects, scope changes, or modifiers. Returns the valid syntax, required parameters, and supported scopes for each rule. If a specific name is not found, it returns intelligent fuzzy suggestions. Use this to understand the correct syntax before generating code.',
             parameters: {
                 type: 'object',
                 properties: {
                     category: { type: 'string', enum: ['trigger', 'effect', 'scope_change', 'modifier'], description: 'Rule category' },
-                    name: { type: 'string', description: 'Specific rule name (optional, lists all if omitted)' },
-                    scope: { type: 'string', description: 'Filter by supported scope (optional)' },
+                    name: { type: 'string', description: 'Specific rule name (optional, lists all if omitted or returns fuzzy matches if exact miss)' },
+                    scope: { type: 'string', description: 'Filter by supported scope (e.g. "planet", "country"). Optional, but heavily recommended. Use query_scope to find your current context first.' },
                 },
                 required: ['category'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'ignore_validation_error',
+            description: 'Provide an explicit override to ignore a CWTools LSP validation error if you are confident the code is structurally correct (e.g. newer game specific syntax or valid dynamic modifier). This will prompt the human user for Permission. If granted, the rule is saved to local memory permanently.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    errorId: { type: 'string', description: 'The exact error ID, rule name, or text snippet being falsely flagged by the LSP.' },
+                    reason: { type: 'string', description: 'A brief technical explanation of why this error is a false positive and should be ignored.' },
+                },
+                required: ['errorId', 'reason'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'get_pdx_block',
+            description: 'Extract exactly one complete AST block (including all its nested {...} brackets) instead of blindly guessing line numbers. Useful when trying to read long vanilla files without exhausting context. Provide the exact symbol name if available.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path' },
+                    symbol: { type: 'string', description: 'Name of the top-level block/identifier to extract (e.g. event id "anomaly.1" or "ship_size_corvette")' },
+                },
+                required: ['file', 'symbol'],
             },
         },
     },
@@ -105,13 +135,15 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_mod_files',
-            description: 'Search for files containing specific text patterns across the ENTIRE mod workspace (all workspace folders). Case-insensitive. Returns up to 50 matching files with up to 20 matching lines each. Use this for broad workspace searches. For narrower searches, supply the "directory" parameter (e.g. "common/scripted_triggers"). If no results, try a shorter or different query.',
+            description: 'Search for files containing specific text patterns. By default, searches the mod workspace. To search vanilla code precisely, change searchContext to "vanilla" and set exactMatch to true.',
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Text to search for (case-insensitive)' },
+                    query: { type: 'string', description: 'Text to search for' },
                     directory: { type: 'string', description: 'Optional subdirectory to restrict search, e.g. "common/scripted_triggers" or "events"' },
                     fileExtension: { type: 'string', description: 'File extension filter, default ".txt". Use ".yml" for localisation.' },
+                    exactMatch: { type: 'boolean', description: 'If true, searches exactly matching complete words using RegEx boundaries. Default: false (wide .includes match)' },
+                    searchContext: { type: 'string', enum: ['mod', 'vanilla', 'both'], description: 'Context to search. "mod" searches workspace. "vanilla" searches the base game directory cached by CWTools. Default "mod".' }
                 },
                 required: ['query'],
             },
@@ -210,13 +242,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_file',
-            description: 'Write content to a file, replacing its entire content. Use this for creating brand-new files (do NOT use validate_code for this). If agentFileWriteMode is "confirm", shows a diff view for user approval.',
+            description: 'Write content to a file. **CRITICAL: You are ONLY allowed to use this tool to create BRAND-NEW files.** If you try to overwrite an existing file with this tool, it will crash and block you. To edit an existing file, you MUST use `edit_file` or `multiedit`.',
             parameters: {
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
                     content: { type: 'string', description: 'New file content' },
-                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Use utf8bom if sibling files in the same directory have a BOM header (\\uFEFF). Default: utf8bom (Stellaris files typically use UTF-8 BOM).' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Localisation files (.yml) MUST use utf8bom. All other code files (.txt, .gui, etc.) MUST use utf8. Omit to let the system auto-detect.' },
                 },
                 required: ['file', 'content'],
             },
@@ -234,7 +266,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     oldString: { type: 'string', description: 'The exact text to replace. **Use empty string "" to create a new file.**' },
                     newString: { type: 'string', description: 'The replacement text (must differ from oldString)' },
                     replaceAll: { type: 'boolean', description: 'If true, replace all occurrences. Default: false.' },
-                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding for new files. Use utf8bom if sibling files have BOM. Default: utf8bom.' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding for new files. Localisation (.yml) MUST be utf8bom, other code MUST be utf8. Omit to let the system auto-detect.' },
                 },
                 required: ['filePath', 'oldString', 'newString'],
             },
@@ -418,7 +450,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                             required: ['oldString', 'newString'],
                         },
                     },
-                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Default: utf8bom.' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Localisation (.yml) MUST be utf8bom, other code MUST be utf8. Omit to auto-detect.' },
                 },
                 required: ['filePath', 'edits'],
             },

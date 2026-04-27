@@ -308,6 +308,8 @@ export interface SearchModFilesArgs {
     query: string;
     directory?: string;
     fileExtension?: string;
+    exactMatch?: boolean;
+    searchContext?: 'mod' | 'vanilla' | 'both';
 }
 
 export interface SearchModFilesResult {
@@ -467,6 +469,9 @@ export type AgentToolName =
     | 'get_entity_info'
     | 'query_static_modifiers'
     | 'query_variables'
+    // ── Error Resolution tools ──
+    | 'ignore_validation_error'
+    | 'get_pdx_block'
     // ── MCP tools ──
     | 'mcp_call';
 

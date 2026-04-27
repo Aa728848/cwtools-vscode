@@ -81,8 +81,11 @@ export class FileToolHandler {
         let shouldAddBom = hasBom;
         if (requestedEncoding) {
             shouldAddBom = requestedEncoding === 'utf8bom';
-        } else if (filePath.endsWith('.yml') && (filePath.replace(/\\/g, '/').includes('/localisation/'))) {
+        } else if (filePath.endsWith('.yml')) {
             shouldAddBom = true;
+        } else {
+            shouldAddBom = false; // Fallback to no BOM for all other files if requestedEncoding is not set and hasBom is false for a new file.
+            if (hasBom) shouldAddBom = true; // Preserve an existing BOM
         }
 
         const finalContent = shouldAddBom ? '\uFEFF' + content : content;
@@ -227,6 +230,12 @@ export class FileToolHandler {
     async writeFile(args: { file: string; content: string; encoding?: string }): Promise<import('../types').WriteFileResult> {
         try {
             args.file = this.resolveAndAssertInWorkspace(args.file);
+            
+            // 安全阻断：禁止覆写
+            if (fs.existsSync(args.file)) {
+                return { success: false, message: "文件已存在！为防止破坏性覆盖，严禁使用 write_file 覆写已有文件。请使用 edit_file 或 multiedit 进行局部改写。" };
+            }
+
             const { content: originalContent, hasBom } = this.readTextFile(args.file);
             this.ctx.onBeforeFileWrite?.(args.file, originalContent);
 
@@ -404,8 +413,23 @@ export class FileToolHandler {
         const startLineIdx = Math.max(0, matchedNode.line - 1);
         const endLineIdx = matchedNode.endLine ? Math.max(0, matchedNode.endLine - 1) : startLineIdx;
 
+        // Intelligent indentation tracking
+        const baseIndentMatch = (lines[startLineIdx] || '').match(/^[\s\t]*/);
+        const baseIndent = baseIndentMatch ? baseIndentMatch[0] : '';
+        const targetIndent = (args.action === 'append' || args.action === 'prepend') ? baseIndent + '\t' : baseIndent;
         const ending = originalContent.includes('\r\n') ? '\r\n' : '\n';
-        const payloadLines = args.payload ? args.payload.replace(/\r\n/g, '\n').split('\n').map((l: string) => l + (ending === '\r\n' ? '\r' : '')) : [];
+        
+        const rawPayloadLines = args.payload ? args.payload.replace(/\r\n/g, '\n').split('\n') : [];
+        const minIndent = rawPayloadLines.filter(l => l.trim().length > 0).reduce((min, l) => {
+             const match = l.match(/^[\s\t]*/);
+             return Math.min(min, match ? match[0].length : 0);
+        }, Infinity);
+
+        const payloadLines = rawPayloadLines.map(l => {
+            if (l.trim().length === 0) return (ending === '\r\n' ? '\r' : '');
+            const relativeLine = l.substring(minIndent === Infinity ? 0 : minIndent);
+            return targetIndent + relativeLine + (ending === '\r\n' ? '\r' : '');
+        });
 
         const newLines = [...lines];
         if (args.action === 'replace') {
@@ -532,9 +556,22 @@ export class FileToolHandler {
                 }
             }
         }
-        const nearbyDiags = editedRegionLines.size > 0
+        let nearbyDiags = editedRegionLines.size > 0
             ? diagnostics.filter(d => editedRegionLines.has(d.line))
             : diagnostics;
+        
+        // Cap diagnostics output to prevent LLM doom-loop from spammy vanilla rules
+        if (nearbyDiags.length > 20) {
+             const errorDiags = nearbyDiags.filter(d => d.severity === 'error');
+             if (errorDiags.length >= 20) {
+                 nearbyDiags = errorDiags.slice(0, 20);
+             } else if (errorDiags.length > 0) {
+                 nearbyDiags = [...errorDiags, ...nearbyDiags.filter(d => d.severity !== 'error').slice(0, 20 - errorDiags.length)];
+             } else {
+                 nearbyDiags = nearbyDiags.slice(0, 20);
+             }
+        }
+
         let message = `multiedit: ${args.edits.length} 个编辑已应用到 ${path.basename(filePath)}`;
         const errorDiags = nearbyDiags.filter(d => d.severity === 'error');
         if (errorDiags.length > 0) {

@@ -4,6 +4,7 @@
  */
 
 const vscode = acquireVsCodeApi();
+import { Icons, svgIcon } from './svgIcons';
 
 // ─── Types (mirrors parser output) ──────────────────────────────────────────
 
@@ -1631,7 +1632,7 @@ function updatePropertiesPanel() {
     html += `<div class="prop-group-title">操作</div>`;
     html += `<div class="prop-row"><button class="prop-input btn-jump-to-line" data-jump-line="${body.line}" style="width:100%;text-align:center;cursor:pointer;padding:4px 8px">跳转到源码 (行 ${body.line})</button></div>`;
     if (editMode) {
-        html += `<div class="prop-row" style="justify-content:center;margin-top:4px"><span style="font-size:10px;color:var(--text-muted)">💡 右键画布可添加新行星</span></div>`;
+        html += `<div class="prop-row" style="justify-content:center;margin-top:4px"><span style="font-size:10px;color:var(--text-muted)">${svgIcon('lightbulb')} 右键画布可添加新行星</span></div>`;
     }
     html += `</div>`;
 

@@ -163,6 +163,8 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.documentSymbols(args as any); break;
             case 'workspace_symbols':
                 result = await this.lspHandler.workspaceSymbols(args as any); break;
+            case 'get_pdx_block':
+                result = await this.lspHandler.getPdxBlock(args as any); break;
             case 'lsp_operation':
                 result = await this.lspHandler.lspOperation(args as any); break;
             case 'query_definition':
@@ -211,6 +213,8 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.todoWrite(args as any); break;
             case 'spawn_sub_agents':
                 result = await this.externalHandler.spawnSubAgents(args as any); break;
+            case 'ignore_validation_error':
+                result = await this.externalHandler.ignoreValidationError(args as any); break;
             case 'analyze_diagnostic_error':
                 result = {
                     success: true,

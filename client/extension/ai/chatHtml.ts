@@ -6,6 +6,7 @@
  */
 
 import * as vs from 'vscode';
+import { Icons, svgIcon, svgIconNoMargin } from '../../webview/svgIcons';
 
 /**
  * Build the full HTML document for the chat panel WebView.
@@ -67,10 +68,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <div style="font-size:13px;font-family:Georgia,serif;">Eddy CWTool Code Assistant</div>
         <div class="empty-tagline">描述你的需求，AI 将生成并验证 Paradox 脚本</div>
         <div class="suggest-cards">
-            <button class="suggest-card" data-suggest="检查当前文件的 LSP 错误并修复"><span class="suggest-card-icon">🔍</span>检查 LSP 错误</button>
-            <button class="suggest-card" data-suggest="解释 from、root、prev 这三个作用域的区别和用法"><span class="suggest-card-icon">📖</span>作用域解释</button>
-            <button class="suggest-card" data-suggest="为当前触发器添加详细注释说明其逻辑"><span class="suggest-card-icon">✏️</span>添加注释</button>
-            <button class="suggest-card" data-suggest="分析当前文件并列出潜在的语法和逻辑问题"><span class="suggest-card-icon">🛡️</span>代码审查</button>
+            <button class="suggest-card" data-suggest="检查当前文件的 LSP 错误并修复"><span class="suggest-card-icon">${Icons.search}</span>检查 LSP 错误</button>
+            <button class="suggest-card" data-suggest="解释 from、root、prev 这三个作用域的区别和用法"><span class="suggest-card-icon">${Icons.book}</span>作用域解释</button>
+            <button class="suggest-card" data-suggest="为当前触发器添加详细注释说明其逻辑"><span class="suggest-card-icon">${Icons.edit}</span>添加注释</button>
+            <button class="suggest-card" data-suggest="分析当前文件并列出潜在的语法和逻辑问题"><span class="suggest-card-icon">${Icons.shield}</span>代码审查</button>
         </div>
     </div>
 </div>
@@ -109,11 +110,11 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 <div class="settings-page" id="settingsPage">
     <div class="settings-header">
         <button class="settings-back-btn" id="settingsBackBtn">←</button>
-        <span class="settings-title">⚙ AI 设置</span>
+        <span class="settings-title">${svgIcon('gear')} AI 设置</span>
     </div>
     <div class="settings-body">
         <div class="accordion-section open" id="chatModelSection">
-            <div class="accordion-header" id="accChat"><span>🤖 对话模型</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-header" id="accChat"><span>${svgIcon('bot')} 对话模型</span><span class="accordion-arrow">▶</span></div>
             <div class="accordion-body">
                 <div class="settings-group">
                     <label class="settings-label">Provider</label>
@@ -124,31 +125,31 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <div class="model-row" style="position:relative">
                         <input class="settings-input" id="settingsModelInput" type="text" placeholder="输入模型名，或点右侧下拉框搜索" autocomplete="off" />
                         <div id="settingsModelDatalist" class="ap-dropdown"></div>
-                        <button class="detect-btn" id="delModelBtn" style="margin-left:4px; padding:0 8px; width:auto;" title="删除列表中当前字面的模型">🗑️ 删除</button>
-                        <button class="detect-btn" id="detectBtn" style="display:none; margin-left:4px;">🔍 检测</button>
+                        <button class="detect-btn" id="delModelBtn" style="margin-left:4px; padding:0 8px; width:auto;" title="删除列表中当前字面的模型">${svgIcon('trash')}删除</button>
+                        <button class="detect-btn" id="detectBtn" style="display:none; margin-left:4px;">${svgIcon('search')}检测</button>
                     </div>
                     <div class="settings-hint" id="modelHint"></div>
                 </div>
                 <div class="settings-group" id="apiKeyGroup">
-                    <label class="settings-label">🔑 API Key</label>
+                    <label class="settings-label">${svgIcon('key')} API Key</label>
                     <div class="settings-hint" id="apiKeyStatus" style="color:#4caf50;margin-bottom:3px;"></div>
                     <div class="settings-key-row">
                         <input class="settings-input" id="settingsApiKey" type="password" placeholder="输入新 Key（留空保留已有）" autocomplete="off" />
                         <button class="key-toggle-btn" id="keyToggleBtn">👁</button>
-                        <button class="detect-btn" id="fetchApiModelsBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="用此 Key 去对应端点拉取模型">☁️ 获取模型</button>
+                        <button class="detect-btn" id="fetchApiModelsBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="用此 Key 去对应端点拉取模型">${svgIcon('cloud')}获取模型</button>
                     </div>
                 </div>
                 <div class="settings-group">
-                    <label class="settings-label">🌐 Endpoint <span style="opacity:0.5;font-weight:400">(可选)</span></label>
+                    <label class="settings-label">${svgIcon('link')} Endpoint <span style="opacity:0.5;font-weight:400">(可选)</span></label>
                     <input class="settings-input" id="settingsEndpoint" type="text" placeholder="留空使用默认" />
                     <div class="settings-hint" id="endpointHint"></div>
                 </div>
                 <div class="settings-group">
-                    <label class="settings-label">📏 上下文大小 (tokens)</label>
+                    <label class="settings-label">${svgIcon('ruler')} 上下文大小 (tokens)</label>
                     <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="0 = provider 默认" />
                 </div>
                 <div class="settings-group">
-                    <label class="settings-label">🧠 思考深度 / Reasoning Effort <span style="opacity:0.5;font-weight:400">(供支持的模型使用)</span></label>
+                    <label class="settings-label">${svgIcon('stethoscope')} 思考深度 / Reasoning Effort <span style="opacity:0.5;font-weight:400">(供支持的模型使用)</span></label>
                     <select class="settings-select" id="settingsReasoningEffort">
                         <option value="low">Low (快速)</option>
                         <option value="medium">Medium (中等)</option>
@@ -159,7 +160,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
             </div>
         </div>
         <div class="accordion-section" id="inlineSection">
-            <div class="accordion-header" id="accInline"><span>✏️ 补全模型</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-header" id="accInline"><span>${svgIcon('edit')} 补全模型</span><span class="accordion-arrow">▶</span></div>
             <div class="accordion-body">
                 <div class="settings-toggle-row">
                     <span class="settings-toggle-label">启用 AI 补全</span>
@@ -198,15 +199,15 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
             <span style="font-size:11px; opacity:0.5; letter-spacing:0.05em;">行为与工具</span>
         </div>
         <div class="accordion-section" id="mcpSection" style="margin-top: 12px;">
-            <div class="accordion-header" id="accMcp"><span>🔌 MCP (模型上下文协议)</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-header" id="accMcp"><span>${svgIcon('plugin')} MCP (模型上下文协议)</span><span class="accordion-arrow">▶</span></div>
             <div class="accordion-body">
                 <div class="settings-hint" style="margin-bottom: 5px;">配置外部数据源为 AI 代理注入额外的上下文上下文信息。</div>
                 <div id="mcpServersList" style="display:flex; flex-direction:column; gap:8px;"></div>
-                <button class="settings-test-btn" id="addMcpServerBtn" style="margin-top: 4px;">➕ 新增 MCP Server</button>
+                <button class="settings-test-btn" id="addMcpServerBtn" style="margin-top: 4px;">${svgIcon('plus')}新增 MCP Server</button>
             </div>
         </div>
         <div class="accordion-section" id="agentSection" style="margin-top: 12px;">
-            <div class="accordion-header" id="accAgent"><span>🛡️ Agent 设置</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-header" id="accAgent"><span>${svgIcon('shield')} Agent 设置</span><span class="accordion-arrow">▶</span></div>
             <div class="accordion-body">
                 <div class="settings-group">
                     <label class="settings-label">文件写入模式</label>
@@ -221,13 +222,13 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <div class="settings-hint" style="margin-top:4px;">在出错自动修复时，强制 AI 优先调用分析工具“口述”修正方案以降低幻觉率。会增加一些请求延迟。</div>
                 </div>
                 <div class="settings-group">
-                    <label class="settings-label">🔍 Brave Search API Key <span style="opacity:0.5;font-weight:400">(可选，用于 web_search 工具)</span></label>
+                    <label class="settings-label">${svgIcon('search')} Brave Search API Key <span style="opacity:0.5;font-weight:400">(可选)</span></label>
                     <div class="settings-key-row">
                         <input class="settings-input" id="braveSearchApiKey" type="password" placeholder="留空则使用 DuckDuckGo 降级搜索" autocomplete="off" />
                         <button class="key-toggle-btn" id="braveKeyToggleBtn" onclick="var k=document.getElementById('braveSearchApiKey');k.type=k.type==='password'?'text':'password';">👁</button>
                     </div>
                     <div class="settings-hint">填写后 web_search 工具将使用 Brave Search API，结果质量更高。Key 请在 <a href="https://api.search.brave.com/" target="_blank" rel="noopener">api.search.brave.com</a> 获取。</div>
-                    <label class="settings-label">🔎 Exa API Key <span style="opacity:0.5;font-weight:400">(可选，用于 codesearch 工具)</span></label>
+                    <label class="settings-label">${svgIcon('search')} Exa API Key <span style="opacity:0.5;font-weight:400">(可选)</span></label>
                     <div class="settings-key-row">
                         <input class="settings-input" id="exaApiKey" type="password" placeholder="留空则使用 Brave/DuckDuckGo 降级搜索" autocomplete="off" />
                         <button class="key-toggle-btn" id="exaKeyToggleBtn" onclick="var k=document.getElementById('exaApiKey');k.type=k.type==='password'?'text':'password';">👁</button>
@@ -237,22 +238,22 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
             </div>
         </div>
         <div class="accordion-section" id="usageSection" style="margin-top: 12px; border-color: rgba(100,149,237,0.3);">
-            <div class="accordion-header" id="accUsage"><span>📊 Token 消耗统计</span><span class="accordion-arrow">▶</span></div>
+            <div class="accordion-header" id="accUsage"><span>${svgIcon('chart')} Token 消耗统计</span><span class="accordion-arrow">▶</span></div>
             <div class="accordion-body">
                 <div class="settings-group">
                     <div id="usageStatsContent" style="font-size:12px; line-height: 1.6; opacity: 0.9;">
                         加载中...
                     </div>
-                    <button class="settings-test-btn" id="refreshUsageBtn" style="margin-top: 8px;">🔄 刷新统计</button>
-                    <button class="settings-test-btn" id="clearUsageBtn" style="margin-top: 5px; color: #e66; border-color: rgba(200,80,80,0.3);">🗑️ 清空统计</button>
+                    <button class="settings-test-btn" id="refreshUsageBtn" style="margin-top: 8px;">${svgIcon('refresh')}刷新统计</button>
+                    <button class="settings-test-btn" id="clearUsageBtn" style="margin-top: 5px; color: #e66; border-color: rgba(200,80,80,0.3);">${svgIcon('trash')}清空统计</button>
                 </div>
             </div>
         </div>
     </div>
     <div class="settings-footer">
         <div class="test-result" id="testResult"></div>
-        <button class="settings-test-btn" id="testConnBtn">🧪 测试连接</button>
-        <button class="settings-save-btn" id="saveSettingsBtn">💾 保存设置</button>
+        <button class="settings-test-btn" id="testConnBtn">${svgIcon('info')}测试连接</button>
+        <button class="settings-save-btn" id="saveSettingsBtn">${svgIcon('save')}保存设置</button>
     </div>
 </div>
 

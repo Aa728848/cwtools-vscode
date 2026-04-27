@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Eddy",
 	"license": "MIT",
-	"version": "1.6.7",
+	"version": "1.6.8",
 	"preview": true,
 	"activationEvents": [
 		"onLanguage:stellaris",

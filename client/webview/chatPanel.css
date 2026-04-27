@@ -249,8 +249,10 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .permission-card-title { font-weight: 600; margin-bottom: 3px; }
 .permission-card-cmd { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; background: rgba(0,0,0,0.25); border-radius: 4px; padding: 3px 6px; margin-top: 4px; opacity: 0.9; word-break: break-all; }
 .permission-card-actions { padding: 7px 10px; display: flex; gap: 6px; background: var(--bg); border-top: 1px solid rgba(255,255,255,0.07); }
-.permission-allow-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
-.permission-deny-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; }
+.permission-allow-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; transition: opacity 0.15s, transform 0.15s; }
+.permission-allow-btn:hover { opacity: 0.85; transform: scale(0.99); }
+.permission-deny-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; transition: background 0.15s; }
+.permission-deny-btn:hover { background: rgba(255,255,255,0.05); }
 
 /* ── Plan file card ── */
 .plan-file-card { display: flex; align-items: flex-start; gap: 10px; background: rgba(100,149,237,0.07); border: 1px solid rgba(100,149,237,0.25); border-radius: 8px; padding: 10px 12px; margin: 6px 0; }

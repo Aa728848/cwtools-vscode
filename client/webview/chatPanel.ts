@@ -112,13 +112,77 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     document.querySelectorAll('.suggest-card').forEach(btn => {
         btn.addEventListener('click', () => {
             const text = btn.getAttribute('data-suggest');
-            if (text) {
+            if (text && !isGenerating) {
                 input.value = text;
                 autoResizeInput();
                 input.focus();
                 setTimeout(() => sendMessage(), 120);
             }
         });
+    });
+
+    // ── Dynamic Event Delegation for AI Options ─────────────────────────────────
+    chatArea.addEventListener('click', e => {
+        const target = e.target as HTMLElement;
+        const btn = target.closest('.ai-option-btn') as HTMLElement;
+        if (btn) {
+            const text = btn.getAttribute('data-suggest');
+            if (text && !isGenerating) {
+                // Check if this is part of a question-card wizard
+                const card = btn.closest('.question-card') as HTMLElement;
+                if (card) {
+                    const bubble = card.closest('.message.assistant') as HTMLElement;
+                    if (bubble) {
+                        const allCards = Array.from(bubble.querySelectorAll('.question-card')) as HTMLElement[];
+                        const cardIndex = allCards.indexOf(card);
+                        
+                        const titleSpan = card.querySelector('.permission-card-title');
+                        const cardTitle = titleSpan && titleSpan.textContent ? titleSpan.textContent.replace('❓ ', '').trim() : `问题 ${cardIndex + 1}`;
+
+                        // Always hide current card
+                        card.style.display = 'none';
+
+                        if (allCards.length > 1) {
+                            // Wizard Mode
+                            const answers = (bubble as any)._collectedAnswers || [];
+                            answers[cardIndex] = text;
+                            (bubble as any)._collectedAnswers = answers;
+                            
+                            // Show next card if available
+                            if (cardIndex + 1 < allCards.length) {
+                                allCards[cardIndex + 1]!.style.display = 'block';
+                                return; // DO NOT send message yet
+                            } else {
+                                // Final card! Prepare the batched message
+                                let combinedMessage = "";
+                                allCards.forEach((c, idx) => {
+                                    const tSpan = c.querySelector('.permission-card-title');
+                                    const title = tSpan && tSpan.textContent ? tSpan.textContent.replace('❓ ', '').trim() : `问题 ${idx + 1}`;
+                                    combinedMessage += `【${title}】: ${answers[idx]}\n`;
+                                });
+                                // Append to existing input
+                                input.value = (input.value ? input.value + '\n\n' : '') + combinedMessage.trim() + '\n';
+                                autoResizeInput();
+                                input.focus();
+                                return;
+                            }
+                        } else {
+                            // Single Card Mode
+                            const formattedText = `【${cardTitle}】: ${text}`;
+                            input.value = (input.value ? input.value + '\n\n' : '') + formattedText + '\n';
+                            autoResizeInput();
+                            input.focus();
+                            return;
+                        }
+                    }
+                }
+                
+                // Normal behavior (not a question card)
+                input.value = (input.value ? input.value + '\n' : '') + text;
+                autoResizeInput();
+                input.focus();
+            }
+        }
     });
 
     // ── Button logic ───────────────────────────────────────────────────────────
@@ -599,6 +663,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
         s = s.replace(/(^|\W)_([^_\n]+)_(\W|$)/g, '$1<em>$2</em>$3');
         s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+        s = s.replace(/\[Option:\s*([^\]]+)\]/gi, '<button class="suggest-card ai-option-btn popup-option" data-suggest="$1" style="display:flex; margin:6px 0; width:fit-content; max-width:98%; text-align:left; word-wrap:break-word; white-space:normal; align-items:flex-start;"><span class="suggest-card-icon" style="margin-top:2px;">👉</span>$1</button>');
         s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
         // eslint-disable-next-line no-control-regex
         s = s.replace(/\x01CODE(\d+)\x01/g, (_: string, i: string) => codeBlocks[parseInt(i)]!);
@@ -609,10 +674,88 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (!rawText) return '';
 
         // Phase 1: extract fenced code blocks to avoid mis-parsing their content
-        const blocks: {lang: string; code: string}[] = [];
-        const text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+        const blocks: {lang: string; code: string; isCard?: boolean}[] = [];
+        let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
             const i = blocks.length; blocks.push({ lang: lang.trim(), code }); return '\x00BLOCK' + i + '\x00';
         });
+
+        // Phase 1.5: extract Question Cards (Highly resilient parser for smaller models)
+        let finalOutputText = "";
+        let questionCardIndex = 0;
+        let inQuestion = false;
+        let qTitle = '';
+        let qOptions: {text: string, desc: string}[] = [];
+
+        function flushQuestionCard() {
+            if (!inQuestion) return;
+            inQuestion = false;
+            if (qOptions.length > 0) {
+                const optionsHtml = qOptions.map(opt => `
+                    <button class="permission-allow-btn ai-option-btn popup-option" data-suggest="${escapeHtml(opt.text)}" style="display:flex; flex-direction:column; align-items:flex-start; text-align:left; width:100%; margin:4px 0; padding:6px 10px; line-height:1.4;">
+                        <span style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px;">${svgIcon('pointer')} ${escapeHtml(opt.text)}</span>
+                        ${opt.desc.trim() ? `<span style="font-size:11.5px; opacity:0.75; margin-top:2px; font-weight:normal;">${escapeHtml(opt.desc.trim())}</span>` : ''}
+                    </button>
+                `).join('');
+                
+                const displayStyle = questionCardIndex === 0 ? "block" : "none";
+                const qIndex = questionCardIndex++;
+                const cardHtml = `
+                <div class="permission-card question-card" data-qindex="${qIndex}" style="margin: 12px 0; display:${displayStyle};">
+                    <div class="permission-card-header">
+                        <span class="permission-card-icon" style="font-size:16px;">${svgIcon('question')}</span>
+                        <div class="permission-card-body">
+                            <div class="permission-card-title" style="font-weight:600; font-size:14px; margin-bottom:4px;">${escapeHtml(qTitle)}</div>
+                        </div>
+                    </div>
+                    <div class="permission-card-actions" style="display:block; padding:0 12px 12px;">
+                        ${optionsHtml}
+                    </div>
+                </div>`;
+                const bIdx = blocks.length;
+                blocks.push({ lang: 'html', code: cardHtml, isCard: true });
+                finalOutputText += '\n\x00BLOCK' + bIdx + '\x00\n';
+            } else {
+                // False alarm, wasn't a valid card or had no options
+                finalOutputText += `:::question ${qTitle}\n`;
+            }
+            qOptions = [];
+            qTitle = '';
+        }
+
+        const lines15 = text.split('\n');
+        for (let j = 0; j < lines15.length; j++) {
+            const line = (lines15[j] || '').trim();
+            // Start of a question block
+            const qStartMatch = line.match(/^(?::::\s*)?question\s+(.+)$/i);
+            if (qStartMatch) {
+                flushQuestionCard(); // Flush previous if it wasn't gracefully closed
+                inQuestion = true;
+                qTitle = qStartMatch[1] || '';
+                continue;
+            }
+            
+            if (inQuestion) {
+                if (line === ':::') {
+                    flushQuestionCard();
+                    continue;
+                }
+                const optMatch = line.match(/^\[Option:\s*([^\]]+)\]\s*(.*)$/i);
+                if (optMatch) {
+                    qOptions.push({ text: optMatch[1] || '', desc: optMatch[2] || '' });
+                } else if (qOptions.length > 0 && line !== '') {
+                    // Accumulate broken newline descriptions
+                    qOptions[qOptions.length - 1]!.desc += ' ' + line;
+                } else if (line !== '') {
+                    // Plain text before any options? We can just append it safely to finalOutputText.
+                    finalOutputText += line + '\n';
+                }
+            } else {
+                // Not in question block, preserve raw text
+                finalOutputText += (lines15[j] || '') + '\n';
+            }
+        }
+        flushQuestionCard(); // Flush any trailing unclosed block
+        text = finalOutputText;
 
         // Phase 2: line-by-line state machine — correctly handles ## headings at any position
         const lines = text.split('\n');
@@ -625,8 +768,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 const t = line.trim();
                 // eslint-disable-next-line no-control-regex
                 if (/^\x00BLOCK\d+\x00$/.test(t)) {
-                    const { lang, code } = blocks[+t.match(/\d+/)![0]!]!;
-                    return '<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>';
+                    const block = blocks[+t.match(/\d+/)![0]!]!;
+                    if (block.isCard) return block.code;
+                    return '<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(block.lang) + '</div><code>' + escapeHtml(block.code) + '</code></div>';
                 }
                 return inlineMd(line);
             });
@@ -646,8 +790,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             // eslint-disable-next-line no-control-regex
             if (/^\x00BLOCK\d+\x00$/.test(trimmed)) {
                 flushPara(paraLines); paraLines = [];
-                const { lang, code } = blocks[+trimmed.match(/\d+/)![0]!]!;
-                out.push('<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(lang) + '</div><code>' + escapeHtml(code) + '</code></div>');
+                const block = blocks[+trimmed.match(/\d+/)![0]!]!;
+                if (block.isCard) {
+                    out.push(block.code);
+                } else {
+                    out.push('<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(block.lang) + '</div><code>' + escapeHtml(block.code) + '</code></div>');
+                }
                 i++; continue;
             }
 

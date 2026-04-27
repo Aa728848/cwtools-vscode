@@ -349,16 +349,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        // Auto-switch from Plan to Build mode if user gives approval implicit keywords
-        if (this.currentMode === 'plan' && !skipAutoModeSwitch) {
-            const lowerText = text.toLowerCase();
-            const approvalKeywords = ['同意', '执行', '开始', 'approved', 'go ahead', 'proceed', 'looks good', '可以', '没问题'];
-            if (approvalKeywords.some(keyword => lowerText.includes(keyword))) {
-                this.switchMode('build');
-                // Add a small delay to ensure UI updates before the agent starts processing
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-        }
 
         // Check if AI is enabled
         const config = this.aiService.getConfig();
@@ -462,7 +452,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             );
 
             // ── Plan mode: suppress explanation in chat, auto-open annotation panel ──
-            if (this.currentMode === 'plan' && result.explanation) {
+            // If the AI is just asking clarification questions (indicated by :::question syntax),
+            // it shouldn't lock into an Implementation Plan yet. Treat it as a conversational turn.
+            const isJustAskingQuestions = result.explanation && result.explanation.includes(':::question');
+
+            if (this.currentMode === 'plan' && result.explanation && !isJustAskingQuestions) {
                 // Chat shows only tool-call steps (no full plan text)
                 this.postMessage({ type: 'generationComplete', result: { ...result, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({

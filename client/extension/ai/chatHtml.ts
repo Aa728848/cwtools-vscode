@@ -48,10 +48,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 
 <div class="topics-panel" id="topicsPanel">
     <div class="topics-panel-header">
-        <button class="new-topic-btn" id="btnNewTopicPanel">＋ 新话题</button>
+        <vscode-button appearance="secondary" class="new-topic-btn" id="btnNewTopicPanel" style="width: 100%">＋ 新话题</vscode-button>
         <div class="topics-search-row">
-            <input type="text" id="topicsSearch" class="topics-search-input" placeholder="🔍 搜索对话..." autocomplete="off" />
-            <button class="icon-btn topics-export-btn" id="btnExportTopic" title="导出当前对话 (Markdown)" style="font-size:11px;padding:4px 7px;">⬇ 导出</button>
+            <vscode-text-field id="topicsSearch" class="topics-search-input" placeholder="🔍 搜索对话..." style="flex:1"></vscode-text-field>
+            <vscode-button appearance="secondary" id="btnExportTopic" title="导出当前对话 (Markdown)">⬇ 导出</vscode-button>
         </div>
     </div>
     <div class="topics-list" id="topicsList"></div>
@@ -68,10 +68,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <div style="font-size:13px;font-family:Georgia,serif;">Eddy CWTool Code Assistant</div>
         <div class="empty-tagline">描述你的需求，AI 将生成并验证 Paradox 脚本</div>
         <div class="suggest-cards">
-            <button class="suggest-card" data-suggest="检查当前文件的 LSP 错误并修复"><span class="suggest-card-icon">${Icons.search}</span>检查 LSP 错误</button>
-            <button class="suggest-card" data-suggest="解释 from、root、prev 这三个作用域的区别和用法"><span class="suggest-card-icon">${Icons.book}</span>作用域解释</button>
-            <button class="suggest-card" data-suggest="为当前触发器添加详细注释说明其逻辑"><span class="suggest-card-icon">${Icons.edit}</span>添加注释</button>
-            <button class="suggest-card" data-suggest="分析当前文件并列出潜在的语法和逻辑问题"><span class="suggest-card-icon">${Icons.shield}</span>代码审查</button>
+            <vscode-button appearance="secondary" class="suggest-card" data-suggest="检查当前文件的 LSP 错误并修复"><span class="suggest-card-icon">${Icons.search}</span>检查 LSP 错误</vscode-button>
+            <vscode-button appearance="secondary" class="suggest-card" data-suggest="解释 from、root、prev 这三个作用域的区别和用法"><span class="suggest-card-icon">${Icons.book}</span>作用域解释</vscode-button>
+            <vscode-button appearance="secondary" class="suggest-card" data-suggest="为当前触发器添加详细注释说明其逻辑"><span class="suggest-card-icon">${Icons.edit}</span>添加注释</vscode-button>
+            <vscode-button appearance="secondary" class="suggest-card" data-suggest="分析当前文件并列出潜在的语法和逻辑问题"><span class="suggest-card-icon">${Icons.shield}</span>代码审查</vscode-button>
         </div>
     </div>
 </div>
@@ -91,17 +91,17 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         </div>
         <div class="input-controls">
             <div class="ctrl-group">
-                <select class="mode-select" id="modeSel" title="切换模式">
-                    <option value="build">构建模式</option>
-                    <option value="plan">计划模式</option>
-                    <option value="explore">分析模式</option>
-                    <option value="general">问答模式</option>
-                    <option value="review">审查模式</option>
-                </select>
+                <vscode-dropdown class="mode-select" id="modeSel" title="切换模式">
+                    <vscode-option value="build">构建模式</vscode-option>
+                    <vscode-option value="plan">计划模式</vscode-option>
+                    <vscode-option value="explore">分析模式</vscode-option>
+                    <vscode-option value="general">问答模式</vscode-option>
+                    <vscode-option value="review">审查模式</vscode-option>
+                </vscode-dropdown>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
                 <button class="img-pick-btn" id="imgPickBtn" title="上传图片">+</button>
             </div>
-            <button class="send-btn" id="sendBtn" title="发送 (Enter)">↑</button>
+            <vscode-button class="send-btn" id="sendBtn" title="发送 (Enter)">↑</vscode-button>
         </div>
     </div>
 </div>

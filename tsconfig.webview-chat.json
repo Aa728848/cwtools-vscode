@@ -3,11 +3,13 @@
         "module": "ES2020",
         "target": "ES2021",
         "noImplicitAny": true,
-        "noImplicitThis": true
+        "noImplicitThis": true,
+        "jsx": "react-jsx",
+        "jsxImportSource": "preact"
     },
     "extends": "./tsconfig.json",
     "include": [
-        "client/webview/chatPanel.ts",
+        "client/webview/chatPanel.tsx",
         "client/webview/vscode.d.ts"
     ],
     "exclude": [

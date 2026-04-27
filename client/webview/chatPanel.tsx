@@ -1,5 +1,30 @@
+import { h, render, Component } from 'preact';
+import { 
+    provideVSCodeDesignSystem, 
+    vsCodeButton, 
+    vsCodeDropdown, 
+    vsCodeOption, 
+    vsCodeTextField, 
+    vsCodeTextArea,
+    vsCodeCheckbox,
+    vsCodePanels,
+    vsCodePanelTab,
+    vsCodePanelView
+} from "@vscode/webview-ui-toolkit";
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 
+// Initialize Toolkit Components
+provideVSCodeDesignSystem().register(
+    vsCodeButton(), 
+    vsCodeDropdown(), 
+    vsCodeOption(), 
+    vsCodeTextField(), 
+    vsCodeTextArea(),
+    vsCodeCheckbox(),
+    vsCodePanels(),
+    vsCodePanelTab(),
+    vsCodePanelView()
+);
 /** Type-safe getElementById with generic cast */
 function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     return document.getElementById(id) as T | null;

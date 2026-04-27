@@ -30,7 +30,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     return document.getElementById(id) as T | null;
 }
 
+import { AppShell } from './components/AppShell';
+
 (function () {
+    const root = document.getElementById('root');
+    if (root) {
+        render(<AppShell />, root);
+    }
+
     const vscode = acquireVsCodeApi();
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
     const input = document.getElementById('input') as HTMLTextAreaElement;

@@ -1,8 +1,6 @@
 import typescript from 'rollup-plugin-typescript2';
 import { copyFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
-import { nodeResolve } from '@rollup/plugin-node-resolve';
-import commonjs from '@rollup/plugin-commonjs';
 
 /** Inline copy plugin — copies a plain JS file to the output directory */
 function copyFile(src, dest) {
@@ -56,7 +54,7 @@ export default [
     },
     // Chat Panel webview bundle
     {
-        input: './client/webview/chatPanel.tsx',
+        input: './client/webview/chatPanel.ts',
         output: {
             file: './release/bin/client/webview/chatPanel.js',
             format: "iife",
@@ -64,8 +62,6 @@ export default [
             indent: false,
         },
         plugins: [
-            nodeResolve(),
-            commonjs(),
             typescript({
                 tsconfig: "tsconfig.webview-chat.json",
                 clean: false,

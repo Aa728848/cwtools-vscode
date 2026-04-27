@@ -232,6 +232,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'cancelWriteFile':
                 void this.resolveWriteConfirmation(msg.messageId, false);
                 break;
+            case 'approveTransaction':
+                void this.agentRunner.commitTransaction(msg.txId);
+                break;
+            case 'rejectTransaction':
+                this.agentRunner.discardTransaction(msg.txId);
+                break;
             case 'quickChangeModel':
                 await this.settingsManager.quickChangeModel(msg.model);
                 break;

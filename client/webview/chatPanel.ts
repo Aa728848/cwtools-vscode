@@ -1020,6 +1020,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     tsum.innerHTML = '<span class="think-pulse spinning"></span>Thinking &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
                 }
             }
+            if (s.transactionCard && s.transactionCard.status === 'pending') {
+                showTransactionCard(s.transactionCard);
+            }
             scrollBottom();
             return;
         }
@@ -1153,6 +1156,40 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             el.style.transform = 'translateY(-4px)';
             setTimeout(() => el.remove(), 260);
         }, delay || 400);
+    }
+    
+    // ── Transaction Card (Batch VFS Commit) ──────────────────────────────
+    function showTransactionCard(cardInfo: any) {
+        const div = document.createElement('div');
+        const card = document.createElement('div');
+        card.className = 'diff-card';
+        const safeId = escapeHtml(cardInfo.id);
+        const filesListHTML = (cardInfo.filesRequested || []).map((f: string) => `<li>${escapeHtml(f.split(/[\\/]/).pop() || f)}</li>`).join('');
+        card.innerHTML =
+            '<div class="diff-card-header">' +
+            svgIcon('edit') + '请求批量应用更改 (' + (cardInfo.filesRequested?.length || 0) + ' 个文件):' +
+            '<ul style="margin: 4px 0; padding-left: 16px; font-size: 11px; font-family: monospace; opacity: 0.8; max-height: 60px; overflow-y: auto;">' + filesListHTML + '</ul>' +
+            '<span class="diff-card-hint">所有的修改会在内存中隔离准备</span></div>' +
+            '<div class="diff-card-actions">' +
+            '<button class="diff-accept-btn" data-txid="' + safeId + '">' + svgIcon('check') + '接受批量提交</button>' +
+            '<button class="diff-reject-btn" data-txid="' + safeId + '">' + svgIcon('x') + '拒绝</button>' +
+            '</div>';
+            
+        (card.querySelector('.diff-accept-btn') as HTMLButtonElement).addEventListener('click', function () {
+            this.disabled = true; (card.querySelector('.diff-reject-btn') as HTMLButtonElement).disabled = true;
+            this.innerHTML = svgIcon('check') + '已接受';
+            vscode.postMessage({ type: 'approveTransaction', txId: cardInfo.id });
+            dismissCard(div, 800);
+        });
+        (card.querySelector('.diff-reject-btn') as HTMLButtonElement).addEventListener('click', function () {
+            this.disabled = true; (card.querySelector('.diff-accept-btn') as HTMLButtonElement).disabled = true;
+            this.textContent = '已拒绝';
+            vscode.postMessage({ type: 'rejectTransaction', txId: cardInfo.id });
+            dismissCard(div, 800);
+        });
+        div.appendChild(card);
+        chatArea.appendChild(div);
+        scrollBottom();
     }
 
     // ── Diff card ──────────────────────────────────────────────────────────────

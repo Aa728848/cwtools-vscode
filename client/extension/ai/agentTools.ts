@@ -56,11 +56,13 @@ export class AgentToolExecutor {
     public agentRunnerRef?: {
         runSubAgent(
             prompt: string,
-            mode: 'explore' | 'general' | 'build',
+            mode: 'explore' | 'general' | 'build' | 'review' | 'gui_expert' | 'script_reviewer',
             parentOptions?: import('./agentRunner').AgentRunnerOptions,
             onStep?: (step: import('./types').AgentStep) => void,
-            parentAccumulator?: import('./types').TokenUsage
+            parentAccumulator?: import('./types').TokenUsage,
+            onFileWrite?: (filePath: string, prevContent: string | null) => void
         ): Promise<string>;
+        pendingTransactions: Map<string, Map<string, string>>;
     };
     /** Parent AgentRunner options (used for sub-agent dispatch to inherit provider/model/abort) */
     public parentRunnerOptions?: import('./agentRunner').AgentRunnerOptions;
@@ -256,6 +258,33 @@ export class AgentToolExecutor {
                 } else {
                     const value = this.sharedMemory.get(key);
                     result = value === undefined ? { found: false } : { found: true, value };
+                }
+                break;
+            }
+            case 'search_memory': {
+                const { query } = args as unknown as { query: string };
+                if (!query) {
+                    result = { success: false, message: 'Missing query argument' };
+                } else {
+                    const qLower = query.toLowerCase();
+                    const matches: Array<{ key: string, preview: string }> = [];
+                    for (const [mKey, mValue] of this.sharedMemory.entries()) {
+                        if (mKey.toLowerCase().includes(qLower) || mValue.toLowerCase().includes(qLower)) {
+                            // Provide up to 150 chars of context around the match
+                            const valLower = mValue.toLowerCase();
+                            const idx = valLower.indexOf(qLower);
+                            let preview = mValue;
+                            if (idx !== -1 && mValue.length > 150) {
+                                const start = Math.max(0, idx - 50);
+                                const end = Math.min(mValue.length, idx + 100);
+                                preview = (start > 0 ? "..." : "") + mValue.substring(start, end) + (end < mValue.length ? "..." : "");
+                            } else if (mValue.length > 150) {
+                                preview = mValue.substring(0, 150) + "...";
+                            }
+                            matches.push({ key: mKey, preview });
+                        }
+                    }
+                    result = { found: matches.length > 0, count: matches.length, matches: matches.slice(0, 50) };
                 }
                 break;
             }

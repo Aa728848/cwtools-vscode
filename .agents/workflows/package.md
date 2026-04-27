@@ -9,6 +9,16 @@ description: 打包 CWTools VSCode 插件为 .vsix 格式（含 Win/Linux/macOS 
 
 ---
 
+## 0. 更新版本号与变更日志（可选项）
+
+在开始打包前，如果需要发布新版本，请确保已手动或通过脚本更新 `release/package.json` 中的 `version` 字段，并在 `release/CHANGELOG.md` 记录本次更新内容。
+
+// turbo
+```powershell
+Write-Host "请确保已修改版本号并记录更新日志！"
+```
+
+
 ## 1. 编译服务端（三平台，自包含，含 .NET 运行时）
 
 依次为三个平台发布 .NET 服务端。**不可并行执行**，否则 dotnet 会因锁冲突导致构建取消。
@@ -63,6 +73,20 @@ Push-Location release; npx @vscode/vsce package; Pop-Location
 ```
 
 产物路径：`release/eddy-stellaris-cwt-<version>.vsix`
+
+## 6. 本地安装
+
+获取 release 目录下最新生成的 `.vsix` 扩展包并强制安装到当前的 VSCode 中。
+
+// turbo
+```powershell
+$vsix = Get-ChildItem -Path release -Filter *.vsix | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($vsix) {
+    code --install-extension $vsix.FullName --force
+} else {
+    Write-Host "未找到可安装的 VSIX 包！"
+}
+```
 
 ---
 

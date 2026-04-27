@@ -50,12 +50,30 @@ export interface FileToolContext {
     onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
     onAutoWritten?: (file: string, isNewFile: boolean) => void;
     vfsOverlay?: Map<string, string>;
+    vfsLocks?: Map<string, Promise<void>>;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
 
 export class FileToolHandler {
     constructor(private ctx: FileToolContext) { }
+
+    private async executeWithLock<T>(filePath: string, operation: () => Promise<T> | T): Promise<T> {
+        if (!this.ctx.vfsLocks) return operation();
+
+        const prevLock = this.ctx.vfsLocks.get(filePath) || Promise.resolve();
+        let release!: () => void;
+        const newLock = new Promise<void>(resolve => release = resolve);
+        
+        this.ctx.vfsLocks.set(filePath, prevLock.then(() => newLock));
+        await prevLock;
+        
+        try {
+            return await operation();
+        } finally {
+            release();
+        }
+    }
 
     private resolveAndAssertInWorkspace(filePath: string): string {
         const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(this.ctx.workspaceRoot, filePath);
@@ -239,35 +257,37 @@ export class FileToolHandler {
     // ─── writeFile ───────────────────────────────────────────────────────────
 
     async writeFile(args: { file: string; content: string; encoding?: string }): Promise<import('../types').WriteFileResult> {
-        try {
-            args.file = this.resolveAndAssertInWorkspace(args.file);
-            
-            // 安全阻断：禁止覆写
-            if (fs.existsSync(args.file)) {
-                return { success: false, message: "文件已存在！为防止破坏性覆盖，严禁使用 write_file 覆写已有文件。请使用 edit_file 或 multiedit 进行局部改写。" };
-            }
-
-            const { content: originalContent, hasBom } = this.readTextFile(args.file);
-            this.ctx.onBeforeFileWrite?.(args.file, originalContent);
-
-            const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
-
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
-                const messageId = `write_${crypto.randomUUID()}`;
-                const confirmed = await this.ctx.onPendingWrite(args.file, args.content, messageId);
-                if (!confirmed) {
-                    return { success: false, message: '用户取消了写入操作' };
+        return this.executeWithLock(args.file, async () => {
+            try {
+                args.file = this.resolveAndAssertInWorkspace(args.file);
+                
+                // 安全阻断：禁止覆写
+                if (fs.existsSync(args.file) && !this.ctx.vfsOverlay) {
+                    return { success: false, message: "文件已存在！为防止破坏性覆盖，严禁使用 write_file 覆写已有文件。请使用 edit_file 或 multiedit 进行局部改写。" };
                 }
-            } else if (this.ctx.onAutoWritten) {
-                const isNewFile = !fs.existsSync(args.file);
-                this.ctx.onAutoWritten(args.file, isNewFile);
-            }
 
-            this.writeTextFile(args.file, args.content, hasBom, args.encoding);
-            return { success: true, message: `文件已写入: ${args.file}` };
-        } catch (e) {
-            return { success: false, message: `写入失败: ${String(e)}` };
-        }
+                const { content: originalContent, hasBom } = this.readTextFile(args.file);
+                this.ctx.onBeforeFileWrite?.(args.file, originalContent);
+
+                const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
+
+                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !this.ctx.vfsOverlay) {
+                    const messageId = `write_${crypto.randomUUID()}`;
+                    const confirmed = await this.ctx.onPendingWrite(args.file, args.content, messageId);
+                    if (!confirmed) {
+                        return { success: false, message: '用户取消了写入操作' };
+                    }
+                } else if (this.ctx.onAutoWritten && !this.ctx.vfsOverlay) {
+                    const isNewFile = !fs.existsSync(args.file);
+                    this.ctx.onAutoWritten(args.file, isNewFile);
+                }
+
+                this.writeTextFile(args.file, args.content, hasBom, args.encoding);
+                return { success: true, message: `文件已写入: ${args.file}` };
+            } catch (e) {
+                return { success: false, message: `写入失败: ${String(e)}` };
+            }
+        });
     }
 
     // ─── editFile (OpenCode-style) ───────────────────────────────────────────
@@ -285,82 +305,81 @@ export class FileToolHandler {
                 message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。示例：edit_file({ "filePath": "/path/to/file.txt", "oldString": "...", "newString": "..." })',
             } as any;
         }
-        try {
-            args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
-        } catch (e) {
-            return { success: false, message: String(e) };
-        }
-        const filePath = args.filePath;
-        const { content: originalContent, hasBom } = this.readTextFile(filePath);
 
-        this.ctx.onBeforeFileWrite?.(filePath, args.oldString === '' ? null : originalContent);
-
-        let newContent: string;
-        if (args.oldString === '') {
-            newContent = args.newString;
-        } else {
-            if (args.oldString === args.newString) {
-                return { success: false, message: 'oldString 与 newString 完全相同，无需修改' };
-            }
-            const ending = this.detectLineEnding(originalContent);
-            const old = this.convertLineEnding(this.normalizeLineEndings(args.oldString), ending);
-            const next = this.convertLineEnding(this.normalizeLineEndings(args.newString), ending);
+        return this.executeWithLock(args.filePath, async () => {
             try {
-                newContent = this.replace(originalContent, old, next, args.replaceAll ?? false);
+                args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
             } catch (e) {
                 return { success: false, message: String(e) };
             }
-        }
+            const filePath = args.filePath;
+            const { content: originalContent, hasBom } = this.readTextFile(filePath);
 
-        const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
+            this.ctx.onBeforeFileWrite?.(filePath, args.oldString === '' ? null : originalContent);
 
-        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
-            const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `edit_${Date.now()}`);
-            if (!confirmed) {
-                return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
-            }
-        } else if (this.ctx.onAutoWritten) {
-            this.ctx.onAutoWritten(filePath, false);
-        }
-
-        try {
-            this.writeTextFile(filePath, newContent, hasBom, args.encoding);
-        } catch (e) {
-            return { success: false, message: `写入失败: ${String(e)}` };
-        }
-
-        const diagnostics = await this.getLspDiagnosticsForFile(filePath);
-        // Only return diagnostics near the edited region to save context
-        const editedLines = new Set<number>();
-        const newLines = args.newString.split('\n');
-        // P2 Fix: use newContent directly instead of re-reading the file (eliminates
-        // redundant I/O and TOCTOU risk — newContent is exactly what was just written)
-        const newContentLines = newContent.split('\n');
-        for (let li = 0; li < newContentLines.length; li++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            if (newLines.some(nl => {
-                const trimmed = nl.trim();
-                return trimmed.length > 8 && newContentLines[li]!.includes(trimmed);
-            })) {
-                for (let r = -10; r <= 10; r++) {
-                    const idx = li + r;
-                    if (idx >= 0 && idx < newContentLines.length) editedLines.add(idx);
+            let newContent: string;
+            if (args.oldString === '') {
+                newContent = args.newString;
+            } else {
+                if (args.oldString === args.newString) {
+                    return { success: false, message: 'oldString 与 newString 完全相同，无需修改' };
+                }
+                const ending = this.detectLineEnding(originalContent);
+                const old = this.convertLineEnding(this.normalizeLineEndings(args.oldString), ending);
+                const next = this.convertLineEnding(this.normalizeLineEndings(args.newString), ending);
+                try {
+                    newContent = this.replace(originalContent, old, next, args.replaceAll ?? false);
+                } catch (e) {
+                    return { success: false, message: String(e) };
                 }
             }
-        }
-        const nearbyDiags = editedLines.size > 0
-            ? diagnostics.filter(d => editedLines.has(d.line))
-            : diagnostics; // fallback: return all if we can't identify region
-        let message = `文件已更新: ${path.basename(filePath)}`;
-        const errors = nearbyDiags.filter(d => d.severity === 'error');
-        if (errors.length > 0) {
-            message += `\n\nLSP 检测到 ${errors.length} 个错误，请修复：\n` +
-                errors.slice(0, 5).map(e => `  第 ${e.line + 1} 行: ${e.message}`).join('\n');
-        }
-        return {
-            success: true, message, diff, diagnostics: nearbyDiags,
-            ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
-        } as any;
+
+            const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
+
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !this.ctx.vfsOverlay) {
+                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `edit_${Date.now()}`);
+                if (!confirmed) {
+                    return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
+                }
+            } else if (this.ctx.onAutoWritten && !this.ctx.vfsOverlay) {
+                this.ctx.onAutoWritten(filePath, false);
+            }
+
+            try {
+                this.writeTextFile(filePath, newContent, hasBom, args.encoding);
+            } catch (e) {
+                return { success: false, message: `写入失败: ${String(e)}` };
+            }
+
+            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+            const editedLines = new Set<number>();
+            const newLines = args.newString.split('\n');
+            const newContentLines = newContent.split('\n');
+            for (let li = 0; li < newContentLines.length; li++) {
+                if (newLines.some(nl => {
+                    const trimmed = nl.trim();
+                    return trimmed.length > 8 && newContentLines[li]!.includes(trimmed);
+                })) {
+                    for (let r = -10; r <= 10; r++) {
+                        const idx = li + r;
+                        if (idx >= 0 && idx < newContentLines.length) editedLines.add(idx);
+                    }
+                }
+            }
+            const nearbyDiags = editedLines.size > 0
+                ? diagnostics.filter(d => editedLines.has(d.line))
+                : diagnostics;
+            let message = `文件已更新: ${path.basename(filePath)}`;
+            const errors = nearbyDiags.filter(d => d.severity === 'error');
+            if (errors.length > 0) {
+                message += `\n\nLSP 检测到 ${errors.length} 个错误，请修复：\n` +
+                    errors.slice(0, 5).map(e => `  第 ${e.line + 1} 行: ${e.message}`).join('\n');
+            }
+            return {
+                success: true, message, diff, diagnostics: nearbyDiags,
+                ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
+            } as any;
+        });
     }
 
     // ─── astMutate ───────────────────────────────────────────────────────────
@@ -372,13 +391,15 @@ export class FileToolHandler {
                 message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。',
             } as any;
         }
-        try {
-            args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
-        } catch (e) {
-            return { success: false, message: String(e) };
-        }
+        
+        return this.executeWithLock(args.filePath, async () => {
+            try {
+                args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
+            } catch (e) {
+                return { success: false, message: String(e) };
+            }
 
-        const filePath = args.filePath;
+            const filePath = args.filePath;
         const { content: originalContent, hasBom } = this.readTextFile(filePath);
         this.ctx.onBeforeFileWrite?.(filePath, originalContent);
 
@@ -471,14 +492,15 @@ export class FileToolHandler {
             return { success: false, message: `写入失败: ${String(e)}` };
         }
 
-        const diagnostics = await this.getLspDiagnosticsForFile(filePath);
-        return {
-            success: true,
-            nodeFound: true,
-            message: `AST surgery successful (${args.action} on ${args.targetPath.join(' -> ')}). 文件已更新: ${path.basename(filePath)}`,
-            diff,
-            diagnostics
-        };
+            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+            return {
+                success: true,
+                nodeFound: true,
+                message: `AST surgery successful (${args.action} on ${args.targetPath.join(' -> ')}). 文件已更新: ${path.basename(filePath)}`,
+                diff,
+                diagnostics
+            };
+        });
     }
 
     // ─── multiEdit ───────────────────────────────────────────────────────────
@@ -494,12 +516,13 @@ export class FileToolHandler {
                 message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。',
             } as any;
         }
-        try {
-            args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
-        } catch (e) {
-            return { success: false, message: String(e) };
-        }
-        const filePath = args.filePath;
+        return this.executeWithLock(args.filePath, async () => {
+            try {
+                args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
+            } catch (e) {
+                return { success: false, message: String(e) };
+            }
+            const filePath = args.filePath;
         const { content: originalContent, hasBom } = this.readTextFile(filePath);
         let content = originalContent;
         this.ctx.onBeforeFileWrite?.(filePath, originalContent || null);
@@ -593,6 +616,7 @@ export class FileToolHandler {
             success: true, message, diff, diagnostics: nearbyDiags,
             ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
         } as any;
+        });
     }
 
     // ─── applyPatch ──────────────────────────────────────────────────────────

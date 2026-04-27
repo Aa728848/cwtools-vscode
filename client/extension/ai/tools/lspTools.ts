@@ -571,6 +571,17 @@ export class LspToolHandler {
             vs.extensions.getExtension('cwtools.cwtools-vscode');
         if (ext) {
             configPaths.push(path.join(ext.extensionPath, 'config'));
+            // Cache directories downloaded by the language server
+            const games = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'ck3', 'vic3', 'eu5'];
+            for (const game of games) {
+                configPaths.push(path.join(ext.extensionPath, '.cwtools', game, 'config'));
+            }
+        }
+        
+        const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
+        const customRulesFolder = cwtoolsConfig.get<string>('rules_folder');
+        if (customRulesFolder) {
+            configPaths.push(customRulesFolder);
         }
 
         for (const configPath of configPaths) {

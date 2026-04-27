@@ -576,7 +576,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_static_modifiers',
-            description: '\u26a0\ufe0f MANDATORY before using any modifier tag in add_modifier. List all static modifiers (from static_modifiers/*.txt files) with their modifier categories. PDXscript modifier tag names are domain-specific and frequently hallucinated by LLMs — always verify that a modifier tag exists and check which scope categories it applies to before using it in generated code.',
+            description: '\u26a0\ufe0f MANDATORY before using any modifier tag in add_modifier. List all static modifiers (from static_modifiers/*.txt files) with their modifier categories. PDXscript modifier tag names are domain-specific and frequently hallucinated by LLMs — always verify that a modifier tag exists. Note: Dynamic or engine-hardcoded modifiers (e.g. planet_storm_*) do NOT appear in static modifiers. If not found here, ALWAYS verify them using `query_rules` with category="modifier" before concluding they are invalid.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -628,6 +628,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     key: { type: 'string', description: 'Unique string identifier.' },
                 },
                 required: ['key'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'search_memory',
+            description: 'Search through the Blackboard memory keys and values using a keyword query. Returns all matching keys and a brief preview of their contents. Useful to discover what data other sub-agents have stored.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'The search query or keyword.' },
+                },
+                required: ['query'],
             },
         },
     },

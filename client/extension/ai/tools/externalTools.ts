@@ -31,6 +31,7 @@ export interface ExternalToolContext {
             parentAccumulator?: import('../types').TokenUsage,
             onFileWrite?: (filePath: string, prevContent: string | null) => void,
         ): Promise<string>;
+        pendingTransactions: Map<string, Map<string, string>>;
     };
     parentRunnerOptions?: import('../agentRunner').AgentRunnerOptions;
     parentTokenAccumulator?: import('../types').TokenUsage;
@@ -470,40 +471,52 @@ export class ExternalToolHandler {
                     timestamp: Date.now(),
                 });
 
-                try {
-                    const result = await this.ctx.agentRunnerRef!.runSubAgent(
-                        task.prompt,
-                        mode,
-                        subAgentOptions,
-                        () => { /* no-op */ },
-                        this.ctx.parentTokenAccumulator,
-                        (filePath, prevContent) => {
-                            if (!globalSnapshots.some(s => s.filePath === filePath)) {
-                                globalSnapshots.push({ filePath, previousContent: prevContent });
+                let lastError = '';
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    try {
+                        const modifiedPrompt = task.prompt + (attempt > 1 ? `\n\n[System] Previous attempt failed with error: ${lastError}. Please fix the issue and try again.` : '');
+                        const result = await this.ctx.agentRunnerRef!.runSubAgent(
+                            modifiedPrompt,
+                            mode,
+                            subAgentOptions,
+                            () => { /* no-op */ },
+                            this.ctx.parentTokenAccumulator,
+                            (filePath, prevContent) => {
+                                if (!globalSnapshots.some(s => s.filePath === filePath)) {
+                                    globalSnapshots.push({ filePath, previousContent: prevContent });
+                                }
+                                this.ctx.onBeforeFileWrite?.(filePath, prevContent);
                             }
-                            this.ctx.onBeforeFileWrite?.(filePath, prevContent);
+                        );
+                        
+                        this.ctx.onStep?.({
+                            type: 'subtask_complete',
+                            content: `✓ ${task.description}`,
+                            subagentType: mode,
+                            timestamp: Date.now(),
+                        });
+                        
+                        return { description: task.description, result };
+                    } catch (e) {
+                        lastError = e instanceof Error ? e.message : String(e);
+                        if (attempt === 2) {
+                            this.ctx.onStep?.({
+                                type: 'subtask_complete',
+                                content: `✗ ${task.description}: ${lastError} (Failed after retry)`,
+                                subagentType: mode,
+                                timestamp: Date.now(),
+                            });
+                            throw e; // Propagate to DAG handler
+                        } else {
+                            this.ctx.onStep?.({
+                                type: 'thinking',
+                                content: `Subtask failed (${lastError}), retrying 1/2...`,
+                                timestamp: Date.now()
+                            });
                         }
-                    );
-                    
-                    this.ctx.onStep?.({
-                        type: 'subtask_complete',
-                        content: `✓ ${task.description}`,
-                        subagentType: mode,
-                        timestamp: Date.now(),
-                    });
-                    
-                    return { description: task.description, result };
-                } catch (e) {
-                    hasError = true;
-                    errorMessage = e instanceof Error ? e.message : String(e);
-                    this.ctx.onStep?.({
-                        type: 'subtask_complete',
-                        content: `✗ ${task.description}: ${errorMessage}`,
-                        subagentType: mode,
-                        timestamp: Date.now(),
-                    });
-                    throw e; // Propagate to trigger global rollback
+                    }
                 }
+                throw new Error('Unreachable');
             };
 
             let completed: Array<{ description: string; result: string }> = [];
@@ -562,7 +575,24 @@ export class ExternalToolHandler {
                                         inDegree.set(dependent, inDegree.get(dependent)! - 1);
                                     }
                                     checkQueue();
-                                }).catch(reject);
+                                }).catch(err => {
+                                    // Partial Success: Log failure, cascade-drop dependents, continue independent branches
+                                    const errMsg = err instanceof Error ? err.message : String(err);
+                                    completed.push({ description: t.description, result: `FAILED: ${errMsg}` });
+                                    running.delete(id);
+                                    
+                                    const dropQueue = [...(adj.get(id) || [])];
+                                    while (dropQueue.length > 0) {
+                                        const dropId = dropQueue.shift()!;
+                                        if (taskMap.has(dropId)) {
+                                            const dt = taskMap.get(dropId);
+                                            completed.push({ description: dt.description, result: `SKIPPED: Dependency failed` });
+                                            taskMap.delete(dropId);
+                                            dropQueue.push(...(adj.get(dropId) || []));
+                                        }
+                                    }
+                                    checkQueue();
+                                });
                             }
                         }
                     };
@@ -585,6 +615,8 @@ export class ExternalToolHandler {
                         status: 'pending'
                     }
                 });
+                
+                this.ctx.agentRunnerRef!.pendingTransactions.set(txId, vfsOverlay);
                 
                 completed.push({
                     description: 'Transaction Batch Emit',

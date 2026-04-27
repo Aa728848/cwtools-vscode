@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.9] — 2026-04-27
+
+### 🤖 多智能体架构加固与原子化事务 (Multi-Agent Concurrency Hardening)
+
+- **[重大更新] 挂载 VFS 事务管理器**：重构了 `AgentRunner` 的状态持久化机制。通过新增的 `pendingTransactions` 管理器，所有子智能体的文件修改现在将被原子化地缓存在内存中。用户可以通过 Chat 面板顶部的 **批量事务卡片** 统一进行 Human-in-the-Loop (HITL) 审阅并一键提交或回滚，彻底解决了多节点并发修改导致的中间态碎文件污染问题。
+- **[重大更新] VFS 异步互斥锁逻辑**：在 `FileToolHandler` 底层引入了 `vfsLocks` 路径互斥锁。针对同一文件的读写操作现在会自动进行异步排队。在大规模并行任务（如全项目 `multiedit`）中，确保了即便多个子智能体同时撞车修改相同模块，代码流也能在逻辑上保持原子排序。
+- **[增强] 子任务自愈机制 (Node-Level Self-Healing)**：拓扑调度器现在具备检测局部崩溃的能力。当子任务由于 LLM 幻觉或网络抖动失败时，系统将自动发起带上下文的重试 (`maxRetries = 2`)。即便最终重试失败，系统也会根据 DAG 依赖关系精准级联跳过受损分支，并确保其他独立并行分支的任务成果能够被安全提交（Partial Success 容错模型）。
+- **[新功能] 语义化 Blackboard 内存检索**：为解决长程会话中共享内存（Blackboard）数据堆积导致的“提示词膨胀”问题，新增 `search_memory` 工具。子智能体可以通过模糊检索快速定位跨节点存储的 AST 或数据清单片段，系统会自动截取命中点周围 150 字符的预览窗格，极大节省了主线流程的 Token 预算。
+- **[修复] `ExternalToolContext` 类型对齐**：修复了子代理派发过程中由于 `agentRunnerRef` 引用丢失导致的 `pendingTransactions` 写入失败及配套的 TS 编译报错。
+
 ## [1.6.8] — 2026-04-27
 
 ### 🛡️ 核心工具层隐患排除与体验优化 (Agent Resilience & Quality of Life)

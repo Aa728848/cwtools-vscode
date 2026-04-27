@@ -487,6 +487,7 @@ export type AgentToolName =
     | 'analyze_diagnostic_error'
     | 'set_memory'
     | 'get_memory'
+    | 'search_memory'
     // ── CWTools Deep API tools ──
     | 'query_definition'
     | 'query_definition_by_name'
@@ -785,6 +786,8 @@ export type WebViewMessage =
     | { type: 'importTopic'; data: string }
     | { type: 'requestUsageStats' }
     | { type: 'promptClearUsageStats' }
+    | { type: 'approveTransaction'; txId: string }
+    | { type: 'rejectTransaction'; txId: string }
     | { type: 'clearUsageStats' };
 
 export type HostMessage =

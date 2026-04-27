@@ -207,6 +207,33 @@ export class AgentRunner {
         this.toolExecutor.agentRunnerRef = this;
     }
 
+    // ─── Transaction Management ────────────────────────────────────────────────
+    public pendingTransactions = new Map<string, Map<string, string>>();
+
+    public async commitTransaction(txId: string): Promise<boolean> {
+        const vfs = this.pendingTransactions.get(txId);
+        if (!vfs) return false;
+
+        try {
+            for (const [filePath, content] of vfs.entries()) {
+                const fs = await import('fs');
+                const path = await import('path');
+                const dir = path.dirname(filePath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(filePath, content, 'utf-8');
+            }
+            this.pendingTransactions.delete(txId);
+            return true;
+        } catch (e) {
+            console.error(`Failed to commit transaction ${txId}:`, e);
+            return false;
+        }
+    }
+
+    public discardTransaction(txId: string): boolean {
+        return this.pendingTransactions.delete(txId);
+    }
+
     /**
      * Run the full agent loop for a user request.
      * Returns the final generation result with code, explanation, and validation status.

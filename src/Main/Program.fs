@@ -773,6 +773,16 @@ type Server(client: ILanguageClient) =
                     inlayHintCache.Clear()
                     
                     let types = game.Types()
+                    
+                    let pathCache = System.Collections.Generic.Dictionary<string, string>()
+                    let getFullName (path: string) =
+                        match pathCache.TryGetValue(path) with
+                        | true, fullname -> fullname
+                        | false, _ ->
+                            let fullname = try FileInfo(path).FullName with _ -> path
+                            pathCache.[path] <- fullname
+                            fullname
+
                     let groupedTypes = 
                         types 
                         |> Map.toList
@@ -781,7 +791,7 @@ type Server(client: ILanguageClient) =
                             else 
                                 vs 
                                 |> Array.toSeq 
-                                |> Seq.map (fun tdi -> (FileInfo(tdi.range.FileName).FullName, typeName, tdi))
+                                |> Seq.map (fun tdi -> (getFullName tdi.range.FileName, typeName, tdi))
                         )
                         |> Seq.groupBy (fun (fname, _, _) -> fname)
                         |> Map.ofSeq
@@ -1776,24 +1786,39 @@ type Server(client: ILanguageClient) =
                         | _ ->
                             let types = game.Types()
 
+                            let pathCache = System.Collections.Generic.Dictionary<string, bool>()
+                            let isTargetFile (tdiPath: string) =
+                                match pathCache.TryGetValue(tdiPath) with
+                                | true, res -> res
+                                | false, _ ->
+                                    let res = 
+                                        if System.String.Equals(tdiPath, filePath, System.StringComparison.OrdinalIgnoreCase) then true
+                                        else 
+                                            try FileInfo(tdiPath).FullName = filePath
+                                            with _ -> false
+                                    pathCache.[tdiPath] <- res
+                                    res
+
                             let lenses =
                                 types
                                 |> Map.toList
                                 |> List.collect (fun (typeName, vs) ->
-                                    vs
-                                    |> Array.toList
-                                    |> List.filter (fun tdi -> FileInfo(tdi.range.FileName).FullName = filePath && not (typeName.Contains(".")))
-                                    |> List.map (fun tdi ->
-                                        let range = convRangeToLSPRange tdi.range
-                                        { range = range
-                                          command = None
-                                          data =
-                                            JsonValue.Record
-                                                [| "typeName", JsonValue.String typeName
-                                                   "id", JsonValue.String tdi.id
-                                                   "filePath", JsonValue.String filePath
-                                                   "line", JsonValue.Number(decimal range.start.line)
-                                                   "character", JsonValue.Number(decimal range.start.character) |] }))
+                                    if typeName.Contains(".") then []
+                                    else
+                                        vs
+                                        |> Array.toList
+                                        |> List.filter (fun tdi -> isTargetFile tdi.range.FileName)
+                                        |> List.map (fun tdi ->
+                                            let range = convRangeToLSPRange tdi.range
+                                            { range = range
+                                              command = None
+                                              data =
+                                                JsonValue.Record
+                                                    [| "typeName", JsonValue.String typeName
+                                                       "id", JsonValue.String tdi.id
+                                                       "filePath", JsonValue.String filePath
+                                                       "line", JsonValue.Number(decimal range.start.line)
+                                                       "character", JsonValue.Number(decimal range.start.character) |] }))
 
                             codeLensCache.[filePath] <- (hash, lenses)
                             evictIfNeeded codeLensCache

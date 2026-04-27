@@ -128,6 +128,14 @@ export class AgentToolExecutor {
         return this.clientGetter();
     }
 
+    suspendLsp = (): void => {
+        try { this.client.sendNotification('cwtools/suspendIndexing'); } catch { /* ignore */ }
+    }
+
+    resumeLsp = (): void => {
+        try { this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
+    }
+
     /** Expose the external handler so AgentRunner can auto-complete todos on task finish. */
     getExternalToolHandler(): ExternalToolHandler {
         return this.externalHandler;

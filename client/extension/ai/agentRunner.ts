@@ -192,8 +192,10 @@ const READ_ONLY_TOOLS = new Set<string>([
     // validate_code is intentionally omitted: it modifies the LSP game state temporarily
 ]);
 
+const globalWriteQueue = new WriteQueue();
+
 export class AgentRunner {
-    private writeQueue = new WriteQueue();
+    private writeQueue = globalWriteQueue;
     constructor(
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,

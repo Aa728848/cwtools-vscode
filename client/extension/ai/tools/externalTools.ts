@@ -36,6 +36,8 @@ export interface ExternalToolContext {
     parentTokenAccumulator?: import('../types').TokenUsage;
     /** C5: File write hook for sub-agent isolation (mirrors FileToolContext.onBeforeFileWrite) */
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
+    suspendLsp?: () => void;
+    resumeLsp?: () => void;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -434,7 +436,6 @@ export class ExternalToolHandler {
         }
 
         const taskList = args.tasks && Array.isArray(args.tasks) ? args.tasks : [];
-        // Legacy single task fallback
         if (taskList.length === 0 && args.prompt && args.description) {
             taskList.push({
                 description: args.description,
@@ -449,11 +450,15 @@ export class ExternalToolHandler {
 
         // Limit to max 3 parallel tasks
         const tasksToRun = taskList.slice(0, 3);
-        
+        const globalSnapshots: Array<{ filePath: string; previousContent: string | null }> = [];
+        let hasError = false;
+        let errorMessage = '';
+
+        this.ctx.suspendLsp?.();
+
         try {
-            const promises = tasksToRun.map(async (task, idx) => {
+            const executeTask = async (task: any, idx: number) => {
                 const mode = (task.subagent_type ?? 'build') as 'explore' | 'general' | 'build';
-                // Emit subtask_start for UI progress visualization
                 this.ctx.onStep?.({
                     type: 'subtask_start',
                     content: `Sub-task ${idx + 1}/${tasksToRun.length}: ${task.description}`,
@@ -461,65 +466,77 @@ export class ExternalToolHandler {
                     timestamp: Date.now(),
                 });
 
-                // new logic
-                const subAgentSnapshots: Array<{ filePath: string; previousContent: string | null }> = [];
-
                 try {
                     const result = await this.ctx.agentRunnerRef!.runSubAgent(
                         task.prompt,
                         mode,
                         this.ctx.parentRunnerOptions,
-                        (step) => {
-                            // Forward sub-agent steps upward; emit subtask_start/complete ourselves
-                        },
+                        () => { /* no-op */ },
                         this.ctx.parentTokenAccumulator,
-                        // Pass snapshot collector — eliminates Hook hijacking
                         (filePath, prevContent) => {
-                            if (!subAgentSnapshots.some(s => s.filePath === filePath)) {
-                                subAgentSnapshots.push({ filePath, previousContent: prevContent });
+                            if (!globalSnapshots.some(s => s.filePath === filePath)) {
+                                globalSnapshots.push({ filePath, previousContent: prevContent });
                             }
                             this.ctx.onBeforeFileWrite?.(filePath, prevContent);
                         }
                     );
-                    // ... subtask_complete emit
+                    
                     this.ctx.onStep?.({
                         type: 'subtask_complete',
                         content: `✓ ${task.description}`,
                         subagentType: mode,
                         timestamp: Date.now(),
                     });
+                    
                     return { description: task.description, result };
                 } catch (e) {
-                    // Rollback unchanged
-                    for (const snap of subAgentSnapshots.reverse()) {
-                        try {
-                            if (snap.previousContent === null) {
-                                if (fs.existsSync(snap.filePath)) fs.unlinkSync(snap.filePath);
-                            } else {
-                                fs.writeFileSync(snap.filePath, snap.previousContent, 'utf-8');
-                            }
-                        } catch (re) {
-                            console.error(`[SubAgent] Rollback failed for ${snap.filePath}:`, re);
-                        }
-                    }
-                    // ... subtask_complete emit
+                    hasError = true;
+                    errorMessage = e instanceof Error ? e.message : String(e);
                     this.ctx.onStep?.({
                         type: 'subtask_complete',
-                        content: `✗ ${task.description}: ${e instanceof Error ? e.message : String(e)} (${subAgentSnapshots.length} file(s) rolled back)`,
+                        content: `✗ ${task.description}: ${errorMessage}`,
                         subagentType: mode,
                         timestamp: Date.now(),
                     });
-                    return { description: task.description, result: `Sub-agent failed: ${e instanceof Error ? e.message : String(e)}` };
+                    throw e; // Propagate to trigger global rollback
                 }
-            });
+            };
 
-            const completed = await Promise.all(promises);
+            let completed: Array<{ description: string; result: string }> = [];
+
+            if (args.sequential) {
+                // Execute sequentially
+                for (let i = 0; i < tasksToRun.length; i++) {
+                    completed.push(await executeTask(tasksToRun[i], i));
+                }
+            } else {
+                // Execute concurrently (Promise.all -> fail fast triggers rollback)
+                completed = await Promise.all(tasksToRun.map((t, i) => executeTask(t, i)));
+            }
+
+            this.ctx.resumeLsp?.();
             return { results: completed };
+
         } catch (e) {
+            // Transactional Rollback for ALL tasks in this batch
+            for (const snap of globalSnapshots.reverse()) {
+                try {
+                    if (snap.previousContent === null) {
+                        if (fs.existsSync(snap.filePath)) fs.unlinkSync(snap.filePath);
+                    } else {
+                        fs.writeFileSync(snap.filePath, snap.previousContent, 'utf-8');
+                    }
+                } catch (re) {
+                    console.error(`[SubAgent] Rollback failed for ${snap.filePath}:`, re);
+                }
+            }
+            
+            this.ctx.resumeLsp?.();
+            const actualError = errorMessage || (e instanceof Error ? e.message : String(e));
             return {
                 results: [{
-                    description: 'Global task error',
-                    result: `Dispatch failed: ${e instanceof Error ? e.message : String(e)}`,
+                    description: 'Transaction Rollback',
+                    result: `Dispatch failed: ${actualError}. All modifications across the cluster (${globalSnapshots.length} files) have been rolled back.`,
                 }]
             };
         }

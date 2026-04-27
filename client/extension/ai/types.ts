@@ -562,6 +562,8 @@ export interface SpawnSubAgentsArgs {
         prompt: string;
         subagent_type?: 'build' | 'explore' | 'general';
     }>;
+    /** If true, executes tasks sequentially instead of concurrently. */
+    sequential?: boolean;
     // Legacy single task support
     description?: string;
     prompt?: string;

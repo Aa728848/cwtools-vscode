@@ -112,10 +112,12 @@ Write files in dependency order (dependencies first, consumers last).
 Start with \`todo_write\` listing all files in dependency order. Mark \`in_progress\` when writing, \`done\` when complete.
 
 #### Rule 5 — MANDATORY Task Walkthrough (CRITICAL)
-Before you conclude any conversation where you have executed file modifications, you **MUST** write a detailed completion report named \`walkthrough.md\` inside the workspace root.
+Before you conclude any conversation where you have executed file modifications, you **MUST** write a detailed completion report named \`walkthrough.md\` inside the Agent Workspace Dir (provided in the Current Editor Context).
 **DO NOT consider the task complete or stop your reasoning until this file is created.** If an edit was requested, your very last action MUST be to generate this file.
 The Walkthrough must document (in Github Flavored Markdown):
-- Changes made
+- Technical approach and methods utilized
+- Detailed list of changes made
+- Specific code blocks added or modified
 - What was tested
 - Validation results
 

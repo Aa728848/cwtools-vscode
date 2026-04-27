@@ -9,15 +9,3 @@ interface VsCodeApi {
 }
 
 declare function acquireVsCodeApi(): VsCodeApi;
-
-declare namespace JSX {
-    interface IntrinsicElements {
-        [elemName: string]: any;
-    }
-}
-
-declare namespace preact.JSX {
-    interface IntrinsicElements {
-        [elemName: string]: any;
-    }
-}

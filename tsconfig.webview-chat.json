@@ -10,8 +10,7 @@
     "extends": "./tsconfig.json",
     "include": [
         "client/webview/chatPanel.tsx",
-        "client/webview/vscode.d.ts",
-        "client/webview/components/**/*.tsx"
+        "client/webview/vscode.d.ts"
     ],
     "exclude": [
         "client/extension/**",

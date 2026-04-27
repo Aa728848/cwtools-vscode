@@ -11,9 +11,7 @@
 		"esModuleInterop": true,
 		"resolveJsonModule": true,
 		"strict": true,
-		"noUncheckedIndexedAccess": true,
-		"jsx": "react-jsx",
-		"jsxImportSource": "preact"
+		"noUncheckedIndexedAccess": true
 	},
 	"include": [
 		"client"

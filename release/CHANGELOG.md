@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.8.2] — 2026-04-28
+
+### 🐛 Bug 修复与体验优化
+
+- **[修复] 预缓存界面持续挂起 Bug**：补充了由 CodeLens 分帧预架构剥离引起的加载条回收漏洞。现在，当后台预扫描池结束 `precacheAllFiles` 时，将会正常下发 `100%` (`totalEntities/totalEntities`) 收尾信息，并向主视窗抛出 `enable: false` 正确注销正在加载的指示轮询。
+
 ## [1.8.1] — 2026-04-28
 
 ### ⚡ 性能优化 (Performance)

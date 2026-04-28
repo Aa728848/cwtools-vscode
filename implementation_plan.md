@@ -1,155 +1,44 @@
-# SemanticTokens Delta 增量解析方案 (重构版)
+# 改进进度条为真百分比填充方案 (Implementation Plan)
 
-## 🎯 业务目标
-将 CWTools VSCode 的 `semanticTokens/full` 全量高亮下发替换为按需发送的 `full/delta` 增量包。
-利用 O(N) 的一维 `int[]` 比对算法，跳过复杂结构体解构带来的 “Relative Line / Char 位移错乱” 的致命隐患，实现极简且安全的增量下发，大幅下压客户端与服务器间的网络与重绘开销。
+本计划旨在优化项目启动时的各类漫长解析进程（如 `precacheAllFiles`），将目前的纯转圈 Loading + 拼接字串更改为真正的且安全的百分比注水进度条，使得等待体验更明确。
 
-> [!CAUTION]
-> **绝对准则**：必须基于已转化好的**相对编码 Int 数组 (`int[]`)**求变更。绝对不能以 `rawTokens (元组类型)` 进行 Diff 求变再重新应用偏移，否则增量点后所有高亮坐标瞬间错位。
+## User Review Required
 
----
+> [!WARNING]
+> **关于显示位置的重大变更申请：**
+> 根据 VS Code API 限制，底部状态栏 (`ProgressLocation.Window`) **不支持**原生的增量进度条显示，只能表现为旋转的 loading spin。为了实现您要求的“真百分比填充”视觉效果，我们**必须**将进度显示位置改为 `ProgressLocation.Notification`。这会在屏幕右下角弹出一个带注水动画的通知框进程。请您核准该项变更。
 
-## 1. 类型体系搭建 (Types.fs)
+## Proposed Changes
 
-必须完全契合 LSP 3.16 官方协议规范定义的字段命名（特别是 `start`，否则客户端拒收）。
+### TypeScript 前端调整
 
-```fsharp
-// Delta 客户端请求载荷：带回上次分配的 resultId
-type SemanticTokensDeltaParams =
-    { textDocument: TextDocumentIdentifier
-      previousResultId: string }
+需要大幅调整接收侧的逻辑，支持 `increment` 并对负值回退进行边界防护，最关键的是更改 `Location`。
 
-// 单次编辑区间描述
-type SemanticTokensEdit =
-    { start: int          // [⚠️重要] 必须命名为 start，非 deleteStart
-      deleteCount: int    // 覆盖旧 Token 的长度 (整数个数)
-      data: int[] }       // 替换的新整数数组片段
+#### [MODIFY] [extension.ts](file:///C:/Users/A/Documents/cwtools-vscode/client/extension/extension.ts)
+- **更新类型定义**：为 `loadingBarParams` 参数追加可选属性 `percentage?: number`。
+- **防止进度回退**：引入外层词法变量 `lastPercentage = 0`，接收到新进度时计算 `inc = Math.max(0, param.percentage - lastPercentage)`。如果是全新的生命周期则重置。
+- **更改 Progress API**：更改 `vs.window.withProgress` 中的 `location: vs.ProgressLocation.Window` 为 `location: vs.ProgressLocation.Notification`，从而激活真正的水平填充条。
+- **传递消息**：在 `.report({ message, increment })` 调用中挂载最新计算的 `inc` 增量。
 
-// 增量返回载荷
-type SemanticTokensDelta =
-    { resultId: string
-      edits: SemanticTokensEdit list }
+--- 
 
-// 合并配置项支持
-type SemanticTokensOptions =
-    { legend: SemanticTokensLegend
-      full: bool
-      range: bool
-      delta: bool } // 初始化时置为 true
+### F# 后端调整
 
-// 请求载荷分发标记
-type Request =
-    ...
-    | SemanticTokensFullDelta of SemanticTokensDeltaParams
+核心改动在于向客户端提供有效的（并确保线程安全的）百分比数据，坚决防范产生 `DivideByZeroException` 导致 LS 崩溃的情况。
 
-// Server 接口
-type ILanguageServer =
-    ...
-    abstract member SemanticTokensFullDelta: SemanticTokensDeltaParams -> Async<Choice<SemanticTokens, SemanticTokensDelta> option>
-```
+#### [MODIFY] [Program.fs](file:///C:/Users/A/Documents/cwtools-vscode/src/Main/Program.fs)
+- **预防除以零灾难**：在 `precacheAllFiles` 等涉及数组总量的统计过程中，强制引入 `totalEntities` 的空值守卫。例如 `let percentage = if totalEntities = 0 then 100 else (entityCount * 100 / totalEntities)`。
+- **生成 JSON Response**：在通过 `client.CustomNotification` 发送 `loadingBar` 更新阶段时，若计算出了 `percentage` 进度，就在打包的 `JsonValue.Record` 数组中追加 `"percentage", JsonValue.Number(decimal percentage)`。
 
----
+## Open Questions
 
-## 2. 路由派发 (LanguageServer.fs)
+> [!IMPORTANT]
+> 如果您觉得右下角的 `Notification` 进度通知由于占空间或者太频繁而过于烦人，并且**坚持要留在底部文字状态栏**，我们也能设计一套“用字符画拼接文本实现假进度”的方案（例：` Precaching UI [█████░░░░░] 50%`）。如果不接受右下角小弹窗，请回复反馈我将采取字符画的备用方案；如果接受的话，请直接审批当前方案。
 
-增加对应的拆包转发规则，由 F# / Newtonsoft 统一序列化处理并下发。
+## Verification Plan
 
-```fsharp
-// 在 processRequest 路由主干内增加 Match 分支：
-| Request.SemanticTokensFullDelta(p) ->
-    ProcessRequest(p, true, fun s -> s.SemanticTokensFullDelta(p))
-```
-
----
-
-## 3. 核心计算与管理控制 (Program.fs)
-
-### 3.1 内存与缓存映射
-
-由于规避了中间结构体的冗余缓存，原先字典仅需新增保存 `resultId`。
-
-```fsharp
-// semanticTokensCache 记录形态： 
-// FilePath -> (contentHash, encodedDataList: int[], resultId)
-let semanticTokensCache =
-    ConcurrentDictionary<string, int * int[] * string>()
-```
-
-### 3.2 纯净版 O(n) 一维数组 Delta 算法
-
-直接对最后完成的生成整型数据做剥头去尾比对。**跨距步长固定为 `5`**（5个整数构筑一个 Semantic Token：deltaLine, deltaChar, length, tokenType, tokenModifiers）。
-
-```fsharp
-let computeDelta (oldTokens: int[]) (newTokens: int[]) =
-    let mutable startIndex = 0
-    // 1. 左侧找不同（步幅为 5）
-    while startIndex < oldTokens.Length && startIndex < newTokens.Length && oldTokens.[startIndex] = newTokens.[startIndex] do
-        startIndex <- startIndex + 5 
-
-    let mutable oldEnd = oldTokens.Length - 5
-    let mutable newEnd = newTokens.Length - 5
-    // 2. 右侧找不同（步幅为 5）
-    while oldEnd >= startIndex && newEnd >= startIndex && oldTokens.[oldEnd] = newTokens.[newEnd] do
-        oldEnd <- oldEnd - 5
-        newEnd <- newEnd - 5
-
-    // 3. 计算移除区与置换插入区
-    let deleteCount = (oldEnd - startIndex + 5) 
-    let inserted    = newTokens.[startIndex .. newEnd + 4] 
-    
-    { start = startIndex
-      deleteCount = deleteCount
-      data = inserted }
-```
-
-### 3.3 请求处理流水线
-
-```fsharp
-// 伪代码执行逻辑：
-member this.SemanticTokensFullDelta(p: SemanticTokensDeltaParams) = async {
-    let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
-    let hash = contentHash fileText
-
-    match semanticTokensCache.TryGetValue(filePath) with
-    | true, (cachedHash, cachedData, cachedResultId) when cachedHash = hash ->
-        // 1. 文件没有被改动，如果是 Delta 请求但客户端已同步该 Hash，返回空 Edit。
-        if p.previousResultId = cachedResultId then 
-            return Choice2Of2 { resultId = cachedResultId; edits = [] }
-        else
-            // 若 resultId 错位，直接下发本地现存最新的 Full 套件即可
-            return Choice1Of2 { resultId = cachedResultId; data = cachedData }
-            
-    | true, (_, oldDataArray, oldResultId) ->
-        // 2. 文件变更且存在缓存根基
-        let newDataArray = 重新遍历_AST_生成_Int_Array_核心函数(...)
-        let newResultId  = System.Guid.NewGuid().ToString()  // [📌新分配 ID]
-        
-        cachePut semanticTokensCache filePath (hash, newDataArray, newResultId)
-
-        // 判断上次持有的 ID 是否匹配，不匹配则强制 Full，阻断连续 Delta 断供
-        if p.previousResultId = oldResultId then
-            let edit = computeDelta oldDataArray newDataArray
-            return Choice2Of2 { resultId = newResultId; edits = [ edit ] }
-        else
-            return Choice1Of2 { resultId = newResultId; data = newDataArray }
-
-    | _ ->
-        // 3. 完全无缓存初始生成
-        let newDataArray = 重新遍历_AST_生成_Int_Array_核心函数(...)
-        let newResultId  = System.Guid.NewGuid().ToString() 
-        cachePut semanticTokensCache filePath (hash, newDataArray, newResultId)
-        
-        return Choice1Of2 { resultId = newResultId; data = newDataArray }
-}
-```
-
-> [!TIP]
-> 这里的 `resultId` 选用了随机 `Guid` 会比利用文件时间戳或累加器来得更加直接与无状态。每次由于 Hash 变更或初次创建触发了全新的分析，分配一组新 ID 并顺势塞给下一个阶段的记录。
-
----
-
-## 4. 预期功能测试路线
-1. 构建执行 `dotnet build src/Main/Main.fsproj -c Release` 保证全量函数和语法闭环。
-2. VS Code Client Trace 日志检查下：首开 File 强制返回 `{ resultId: "guid", data: [...] }`。
-3. 删除一行宏定义，检查 LSP 通道中是否发送出对应的 `delta: { edits: [ { start: N, deleteCount: 5, data: [] } ] }`。
-4. 增删包含代码层及块，验证文件下方的其余高亮不受任何断档、串位影响！
+### Manual Verification
+1. **启动测试**: F5 进行客户端扩展 Debug 启动。
+2. **重度进程监控**: 打开一个大型项目以触发 `precacheAllFiles`。
+3. **视觉测试**: 观察右下脚能否顺利弹出通知框，并平滑填充蓝色的百分比进度条直至 `100%`。
+4. **空项目边界测试**: 强制选择一个不存在 entity 的空文件夹加载作为 Workspace，确认 Language Server 是否安然无恙并迅速关闭通知，而没有发生红字崩盘。

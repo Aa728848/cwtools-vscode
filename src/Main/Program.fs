@@ -915,9 +915,14 @@ type Server(client: ILanguageClient) =
                             for struct(entity, _) in entities do
                                 entityCount <- entityCount + 1
                                 if entityCount % 500 = 0 then
+                                    let pct = if totalEntities = 0 then 100 else entityCount * 100 / totalEntities
                                     client.CustomNotification(
                                         "loadingBar",
-                                        JsonValue.Record [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_PrecachingUI entityCount totalEntities); "enable", JsonValue.Boolean(true) |]
+                                        JsonValue.Record [|
+                                            "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_PrecachingUI entityCount totalEntities)
+                                            "enable", JsonValue.Boolean(true)
+                                            "percentage", JsonValue.Number(decimal pct)
+                                        |]
                                     )
 
                                 let filePath = FileInfo(entity.filepath).FullName
@@ -968,7 +973,11 @@ type Server(client: ILanguageClient) =
                             // Send 100% progress on completion
                             client.CustomNotification(
                                 "loadingBar",
-                                JsonValue.Record [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_PrecachingUI totalEntities totalEntities); "enable", JsonValue.Boolean(true) |]
+                                JsonValue.Record [|
+                                    "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_PrecachingUI totalEntities totalEntities)
+                                    "enable", JsonValue.Boolean(true)
+                                    "percentage", JsonValue.Number 100M
+                                |]
                             )
                             true
                     }

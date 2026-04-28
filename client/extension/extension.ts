@@ -442,7 +442,7 @@ export async function activate(context: ExtensionContext) {
 		const log = client.outputChannel
 		defaultClient = client;
 		client.registerProposedFeatures();
-		interface loadingBarParams { enable: boolean; value: string }
+		interface loadingBarParams { enable: boolean; value: string; percentage?: number }
 		const loadingBarNotification = new NotificationType<loadingBarParams>('loadingBar');
 		interface debugStatusBarParams { enable: boolean; value: string }
 		const debugStatusBarParamsNotification = new NotificationType<debugStatusBarParams>('debugBar');
@@ -522,6 +522,7 @@ export async function activate(context: ExtensionContext) {
 
 		let resolveLoadingBar: (() => void) | undefined;
 		let loadingReporter: vs.Progress<{ message?: string; increment?: number; }> | undefined;
+			let lastPercentage = 0;
 
 		client.onNotification(loadingBarNotification, (param: loadingBarParams) => {
 			if (param.enable) {
@@ -534,11 +535,14 @@ export async function activate(context: ExtensionContext) {
 
 				if (!resolveLoadingBar) {
 					vs.window.withProgress({
-						location: vs.ProgressLocation.Window,
+						location: vs.ProgressLocation.Notification,
+						cancellable: false,
 						title: "CWTools",
 					}, (progress) => {
 						loadingReporter = progress;
-						progress.report({ message: param.value });
+						const inc0 = param.percentage !== undefined ? Math.max(0, param.percentage - lastPercentage) : undefined;
+						lastPercentage = param.percentage ?? lastPercentage;
+						progress.report({ message: param.value, increment: inc0 });
 						return new Promise<void>((resolve) => {
 							resolveLoadingBar = resolve;
 						});
@@ -548,10 +552,13 @@ export async function activate(context: ExtensionContext) {
 					});
 				} else {
 					if (loadingReporter) {
-						loadingReporter.report({ message: param.value });
+						const inc = param.percentage !== undefined ? Math.max(0, param.percentage - lastPercentage) : undefined;
+						lastPercentage = param.percentage ?? lastPercentage;
+						loadingReporter.report({ message: param.value, increment: inc });
 					}
 				}
 			} else {
+				lastPercentage = 0;
 				if (status !== undefined) {
 					status.dispose();
 					status = undefined;

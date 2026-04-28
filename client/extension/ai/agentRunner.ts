@@ -32,6 +32,8 @@ import { getModelPricing } from './pricing';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace } from './contextBudget';
+import { AGENT, SOURCE } from './messages';
+import { ErrorReporter } from './errorReporter';
 
 // Base fallback tool iterations (dynamically scaled in reasoningLoop)
 const MAX_TOOL_ITERATIONS_BASE = 50;
@@ -222,6 +224,25 @@ const TOOL_RESULT_BUDGET_MIN = 3000;
 // Maximum tool result budget (even for huge context windows like 1M)
 const TOOL_RESULT_BUDGET_MAX = 30000;
 
+// ─── Batch 2.3: Checkpoint mechanism ─────────────────────────────────────────
+// Save a lightweight progress checkpoint every N iterations within the reasoning loop.
+// On crash or context-window overflow, the agent can load the last checkpoint
+// instead of starting from scratch.
+const CHECKPOINT_INTERVAL = 10;
+
+// ─── Batch 2.5: Provider fallback retry ──────────────────────────────────────
+// When a provider returns a catastrophic error (5xx, rate-limit after exhaustion,
+// network timeout), the agent can retry with a fallback model.
+// Maps primary provider → fallback provider+model pairs.
+const PROVIDER_FALLBACK: Record<string, { providerId: string; model: string }[]> = {
+    // If the primary provider fails, try these in order:
+    openai:     [{ providerId: 'deepseek', model: 'deepseek-v4-pro' }],
+    deepseek:   [{ providerId: 'openai',   model: 'gpt-5.5' }],
+    claude:     [{ providerId: 'deepseek', model: 'deepseek-v4-pro' }],
+    gemini:     [{ providerId: 'deepseek', model: 'deepseek-v4-pro' }],
+    qwen:       [{ providerId: 'deepseek', model: 'deepseek-v4-pro' }],
+};
+
 export interface AgentRunnerOptions {
     /** Override provider for this run */
     providerId?: string;
@@ -325,13 +346,105 @@ export class AgentRunner {
             this.pendingTransactions.delete(txId);
             return true;
         } catch (e) {
-            console.error(`Failed to commit transaction ${txId}:`, e);
+            ErrorReporter.fatal(SOURCE.AGENT_RUNNER, `Failed to commit transaction ${txId}`, e);
             return false;
         }
     }
 
     public discardTransaction(txId: string): boolean {
         return this.pendingTransactions.delete(txId);
+    }
+
+    // ─── Batch 2.3: Checkpoint save/load ─────────────────────────────────────
+
+    /**
+     * Save a lightweight checkpoint of agent progress for crash recovery.
+     * Called every CHECKPOINT_INTERVAL iterations in the reasoning loop.
+     */
+    private async saveCheckpoint(
+        iteration: number,
+        messages: ChatMessage[],
+        writtenFiles: string[],
+        topicId?: string
+    ): Promise<void> {
+        try {
+            const fs = await import('fs');
+            const pathModule = await import('path');
+            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!wsRoot) return;
+
+            const checkpointDir = pathModule.join(wsRoot, '.cwtools-ai', topicId || 'default');
+            if (!fs.existsSync(checkpointDir)) fs.mkdirSync(checkpointDir, { recursive: true });
+
+            const checkpoint: import('./types').AgentCheckpoint = {
+                version: 1,
+                timestamp: Date.now(),
+                iteration,
+                writtenFiles,
+                conversationSummary: messages
+                    .filter(m => m.role === 'assistant')
+                    .slice(-3)
+                    .map(m => contentToString(m.content).substring(0, 500))
+                    .join('\n---\n'),
+                todoSnapshot: JSON.stringify(this.toolExecutor.getTodos()),
+                topicId,
+            };
+
+            fs.writeFileSync(
+                pathModule.join(checkpointDir, 'checkpoint.json'),
+                JSON.stringify(checkpoint, null, 2),
+                'utf-8'
+            );
+        } catch {
+            // Non-critical — silently ignore checkpoint failures
+        }
+    }
+
+    // ─── Batch 2.5: Provider fallback retry ──────────────────────────────────
+
+    /**
+     * Determine if an API error is catastrophic enough to warrant a fallback retry.
+     * Returns true for 5xx server errors, network timeouts, and exhausted rate limits.
+     */
+    private isFallbackEligibleError(error: unknown): boolean {
+        const msg = error instanceof Error ? error.message : String(error);
+        return /\b(5\d{2})\b/.test(msg) ||          // 5xx server errors
+               /timeout|ETIMEDOUT|ECONNRESET/.test(msg) ||  // Network failures
+               /overloaded|capacity|unavailable/i.test(msg); // Capacity issues
+    }
+
+    /**
+     * Attempt to retry a failed API call with a fallback provider/model.
+     * Returns the response on success, or null if no fallback is available or all fail.
+     */
+    private async tryFallbackProvider(
+        messages: ChatMessage[],
+        originalProviderId: string,
+        options?: { tools?: import('./types').ToolDefinition[]; model?: string },
+        emitStep?: (step: AgentStep) => void
+    ): Promise<ChatCompletionResponse | null> {
+        const fallbacks = PROVIDER_FALLBACK[originalProviderId];
+        if (!fallbacks || fallbacks.length === 0) return null;
+
+        for (const fb of fallbacks) {
+            try {
+                emitStep?.({
+                    type: 'compaction',
+                    content: `Provider fallback: ${originalProviderId} → ${fb.providerId} (${fb.model})`,
+                    timestamp: Date.now(),
+                });
+                const response = await this.aiService.chatCompletion(messages, {
+                    tools: options?.tools,
+                    providerId: fb.providerId,
+                    model: fb.model,
+                });
+                return response;
+            } catch {
+                // This fallback also failed — try the next one
+                continue;
+            }
+        }
+        return null;
     }
 
     /**
@@ -390,10 +503,10 @@ export class AgentRunner {
         if (effectiveImages && !visionSupported) {
             emitStep({
                 type: 'error',
-                content: `⚠️ 当前提供商 (${_providerVision.name}) 不支持图片输入，图片附件已被忽略。` +
+                content: AGENT.VISION_UNSUPPORTED(_providerVision.name) +
                     (_providerIdVision === 'minimax-token-plan'
-                        ? '\n提示: MiniMax Token Plan 的 Anthropic 兼容接口明确不支持图片 (官方文档)。\n若需发送图片，请切换到 "MiniMax (按量计费)" 提供商。'
-                        : '\n请检查您所选模型是否支持视觉功能。'),
+                        ? AGENT.VISION_MINIMAX_HINT
+                        : AGENT.VISION_GENERIC_HINT),
                 timestamp: Date.now(),
             });
             effectiveImages = undefined; // drop images, proceed text-only
@@ -421,15 +534,15 @@ export class AgentRunner {
         ];
 
         const modeLabel: Record<string, string> = {
-            build: '分析需求中...',
-            plan: '分析中（Plan 模式 — 只读）...',
-            explore: '探索代码库中（Explore 模式）...',
-            general: '处理请求中（General 模式）...',
-            review: '代码审查中（Review 模式）...',
+            build: AGENT.MODE_BUILD,
+            plan: AGENT.MODE_PLAN,
+            explore: AGENT.MODE_EXPLORE,
+            general: AGENT.MODE_GENERAL,
+            review: AGENT.MODE_REVIEW,
         };
         emitStep({
             type: 'thinking',
-            content: modeLabel[mode] ?? '分析中...',
+            content: modeLabel[mode] ?? AGENT.MODE_FALLBACK,
             timestamp: Date.now(),
         });
 
@@ -473,9 +586,9 @@ export class AgentRunner {
             const errorMsg = e instanceof Error ? e.message : String(e);
 
             if (errorMsg.includes('aborted') || errorMsg.includes('cancel')) {
-                emitStep({ type: 'error', content: '已取消生成', timestamp: Date.now() });
+                emitStep({ type: 'error', content: AGENT.CANCELLED, timestamp: Date.now() });
             } else {
-                emitStep({ type: 'error', content: `错误: ${errorMsg}`, timestamp: Date.now() });
+                emitStep({ type: 'error', content: `${AGENT.ERROR_PREFIX}: ${errorMsg}`, timestamp: Date.now() });
             }
 
             return {
@@ -560,7 +673,7 @@ export class AgentRunner {
         // Need to compact!
         emitStep({
             type: 'compaction',
-            content: `上下文压缩中... (${estimatedTokens} tokens → 目标 <${threshold})`,
+            content: AGENT.COMPACTION_START(estimatedTokens, threshold),
             timestamp: Date.now(),
         });
 
@@ -689,10 +802,10 @@ export class AgentRunner {
             const summary = compactionResponse.choices?.[0]?.message?.content ?? '';
 
             if (summary.length > 0) {
-                const compactionType = existingSummaryText ? '增量合并' : '初始压缩';
+                const compactionType = existingSummaryText ? AGENT.COMPACTION_INCREMENTAL : AGENT.COMPACTION_INITIAL;
                 emitStep({
                     type: 'compaction',
-                    content: `上下文已压缩 (${compactionType}): ${olderMessages.length} 条消息 → 摘要 (${summary.length} chars, ${pinnedContext.length} pinned entities)`,
+                    content: AGENT.COMPACTION_DONE(compactionType, olderMessages.length, summary.length, pinnedContext.length),
                     timestamp: Date.now(),
                 });
 
@@ -709,7 +822,7 @@ export class AgentRunner {
             // If compaction fails, just truncate to recent messages
             emitStep({
                 type: 'error',
-                content: `上下文压缩失败: ${e instanceof Error ? e.message : String(e)}`,
+                content: AGENT.COMPACTION_FAILED(e instanceof Error ? e.message : String(e)),
                 timestamp: Date.now(),
             });
         }
@@ -798,6 +911,16 @@ export class AgentRunner {
             options?.abortSignal?.throwIfAborted();
             iteration++;
 
+            // Batch 2.3: Periodic checkpoint save for crash recovery
+            if (iteration > 1 && iteration % CHECKPOINT_INTERVAL === 0) {
+                void this.saveCheckpoint(
+                    iteration,
+                    messages,
+                    Array.from(confirmedWrittenFiles),
+                    undefined // topicId not available here — wired from run()
+                );
+            }
+
             // ── Mid-loop compaction: prevent uncontrolled context growth ──────
             // Every MID_LOOP_COMPACTION_INTERVAL iterations, estimate message size
             // and compact if approaching the context window limit.
@@ -806,7 +929,7 @@ export class AgentRunner {
                 if (loopTokens > midLoopThreshold) {
                     emitStep({
                         type: 'compaction',
-                        content: `循环内上下文压缩中... (${loopTokens} tokens, 阈值 ${midLoopThreshold})`,
+                        content: AGENT.COMPACTION_MID_LOOP(loopTokens, midLoopThreshold),
                         timestamp: Date.now(),
                     });
                     this.compactMessagesInPlace(messages, toolResultBudget);
@@ -825,7 +948,7 @@ export class AgentRunner {
                         announcedPaths.add(extractedPath);
                         emitStep({
                             type: 'text_delta',
-                            content: `\n> ⏳ 正在解析修改策略... 锁定目标文件: \`${extractedPath}\`\n`,
+                            content: AGENT.FILE_LOCKING(extractedPath),
                             timestamp: Date.now()
                         });
                     }
@@ -890,7 +1013,23 @@ export class AgentRunner {
                     });
                     continue;
                 }
-                throw err;
+                // Batch 2.5: Provider fallback on catastrophic errors
+                if (this.isFallbackEligibleError(err)) {
+                    const fallbackResponse = await this.tryFallbackProvider(
+                        messages,
+                        _providerId0,
+                        { tools: availableTools },
+                        emitStep
+                    );
+                    if (fallbackResponse) {
+                        response = fallbackResponse;
+                        // Fall through to normal processing below
+                    } else {
+                        throw err; // All fallbacks exhausted
+                    }
+                } else {
+                    throw err;
+                }
             }
 
             // Accumulate token usage from this API call
@@ -1192,7 +1331,7 @@ export class AgentRunner {
             if (emergencyTokens > contextLimit * 0.98) {
                 emitStep({
                     type: 'compaction',
-                    content: `紧急上下文压缩 (${emergencyTokens} tokens > ${contextLimit} 上限)`,
+                    content: AGENT.COMPACTION_EMERGENCY(emergencyTokens, contextLimit),
                     timestamp: Date.now(),
                 });
                 this.compactMessagesInPlace(messages, toolResultBudget);
@@ -1207,7 +1346,7 @@ export class AgentRunner {
                 const { toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j]!;  
                 const toolResult = toolResults[j];
 
-                emitStep({ type: 'tool_result', content: `工具结果: ${toolName}`, toolName, toolResult, timestamp: Date.now() });
+                emitStep({ type: 'tool_result', content: `${AGENT.TOOL_RESULT_PREFIX}: ${toolName}`, toolName, toolResult, timestamp: Date.now() });
 
                 // Track consecutive errors
                 if (typeof toolResult === 'object' && toolResult !== null &&

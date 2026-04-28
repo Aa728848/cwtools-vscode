@@ -13,6 +13,7 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, No
 
 import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
+import { UI } from './ai/messages';
 import { SolarSystemPanel } from './solarSystemPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
@@ -169,7 +170,7 @@ export async function activate(context: ExtensionContext) {
 		}
 	}
 
-	const isDevDir = env.machineId === "someValue.machineId"
+	const isDevDir = context.extensionMode === vs.ExtensionMode.Development
 	// M4 Fix: context.globalStorageUri is a Uri object, not a string.
 	// Concatenating it with '/' calls toString() which produces "file:///..."— not a valid fs path.
 	// Use .fsPath and path.join() to get a proper filesystem path.
@@ -240,7 +241,7 @@ export async function activate(context: ExtensionContext) {
 	safeRegisterCommand(context, "cwtools.ai.reviewFile", async () => {
 		const editor = vs.window.activeTextEditor;
 		if (!editor) {
-			vs.window.showWarningMessage('没有打开的编辑器');
+			vs.window.showWarningMessage(UI.NO_ACTIVE_EDITOR);
 			return;
 		}
 		const relPath = vs.workspace.asRelativePath(editor.document.uri);
@@ -257,7 +258,7 @@ export async function activate(context: ExtensionContext) {
 		}
 		const selection = editor.document.getText(editor.selection);
 		if (!selection.trim()) {
-			vs.window.showWarningMessage('请先选中要解释的代码');
+			vs.window.showWarningMessage(UI.SELECT_CODE_FIRST);
 			return;
 		}
 		await chatPanelProvider.sendProgrammaticMessage(

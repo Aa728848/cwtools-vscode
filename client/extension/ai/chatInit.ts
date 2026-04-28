@@ -10,6 +10,7 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { HostMessage } from './types';
+import { UI } from './messages';
 
 type PostMessageFn = (msg: HostMessage) => void;
 type RecordSnapshotFn = (filePath: string) => void;
@@ -23,7 +24,7 @@ export async function generateInitFile(
 ): Promise<void> {
     const folders = vs.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
-        vs.window.showWarningMessage('Eddy CWTool Code /init: 当前没有打开的工作区');
+        vs.window.showWarningMessage(UI.NO_WORKSPACE_INIT);
         return;
     }
      

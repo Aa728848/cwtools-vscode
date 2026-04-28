@@ -26,6 +26,8 @@ import { getChatPanelHtml } from './chatHtml';
 import { ChatTopicManager } from './chatTopics';
 import { generateInitFile } from './chatInit';
 import { ChatSettingsManager } from './chatSettings';
+import { ErrorReporter } from './errorReporter';
+import { UI, SOURCE } from './messages';
 
 export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public static readonly viewType = 'cwtools.aiChat';
@@ -634,7 +636,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         restoredFiles++;
                     }
                 } catch (e) {
-                    console.error(`[Retract] Failed to restore ${snap.filePath}:`, e);
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, `Failed to restore ${snap.filePath}`, e);
                 }
             }
             this._messageFileSnapshots.delete(idx);
@@ -812,7 +814,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
 
         } catch (e) {
-            console.error('Failed to parse walkthrough.md', e);
+            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to parse walkthrough.md', e);
         }
     }
 
@@ -879,7 +881,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     );
                 }
             } catch (e) {
-                console.error('[Eddy CWTool Code] Failed to open diff view:', e);
+                ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to open diff view', e);
             }
 
             // Tell the WebView to show a simple Accept/Reject card
@@ -946,7 +948,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async insertCodeWithDiff(code: string): Promise<void> {
         const editor = vs.window.activeTextEditor;
         if (!editor) {
-            vs.window.showWarningMessage('没有打开的编辑器');
+            vs.window.showWarningMessage(UI.NO_ACTIVE_EDITOR);
             return;
         }
 
@@ -1004,7 +1006,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await vs.workspace.applyEdit(edit);
                 vs.window.showInformationMessage('代码已插入');
             } else {
-                vs.window.showInformationMessage('已取消插入');
+                vs.window.showInformationMessage(UI.INSERT_CANCELLED);
             }
         } finally {
             // Close the diff editor (preview registration kept alive for next use)

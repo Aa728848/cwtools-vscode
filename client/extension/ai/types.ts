@@ -659,6 +659,47 @@ export interface TokenUsage {
     contextWindowTokens?: number;
 }
 
+// ─── Tool Result Types (Batch 2.1) ──────────────────────────────────────────
+
+/**
+ * Structured tool result envelope — wraps any tool return value with
+ * consistent success/error signaling for the AI reasoning loop.
+ * Enables reliable doom-loop detection and structured error recovery.
+ * (Named StructuredToolResult to avoid conflict with the existing ToolResult union type.)
+ */
+export interface StructuredToolResult<T = unknown> {
+    success: boolean;
+    /** The payload data on success */
+    data?: T;
+    /** Human-readable error description on failure */
+    error?: string;
+    /** Recovery hint for the AI when an error occurs */
+    hint?: string;
+    /** Whether this error is retriable (default: true) */
+    retriable?: boolean;
+}
+
+/**
+ * Agent checkpoint — serializable snapshot for long-task resilience (Batch 2.3).
+ * Saved periodically so the agent can resume after crashes or context resets.
+ */
+export interface AgentCheckpoint {
+    /** Checkpoint version for forward compatibility */
+    version: 1;
+    /** Timestamp of the checkpoint */
+    timestamp: number;
+    /** Current iteration index in the reasoning loop */
+    iteration: number;
+    /** Files written so far (for rollback awareness) */
+    writtenFiles: string[];
+    /** Compressed summary of conversation up to this point */
+    conversationSummary: string;
+    /** Current todo list state */
+    todoSnapshot: string;
+    /** Topic ID for associating with the correct session */
+    topicId?: string;
+}
+
 // ─── Agent Execution ─────────────────────────────────────────────────────────
 
 export interface AgentStep {

@@ -13,6 +13,8 @@ import * as path from 'path';
 import type { ChatMessage, AgentMode } from './types';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
+import { ErrorReporter } from './errorReporter';
+import { SOURCE } from './messages';
 
 // ─── Parsed CWTOOLS.md Structure ─────────────────────────────────────────────
 
@@ -638,7 +640,7 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
             this._parsedRulesMtime = mtime;
             return parsed;
         } catch (e) {
-            console.error('[PromptBuilder] Error reading CWTOOLS.md:', e);
+            ErrorReporter.debug(SOURCE.PROMPT_BUILDER, 'Error reading CWTOOLS.md', e);
             this._parsedRulesCache = null;
             return null;
         }

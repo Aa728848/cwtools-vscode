@@ -173,14 +173,31 @@ export class LspToolHandler {
         }
     }
 
-    // ─── Generic TTL cache ───────────────────────────────────────────────────
+    // ─── Generic LRU+TTL cache (Batch 2.2 upgrade) ────────────────────────────
+    //
+    // The original cache was unbounded — during long reasoning loops with hundreds
+    // of unique query_scope / query_types calls, it could grow without limit.
+    // This version adds LRU eviction (oldest entry removed when size > MAX) on top
+    // of the existing TTL expiration.
+
+    private static readonly LSP_CACHE_MAX_SIZE = 128;
 
     private async cachedLspRead<T>(key: string, fetcher: () => Promise<T>, ttlMs = 5000): Promise<T> {
         const now = Date.now();
         const cached = this.lspReadCache.get(key);
-        if (cached && cached.expiresAt > now) return cached.data as T;
+        if (cached && cached.expiresAt > now) {
+            // LRU touch: move to end of Map iteration order
+            this.lspReadCache.delete(key);
+            this.lspReadCache.set(key, cached);
+            return cached.data as T;
+        }
         const freshData = await fetcher();
         this.lspReadCache.set(key, { data: freshData, expiresAt: now + ttlMs });
+        // Evict oldest entries if over capacity
+        while (this.lspReadCache.size > LspToolHandler.LSP_CACHE_MAX_SIZE) {
+            const oldest = this.lspReadCache.keys().next().value as string;
+            this.lspReadCache.delete(oldest);
+        }
         return freshData;
     }
 

@@ -8,6 +8,7 @@
 
 import type { ChatMessage, ContentPart } from './types';
 import { contentToString } from './types';
+import { BUDGET } from './messages';
 
 // P1-7: contentToString moved to types.ts — single shared definition
 
@@ -28,7 +29,7 @@ export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT
     if (result === null) return 'null';
     if (typeof result === 'string') {
         if (result.length <= maxChars) return result;
-        return result.substring(0, maxChars) + `\n\n[... 已截断 — 原始长度：${result.length} 字符。]`;
+        return result.substring(0, maxChars) + `\n\n${BUDGET.TRUNCATED(result.length)}`;
     }
 
     const raw = JSON.stringify(result, null, 2) || '';
@@ -52,7 +53,7 @@ export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT
                 totalLines: readResult.totalLines,
                 truncated: true,
                 _linesShown: kept,
-                _hint: `由于长度超出预算已截断至 ${kept} 行。进行精确读取请使用 startLine 和 endLine 参数。`,
+                _hint: BUDGET.TRUNCATED_LINES(kept),
             }, null, 2);
         }
     }
@@ -73,7 +74,7 @@ export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT
 
     // Strategy 3: Generic truncation with structure hint
     return raw.substring(0, maxChars) +
-        `\n\n[... 已截断 — 原始长度：${raw.length} 字符。如需具体项请单独查询。]`;
+        `\n\n${BUDGET.TRUNCATED_GENERIC(raw.length)}`;
 }
 
 /**
@@ -163,9 +164,9 @@ function budgetArray(
 
     const segmented = [
         ...head,
-        { _gap: `... 省略了 ${totalCount - headCount - midCount - tailCount} 项 ...` },
+        { _gap: BUDGET.GAP(totalCount - headCount - midCount - tailCount) },
         ...mid,
-        { _gap: `... 延续至结尾 ...` },
+        { _gap: BUDGET.GAP_TAIL },
         ...tail,
     ];
 
@@ -208,7 +209,7 @@ function buildArrayResult(
         budgetedWrapper[`_${arrayKey}Shown`] = Math.min(keptCount, items.length);
         budgetedWrapper[`_${arrayKey}Total`] = totalCount;
         if (keptCount < totalCount) {
-            budgetedWrapper[`_${arrayKey}Note`] = `显示了 ${totalCount} 项中的 ${Math.min(keptCount, items.length)} 项（为节省上下文已去重/分段）。请使用带 filter 的查询以查找特定文件。`;
+            budgetedWrapper[`_${arrayKey}Note`] = BUDGET.ARRAY_BUDGET_NOTE(totalCount, Math.min(keptCount, items.length));
         }
         return JSON.stringify(budgetedWrapper, null, 2);
     }
@@ -218,7 +219,7 @@ function buildArrayResult(
         items: shown,
         _shown: Math.min(keptCount, items.length),
         _total: totalCount,
-        _note: `显示了 ${totalCount} 项中的 ${Math.min(keptCount, items.length)} 项。请使用针对性的查询以查找特定项。`,
+        _note: BUDGET.ARRAY_GENERIC_NOTE(totalCount, Math.min(keptCount, items.length)),
     }, null, 2);
 }
 
@@ -251,7 +252,7 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
                 const contentMatch = content.match(/"content"\s*:/);
                 const totalLinesMatch = content.match(/"totalLines"\s*:\s*(\d+)/);
                 if (contentMatch && totalLinesMatch) {
-                    messages[i] = { ...m, content: `[已压缩的 read_file 工具结果] 成功读取文件，共 ${totalLinesMatch[1]!} 行。` };  
+                    messages[i] = { ...m, content: BUDGET.COMPACTED_READ_FILE(totalLinesMatch[1]!) };  
                     continue;
                 }
 
@@ -266,21 +267,21 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
                     errorMatch && successMatch?.[1] === 'false' ? `err=${errorMatch[1]!.substring(0, 80)}` : null,  
                     countMatch ? `count=${countMatch[1]}` : null,
                 ].filter(Boolean).join(', ');
-                messages[i] = { ...m, content: `[已压缩] ${meta || content.substring(0, 200)}` };
+                messages[i] = { ...m, content: `[${BUDGET.COMPACTED_PREFIX}] ${meta || content.substring(0, 200)}` };
             } else if (content.length > toolResultBudget) {
                 // Moderate: apply budgeting
                 try {
                     const parsed = JSON.parse(content);
                     messages[i] = { ...m, content: budgetToolResult(parsed, toolResultBudget) };
                 } catch {
-                    messages[i] = { ...m, content: content.substring(0, toolResultBudget) + '\n[... 超限已截断]' };
+                    messages[i] = { ...m, content: content.substring(0, toolResultBudget) + `\n${BUDGET.BUDGET_EXCEEDED}` };
                 }
             }
         } else if (m.role === 'assistant' && i < aggressiveThreshold) {
             // Aggressively compress old assistant reasoning
             const newM: ChatMessage = { ...m };
             if (content.length > 2000) {
-                newM.content = content.substring(0, 1000) + '\n[... 已压缩]';
+                newM.content = content.substring(0, 1000) + BUDGET.COMPACTED_ASSISTANT;
             }
             // Delete reasoning_content to save token overhead from old thoughts.
             // CRITICAL: must use `delete` (not set to placeholder). DeepSeek API requires
@@ -293,9 +294,9 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
         // Strip reasoning_content from ALL compacted messages (not just aggressive zone).
         // Messages in the middle zone may have truncated content but preserved reasoning,
         // creating a mismatch. Consistent removal prevents stale reasoning from bloating context.
-        if (m.role === 'assistant' && (m as any).reasoning_content !== undefined) {
+        if (m.role === 'assistant' && m.reasoning_content !== undefined) {
             const stripped: ChatMessage = { ...m };
-            delete (stripped as any).reasoning_content;
+            delete stripped.reasoning_content;
             messages[i] = stripped;
         }
     }

@@ -9,6 +9,7 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
+import { UI } from './messages';
 
 /** Callback type for sending messages to the WebView */
 type PostMessageFn = (msg: HostMessage) => void;
@@ -305,7 +306,7 @@ export class ChatTopicManager {
         const content = lines.join('\n');
         const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workspaceRoot) {
-            vs.window.showWarningMessage('没有打开的工作区');
+            vs.window.showWarningMessage(UI.NO_WORKSPACE);
             return;
         }
 
@@ -340,7 +341,7 @@ export class ChatTopicManager {
 
         const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workspaceRoot) {
-            vs.window.showWarningMessage('没有打开的工作区');
+            vs.window.showWarningMessage(UI.NO_WORKSPACE);
             return;
         }
 

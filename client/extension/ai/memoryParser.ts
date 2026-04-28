@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { ErrorReporter } from './errorReporter';
+import { SOURCE } from './messages';
 
 /**
  * Parses the .cwtools-ai-memory.md file to extract workspace-specific rules.
@@ -51,7 +53,7 @@ export class MemoryParser {
             
             return this.cache;
         } catch (e) {
-            console.error('[MemoryParser] Error reading .cwtools-ai-memory.md:', e);
+            ErrorReporter.debug(SOURCE.MEMORY_PARSER, 'Error reading .cwtools-ai-memory.md', e);
             return '';
         }
     }

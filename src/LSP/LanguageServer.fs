@@ -89,6 +89,17 @@ let private serializeSemanticTokens =
 
 let private serializeSemanticTokensOption = Option.map serializeSemanticTokens
 
+let private serializeSemanticTokensDelta =
+    serializerFactory<SemanticTokensDelta> jsonWriteOptions
+
+let private serializeSemanticTokensOrDelta (c: Choice<SemanticTokens, SemanticTokensDelta>) : string =
+    match c with
+    | Choice1Of2 t -> serializeSemanticTokens t
+    | Choice2Of2 d -> serializeSemanticTokensDelta d
+
+let private serializeSemanticTokensOrDeltaOption =
+    Option.map serializeSemanticTokensOrDelta
+
 let private serializePublishDiagnostics =
     serializerFactory<PublishDiagnosticsParams> jsonWriteOptions
 
@@ -297,6 +308,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | DocumentLink(p)       -> server.DocumentLink(p)        |> thenMap serializeDocumentLinkList |> thenSome,       true
         | ResolveDocumentLink(p)-> server.ResolveDocumentLink(p) |> thenMap serializeDocumentLink |> thenSome,           true
         | SemanticTokensFull(p) -> server.SemanticTokensFull(p)  |> thenMap serializeSemanticTokensOption |> thenMap (Option.defaultValue "[[CANCEL]]") |> thenSome, true
+        | SemanticTokensFullDelta(p) -> server.SemanticTokensFullDelta(p) |> thenMap serializeSemanticTokensOrDeltaOption |> thenMap (Option.defaultValue "[[CANCEL]]") |> thenSome, true
         // CodeActions reads game state but result doesn't mutate; treat as read-only
         | CodeActions(p)        -> server.CodeActions(p)         |> thenMap serializeCommandList |> thenSome,            true
         // ExecuteCommand: split into read-only (query/info) and write (validateCode, etc.)

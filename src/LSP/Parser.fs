@@ -302,6 +302,9 @@ let parseDidChangeWorkspaceFoldersParams =
 let parseSemanticTokensParams =
     deserializerFactory<SemanticTokensParams> readOptions
 
+let parseSemanticTokensDeltaParams =
+    deserializerFactory<SemanticTokensDeltaParams> readOptions
+
 let parseRequest (method: string, json: JsonValue) : Request =
     match method with
     | "initialize" -> Initialize(parseInitialize json)
@@ -329,4 +332,5 @@ let parseRequest (method: string, json: JsonValue) : Request =
     | "workspace/executeCommand" -> ExecuteCommand(parseExecuteCommandParams json)
     | "workspace/didChangeWorkspaceFolders" -> DidChangeWorkspaceFolders(parseDidChangeWorkspaceFoldersParams json)
     | "textDocument/semanticTokens/full" -> SemanticTokensFull(parseSemanticTokensParams json)
+    | "textDocument/semanticTokens/full/delta" -> SemanticTokensFullDelta(parseSemanticTokensDeltaParams json)
     | _ -> raise (Exception $"Unexpected request method %s{method}")

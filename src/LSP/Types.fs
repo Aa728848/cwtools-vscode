@@ -390,6 +390,19 @@ type ExecuteCommandResponse = JsonValue
 
 type SemanticTokensParams = { textDocument: TextDocumentIdentifier }
 
+type SemanticTokensDeltaParams =
+    { textDocument: TextDocumentIdentifier
+      previousResultId: string }
+
+type SemanticTokensEdit =
+    { start: int
+      deleteCount: int
+      data: int list }
+
+type SemanticTokensDelta =
+    { resultId: string
+      edits: SemanticTokensEdit list }
+
 type Request =
     | Initialize of InitializeParams
     | Shutdown
@@ -416,6 +429,7 @@ type Request =
     | ExecuteCommand of ExecuteCommandParams
     | DidChangeWorkspaceFolders of DidChangeWorkspaceFoldersParams
     | SemanticTokensFull of SemanticTokensParams
+    | SemanticTokensFullDelta of SemanticTokensDeltaParams
 
 [<RequireQualifiedAccess>]
 type TextDocumentSyncKind =
@@ -453,7 +467,9 @@ type DocumentLinkOptions = { resolveProvider: bool }
 
 let defaultDocumentLinkOptions = { resolveProvider = false }
 
-type SemanticTokens = { data: int list }
+type SemanticTokens =
+    { data: int list
+      resultId: string option }
 
 type SemanticTokensLegend =
     { tokenTypes: string list
@@ -461,7 +477,9 @@ type SemanticTokensLegend =
 
 type SemanticTokensOptions =
     { legend: SemanticTokensLegend
-      full: bool }
+      full: bool
+      range: bool
+      delta: bool }
 
 type ExecuteCommandOptions = { commands: string list }
 
@@ -678,6 +696,7 @@ type ILanguageServer =
     abstract member DidChangeWorkspaceFolders: DidChangeWorkspaceFoldersParams -> Async<unit>
     abstract member DidFocusFile: DidFocusFileParams -> Async<unit>
     abstract member SemanticTokensFull: SemanticTokensParams -> Async<SemanticTokens option>
+    abstract member SemanticTokensFullDelta: SemanticTokensDeltaParams -> Async<Choice<SemanticTokens, SemanticTokensDelta> option>
 
 type PublishDiagnosticsParams =
     { uri: Uri

@@ -50,15 +50,14 @@ let private getLineAt (text: string) (lineIdx: int) =
                 e
             text.Substring(idx, lineEnd - idx)
 
-let completionCache = Dictionary<int, CompletionItem>()
+let completionCache = System.Collections.Concurrent.ConcurrentDictionary<int, CompletionItem>()
 let mutable private rangeCache: (string * int * int * Range * Range) option = None
 
 let mutable private completionCacheKey = 0
 
 let addToCache completionItem =
-    let key = completionCacheKey
-    completionCacheKey <- completionCacheKey + 1
-    completionCache.Add(key, completionItem)
+    let key = System.Threading.Interlocked.Increment(&completionCacheKey) - 1
+    completionCache.[key] <- completionItem
     key
 
 let mutable completionCacheCount = 0

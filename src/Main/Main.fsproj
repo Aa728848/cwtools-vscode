@@ -9,6 +9,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
     <ServerGarbageCollection>true</ServerGarbageCollection>
+    <Tailcalls>true</Tailcalls>
     <PublishReadyToRun>false</PublishReadyToRun>
     <PublishReadyToRunComposite>false</PublishReadyToRunComposite>
     <PublishTrimmed>false</PublishTrimmed>

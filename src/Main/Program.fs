@@ -87,6 +87,139 @@ type LintRequestMsg =
     | UpdateRequest of VersionedTextDocumentIdentifier * bool
     | WorkComplete of DateTime
 
+/// Shared token computation — walks AST, classifies tokens, encodes to delta int[].
+let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) =
+    let entityOpt =
+        game.AllEntities()
+        |> Seq.tryPick (fun struct (e, _) ->
+            if e.filepath = filePath then Some e else None)
+    match entityOpt with
+    | None -> [||]
+    | Some entity ->
+        let tokens = ResizeArray<struct (int * int * int * int * int)>()
+        let lines = fileText.Split('\n')
+        let allEffects = game.ScriptedEffects() |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
+        let allTriggers = game.ScriptedTriggers() |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
+        let keywords = System.Collections.Generic.HashSet([|
+            "if"; "else"; "else_if"; "AND"; "OR"; "NOT"; "NOR"; "NAND"
+            "limit"; "trigger"; "modifier"; "while"
+            "switch"; "every"; "random"; "random_list"; "inline_script"
+        |])
+        let verifyAndAdd (line: int) (col: int) (len: int) (tokenType: int) =
+            if line >= 0 && line < lines.Length then
+                let srcLine = lines.[line]
+                if col >= 0 && col + len <= srcLine.Length then
+                    tokens.Add(struct (line, col, len, tokenType, 0))
+        let rec visitNode (n: CWTools.Process.Node) =
+            n.Leaves |> Seq.iter (fun l ->
+                if l.Position.FileName = filePath then
+                    let line = max 0 (int l.Position.StartLine - 1)
+                    let col = int l.Position.StartColumn
+                    let key = l.Key
+                    let rawVal = l.Value.ToRawString()
+                    if key.Length > 0 && line < lines.Length then
+                        let srcLine = lines.[line]
+                        let actualCol =
+                            if col >= 0 && col + key.Length <= srcLine.Length && srcLine.Substring(col, key.Length) = key then col
+                            else let idx = srcLine.IndexOf(key, max 0 col)
+                                 if idx >= 0 then idx
+                                 else let idx2 = srcLine.IndexOf(key)
+                                      if idx2 >= 0 then idx2 else -1
+                        if actualCol >= 0 then
+                            let keyType =
+                                if key.StartsWith("@") then 3
+                                elif key.StartsWith("$") && key.EndsWith("$") then 4
+                                elif allEffects.Contains(key) then 2
+                                elif allTriggers.Contains(key) then 1
+                                elif keywords.Contains(key) then 7
+                                else 5
+                            verifyAndAdd line actualCol key.Length keyType
+                    let valLine = max 0 (int l.Position.EndLine - 1)
+                    if valLine < lines.Length && rawVal.Length > 0 then
+                        let cleanVal = rawVal.Trim('"')
+                        let srcLine = lines.[valLine]
+                        let mutable dummy = 0.0
+                        let valType =
+                            if rawVal.StartsWith("@") then 3
+                            elif rawVal.StartsWith("$") && rawVal.EndsWith("$") then 4
+                            elif rawVal = "yes" || rawVal = "no" then 7
+                            elif System.Double.TryParse(rawVal, &dummy) then 8
+                            else 6
+                        let searchVal = if rawVal.StartsWith("\"") then cleanVal else rawVal
+                        if searchVal.Length > 0 then
+                            let endCol = int l.Position.EndColumn
+                            let valStartHint = max 0 (endCol - searchVal.Length)
+                            let actualValCol =
+                                if valStartHint >= 0 && valStartHint + searchVal.Length <= srcLine.Length && srcLine.Substring(valStartHint, searchVal.Length) = searchVal then
+                                    valStartHint
+                                else
+                                    let searchFrom = max 0 (col + key.Length)
+                                    let idx = srcLine.IndexOf(searchVal, searchFrom)
+                                    if idx >= 0 then idx else -1
+                            if actualValCol >= 0 then
+                                verifyAndAdd valLine actualValCol searchVal.Length valType
+            )
+            n.LeafValues |> Seq.iter (fun lv ->
+                if lv.Position.FileName = filePath then
+                    let line = max 0 (int lv.Position.StartLine - 1)
+                    let col = int lv.Position.StartColumn
+                    let rawVal = lv.Value.ToRawString()
+                    let valLen = rawVal.Trim('"').Length
+                    if valLen > 0 then
+                        let valType =
+                            if rawVal.StartsWith("@") then 3
+                            elif rawVal.StartsWith("$") && rawVal.EndsWith("$") then 4
+                            elif rawVal = "yes" || rawVal = "no" then 7
+                            else 6
+                        verifyAndAdd line col valLen valType
+            )
+            n.Nodes |> Seq.iter (fun childNode ->
+                if childNode.Position.FileName = filePath then
+                    let nLine = max 0 (int childNode.Position.StartLine - 1)
+                    let nCol = int childNode.Position.StartColumn
+                    let nKey = childNode.Key
+                    if nKey.Length > 0 && nLine < lines.Length then
+                        let srcLine = lines.[nLine]
+                        let actualCol =
+                            if nCol >= 0 && nCol + nKey.Length <= srcLine.Length && srcLine.Substring(nCol, nKey.Length) = nKey then nCol
+                            else let idx = srcLine.IndexOf(nKey, max 0 nCol)
+                                 if idx >= 0 then idx
+                                 else let idx2 = srcLine.IndexOf(nKey)
+                                      if idx2 >= 0 then idx2 else -1
+                        if actualCol >= 0 then
+                            let keyType =
+                                if nKey.StartsWith("@") then 3
+                                elif nKey.StartsWith("$") && nKey.EndsWith("$") then 4
+                                elif allEffects.Contains(nKey) then 2
+                                elif allTriggers.Contains(nKey) then 1
+                                elif keywords.Contains(nKey) then 7
+                                else 5
+                            verifyAndAdd nLine actualCol nKey.Length keyType
+                visitNode childNode
+            )
+        visitNode entity.entity
+        lines |> Array.iteri (fun lineIdx lineText ->
+            let trimmed = lineText.TrimStart()
+            if trimmed.StartsWith("#") then
+                let col = lineText.Length - trimmed.Length
+                tokens.Add(struct (lineIdx, col, lineText.Length - col, 10, 0))
+        )
+        let sorted = tokens |> Seq.toArray |> Array.sortBy (fun struct (l, c, _, _, _) -> l, c)
+        let data = ResizeArray<int>()
+        let mutable prevLine = 0
+        let mutable prevChar = 0
+        for struct (line, col, len, tokenType, mods) in sorted do
+            let deltaLine = line - prevLine
+            let deltaChar = if deltaLine = 0 then col - prevChar else col
+            data.Add(deltaLine)
+            data.Add(deltaChar)
+            data.Add(len)
+            data.Add(tokenType)
+            data.Add(mods)
+            prevLine <- line
+            prevChar <- col
+        data |> Seq.toArray
+
 type Server(client: ILanguageClient) =
     do setupLogger client
     let docs = DocumentStore()
@@ -155,7 +288,7 @@ type Server(client: ILanguageClient) =
     // Getter function for stlVanillaPath
     let getSTLVanillaPath() = stlVanillaPath
 
-    /// Data-driven mapping: config key �?(getter, setter) for vanilla paths.
+    /// Data-driven mapping: config key (getter, setter) for vanilla paths.
     /// Used by the config reader loop and checkOrSetGameCache to eliminate duplication.
     let vanillaPathMap =
         [ "stellaris", (fun () -> stlVanillaPath),  (fun v -> stlVanillaPath <- v)
@@ -189,11 +322,12 @@ type Server(client: ILanguageClient) =
     /// key: FileName (使用 ConcurrentDictionary 替代不可变的 Map 以减少 GC 压力)
     let locCache = System.Collections.Concurrent.ConcurrentDictionary<string, CWError list>()
 
-    /// SemanticTokens cache: filePath -> (contentHash, tokenData)
+    /// SemanticTokens cache: filePath -> (contentHash, encodedDataArray, resultId)
     /// Avoids full AST re-traversal when file content hasn't changed.
-    let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * int list>()
+    /// resultId enables delta diff against the previous snapshot.
+    let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * int[] * string>()
 
-    /// CodeLens cache: filePath �?(contentHash, lenses)
+    /// CodeLens cache: filePath (contentHash, lenses)
     let codeLensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * CodeLens list>()
 
     /// InlayHint cache: filePath -> (contentHash, hints)
@@ -227,6 +361,30 @@ type Server(client: ILanguageClient) =
         cache.[key] <- value
         cacheWriteTimes.[key] <- DateTime.UtcNow.Ticks
 
+    /// Compute a SemanticTokens delta between two encoded int arrays.
+    /// Each token occupies 5 ints (deltaLine, deltaChar, length, tokenType, tokenModifiers).
+    /// Walks stride-5 from both ends to find the changed region.
+    let computeDelta (oldTokens: int[]) (newTokens: int[]) : SemanticTokensEdit =
+        let mutable startIndex = 0
+        while startIndex < oldTokens.Length
+              && startIndex < newTokens.Length
+              && oldTokens.[startIndex] = newTokens.[startIndex] do
+            startIndex <- startIndex + 5
+
+        let mutable oldEnd = oldTokens.Length - 5
+        let mutable newEnd = newTokens.Length - 5
+        while oldEnd >= startIndex
+              && newEnd >= startIndex
+              && oldTokens.[oldEnd] = newTokens.[newEnd] do
+            oldEnd <- oldEnd - 5
+            newEnd <- newEnd - 5
+
+        let deleteCount = max 0 (oldEnd - startIndex + 5)
+        let inserted = newTokens.[startIndex .. newEnd + 4]
+        { start = startIndex
+          deleteCount = deleteCount
+          data = Array.toList inserted }
+
     /// Allocation-based GC threshold — triggers non-blocking Gen2 collection
     /// after ~50 MB of new allocations instead of a simple locCache.Count check.
     let mutable lastGCAllocBytes = GC.GetTotalAllocatedBytes(false)
@@ -248,7 +406,7 @@ type Server(client: ILanguageClient) =
 
     let mutable lastFocusedFile: string option = None
 
-    /// Atomic flag �?0 = idle, 1 = refreshing.  Use Interlocked.CompareExchange
+    /// Atomic flag 0 = idle, 1 = refreshing.  Use Interlocked.CompareExchange
     /// instead of a plain mutable bool to prevent two DidOpenTextDocument handlers
     /// from both passing the "false" check and starting duplicate Tasks.
     let currentlyRefreshingFiles = ref 0
@@ -417,7 +575,7 @@ type Server(client: ILanguageClient) =
         match gameObj with
         | Some game ->
             let timestamp = Stopwatch.GetTimestamp()
-            // RefreshCaches rewrites infoService/ruleValidationService/completionService �?exclusive write lock
+            // RefreshCaches rewrites infoService/ruleValidationService/completionService exclusive write lock
             gameStateLock.EnterWriteLock()
             try
                 game.RefreshCaches()
@@ -427,7 +585,7 @@ type Server(client: ILanguageClient) =
                     game.RefreshLocalisationCaches()
                     delayedLocUpdate <- false
 
-                    // 使用 Dictionary: 清空后重新填�?
+                    // 使用 Dictionary: 清空后重新填
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
@@ -438,7 +596,7 @@ type Server(client: ILanguageClient) =
                     for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
 
-                // Effect/trigger sets may have changed �?invalidate all semantic caches.
+                // Effect/trigger sets may have changed invalidate all semantic caches.
                 // Unlike the old Clear() which caused VSCode to lose all highlighting,
                 // we now keep stale entries: SemanticTokensFull will return cached data
                 // when the entity is not yet rebuilt, then VSCode re-requests once the
@@ -452,7 +610,7 @@ type Server(client: ILanguageClient) =
             delayTime <-
                 TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 1, 500).Ticks, 2L * time.Ticks)))
             
-            // 定期清理不存在文件的缓存，防止内存泄�?
+            // 定期清理不存在文件的缓存，防止内存泄
             try
                 let existingFiles = 
                     docs.OpenFiles() 
@@ -570,7 +728,7 @@ type Server(client: ILanguageClient) =
 
             loop false Map.empty)
 
-    /// Debounce agent for DidChangeTextDocument �?lintAgent.
+    /// Debounce agent for DidChangeTextDocument lintAgent.
     /// Waits 1.5 seconds of inactivity before forwarding the lint request.
     /// This prevents write-lock contention during rapid typing.
     let lintDebounceAgent =
@@ -581,13 +739,13 @@ type Server(client: ILanguageClient) =
                     let! msgOpt = agent.TryReceive(1500)
                     match msgOpt with
                     | Some (UpdateRequest(ur, force)) ->
-                        // New edit arrived �?reset the debounce timer
+                        // New edit arrived reset the debounce timer
                         return! loop (Some (ur, force))
                     | Some (WorkComplete _) ->
                         // Ignore WorkComplete messages in debounce agent
                         return! loop pending
                     | None ->
-                        // Timeout: 1.5s of inactivity �?forward to lintAgent
+                        // Timeout: 1.5s of inactivity forward to lintAgent
                         match pending with
                         | Some (ur, force) ->
                             lintAgent.Post(UpdateRequest(ur, force))
@@ -699,7 +857,7 @@ type Server(client: ILanguageClient) =
                       maxFileSize = maxFileSize
                       stlVanillaPath = stlVanillaPath }
 
-                // 加载新游戏前，清理旧的游戏对象引用释放内�?
+                // 加载新游戏前，清理旧的游戏对象引用释放内
                 let cleanupOldGame () =
                     match gameObj with
                     | Some oldGame ->
@@ -961,7 +1119,7 @@ type Server(client: ILanguageClient) =
                         
                 with e -> eprintfn $"Precache failed: %A{e}"
 
-                // L6 Fix: non-blocking optimised GC �?avoids a 100ms freeze on load
+                // L6 Fix: non-blocking optimised GC avoids a 100ms freeze on load
                 maybeCollectGarbage ()
             with e ->
                 eprintfn $"%A{e}"
@@ -1175,7 +1333,9 @@ type Server(client: ILanguageClient) =
                                               "property"; "enumMember"; "keyword"; "number"; "string"
                                               "comment"; "operator"; "macro"; "decorator" ]
                                           tokenModifiers = [ "declaration"; "definition"; "readonly" ] }
-                                      full = true } } }
+                                      full = true
+                                      range = false
+                                      delta = true } } }
             }
 
         member this.Initialized() = async { () }
@@ -1347,7 +1507,7 @@ type Server(client: ILanguageClient) =
 
                     let task =
                         new Task(fun () ->
-                            // M1 Fix: AllFiles() reads internal game state �?acquire a shared
+                            // M1 Fix: AllFiles() reads internal game state acquire a shared
                             // read lock so we don't race against a concurrent game reload.
                             gameStateLock.EnterReadLock()
                             try
@@ -1410,7 +1570,7 @@ type Server(client: ILanguageClient) =
                 )
             }
 
-        // P0 Fix: was TODO() �?return empty edit list instead of crashing
+        // P0 Fix: was TODO() return empty edit list instead of crashing
         member this.WillSaveWaitUntilTextDocument(_: WillSaveTextDocumentParams) = async { return [] }
 
         member this.DidSaveTextDocument(p: DidSaveTextDocumentParams) =
@@ -1592,7 +1752,7 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        // P0 Fix: was TODO() �?return empty list instead of crashing
+        // P0 Fix: was TODO() return empty list instead of crashing
         member this.DocumentHighlight(_: TextDocumentPositionParams) = async { return [] }
 
         member this.DocumentSymbols(p: DocumentSymbolParams) =
@@ -1963,7 +2123,7 @@ type Server(client: ILanguageClient) =
                         return generatedHints
             }
             |> catchError []
-        // P0 Fix: was TODO() �?return empty list / identity instead of crashing
+        // P0 Fix: was TODO() return empty list / identity instead of crashing
         member this.DocumentLink(_: DocumentLinkParams) = async { return [] }
         member this.ResolveDocumentLink(link: DocumentLink) = async { return link }
 
@@ -1980,197 +2140,73 @@ type Server(client: ILanguageClient) =
                     let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
                     let hash = contentHash fileText
                     match semanticTokensCache.TryGetValue(filePath) with
-                    | true, (cachedHash, cachedData) when cachedHash = hash ->
-                        Some { data = cachedData }
+                    | true, (cachedHash, cachedData, cachedResultId) when cachedHash = hash ->
+                        Some { data = Array.toList cachedData; resultId = Some cachedResultId }
                     | true, _ ->
                         // File modified! We want to cancel semantic updates until it is reopened.
                         // Returning None translates to [[CANCEL]] error so VS Code shifts tokens natively.
                         None
                     | false, _ ->
-                        let entityOpt =
-                            game.AllEntities()
-                            |> Seq.tryPick (fun struct (e, _) ->
-                                if e.filepath = filePath then Some e else None)
-
-                        match entityOpt with
-                        | None ->
-                            // Entity not yet available (AST rebuild in progress).
-                            // Return None to let VS Code smoothly keep and shift the existing tokens 
-                            // internally without flickering.
+                        let dataArray = computeTokensForFile game filePath fileText
+                        if dataArray.Length = 0 then
                             None
-                        | Some entity ->
-                        let tokens = ResizeArray<struct (int * int * int * int * int)>()
-                        let fileContent = fileText
-                        let lines = fileContent.Split('\n')
+                        else
+                            let resultId = Guid.NewGuid().ToString()
+                            cachePut semanticTokensCache filePath (hash, dataArray, resultId)
+                            evictIfNeeded semanticTokensCache
+                            Some { data = Array.toList dataArray; resultId = Some resultId }
 
-                        // Collect known names for classification (HashSet for O(1) lookup in AST walk)
-                        let allEffects = game.ScriptedEffects() |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
-                        let allTriggers = game.ScriptedTriggers() |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
-                        let keywords = System.Collections.Generic.HashSet([|
-                            "if"; "else"; "else_if"; "AND"; "OR"; "NOT"; "NOR"; "NAND"
-                            "limit"; "trigger"; "modifier"; "while"
-                            "switch"; "every"; "random"; "random_list"; "inline_script"
-                        |])
-
-                        // Walk AST �?only classify Leaves and LeafValues
-                        // Verify against source text to avoid position mismatches
-                        let verifyAndAdd (line: int) (col: int) (len: int) (tokenType: int) =
-                            if line >= 0 && line < lines.Length then
-                                let srcLine = lines.[line]
-                                if col >= 0 && col + len <= srcLine.Length then
-                                    tokens.Add(struct (line, col, len, tokenType, 0))
-
-                        let rec visitNode (n: CWTools.Process.Node) =
-
-                            n.Leaves |> Seq.iter (fun l ->
-                                if l.Position.FileName = filePath then
-                                    let line = max 0 (int l.Position.StartLine - 1)
-                                    let col = int l.Position.StartColumn
-                                    let key = l.Key
-                                    let rawVal = l.Value.ToRawString()
-
-                                    // Verify key against source, find actual position
-                                    if key.Length > 0 && line < lines.Length then
-                                        let srcLine = lines.[line]
-                                        // Find key in source starting from col
-                                        let actualCol =
-                                            if col >= 0 && col + key.Length <= srcLine.Length && srcLine.Substring(col, key.Length) = key then
-                                                col
-                                            else
-                                                // Search from AST column position, not from line start
-                                                let idx = srcLine.IndexOf(key, max 0 col)
-                                                if idx >= 0 then idx
-                                                else
-                                                    let idx2 = srcLine.IndexOf(key)
-                                                    if idx2 >= 0 then idx2 else -1
-                                        if actualCol >= 0 then
-                                            let keyType =
-                                                if key.StartsWith("@") then 3
-                                                elif key.StartsWith("$") && key.EndsWith("$") then 4
-                                                elif allEffects.Contains(key) then 2
-                                                elif allTriggers.Contains(key) then 1
-                                                elif keywords.Contains(key) then 7
-                                                else 5
-                                            verifyAndAdd line actualCol key.Length keyType
-
-                                    // Value: find in source text on the end line
-                                    let valLine = max 0 (int l.Position.EndLine - 1)
-                                    if valLine < lines.Length && rawVal.Length > 0 then
-                                        let cleanVal = rawVal.Trim('"')
-                                        let srcLine = lines.[valLine]
-                                        // Find value text in the source line
-                                        let mutable dummy = 0.0
-                                        let valType =
-                                            if rawVal.StartsWith("@") then 3
-                                            elif rawVal.StartsWith("$") && rawVal.EndsWith("$") then 4
-                                            elif rawVal = "yes" || rawVal = "no" then 7
-                                            elif System.Double.TryParse(rawVal, &dummy) then 8
-                                            else 6
-                                        // Find the actual position of the value using AST end position hint
-                                        let searchVal = if rawVal.StartsWith("\"") then cleanVal else rawVal
-                                        if searchVal.Length > 0 then
-                                            let endCol = int l.Position.EndColumn
-                                            // Try AST-provided end position first (value ends at EndColumn)
-                                            let valStartHint = max 0 (endCol - searchVal.Length)
-                                            let actualValCol =
-                                                if valStartHint >= 0 && valStartHint + searchVal.Length <= srcLine.Length && srcLine.Substring(valStartHint, searchVal.Length) = searchVal then
-                                                    valStartHint
-                                                else
-                                                    // Fallback: search from after the key position
-                                                    let searchFrom = max 0 (col + key.Length)
-                                                    let idx = srcLine.IndexOf(searchVal, searchFrom)
-                                                    if idx >= 0 then idx else -1
-                                            if actualValCol >= 0 then
-                                                verifyAndAdd valLine actualValCol searchVal.Length valType
-                            )
-
-                            n.LeafValues |> Seq.iter (fun lv ->
-                                if lv.Position.FileName = filePath then
-                                    let line = max 0 (int lv.Position.StartLine - 1)
-                                    let col = int lv.Position.StartColumn
-                                    let rawVal = lv.Value.ToRawString()
-                                    let valLen = rawVal.Trim('"').Length
-                                    if valLen > 0 then
-                                        let valType =
-                                            if rawVal.StartsWith("@") then 3
-                                            elif rawVal.StartsWith("$") && rawVal.EndsWith("$") then 4
-                                            elif rawVal = "yes" || rawVal = "no" then 7
-                                            else 6
-                                        verifyAndAdd line col valLen valType
-                            )
-
-                            // Generate tokens for Node keys (e.g. effect = { ... }, trigger = { ... })
-                            n.Nodes |> Seq.iter (fun childNode ->
-                                if childNode.Position.FileName = filePath then
-                                    let nLine = max 0 (int childNode.Position.StartLine - 1)
-                                    let nCol = int childNode.Position.StartColumn
-                                    let nKey = childNode.Key
-                                    if nKey.Length > 0 && nLine < lines.Length then
-                                        let srcLine = lines.[nLine]
-                                        let actualCol =
-                                            if nCol >= 0 && nCol + nKey.Length <= srcLine.Length && srcLine.Substring(nCol, nKey.Length) = nKey then
-                                                nCol
-                                            else
-                                                let idx = srcLine.IndexOf(nKey, max 0 nCol)
-                                                if idx >= 0 then idx
-                                                else
-                                                    let idx2 = srcLine.IndexOf(nKey)
-                                                    if idx2 >= 0 then idx2 else -1
-                                        if actualCol >= 0 then
-                                            let keyType =
-                                                if nKey.StartsWith("@") then 3
-                                                elif nKey.StartsWith("$") && nKey.EndsWith("$") then 4
-                                                elif allEffects.Contains(nKey) then 2
-                                                elif allTriggers.Contains(nKey) then 1
-                                                elif keywords.Contains(nKey) then 7
-                                                else 5
-                                            verifyAndAdd nLine actualCol nKey.Length keyType
-                                visitNode childNode
-                            )
-
-                        visitNode entity.entity
-
-                        // Scan for comments
-                        lines |> Array.iteri (fun lineIdx lineText ->
-                            let trimmed = lineText.TrimStart()
-                            if trimmed.StartsWith("#") then
-                                let col = lineText.Length - trimmed.Length
-                                tokens.Add(struct (lineIdx, col, lineText.Length - col, 10, 0))
-                        )
-
-                        // Sort and encode as delta format
-                        let sorted =
-                            tokens
-                            |> Seq.toArray
-                            |> Array.sortBy (fun struct (l, c, _, _, _) -> l, c)
-
-                        let data = ResizeArray<int>()
-                        let mutable prevLine = 0
-                        let mutable prevChar = 0
-
-                        for struct (line, col, len, tokenType, mods) in sorted do
-                            let deltaLine = line - prevLine
-                            let deltaChar = if deltaLine = 0 then col - prevChar else col
-                            data.Add(deltaLine)
-                            data.Add(deltaChar)
-                            data.Add(len)
-                            data.Add(tokenType)
-                            data.Add(mods)
-                            prevLine <- line
-                            prevChar <- col
-
-                        let dataList = data |> Seq.toList
-                        cachePut semanticTokensCache filePath (hash, dataList)
-                        evictIfNeeded semanticTokensCache
-                        Some { data = dataList }
-
-                let visitor = 
+                let visitor =
                     { new IGameVisitor<_> with 
                         member this.Visit game = semanticTokensFunction game 
                     }
                 return
                     gameDispatcher.Dispatch visitor
                     |> Option.flatten
+            }
+            |> catchError None
+
+        member this.SemanticTokensFullDelta(p: SemanticTokensDeltaParams) =
+            async {
+                let semanticTokensFullDeltaFunction (game: IGame<_>) =
+                    let filePath = p.textDocument.uri.LocalPath
+                    let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                    let hash = contentHash fileText
+                    match semanticTokensCache.TryGetValue(filePath) with
+                    | true, (cachedHash, cachedData, cachedResultId) when cachedHash = hash ->
+                        if p.previousResultId = cachedResultId then
+                            Choice2Of2 { resultId = cachedResultId; edits = [] }
+                        else
+                            Choice1Of2 { data = Array.toList cachedData; resultId = Some cachedResultId }
+                    | true, (_, oldDataArray, oldResultId) ->
+                        let newDataArray = computeTokensForFile game filePath fileText
+                        if newDataArray.Length = 0 then
+                            Choice1Of2 { data = []; resultId = None }
+                        else
+                            let newResultId = Guid.NewGuid().ToString()
+                            cachePut semanticTokensCache filePath (hash, newDataArray, newResultId)
+                            evictIfNeeded semanticTokensCache
+                            if p.previousResultId = oldResultId then
+                                let edit = computeDelta oldDataArray newDataArray
+                                Choice2Of2 { resultId = newResultId; edits = [ edit ] }
+                            else
+                                Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId }
+                    | _ ->
+                        let newDataArray = computeTokensForFile game filePath fileText
+                        if newDataArray.Length = 0 then
+                            Choice1Of2 { data = []; resultId = None }
+                        else
+                            let newResultId = Guid.NewGuid().ToString()
+                            cachePut semanticTokensCache filePath (hash, newDataArray, newResultId)
+                            evictIfNeeded semanticTokensCache
+                            Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId }
+                let visitor =
+                    { new IGameVisitor<_> with
+                        member this.Visit game = semanticTokensFullDeltaFunction game }
+                return
+                    gameDispatcher.Dispatch visitor
+                    |> Option.map (fun c -> Some c)
+                    |> Option.defaultValue None
             }
             |> catchError None
 
@@ -2205,7 +2241,7 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        // P0 Fix: was TODO() �?return empty results / no-op instead of crashing
+        // P0 Fix: was TODO() return empty results / no-op instead of crashing
         member this.DocumentRangeFormatting(_: DocumentRangeFormattingParams) = async { return [] }
         member this.DocumentOnTypeFormatting(_: DocumentOnTypeFormattingParams) = async { return [] }
         member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = async { () }
@@ -2561,10 +2597,10 @@ type Server(client: ILanguageClient) =
 
                         | { command = "cwtools.ai.validateCode"
                             arguments = codeArg :: targetFileArg :: _ } ->
-                            // In-memory code validation �?no temp files, no 3s wait
+                            // In-memory code validation no temp files, no 3s wait
                             // NOTE: This handler runs inside runWriteRequest which already
                             // holds gameStateLock in Write mode. Do NOT re-acquire the lock
-                            // here �?ReaderWriterLockSlim(NoRecursion) would throw LockRecursionException.
+                            // here ReaderWriterLockSlim(NoRecursion) would throw LockRecursionException.
                             let code       = codeArg.AsString()
                             let targetFile = targetFileArg.AsString()
                             let errorsJson =
@@ -2603,7 +2639,7 @@ type Server(client: ILanguageClient) =
                                         | Some orig ->
                                             try g.UpdateFile true targetFile (Some orig) |> ignore
                                             with ex ->
-                                                // Restoration failed �?log the error so it doesn't silently corrupt state
+                                                // Restoration failed log the error so it doesn't silently corrupt state
                                                 eprintfn "validateCode: failed to restore original content for %s: %A" targetFile ex
                                         | None -> ()
 
@@ -2663,7 +2699,7 @@ type Server(client: ILanguageClient) =
                                                "totalCount", JsonValue.Number 0m
                                                "ok",         JsonValue.Boolean true |]
                                     | Some typeArr ->
-                                        // Single filter pass �?reuse for both count and truncated result
+                                        // Single filter pass reuse for both count and truncated result
                                         let filtered =
                                             typeArr
                                             |> Array.filter (fun td ->
@@ -2755,7 +2791,7 @@ type Server(client: ILanguageClient) =
                         // is defined, by searching AllEntities for a top-level key that matches.
                         // Much more practical than position-based GoToType for AI use.
                         //
-                        // Optimization: Phase 1 uses g.Types() �?an already-indexed Map<typeName, TypeDefInfo[]>
+                        // Optimization: Phase 1 uses g.Types() an already-indexed Map<typeName, TypeDefInfo[]>
                         // for O(1) lookup. Phase 2 falls back to AllEntities scan only if Types() misses.
                         | { command = "cwtools.ai.queryDefinitionByName"
                             arguments = args } ->
@@ -3133,7 +3169,7 @@ type Server(client: ILanguageClient) =
                             Some result
 
                         // M8 Fix: previously these were declared as isReadCmd=true in LanguageServer.fs
-                        // but had no implementation �?they would silently return null.
+                        // but had no implementation they would silently return null.
                         // Return a structured not-implemented response so callers can detect the gap.
                         | { command = "typeGraphInfo"; arguments = _ }
                         | { command = "getFileTypes"; arguments = _ }

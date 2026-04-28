@@ -1,0 +1,47 @@
+﻿diff --git a/src/LSP/LSP.fsproj b/src/LSP/LSP.fsproj
+index f6d06a7..80da8a0 100644
+--- a/src/LSP/LSP.fsproj
++++ b/src/LSP/LSP.fsproj
+@@ -2,6 +2,7 @@
+ <Project Sdk="Microsoft.NET.Sdk">
+   <PropertyGroup>
+     <TargetFramework>net9.0</TargetFramework>
++    <Tailcalls>true</Tailcalls>
+   </PropertyGroup>
+   <ItemGroup>
+     <Compile Include="Log.fs" />
+diff --git a/src/Main/Completion.fs b/src/Main/Completion.fs
+index a34859e..8ea7808 100644
+--- a/src/Main/Completion.fs
++++ b/src/Main/Completion.fs
+@@ -50,15 +50,14 @@ let private getLineAt (text: string) (lineIdx: int) =
+                 e
+             text.Substring(idx, lineEnd - idx)
+ 
+-let completionCache = Dictionary<int, CompletionItem>()
++let completionCache = System.Collections.Concurrent.ConcurrentDictionary<int, CompletionItem>()
+ let mutable private rangeCache: (string * int * int * Range * Range) option = None
+ 
+ let mutable private completionCacheKey = 0
+ 
+ let addToCache completionItem =
+-    let key = completionCacheKey
+-    completionCacheKey <- completionCacheKey + 1
+-    completionCache.Add(key, completionItem)
++    let key = System.Threading.Interlocked.Increment(&completionCacheKey) - 1
++    completionCache.[key] <- completionItem
+     key
+ 
+ let mutable completionCacheCount = 0
+diff --git a/src/Main/Main.fsproj b/src/Main/Main.fsproj
+index 6939a61..797862a 100644
+--- a/src/Main/Main.fsproj
++++ b/src/Main/Main.fsproj
+@@ -9,6 +9,7 @@
+     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+     <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+     <ServerGarbageCollection>true</ServerGarbageCollection>
++    <Tailcalls>true</Tailcalls>
+     <PublishReadyToRun>false</PublishReadyToRun>
+     <PublishReadyToRunComposite>false</PublishReadyToRunComposite>
+     <PublishTrimmed>false</PublishTrimmed>

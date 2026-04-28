@@ -35,8 +35,58 @@ import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compa
 
 // Base fallback tool iterations (dynamically scaled in reasoningLoop)
 const MAX_TOOL_ITERATIONS_BASE = 50;
-// Doom-loop detection threshold: N consecutive identical call-signatures = loop (OpenCode: DOOM_LOOP_THRESHOLD)
-const DOOM_LOOP_THRESHOLD = 3;
+// Doom-loop detection: two-phase approach.
+// Phase 1 — signature-pair tracking: (prevSig, currSig) pairs. Same pair ≥ PAIR_THRESHOLD triggers Phase 2.
+// Phase 2 — normalized result hash: compare hashes of adjacent same-name tool results.
+//   Same hash = "spinning in place" → confirmed doom-loop → stop.
+//   Different hash = "making progress" → reset pair counter and continue.
+const DOOM_LOOP_PAIR_THRESHOLD = 4;
+
+// Lightweight 32-bit FNV-1a hash for normalized tool result comparison.
+function fnv32a(str: string): number {
+    let hash = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = (hash * 16777619) | 0;
+    }
+    return hash >>> 0;
+}
+
+// Normalize a tool result to a hashable key, extracting only semantically
+// meaningful fields (stripping positional info like line/column numbers).
+function normalizeToolResultHash(toolName: string, result: unknown): string {
+    if (result === null || result === undefined) return String(result);
+    if (typeof result !== 'object') return String(result).substring(0, 256);
+
+    const obj = result as Record<string, unknown>;
+    // read_file → hash file content
+    if (toolName === 'read_file' && typeof obj.content === 'string') {
+        return `read_file:${obj.file ?? ''}:${obj.content.length}`;
+    }
+    // edit_file / write_file → hash written content
+    if ((toolName === 'edit_file' || toolName === 'write_file') && typeof obj.content === 'string') {
+        return `write:${obj.filePath ?? obj.file ?? ''}:${obj.content.length}`;
+    }
+    // query_scope → hash scope chain
+    if (toolName === 'query_scope') {
+        return `scope:${JSON.stringify(obj.currentScope ?? '')}:${JSON.stringify(obj.thisScope ?? '')}`;
+    }
+    // validate_code → hash error code+message set (exclude line/col)
+    if (toolName === 'validate_code' && Array.isArray(obj.errors)) {
+        const sigs = (obj.errors as Array<Record<string, unknown>>)
+            .map(e => `${e.code ?? ''}:${e.message ?? ''}`).sort().join('|');
+        return `validate:${sigs}`;
+    }
+    // lsp_operation → hash the returned structure (exclude positions)
+    if (toolName === 'lsp_operation') {
+        const stripped = JSON.stringify(obj, (key, val) =>
+            (key === 'line' || key === 'column' || key === 'character' || key === 'offset') ? undefined : val
+        );
+        return `lsp:${stripped.substring(0, 256)}`;
+    }
+    // Generic fallback: first 256 chars of JSON
+    return `${toolName}:${JSON.stringify(obj).substring(0, 256)}`;
+}
 // Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
 const MAX_VALIDATION_RETRIES = 2;
 // Token estimation: adaptive based on content character distribution.
@@ -98,8 +148,36 @@ class WriteQueue {
 
     enqueue<T>(fn: () => Promise<T>): Promise<T> {
         return new Promise((resolve, reject) => {
-            this.queue = this.queue.then(() => fn().then(resolve, reject));
+            this.queue = this.queue
+                .then(() => fn().then(resolve, reject))
+                .catch(() => { /* swallow to keep the queue alive — a rejected write must not stall subsequent writes */ });
         });
+    }
+}
+
+// PartitionedWriteQueue: per-file-path write serialization.
+// Replaces the global single WriteQueue to allow parallel writes to different files
+// while preserving per-file ordering. Multi-file operations acquire all path locks
+// in sorted order (lexicographic) to prevent AB/BA deadlocks.
+class PartitionedWriteQueue {
+    private queues = new Map<string, WriteQueue>();
+
+    enqueue(files: string[], fn: () => Promise<void>): Promise<void> {
+        const sorted = [...new Set(files)].sort();
+        const acquire = (idx: number): Promise<void> => {
+            if (idx >= sorted.length) return fn(); // all locks held, execute write
+            return this.getQueue(sorted[idx]!).enqueue(() => acquire(idx + 1));
+        };
+        return acquire(0);
+    }
+
+    private getQueue(filePath: string): WriteQueue {
+        let q = this.queues.get(filePath);
+        if (!q) {
+            q = new WriteQueue();
+            this.queues.set(filePath, q);
+        }
+        return q;
     }
 }
 
@@ -194,10 +272,10 @@ const READ_ONLY_TOOLS = new Set<string>([
     // validate_code is intentionally omitted: it modifies the LSP game state temporarily
 ]);
 
-const globalWriteQueue = new WriteQueue();
+const globalPartitionedWriteQueue = new PartitionedWriteQueue();
 
 export class AgentRunner {
-    private writeQueue = globalWriteQueue;
+    private writeQueue = globalPartitionedWriteQueue;
     constructor(
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
@@ -637,9 +715,12 @@ export class AgentRunner {
         onFileWrite?: (filePath: string, prevContent: string | null) => void
     ): Promise<string> {
         let iteration = 0;
-        // M2 Fix: Track signature frequencies throughout the entire loop.
-        // Prevents alternating patterns (A-B-A-B) from escaping loop detection.
-        const callFrequency = new Map<string, number>();
+        // Two-phase doom-loop detection:
+        // phase1: track (prevSig → currSig) pair frequency
+        // phase2: compare normalized result hashes for same-name calls
+        const pairFrequency = new Map<string, number>();
+        const lastResultHash = new Map<string, number>(); // sig → fnv32a(normalized result)
+        let prevCallSignature = '';
         let consecutiveErrorCount = 0;
         // Flag set to true when we need to exit the outer while loop
         let forceStop = false;
@@ -800,6 +881,8 @@ export class AgentRunner {
                 tokenAccumulator.total += response.usage.total_tokens;
                 tokenAccumulator.estimatedCostUsd += inputCost + outputCost;
                 tokenAccumulator.contextWindowTokens = response.usage.prompt_tokens;
+                // Enforce session-wide token budget (propagates through sub-agents via parentAccumulator)
+                this.aiService.reportUsage(tokenAccumulator.total);
             }
 
             const choice = response.choices[0];
@@ -878,21 +961,18 @@ export class AgentRunner {
                 return this.cleanFinalContent(contentToString(assistantMessage.content));
             }
 
-            // ── M2 Fix: Doom loop detection via global map ──────
-            // Count iterations with identical call signatures.
-            // Works for exact repeats and alternating patterns (A-B-A-B).
+            // ── Two-phase doom-loop detection: phase 1 (pre-exec) ──
+            // Track (prevSig → currSig) pairs. If the same pair repeats
+            // ≥ DOOM_LOOP_PAIR_THRESHOLD times, flag for phase-2 hash check.
             const callSignature = toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`).join('|');
-            const freq = (callFrequency.get(callSignature) || 0) + 1;
-            callFrequency.set(callSignature, freq);
-            
-            if (freq >= DOOM_LOOP_THRESHOLD) {
-                emitStep({
-                    type: 'error',
-                    content: '检测到同质化高频无死锁调用循环 (Doom-Loop)，已强制停止',
-                    timestamp: Date.now(),
-                });
-                break;
+            let needsHashValidation = false;
+            if (prevCallSignature) {
+                const pairKey = `${prevCallSignature}→${callSignature}`;
+                const pairFreq = (pairFrequency.get(pairKey) || 0) + 1;
+                pairFrequency.set(pairKey, pairFreq);
+                if (pairFreq >= DOOM_LOOP_PAIR_THRESHOLD) needsHashValidation = true;
             }
+            prevCallSignature = callSignature;
 
             // ── Deduplicate file-write calls ──────────────────────────────────
             // If the model emitted multiple write/edit calls targeting the same file
@@ -989,12 +1069,23 @@ export class AgentRunner {
                         }
                     }));
                 } else {
-                    // Write tool: execute serially taking advantage of WriteQueue
+                    // Write tool: execute serially taking advantage of PartitionedWriteQueue
                     const filePath = (toolArgs['filePath'] as string) ?? (toolArgs['file'] as string) ?? '';
                     const isSupersededWrite = WRITE_TOOLS.has(toolName) && filePath &&
                         lastWriteIndexByFile.get(filePath) !== i;
 
-                    await this.writeQueue.enqueue(async () => {
+                    // Collect all file paths that this tool touches for partitioned locking
+                    const lockPaths: string[] = [];
+                    if (filePath) lockPaths.push(filePath);
+                    // multiedit may touch multiple files
+                    if (toolName === 'multiedit' && Array.isArray(toolArgs['edits'])) {
+                        for (const edit of toolArgs['edits'] as Array<Record<string, unknown>>) {
+                            const ep = (edit.filePath ?? edit.file ?? '') as string;
+                            if (ep && !lockPaths.includes(ep)) lockPaths.push(ep);
+                        }
+                    }
+
+                    await this.writeQueue.enqueue(lockPaths.length > 0 ? lockPaths : ['__global__'], async () => {
                         try {
                             // Sub-agent snapshot isolate hook
                             if (onFileWrite && filePath) {
@@ -1035,6 +1126,42 @@ export class AgentRunner {
                     });
                 }
             }
+
+            // ── Two-phase doom-loop detection: phase 2 (post-exec hash check) ──
+            if (needsHashValidation) {
+                let allHashesMatch = true;
+                for (let j = 0; j < parsedCalls.length; j++) {
+                    const { toolName, toolArgs, toolCall } = parsedCalls[j]!;
+                    const sig = `${toolCall.function.name}:${toolCall.function.arguments}`;
+                    const resultHash = fnv32a(normalizeToolResultHash(toolName, toolResults[j]));
+                    const prevHash = lastResultHash.get(sig);
+                    if (prevHash !== undefined && prevHash !== resultHash) {
+                        // Hash differs — meaningful progress, not a doom-loop.
+                        // Reset the pair counter for this pair.
+                        const pairKey = `${prevCallSignature}→${callSignature}`;
+                        pairFrequency.set(pairKey, 0);
+                        allHashesMatch = false;
+                    }
+                    lastResultHash.set(sig, resultHash);
+                }
+                if (allHashesMatch) {
+                    emitStep({
+                        type: 'error',
+                        content: '检测到死循环 (Doom-Loop): 签名对重复且工具返回结果未变化，已强制停止',
+                        timestamp: Date.now(),
+                    });
+                    forceStop = true;
+                }
+            } else {
+                // Update result hashes for future comparisons even when not flagged
+                for (let j = 0; j < parsedCalls.length; j++) {
+                    const { toolName, toolCall } = parsedCalls[j]!;
+                    const sig = `${toolCall.function.name}:${toolCall.function.arguments}`;
+                    lastResultHash.set(sig, fnv32a(normalizeToolResultHash(toolName, toolResults[j])));
+                }
+            }
+
+            if (forceStop) break;
 
             // Emergency compaction: if a single batch of tool results pushed the
             // conversation past 98% of context limit, force-compact immediately
@@ -1385,6 +1512,7 @@ export class AgentRunner {
         onStep?: (step: AgentStep) => void,
         parentAccumulator?: TokenUsage,
         onFileWrite?: (filePath: string, prevContent: string | null) => void,
+        parentContextHint?: string,
     ): Promise<string> {
         // P3: sub-agents use slim CWTOOLS.md (only mod info + namespaces)
         // to avoid bloating narrow-scope sub-agent contexts with full project rules
@@ -1393,9 +1521,14 @@ export class AgentRunner {
             this.aiService.getConfig().provider
         );
 
+        // Inject parent context summary so sub-agents don't start from scratch
+        const contextualizedPrompt = parentContextHint
+            ? `## Context from parent agent\n${parentContextHint}\n\n---\n\n## Your task\n${prompt}`
+            : prompt;
+
         const messages: ChatMessage[] = [
             { role: 'system', content: subSystemPrompt },
-            { role: 'user', content: prompt },
+            { role: 'user', content: contextualizedPrompt },
         ];
 
         const subOptions: AgentRunnerOptions = {

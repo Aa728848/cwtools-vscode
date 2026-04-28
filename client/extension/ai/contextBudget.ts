@@ -86,7 +86,7 @@ function extractBudgetableArray(
 ): { array: unknown[]; wrapper: Record<string, unknown>; key: string } | null {
     if (typeof result !== 'object' || result === null || Array.isArray(result)) return null;
     const obj = result as Record<string, unknown>;
-    const candidateKeys = ['diagnostics', 'instances', 'results', 'files', 'references', 'entries', 'items', 'rules'];
+    const candidateKeys = ['diagnostics', 'instances', 'results', 'files', 'references', 'entries', 'items', 'rules', 'matches', 'suggestions', 'findings', 'errors', 'warnings'];
     for (const k of candidateKeys) {
         if (Array.isArray(obj[k]) && (obj[k] as unknown[]).length > 5) {
             return { array: obj[k] as unknown[], wrapper: obj, key: k };
@@ -289,6 +289,14 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
                 delete newM.reasoning_content;
             }
             messages[i] = newM;
+        }
+        // Strip reasoning_content from ALL compacted messages (not just aggressive zone).
+        // Messages in the middle zone may have truncated content but preserved reasoning,
+        // creating a mismatch. Consistent removal prevents stale reasoning from bloating context.
+        if (m.role === 'assistant' && (m as any).reasoning_content !== undefined) {
+            const stripped: ChatMessage = { ...m };
+            delete (stripped as any).reasoning_content;
+            messages[i] = stripped;
         }
     }
 }

@@ -25,11 +25,12 @@ export interface ExternalToolContext {
     agentRunnerRef?: {
         runSubAgent(
             prompt: string,
-            mode: 'explore' | 'general' | 'build',
+            mode: 'explore' | 'general' | 'build' | 'review' | 'gui_expert' | 'script_reviewer',
             parentOptions?: import('../agentRunner').AgentRunnerOptions,
             onStep?: (step: import('../types').AgentStep) => void,
             parentAccumulator?: import('../types').TokenUsage,
             onFileWrite?: (filePath: string, prevContent: string | null) => void,
+            parentContextHint?: string,
         ): Promise<string>;
         pendingTransactions: Map<string, Map<string, string>>;
     };
@@ -453,17 +454,23 @@ export class ExternalToolHandler {
         // Limit to max 5 parallel tasks for DAG
         const tasksToRun = taskList.slice(0, 5);
         const globalSnapshots: Array<{ filePath: string; previousContent: string | null }> = [];
-        let hasError = false;
-        let errorMessage = '';
 
         this.ctx.suspendLsp?.();
 
         const vfsOverlay = new Map<string, string>();
         const subAgentOptions = { ...this.ctx.parentRunnerOptions, vfsOverlay };
 
+        // Build a lightweight parent context hint so sub-agents don't start from scratch.
+        // Includes sibling task descriptions and workspace root for file awareness.
+        const siblingDescs = taskList.map((t: any) => `- ${t.description ?? '(no description)'}`).join('\n');
+        const parentContextHint = [
+            `Workspace: ${this.ctx.workspaceRoot}`,
+            siblingDescs ? `Sibling tasks:\n${siblingDescs}` : null,
+        ].filter(Boolean).join('\n');
+
         try {
             const executeTask = async (task: any, idx: number) => {
-                const mode = (task.subagent_type ?? 'build') as 'explore' | 'general' | 'build';
+                const mode = (task.subagent_type ?? 'build') as 'explore' | 'general' | 'build' | 'review' | 'gui_expert' | 'script_reviewer';
                 this.ctx.onStep?.({
                     type: 'subtask_start',
                     content: `Sub-task ${idx + 1}/${tasksToRun.length}: ${task.description}`,
@@ -486,7 +493,8 @@ export class ExternalToolHandler {
                                     globalSnapshots.push({ filePath, previousContent: prevContent });
                                 }
                                 this.ctx.onBeforeFileWrite?.(filePath, prevContent);
-                            }
+                            },
+                            parentContextHint
                         );
                         
                         this.ctx.onStep?.({
@@ -557,7 +565,6 @@ export class ExternalToolHandler {
                     const running = new Set<string>();
                     
                     const checkQueue = () => {
-                        if (hasError) return;
                         if (taskMap.size === 0 && running.size === 0) {
                             resolve();
                             return;
@@ -632,7 +639,7 @@ export class ExternalToolHandler {
             vfsOverlay.clear();
             
             this.ctx.resumeLsp?.();
-            const actualError = errorMessage || (e instanceof Error ? e.message : String(e));
+            const actualError = e instanceof Error ? e.message : String(e);
             return {
                 results: [{
                     description: 'Transaction Rollback',

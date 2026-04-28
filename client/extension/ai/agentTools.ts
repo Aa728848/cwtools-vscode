@@ -29,6 +29,47 @@ import { ExternalToolHandler } from './tools/externalTools';
  */
 const MAX_TOOL_RESULT_CHARS = 30000;
 
+// Tool execution timeouts (ms) — prevents hangs on network filesystems or LSP deadlocks
+const TOOL_TIMEOUTS: Record<string, number> = {
+    // LSP / CWTools query tools — 15s
+    query_scope: 15_000,
+    query_types: 15_000,
+    query_rules: 15_000,
+    query_references: 15_000,
+    validate_code: 15_000,
+    get_diagnostics: 15_000,
+    get_file_context: 15_000,
+    search_mod_files: 15_000,
+    get_completion_at: 15_000,
+    document_symbols: 15_000,
+    workspace_symbols: 15_000,
+    get_pdx_block: 15_000,
+    lsp_operation: 15_000,
+    query_definition: 15_000,
+    query_definition_by_name: 15_000,
+    query_scripted_effects: 15_000,
+    query_scripted_triggers: 15_000,
+    query_enums: 15_000,
+    get_entity_info: 15_000,
+    query_static_modifiers: 15_000,
+    query_variables: 15_000,
+    // File tools — 30s
+    read_file: 30_000,
+    write_file: 30_000,
+    edit_file: 30_000,
+    multiedit: 30_000,
+    apply_patch: 30_000,
+    list_directory: 30_000,
+    glob_files: 30_000,
+    // Network/External — 20s
+    web_fetch: 20_000,
+    search_web: 20_000,
+    codesearch: 20_000,
+    // Shell — 30s
+    run_command: 30_000,
+};
+const DEFAULT_TOOL_TIMEOUT = 30_000;
+
 /**
  * Executes Agent tools by communicating with the CWTools Language Server
  * and directly reading workspace files.
@@ -153,8 +194,29 @@ export class AgentToolExecutor {
     /**
      * Execute a tool by name with the given arguments.
      * Results are automatically truncated if too large.
+     * Each tool execution is wrapped in a Promise.race with a category-specific timeout
+     * to prevent hangs on network filesystems, LSP deadlocks, or unresponsive external services.
      */
     async execute(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+        const timeout = TOOL_TIMEOUTS[toolName] ?? DEFAULT_TOOL_TIMEOUT;
+        try {
+            const result = await Promise.race([
+                this.executeInternal(toolName, args),
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`)), timeout)
+                ),
+            ]);
+            return this.truncateResult(result);
+        } catch (e) {
+            if (e instanceof Error && e.message.includes('执行超时')) {
+                return { error: e.message, hint: '请重试或使用更小范围的操作' };
+            }
+            throw e;
+        }
+    }
+
+    /** Internal tool dispatch — the actual switch statement, called within a timeout wrapper. */
+    private async executeInternal(toolName: string, args: Record<string, unknown>): Promise<unknown> {
         let result: unknown;
         switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'codesearch' | 'apply_patch' | 'multiedit' | 'task' | 'analyze_diagnostic_error') {
             // ── LSP / CWTools query tools ─────────────────────────────────
@@ -301,7 +363,7 @@ export class AgentToolExecutor {
                     throw new Error(`Unknown tool: ${toolName}`);
                 }
         }
-        return this.truncateResult(result);
+        return result;
     }
 
     // ─── MCP Connection Pool ─────────────────────────────────────────────────

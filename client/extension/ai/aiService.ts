@@ -711,11 +711,13 @@ export class AIService {
 
         while (true) {
             const response = await fetch(url, init);
-            
+
             // Check for 429 (Rate Limit / Too Many Requests)
             if (response.status === 429 && retries < maxRetries) {
-                console.warn(`[AIService] 429 Rate Limit hit for ${providerId}. Retrying in ${delays[retries]}ms...`);
-                await new Promise(r => setTimeout(r, delays[retries]));
+                const jitter = Math.floor(Math.random() * delays[retries]! * 0.25);
+                const delay = delays[retries]! + jitter;
+                console.warn(`[AIService] 429 Rate Limit hit for ${providerId}. Retrying in ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
                 retries++;
                 continue;
             }

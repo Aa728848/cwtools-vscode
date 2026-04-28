@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.8.1] — 2026-04-28
+
+### ⚡ 性能优化 (Performance)
+
+- **[重大优化] CodeLens 零阻塞零 I/O 预加载**：彻底重构了全局 CodeLens 类型的预热与缓存索引机制。现在缓存剥离于 `gameStateLock` 独占锁，通过懒加载形式建立以绝对路径为建档原点的倒查表 `cachedGroupedTypes`。这一改动实现了针对 CodeLens 请求从原 `O(N)` 全局扫表骤降至 `O(1)` 精确打击，并且 100% 消灭了由于假 Hash 初始化带来的磁盘重复 `ReadAllText` 读取消耗！
+
 ## [1.8.0] — 2026-04-28
 
 ### ⚡ 性能优化与 LSP 增量流 (Performance & LSP Delta)

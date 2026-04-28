@@ -333,6 +333,37 @@ type Server(client: ILanguageClient) =
     /// InlayHint cache: filePath -> (contentHash, hints)
     let inlayHintCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * InlayHint list>()
 
+    /// Cached type-index: filePath -> (typeName, id, TypeDefInfo) list.
+    /// Built lazily from game.Types(), cleared on delayedAnalyze alongside codeLensCache.
+    /// Avoids repeated O(all-types) scans in CodeLens handler and precaching.
+    let mutable cachedGroupedTypes: Map<string, (string * string * TypeDefInfo) list> option = None
+
+    let getOrBuildGroupedTypes (game: IGame) =
+        match cachedGroupedTypes with
+        | Some g -> g
+        | None ->
+            let pathCache = System.Collections.Generic.Dictionary<string, string>()
+            let getFullName (path: string) =
+                match pathCache.TryGetValue(path) with
+                | true, fn -> fn
+                | false, _ ->
+                    let fn = try FileInfo(path).FullName with _ -> path
+                    pathCache.[path] <- fn
+                    fn
+            let result =
+                game.Types()
+                |> Map.toList
+                |> List.collect (fun (typeName, vs) ->
+                    if typeName.Contains(".") then []
+                    else vs |> Array.toList |> List.map (fun tdi -> (getFullName tdi.range.FileName, typeName, tdi)))
+                |> List.groupBy (fun (fn, _, _) -> fn)
+                |> Map.ofList
+            cachedGroupedTypes <- Some result
+            result
+
+    let clearTypeIndexCache () =
+        cachedGroupedTypes <- None
+
     /// Maximum entries before eviction.  512 files covers even very large mods;
     /// each entry is small (hash + delta-encoded int list / CodeLens list).
     let cacheMaxEntries = 512
@@ -602,6 +633,7 @@ type Server(client: ILanguageClient) =
                 // when the entity is not yet rebuilt, then VSCode re-requests once the
                 // AST is ready. We clear codeLens because it's cheaper to recompute.
                 codeLensCache.Clear()
+                clearTypeIndexCache ()
             finally
                 gameStateLock.ExitWriteLock()
 
@@ -829,6 +861,126 @@ type Server(client: ILanguageClient) =
                         client.CustomNotification("promptVanillaPath", JsonValue.String(promptName))
         | _ -> logInfo "No cache path"
 
+    /// Precache CodeLens and InlayHints for all files.  Reads game data but only
+    /// writes to ConcurrentDictionary caches — safe to call without any lock.
+    let precacheAllFiles () =
+        match gameObj with
+        | None -> ()
+        | Some game ->
+            client.CustomNotification(
+                "loadingBar",
+                JsonValue.Record [| "value", JsonValue.String(LangResources.loadingBar_PrecachingUI); "enable", JsonValue.Boolean(true) |]
+            )
+            try
+                codeLensCache.Clear()
+                inlayHintCache.Clear()
+
+                // Phase 1: Build CodeLens cache from type index (no file reads, instant)
+                let groupedTypes = getOrBuildGroupedTypes game
+                for (filePath, items) in groupedTypes |> Map.toSeq do
+                    let lenses =
+                        items
+                        |> List.map (fun (typeName, id, tdi) ->
+                            let range = convRangeToLSPRange tdi.range
+                            { LSP.Types.CodeLens.range = range
+                              command = None
+                              data =
+                                JsonValue.Record
+                                    [| "typeName", JsonValue.String typeName
+                                       "id", JsonValue.String id
+                                       "filePath", JsonValue.String filePath
+                                       "line", JsonValue.Number(decimal range.start.line)
+                                       "character", JsonValue.Number(decimal range.start.character) |] })
+                    cachePut codeLensCache filePath (0, lenses)  // hash=0 → runtime handler recomputes with real hash
+
+                // Phase 2: Precache InlayHints by walking entity ASTs
+                let precacheVisitor =
+                    { new IGameVisitor<bool> with
+                        member this.Visit (gameT: IGame<_>) =
+                            let globalLocMap = gameT.References().Localisation |> Map.ofList
+                            let globalVars = gameT.ScriptedVariables()
+                            let localVarPattern = inlayLocalVarPattern
+
+                            let formatHintLabel (desc: string) =
+                                let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
+                                let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
+                                let clean = paradoxColorPattern.Replace(clean, "")
+                                let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
+                                sprintf "\U0001f4ac %s" truncated
+
+                            let entities = gameT.AllEntities() |> Seq.toArray
+                            let totalEntities = entities.Length
+                            let mutable entityCount = 0
+
+                            for struct(entity, _) in entities do
+                                entityCount <- entityCount + 1
+                                if entityCount % 500 = 0 then
+                                    client.CustomNotification(
+                                        "loadingBar",
+                                        JsonValue.Record [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_PrecachingUI entityCount totalEntities); "enable", JsonValue.Boolean(true) |]
+                                    )
+
+                                let filePath = FileInfo(entity.filepath).FullName
+                                let fileText =
+                                    match docs.GetTextByPath(filePath) with
+                                    | Some t -> t
+                                    | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
+                                let hash = contentHash fileText
+                                // Precache InlayHints
+                                let hints = ResizeArray<InlayHint>()
+                                let localVars = [ for m in localVarPattern.Matches(fileText) -> (m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim()) ]
+                                let varMap = (localVars @ globalVars) |> Map.ofList
+
+                                let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
+                                    if rawVal.StartsWith("@") && not (rawVal.StartsWith("@[")) then
+                                        match Map.tryFind rawVal varMap with
+                                        | Some value ->
+                                            let range = convRangeToLSPRange position
+                                            hints.Add { position = range.``end``; label = sprintf "= %s" value; paddingLeft = true; paddingRight = false }
+                                        | None -> ()
+
+                                let rec visitNode (n: CWTools.Process.Node) =
+                                    n.Leaves |> Seq.iter (fun l ->
+                                        if l.Position.FileName = filePath then
+                                            let rawVal = l.Value.ToRawString().Trim('\"')
+                                            match Map.tryFind rawVal globalLocMap with
+                                            | Some tr ->
+                                                let range = convRangeToLSPRange l.Position
+                                                hints.Add { position = range.``end``; label = formatHintLabel tr.desc; paddingLeft = true; paddingRight = false }
+                                            | None -> ()
+                                            tryAddVarHint rawVal l.Position
+                                    )
+                                    n.LeafValues |> Seq.iter (fun lv ->
+                                        if lv.Position.FileName = filePath then
+                                            let rawVal = lv.Value.ToRawString().Trim('\"')
+                                            match Map.tryFind rawVal globalLocMap with
+                                            | Some tr ->
+                                                let range = convRangeToLSPRange lv.Position
+                                                hints.Add { position = range.``end``; label = formatHintLabel tr.desc; paddingLeft = true; paddingRight = false }
+                                            | None -> ()
+                                            tryAddVarHint rawVal lv.Position
+                                    )
+                                    n.Nodes |> Seq.iter visitNode
+
+                                visitNode entity.entity
+                                let uniqueHints = hints |> Seq.distinctBy (fun h -> h.position.line, h.label) |> Seq.toList
+                                cachePut inlayHintCache filePath (hash, uniqueHints)
+                            // Send 100% progress on completion
+                            client.CustomNotification(
+                                "loadingBar",
+                                JsonValue.Record [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_PrecachingUI totalEntities totalEntities); "enable", JsonValue.Boolean(true) |]
+                            )
+                            true
+                    }
+
+                gameDispatcher.Dispatch precacheVisitor |> ignore
+            with e -> eprintfn $"Precache failed: %A{e}"
+            client.CustomNotification(
+                "loadingBar",
+                JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
+            )
+            maybeCollectGarbage ()
+
     let processWorkspace (uri: option<Uri>) =
         client.CustomNotification(
             "loadingBar",
@@ -982,142 +1134,6 @@ type Server(client: ILanguageClient) =
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
                 valErrors @ locErrors |> List.map parserErrorToDiagnostics |> sendDiagnostics
-                
-                // Precache CodeLens and InlayHints for all files in O(T)
-                client.CustomNotification(
-                    "loadingBar",
-                    JsonValue.Record [| "value", JsonValue.String(LangResources.loadingBar_PrecachingUI); "enable", JsonValue.Boolean(true) |]
-                )
-                try
-                    codeLensCache.Clear()
-                    inlayHintCache.Clear()
-                    
-                    let types = game.Types()
-                    
-                    let pathCache = System.Collections.Generic.Dictionary<string, string>()
-                    let getFullName (path: string) =
-                        match pathCache.TryGetValue(path) with
-                        | true, fullname -> fullname
-                        | false, _ ->
-                            let fullname = try FileInfo(path).FullName with _ -> path
-                            pathCache.[path] <- fullname
-                            fullname
-
-                    let groupedTypes = 
-                        types 
-                        |> Map.toList
-                        |> Seq.collect (fun (typeName, vs) ->
-                            if typeName.Contains(".") then Seq.empty
-                            else 
-                                vs 
-                                |> Array.toSeq 
-                                |> Seq.map (fun tdi -> (getFullName tdi.range.FileName, typeName, tdi))
-                        )
-                        |> Seq.groupBy (fun (fname, _, _) -> fname)
-                        |> Map.ofSeq
-
-                    let precacheVisitor =
-                        { new IGameVisitor<bool> with
-                            member this.Visit (gameT: IGame<_>) =
-                                let globalLocMap = gameT.References().Localisation |> Map.ofList
-                                let globalVars = gameT.ScriptedVariables()
-                                let localVarPattern = inlayLocalVarPattern
-
-                                let formatHintLabel (desc: string) =
-                                    let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
-                                    let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
-                                    let clean = paradoxColorPattern.Replace(clean, "")
-                                    let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
-                                    sprintf "💬 %s" truncated
-
-                                let entities = gameT.AllEntities() |> Seq.toArray
-                                let totalEntities = entities.Length
-                                let mutable entityCount = 0
-
-                                for struct(entity, _) in entities do
-                                    entityCount <- entityCount + 1
-                                    if entityCount % 500 = 0 then
-                                        client.CustomNotification(
-                                            "loadingBar",
-                                            JsonValue.Record [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_PrecachingUI entityCount totalEntities); "enable", JsonValue.Boolean(true) |]
-                                        )
-
-                                    let filePath = FileInfo(entity.filepath).FullName
-                                    let fileText = 
-                                        // Only use DocumentStore if it's already open, else Fallback to File system read
-                                        match docs.GetTextByPath(filePath) with
-                                        | Some t -> t
-                                        | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
-                                    let hash = contentHash fileText
-                                    
-                                    // 1. Precache CodeLens
-                                    match Map.tryFind filePath groupedTypes with
-                                    | Some items ->
-                                        let lenses =
-                                            items 
-                                            |> Seq.map (fun (_, typeName, tdi) ->
-                                                let range = convRangeToLSPRange tdi.range
-                                                { LSP.Types.CodeLens.range = range
-                                                  command = None
-                                                  data =
-                                                    JsonValue.Record
-                                                        [| "typeName", JsonValue.String typeName
-                                                           "id", JsonValue.String tdi.id
-                                                           "filePath", JsonValue.String filePath
-                                                           "line", JsonValue.Number(decimal range.start.line)
-                                                           "character", JsonValue.Number(decimal range.start.character) |] 
-                                                }
-                                            )
-                                            |> Seq.toList
-                                        cachePut codeLensCache filePath (hash, lenses)
-                                    | None ->
-                                        cachePut codeLensCache filePath (hash, [])
-                                    
-                                    // 2. Precache InlayHints
-                                    let hints = ResizeArray<InlayHint>()
-                                    let localVars = [ for m in localVarPattern.Matches(fileText) -> (m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim()) ]
-                                    let varMap = (localVars @ globalVars) |> Map.ofList
-                                    
-                                    let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
-                                        if rawVal.StartsWith("@") && not (rawVal.StartsWith("@[")) then
-                                            match Map.tryFind rawVal varMap with
-                                            | Some value ->
-                                                let range = convRangeToLSPRange position
-                                                hints.Add { position = range.``end``; label = sprintf "= %s" value; paddingLeft = true; paddingRight = false }
-                                            | None -> ()
-
-                                    let rec visitNode (n: CWTools.Process.Node) =
-                                        n.Leaves |> Seq.iter (fun l ->
-                                            if l.Position.FileName = filePath then
-                                                let rawVal = l.Value.ToRawString().Trim('\"')
-                                                match Map.tryFind rawVal globalLocMap with
-                                                | Some tr ->
-                                                    let range = convRangeToLSPRange l.Position
-                                                    hints.Add { position = range.``end``; label = formatHintLabel tr.desc; paddingLeft = true; paddingRight = false }
-                                                | None -> ()
-                                                tryAddVarHint rawVal l.Position
-                                        )
-                                        n.LeafValues |> Seq.iter (fun lv ->
-                                            if lv.Position.FileName = filePath then
-                                                let rawVal = lv.Value.ToRawString().Trim('\"')
-                                                match Map.tryFind rawVal globalLocMap with
-                                                | Some tr ->
-                                                    let range = convRangeToLSPRange lv.Position
-                                                    hints.Add { position = range.``end``; label = formatHintLabel tr.desc; paddingLeft = true; paddingRight = false }
-                                                | None -> ()
-                                                tryAddVarHint rawVal lv.Position
-                                        )
-                                        n.Nodes |> Seq.iter visitNode
-                                    
-                                    visitNode entity.entity
-                                    let uniqueHints = hints |> Seq.distinctBy (fun h -> h.position.line, h.label) |> Seq.toList
-                                    cachePut inlayHintCache filePath (hash, uniqueHints)
-                                true
-                        }
-                    
-                    gameDispatcher.Dispatch precacheVisitor |> ignore
-                        
-                with e -> eprintfn $"Precache failed: %A{e}"
 
                 // L6 Fix: non-blocking optimised GC avoids a 100ms freeze on load
                 maybeCollectGarbage ()
@@ -1470,16 +1486,16 @@ type Server(client: ILanguageClient) =
                 if requiresReload then
                     let task =
                         new Task(fun () ->
-                            // C3 Fix: processWorkspace mutates gameObj / stlGameObj / etc.
-                            // Acquire the write lock so no concurrent read request sees a
-                            // half-initialised game object while we are swapping it in.
+                            // Phase 1: game init / swap (needs write lock)
                             gameStateLock.EnterWriteLock()
                             try
                                 setupRulesCaches ()
                                 checkOrSetGameCache false
                                 processWorkspace rootUri
                             finally
-                                gameStateLock.ExitWriteLock())
+                                gameStateLock.ExitWriteLock()
+                            // Phase 2: precache (no lock needed — reads game data, writes ConcurrentDictionary)
+                            precacheAllFiles ())
 
                     task.Start()
             }
@@ -1908,42 +1924,24 @@ type Server(client: ILanguageClient) =
                         | true, (cachedHash, cachedLenses) when cachedHash = hash ->
                             cachedLenses
                         | _ ->
-                            let types = game.Types()
-
-                            let pathCache = System.Collections.Generic.Dictionary<string, bool>()
-                            let isTargetFile (tdiPath: string) =
-                                match pathCache.TryGetValue(tdiPath) with
-                                | true, res -> res
-                                | false, _ ->
-                                    let res = 
-                                        if System.String.Equals(tdiPath, filePath, System.StringComparison.OrdinalIgnoreCase) then true
-                                        else 
-                                            try FileInfo(tdiPath).FullName = filePath
-                                            with _ -> false
-                                    pathCache.[tdiPath] <- res
-                                    res
-
+                            // Use cached type index for O(1) lookup per file
+                            let grouped = getOrBuildGroupedTypes game
                             let lenses =
-                                types
-                                |> Map.toList
-                                |> List.collect (fun (typeName, vs) ->
-                                    if typeName.Contains(".") then []
-                                    else
-                                        vs
-                                        |> Array.toList
-                                        |> List.filter (fun tdi -> isTargetFile tdi.range.FileName)
-                                        |> List.map (fun tdi ->
-                                            let range = convRangeToLSPRange tdi.range
-                                            { range = range
-                                              command = None
-                                              data =
-                                                JsonValue.Record
-                                                    [| "typeName", JsonValue.String typeName
-                                                       "id", JsonValue.String tdi.id
-                                                       "filePath", JsonValue.String filePath
-                                                       "line", JsonValue.Number(decimal range.start.line)
-                                                       "character", JsonValue.Number(decimal range.start.character) |] }))
-
+                                match grouped.TryFind(filePath) with
+                                | Some items ->
+                                    items
+                                    |> List.map (fun (typeName, id, tdi) ->
+                                        let range = convRangeToLSPRange tdi.range
+                                        { range = range
+                                          command = None
+                                          data =
+                                            JsonValue.Record
+                                                [| "typeName", JsonValue.String typeName
+                                                   "id", JsonValue.String id
+                                                   "filePath", JsonValue.String filePath
+                                                   "line", JsonValue.Number(decimal range.start.line)
+                                                   "character", JsonValue.Number(decimal range.start.character) |] })
+                                | None -> []
                             cachePut codeLensCache filePath (hash, lenses)
                             evictIfNeeded codeLensCache
                             lenses

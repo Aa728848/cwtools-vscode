@@ -1927,6 +1927,34 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     html += '</div></div>';
                 }
 
+                // ── Batch 4.2: Tool frequency ──
+                if (stats.toolFrequency && stats.toolFrequency.length > 0) {
+                    html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
+                    html += '<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">工具使用频率</div>';
+                    const topTools = stats.toolFrequency.slice(0, 8);
+                    for (const t of topTools) {
+                        const barW = Math.max(2, t.percentage);
+                        html += `<div style="margin-bottom: 4px;">
+                            <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+                                <span style="opacity:0.85; font-family:var(--vscode-editor-font-family,monospace);">${escapeHtml(t.tool)}</span>
+                                <span style="opacity:0.6;">${t.count}× (${t.percentage}%)</span>
+                            </div>
+                            <div style="background:var(--border); border-radius:3px; height:4px; overflow:hidden;">
+                                <div style="width:${barW}%; height:100%; background:cornflowerblue; border-radius:3px; transition:width 0.3s;"></div>
+                            </div>
+                        </div>`;
+                    }
+                    html += '</div>';
+                }
+
+                // ── Batch 4.2: Average response time ──
+                if (stats.avgResponseMs && stats.avgResponseMs > 0) {
+                    const avgSec = (stats.avgResponseMs / 1000).toFixed(1);
+                    html += `<div style="border-top: 1px dashed var(--border); padding-top: 6px; font-size:11px; opacity:0.7;">
+                        平均响应时间: <b>${avgSec}s</b> (${stats.avgResponseMs}ms)
+                    </div>`;
+                }
+
                 c.innerHTML = html;
                 break;
             }

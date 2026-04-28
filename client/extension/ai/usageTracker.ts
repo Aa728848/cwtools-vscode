@@ -11,6 +11,12 @@ export interface UsageRecord {
     outputTokens: number;
     totalTokens: number;
     costUsd: number;
+    /** Tool calls made in this request (Batch 4.2) */
+    toolCalls?: Record<string, number>;
+    /** Response latency in ms (Batch 4.2) */
+    durationMs?: number;
+    /** Topic/session ID for grouping (Batch 4.2) */
+    topicId?: string;
 }
 
 export interface ProviderStats {
@@ -40,6 +46,10 @@ export interface UsageStats {
     byProvider: Record<string, ProviderStats>;
     dailyStats: DailyStats[];
     modelDistribution: ModelDistribution[];
+    /** Batch 4.2: Aggregated tool call frequencies */
+    toolFrequency: { tool: string; count: number; percentage: number }[];
+    /** Batch 4.2: Average response time in ms */
+    avgResponseMs: number;
 }
 
 // ─── Internal persisted shape ────────────────────────────────────────────────
@@ -64,7 +74,16 @@ export class UsageTracker {
 
     // ── Write ────────────────────────────────────────────────────────────────
 
-    addUsage(providerId: string, model: string, usage: TokenUsage) {
+    addUsage(
+        providerId: string,
+        model: string,
+        usage: TokenUsage,
+        options?: {
+            toolCalls?: Record<string, number>;
+            durationMs?: number;
+            topicId?: string;
+        }
+    ) {
         if (!usage || typeof usage.total !== 'number') return;
 
         const data = this.loadData();
@@ -77,6 +96,9 @@ export class UsageTracker {
             outputTokens: usage.output ?? 0,
             totalTokens: usage.total,
             costUsd: usage.estimatedCostUsd ?? 0,
+            toolCalls: options?.toolCalls,
+            durationMs: options?.durationMs,
+            topicId: options?.topicId,
         });
 
         // Auto-cleanup stale records
@@ -142,6 +164,31 @@ export class UsageTracker {
             }))
             .sort((a, b) => b.tokens - a.tokens);
 
+        // Batch 4.2: Tool frequency aggregation
+        const toolMap = new Map<string, number>();
+        let totalDurationMs = 0;
+        let durationCount = 0;
+        for (const r of records) {
+            if (r.toolCalls) {
+                for (const [tool, count] of Object.entries(r.toolCalls)) {
+                    toolMap.set(tool, (toolMap.get(tool) ?? 0) + count);
+                }
+            }
+            if (r.durationMs && r.durationMs > 0) {
+                totalDurationMs += r.durationMs;
+                durationCount++;
+            }
+        }
+        const totalToolCalls = Array.from(toolMap.values()).reduce((a, b) => a + b, 0) || 1;
+        const toolFrequency = Array.from(toolMap.entries())
+            .map(([tool, count]) => ({
+                tool,
+                count,
+                percentage: Math.round((count / totalToolCalls) * 10000) / 100,
+            }))
+            .sort((a, b) => b.count - a.count);
+        const avgResponseMs = durationCount > 0 ? Math.round(totalDurationMs / durationCount) : 0;
+
         return {
             totalTokens,
             totalCostUsd,
@@ -149,6 +196,8 @@ export class UsageTracker {
             byProvider,
             dailyStats,
             modelDistribution,
+            toolFrequency,
+            avgResponseMs,
         };
     }
 
@@ -211,6 +260,45 @@ export class UsageTracker {
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
+
+    /**
+     * Batch 4.2: Export all usage records as CSV or JSON.
+     * Supports optional date range filtering.
+     */
+    exportStats(format: 'csv' | 'json', options?: { fromDate?: number; toDate?: number }): string {
+        const data = this.loadData();
+        let records = data.records;
+
+        // Filter by date range if specified
+        if (options?.fromDate) {
+            records = records.filter(r => r.timestamp >= options.fromDate!);
+        }
+        if (options?.toDate) {
+            records = records.filter(r => r.timestamp <= options.toDate!);
+        }
+
+        if (format === 'json') {
+            return JSON.stringify(records, null, 2);
+        }
+
+        // CSV format
+        const headers = ['timestamp', 'date', 'provider', 'model', 'inputTokens', 'outputTokens', 'totalTokens', 'costUsd', 'durationMs', 'topicId', 'toolCalls'];
+        const rows = records.map(r => [
+            r.timestamp,
+            new Date(r.timestamp).toISOString(),
+            r.provider,
+            r.model,
+            r.inputTokens,
+            r.outputTokens,
+            r.totalTokens,
+            r.costUsd.toFixed(6),
+            r.durationMs ?? '',
+            r.topicId ?? '',
+            r.toolCalls ? Object.entries(r.toolCalls).map(([k, v]) => `${k}:${v}`).join(';') : '',
+        ].join(','));
+
+        return [headers.join(','), ...rows].join('\n');
+    }
 
     clearStats() {
         this.context.globalState.update(UsageTracker.STORAGE_KEY, undefined);

@@ -836,6 +836,90 @@ function formatBytes(bytes: number): string {
 }
 
 /**
+ * Batch 4.4: Suggest optimal Ollama configuration based on detected models.
+ * Analyzes model parameter sizes and names to recommend:
+ * - Best model for agent/chat use (largest capable model)
+ * - Best model for inline completion (fastest small model)
+ * - Recommended context window size
+ */
+export interface OllamaModelSuggestion {
+    /** Recommended model name for chat/agent use */
+    chatModel: string;
+    /** Recommended model for inline FIM completion (if available) */
+    inlineModel?: string;
+    /** Recommended context window size */
+    contextTokens: number;
+    /** Human-readable reasoning for the recommendation */
+    reasoning: string;
+}
+
+export function suggestOllamaConfig(
+    models: Array<{ name: string; size: string; parameterSize?: string }>
+): OllamaModelSuggestion | null {
+    if (!models.length) return null;
+
+    // Parse parameter sizes to numeric values (e.g., "7B" → 7, "70B" → 70)
+    const parsed = models.map(m => {
+        let paramB = 0;
+        if (m.parameterSize) {
+            const match = m.parameterSize.match(/([\d.]+)\s*([BM])/i);
+            if (match) {
+                paramB = parseFloat(match[1]!);
+                if (match[2]!.toUpperCase() === 'M') paramB /= 1000;
+            }
+        }
+        // Fallback: infer from model name (e.g., "llama3:70b", "qwen2.5-coder:32b")
+        if (paramB === 0) {
+            const nameMatch = m.name.match(/(\d+)[bB]/);
+            if (nameMatch) paramB = parseInt(nameMatch[1]!, 10);
+        }
+        return { ...m, paramB };
+    }).sort((a, b) => b.paramB - a.paramB);
+
+    // Identify coding-capable models (prefer those with 'coder', 'code', 'instruct' in name)
+    const isCodingModel = (name: string) =>
+        /coder|code|instruct|chat/i.test(name);
+
+    // Chat model: largest available coding model, or largest overall
+    const codingModels = parsed.filter(m => isCodingModel(m.name));
+    const chatModel = codingModels.length > 0 ? codingModels[0]! : parsed[0]!;
+
+    // Inline completion model: smallest model that supports FIM (prefer <14B for speed)
+    const smallModels = parsed.filter(m => m.paramB > 0 && m.paramB <= 14);
+    const fimCandidates = smallModels.filter(m =>
+        /coder|code|deepseek|starcoder|codellama/i.test(m.name)
+    );
+    const inlineModel = fimCandidates.length > 0
+        ? fimCandidates[fimCandidates.length - 1] // smallest FIM-capable
+        : (smallModels.length > 0 ? smallModels[smallModels.length - 1] : undefined);
+
+    // Context window: based on largest model's param count
+    let contextTokens = 4096; // conservative default
+    if (chatModel.paramB >= 70) contextTokens = 32768;
+    else if (chatModel.paramB >= 30) contextTokens = 16384;
+    else if (chatModel.paramB >= 13) contextTokens = 8192;
+    else if (chatModel.paramB >= 7) contextTokens = 4096;
+
+    // Build reasoning
+    const parts: string[] = [];
+    parts.push(`推荐 "${chatModel.name}" (${chatModel.parameterSize || chatModel.paramB + 'B'}) 作为对话模型`);
+    if (inlineModel && inlineModel.name !== chatModel.name) {
+        parts.push(`推荐 "${inlineModel.name}" 作为补全模型（较快）`);
+    }
+    parts.push(`建议上下文窗口: ${contextTokens} tokens`);
+    if (chatModel.paramB < 7) {
+        parts.push('⚠️ 模型较小，工具调用能力可能有限');
+    }
+
+    return {
+        chatModel: chatModel.name,
+        inlineModel: inlineModel?.name,
+        contextTokens,
+        reasoning: parts.join('。'),
+    };
+}
+
+/**
  * Get the effective endpoint for a provider (user override takes precedence).
  */
 export function getEffectiveEndpoint(providerId: string, userEndpoint?: string): string {

@@ -236,11 +236,13 @@ const CHECKPOINT_INTERVAL = 10;
 // Maps primary provider → fallback provider+model pairs.
 const PROVIDER_FALLBACK: Record<string, { providerId: string; model: string }[]> = {
     // If the primary provider fails, try these in order:
-    openai:     [{ providerId: 'deepseek', model: 'deepseek-v4-pro' }],
-    deepseek:   [{ providerId: 'openai',   model: 'gpt-5.5' }],
-    claude:     [{ providerId: 'deepseek', model: 'deepseek-v4-pro' }],
-    gemini:     [{ providerId: 'deepseek', model: 'deepseek-v4-pro' }],
-    qwen:       [{ providerId: 'deepseek', model: 'deepseek-v4-pro' }],
+    openai:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
+    deepseek:   [{ providerId: 'minimax-token-plan',  model: 'MiniMax-M2.7-highspeed' }],
+    claude:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
+    qwen:       [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
+    glm:        [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
+    google:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
+    minimax:    [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
 };
 
 export interface AgentRunnerOptions {

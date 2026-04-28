@@ -61,6 +61,7 @@ npx rollup -c
 // turbo
 ```powershell
 Copy-Item "client\webview\solarSystemPreview.css" "release\bin\client\webview\" -Force
+Copy-Item "client\webview\chatPanel.css" "release\bin\client\webview\" -Force
 ```
 
 ## 5. 打包 VSIX（通用包，含三平台）

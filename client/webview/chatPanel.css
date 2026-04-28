@@ -6,15 +6,25 @@
     --input-fg: var(--vscode-input-foreground, #ccc);
     --btn-hover: var(--vscode-list-hoverBackground, #2a2d2e);
     --accent: #d95a43;
-    --success: #4caf50;
-    --error: #f44336;
-    --warning: #ff9800;
+    --success: var(--vscode-testing-iconPassed, #4caf50);
+    --error: var(--vscode-testing-iconFailed, #f44336);
+    --warning: var(--vscode-editorWarning-foreground, #ff9800);
     --code-bg: var(--vscode-textCodeBlock-background, #1a1a1a);
     --thinking-bg: rgba(100,149,237,0.06);
     --thinking-border: rgba(100,149,237,0.25);
+    --focus-ring: var(--vscode-focusBorder, #007fd4);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
+
+/* ── Batch 3.3: Accessibility — keyboard focus ring ── */
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: 3px; }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* ── Batch 3.3: Reduced motion preference ── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
 
 /* ── Custom Scrollbar ── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -138,13 +148,29 @@ body.plan-mode .plan-indicator { display: block; }
 .msg-bubble strong { font-weight:700; }
 .msg-bubble em { font-style:italic; }
 .msg-bubble del { text-decoration:line-through; opacity:0.6; }
-.msg-bubble a { color:#7ab4d4; text-decoration:none; }
+.msg-bubble a { color:var(--vscode-textLink-foreground, #7ab4d4); text-decoration:none; }
 .msg-bubble a:hover { text-decoration:underline; }
-.msg-bubble .md-codeblock { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin:6px 0; }
+.msg-bubble .md-codeblock { background:var(--code-bg); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin:6px 0; position:relative; }
 .msg-bubble .md-codeblock-lang { font-size:10px; opacity:0.5; padding:2px 8px; background:rgba(255,255,255,0.03); border-bottom:1px solid var(--border); letter-spacing:0.05em; text-transform:uppercase; }
 .msg-bubble .md-codeblock-lang:empty { display:none; }
 .msg-bubble .md-codeblock code { display:block; padding:8px 10px; font-family:var(--vscode-editor-font-family,monospace); font-size:13px; white-space:pre; overflow-x:auto; background:none; border-radius:0; }
 .msg-bubble code { background:rgba(255,255,255,0.1); border-radius:3px; padding:1px 4px; font-family:var(--vscode-editor-font-family,monospace); font-size:12.5px; }
+
+/* ── Batch 3.2: Code block copy button ── */
+.md-codeblock-copy { position:absolute; top:4px; right:6px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); color:var(--fg); border-radius:4px; padding:2px 7px; cursor:pointer; font-size:10px; opacity:0; transition:opacity 0.15s; z-index:1; }
+.md-codeblock:hover .md-codeblock-copy { opacity:0.7; }
+.md-codeblock-copy:hover { opacity:1 !important; background:rgba(255,255,255,0.15); }
+.md-codeblock-copy.copied { color:var(--success); }
+
+/* ── Batch 3.2: Task list (GFM checkboxes) ── */
+.msg-bubble .task-list { list-style:none; margin-left:0; padding-left:2px; }
+.msg-bubble .task-list li { display:flex; align-items:flex-start; gap:6px; }
+.msg-bubble .task-checkbox { width:14px; height:14px; border-radius:3px; border:1px solid var(--border); background:transparent; flex-shrink:0; margin-top:3px; appearance:none; cursor:default; }
+.msg-bubble .task-checkbox:checked { background:var(--success); border-color:var(--success); }
+.msg-bubble .task-checkbox:checked::after { content:'\2713'; display:block; text-align:center; font-size:10px; line-height:14px; color:#fff; }
+
+/* ── Batch 3.1: Virtual scroll offscreen optimization ── */
+.message.offscreen { content-visibility:auto; contain-intrinsic-size:auto 80px; }
 
 /* ── Diff card ── */
 .diff-card { border: 1px solid var(--warning); border-radius: 6px; overflow: hidden; margin: 4px 0; font-size: 11px; }

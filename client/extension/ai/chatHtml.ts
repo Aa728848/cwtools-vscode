@@ -31,7 +31,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 <link rel="stylesheet" href="${cssUri}">
 </head>
 <body>
-<div class="header">
+<div class="header" role="banner">
     <div class="header-title">
         <svg class="header-brand-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
             <path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/>
@@ -40,9 +40,9 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <span class="brand-text">Eddy CWTool Code</span>
     </div>
     <div class="header-actions">
-        <button class="icon-btn" id="btnNewTopic" title="新话题">+</button>
-        <button class="icon-btn" id="btnTopics" title="历史话题">≡</button>
-        <button class="icon-btn" id="btnSettings" title="设置">⋯</button>
+        <button class="icon-btn" id="btnNewTopic" title="新话题" aria-label="新建对话话题">+</button>
+        <button class="icon-btn" id="btnTopics" title="历史话题" aria-label="展开历史话题面板">≡</button>
+        <button class="icon-btn" id="btnSettings" title="设置" aria-label="打开 AI 设置">⋯</button>
     </div>
 </div>
 
@@ -62,7 +62,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
     <div id="todoList"></div>
 </div>
 
-<div class="chat-area" id="chatArea">
+<div class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="AI 对话消息区">
     <div class="empty-state" id="emptyState">
         <div class="empty-icon"><svg width="40" height="40" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/><circle fill="#e8c840" cx="13" cy="3" r="1"/></svg></div>
         <div style="font-size:13px;font-family:Georgia,serif;">Eddy CWTool Code Assistant</div>
@@ -87,7 +87,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <div class="file-badge-area" id="fileBadgeArea"></div>
         <div class="image-preview-area" id="imagePreviewArea"></div>
         <div class="input-row">
-            <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1"></textarea>
+            <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1" aria-label="向 AI 发送消息"></textarea>
         </div>
         <div class="input-controls">
             <div class="ctrl-group">
@@ -101,7 +101,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
                 <button class="img-pick-btn" id="imgPickBtn" title="上传图片">+</button>
             </div>
-            <button class="send-btn" id="sendBtn" title="发送 (Enter)">↑</button>
+            <button class="send-btn" id="sendBtn" title="发送 (Enter)" aria-label="发送消息">↑</button>
         </div>
     </div>
 </div>

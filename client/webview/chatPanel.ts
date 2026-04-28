@@ -955,6 +955,85 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
     }
 
+    // ── Batch 3.1: Virtual scroll — IntersectionObserver offscreen optimization ──
+    // Adds CSS class 'offscreen' to messages far from the viewport, enabling
+    // content-visibility:auto to skip layout/paint for off-screen DOM subtrees.
+    // This dramatically reduces memory and rendering cost for 100+ message sessions.
+    const virtualScrollObserver = new IntersectionObserver(
+        (entries) => {
+            for (const entry of entries) {
+                const el = entry.target as HTMLElement;
+                if (entry.isIntersecting) {
+                    el.classList.remove('offscreen');
+                } else {
+                    // Only mark offscreen if the message is NOT the live streaming message
+                    if (!el.classList.contains('live-msg')) {
+                        el.classList.add('offscreen');
+                    }
+                }
+            }
+        },
+        { root: chatArea, rootMargin: '200% 0px' } // ±2 screens buffer
+    );
+
+    /** Register a message element for virtual scroll observation */
+    function observeMessage(el: HTMLElement) {
+        virtualScrollObserver.observe(el);
+    }
+
+    // ── Batch 3.2: Code block copy button enhancer ──────────────────────────
+    // After rendering markdown, attach copy buttons to all code blocks.
+    function enhanceCodeBlocks(container: HTMLElement) {
+        const blocks = container.querySelectorAll('.md-codeblock');
+        blocks.forEach(block => {
+            // Skip if already enhanced
+            if (block.querySelector('.md-codeblock-copy')) return;
+            const codeEl = block.querySelector('code');
+            if (!codeEl) return;
+            const btn = document.createElement('button');
+            btn.className = 'md-codeblock-copy';
+            btn.textContent = 'Copy';
+            btn.setAttribute('aria-label', '复制代码');
+            btn.addEventListener('click', () => {
+                navigator.clipboard.writeText(codeEl.textContent || '').then(() => {
+                    btn.textContent = '✓';
+                    btn.classList.add('copied');
+                    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+                }).catch(() => { /* clipboard not available in webview sandbox */ });
+            });
+            block.appendChild(btn);
+        });
+    }
+
+    // ── Batch 3.2: Task list checkbox rendering ──────────────────────────────
+    // Converts GFM-style task list items (- [x] / - [ ]) to styled checkboxes.
+    function enhanceTaskLists(container: HTMLElement) {
+        const lists = container.querySelectorAll('ul, ol');
+        lists.forEach(list => {
+            const items = Array.from(list.children) as HTMLElement[];
+            let hasTask = false;
+            for (const li of items) {
+                const text = li.innerHTML;
+                const checkedMatch = text.match(/^\s*\[x\]\s*/i);
+                const uncheckedMatch = text.match(/^\s*\[\s?\]\s*/);
+                if (checkedMatch || uncheckedMatch) {
+                    hasTask = true;
+                    const checked = !!checkedMatch;
+                    const prefix = checked ? checkedMatch![0] : uncheckedMatch![0];
+                    li.innerHTML = `<input type="checkbox" class="task-checkbox" ${checked ? 'checked' : ''} disabled aria-label="${checked ? '已完成' : '未完成'}">` +
+                        text.substring(prefix.length);
+                }
+            }
+            if (hasTask) list.classList.add('task-list');
+        });
+    }
+
+    // ── Batch 3.3: ARIA role helpers for dynamic messages ─────────────────────
+    function setMessageAria(el: HTMLElement, role: 'user' | 'assistant') {
+        el.setAttribute('role', 'article');
+        el.setAttribute('aria-label', role === 'user' ? 'User message' : 'AI response');
+    }
+
     // ── OpenCode-style step rendering ─────────────────────────────────────────
     // Tool step icons — minimal, professional
     const TOOL_ICONS = {
@@ -1104,6 +1183,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             b.innerHTML = renderMarkdown(content);
             div.appendChild(b);
         }
+
+        // Batch 3: Enhance rendered content
+        setMessageAria(div, 'assistant');
+        enhanceCodeBlocks(div);
+        enhanceTaskLists(div);
+        observeMessage(div);
 
         return div;
     }
@@ -1295,10 +1380,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             const rb = document.createElement('button');
             rb.className = 'retract-btn';
             rb.textContent = '↩ 撤回';
+            rb.setAttribute('aria-label', '撤回此消息');
             rb.addEventListener('click', () => showRetractConfirm(msgIdx));
             div.appendChild(rb);
             messageIndexMap.set(msgIdx, div);
         }
+        // Batch 3: ARIA and virtual scroll
+        setMessageAria(div, 'user');
+        observeMessage(div);
         chatArea.appendChild(div);
         scrollBottom(true);
         return div;

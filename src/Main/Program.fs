@@ -25,6 +25,22 @@ open Main.Completion
 open CWTools.Utilities.Utils
 open LSP.LanguageServer   // brings gameStateLock into scope
 
+// 预编译正则，避免 InlayHint / precache 热路径上每次分配
+let private inlayLocalVarPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
+        System.Text.RegularExpressions.RegexOptions.Multiline ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private paradoxColorPattern =
+    System.Text.RegularExpressions.Regex(
+        @"§[RGBYWHETLMSP!]",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private scriptedParamRegex =
+    System.Text.RegularExpressions.Regex(
+        @"\$([A-Za-z_][A-Za-z0-9_]*)\$",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
 let private TODO () = raise (Exception "TODO")
 
 [<assembly: AssemblyDescription("CWTools language server for PDXScript")>]
@@ -109,6 +125,19 @@ type Server(client: ILanguageClient) =
                 | _ -> None
         }
 
+    /// Data-driven list of field clearers — keeps cleanupOldGame DRY.
+    let gameFieldClearers =
+        [ (fun () -> stlGameObj <- None)
+          (fun () -> hoi4GameObj <- None)
+          (fun () -> eu4GameObj <- None)
+          (fun () -> ck2GameObj <- None)
+          (fun () -> irGameObj <- None)
+          (fun () -> vic2GameObj <- None)
+          (fun () -> ck3GameObj <- None)
+          (fun () -> vic3GameObj <- None)
+          (fun () -> eu5GameObj <- None)
+          (fun () -> customGameObj <- None) ]
+
     let mutable languages: Lang array = [||]
     let mutable rootUri: Uri option = None
     let mutable workspaceFolders: WorkspaceFolder list = []
@@ -160,11 +189,9 @@ type Server(client: ILanguageClient) =
     /// key: FileName (使用 ConcurrentDictionary 替代不可变的 Map 以减少 GC 压力)
     let locCache = System.Collections.Concurrent.ConcurrentDictionary<string, CWError list>()
 
-    let mutable effectTriggerVersion = 0
-
-    /// SemanticTokens cache: filePath ?(contentHash, effectTriggerVersion, tokenData)
+    /// SemanticTokens cache: filePath -> (contentHash, tokenData)
     /// Avoids full AST re-traversal when file content hasn't changed.
-    let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * int * int list>()
+    let semanticTokensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * int list>()
 
     /// CodeLens cache: filePath �?(contentHash, lenses)
     let codeLensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * CodeLens list>()
@@ -176,14 +203,40 @@ type Server(client: ILanguageClient) =
     /// each entry is small (hash + delta-encoded int list / CodeLens list).
     let cacheMaxEntries = 512
 
-    /// Evict ~25% of entries when a Dictionary exceeds cacheMaxEntries.
-    /// Uses enumerator order (effectively random for Dictionary) so we don't
-    /// need to track access timestamps.
+    /// Write-time tracking for LRU eviction.  Updated on every cache write so
+    /// evictIfNeeded can remove the least-recently-written entries first.
+    let cacheWriteTimes = System.Collections.Concurrent.ConcurrentDictionary<string, int64>()
+
+    /// Evict ~25% of the least-recently-written entries when a cache exceeds cacheMaxEntries.
     let evictIfNeeded (cache: System.Collections.Concurrent.ConcurrentDictionary<'K, 'V>) =
         if cache.Count > cacheMaxEntries then
             let toRemove = cache.Count / 4
-            let keys = cache.Keys |> Seq.take toRemove |> Seq.toArray
-            for k in keys do (cache :> System.Collections.Generic.IDictionary<'K, 'V>).Remove(k) |> ignore
+            let keys =
+                cache.Keys
+                |> Seq.sortBy (fun k ->
+                    match cacheWriteTimes.TryGetValue(k.ToString()) with
+                    | true, ticks -> ticks
+                    | false, _ -> 0L)
+                |> Seq.take toRemove
+                |> Seq.toArray
+            for k in keys do
+                (cache :> System.Collections.Generic.IDictionary<'K, 'V>).Remove(k) |> ignore
+                cacheWriteTimes.TryRemove(k.ToString()) |> ignore
+
+    let cachePut (cache: System.Collections.Concurrent.ConcurrentDictionary<string, 'V>) (key: string) (value: 'V) =
+        cache.[key] <- value
+        cacheWriteTimes.[key] <- DateTime.UtcNow.Ticks
+
+    /// Allocation-based GC threshold — triggers non-blocking Gen2 collection
+    /// after ~50 MB of new allocations instead of a simple locCache.Count check.
+    let mutable lastGCAllocBytes = GC.GetTotalAllocatedBytes(false)
+    let gcThresholdBytes = 50L * 1024L * 1024L
+
+    let maybeCollectGarbage () =
+        let currentBytes = GC.GetTotalAllocatedBytes(false)
+        if currentBytes - lastGCAllocBytes > gcThresholdBytes then
+            GC.Collect(2, GCCollectionMode.Optimized, false, false)
+            lastGCAllocBytes <- GC.GetTotalAllocatedBytes(false)
 
     /// Deterministic content hash using FNV-1a instead of string.GetHashCode()
     /// because string.GetHashCode() is randomized per-process in .NET Core.
@@ -204,6 +257,20 @@ type Server(client: ILanguageClient) =
         match tryResult with
         | true, value -> TrySuccess value
         | _ -> TryFailure
+
+    /// Data-driven mapping for language parsing in DidChangeConfiguration.
+    /// Each entry: (GameType, parser (string -> Lang), default (unit -> Lang array))
+    let langConfigMap =
+        [ STL,  (fun (s: string) -> match STLLang.TryParse<STLLang> s with TrySuccess v -> Lang.STL v | _ -> Lang.STL STLLang.English), (fun () -> [| Lang.STL STLLang.English |])
+          EU4,  (fun s -> match EU4Lang.TryParse<EU4Lang> s with TrySuccess v -> Lang.EU4 v | _ -> Lang.EU4 EU4Lang.English), (fun () -> [| Lang.EU4 EU4Lang.English |])
+          HOI4, (fun s -> match HOI4Lang.TryParse<HOI4Lang> s with TrySuccess v -> Lang.HOI4 v | _ -> Lang.HOI4 HOI4Lang.English), (fun () -> [| Lang.HOI4 HOI4Lang.English |])
+          CK2,  (fun s -> match CK2Lang.TryParse<CK2Lang> s with TrySuccess v -> Lang.CK2 v | _ -> Lang.CK2 CK2Lang.English), (fun () -> [| Lang.CK2 CK2Lang.English |])
+          IR,   (fun s -> match IRLang.TryParse<IRLang> s with TrySuccess v -> Lang.IR v | _ -> Lang.IR IRLang.English), (fun () -> [| Lang.IR IRLang.English |])
+          VIC2, (fun s -> match VIC2Lang.TryParse<VIC2Lang> s with TrySuccess v -> Lang.VIC2 v | _ -> Lang.VIC2 VIC2Lang.English), (fun () -> [| Lang.VIC2 VIC2Lang.English |])
+          CK3,  (fun s -> match CK3Lang.TryParse<CK3Lang> s with TrySuccess v -> Lang.CK3 v | _ -> Lang.CK3 CK3Lang.English), (fun () -> [| Lang.CK3 CK3Lang.English |])
+          VIC3, (fun s -> match VIC3Lang.TryParse<VIC3Lang> s with TrySuccess v -> Lang.VIC3 v | _ -> Lang.VIC3 VIC3Lang.English), (fun () -> [| Lang.VIC3 VIC3Lang.English |])
+          EU5,  (fun s -> match EU5Lang.TryParse<EU5Lang> s with TrySuccess v -> Lang.EU5 v | _ -> Lang.EU5 EU5Lang.English), (fun () -> [| Lang.EU5 EU5Lang.English |])
+          Custom, (fun s -> match CustomLang.TryParse<CustomLang> s with TrySuccess v -> Lang.Custom v | _ -> Lang.Custom CustomLang.English), (fun () -> [| Lang.Custom CustomLang.English |]) ]
 
     let sevToDiagSev =
         function
@@ -376,7 +443,6 @@ type Server(client: ILanguageClient) =
                 // we now keep stale entries: SemanticTokensFull will return cached data
                 // when the entity is not yet rebuilt, then VSCode re-requests once the
                 // AST is ready. We clear codeLens because it's cheaper to recompute.
-                effectTriggerVersion <- effectTriggerVersion + 1
                 codeLensCache.Clear()
             finally
                 gameStateLock.ExitWriteLock()
@@ -384,7 +450,7 @@ type Server(client: ILanguageClient) =
             let time = Stopwatch.GetElapsedTime(timestamp)
 
             delayTime <-
-                TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 3).Ticks, 2L * time.Ticks)))
+                TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 1, 500).Ticks, 2L * time.Ticks)))
             
             // 定期清理不存在文件的缓存，防止内存泄�?
             try
@@ -398,8 +464,7 @@ type Server(client: ILanguageClient) =
             
             // L6/L3 Fix: Use non-blocking Gen2 GC only after a full refresh to
             // reclaim large rule data; avoid frequent mid-stream GC in hot path.
-            if locCache.Count > 500 then
-                GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
+            maybeCollectGarbage ()
         | None -> ()
 
 
@@ -641,13 +706,10 @@ type Server(client: ILanguageClient) =
                         try
                             let existingFiles = docs.OpenFiles() |> List.map (fun f -> f.FullName) |> Set.ofList
                             oldGame.CleanupCache existingFiles
-                        with _ -> ()
+                        with e -> logDiag $"CleanupCache error on reload: {e.Message}"
                     | None -> ()
-                    // 清除所有旧的类型特定引�?
-                    stlGameObj <- None; hoi4GameObj <- None; eu4GameObj <- None
-                    ck2GameObj <- None; irGameObj <- None; vic2GameObj <- None
-                    ck3GameObj <- None; vic3GameObj <- None; eu5GameObj <- None
-                    customGameObj <- None
+                    // 清除所有旧的类型特定引用
+                    gameFieldClearers |> List.iter (fun f -> f())
 
                 let game =
                     match activeGame with
@@ -801,15 +863,12 @@ type Server(client: ILanguageClient) =
                             member this.Visit (gameT: IGame<_>) =
                                 let globalLocMap = gameT.References().Localisation |> Map.ofList
                                 let globalVars = gameT.ScriptedVariables()
-                                let localVarPattern =
-                                    System.Text.RegularExpressions.Regex(
-                                        @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
-                                        System.Text.RegularExpressions.RegexOptions.Multiline)
+                                let localVarPattern = inlayLocalVarPattern
 
                                 let formatHintLabel (desc: string) =
                                     let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
                                     let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
-                                    let clean = System.Text.RegularExpressions.Regex.Replace(clean, "§[RGBYWHETLMSP!]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                                    let clean = paradoxColorPattern.Replace(clean, "")
                                     let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
                                     sprintf "💬 %s" truncated
 
@@ -852,9 +911,9 @@ type Server(client: ILanguageClient) =
                                                 }
                                             )
                                             |> Seq.toList
-                                        codeLensCache.[filePath] <- (hash, lenses)
-                                    | None -> 
-                                        codeLensCache.[filePath] <- (hash, [])
+                                        cachePut codeLensCache filePath (hash, lenses)
+                                    | None ->
+                                        cachePut codeLensCache filePath (hash, [])
                                     
                                     // 2. Precache InlayHints
                                     let hints = ResizeArray<InlayHint>()
@@ -894,7 +953,7 @@ type Server(client: ILanguageClient) =
                                     
                                     visitNode entity.entity
                                     let uniqueHints = hints |> Seq.distinctBy (fun h -> h.position.line, h.label) |> Seq.toList
-                                    inlayHintCache.[filePath] <- (hash, uniqueHints)
+                                    cachePut inlayHintCache filePath (hash, uniqueHints)
                                 true
                         }
                     
@@ -903,7 +962,7 @@ type Server(client: ILanguageClient) =
                 with e -> eprintfn $"Precache failed: %A{e}"
 
                 // L6 Fix: non-blocking optimised GC �?avoids a 100ms freeze on load
-                GC.Collect(2, System.GCCollectionMode.Optimized, false, false)
+                maybeCollectGarbage ()
             with e ->
                 eprintfn $"%A{e}"
 
@@ -1127,107 +1186,15 @@ type Server(client: ILanguageClient) =
                 let config = p.settings.Item("cwtools")
 
                 let newLanguages =
-                    match config.Item("localisation").Item("languages"), activeGame with
-                    | JsonValue.Array o, STL ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match STLLang.TryParse<STLLang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| STLLang.English |] else l)
-                        |> Array.map Lang.STL
-                    | _, STL -> [| Lang.STL STLLang.English |]
-                    | JsonValue.Array o, EU4 ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match EU4Lang.TryParse<EU4Lang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| EU4Lang.English |] else l)
-                        |> Array.map Lang.EU4
-                    | _, EU4 -> [| Lang.EU4 EU4Lang.English |]
-                    | JsonValue.Array o, HOI4 ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match HOI4Lang.TryParse<HOI4Lang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| HOI4Lang.English |] else l)
-                        |> Array.map Lang.HOI4
-                    | _, HOI4 -> [| Lang.HOI4 HOI4Lang.English |]
-                    | JsonValue.Array o, CK2 ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match CK2Lang.TryParse<CK2Lang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| CK2Lang.English |] else l)
-                        |> Array.map Lang.CK2
-                    | _, CK2 -> [| Lang.CK2 CK2Lang.English |]
-                    | JsonValue.Array o, IR ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match IRLang.TryParse<IRLang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| IRLang.English |] else l)
-                        |> Array.map Lang.IR
-                    | _, IR -> [| Lang.IR IRLang.English |]
-                    | JsonValue.Array o, VIC2 ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match VIC2Lang.TryParse<VIC2Lang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| VIC2Lang.English |] else l)
-                        |> Array.map Lang.VIC2
-                    | _, VIC2 -> [| Lang.VIC2 VIC2Lang.English |]
-                    | JsonValue.Array o, CK3 ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match CK3Lang.TryParse<CK3Lang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| CK3Lang.English |] else l)
-                        |> Array.map Lang.CK3
-                    | _, CK3 -> [| Lang.CK3 CK3Lang.English |]
-                    | JsonValue.Array o, VIC3 ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match VIC3Lang.TryParse<VIC3Lang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| VIC3Lang.English |] else l)
-                        |> Array.map Lang.VIC3
-                    | _, VIC3 -> [| Lang.VIC3 VIC3Lang.English |]
-                    | JsonValue.Array(o: JsonValue array), EU5 ->
-                        o
-                        |> Array.choose (function
-                            | JsonValue.String s ->
-                                (match EU5Lang.TryParse<EU5Lang> s with
-                                 | TrySuccess s -> Some s
-                                 | TryFailure -> None)
-                            | _ -> None)
-                        |> (fun l -> if Array.isEmpty l then [| EU5Lang.English |] else l)
-                        |> Array.map Lang.EU5
-                    | _, EU5 -> [| Lang.EU5 EU5Lang.English |]
-                    | _, Custom -> [| Lang.Custom CustomLang.English |]
+                    match langConfigMap |> List.tryFind (fun (g, _, _) -> g = activeGame) with
+                    | Some (_, parse, defaultFn) ->
+                        match config.Item("localisation").Item("languages") with
+                        | JsonValue.Array o ->
+                            o
+                            |> Array.choose (function JsonValue.String s -> Some (parse s) | _ -> None)
+                            |> fun l -> if Array.isEmpty l then defaultFn() else l
+                        | _ -> defaultFn()
+                    | None -> [| Lang.Custom CustomLang.English |]
 
                 let mutable requiresReload = false
                 let updateIfChanged current newVal =
@@ -1497,7 +1464,7 @@ type Server(client: ILanguageClient) =
                     match gameObj with
                     | Some game ->
                         let allEffects = game.ScriptedEffects() @ game.ScriptedTriggers()
-                        let effectNames = allEffects |> List.map (fun e -> e.Name.GetString()) |> Set.ofList
+                        let effectNames = allEffects |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
 
                         // Try word under cursor first
                         let word = docs.GetTextAtPosition(p.textDocument.uri, p.position)
@@ -1519,7 +1486,7 @@ type Server(client: ILanguageClient) =
                                         elif ch = '{' then depth <- depth - 1
                                     if depth < 0 then
                                         let parts = lines.[i].TrimStart().Split([|' '; '='; '\t'|], StringSplitOptions.RemoveEmptyEntries)
-                                        if parts.Length > 0 && Set.contains parts.[0] effectNames then
+                                        if parts.Length > 0 && effectNames.Contains(parts.[0]) then
                                             found <- Some parts.[0]
                             found
 
@@ -1533,10 +1500,7 @@ type Server(client: ILanguageClient) =
                             let effect = allEffects |> List.tryFind (fun e -> e.Name.GetString() = name)
                             match effect with
                             | Some effect ->
-                                let paramRegex =
-                                    System.Text.RegularExpressions.Regex(
-                                        @"\$([A-Za-z_][A-Za-z0-9_]*)\$",
-                                        System.Text.RegularExpressions.RegexOptions.Compiled)
+                                let paramRegex = scriptedParamRegex
 
                                 let comments =
                                     match effect with
@@ -1820,7 +1784,7 @@ type Server(client: ILanguageClient) =
                                                        "line", JsonValue.Number(decimal range.start.line)
                                                        "character", JsonValue.Number(decimal range.start.character) |] }))
 
-                            codeLensCache.[filePath] <- (hash, lenses)
+                            cachePut codeLensCache filePath (hash, lenses)
                             evictIfNeeded codeLensCache
                             lenses
                     | None -> []
@@ -1919,10 +1883,7 @@ type Server(client: ILanguageClient) =
                                 // Build scripted variable lookup map
                                 let globalVars = game.ScriptedVariables()
                                 let fileContent = fileText
-                                let localVarPattern =
-                                    System.Text.RegularExpressions.Regex(
-                                        @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
-                                        System.Text.RegularExpressions.RegexOptions.Multiline)
+                                let localVarPattern = inlayLocalVarPattern
                                 let localVars =
                                     [ for m in localVarPattern.Matches(fileContent) ->
                                         m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() ]
@@ -1932,7 +1893,7 @@ type Server(client: ILanguageClient) =
                                     let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
                                     let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
                                     // Strip Paradox color codes
-                                    let clean = System.Text.RegularExpressions.Regex.Replace(clean, "§[RGBYWHETLMSP!]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                                    let clean = paradoxColorPattern.Replace(clean, "")
                                     let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
                                     sprintf "💬 %s" truncated
         
@@ -1998,7 +1959,7 @@ type Server(client: ILanguageClient) =
                             }
                         
                         let generatedHints = gameDispatcher.Dispatch visitor |> Option.defaultValue []
-                        inlayHintCache.[filePath] <- (hash, generatedHints)
+                        cachePut inlayHintCache filePath (hash, generatedHints)
                         return generatedHints
             }
             |> catchError []
@@ -2019,7 +1980,7 @@ type Server(client: ILanguageClient) =
                     let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
                     let hash = contentHash fileText
                     match semanticTokensCache.TryGetValue(filePath) with
-                    | true, (cachedHash, _, cachedData) when cachedHash = hash ->
+                    | true, (cachedHash, cachedData) when cachedHash = hash ->
                         Some { data = cachedData }
                     | true, _ ->
                         // File modified! We want to cancel semantic updates until it is reopened.
@@ -2042,9 +2003,14 @@ type Server(client: ILanguageClient) =
                         let fileContent = fileText
                         let lines = fileContent.Split('\n')
 
-                        // Collect known names for classification
-                        let allEffects = game.ScriptedEffects() |> List.map (fun e -> e.Name.GetString()) |> Set.ofList
-                        let allTriggers = game.ScriptedTriggers() |> List.map (fun e -> e.Name.GetString()) |> Set.ofList
+                        // Collect known names for classification (HashSet for O(1) lookup in AST walk)
+                        let allEffects = game.ScriptedEffects() |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
+                        let allTriggers = game.ScriptedTriggers() |> Seq.map (fun e -> e.Name.GetString()) |> System.Collections.Generic.HashSet
+                        let keywords = System.Collections.Generic.HashSet([|
+                            "if"; "else"; "else_if"; "AND"; "OR"; "NOT"; "NOR"; "NAND"
+                            "limit"; "trigger"; "modifier"; "while"
+                            "switch"; "every"; "random"; "random_list"; "inline_script"
+                        |])
 
                         // Walk AST �?only classify Leaves and LeafValues
                         // Verify against source text to avoid position mismatches
@@ -2081,16 +2047,9 @@ type Server(client: ILanguageClient) =
                                             let keyType =
                                                 if key.StartsWith("@") then 3
                                                 elif key.StartsWith("$") && key.EndsWith("$") then 4
-                                                elif Set.contains key allEffects then 2
-                                                elif Set.contains key allTriggers then 1
-                                                elif key = "if" || key = "else" || key = "else_if"
-                                                    || key = "AND" || key = "OR" || key = "NOT"
-                                                    || key = "NOR" || key = "NAND"
-                                                    || key = "limit" || key = "trigger"
-                                                    || key = "modifier" || key = "while"
-                                                    || key = "switch" || key = "every"
-                                                    || key = "random" || key = "random_list"
-                                                    || key = "inline_script" then 7
+                                                elif allEffects.Contains(key) then 2
+                                                elif allTriggers.Contains(key) then 1
+                                                elif keywords.Contains(key) then 7
                                                 else 5
                                             verifyAndAdd line actualCol key.Length keyType
 
@@ -2161,16 +2120,9 @@ type Server(client: ILanguageClient) =
                                             let keyType =
                                                 if nKey.StartsWith("@") then 3
                                                 elif nKey.StartsWith("$") && nKey.EndsWith("$") then 4
-                                                elif Set.contains nKey allEffects then 2
-                                                elif Set.contains nKey allTriggers then 1
-                                                elif nKey = "if" || nKey = "else" || nKey = "else_if"
-                                                    || nKey = "AND" || nKey = "OR" || nKey = "NOT"
-                                                    || nKey = "NOR" || nKey = "NAND"
-                                                    || nKey = "limit" || nKey = "trigger"
-                                                    || nKey = "modifier" || nKey = "while"
-                                                    || nKey = "switch" || nKey = "every"
-                                                    || nKey = "random" || nKey = "random_list"
-                                                    || nKey = "inline_script" then 7
+                                                elif allEffects.Contains(nKey) then 2
+                                                elif allTriggers.Contains(nKey) then 1
+                                                elif keywords.Contains(nKey) then 7
                                                 else 5
                                             verifyAndAdd nLine actualCol nKey.Length keyType
                                 visitNode childNode
@@ -2208,7 +2160,7 @@ type Server(client: ILanguageClient) =
                             prevChar <- col
 
                         let dataList = data |> Seq.toList
-                        semanticTokensCache.[filePath] <- (hash, effectTriggerVersion, dataList)
+                        cachePut semanticTokensCache filePath (hash, dataList)
                         evictIfNeeded semanticTokensCache
                         Some { data = dataList }
 
@@ -2642,7 +2594,9 @@ type Server(client: ILanguageClient) =
                                         let mutable rawErrors: CWError list = []
                                         try
                                             rawErrors <- g.UpdateFile true targetFile (Some validationContent)
-                                        with _ -> rawErrors <- []
+                                        with e ->
+                                            logDiag $"validateCode UpdateFile error: {e.Message}"
+                                            rawErrors <- []
 
                                         // Restore original content unconditionally
                                         match originalContent with

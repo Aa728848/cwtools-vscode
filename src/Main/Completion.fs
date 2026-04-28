@@ -33,6 +33,23 @@ let private macroParamPattern =
         @"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
+/// Extract a single line from text without allocating a full string[] via Split.
+let private getLineAt (text: string) (lineIdx: int) =
+    if lineIdx < 0 then ""
+    else
+        let mutable idx = 0
+        let mutable currentLine = 0
+        while currentLine < lineIdx && idx < text.Length do
+            if text.[idx] = '\n' then currentLine <- currentLine + 1
+            idx <- idx + 1
+        if idx >= text.Length then ""
+        else
+            let lineEnd =
+                let mutable e = idx
+                while e < text.Length && text.[e] <> '\n' && text.[e] <> '\r' do e <- e + 1
+                e
+            text.Substring(idx, lineEnd - idx)
+
 let completionCache = Dictionary<int, CompletionItem>()
 let mutable private rangeCache: (string * int * int * Range * Range) option = None
 
@@ -226,13 +243,7 @@ let computeCompletionRanges (filetext: string) (line: int) (character: int) =
         ->
         (cachedInsert, cachedReplace)
     | _ ->
-        let lines = filetext.Split('\n')
-
-        let targetLine =
-            if line > 0 && line <= lines.Length then
-                lines.[line - 1]
-            else
-                ""
+        let targetLine = getLineAt filetext (line - 1)
 
         //TODO: This needs to handle localisation differently really
         let isWordChar c = not (Char.IsWhiteSpace(c) || c = '.' || c = '|')
@@ -357,11 +368,10 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
     let precomputedRanges =
         if supportsInsertReplaceEdit then
             try
-                let lines = filetext.Split('\n')
                 let line = position.Line   // 1-based
                 let col = position.Column  // 0-based
-                if line > 0 && line <= lines.Length then
-                    let currentLine = lines.[line - 1]
+                let currentLine = getLineAt filetext (line - 1)
+                if currentLine <> "" then
                     let textBefore = currentLine.Substring(0, min col currentLine.Length)
                     let valueIdx = textBefore.LastIndexOf("value:")
                     if valueIdx <> -1 then
@@ -378,7 +388,8 @@ let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsIn
                         Some (computeCompletionRanges filetext line col)
                 else
                     Some (computeCompletionRanges filetext line col)
-            with _ ->
+            with e ->
+                logError $"computeCompletionRanges fallback: {e.Message}"
                 Some (computeCompletionRanges filetext position.Line position.Column)
         else
             None
@@ -513,8 +524,7 @@ let completion
             |> Seq.cache
 
         logInfo $"completion items time %i{stopwatch.ElapsedMilliseconds}ms"
-        let split = filetext.Split('\n')
-        let targetLine = split[position.Line - 1]
+        let targetLine = getLineAt filetext (position.Line - 1)
         let textBeforeCursor = targetLine.Remove(position.Column)
         logInfo $"{p} {position}"
 
@@ -650,7 +660,8 @@ let completion
                 Some
                     { isIncomplete = partialReturn || isScriptValueLike
                       items = finalItemsList }
-        with _ ->
+        with e ->
+            logError $"Completion fallback: {e.Message}"
             // Fallback: return raw items without any processing
             let fallbackItems = items |> Seq.toList
             Some { isIncomplete = false; items = fallbackItems }

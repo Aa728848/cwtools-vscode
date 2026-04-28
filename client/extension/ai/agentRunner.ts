@@ -145,6 +145,8 @@ Rules:
 // Each AgentRunner owns one; sub-agents get their own instance for isolated tracking.
 class WriteQueue {
     private queue: Promise<void> = Promise.resolve();
+    /** Incremented on every enqueue; used by PartitionedWriteQueue to detect idle queues. */
+    lastUsedSeq = 0;
 
     enqueue<T>(fn: () => Promise<T>): Promise<T> {
         return new Promise((resolve, reject) => {
@@ -159,16 +161,26 @@ class WriteQueue {
 // Replaces the global single WriteQueue to allow parallel writes to different files
 // while preserving per-file ordering. Multi-file operations acquire all path locks
 // in sorted order (lexicographic) to prevent AB/BA deadlocks.
+// Idle queues are cleaned up after 30s of inactivity to prevent unbounded Map growth.
 class PartitionedWriteQueue {
     private queues = new Map<string, WriteQueue>();
+    private static readonly IDLE_CLEANUP_MS = 30_000;
 
     enqueue(files: string[], fn: () => Promise<void>): Promise<void> {
         const sorted = [...new Set(files)].sort();
+        const seq = Date.now();
+        // Mark all involved queues as active
+        for (const f of sorted) this.getQueue(f).lastUsedSeq = seq;
         const acquire = (idx: number): Promise<void> => {
             if (idx >= sorted.length) return fn(); // all locks held, execute write
             return this.getQueue(sorted[idx]!).enqueue(() => acquire(idx + 1));
         };
-        return acquire(0);
+        const result = acquire(0);
+        // After all writes complete, schedule cleanup check for each path
+        void result.then(() => {
+            for (const f of sorted) this.scheduleCleanup(f, seq);
+        });
+        return result;
     }
 
     private getQueue(filePath: string): WriteQueue {
@@ -178,6 +190,16 @@ class PartitionedWriteQueue {
             this.queues.set(filePath, q);
         }
         return q;
+    }
+
+    private scheduleCleanup(filePath: string, seqAtEnqueue: number): void {
+        setTimeout(() => {
+            const q = this.queues.get(filePath);
+            // Only remove if the queue hasn't been used since we enqueued
+            if (q && q.lastUsedSeq === seqAtEnqueue) {
+                this.queues.delete(filePath);
+            }
+        }, PartitionedWriteQueue.IDLE_CLEANUP_MS);
     }
 }
 

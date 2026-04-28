@@ -42,6 +42,15 @@ export class LspToolHandler {
     /** 5-second TTL cache for heavy read-only LSP commands */
     private lspReadCache = new Map<string, { data: unknown; expiresAt: number }>();
 
+    /** Invalidate all cached LSP read results for the given file path.
+     * Call when a document is modified so the AI doesn't base decisions on stale symbols/diagnostics. */
+    invalidateCacheForFile(filePath: string): void {
+        const normalized = filePath.replace(/\\/g, '/');
+        for (const key of this.lspReadCache.keys()) {
+            if (key.includes(normalized)) this.lspReadCache.delete(key);
+        }
+    }
+
     // ─── Concurrency limiter ─────────────────────────────────────────────────
     // The CWTools LSP server is single-threaded (F# async event loop).
     // When the AI agent fires many parallel read-only tool calls, flooding it
@@ -804,15 +813,27 @@ export class LspToolHandler {
                     const existing = vs.languages.getDiagnostics(tempUri);
                     if (existing.length > 0) { resolve(existing); return; }
 
-                    const timeout = setTimeout(() => {
+                    // Early check at 1500ms — diagnostics may have arrived before the event fired
+                    const earlyCheck = setTimeout(() => {
+                        const current = vs.languages.getDiagnostics(tempUri);
+                        if (current.length > 0) {
+                            clearTimeout(deadline);
+                            disposable.dispose();
+                            resolve(current);
+                        }
+                    }, 1500);
+
+                    const deadline = setTimeout(() => {
+                        clearTimeout(earlyCheck);
                         disposable.dispose();
                         resolve(vs.languages.getDiagnostics(tempUri));
-                    }, 3000);
+                    }, 2000);
 
                     const disposable = vs.languages.onDidChangeDiagnostics((e) => {
                         const changedForUs = e.uris.some(u => u.fsPath === tempUri.fsPath);
                         if (changedForUs) {
-                            clearTimeout(timeout);
+                            clearTimeout(earlyCheck);
+                            clearTimeout(deadline);
                             disposable.dispose();
                             resolve(vs.languages.getDiagnostics(tempUri));
                         }

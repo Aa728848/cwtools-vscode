@@ -482,7 +482,7 @@ export class ExternalToolHandler {
                 for (let attempt = 1; attempt <= 2; attempt++) {
                     try {
                         const modifiedPrompt = task.prompt + (attempt > 1 ? `\n\n[System] Previous attempt failed with error: ${lastError}. Please fix the issue and try again.` : '');
-                        const result = await this.ctx.agentRunnerRef!.runSubAgent(
+                        const runPromise = this.ctx.agentRunnerRef!.runSubAgent(
                             modifiedPrompt,
                             mode,
                             subAgentOptions,
@@ -496,17 +496,40 @@ export class ExternalToolHandler {
                             },
                             parentContextHint
                         );
-                        
+
+                        let r: string;
+                        if (task.deadlineMs && task.deadlineMs > 0) {
+                            r = await Promise.race([
+                                runPromise,
+                                new Promise<string>((_, reject) =>
+                                    setTimeout(() => reject(new Error(`TIMEOUT:${task.deadlineMs}`)), task.deadlineMs)
+                                ),
+                            ]);
+                        } else {
+                            r = await runPromise;
+                        }
+
                         this.ctx.onStep?.({
                             type: 'subtask_complete',
                             content: `✓ ${task.description}`,
                             subagentType: mode,
                             timestamp: Date.now(),
                         });
-                        
-                        return { description: task.description, result };
+
+                        return { description: task.description, result: r };
                     } catch (e) {
                         lastError = e instanceof Error ? e.message : String(e);
+                        // Timeout: return partial result immediately, don't retry
+                        if (lastError.startsWith('TIMEOUT:')) {
+                            const ms = parseInt(lastError.slice(8), 10) || 0;
+                            this.ctx.onStep?.({
+                                type: 'subtask_complete',
+                                content: `⏱ ${task.description} (超时截断, ${ms}ms)`,
+                                subagentType: mode,
+                                timestamp: Date.now(),
+                            });
+                            return { description: task.description, result: `(超时截断: ${ms}ms) 子任务在截止时间前未完成。` };
+                        }
                         if (attempt === 2) {
                             this.ctx.onStep?.({
                                 type: 'subtask_complete',

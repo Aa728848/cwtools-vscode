@@ -179,8 +179,33 @@ export class AgentToolExecutor {
         try { this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
     }
 
-    /** Blackboard memory store shared by all agents branching from this executor */
-    public sharedMemory = new Map<string, string>();
+    /** Blackboard memory store shared by all agents branching from this executor.
+     * O(1) LRU: entries are evicted oldest-first when size exceeds 200.
+     * Map insertion order is used — on access, delete+set moves entry to the end (most-recent). */
+    public sharedMemory = new Map<string, { value: string }>();
+    private static readonly SHARED_MEMORY_MAX = 200;
+
+    /** Move a key to the end of the Map (most-recently-used). O(1). */
+    private touchMemory(key: string): void {
+        const entry = this.sharedMemory.get(key);
+        if (entry !== undefined) {
+            this.sharedMemory.delete(key);
+            this.sharedMemory.set(key, entry);
+        }
+    }
+
+    /** Evict the oldest entry when over capacity. Called after set_memory. */
+    private evictMemoryIfNeeded(): void {
+        while (this.sharedMemory.size > AgentToolExecutor.SHARED_MEMORY_MAX) {
+            const oldestKey = this.sharedMemory.keys().next().value as string;
+            this.sharedMemory.delete(oldestKey);
+        }
+    }
+
+    /** Forward LSP read-cache invalidation to the lspHandler. */
+    invalidateCacheForFile(filePath: string): void {
+        this.lspHandler.invalidateCacheForFile(filePath);
+    }
     
     get vfsOverlay(): Map<string, string> | undefined {
         return this.parentRunnerOptions?.vfsOverlay;
@@ -308,7 +333,9 @@ export class AgentToolExecutor {
                 } else if (value.length > 50000) {
                     result = { success: false, message: 'Value too large max 50000 characters' };
                 } else {
-                    this.sharedMemory.set(key, value);
+                    this.touchMemory(key); // move to end if exists
+                    this.sharedMemory.set(key, { value });
+                    this.evictMemoryIfNeeded();
                     result = { success: true, message: `Stored value in memory under key '${key}'.` };
                 }
                 break;
@@ -318,8 +345,9 @@ export class AgentToolExecutor {
                 if (!key) {
                     result = { found: false };
                 } else {
-                    const value = this.sharedMemory.get(key);
-                    result = value === undefined ? { found: false } : { found: true, value };
+                    this.touchMemory(key);
+                    const entry = this.sharedMemory.get(key);
+                    result = entry === undefined ? { found: false } : { found: true, value: entry.value };
                 }
                 break;
             }
@@ -330,7 +358,8 @@ export class AgentToolExecutor {
                 } else {
                     const qLower = query.toLowerCase();
                     const matches: Array<{ key: string, preview: string }> = [];
-                    for (const [mKey, mValue] of this.sharedMemory.entries()) {
+                    for (const [mKey, entry] of this.sharedMemory.entries()) {
+                        const mValue = entry.value;
                         if (mKey.toLowerCase().includes(qLower) || mValue.toLowerCase().includes(qLower)) {
                             // Provide up to 150 chars of context around the match
                             const valLower = mValue.toLowerCase();
@@ -439,28 +468,42 @@ export class AgentToolExecutor {
         _toolName?: string;
         [key: string]: unknown;
     }): Promise<{ success: boolean; result?: unknown; error?: string }> {
+        let serverName = args.server;
+        let toolName = args.tool;
+
+        // Parse from mcp_<server>_<tool> pattern
+        if (!serverName && args._toolName) {
+            const match = args._toolName.match(/^mcp_(.+?)_(.+)$/);
+            if (match) {
+                serverName = match[1];
+                toolName = match[2];
+            }
+        }
+
+        if (!serverName || !toolName) {
+            return { success: false, error: 'Missing server or tool name. Use mcp_call with server and tool args.' };
+        }
+
+        const CONNECTION_ERRORS = /ECONNREFUSED|EPIPE|disconnect|not connected|ECONNRESET/i;
+
         try {
-            let serverName = args.server;
-            let toolName = args.tool;
-
-            // Parse from mcp_<server>_<tool> pattern
-            if (!serverName && args._toolName) {
-                const match = args._toolName.match(/^mcp_(.+?)_(.+)$/);
-                if (match) {
-                    serverName = match[1];
-                    toolName = match[2];
-                }
-            }
-
-            if (!serverName || !toolName) {
-                return { success: false, error: 'Missing server or tool name. Use mcp_call with server and tool args.' };
-            }
-
-            const client = await this.getMcpClient(serverName);
-            const result = await client.callTool(toolName, (args.arguments || {}) as Record<string, unknown>);
+            const client = await this.getMcpClient(serverName!);
+            const result = await client.callTool(toolName!, (args.arguments || {}) as Record<string, unknown>);
             return { success: true, result };
         } catch (e) {
-            return { success: false, error: `MCP tool call failed: ${e instanceof Error ? e.message : String(e)}` };
+            const errMsg = e instanceof Error ? e.message : String(e);
+            // Connection crash: evict dead client from pool, reconnect once, and retry
+            if (CONNECTION_ERRORS.test(errMsg)) {
+                this.evictMcpClient(serverName!);
+                try {
+                    const client = await this.getMcpClient(serverName!);
+                    const result = await client.callTool(toolName!, (args.arguments || {}) as Record<string, unknown>);
+                    return { success: true, result };
+                } catch (retryErr) {
+                    return { success: false, error: `MCP tool call failed after reconnect: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}` };
+                }
+            }
+            return { success: false, error: `MCP tool call failed: ${errMsg}` };
         }
     }
 

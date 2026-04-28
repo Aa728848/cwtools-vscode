@@ -214,6 +214,10 @@ export async function activate(context: ExtensionContext) {
 			toolExecutor.fileWriteMode = workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
 		}
 	}));
+	// Invalidate LSP read cache on document changes so AI doesn't base decisions on stale data
+	context.subscriptions.push(workspace.onDidChangeTextDocument(e => {
+		toolExecutor.invalidateCacheForFile(e.document.uri.fsPath);
+	}));
 	// Fix #8: reuse shared gameLanguages instead of duplicate gameLanguages2
 	const docSelector2 = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder, usageTracker);

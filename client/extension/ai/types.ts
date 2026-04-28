@@ -591,6 +591,8 @@ export interface SpawnSubAgentsArgs {
         description: string;
         prompt: string;
         subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer';
+        /** Max wall-clock time in ms for this sub-task. Exceeded tasks return partial results with a timeout marker. */
+        deadlineMs?: number;
     }>;
     /** If true, executes tasks sequentially instead of concurrently (overridden by DAG logic if dependsOn is used). */
     sequential?: boolean;

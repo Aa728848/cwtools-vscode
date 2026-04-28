@@ -980,7 +980,18 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         let callHtml = `<span class="tp-icon">${icon}</span>`;
         callHtml += `<span class="tp-name">${escapeHtml(toolName)}</span>`;
-        if (fname) callHtml += ` <span class="tp-file">${escapeHtml(fname)}</span>`;
+        
+        let summaryText = fname;
+        if (toolName === 'run_command' && args.command) {
+            summaryText = String(args.command).substring(0, 30) + (String(args.command).length > 30 ? '...' : '');
+        } else if ((toolName === 'search_web' || toolName === 'codesearch') && args.query) {
+            summaryText = String(args.query).substring(0, 30);
+        } else if (toolName === 'todo_write') {
+            const todos = Array.isArray(args.todos) ? args.todos : [];
+            summaryText = `${todos.length} items`;
+        }
+        
+        if (summaryText) callHtml += ` <span class="tp-file">${escapeHtml(summaryText)}</span>`;
 
         let resultHtml = '';
         if (resultStep && resultStep.toolResult) {
@@ -1426,6 +1437,16 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         div.className = 'permission-card';
         div.dataset.permId = permissionId;
         const safeId = escapeHtml(permissionId);
+        
+        let actionsHtml = `<div class="permission-card-actions">` +
+            `<button class="permission-allow-btn" data-permid="${safeId}">${svgIcon('check')}允许</button>` +
+            `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}拒绝</button>`;
+            
+        if (tool === 'run_command') {
+            actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" style="margin-left:auto; font-size:0.8em; opacity:0.8" title="当前会话期间一直允许">${svgIcon('check')}一直允许</button>`;
+        }
+        actionsHtml += `</div>`;
+        
         div.innerHTML =
             `<div class="permission-card-header">` +
             `<span class="permission-card-icon">${svgIconNoMargin('key')}</span>` +
@@ -1433,22 +1454,47 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             `<div class="permission-card-title">${escapeHtml(description)}</div>` +
             (command ? `<div class="permission-card-cmd">${escapeHtml(command)}</div>` : '') +
             `</div></div>` +
-            `<div class="permission-card-actions">` +
-            `<button class="permission-allow-btn" data-permid="${safeId}">${svgIcon('check')}允许</button>` +
-            `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}拒绝</button>` +
-            `</div>`;
+            actionsHtml;
+            
         (div.querySelector('.permission-allow-btn') as HTMLButtonElement).addEventListener('click', function () {
-            this.disabled = true; (div.querySelector('.permission-deny-btn') as HTMLButtonElement).disabled = true;
+            this.disabled = true; 
+            const denyBtn = div.querySelector('.permission-deny-btn') as HTMLButtonElement;
+            if (denyBtn) denyBtn.disabled = true;
+            const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
+            if (alwaysBtn) alwaysBtn.disabled = true;
+            
             this.innerHTML = svgIcon('check') + '已允许';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
             dismissCard(div, 400);
         });
+        
         (div.querySelector('.permission-deny-btn') as HTMLButtonElement).addEventListener('click', function () {
-            this.disabled = true; (div.querySelector('.permission-allow-btn') as HTMLButtonElement).disabled = true;
+            this.disabled = true; 
+            const allowBtn = div.querySelector('.permission-allow-btn') as HTMLButtonElement;
+            if (allowBtn) allowBtn.disabled = true;
+            const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
+            if (alwaysBtn) alwaysBtn.disabled = true;
+            
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
             dismissCard(div, 400);
         });
+        
+        const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
+        if (alwaysBtn) {
+            alwaysBtn.addEventListener('click', function() {
+                this.disabled = true;
+                const denyBtn = div.querySelector('.permission-deny-btn') as HTMLButtonElement;
+                if (denyBtn) denyBtn.disabled = true;
+                const allowBtn = div.querySelector('.permission-allow-btn') as HTMLButtonElement;
+                if (allowBtn) allowBtn.disabled = true;
+                
+                this.innerHTML = svgIcon('check') + '已一直允许';
+                vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true, alwaysAllow: true });
+                dismissCard(div, 400);
+            });
+        }
+        
         chatArea.appendChild(div);
         scrollBottom();
     }

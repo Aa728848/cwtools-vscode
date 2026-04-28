@@ -66,7 +66,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     search_web: 20_000,
     codesearch: 20_000,
     // Shell — 30s
-    run_command: 30_000,
+    run_command: 120_000,
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 

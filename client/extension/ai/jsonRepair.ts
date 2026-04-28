@@ -11,7 +11,16 @@
  */
 export function tryRepairJson(badJson: string | undefined): Record<string, unknown> | null {
     if (!badJson) return null;
-    const s = badJson.trim();
+    let s = badJson.trim();
+
+    // Strategy 0: Fix unescaped backslashes and literal control characters (e.g. Windows paths, raw newlines)
+    s = s.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+    s = s.replace(/[\u0000-\u001F]/g, (match) => {
+        if (match === '\n') return '\\n';
+        if (match === '\r') return '\\r';
+        if (match === '\t') return '\\t';
+        return ''; // Strip other control characters
+    });
 
     // Strategy 1: Missing closing brackets (common in truncation)
     try {

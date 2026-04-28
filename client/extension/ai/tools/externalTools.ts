@@ -225,7 +225,7 @@ export class ExternalToolHandler {
         }
 
         if (this.ctx.onPermissionRequest) {
-            const permId = `perm_${Date.now()}`;
+            const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const allowed = await this.ctx.onPermissionRequest(
                 permId,
                 'run_command',
@@ -239,7 +239,7 @@ export class ExternalToolHandler {
             return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
         }
 
-        const timeoutMs = Math.min(args.timeoutMs ?? 15000, 60000);
+        const timeoutMs = Math.min(args.timeoutMs ?? 30000, 120000);
         const { spawn } = await import('child_process');
 
         // Parse command into binary + args on the platform shell

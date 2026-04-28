@@ -245,7 +245,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.handleSlashCommand(msg.command);
                 break;
             case 'permissionResponse':
-                this.resolvePermissionRequest(msg.permissionId, msg.allowed);
+                this.resolvePermissionRequest(msg.permissionId, msg.allowed, msg.alwaysAllow);
                 break;
             case 'openPlanFile':
                 // Simply open the plan markdown file in the native VSCode editor
@@ -1134,6 +1134,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // ─── Permission System (OpenCode-aligned) ────────────────────────────────────
 
     private pendingPermissionResolvers = new Map<string, (allowed: boolean) => void>();
+    private alwaysAllowRunCommand = false;
 
     /**
      * Request permission from the user (for run_command tool).
@@ -1146,6 +1147,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         description: string,
         command?: string
     ): Promise<boolean> {
+        if (tool === 'run_command' && this.alwaysAllowRunCommand) {
+            // Auto-approve if user clicked "Always Allow" in this session
+            return Promise.resolve(true);
+        }
+
         return new Promise<boolean>((resolve) => {
             let resolved = false;
             // Auto-deny after 60s to prevent hangs
@@ -1168,10 +1174,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         });
     }
 
-    private resolvePermissionRequest(permissionId: string, allowed: boolean): void {
+    private resolvePermissionRequest(permissionId: string, allowed: boolean, alwaysAllow?: boolean): void {
         const resolver = this.pendingPermissionResolvers.get(permissionId);
         if (resolver) {
             this.pendingPermissionResolvers.delete(permissionId);
+            if (alwaysAllow && allowed) {
+                this.alwaysAllowRunCommand = true;
+            }
             resolver(allowed);
         }
     }

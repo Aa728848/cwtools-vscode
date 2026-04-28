@@ -31,8 +31,9 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size:
 .icon-btn:hover { opacity: 1; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2); }
 
 /* ── Topics panel ── */
+@keyframes slideDownIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 .topics-panel { display: none; position: absolute; top: 41px; left: 0; right: 0; bottom: 70px; background: var(--bg); border: 1px solid var(--border); z-index: 100; overflow-y: auto; }
-.topics-panel.show { display: flex; flex-direction: column; }
+.topics-panel.show { display: flex; flex-direction: column; animation: slideDownIn 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
 .topics-panel-header { padding: 8px 8px 4px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .new-topic-btn { width: 100%; background: none; border: 1px dashed var(--border); border-radius: 5px; color: var(--fg); cursor: pointer; padding: 6px 10px; font-size: 12px; text-align: left; opacity: 0.7; display: flex; align-items: center; gap: 5px; transition: opacity 0.15s, background 0.15s; }
 .new-topic-btn:hover { opacity: 1; background: var(--btn-hover); border-color: var(--accent); }
@@ -251,6 +252,8 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .permission-card-actions { padding: 7px 10px; display: flex; gap: 6px; background: var(--bg); border-top: 1px solid rgba(255,255,255,0.07); }
 .permission-allow-btn { background: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; transition: opacity 0.15s, transform 0.15s; }
 .permission-allow-btn:hover { opacity: 0.85; transform: scale(0.99); }
+.permission-always-btn { background: rgba(76, 175, 80, 0.15); color: #4caf50; border: 1px solid rgba(76, 175, 80, 0.4); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; transition: opacity 0.15s, transform 0.15s, background 0.15s; }
+.permission-always-btn:hover { background: rgba(76, 175, 80, 0.25); opacity: 1 !important; transform: scale(0.99); }
 .permission-deny-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; transition: background 0.15s; }
 .permission-deny-btn:hover { background: rgba(255,255,255,0.05); }
 
@@ -334,8 +337,9 @@ body.review-mode .mode-indicator { color: #f48771; }
 .slash-popup-desc { opacity: 0.55; font-size: 11px; }
 
 /* ── Settings page ── */
+@keyframes slideRightIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
 .settings-page { display: none; flex-direction: column; flex: 1; min-height: 0; width: 100%; overflow: hidden; }
-.settings-page.active { display: flex; }
+.settings-page.active { display: flex; animation: slideRightIn 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
 .settings-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .settings-back-btn { background: none; border: none; color: var(--fg); cursor: pointer; font-size: 16px; padding: 0 4px; opacity: 0.7; line-height: 1; }
 .settings-back-btn:hover { opacity: 1; }

@@ -766,7 +766,7 @@ export type WebViewMessage =
     | { type: 'cancelWriteFile'; messageId: string }
     | { type: 'quickChangeModel'; model: string }
     | { type: 'slashCommand'; command: string }
-    | { type: 'permissionResponse'; permissionId: string; allowed: boolean; always: boolean }
+    | { type: 'permissionResponse'; permissionId: string; allowed: boolean; alwaysAllow?: boolean }
     /** Submit inline annotations collected in the webview back to AI for revision */
     | { type: 'submitPlanAnnotations'; annotations: Array<{ section: string; note: string }> }
     | { type: 'revisePlanWithAnnotations'; annotations: Array<{ section: string; note: string }> }

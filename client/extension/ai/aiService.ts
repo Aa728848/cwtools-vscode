@@ -93,7 +93,7 @@ export class AIService {
 
     /** Global budget tracking to prevent runaway multi-agent costs */
     private sessionTokenUsage = 0;
-    private readonly MAX_SESSION_TOKENS = 1500000; // 1.5M tokens default ceiling
+    private readonly MAX_SESSION_TOKENS = 100000000; // 100M tokens default ceiling
 
     public resetSessionBudget(): void {
         this.sessionTokenUsage = 0;

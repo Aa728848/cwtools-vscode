@@ -614,13 +614,39 @@ export class LspToolHandler {
             const triggersFile = path.join(configPath, 'triggers.cwt');
             const effectsFile = path.join(configPath, 'effects.cwt');
             const modifiersLog = path.join(configPath, 'logs', 'modifiers.log');
-            if (fs.existsSync(triggersFile)) { this.parseCWTFile(triggersFile, triggers); }
-            if (fs.existsSync(effectsFile)) { this.parseCWTFile(effectsFile, effects); }
+            const triggerDocsLog = path.join(configPath, 'logs', 'trigger_docs.log');
+            
+            const scopeMap = new Map<string, string[]>();
+            if (fs.existsSync(triggerDocsLog)) { this.parseDocsLog(triggerDocsLog, scopeMap); }
+
+            if (fs.existsSync(triggersFile)) { this.parseCWTFile(triggersFile, triggers, scopeMap); }
+            if (fs.existsSync(effectsFile)) { this.parseCWTFile(effectsFile, effects, scopeMap); }
             if (fs.existsSync(modifiersLog)) { this.parseModifiersLog(modifiersLog, modifiers); }
             if (triggers.length > 0 || effects.length > 0 || modifiers.length > 0) break;
         }
 
         return { triggers, effects, modifiers };
+    }
+
+    private parseDocsLog(filePath: string, scopeMap: Map<string, string[]>): void {
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const lines = content.split('\n');
+            let currentName = '';
+            for (const line of lines) {
+                const nameMatch = line.match(/^([\w.-]+)\s*-/);
+                if (nameMatch) {
+                    currentName = nameMatch[1]!;
+                    continue;
+                }
+                const scopeMatch = line.match(/^Supported Scopes:\s*(.*)/);
+                if (scopeMatch && currentName) {
+                    const scopes = scopeMatch[1]!.split(/\s+/).filter(s => s.length > 0 && s !== 'none');
+                    scopeMap.set(currentName, scopes);
+                    currentName = '';
+                }
+            }
+        } catch { /* skip */ }
     }
 
     private parseModifiersLog(filePath: string, results: RuleInfo[]): void {
@@ -643,7 +669,7 @@ export class LspToolHandler {
         } catch { /* skip */ }
     }
 
-    private parseCWTFile(filePath: string, results: RuleInfo[]): void {
+    private parseCWTFile(filePath: string, results: RuleInfo[], scopeMap?: Map<string, string[]>): void {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
             const lines = content.split('\n');
@@ -676,10 +702,19 @@ export class LspToolHandler {
                     const name = nameMatch[1]!;
                     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                     const syntax = nameMatch[2]!;
+                    
+                    let scopes = [...currentScopes];
+                    // IMPORTANT: Reset currentScopes after applying it, so it doesn't leak to next rule
+                    currentScopes = [];
+                    
+                    if (scopeMap && scopeMap.has(name)) {
+                        scopes = scopeMap.get(name)!;
+                    }
+
                     results.push({
                         name,
                         description: currentDesc,
-                        scopes: [...currentScopes],
+                        scopes,
                         syntax: syntax.trim(),
                     });
                     currentDesc = '';

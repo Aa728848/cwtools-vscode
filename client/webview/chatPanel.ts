@@ -2351,6 +2351,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         return groups.filter(g => g.items.length > 0);
     }
 
+    const showArchivedCb = document.getElementById('showArchivedCb') as HTMLInputElement;
+    if (showArchivedCb) {
+        showArchivedCb.addEventListener('change', (e) => {
+            vscode.postMessage({ type: 'setShowArchived', show: (e.target as HTMLInputElement).checked });
+        });
+    }
+
     function renderTopics(topics: any[]) {
         const list = document.getElementById('topicsList')!;
         if (!topics.length) {
@@ -2367,17 +2374,24 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             for (const t of group.items) {
                 const item = document.createElement('div');
                 item.className = 'topic-item'; item.dataset.topicId = t.id;
-                const title = document.createElement('span'); title.className = 'topic-title'; title.textContent = t.title;
+                if (t.archived) {
+                    item.style.opacity = '0.6';
+                    item.style.fontStyle = 'italic';
+                }
+                const title = document.createElement('span'); title.className = 'topic-title'; 
+                title.textContent = t.archived ? `[归档] ${t.title}` : t.title;
                 // Action buttons: fork, archive, delete
                 const actions = document.createElement('div'); actions.className = 'topic-actions';
                 const forkBtn = document.createElement('button');
-                forkBtn.className = 'topic-action-btn topic-fork-btn'; forkBtn.textContent = '⑂'; forkBtn.title = '分叉话题';
+                forkBtn.className = 'topic-action-btn topic-fork-btn'; forkBtn.innerHTML = svgIconNoMargin('link'); forkBtn.title = '分叉话题';
                 forkBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'forkTopic', topicId: t.id, messageIndex: 999 }); });
                 const archBtn = document.createElement('button');
-                archBtn.className = 'topic-action-btn topic-archive-btn'; archBtn.textContent = '📦'; archBtn.title = '归档';
+                archBtn.className = 'topic-action-btn topic-archive-btn'; 
+                archBtn.innerHTML = t.archived ? `${svgIconNoMargin('refresh')} 恢复` : svgIconNoMargin('bookmark'); 
+                archBtn.title = t.archived ? '取消归档' : '归档';
                 archBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'archiveTopic', topicId: t.id }); });
                 const del = document.createElement('button');
-                del.className = 'topic-action-btn topic-delete'; del.textContent = '✕'; del.title = '删除';
+                del.className = 'topic-action-btn topic-delete'; del.innerHTML = svgIconNoMargin('trash'); del.title = '删除';
                 del.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'deleteTopic', topicId: t.id }); });
                 actions.appendChild(forkBtn); actions.appendChild(archBtn); actions.appendChild(del);
                 item.appendChild(title); item.appendChild(actions);

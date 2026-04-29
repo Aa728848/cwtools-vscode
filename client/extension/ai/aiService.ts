@@ -91,9 +91,8 @@ export class AIService {
     /** In-memory model override — avoids writing to workspace config (which triggers LS restart) */
     private modelOverride: string | null = null;
 
-    /** Global budget tracking to prevent runaway multi-agent costs */
+    /** Global budget tracking to prevent runaway multi-agent costs (Currently disabled by user request) */
     private sessionTokenUsage = 0;
-    private readonly MAX_SESSION_TOKENS = 100000000; // 100M tokens default ceiling
 
     public resetSessionBudget(): void {
         this.sessionTokenUsage = 0;
@@ -101,9 +100,7 @@ export class AIService {
 
     public reportUsage(tokens: number): void {
         this.sessionTokenUsage += tokens;
-        if (this.sessionTokenUsage > this.MAX_SESSION_TOKENS) {
-            throw new Error(`Global Context Budget Exceeded: The session has used ${this.sessionTokenUsage} tokens, exceeding the hard limit of ${this.MAX_SESSION_TOKENS}. Please start a new session or consolidate context.`);
-        }
+        // The hard limit of 100M tokens has been removed globally to allow unlimited conversation sizes
     }
 
     constructor(private context: vs.ExtensionContext) {

@@ -794,6 +794,7 @@ export type WebViewMessage =
     | { type: 'deleteTopic'; topicId: string }
     | { type: 'forkTopic'; topicId: string; messageIndex: number }
     | { type: 'archiveTopic'; topicId: string }
+    | { type: 'setShowArchived'; show: boolean }
     | { type: 'configureProvider' }
     | { type: 'cancelGeneration' }
     | { type: 'switchMode'; mode: AgentMode }

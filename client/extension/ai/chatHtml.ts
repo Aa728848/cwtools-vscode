@@ -40,23 +40,26 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <span class="brand-text">Eddy CWTool Code</span>
     </div>
     <div class="header-actions">
-        <button class="icon-btn" id="btnNewTopic" title="新话题" aria-label="新建对话话题">+</button>
+        <button class="icon-btn" id="btnNewTopic" title="新话题" aria-label="新建对话话题">${svgIconNoMargin('plus')}</button>
         <button class="icon-btn" id="btnTopics" title="历史话题" aria-label="展开历史话题面板">≡</button>
-        <button class="icon-btn" id="btnSettings" title="设置" aria-label="打开 AI 设置">⋯</button>
+        <button class="icon-btn" id="btnSettings" title="设置" aria-label="打开 AI 设置">${svgIconNoMargin('gear')}</button>
     </div>
 </div>
 
 <div class="topics-panel" id="topicsPanel">
     <div class="topics-panel-header">
-        <button class="new-topic-btn" id="btnNewTopicPanel">＋ 新话题</button>
+        <button class="new-topic-btn" id="btnNewTopicPanel">${svgIcon('plus')}新话题</button>
         <div class="topics-search-row">
-            <input type="text" id="topicsSearch" class="topics-search-input" placeholder="🔍 搜索对话..." autocomplete="off" />
-            <button class="icon-btn topics-export-btn" id="btnExportTopic" title="导出当前对话 (Markdown)" style="font-size:11px;padding:4px 7px;">⬇ 导出</button>
+            <input type="text" id="topicsSearch" class="topics-search-input" placeholder="搜索对话..." autocomplete="off" />
+            <label style="font-size:11px; display:flex; align-items:center; gap:4px; opacity:0.8; cursor:pointer;">
+                <input type="checkbox" id="showArchivedCb" /> 已归档
+            </label>
+            <button class="icon-btn topics-export-btn" id="btnExportTopic" title="导出当前对话 (Markdown)" style="font-size:11px;padding:4px 7px;">${svgIcon('save')}导出</button>
         </div>
     </div>
     <div class="topics-list" id="topicsList"></div>
 </div>
-<div class="mode-indicator" id="modeIndicator">📋 Plan Mode — 只读分析，不修改文件</div>
+<div class="mode-indicator" id="modeIndicator">${svgIcon('clipboard')}Plan Mode — 只读分析，不修改文件</div>
 <div class="todo-panel" id="todoPanel">
     <div class="todo-panel-title">Tasks</div>
     <div id="todoList"></div>
@@ -99,7 +102,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <option value="review">审查模式</option>
                 </select>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
-                <button class="img-pick-btn" id="imgPickBtn" title="上传图片">+</button>
+                <button class="img-pick-btn" id="imgPickBtn" title="上传图片">${svgIconNoMargin('plus')}</button>
             </div>
             <button class="send-btn" id="sendBtn" title="发送 (Enter)" aria-label="发送消息">↑</button>
         </div>
@@ -135,7 +138,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <div class="settings-hint" id="apiKeyStatus" style="color:#4caf50;margin-bottom:3px;"></div>
                     <div class="settings-key-row">
                         <input class="settings-input" id="settingsApiKey" type="password" placeholder="输入新 Key（留空保留已有）" autocomplete="off" />
-                        <button class="key-toggle-btn" id="keyToggleBtn">👁</button>
+                        <button class="key-toggle-btn" id="keyToggleBtn">${svgIconNoMargin('eye')}</button>
                         <button class="detect-btn" id="fetchApiModelsBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="用此 Key 去对应端点拉取模型">${svgIcon('cloud')}获取模型</button>
                     </div>
                 </div>

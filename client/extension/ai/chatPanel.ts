@@ -199,6 +199,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'archiveTopic':
                 this.archiveTopic(msg.topicId);
                 break;
+            case 'setShowArchived':
+                this.topicManager.setShowArchived(msg.show);
+                break;
             case 'configureProvider':
             case 'openSettings':
                 await this.settingsManager.openSettingsPage();

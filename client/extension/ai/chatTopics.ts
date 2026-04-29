@@ -17,6 +17,7 @@ type PostMessageFn = (msg: HostMessage) => void;
 export class ChatTopicManager {
     currentTopic: ChatTopic | null = null;
     topics: ChatTopic[] = [];
+    public showArchived: boolean = false;
 
     constructor(
         private storageUri: vs.Uri | undefined,
@@ -172,7 +173,7 @@ export class ChatTopicManager {
         this.postMessage({
             type: 'topicList',
             topics: this.topics
-                .filter(t => !t.archived)
+                .filter(t => this.showArchived || !t.archived)
                 .map(t => ({
                     id: t.id,
                     title: t.title,
@@ -180,6 +181,11 @@ export class ChatTopicManager {
                     archived: t.archived,
                 })),
         });
+    }
+
+    setShowArchived(show: boolean): void {
+        this.showArchived = show;
+        this.sendTopicList();
     }
 
     /**
@@ -200,7 +206,7 @@ export class ChatTopicManager {
         }> = [];
 
         for (const t of this.topics) {
-            if (t.archived) continue;
+            if (t.archived && !this.showArchived) continue;
 
             let score = 0;
             let matchContext: string | undefined;

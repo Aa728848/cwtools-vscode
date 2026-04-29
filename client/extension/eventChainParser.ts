@@ -279,8 +279,8 @@ function extractEdges(sourceId: string, body: string, edges: EventEdge[]) {
         }
 
         // Match situation creation
-        if (trimmed.startsWith('create_situation')) {
-            const sit = extractLookahead(/situation\s*=\s*"?([a-zA-Z0-9_-]+)"?/, j);
+        if (trimmed.startsWith('start_situation') || trimmed.startsWith('create_situation')) {
+            const sit = extractLookahead(/(?:type|situation)\s*=\s*"?([a-zA-Z0-9_-]+)"?/, j);
             if (sit) {
                 const targetId = `[situation] ${sit}`;
                 addEdgeDedup(edges, sourceId, targetId, 'effect', inOption ? optionName : undefined);

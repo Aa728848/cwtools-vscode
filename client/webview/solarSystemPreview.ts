@@ -1283,7 +1283,7 @@ function setupControls() {
                     // Orbit lock: orbit_distance=0 bodies only change angle (but NOT ring worlds)
                     isLockedOrbit: !ringGroup && body.orbitDistance.type === 'fixed' && body.orbitDistance.value === 0,
                     // Ring world specific data
-                    isRingWorld: !ringGroup,
+                    isRingWorld: !!ringGroup,
                     ringChangeOrbitLine: ringGroup?.changeOrbitLine ?? -1,
                     ringOldOrbitRadius: ringGroup ? ((ringGroup as any)._dragOrigRadius || ringGroup.orbitRadius) : 0,
                     ringFirstLine: ringGroup?.firstLine ?? 0,

@@ -502,7 +502,7 @@ export class SolarSystemPanel {
             for (const sys of systems) {
                 if (sys.endLine === msg.systemEndLine) {
                     for (const b of sys.bodies) {
-                        const bodyEndOrbit = b.resolvedOrbitRadius + b.changeOrbit;
+                        const bodyEndOrbit = b.resolvedOrbitRadius;
                         if (bodyEndOrbit > cumulativeOrbit) {
                             cumulativeOrbit = bodyEndOrbit;
                         }
@@ -1012,16 +1012,16 @@ export class SolarSystemPanel {
                 const lastSegIdx = insertBefore - 1;
                 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                 const lastSeg = rePlanets[lastSegIdx]!;
-                cumOrbit = lastSeg.resolvedOrbitRadius + lastSeg.changeOrbit;
+                cumOrbit = lastSeg.resolvedOrbitRadius;
             } else {
-                cumOrbit = prevPlanet.resolvedOrbitRadius + prevPlanet.changeOrbit;
+                cumOrbit = prevPlanet.resolvedOrbitRadius;
             }
         } else if (insertBefore < rePlanets.length) {
             // Inserting before the first planet
             // Check if there's a star body (bodyType === 'star') contributing to cumulative
             const star = reSystem.bodies.find(b => b.bodyType === 'star');
             if (star) {
-                cumOrbit = star.resolvedOrbitRadius + star.changeOrbit;
+                cumOrbit = star.resolvedOrbitRadius;
             }
         }
 

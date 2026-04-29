@@ -466,7 +466,7 @@ function resolveMoonsRecursive(parent: CelestialBody): void {
             : resolveValue(moon.orbitAngle);
         moon.resolvedSize = resolveValue(moon.size);
         moon.resolvedCount = resolveCount(moon.count);
-        moonCumulativeOrbit = moon.resolvedOrbitRadius + moon.changeOrbit;
+        moonCumulativeOrbit = moon.resolvedOrbitRadius;
 
         // Recursively resolve sub-moons
         if (moon.moons.length > 0) {
@@ -557,8 +557,8 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
             body.resolvedSize = resolveValue(body.size);
             body.resolvedCount = resolveCount(body.count);
 
-            // Handle per-body change_orbit for next sibling
-            cumulativeOrbit = body.resolvedOrbitRadius + body.changeOrbit;
+            // Update cumulative orbit for next sibling
+            cumulativeOrbit = body.resolvedOrbitRadius;
 
             // Resolve moons recursively (handles sub-moons, ring worlds at any depth)
             resolveMoonsRecursive(body);
@@ -573,7 +573,7 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
                     : resolveValue(sub.orbitAngle);
                 sub.resolvedSize = resolveValue(sub.size);
                 sub.resolvedCount = resolveCount(sub.count);
-                subCumulativeOrbit = sub.resolvedOrbitRadius + sub.changeOrbit;
+                subCumulativeOrbit = sub.resolvedOrbitRadius;
 
                 // Resolve sub-planet moons recursively
                 resolveMoonsRecursive(sub);

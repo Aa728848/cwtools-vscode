@@ -78,11 +78,35 @@ export class FileToolHandler {
     private resolveAndAssertInWorkspace(filePath: string): string {
         const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(this.ctx.workspaceRoot, filePath);
         const normalized = path.resolve(absolutePath);
-        const wsRoot = path.resolve(this.ctx.workspaceRoot);
-        if (!normalized.startsWith(wsRoot)) {
-            throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
+        
+        const bypassSandbox = vs.workspace.getConfiguration('cwtools.ai.developer').get<boolean>('disableSecuritySandbox') === true;
+        if (bypassSandbox) {
+            return normalized;
         }
-        return normalized;
+
+        const isWindows = process.platform === 'win32';
+        const checkPath = isWindows ? normalized.toLowerCase() : normalized;
+        
+        // 1. Check primary workspace root (from context)
+        const wsRoot = path.resolve(this.ctx.workspaceRoot);
+        const checkWsRoot = isWindows ? wsRoot.toLowerCase() : wsRoot;
+        if (checkPath.startsWith(checkWsRoot)) {
+            return normalized;
+        }
+
+        // 2. Check all other VS Code workspace folders (multi-root support)
+        const wsFolders = vs.workspace.workspaceFolders;
+        if (wsFolders) {
+            for (const folder of wsFolders) {
+                const folderRoot = path.resolve(folder.uri.fsPath);
+                const checkFolderRoot = isWindows ? folderRoot.toLowerCase() : folderRoot;
+                if (checkPath.startsWith(checkFolderRoot)) {
+                    return normalized;
+                }
+            }
+        }
+
+        throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
     }
 
     private readTextFile(filePath: string): { content: string; hasBom: boolean } {

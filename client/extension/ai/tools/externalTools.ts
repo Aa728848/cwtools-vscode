@@ -200,15 +200,19 @@ export class ExternalToolHandler {
         const cmdLower = args.command.trim().toLowerCase();
         const isSafePrefix = SAFE_COMMAND_PREFIXES.some(p => cmdLower.startsWith(p));
 
-        for (const pat of ALWAYS_BLOCKED) {
-            if (pat.test(args.command)) {
-                return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${pat.source}). Please use built-in tools instead of generic shell pipes/chains.`, exitCode: 1 };
-            }
-        }
-        if (!isSafePrefix) {
-            for (const pat of PIPE_REDIRECT_BLOCKED) {
+        const bypassSandbox = vs.workspace.getConfiguration('cwtools.ai.developer').get<boolean>('disableSecuritySandbox') === true;
+
+        if (!bypassSandbox) {
+            for (const pat of ALWAYS_BLOCKED) {
                 if (pat.test(args.command)) {
                     return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${pat.source}). Please use built-in tools instead of generic shell pipes/chains.`, exitCode: 1 };
+                }
+            }
+            if (!isSafePrefix) {
+                for (const pat of PIPE_REDIRECT_BLOCKED) {
+                    if (pat.test(args.command)) {
+                        return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${pat.source}). Please use built-in tools instead of generic shell pipes/chains.`, exitCode: 1 };
+                    }
                 }
             }
         }
@@ -216,8 +220,31 @@ export class ExternalToolHandler {
         let cwd: string;
         try {
             cwd = path.resolve(args.cwd ?? this.ctx.workspaceRoot);
+            
+            const isWindows = process.platform === 'win32';
+            const checkCwd = isWindows ? cwd.toLowerCase() : cwd;
+            
+            let isWithinWorkspace = false;
+            
             const wsRoot = path.resolve(this.ctx.workspaceRoot);
-            if (!cwd.startsWith(wsRoot)) {
+            const checkWsRoot = isWindows ? wsRoot.toLowerCase() : wsRoot;
+            if (checkCwd.startsWith(checkWsRoot)) {
+                isWithinWorkspace = true;
+            }
+
+            const wsFolders = vs.workspace.workspaceFolders;
+            if (!isWithinWorkspace && wsFolders) {
+                for (const folder of wsFolders) {
+                    const folderRoot = path.resolve(folder.uri.fsPath);
+                    const checkFolderRoot = isWindows ? folderRoot.toLowerCase() : folderRoot;
+                    if (checkCwd.startsWith(checkFolderRoot)) {
+                        isWithinWorkspace = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!isWithinWorkspace && !bypassSandbox) {
                 return { stdout: '', stderr: `Blocked: Working directory must be within the workspace root`, exitCode: 1 };
             }
         } catch (e) {

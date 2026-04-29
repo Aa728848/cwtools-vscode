@@ -104,5 +104,6 @@
   "configuration.cwtools.ai.reasoningEffort.enum.max": "Max (DeepSeek-V4 intensive thinking)",
   "configuration.cwtools.ai.reasoningEffort.description": "Thinking depth / Reasoning effort for supported AI models (DeepSeek, OpenAI o-series).",
   "configuration.cwtools.ai.dynamicModels.description": "Dynamically fetched AI models",
-  "configuration.cwtools.ai.dynamicModelsContext.description": "Dynamically fetched AI models context sizes"
+  "configuration.cwtools.ai.dynamicModelsContext.description": "Dynamically fetched AI models context sizes",
+  "configuration.cwtools.ai.developer.disableSecuritySandbox.description": "WARNING: Disables all AI file path constraints and shell command blocklists. Extremely dangerous, use at your own risk!"
 }

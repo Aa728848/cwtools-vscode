@@ -494,6 +494,12 @@
 					"default": false,
 					"description": "%configuration.cwtools.ai.forcedThinkingMode.description%"
 				},
+				"cwtools.ai.developer.disableSecuritySandbox": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.cwtools.ai.developer.disableSecuritySandbox.description%"
+				},
 				"cwtools.ai.maxRetries": {
 					"scope": "window",
 					"type": "integer",

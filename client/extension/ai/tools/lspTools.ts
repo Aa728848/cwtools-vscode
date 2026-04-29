@@ -736,7 +736,7 @@ export class LspToolHandler {
             try {
                 const client = this.client;
                 if (client) {
-                    const raw = await this.lspRequest('cwtools.ai.validateCode', [args.code, args.targetFile ?? ''], 15_000) as any;
+                    const raw = await this.lspRequest('cwtools.ai.validateCode', [args.code, args.targetFile ?? ''], 30_000) as any;
 
                     if (raw && raw.ok === true) {
                         if (Array.isArray(raw.errors)) {
@@ -830,7 +830,7 @@ export class LspToolHandler {
                     const existing = vs.languages.getDiagnostics(tempUri);
                     if (existing.length > 0) { resolve(existing); return; }
 
-                    // Early check at 1500ms — diagnostics may have arrived before the event fired
+                    // Early check at 3000ms — diagnostics may have arrived before the event fired
                     const earlyCheck = setTimeout(() => {
                         const current = vs.languages.getDiagnostics(tempUri);
                         if (current.length > 0) {
@@ -838,13 +838,13 @@ export class LspToolHandler {
                             disposable.dispose();
                             resolve(current);
                         }
-                    }, 1500);
+                    }, 3000);
 
                     const deadline = setTimeout(() => {
                         clearTimeout(earlyCheck);
                         disposable.dispose();
                         resolve(vs.languages.getDiagnostics(tempUri));
-                    }, 2000);
+                    }, 10000);
 
                     const disposable = vs.languages.onDidChangeDiagnostics((e) => {
                         const changedForUs = e.uris.some(u => u.fsPath === tempUri.fsPath);
@@ -1052,7 +1052,13 @@ export class LspToolHandler {
                 }
                 if (searchRoots.length === 0 && fs.existsSync(args.directory)) {
                     const resolvedDir = path.resolve(args.directory);
-                    const isWithinWorkspace = workspaceFolders.some(ws => resolvedDir.startsWith(path.resolve(ws) + path.sep) || resolvedDir === path.resolve(ws));
+                    const isWindows = process.platform === 'win32';
+                    const checkDir = isWindows ? resolvedDir.toLowerCase() : resolvedDir;
+                    const isWithinWorkspace = workspaceFolders.some(ws => {
+                        const wsResolved = path.resolve(ws);
+                        const checkWs = isWindows ? wsResolved.toLowerCase() : wsResolved;
+                        return checkDir.startsWith(checkWs + path.sep) || checkDir === checkWs;
+                    });
                     if (isWithinWorkspace) {
                         searchRoots.push(resolvedDir);
                     }

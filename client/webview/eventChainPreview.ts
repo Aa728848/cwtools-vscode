@@ -14,6 +14,10 @@
  */
 
 import cytoscape from 'cytoscape';
+// @ts-ignore
+import elk from 'cytoscape-elk';
+
+cytoscape.use(elk);
 
 // VS Code API handle
 declare function acquireVsCodeApi(): {
@@ -35,6 +39,7 @@ interface EventNode {
     endLine: number;
     namespace: string;
     isFireOnAction: boolean;
+    isHidden: boolean;
 }
 
 interface EventEdge {
@@ -82,10 +87,11 @@ const cy = cytoscape({
                 'border-width': 1,
                 'border-color': '#666',
                 'width': 'label',
-                'height': 24,
+                'height': 28,
                 'shape': 'round-rectangle',
-                'padding': '6px' as any,
-                'text-wrap': 'none',
+                'padding': '10px' as any,
+                'text-wrap': 'wrap' as any,
+                'text-max-width': '180px' as any,
             },
         },
         {
@@ -116,6 +122,13 @@ const cy = cytoscape({
                 'border-color': '#e8c840',
                 'border-width': 3,
                 'background-color': '#5c5c1a',
+            },
+        },
+        {
+            selector: 'node[?isHidden]',
+            style: {
+                'opacity': 0.65,
+                'border-style': 'dashed' as any,
             },
         },
         {
@@ -179,9 +192,9 @@ const cy = cytoscape({
         },
     ],
     layout: { name: 'preset' },
-    minZoom: 0.1,
-    maxZoom: 5,
-    wheelSensitivity: 0.3,
+    minZoom: 0.05,
+    maxZoom: 8,
+    wheelSensitivity: 0.8,
 });
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -325,16 +338,22 @@ function renderGraph() {
 
     for (const node of nodes) {
         const isEntry = node.isFireOnAction || (!node.isTriggeredOnly && !hasIncoming.has(node.id));
+        // For non-hidden popup events, show localized title if available
+        let displayLabel = node.id;
+        if (!node.isHidden && node.title) {
+            displayLabel = `${node.id}\n${node.title}`;
+        }
         elements.push({
             data: {
                 id: node.id,
-                label: node.id.length > 20 ? node.id.slice(-18) : node.id,
+                label: displayLabel,
                 eventType: node.type,
                 title: node.title,
                 file: node.file,
                 line: node.line,
                 isEntry: isEntry || undefined,
                 isTriggered: node.isTriggeredOnly || undefined,
+                isHidden: node.isHidden || undefined,
                 isOrphan: false,
             },
         });
@@ -374,19 +393,21 @@ function renderGraph() {
 
     cy.add(elements);
 
-    // Layout — breadthfirst for hierarchical directed graphs
+    // Layout — ELK (layered/hierarchical) for clean DAG visualization
     cy.layout({
-        name: 'breadthfirst',
-        directed: true,
-        spacingFactor: 1.5,
-        avoidOverlap: true,
-        nodeDimensionsIncludeLabels: true,
+        name: 'elk',
         animate: false,
-        padding: 30,
-        roots: cy.nodes().filter(n => {
-            // Use entry points as roots for better hierarchy
-            return n.data('isEntry') || n.data('isExternal');
-        }),
+        fit: true,
+        padding: 40,
+        nodeDimensionsIncludeLabels: true,
+        elk: {
+            algorithm: 'layered',
+            'elk.direction': 'DOWN',
+            'elk.spacing.nodeNode': 60,
+            'elk.spacing.edgeNode': 40,
+            'elk.layered.spacing.nodeNodeBetweenLayers': 80,
+            'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+        },
     } as any).run();
 
     cy.fit(undefined, 30);

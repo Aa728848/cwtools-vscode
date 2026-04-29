@@ -252,6 +252,7 @@ export class EventChainPanel {
                                         endLine: src.line,
                                         namespace: `__${src.sourceType}__`,
                                         isFireOnAction: src.sourceType === 'on_action',
+                                        isHidden: false,
                                     });
                                 }
                             }
@@ -263,7 +264,74 @@ export class EventChainPanel {
             }
         }
 
+        // ── Phase 4: Resolve localization titles for non-hidden events ─────────
+        this._panel.webview.postMessage({ command: 'loading', text: '解析本地化文本...' });
+        await this._resolveLocTitles(subgraph);
+
         return subgraph;
+    }
+
+    // ── Resolve localization titles for non-hidden events ────────────────────
+
+    private async _resolveLocTitles(graph: EventGraph) {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders) return;
+
+        // Collect title keys that need resolving (non-hidden events with a title key)
+        const keysToResolve = new Set<string>();
+        for (const node of graph.nodes) {
+            if (!node.isHidden && node.title) {
+                keysToResolve.add(node.title);
+            }
+        }
+        if (keysToResolve.size === 0) return;
+
+        const locMap = new Map<string, string>();
+
+        // Get configured validation languages, prioritize Chinese if present
+        const config = vscode.workspace.getConfiguration('cwtools');
+        let locLangs = config.get<string[]>('localisation.languages') || ['English'];
+        
+        let targetLangs = locLangs.map(l => l.toLowerCase());
+        if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {
+            targetLangs = ['simp_chinese', 'chinese'];
+        } else {
+            targetLangs = targetLangs.map(l => l === 'english' ? 'english' : l === 'chinese' ? 'simp_chinese' : l);
+        }
+
+        // Only scan YML files that match the target languages (e.g. *l_english.yml)
+        // This is significantly faster than parsing all loc files
+        for (const lang of targetLangs) {
+            const locPattern = new vscode.RelativePattern(
+                workspaceFolders[0]!,
+                `**/{localisation,localisation_synced,localization}/**/*l_${lang}.yml`,
+            );
+            const locFiles = await vscode.workspace.findFiles(locPattern, '**/node_modules/**', 200);
+            const linePattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
+
+            for (const fileUri of locFiles) {
+                try {
+                    const data = await vscode.workspace.fs.readFile(fileUri);
+                    const text = new TextDecoder('utf-8').decode(data);
+                    for (const line of text.split('\n')) {
+                        const m = linePattern.exec(line);
+                        if (m && keysToResolve.has(m[1]!)) {
+                            // Strip Paradox color codes for clean display
+                            locMap.set(m[1]!, m[2]!.replace(/§[RGBYWHETLMSPr!]/g, ''));
+                        }
+                    }
+                } catch {
+                    // Skip
+                }
+            }
+        }
+
+        // Apply resolved titles to nodes
+        for (const node of graph.nodes) {
+            if (!node.isHidden && node.title && locMap.has(node.title)) {
+                node.title = locMap.get(node.title)!;
+            }
+        }
     }
 
     // ── Navigate to event source ────────────────────────────────────────────

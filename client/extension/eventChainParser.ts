@@ -32,6 +32,8 @@ export interface EventNode {
     namespace: string;
     /** Whether this event has fire_on_action (entry point) */
     isFireOnAction: boolean;
+    /** Whether the event is hidden (no popup) */
+    isHidden: boolean;
 }
 
 export interface EventEdge {
@@ -56,6 +58,7 @@ const EVENT_TYPES = [
     'country_event', 'planet_event', 'fleet_event', 'ship_event',
     'pop_event', 'pop_faction_event', 'observer_event', 'event',
     'situation_event', 'first_contact_event', 'espionage_operation_event',
+    'astral_rift_event',
 ] as const;
 
 const EVENT_TYPE_SET = new Set<string>(EVENT_TYPES);
@@ -65,6 +68,13 @@ const EVENT_FIRE_PATTERNS = [
     'country_event', 'planet_event', 'fleet_event', 'ship_event',
     'pop_event', 'pop_faction_event', 'observer_event',
     'situation_event', 'first_contact_event', 'espionage_operation_event',
+    'astral_rift_event',
+];
+
+// Additional patterns that reference an event by ID (non-standard triggers)
+// e.g. set_next_astral_rift_event = { id = xxx.123 }
+const EXTRA_FIRE_PATTERNS = [
+    'set_next_astral_rift_event',
 ];
 
 // ─── Event file parser ──────────────────────────────────────────────────────
@@ -135,6 +145,9 @@ export function parseEventFile(content: string, filePath: string): EventGraph {
                 // Check fire_on_action
                 const isFireOnAction = /\bfire_on_action\b/.test(body);
 
+                // Check is_hidden
+                const isHidden = /\bis_hidden\s*=\s*yes\b/.test(body) || /\bhide_window\s*=\s*yes\b/.test(body);
+
                 const ns = eventId.includes('.') ? eventId.split('.')[0]! : currentNamespace;
 
                 nodes.push({
@@ -147,6 +160,7 @@ export function parseEventFile(content: string, filePath: string): EventGraph {
                     endLine: endLineIdx + 1,
                     namespace: ns,
                     isFireOnAction,
+                    isHidden,
                 });
 
                 // Phase 3: Extract outgoing event references within this event body
@@ -219,6 +233,19 @@ function extractEdges(sourceId: string, body: string, edges: EventEdge[]) {
                 if (!exists) {
                     edges.push({ source: sourceId, target: targetId, edgeType, label });
                 }
+            }
+        }
+
+        // Match extra fire patterns (e.g. set_next_astral_rift_event = { id = xxx })
+        for (const pattern of EXTRA_FIRE_PATTERNS) {
+            const fireMatch = trimmed.match(
+                new RegExp(`${pattern}\\s*=\\s*\\{\\s*id\\s*=\\s*(\\S+)`)
+            );
+            if (fireMatch) {
+                const targetId = fireMatch[1]!;
+                if (targetId === sourceId) continue;
+                const edgeType: EventEdge['edgeType'] = inOption ? 'option' : inImmediate ? 'immediate' : inAfter ? 'after' : 'effect';
+                addEdgeDedup(edges, sourceId, targetId, edgeType, inOption ? optionName : undefined);
             }
         }
 

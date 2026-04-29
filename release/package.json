@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Eddy",
 	"license": "MIT",
-	"version": "1.8.2",
+	"version": "1.8.3",
 	"preview": true,
 	"activationEvents": [
 		"onLanguage:stellaris",
@@ -93,6 +93,11 @@
 				{
 					"command": "cwtools.previewSolarSystem",
 					"when": "resourceExtname == .txt && resourcePath =~ /solar_system_initializers/",
+					"group": "navigation"
+				},
+				{
+					"command": "cwtools.visualizeEventChain",
+					"when": "resourceExtname == .txt && resourcePath =~ /events/",
 					"group": "navigation"
 				}
 			]
@@ -205,6 +210,12 @@
 				"title": "%commands.cwtools.ai.fixDiagnostics.title%",
 				"category": "CWTools AI",
 				"icon": "$(wrench)"
+			},
+			{
+				"command": "cwtools.visualizeEventChain",
+				"title": "%commands.cwtools.visualizeEventChain.title%",
+				"category": "cwtools",
+				"icon": "$(type-hierarchy)"
 			}
 		],
 		"keybindings": [

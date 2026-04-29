@@ -728,45 +728,71 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
 /**
  * Dynamic output token limits for API calls to prevent self-truncation.
  * Deep reasoning models (like DeepSeek R1) consume their output budget with 
- * <think> tokens and can easily exceed 8k boundary limit.
+ * <think> tokens and can easily exceed small boundary limits.
+ *
+ * Verified limits (2026-04):
+ *   OpenAI GPT-5.4/5.5:   128K output
+ *   DeepSeek V4 official:  384K output (1M context)
+ *   Claude Opus/Sonnet 4:  8K standard, 300K via Batch API beta
+ *   Gemini 2.5/3.x:       65K output
+ *   GLM-5:                 128K output (200K context)
+ *   MiniMax M2.x:          shared 204K budget (input+output)
+ *   Qwen3.x:               up to 65K output
+ *
+ * NOTE: We intentionally set values BELOW the hard maximum to leave headroom
+ * and avoid 400 errors on providers that count reasoning/thinking tokens
+ * against the output budget. The goal is "large enough for agent loops,
+ * small enough to never hit a hard cap".
  */
 export function getModelOutputTokens(model: string, providerId?: string): number {
-    if (!model) return 8192;
+    if (!model) return 16384;
     const lower = model.toLowerCase();
 
-    // Strict provider constraints that error out if exceeded
+    // ── Direct provider constraints (official API endpoints) ─────────────
+    // max_tokens is just a ceiling — model stops when done, no extra cost.
+    // Set to actual API hard caps.
     if (providerId === 'openai') {
-        return 16384; 
+        return 128000; // GPT-5.4/5.5 hard cap: 128K
     }
     if (providerId === 'deepseek') {
-        // Official DeepSeek API hard cap is 8192. If exceeded, it throws 400.
-        return 8192;
+        return 384000; // DeepSeek V4 hard cap: 384K
     }
     if (providerId === 'claude' || lower.includes('claude')) {
+        // ⚠ Claude standard Messages API hard cap is 8192.
+        // Exceeding returns 400 — do NOT raise without beta header.
         return 8192;
     }
     if (providerId === 'minimax' || providerId === 'minimax-token-plan' || providerId?.includes('minimax') || lower.includes('minimax')) {
-        // MiniMax strictly limits output; large values cause ungraceful stream termination
-        return 8192;
+        // MiniMax: shared 204K budget (input+output). Leave room for input.
+        return 65536;
     }
     if (providerId === 'glm' || lower.includes('glm')) {
-        // Zhipu restricts to 8K
-        return 8192;
+        return 128000; // GLM-5 hard cap: 128K
+    }
+    if (providerId === 'qwen' || (lower.includes('qwen') && (lower.includes('3') || lower.includes('max') || lower.includes('plus')))) {
+        return 65536; // Qwen3.x hard cap: 65536
     }
 
-    // OpenAI-compatible / Proxy providers (OpenCode, OpenRouter, SiliconFlow, Ollama)
-    // usually auto-cap or support massive limits natively.
+    // ── Model-name based inference (proxy/OpenAI-compat providers) ────────
+    if (lower.includes('deepseek') && lower.includes('v4')) {
+        return 384000; // DeepSeek V4 hard cap: 384K
+    }
     if (lower.includes('deepseek') || lower.includes('r1')) {
-        return 65536; // Necessary for massive reasoning loops
+        return 65536;
+    }
+    if (lower.includes('gpt-5')) {
+        return 128000;
     }
     if (lower.includes('gemini')) {
-        return 65536; // Gemini 2.5/3.0 supports 64k+ output
+        return 65536; // Gemini hard cap: 65536
     }
-    if (lower.includes('qwen') && (lower.includes('3') || lower.includes('max') || lower.includes('plus'))) {
-        return 32768; 
+    if (lower.includes('qwen')) {
+        return 65536;
+    }
+    if (lower.includes('glm')) {
+        return 128000;
     }
     
-    // Default to a safe large value for OpenAI-compatibles instead of 8192
     return 32768;
 }
 

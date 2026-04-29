@@ -91,6 +91,7 @@
   "commands.cwtools.toggleInlineTextOff.title": "禁用内联文本显示",
   "commands.cwtools.previewGUI.title": "预览 GUI 布局",
   "commands.cwtools.previewSolarSystem.title": "预览星系初始化系统",
+  "commands.cwtools.visualizeEventChain.title": "可视化事件链",
   "commands.cwtools.ai.selectModel.title": "从提供商选择 AI 模型...",
   "commands.cwtools.ai.reviewFile.title": "AI: 审查当前文件",
   "commands.cwtools.ai.explainSelection.title": "AI: 解释选中代码",

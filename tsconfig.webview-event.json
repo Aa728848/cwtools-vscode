@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "module": "ES2020"
+    },
+    "extends": "./tsconfig.json",
+    "include": [
+        "client/webview/eventChainPreview.ts",
+        "client/webview/vscode.d.ts"
+    ],
+    "exclude": [
+        "client/extension/**",
+        "client/test/**",
+        "client/webview/guiPreview.ts",
+        "client/webview/solarSystemPreview.ts",
+        "client/webview/chatPanel.ts"
+    ]
+}

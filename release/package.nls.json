@@ -91,6 +91,7 @@
   "commands.cwtools.toggleInlineTextOff.title": "Disable Inline Text",
   "commands.cwtools.previewGUI.title": "Preview GUI Layout",
   "commands.cwtools.previewSolarSystem.title": "Preview Solar System",
+  "commands.cwtools.visualizeEventChain.title": "Visualize Event Chain",
   "commands.cwtools.ai.selectModel.title": "Select AI Model from Provider...",
   "commands.cwtools.ai.reviewFile.title": "AI: Review Current File",
   "commands.cwtools.ai.explainSelection.title": "AI: Explain Selected Code",

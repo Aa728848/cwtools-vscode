@@ -15,6 +15,7 @@ import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
 import { UI } from './ai/messages';
 import { SolarSystemPanel } from './solarSystemPanel';
+import { EventChainPanel } from './eventChainPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
 import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelProvider, AIInlineCompletionProvider, UsageTracker } from './ai';
@@ -747,6 +748,12 @@ export async function activate(context: ExtensionContext) {
 				if (result !== 'Preview') return;
 			}
 			await SolarSystemPanel.create(context.extensionPath, doc);
+		});
+
+		// Event Chain Visualizer command
+		safeRegisterCommand(context, "cwtools.visualizeEventChain", async () => {
+			const editor = vs.window.activeTextEditor;
+			await EventChainPanel.create(context.extensionPath, editor?.document);
 		});
 
 		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {

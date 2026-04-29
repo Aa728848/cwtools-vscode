@@ -1159,6 +1159,19 @@ export class AgentRunner {
             if (reasoningField !== undefined && assistantMessage.reasoning_content === undefined) {
                 assistantMessage.reasoning_content = reasoningField || null;
             }
+
+            // ── DeepSeek API guard: ensure assistant messages always have content or tool_calls ──
+            // DeepSeek (and some other OpenAI-compat providers) returns 400:
+            //   "Invalid assistant message: content or tool_calls must be set"
+            // when an assistant message has null/empty content AND no tool_calls.
+            // This happens during truncation (finish_reason=length) when the model
+            // output only thinking tokens or was mid-tool-call with no text content.
+            const hasContent = assistantMessage.content && (typeof assistantMessage.content === 'string' ? assistantMessage.content.trim().length > 0 : true);
+            const hasToolCalls = assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0;
+            if (!hasContent && !hasToolCalls) {
+                assistantMessage.content = '[Response truncated — no text content was generated before the length limit was reached.]';
+            }
+
             messages.push(assistantMessage);
 
             // ── M3: Length Truncation Fallback ──

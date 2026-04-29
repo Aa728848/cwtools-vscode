@@ -1,0 +1,183 @@
+/* ── Event Chain Preview Stylesheet ─────────────────────────────────────────── */
+:root {
+    --bg: var(--vscode-editor-background, #1e1e1e);
+    --fg: var(--vscode-editor-foreground, #ccc);
+    --border: var(--vscode-panel-border, #333);
+    --accent: #e8c840;
+    --node-bg: var(--vscode-badge-background, #4d4d4d);
+    --node-fg: var(--vscode-badge-foreground, #fff);
+    --entry-color: #4caf50;
+    --triggered-color: #42a5f5;
+    --option-edge: #e8c840;
+    --immediate-edge: #4caf50;
+    --after-edge: #ff9800;
+    --effect-edge: #ab47bc;
+    --focus-ring: var(--vscode-focusBorder, #007fd4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: var(--vscode-font-family, system-ui, sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+    color: var(--fg);
+    background: var(--bg);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── Toolbar ── */
+#toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+    flex-shrink: 0;
+}
+
+#toolbar .title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#toolbar .controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+#toolbar button {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    border-radius: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: background 0.15s;
+}
+#toolbar button:hover { background: rgba(255,255,255,0.12); }
+#toolbar button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+#toolbar button.active { background: rgba(232,200,64,0.2); border-color: var(--accent); }
+
+#toolbar select {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 11px;
+}
+
+#toolbar input[type="text"] {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    width: 140px;
+}
+
+.separator { color: var(--border); margin: 0 2px; }
+
+/* ── Graph container ── */
+#cy-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+/* ── Stats bar ── */
+#stats-bar {
+    padding: 4px 12px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    opacity: 0.6;
+    display: flex;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+/* ── Legend ── */
+#legend {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(30,30,30,0.9);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 10;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-swatch {
+    width: 12px;
+    height: 3px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+/* ── Loading overlay ── */
+#loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    z-index: 100;
+    font-size: 14px;
+    color: var(--accent);
+}
+
+#loading.hidden { display: none; }
+
+/* ── Empty state ── */
+#empty-state {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+    opacity: 0.5;
+}
+#empty-state.visible { display: flex; }
+
+/* ── Node tooltip ── */
+.cy-tooltip {
+    position: absolute;
+    background: rgba(30,30,30,0.95);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 11px;
+    z-index: 20;
+    pointer-events: none;
+    max-width: 280px;
+    line-height: 1.5;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.cy-tooltip .tt-id { font-weight: 600; color: var(--accent); }
+.cy-tooltip .tt-type { opacity: 0.6; font-size: 10px; }
+.cy-tooltip .tt-file { opacity: 0.5; font-size: 10px; margin-top: 4px; }

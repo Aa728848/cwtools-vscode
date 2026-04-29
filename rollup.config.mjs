@@ -1,4 +1,6 @@
 import typescript from 'rollup-plugin-typescript2';
+import resolve from '@rollup/plugin-node-resolve';
+import commonjs from '@rollup/plugin-commonjs';
 import { copyFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 
@@ -72,4 +74,26 @@ export default [
             copyFile('client/webview/chatPanel.css', 'release/bin/client/webview/chatPanel.css'),
         ],
     },
-];
+    // Event Chain Preview webview bundle
+    {
+        input: './client/webview/eventChainPreview.ts',
+        output: {
+            file: './release/bin/client/webview/eventChainPreview.js',
+            format: "iife",
+            name: "cwtoolseventchain",
+            indent: false,
+        },
+        plugins: [
+            resolve({ browser: true }),
+            commonjs(),
+            typescript({
+                tsconfig: "tsconfig.webview-event.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
+            copyFile('client/webview/eventChainPreview.css', 'release/bin/client/webview/eventChainPreview.css'),
+        ],
+    },
+];

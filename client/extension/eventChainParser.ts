@@ -188,7 +188,8 @@ function extractEdges(sourceId: string, body: string, edges: EventEdge[]) {
     let inImmediate = false;
     let inAfter = false;
 
-    for (const line of lines) {
+    for (let j = 0; j < lines.length; j++) {
+        const line = lines[j]!;
         const trimmed = line.trim();
 
         // Track context (option, immediate, after blocks)
@@ -234,6 +235,70 @@ function extractEdges(sourceId: string, body: string, edges: EventEdge[]) {
                     edges.push({ source: sourceId, target: targetId, edgeType, label });
                 }
             }
+        }
+
+        // Generic fallback for any line containing id = xxx or event = xxx
+        // This gracefully handles multi-line blocks like:
+        // country_event = { \n id = exe_invasion.132 \n }
+        // as well as archaeological site stages: stage = { event = kuat_legacy.3 }
+        const genericIdMatch = trimmed.match(/\b(?:id|event)\s*=\s*([a-zA-Z_]\w*\.\d+)/);
+        if (genericIdMatch) {
+            const targetId = genericIdMatch[1]!;
+            if (targetId !== sourceId) {
+                let edgeType: EventEdge['edgeType'] = inOption ? 'option' : inImmediate ? 'immediate' : inAfter ? 'after' : 'effect';
+                addEdgeDedup(edges, sourceId, targetId, edgeType, inOption ? optionName : undefined);
+            }
+        }
+
+        // Match random_events and random_list weights (e.g. 20 = kuat_situation.1)
+        const randomMatch = trimmed.match(/^\d+\s*=\s*([a-zA-Z0-9_]+(?:\.\d+)?)$/);
+        if (randomMatch) {
+            const targetId = randomMatch[1]!;
+            if (targetId !== '0' && targetId !== sourceId && !/^\d+$/.test(targetId)) {
+                let edgeType: EventEdge['edgeType'] = inOption ? 'option' : inImmediate ? 'immediate' : inAfter ? 'after' : 'effect';
+                addEdgeDedup(edges, sourceId, targetId, edgeType, inOption ? optionName : undefined);
+            }
+        }
+
+        // Helper for multi-line extraction
+        const extractLookahead = (pattern: RegExp, startIdx: number, maxLookahead: number = 4) => {
+            for (let k = 0; k <= maxLookahead && startIdx + k < lines.length; k++) {
+                const match = lines[startIdx + k]!.match(pattern);
+                if (match) return match[1];
+            }
+            return undefined;
+        };
+
+        // Match special project creation
+        if (trimmed.startsWith('enable_special_project')) {
+            const name = extractLookahead(/name\s*=\s*"?([a-zA-Z0-9_-]+)"?/, j);
+            if (name) {
+                const targetId = `[special_project] ${name}`;
+                addEdgeDedup(edges, sourceId, targetId, 'effect', inOption ? optionName : undefined);
+            }
+        }
+
+        // Match situation creation
+        if (trimmed.startsWith('create_situation')) {
+            const sit = extractLookahead(/situation\s*=\s*"?([a-zA-Z0-9_-]+)"?/, j);
+            if (sit) {
+                const targetId = `[situation] ${sit}`;
+                addEdgeDedup(edges, sourceId, targetId, 'effect', inOption ? optionName : undefined);
+            }
+        }
+
+        // Match anomaly creation
+        const anomalyMatch = trimmed.match(/add_anomaly\s*=\s*"?([a-zA-Z0-9_-]+)"?/);
+        if (anomalyMatch) {
+            const targetId = `[anomaly] ${anomalyMatch[1]!}`;
+            addEdgeDedup(edges, sourceId, targetId, 'effect', inOption ? optionName : undefined);
+        }
+
+        // Match archaeology site creation
+        const archMatch = trimmed.match(/create_archaeological_site\s*=\s*"?([a-zA-Z0-9_-]+)"?/);
+        if (archMatch && archMatch[1] !== 'random') {
+            const targetId = `[archaeology] ${archMatch[1]!}`;
+            addEdgeDedup(edges, sourceId, targetId, 'effect', inOption ? optionName : undefined);
         }
 
         // Match extra fire patterns (e.g. set_next_astral_rift_event = { id = xxx })
@@ -330,6 +395,7 @@ export function parseCommonFile(content: string, filePath: string): CommonFileRe
     let currentBlockName = '';
     let currentBlockLine = 0;
     let depth = 0;
+    let lastSeenSequentialEvent: string | undefined = undefined;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
@@ -339,17 +405,22 @@ export function parseCommonFile(content: string, filePath: string): CommonFileRe
         if (trimmed.startsWith('#')) continue;
 
         // Track brace depth for block context
-        for (const ch of trimmed) {
+        const prevDepth = depth;
+        const noComment = trimmed.split('#')[0]!;
+        for (const ch of noComment) {
             if (ch === '{') depth++;
             if (ch === '}') depth--;
         }
 
         // Detect top-level block names (depth 0→1 transition)
-        if (depth === 1) {
-            const blockMatch = trimmed.match(/^(\w+)\s*=\s*\{/);
+        // Using prevDepth === 0 ensures we only capture the actual root definitions
+        // and not inline blocks that open and close on the same line at depth 1.
+        if (prevDepth === 0 && depth > 0) {
+            const blockMatch = trimmed.match(/^([a-zA-Z0-9_-]+)\s*=\s*\{/);
             if (blockMatch) {
                 currentBlockName = blockMatch[1]!;
                 currentBlockLine = i + 1;
+                lastSeenSequentialEvent = undefined;
 
                 externalSources.push({
                     id: `[${labelPrefix}] ${currentBlockName}`,
@@ -358,6 +429,27 @@ export function parseCommonFile(content: string, filePath: string): CommonFileRe
                     file: filePath,
                     line: currentBlockLine,
                 });
+            }
+        }
+
+        // Refine generic block names if a key/name is specified inside the block
+        if (depth > 0 && /^(?:special_project|anomaly|situation)$/.test(currentBlockName)) {
+            const keyMatch = trimmed.match(/^(?:key|name|anomaly_category)\s*=\s*"?([a-zA-Z0-9_-]+)"?/);
+            if (keyMatch) {
+                const newName = keyMatch[1]!;
+                const oldId = `[${labelPrefix}] ${currentBlockName}`;
+                const newId = `[${labelPrefix}] ${newName}`;
+                
+                const source = externalSources.find(s => s.id === oldId && s.line === currentBlockLine);
+                if (source) {
+                    source.id = newId;
+                    source.name = newName;
+                }
+                for (const edge of edges) {
+                    if (edge.source === oldId) edge.source = newId;
+                    if (edge.target === oldId) edge.target = newId;
+                }
+                currentBlockName = newName;
             }
         }
 
@@ -395,6 +487,25 @@ export function parseCommonFile(content: string, filePath: string): CommonFileRe
             }
         }
 
+        // Generic fallback for multi-line blocks or archaeological stages
+        // e.g. stage = { event = kuat_legacy.3 }
+        const genericIdMatch = trimmed.match(/\b(?:id|event)\s*=\s*([a-zA-Z_]\w*\.\d+)/);
+        if (genericIdMatch && currentBlockName) {
+            const targetId = genericIdMatch[1]!;
+            const sourceId = `[${labelPrefix}] ${currentBlockName}`;
+            
+            if (labelPrefix === 'archaeology' || labelPrefix === 'situation') {
+                if (lastSeenSequentialEvent) {
+                    addEdgeDedup(edges, lastSeenSequentialEvent, targetId, 'after');
+                } else {
+                    addEdgeDedup(edges, sourceId, targetId, edgeType);
+                }
+                lastSeenSequentialEvent = targetId;
+            } else {
+                addEdgeDedup(edges, sourceId, targetId, edgeType);
+            }
+        }
+
         // Pattern 3: Multi-line events list
         //   events = {
         //       ns.100
@@ -415,6 +526,53 @@ export function parseCommonFile(content: string, filePath: string): CommonFileRe
                     }
                 }
             }
+        }
+
+        // Match random_events weights (e.g. 20 = kuat_situation.1)
+        const randomMatch = trimmed.match(/^\d+\s*=\s*([a-zA-Z0-9_]+(?:\.\d+)?)$/);
+        if (randomMatch && currentBlockName) {
+            const targetId = randomMatch[1]!;
+            if (targetId !== '0' && !/^\d+$/.test(targetId)) {
+                const sourceId = `[${labelPrefix}] ${currentBlockName}`;
+                addEdgeDedup(edges, sourceId, targetId, edgeType);
+            }
+        }
+
+        // Helper for multi-line extraction
+        const extractLookaheadOther = (pattern: RegExp, startIdx: number, maxLookahead: number = 4) => {
+            for (let k = 0; k <= maxLookahead && startIdx + k < lines.length; k++) {
+                const match = lines[startIdx + k]!.match(pattern);
+                if (match) return match[1];
+            }
+            return undefined;
+        };
+
+        // Match special project creation
+        if (trimmed.startsWith('enable_special_project')) {
+            const name = extractLookaheadOther(/name\s*=\s*"?([a-zA-Z0-9_-]+)"?/, i);
+            if (name && currentBlockName) {
+                const targetId = `[special_project] ${name}`;
+                const sourceId = `[${labelPrefix}] ${currentBlockName}`;
+                addEdgeDedup(edges, sourceId, targetId, edgeType);
+            }
+        }
+
+        // Match situation creation
+        if (trimmed.startsWith('create_situation')) {
+            const sit = extractLookaheadOther(/situation\s*=\s*"?([a-zA-Z0-9_-]+)"?/, i);
+            if (sit && currentBlockName) {
+                const targetId = `[situation] ${sit}`;
+                const sourceId = `[${labelPrefix}] ${currentBlockName}`;
+                addEdgeDedup(edges, sourceId, targetId, edgeType);
+            }
+        }
+
+        // Match anomaly creation
+        const anomalyMatch = trimmed.match(/add_anomaly\s*=\s*"?([a-zA-Z0-9_-]+)"?/);
+        if (anomalyMatch && currentBlockName) {
+            const targetId = `[anomaly] ${anomalyMatch[1]!}`;
+            const sourceId = `[${labelPrefix}] ${currentBlockName}`;
+            addEdgeDedup(edges, sourceId, targetId, edgeType);
         }
     }
 

@@ -184,17 +184,7 @@ export class EventChainPanel {
             }
         }
 
-        // ── Phase 2: BFS-expand from seed events (shallow: depth 2) ───────────
-        this._panel.webview.postMessage({ command: 'loading', text: '构建事件关系图...' });
-
-        const eventsOnlyGraph = mergeGraphs(eventGraphs);
-        // Depth 2: seed events → their direct targets → one more hop
-        const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
-
-        // ── Phase 3: Scan common/ for triggers that reference our subgraph ────
         this._panel.webview.postMessage({ command: 'loading', text: '扫描 common/ 触发器...' });
-
-        const subgraphIds = new Set(subgraph.nodes.map(n => n.id));
 
         const commonPatterns = [
             '**/common/on_actions/**/*.txt',
@@ -233,36 +223,38 @@ export class EventChainPanel {
                     const relativePath = vscode.workspace.asRelativePath(fileUri);
                     const result = parseCommonFile(content, relativePath);
 
-                    // Only add edges that target events in our subgraph
-                    for (const edge of result.edges) {
-                        if (subgraphIds.has(edge.target)) {
-                            subgraph.edges.push(edge);
-
-                            // Add the external source as a pseudo-node if not present
-                            if (!subgraph.nodes.some(n => n.id === edge.source)) {
-                                const src = result.externalSources.find(s => s.id === edge.source);
-                                if (src) {
-                                    subgraph.nodes.push({
-                                        id: src.id,
-                                        type: src.sourceType,
-                                        title: src.name,
-                                        isTriggeredOnly: false,
-                                        file: src.file,
-                                        line: src.line,
-                                        endLine: src.line,
-                                        namespace: `__${src.sourceType}__`,
-                                        isFireOnAction: src.sourceType === 'on_action',
-                                        isHidden: false,
-                                    });
-                                }
-                            }
-                        }
+                    const graph: EventGraph = { nodes: [], edges: result.edges };
+                    for (const src of result.externalSources) {
+                        graph.nodes.push({
+                            id: src.id,
+                            type: src.sourceType,
+                            title: src.name,
+                            isTriggeredOnly: false,
+                            file: src.file,
+                            line: src.line,
+                            endLine: src.line,
+                            namespace: `__${src.sourceType}__`,
+                            isFireOnAction: src.sourceType === 'on_action',
+                            isHidden: false,
+                        });
+                    }
+                    if (graph.nodes.length > 0 || graph.edges.length > 0) {
+                        eventGraphs.push(graph);
                     }
                 } catch {
                     // Skip
                 }
             }
         }
+
+        // ── Phase 2: BFS-expand from seed events (shallow: depth 2) ───────────
+        this._panel.webview.postMessage({ command: 'loading', text: '构建事件关系图...' });
+
+        const eventsOnlyGraph = mergeGraphs(eventGraphs);
+        // Depth 2: seed events → their direct targets → one more hop
+        const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
+
+        // (Phase 3 removed: common/ scanning is now done in Phase 1 before BFS)
 
         // ── Phase 4: Resolve localization titles for non-hidden events ─────────
         this._panel.webview.postMessage({ command: 'loading', text: '解析本地化文本...' });

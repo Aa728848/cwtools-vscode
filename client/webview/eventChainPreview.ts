@@ -402,10 +402,12 @@ function renderGraph() {
         nodeDimensionsIncludeLabels: true,
         elk: {
             algorithm: 'layered',
-            'elk.direction': 'DOWN',
-            'elk.spacing.nodeNode': 60,
-            'elk.spacing.edgeNode': 40,
-            'elk.layered.spacing.nodeNodeBetweenLayers': 80,
+            'elk.direction': 'RIGHT',
+            'elk.aspectRatio': 0.2, // Force disconnected components to pack vertically
+            'elk.spacing.componentComponent': 40,
+            'elk.spacing.nodeNode': 30,
+            'elk.spacing.edgeNode': 25,
+            'elk.layered.spacing.nodeNodeBetweenLayers': 60,
             'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
         },
     } as any).run();

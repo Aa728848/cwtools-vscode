@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Eddy",
 	"license": "MIT",
-	"version": "1.8.4",
+	"version": "1.8.5",
 	"preview": true,
 	"activationEvents": [
 		"onLanguage:stellaris",
@@ -98,6 +98,11 @@
 				{
 					"command": "cwtools.visualizeEventChain",
 					"when": "resourceExtname == .txt && resourcePath =~ /events/",
+					"group": "navigation"
+				},
+				{
+					"command": "cwtools.visualizeTechTree",
+					"when": "resourceExtname == .txt && resourcePath =~ /technology/",
 					"group": "navigation"
 				}
 			]
@@ -216,6 +221,12 @@
 				"title": "%commands.cwtools.visualizeEventChain.title%",
 				"category": "cwtools",
 				"icon": "$(type-hierarchy)"
+			},
+			{
+				"command": "cwtools.visualizeTechTree",
+				"title": "%commands.cwtools.visualizeTechTree.title%",
+				"category": "cwtools",
+				"icon": "$(circuit-board)"
 			}
 		],
 		"keybindings": [

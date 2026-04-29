@@ -138,7 +138,10 @@ const cy = cytoscape({
                 'line-color': '#666',
                 'target-arrow-color': '#666',
                 'target-arrow-shape': 'triangle',
-                'curve-style': 'bezier',
+                'curve-style': 'taxi',
+                'taxi-direction': 'vertical' as any,
+                'taxi-turn': '15px' as any,
+                'taxi-turn-min-distance': 5 as any,
                 'arrow-scale': 0.8,
                 'font-size': '7px',
                 'color': '#999',
@@ -233,6 +236,40 @@ cy.on('mouseover', 'node', (evt) => {
 });
 cy.on('mouseout', 'node', () => {
     cy.elements().removeClass('faded').removeClass('highlighted');
+});
+
+// ─── Subtree dragging ────────────────────────────────────────────────────────
+
+let dragPrevPos: cytoscape.Position | null = null;
+let draggedSubtree: cytoscape.NodeCollection | null = null;
+
+cy.on('grab', 'node', (evt) => {
+    const node = evt.target;
+    dragPrevPos = { ...node.position() };
+    // Get all descendant nodes
+    draggedSubtree = node.successors().nodes();
+});
+
+cy.on('drag', 'node', (evt) => {
+    if (!dragPrevPos || !draggedSubtree || draggedSubtree.length === 0) return;
+    const node = evt.target;
+    const currPos = node.position();
+    const dx = currPos.x - dragPrevPos.x;
+    const dy = currPos.y - dragPrevPos.y;
+    
+    if (dx === 0 && dy === 0) return;
+    
+    draggedSubtree.forEach((child) => {
+        const p = child.position();
+        child.position({ x: p.x + dx, y: p.y + dy });
+    });
+    
+    dragPrevPos = { ...currPos };
+});
+
+cy.on('free', 'node', () => {
+    dragPrevPos = null;
+    draggedSubtree = null;
 });
 
 // ─── Tooltip ─────────────────────────────────────────────────────────────────

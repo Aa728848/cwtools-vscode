@@ -96,4 +96,26 @@ export default [
             copyFile('client/webview/eventChainPreview.css', 'release/bin/client/webview/eventChainPreview.css'),
         ],
     },
+    // Tech Tree Preview webview bundle
+    {
+        input: './client/webview/techTreePreview.ts',
+        output: {
+            file: './release/bin/client/webview/techTreePreview.js',
+            format: "iife",
+            name: "cwtoolstechtree",
+            indent: false,
+        },
+        plugins: [
+            resolve({ browser: true }),
+            commonjs(),
+            typescript({
+                tsconfig: "tsconfig.webview-tech.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
+            copyFile('client/webview/techTreePreview.css', 'release/bin/client/webview/techTreePreview.css'),
+        ],
+    },
 ];

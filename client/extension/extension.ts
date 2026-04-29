@@ -16,6 +16,7 @@ import { GuiPanel } from './guiPanel';
 import { UI } from './ai/messages';
 import { SolarSystemPanel } from './solarSystemPanel';
 import { EventChainPanel } from './eventChainPanel';
+import { TechTreePanel } from './techTreePanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
 import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelProvider, AIInlineCompletionProvider, UsageTracker } from './ai';
@@ -754,6 +755,12 @@ export async function activate(context: ExtensionContext) {
 		safeRegisterCommand(context, "cwtools.visualizeEventChain", async () => {
 			const editor = vs.window.activeTextEditor;
 			await EventChainPanel.create(context.extensionPath, editor?.document);
+		});
+
+		// Tech Tree Visualizer command
+		safeRegisterCommand(context, "cwtools.visualizeTechTree", async () => {
+			const editor = vs.window.activeTextEditor;
+			await TechTreePanel.create(context.extensionPath, editor?.document);
 		});
 
 		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {

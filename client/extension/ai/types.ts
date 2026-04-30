@@ -500,6 +500,9 @@ export type AgentToolName =
     | 'query_variables'
     // ── Error Resolution tools ──
     | 'ignore_validation_error'
+    | 'remove_ignored_diagnostic'
+    | 'get_ignored_diagnostics'
+    | 'analyze_diagnostic_error'
     | 'get_pdx_block'
     // ── MCP tools ──
     | 'mcp_call';

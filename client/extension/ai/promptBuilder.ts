@@ -203,7 +203,8 @@ When you see LSP/CWTools errors, classify before acting:
     3. If the error is about an invalid enum value → call \`query_enums("enum_name")\` to list valid values
     4. If the error is about an unknown modifier **tag** (e.g. in \`has_modifier = X\`) → call \`query_static_modifiers("...")\` first. If not found, check \`query_types("scripted_modifier", "...")\` or \`query_rules(category="modifier", name="...")\` for generated modifiers. If either confirms it, it is valid and you must ignore the error.
     5. **Ignoring False Positives**: If you are absolutely confident an error is a false positive (e.g., valid dynamic modifier, or the USER explicitly instructed you to use this syntax), CALL \`ignore_validation_error("errorId", "reason")\` to whitelist it locally. Do not delete working code.
-    6. **Only use values confirmed by the rule database.** Never invent effect/trigger/modifier names.
+    6. **Reversing False Negatives**: If you notice that an ignored error key (reported in SYSTEM_WHITELIST_INFO) is actually causing the failure you are debugging (i.e. the user accidentally ignored a genuine typo), CALL \`remove_ignored_diagnostic("diagnosticKey", "reason")\` to ask the user to remove it from their whitelist.
+    7. **Only use values confirmed by the rule database.** Never invent effect/trigger/modifier names.
 
 ---
 

@@ -109,5 +109,7 @@
   "configuration.cwtools.ai.developer.disableSecuritySandbox.description": "WARNING: Disables all AI file path constraints and shell command blocklists. Extremely dangerous, use at your own risk!",
   "commands.cwtools.ai.codeAction.fix": "AI: Fix this CWTools error",
   "commands.cwtools.ai.codeAction.explain": "AI: Explain this CWTools error",
-  "commands.cwtools.ai.codeAction.fixAll": "AI: Fix all CWTools errors in file"
+  "commands.cwtools.ai.codeAction.fixAll": "AI: Fix all CWTools errors in file",
+  "commands.cwtools.ai.manageIgnoredDiagnostics.title": "AI: Manage Ignored Diagnostics",
+  "configuration.cwtools.ai.ignoredDiagnostics.description": "List of diagnostic keys (e.g. external mod keys) to be completely ignored by the LSP Problems panel and AI Agent. Modifiable via 'Manage Ignored Diagnostics' command."
 }

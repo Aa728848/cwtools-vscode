@@ -281,6 +281,226 @@ export async function activate(context: ExtensionContext) {
 		);
 	});
 
+	safeRegisterCommand(context, "cwtools.ai.manageIgnoredDiagnostics", async () => {
+		const config = vs.workspace.getConfiguration('cwtools.ai');
+		const currentIgnored = config.get<string[]>('ignoredDiagnostics', []);
+
+		const allDiagnostics = vs.languages.getDiagnostics();
+		const candidatesByCode = new Map<string, Set<string>>();
+
+		for (const [uri, diags] of allDiagnostics) {
+			for (const diag of diags) {
+				if (diag.severity !== vs.DiagnosticSeverity.Error) {
+					continue;
+				}
+				
+				const code = diag.code ? String(diag.code) : 'Unknown Code';
+				
+				const match = diag.message.match(/'([^']+)'/) || diag.message.match(/"([^"]+)"/);
+				const matchUnexpected = diag.message.match(/^([^\s]+) is unexpected in/);
+				const matchUnknown = diag.message.match(/^Unknown [^\s]+ ([^\s]+)/);
+
+				const key = match && match[1] ? match[1] 
+							: (matchUnexpected && matchUnexpected[1] ? matchUnexpected[1] 
+							: (matchUnknown && matchUnknown[1] ? matchUnknown[1] : diag.message));
+
+				if (!candidatesByCode.has(code)) {
+					candidatesByCode.set(code, new Set<string>());
+				}
+				candidatesByCode.get(code)!.add(key);
+			}
+		}
+
+		currentIgnored.forEach(key => {
+			let found = false;
+			for (const keys of candidatesByCode.values()) {
+				if (keys.has(key)) {
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
+				if (!candidatesByCode.has('Previously Saved')) {
+					candidatesByCode.set('Previously Saved', new Set<string>());
+				}
+				candidatesByCode.get('Previously Saved')!.add(key);
+			}
+		});
+
+		if (candidatesByCode.size === 0) {
+			vs.window.showInformationMessage('当前上下文中未发现任何红色报错。');
+			return;
+		}
+
+		const qp = vs.window.createQuickPick();
+		qp.canSelectMany = true;
+		qp.title = '请选择要忽略的兼容性报错 (点击右侧图标可展开/收起具体报错)';
+		qp.placeholder = '搜索前缀或报错码 (例如: CW262)';
+		
+		const globalItem: vs.QuickPickItem = {
+			label: '忽略所有兼容性报错 (全局)',
+			description: '将所有分类下的报错一键加入白名单',
+			alwaysShow: true
+		};
+
+		const categoryItems = new Map<string, vs.QuickPickItem>();
+		const childItemsByCode = new Map<string, vs.QuickPickItem[]>();
+		
+		const collapseButton: vs.QuickInputButton = { iconPath: new vs.ThemeIcon('chevron-down'), tooltip: '收起此分类' };
+		const expandButton: vs.QuickInputButton = { iconPath: new vs.ThemeIcon('chevron-right'), tooltip: '展开此分类查看详情' };
+
+		for (const [code, keys] of candidatesByCode.entries()) {
+			const catItem: vs.QuickPickItem = {
+				label: `忽略所有 ${code} 报错`,
+				description: `共 ${keys.size} 个报错项`
+			};
+			categoryItems.set(code, catItem);
+
+			const children: vs.QuickPickItem[] = [];
+			Array.from(keys).sort().forEach(key => {
+				children.push({
+					label: key,
+					description: `报错码: ${code}`
+				});
+			});
+			childItemsByCode.set(code, children);
+		}
+
+		// State
+		const expandedCategories = new Set<string>(); // Default to collapsed
+		const internalSelected = new Set<string>(currentIgnored); // Initially selected from settings
+
+		let isUpdating = false;
+		let previousSelected = new Set<vs.QuickPickItem>();
+
+		const rebuildItems = (updateItems: boolean) => {
+			const newItems: vs.QuickPickItem[] = [globalItem];
+			const newSelected: vs.QuickPickItem[] = [];
+
+			let allGlobalPicked = true;
+			let totalKeys = 0;
+
+			for (const [code, keys] of candidatesByCode.entries()) {
+				totalKeys += keys.size;
+				const isExpanded = expandedCategories.has(code);
+				
+				if (updateItems) {
+					newItems.push({
+						label: `报错码: ${code}`,
+						kind: vs.QuickPickItemKind.Separator
+					});
+
+					const catItem = categoryItems.get(code)!;
+					catItem.buttons = [isExpanded ? collapseButton : expandButton];
+					newItems.push(catItem);
+				}
+
+				let allCatPicked = true;
+				for (const key of keys) {
+					if (!internalSelected.has(key)) {
+						allCatPicked = false;
+						allGlobalPicked = false;
+					}
+				}
+				if (allCatPicked && keys.size > 0) {
+					newSelected.push(categoryItems.get(code)!);
+				}
+
+				if (isExpanded) {
+					const children = childItemsByCode.get(code)!;
+					for (const child of children) {
+						if (updateItems) newItems.push(child);
+						if (internalSelected.has(child.label)) {
+							newSelected.push(child);
+						}
+					}
+				}
+			}
+
+			if (allGlobalPicked && totalKeys > 0) {
+				newSelected.push(globalItem);
+			}
+
+			isUpdating = true;
+			if (updateItems) {
+				qp.items = newItems;
+			}
+			qp.selectedItems = newSelected;
+			previousSelected = new Set(newSelected);
+			isUpdating = false;
+		};
+
+		qp.onDidTriggerItemButton(e => {
+			const match = e.item.label.match(/忽略所有 (.+) 报错/);
+			if (match && match[1]) {
+				const code = match[1];
+				if (expandedCategories.has(code)) {
+					expandedCategories.delete(code);
+				} else {
+					expandedCategories.add(code);
+				}
+				rebuildItems(true);
+			}
+		});
+
+		qp.onDidChangeSelection(selected => {
+			if (isUpdating) return;
+
+			const currentSet = new Set(selected);
+			const toggledOn = selected.filter(item => !previousSelected.has(item));
+			const toggledOff = Array.from(previousSelected).filter(item => !currentSet.has(item));
+
+			if (toggledOn.length === 0 && toggledOff.length === 0) return;
+
+			if (toggledOn.includes(globalItem)) {
+				for (const keys of candidatesByCode.values()) {
+					keys.forEach(k => internalSelected.add(k));
+				}
+			} else if (toggledOff.includes(globalItem)) {
+				for (const keys of candidatesByCode.values()) {
+					keys.forEach(k => internalSelected.delete(k));
+				}
+			} else {
+				for (const item of toggledOn) {
+					const match = item.label.match(/忽略所有 (.+) 报错/);
+					if (match && match[1]) {
+						candidatesByCode.get(match[1])?.forEach(k => internalSelected.add(k));
+					} else if (item.kind !== vs.QuickPickItemKind.Separator) {
+						internalSelected.add(item.label);
+					}
+				}
+				for (const item of toggledOff) {
+					const match = item.label.match(/忽略所有 (.+) 报错/);
+					if (match && match[1]) {
+						candidatesByCode.get(match[1])?.forEach(k => internalSelected.delete(k));
+					} else if (item.kind !== vs.QuickPickItemKind.Separator) {
+						internalSelected.delete(item.label);
+					}
+				}
+			}
+
+			rebuildItems(false);
+		});
+
+		qp.onDidAccept(async () => {
+			qp.hide();
+			
+			const newIgnored = Array.from(internalSelected);
+			await config.update('ignoredDiagnostics', newIgnored, vs.ConfigurationTarget.Workspace);
+			vs.window.showInformationMessage(`已成功将 ${newIgnored.length} 个兼容性报错加入白名单。`);
+			
+			qp.dispose();
+		});
+
+		qp.onDidHide(() => {
+			qp.dispose();
+		});
+
+		// Initialize
+		rebuildItems(true);
+		qp.show();
+	});
+
 	// ── CodeActionProvider: AI Quick Fix for CWTools diagnostics ──────────
 	registerCodeActions(
 		context,
@@ -440,6 +660,24 @@ export async function activate(context: ExtensionContext) {
 						}
 						await next(sections);
 					}
+				},
+				handleDiagnostics: (uri, diagnostics, next) => {
+					const config = workspace.getConfiguration('cwtools.ai');
+					const ignored = config.get<string[]>('ignoredDiagnostics', []);
+					if (ignored.length === 0) {
+						next(uri, diagnostics);
+						return;
+					}
+					const filtered = diagnostics.filter(diag => {
+						// If the diagnostic message contains any of the ignored keys, we filter it out.
+						for (const key of ignored) {
+							if (diag.message.includes(`'${key}'`) || diag.message.includes(`"${key}"`) || diag.message.includes(key)) {
+								return false;
+							}
+						}
+						return true;
+					});
+					next(uri, filtered);
 				}
 			},
 			initializationOptions: {

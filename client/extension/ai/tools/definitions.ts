@@ -73,6 +73,33 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'remove_ignored_diagnostic',
+            description: "Propose to remove a previously ignored diagnostic key from the user's workspace whitelist. Use this if you are debugging a silent failure and strongly suspect that a key in the ignored list is actually a genuine typo. This will prompt the human user for Permission. If granted, the key is removed from their whitelist and the LSP will flag it again.",
+            parameters: {
+                type: 'object',
+                properties: {
+                    diagnosticKey: { type: 'string', description: 'The exact string key that is currently being ignored (e.g. "producess").' },
+                    reason: { type: 'string', description: 'A brief technical explanation of why you suspect this is a genuine error and should NOT be ignored.' },
+                },
+                required: ['diagnosticKey', 'reason'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'get_ignored_diagnostics',
+            description: 'Get the complete list of all currently ignored diagnostic keys from the user\'s workspace whitelist. Use this tool to audit or review the whitelist instead of reading the large .vscode/settings.json file directly, which consumes too many tokens.',
+            parameters: {
+                type: 'object',
+                properties: {},
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'get_pdx_block',
             description: 'Extract exactly one complete AST block (including all its nested {...} brackets) instead of blindly guessing line numbers. Useful when trying to read long vanilla files without exhausting context. Provide the exact symbol name if available.',
             parameters: {

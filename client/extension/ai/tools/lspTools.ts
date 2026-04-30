@@ -759,6 +759,33 @@ export class LspToolHandler {
 
     async validateCode(args: { code: string; targetFile: string }): Promise<ValidateCodeResult> {
         const errors: import('../types').ValidationError[] = [];
+        const ignored = vs.workspace.getConfiguration('cwtools.ai').get<string[]>('ignoredDiagnostics', []);
+
+        const filterErrors = (errs: import('../types').ValidationError[]) => {
+            if (ignored.length === 0) return errs;
+            const activelyIgnoredKeys = new Set<string>();
+
+            const filtered = errs.filter(e => {
+                for (const key of ignored) {
+                    if (e.message.includes(`'${key}'`) || e.message.includes(`"${key}"`) || e.message.includes(key)) {
+                        activelyIgnoredKeys.add(key);
+                        return false;
+                    }
+                }
+                return true;
+            });
+
+            if (activelyIgnoredKeys.size > 0) {
+                filtered.push({
+                    code: 'SYSTEM_WHITELIST_INFO',
+                    severity: 'hint',
+                    message: `The following diagnostic keys were matched and suppressed by the user's whitelist during this check: [${Array.from(activelyIgnoredKeys).join(', ')}]. If you suspect the user has erroneously ignored a true typo that is causing issues, call remove_ignored_diagnostic to ask them to remove it.`,
+                    line: 0,
+                    column: 0,
+                });
+            }
+            return filtered;
+        };
 
         try {
             const wsFolders = vs.workspace.workspaceFolders;
@@ -785,9 +812,10 @@ export class LspToolHandler {
                                 });
                             }
                         }
+                        const filtered = filterErrors(errors);
                         return {
-                            isValid: errors.filter(e => e.severity === 'error').length === 0,
-                            errors,
+                            isValid: filtered.filter(e => e.severity === 'error').length === 0,
+                            errors: filtered,
                         };
                     }
                 }
@@ -812,9 +840,10 @@ export class LspToolHandler {
                                 column: d.range.start.character,
                             });
                         }
+                        const filtered = filterErrors(errors);
                         return {
-                            isValid: errors.filter(e => e.severity === 'error').length === 0,
-                            errors,
+                            isValid: filtered.filter(e => e.severity === 'error').length === 0,
+                            errors: filtered,
                             _strategy: 'incremental',
                         } as ValidateCodeResult;
                     }
@@ -948,9 +977,10 @@ export class LspToolHandler {
             });
         }
 
+        const filtered = filterErrors(errors);
         return {
-            isValid: errors.filter(e => e.severity === 'error').length === 0,
-            errors,
+            isValid: filtered.filter(e => e.severity === 'error').length === 0,
+            errors: filtered,
         };
     }
 
@@ -965,6 +995,8 @@ export class LspToolHandler {
         const severityFilter = args.severity && args.severity !== 'all' ? args.severity : null;
 
         const allPairs = vs.languages.getDiagnostics();
+        const activelyIgnoredKeys = new Set<string>();
+        const ignored = vs.workspace.getConfiguration('cwtools.ai').get<string[]>('ignoredDiagnostics', []);
 
         const entries: import('../types').DiagnosticEntry[] = [];
         const filesWithDiags = new Set<string>();
@@ -992,6 +1024,16 @@ export class LspToolHandler {
                         : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
 
                 if (severityFilter && sev !== severityFilter) continue;
+
+                let shouldIgnore = false;
+                for (const key of ignored) {
+                    if (d.message.includes(`'${key}'`) || d.message.includes(`"${key}"`) || d.message.includes(key)) {
+                        shouldIgnore = true;
+                        activelyIgnoredKeys.add(key);
+                        break;
+                    }
+                }
+                if (shouldIgnore) continue;
 
                 entries.push({
                     file: fsPath,
@@ -1030,6 +1072,18 @@ export class LspToolHandler {
             } else {
                 totalDiagCount += diags.length;
             }
+        }
+
+        if (activelyIgnoredKeys.size > 0) {
+            entries.push({
+                file: 'system',
+                logicalPath: 'system',
+                severity: 'hint',
+                message: `The following diagnostic keys were matched and suppressed by the user's whitelist during this check: [${Array.from(activelyIgnoredKeys).join(', ')}]. If you suspect the user has erroneously ignored a true typo that is causing issues, call remove_ignored_diagnostic to ask them to remove it.`,
+                line: 0,
+                column: 0,
+                code: 'SYSTEM_WHITELIST_INFO'
+            });
         }
 
         return {

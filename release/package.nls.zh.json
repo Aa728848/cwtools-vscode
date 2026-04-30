@@ -109,5 +109,7 @@
   "configuration.cwtools.ai.developer.disableSecuritySandbox.description": "警告：禁用所有 AI 运行的文件路径限制和终端危险命令黑名单拦截。该选项极其危险，可能导致系统文件被意外修改或执行恶意脚本，请自行承担风险！",
   "commands.cwtools.ai.codeAction.fix": "AI: 修复此 CWTools 错误",
   "commands.cwtools.ai.codeAction.explain": "AI: 解释此 CWTools 错误",
-  "commands.cwtools.ai.codeAction.fixAll": "AI: 修复文件中所有 CWTools 错误"
+  "commands.cwtools.ai.codeAction.fixAll": "AI: 修复文件中所有 CWTools 错误",
+  "commands.cwtools.ai.manageIgnoredDiagnostics.title": "AI: 管理忽略的兼容性报错",
+  "configuration.cwtools.ai.ignoredDiagnostics.description": "将被 LSP 问题面板和 AI 代理完全忽略的兼容性报错键值列表（例如外部 Mod 引入的意外参数）。可通过“管理忽略的兼容性报错”命令进行交互式配置。"
 }

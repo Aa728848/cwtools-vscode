@@ -97,6 +97,59 @@ export class ExternalToolHandler {
         }
     }
 
+    // ─── removeIgnoredDiagnostic ──────────────────────────────────────────────
+
+    async removeIgnoredDiagnostic(args: { diagnosticKey: string; reason: string }): Promise<{ success: boolean; message: string }> {
+        const vs = await import('vscode');
+        const fileWriteMode = vs.workspace.getConfiguration('cwtools.ai').get<string>('agentFileWriteMode', 'confirm');
+
+        // Auto mode -> strictly follow whitelist without asking
+        if (fileWriteMode === 'auto') {
+            return { success: false, message: 'Current execution is in Auto Mode. AI is configured to strictly follow the whitelist without prompting for removal.' };
+        }
+
+        if (!this.ctx.onPermissionRequest) {
+            return { success: false, message: 'Permission handler not configured.' };
+        }
+
+        const permId = `perm_${Date.now()}`;
+        const allowed = await this.ctx.onPermissionRequest(
+            permId,
+            'remove_ignored_diagnostic',
+            `AI 建议从白名单中移除被忽略的报错关键字：\n\n【关键字】：${args.diagnosticKey}\n【判断理由】：${args.reason}\n\n您是否同意将此规则从您的 .vscode 设置中移除，恢复对此关键字的报错提示？`
+        );
+
+        if (!allowed) {
+            return { success: false, message: 'User denied the request to remove the ignored diagnostic.' };
+        }
+
+        try {
+            const vs = await import('vscode');
+            const config = vs.workspace.getConfiguration('cwtools.ai');
+            const ignored = config.get<string[]>('ignoredDiagnostics', []);
+            const updated = ignored.filter(k => k !== args.diagnosticKey);
+            await config.update('ignoredDiagnostics', updated, vs.ConfigurationTarget.Workspace);
+
+            // Rebuild diagnostics via extension settings refresh might happen automatically,
+            // but we can also trigger a cache invalidation if needed. For now, updating settings is enough.
+            return { success: true, message: 'Diagnostic key successfully removed from whitelist.' };
+        } catch (e) {
+            return { success: false, message: `Failed to update settings: ${e instanceof Error ? e.message : String(e)}` };
+        }
+    }
+
+    // ─── getIgnoredDiagnostics ────────────────────────────────────────────────
+
+    async getIgnoredDiagnostics(): Promise<{ success: boolean; ignoredKeys: string[]; count: number }> {
+        try {
+            const vs = await import('vscode');
+            const ignored = vs.workspace.getConfiguration('cwtools.ai').get<string[]>('ignoredDiagnostics', []);
+            return { success: true, count: ignored.length, ignoredKeys: ignored };
+        } catch (e) {
+            return { success: false, count: 0, ignoredKeys: [] };
+        }
+    }
+
     // ─── webFetch ────────────────────────────────────────────────────────────
 
     async webFetch(args: { url: string; maxChars?: number }): Promise<{ content: string; url: string; truncated: boolean }> {

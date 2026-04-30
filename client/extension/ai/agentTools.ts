@@ -319,6 +319,10 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.spawnSubAgents(args as any); break;
             case 'ignore_validation_error':
                 result = await this.externalHandler.ignoreValidationError(args as any); break;
+            case 'remove_ignored_diagnostic':
+                result = await this.externalHandler.removeIgnoredDiagnostic(args as any); break;
+            case 'get_ignored_diagnostics':
+                result = await this.externalHandler.getIgnoredDiagnostics(); break;
             case 'analyze_diagnostic_error':
                 result = {
                     success: true,

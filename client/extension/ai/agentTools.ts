@@ -380,6 +380,19 @@ export class AgentToolExecutor {
                 break;
             }
 
+            // ── Persistent memory (cross-session, written to .cwtools-ai-memory.md) ──
+            case 'save_memory': {
+                const { key, content, priority } = args as { key: string; content: string; priority?: 'high' | 'normal' | 'low' };
+                if (!key || !content) {
+                    result = { success: false, message: 'Missing key or content' };
+                } else {
+                    const { MemoryParser } = await import('./memoryParser');
+                    const parser = new MemoryParser(this.workspaceRoot);
+                    result = await parser.appendMemory({ key, content, priority: priority || 'normal' });
+                }
+                break;
+            }
+
             // ── MCP tool call ────────────────────────────────────────────
             case 'mcp_call':
                 result = await this.executeMcpTool(args as any); break;

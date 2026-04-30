@@ -333,16 +333,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      */
     async sendProgrammaticMessage(text: string): Promise<void> {
         await vs.commands.executeCommand('cwtools.aiChat.focus');
-        if (this.view && !this.view.visible) {
-            await new Promise<void>(resolve => {
-                const d = vs.Disposable.from(
-                    this.view!.onDidChangeVisibility(() => {
-                        if (this.view!.visible) { d.dispose(); resolve(); }
-                    }),
-                );
-                setTimeout(() => { d.dispose(); resolve(); }, 5000);
-            });
+        
+        // Wait up to 5 seconds for the view to be both defined and visible
+        let attempts = 0;
+        while ((!this.view || !this.view.visible) && attempts < 50) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
         }
+
         await this.handleUserMessage(text);
     }
 
@@ -676,7 +674,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async sendDiffSummary(snapshots: Array<{ filePath: string; previousContent: string | null }>): Promise<void> {
         if (!snapshots || snapshots.length === 0) return;
 
-        const files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string }> = [];
+        // Lazy-load diff engine to avoid startup cost
+        const { computeLineDiff } = await import('./diffEngine');
+
+        const files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string; additions?: number; deletions?: number; diffLines?: Array<{ type: 'add' | 'remove' | 'context'; content: string; oldLineNo?: number; newLineNo?: number }> }> = [];
 
         for (const snap of snapshots) {
             const currentContentExists = fs.existsSync(snap.filePath);
@@ -690,19 +691,27 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     file: snap.filePath,
                     status: 'created',
                     diffPreview: `+ ${currentContent.split('\n').length} lines added`,
+                    additions: currentContent.split('\n').length,
+                    deletions: 0,
                 });
             } else if (snap.previousContent !== null && currentContent === null) {
                 files.push({
                     file: snap.filePath,
                     status: 'deleted',
                     diffPreview: `- ${snap.previousContent.split('\n').length} lines removed`,
+                    additions: 0,
+                    deletions: snap.previousContent.split('\n').length,
                 });
             } else if (snap.previousContent !== null && currentContent !== null) {
                 if (snap.previousContent !== currentContent) {
+                    const diffResult = computeLineDiff(snap.previousContent, currentContent);
                     files.push({
                         file: snap.filePath,
                         status: 'modified',
-                        diffPreview: `~ File modified`,
+                        diffPreview: `+${diffResult.additions} -${diffResult.deletions}${diffResult.truncated ? ' (truncated)' : ''}`,
+                        additions: diffResult.additions,
+                        deletions: diffResult.deletions,
+                        diffLines: diffResult.lines,
                     });
                 }
             }

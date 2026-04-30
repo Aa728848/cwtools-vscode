@@ -645,6 +645,23 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // ─── Persistent Memory (Cross-Session) ──────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'save_memory',
+            description: 'Persist a learned rule, convention, or important discovery to the project-level memory file (.cwtools-ai-memory.md). This memory persists across sessions — the AI will reference it in every future conversation. Use this sparingly for genuinely important, reusable insights (e.g. coding conventions, namespace patterns, recurring user preferences). Do NOT save transient/task-specific data.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    key: { type: 'string', description: 'Short descriptive label for this memory entry (e.g. "Event namespace convention").' },
+                    content: { type: 'string', description: 'The rule or insight to persist. Be concise.' },
+                    priority: { type: 'string', enum: ['high', 'normal', 'low'], description: 'Priority level. High = never pruned; low = pruned first when file grows too large. Default: normal.' },
+                },
+                required: ['key', 'content'],
+            },
+        },
+    },
     // ─── MCP Tools ──────────────────────────────────────────────────────
     {
         type: 'function',

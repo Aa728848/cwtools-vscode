@@ -488,6 +488,7 @@ export type AgentToolName =
     | 'set_memory'
     | 'get_memory'
     | 'search_memory'
+    | 'save_memory'
     // ── CWTools Deep API tools ──
     | 'query_definition'
     | 'query_definition_by_name'
@@ -871,7 +872,7 @@ export type HostMessage =
     /** Token usage stats after generation completes */
     | { type: 'tokenUsage'; usage: TokenUsage; model: string }
     /** Emit a unified diff summary of all files changed in the message */
-    | { type: 'diffSummary'; files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string }> }
+    | { type: 'diffSummary'; files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string; additions?: number; deletions?: number; diffLines?: Array<{ type: 'add' | 'remove' | 'context'; content: string; oldLineNo?: number; newLineNo?: number }> }> }
     /** Topic search results */
     | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number }> }
     /** Topic imported successfully */

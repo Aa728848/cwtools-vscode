@@ -84,15 +84,23 @@ jobs:
                 continue
               fi
 
+              # Extract release ID from create response (Gitee API requires numeric ID for asset upload)
+              RELEASE_ID=$(echo "$RESP_BODY" | jq -r '.id // empty')
+              if [ -z "$RELEASE_ID" ]; then
+                echo "Failed to extract release ID from response, skipping assets"
+                continue
+              fi
+              echo "Created release ID: $RELEASE_ID"
+
               mkdir -p /tmp/assets
               gh release view "$TAG" --repo "$GH_REPO" --json assets -q '.assets[]?.name // empty' |
                 while IFS= read -r ASSET_NAME; do
                   [ -z "$ASSET_NAME" ] && continue
                   echo "  Downloading asset: $ASSET_NAME"
                   gh release download "$TAG" --repo "$GH_REPO" -p "$ASSET_NAME" -D /tmp/assets/ 2>&1
-                  echo "  Uploading to Gitee..."
+                  echo "  Uploading to Gitee (release_id=$RELEASE_ID)..."
                   RESP=$(curl -s -w "\n%{http_code}" -X POST \
-                    "$GITEE_API/repos/$REPO/releases/tags/$TAG/attach_files?access_token=$GITEE_TOKEN" \
+                    "$GITEE_API/repos/$REPO/releases/$RELEASE_ID/attach_files?access_token=$GITEE_TOKEN" \
                     -F "file=@/tmp/assets/$ASSET_NAME")
                   HTTP_CODE=$(echo "$RESP" | tail -1)
                   echo "  Asset upload: HTTP $HTTP_CODE"

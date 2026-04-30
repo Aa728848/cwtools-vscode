@@ -229,6 +229,7 @@ When you see LSP/CWTools errors, classify before acting:
 - **USER INSTRUCTIONS ARE SUPREME**: When the user gives a direct correction (e.g. "change X to Y", "the correct syntax for X is Y", "replace X with Y"), execute the change **EXACTLY as instructed** without second-guessing, modifying, or re-interpreting the content. The user knows their project. Apply the replacement verbatim.
 - **TOOL CALLS ARE MANDATORY**: Saying "I have updated the file" in chat does NOT perform the update. You MUST emit a valid \`tool_call\` to actually change files.
 - **COMMAND PERMISSION IS MANDATORY**: \`run_command\` ALWAYS requires explicit user approval. Never assume a command is safe enough to run automatically. Explain what the command does and why before calling \`run_command\`.
+- **TEMPORARY FILES**: All temporary files, scratchpads, and script files (e.g., .sh, .ps1, .py, .js) created for execution via \`run_command\` MUST be placed strictly inside the Agent Workspace Dir (\`.cwtools-ai/{Topic_ID}/\`). NEVER clutter the workspace root or source directories with temporary script files.
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **MAX 3 RETRIES & GRACEFUL DEGRADATION**: If validation still fails after 3 attempts to fix a script, DO NOT delete the entire block and DO NOT guess. Instead, leave the best-effort code in the file, place a \`# TODO: [USER INTERVENTION REQUIRED] - LSP error: <error text>\` comment immediately above it, save the file, and notify the user in chat.
 

@@ -2312,6 +2312,83 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 break;
             }
 
+            case 'diffSummary': {
+                if (!msg.files || msg.files.length === 0) break;
+                const card = document.createElement('div');
+                card.className = 'diff-summary-card';
+
+                // Header with total stats
+                let totalAdd = 0, totalDel = 0;
+                for (const f of msg.files) { totalAdd += f.additions || 0; totalDel += f.deletions || 0; }
+                const headerHtml = `<div class="ds-header">
+                    <span class="ds-title">${svgIconNoMargin('edit')} 文件变更摘要</span>
+                    <span class="ds-stats"><span class="ds-add">+${totalAdd}</span> <span class="ds-del">-${totalDel}</span> · ${msg.files.length} 个文件</span>
+                </div>`;
+                card.innerHTML = headerHtml;
+
+                const filesList = document.createElement('div');
+                filesList.className = 'ds-files';
+
+                for (const f of msg.files) {
+                    const fileEl = document.createElement('div');
+                    fileEl.className = 'ds-file';
+
+                    const baseName = f.file.replace(/\\/g, '/').split('/').pop() || f.file;
+                    const relPath = f.file.replace(/\\/g, '/');
+                    const statusIcon = f.status === 'created' ? '🆕' : f.status === 'deleted' ? '🗑️' : '✏️';
+                    const statsText = f.additions != null ? `<span class="ds-add">+${f.additions}</span> <span class="ds-del">-${f.deletions || 0}</span>` : escapeHtml(f.diffPreview);
+
+                    const fileHeader = document.createElement('div');
+                    fileHeader.className = 'ds-file-header';
+                    fileHeader.innerHTML = `<span class="ds-file-icon">${statusIcon}</span>
+                        <span class="ds-file-name" title="${escapeHtml(relPath)}">${escapeHtml(baseName)}</span>
+                        <span class="ds-file-stats">${statsText}</span>
+                        ${f.diffLines && f.diffLines.length > 0 ? '<span class="ds-expand-btn">▶</span>' : ''}`;
+
+                    fileEl.appendChild(fileHeader);
+
+                    // Line-level diff body (collapsed by default)
+                    if (f.diffLines && f.diffLines.length > 0) {
+                        const diffBody = document.createElement('div');
+                        diffBody.className = 'ds-diff-body';
+                        diffBody.style.display = 'none';
+
+                        let diffHtml = '<table class="ds-diff-table"><tbody>';
+                        for (const line of f.diffLines) {
+                            const cls = line.type === 'add' ? 'ds-line-add' : line.type === 'remove' ? 'ds-line-del' : 'ds-line-ctx';
+                            const prefix = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
+                            const oldNo = line.oldLineNo != null ? String(line.oldLineNo) : '';
+                            const newNo = line.newLineNo != null ? String(line.newLineNo) : '';
+                            diffHtml += `<tr class="${cls}">
+                                <td class="ds-ln">${oldNo}</td>
+                                <td class="ds-ln">${newNo}</td>
+                                <td class="ds-prefix">${prefix}</td>
+                                <td class="ds-code">${escapeHtml(line.content)}</td>
+                            </tr>`;
+                        }
+                        diffHtml += '</tbody></table>';
+                        diffBody.innerHTML = diffHtml;
+                        fileEl.appendChild(diffBody);
+
+                        // Toggle expand/collapse
+                        fileHeader.style.cursor = 'pointer';
+                        fileHeader.addEventListener('click', () => {
+                            const isOpen = diffBody.style.display !== 'none';
+                            diffBody.style.display = isOpen ? 'none' : 'block';
+                            const btn = fileHeader.querySelector('.ds-expand-btn');
+                            if (btn) btn.textContent = isOpen ? '▶' : '▼';
+                        });
+                    }
+
+                    filesList.appendChild(fileEl);
+                }
+
+                card.appendChild(filesList);
+                chatArea.appendChild(card);
+                scrollBottom();
+                break;
+            }
+
             case 'topicSearchResults': {
                 const list = document.getElementById('topicsList');
                 if (!list) break;

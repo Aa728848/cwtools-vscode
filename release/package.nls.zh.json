@@ -106,5 +106,8 @@
   "configuration.cwtools.ai.reasoningEffort.description": "控制支持深度思考特性模型的推算潜能上限（目前用于部分高阶模型）。",
   "configuration.cwtools.ai.dynamicModels.description": "动态获取的附加第三方模型列表",
   "configuration.cwtools.ai.dynamicModelsContext.description": "动态获取模型所支持的最大上下文 tokens",
-  "configuration.cwtools.ai.developer.disableSecuritySandbox.description": "警告：禁用所有 AI 运行的文件路径限制和终端危险命令黑名单拦截。该选项极其危险，可能导致系统文件被意外修改或执行恶意脚本，请自行承担风险！"
+  "configuration.cwtools.ai.developer.disableSecuritySandbox.description": "警告：禁用所有 AI 运行的文件路径限制和终端危险命令黑名单拦截。该选项极其危险，可能导致系统文件被意外修改或执行恶意脚本，请自行承担风险！",
+  "commands.cwtools.ai.codeAction.fix": "AI: 修复此 CWTools 错误",
+  "commands.cwtools.ai.codeAction.explain": "AI: 解释此 CWTools 错误",
+  "commands.cwtools.ai.codeAction.fixAll": "AI: 修复文件中所有 CWTools 错误"
 }

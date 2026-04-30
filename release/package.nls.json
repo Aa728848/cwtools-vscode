@@ -106,5 +106,8 @@
   "configuration.cwtools.ai.reasoningEffort.description": "Thinking depth / Reasoning effort for supported AI models (DeepSeek, OpenAI o-series).",
   "configuration.cwtools.ai.dynamicModels.description": "Dynamically fetched AI models",
   "configuration.cwtools.ai.dynamicModelsContext.description": "Dynamically fetched AI models context sizes",
-  "configuration.cwtools.ai.developer.disableSecuritySandbox.description": "WARNING: Disables all AI file path constraints and shell command blocklists. Extremely dangerous, use at your own risk!"
+  "configuration.cwtools.ai.developer.disableSecuritySandbox.description": "WARNING: Disables all AI file path constraints and shell command blocklists. Extremely dangerous, use at your own risk!",
+  "commands.cwtools.ai.codeAction.fix": "AI: Fix this CWTools error",
+  "commands.cwtools.ai.codeAction.explain": "AI: Explain this CWTools error",
+  "commands.cwtools.ai.codeAction.fixAll": "AI: Fix all CWTools errors in file"
 }

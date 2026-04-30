@@ -22,6 +22,7 @@ import { registerLocalizationFeatures } from './locDecorations';
 import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelProvider, AIInlineCompletionProvider, UsageTracker } from './ai';
 import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
+import { registerCodeActions } from './codeActions';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
@@ -279,6 +280,13 @@ export async function activate(context: ExtensionContext) {
 			`请获取并修复当前文件 \`${relPath}\` 中的所有 CWTools 诊断错误。`
 		);
 	});
+
+	// ── CodeActionProvider: AI Quick Fix for CWTools diagnostics ──────────
+	registerCodeActions(
+		context,
+		(msg: string) => chatPanelProvider.sendProgrammaticMessage(msg),
+		['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox']
+	);
 
 	const init = async function (language: string, isVanillaFolder: boolean) {
 		vs.languages.setLanguageConfiguration(language, {

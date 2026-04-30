@@ -409,3 +409,32 @@ body.review-mode .mode-indicator { color: #f48771; }
 .toggle-switch input:checked + .toggle-track { background: var(--accent); }
 .toggle-track::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
 .toggle-switch input:checked + .toggle-track::before { transform: translateX(16px); }
+
+/* ── Diff Summary Card ── */
+.diff-summary-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 6px 0; font-size: 12px; }
+.ds-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border); }
+.ds-title { font-weight: 600; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.ds-stats { font-size: 11px; opacity: 0.7; display: flex; gap: 6px; }
+.ds-add { color: #4caf50; font-weight: 600; }
+.ds-del { color: #f44336; font-weight: 600; }
+.ds-files { display: flex; flex-direction: column; }
+.ds-file { border-bottom: 1px solid rgba(255,255,255,0.04); }
+.ds-file:last-child { border-bottom: none; }
+.ds-file-header { display: flex; align-items: center; gap: 8px; padding: 6px 12px; transition: background 0.12s; }
+.ds-file-header:hover { background: rgba(255,255,255,0.04); }
+.ds-file-icon { flex-shrink: 0; font-size: 13px; }
+.ds-file-name { flex: 1; font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-file-stats { flex-shrink: 0; font-size: 11px; display: flex; gap: 4px; }
+.ds-expand-btn { flex-shrink: 0; font-size: 9px; opacity: 0.5; transition: transform 0.15s; width: 16px; text-align: center; }
+.ds-diff-body { max-height: 400px; overflow: auto; border-top: 1px solid var(--border); }
+.ds-diff-table { width: 100%; border-collapse: collapse; font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; line-height: 1.45; }
+.ds-diff-table td { padding: 0 6px; white-space: pre; vertical-align: top; }
+.ds-ln { width: 40px; min-width: 40px; text-align: right; opacity: 0.3; user-select: none; border-right: 1px solid rgba(255,255,255,0.06); }
+.ds-prefix { width: 14px; min-width: 14px; text-align: center; opacity: 0.5; user-select: none; }
+.ds-code { overflow-x: auto; }
+.ds-line-add { background: rgba(76, 175, 80, 0.12); }
+.ds-line-add .ds-prefix { color: #4caf50; }
+.ds-line-del { background: rgba(244, 67, 54, 0.12); }
+.ds-line-del .ds-prefix { color: #f44336; }
+.ds-line-ctx { background: transparent; }
+

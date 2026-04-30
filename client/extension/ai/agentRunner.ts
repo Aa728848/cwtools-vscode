@@ -1429,8 +1429,9 @@ export class AgentRunner {
                 if (typeof toolResult === 'object' && toolResult !== null &&
                     'error' in toolResult && !('success' in toolResult)) {
                     consecutiveErrorCount++;
-                    if (consecutiveErrorCount >= 5) {
-                        emitStep({ type: 'error', content: '工具连续失败 5 次，已强制停止', timestamp: Date.now() });
+                    const errorLimit = bypassSandbox ? 100 : 10;
+                    if (consecutiveErrorCount >= errorLimit) {
+                        emitStep({ type: 'error', content: `工具连续失败 ${errorLimit} 次，已强制停止`, timestamp: Date.now() });
                         forceStop = true;
                         break; // break inner for-loop; forceStop will exit the outer while
                     }
@@ -1465,6 +1466,14 @@ export class AgentRunner {
         // If the user cancelled, skip this call — it would produce charges and
         // stale UI state ("已取消" already emitted but a new request fires anyway).
         options?.abortSignal?.throwIfAborted();
+
+        // If we force-stopped due to critical errors (e.g., Doom-Loop or consecutive errors),
+        // we must not fire another chatCompletion, because the tool outputs for the last
+        // assistant message were not fully appended, which would result in an API 400 error:
+        // "No tool output found for function call...".
+        if (forceStop) {
+            return '[Agent Execution Terminated]: Tool execution failed consecutively or doom-loop detected.';
+        }
 
         // Max iterations reached — try to get a final response without tools
         const finalResponse = await this.aiService.chatCompletion(messages, {

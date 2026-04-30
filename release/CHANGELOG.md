@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.8.6] - 2026-04-30
+
+### ✨ 新特性 (Features)
+- **行级 Diff 可视化**：彻底告别文件级变更提示！AI 代理在修改文件后，现在会通过 Myers Diff 算法计算出精确的行级变更，并在聊天面板中呈现 GitHub 风格的绿/红代码差异卡片。可点击展开/收起，并展示带有上下文的代码变更。
+- **快速修复与代码解释 (CodeActionProvider)**：引入深度集成的 `CWToolsCodeActionProvider`。光标悬停在任何 CWTools 诊断错误（红波浪线）上时，点击小灯泡即可直接请求 AI “修复此错误” 或 “解释此错误”。支持运行时中英文国际化，无缝衔接 VS Code 原生体验。
+- **跨会话持久记忆 (Persistent Memory)**：新增了跨会话保留重要规则的 `.cwtools-ai-memory.md` 机制。AI 在执行任务中提炼出的核心规范（如特定的文件命名规则或作用域使用习惯）会被记录至项目根目录，并在后续所有会话中生效。内置自动裁剪算法防止超量引发 Token 爆炸。
+
+### 🐛 Bug 修复与清理
+- **移除上游遗留流水线**：删除了 `pr.yml` 和 `release.yml` 等无用流水线。
+- **修复 Gitee 同步发布 Bug**：修复了 `sync-gitee.yml` 中导致构建 Asset 文件上传失败的端点错误（改用 release id 替代 tag name）。
+
 ## [1.8.5] - 2026-04-29
 
 ### ✨ 新特性 (Features)

@@ -7,6 +7,19 @@ import * as fs from 'fs';
 import { parseGuiFile, buildSpriteIndex, serializePosition, serializeSize, serializeProperty, serializeNewElement, type GuiElement } from './guiParser';
 import { decodeDds, decodeTga, type DdsResult } from './ddsDecoder';
 
+// ── WebView message types ──────────────────────────────────────────────────────
+type GuiPanelMessage =
+    | { command: 'goToLine'; line: number }
+    | { command: 'updateProperty'; line: number; property: string; value: unknown; propertyLine?: number }
+    | { command: 'addElement'; parentEndLine: number; type: string; name: string; x: number; y: number; w: number; h: number }
+    | { command: 'deleteElement'; startLine: number; endLine: number }
+    | { command: 'duplicateElement'; startLine: number; endLine: number; newName: string }
+    | { command: 'removePropertyLine'; line: number; property: string }
+    | { command: 'addBackground'; parentEndLine: number; sprite?: string }
+    | { command: 'reparentElement'; startLine: number; endLine: number; newParentEndLine: number; positionAdjust?: { dx: number; dy: number } }
+    | { command: 'unparentElement'; startLine: number; endLine: number; parentEndLine: number; positionAdjust?: { dx: number; dy: number } }
+    | { command: 'vscodeUndo' };
+
 export class GuiPanel {
     public static currentPanel: GuiPanel | undefined;
     private static readonly viewType = 'cwtools-gui-preview';
@@ -21,6 +34,13 @@ export class GuiPanel {
     private _skipNextReload = false;   // skip reload after programmatic edit
     private _contentSnapshots: string[] = [];  // content snapshots for structural undo
     private _lastSnapshotTime = 0;  // debounce: only save one snapshot per 500ms batch
+    private static readonly MAX_SNAPSHOTS = 20;
+    private _saveSnapshot(doc: vscode.TextDocument) {
+        this._saveSnapshot(doc);
+        if (this._contentSnapshots.length > GuiPanel.MAX_SNAPSHOTS) {
+            this._contentSnapshots.shift();
+        }
+    }
     private _messageQueue: Promise<void> = Promise.resolve();  // serial queue for property updates
     private _spriteIndexCache: Map<string, import('./guiParser').SpriteInfo> | null = null;
     private _effectNamesCache: string[] | null = null;
@@ -62,7 +82,7 @@ export class GuiPanel {
         this._panel.webview.html = this._getHtml();
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage(async msg => {
+            this._panel.webview.onDidReceiveMessage(async (msg: GuiPanelMessage) => {
                 if (!msg?.command) return;
                 switch (msg.command) {
                     case 'goToLine': {
@@ -446,7 +466,7 @@ export class GuiPanel {
         // Save snapshot for undo (debounce: only save if last snapshot was >500ms ago)
         const now = Date.now();
         if (now - this._lastSnapshotTime > 500) {
-            this._contentSnapshots.push(doc.getText());
+            this._saveSnapshot(doc);
             this._lastSnapshotTime = now;
         }
 
@@ -682,7 +702,7 @@ export class GuiPanel {
     private async _handleAddBackground(msg: { parentEndLine: number; sprite?: string }) {
         if (!this._document) return;
         const doc = this._document;
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         const closingLine = doc.lineAt(msg.parentEndLine - 1);
         const parentIndent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
         const childIndent = parentIndent + '\t';
@@ -710,7 +730,7 @@ export class GuiPanel {
     private async _handleAddElement(msg: { parentEndLine: number; type: string; name: string; x: number; y: number; w: number; h: number }) {
         if (!this._document) return;
         const doc = this._document;
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         // Determine indentation from parent's closing brace
         const closingLine = doc.lineAt(msg.parentEndLine - 1);
         const parentIndent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
@@ -734,7 +754,7 @@ export class GuiPanel {
     private async _handleDeleteElement(msg: { startLine: number; endLine: number }) {
         if (!this._document) return;
         const doc = this._document;
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         const edit = new vscode.WorkspaceEdit();
         // Delete the entire line range including the preceding newline
         const startPos = msg.startLine > 1
@@ -756,7 +776,7 @@ export class GuiPanel {
     private async _handleDuplicateElement(msg: { startLine: number; endLine: number; newName: string }) {
         if (!this._document) return;
         const doc = this._document;
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         // Copy the source lines
         const sourceLines: string[] = [];
         for (let i = msg.startLine - 1; i < msg.endLine; i++) {
@@ -791,7 +811,7 @@ export class GuiPanel {
     private async _handleReparentElement(msg: { startLine: number; endLine: number; newParentEndLine: number; positionAdjust?: { dx: number; dy: number } }) {
         if (!this._document) return;
         const doc = this._document;
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
 
         // Read the source lines of the element to move
         const sourceLines: string[] = [];
@@ -862,7 +882,7 @@ export class GuiPanel {
     private async _handleUnparentElement(msg: { startLine: number; endLine: number; parentEndLine: number; positionAdjust?: { dx: number; dy: number } }) {
         if (!this._document) return;
         const doc = this._document;
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
 
         // Read the source lines
         const sourceLines: string[] = [];

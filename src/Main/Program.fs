@@ -535,6 +535,19 @@ type Server(client: ILanguageClient) =
 
     let mutable delayedLocUpdate = false
 
+    /// Paths that define types/enums/scopes — edits here require full RefreshCaches
+    let typeDefiningSegments = [| "/common/"; "\\common\\"; "/interface/"; "\\interface\\"; "/gfx/"; "\\gfx\\"; "/map/"; "\\map\\"; "/prescripted_countries/"; "\\prescripted_countries\\" |]
+    let isTypeDefiningPath (path: string) =
+        let lp = path.ToLowerInvariant()
+        typeDefiningSegments |> Array.exists (fun seg -> lp.Contains(seg))
+
+    /// When true, the next delayedAnalyze must run full RefreshCaches
+    let mutable needsTypeRefresh = false
+    /// How many consecutive deep-analyze cycles have skipped RefreshCaches
+    let mutable refreshSkipCount = 0
+    /// Maximum consecutive skips before forcing a full refresh
+    let maxRefreshSkipCount = 10
+
     let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) : Async<unit> =
         async {
             let name = getPathFromDoc doc
@@ -545,6 +558,10 @@ type Server(client: ILanguageClient) =
                 delayedLocUpdate <- true
             else
                 ()
+
+            // Mark type refresh needed if edited file is in a type-defining directory
+            if isTypeDefiningPath name then
+                needsTypeRefresh <- true
 
             // 优化：只获取一次文件文本，避免重复 GetText 调用
             let filetext =
@@ -582,11 +599,14 @@ type Server(client: ILanguageClient) =
                 | None -> parserErrors @ locErrors
                 | Some game ->
                     gameStateLock.EnterWriteLock()
+                    let allocBeforeUpdate = GC.GetTotalAllocatedBytes(false)
                     let astErrors = 
                         try game.UpdateFile shallowAnalyze name filetext
                         finally gameStateLock.ExitWriteLock()
                         |> List.map (fun e ->
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                    let allocAfterUpdate = GC.GetTotalAllocatedBytes(false)
+                    logInfo $"[MemDiag:UpdateFile] shallow={shallowAnalyze} +{(allocAfterUpdate - allocBeforeUpdate) / 1048576L}MB"
                     
                     if name.EndsWith(".yml") then
                         // We still need to call game.UpdateFile so the VFS gets the new text,
@@ -602,15 +622,27 @@ type Server(client: ILanguageClient) =
 
     let mutable delayTime = TimeSpan(0, 0, 5)
 
+
     let delayedAnalyze () =
         match gameObj with
         | Some game ->
             let timestamp = Stopwatch.GetTimestamp()
-            // RefreshCaches rewrites infoService/ruleValidationService/completionService exclusive write lock
+            let allocBefore = GC.GetTotalAllocatedBytes(false)
+            // Conditionally skip RefreshCaches when no type-defining files changed
+            let doRefresh = needsTypeRefresh || refreshSkipCount >= maxRefreshSkipCount
             gameStateLock.EnterWriteLock()
             try
-                game.RefreshCaches()
+                if doRefresh then
+                    game.RefreshCaches()
+                    let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
+                    logInfo $"[MemDiag:RefreshCaches] +{(allocAfterRefresh - allocBefore) / 1048576L}MB (forced={not needsTypeRefresh})"
+                    needsTypeRefresh <- false
+                    refreshSkipCount <- 0
+                else
+                    refreshSkipCount <- refreshSkipCount + 1
+                    logInfo $"[MemDiag:RefreshCaches] SKIPPED (skip#{refreshSkipCount})"
 
+                let allocBeforeLoc = GC.GetTotalAllocatedBytes(false)
                 if delayedLocUpdate then
                     logDiag "delayedLocUpdate true"
                     game.RefreshLocalisationCaches()
@@ -626,6 +658,8 @@ type Server(client: ILanguageClient) =
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
+                let allocAfterLoc = GC.GetTotalAllocatedBytes(false)
+                logInfo $"[MemDiag:LocErrors] +{(allocAfterLoc - allocBeforeLoc) / 1048576L}MB"
 
                 // Effect/trigger sets may have changed invalidate all semantic caches.
                 // Unlike the old Clear() which caused VSCode to lose all highlighting,
@@ -663,6 +697,12 @@ type Server(client: ILanguageClient) =
             // L6/L3 Fix: Use non-blocking Gen2 GC only after a full refresh to
             // reclaim large rule data; avoid frequent mid-stream GC in hot path.
             maybeCollectGarbage ()
+
+            // Memory diagnostics: track growth sources after each full refresh
+            let heapBytes = GC.GetTotalMemory(false)
+            let allocTotal = GC.GetTotalAllocatedBytes(false)
+            let sm = CWTools.Utilities.StringResource.stringManager
+            logInfo $"[MemDiag] heap={heapBytes / 1048576L}MB alloc={allocTotal / 1048576L}MB cycle=+{(allocTotal - allocBefore) / 1048576L}MB strings={sm.StringCount} ints={sm.IntCount}"
         | None -> ()
 
 

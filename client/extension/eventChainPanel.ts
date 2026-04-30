@@ -12,6 +12,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { ErrorReporter } from './ai/errorReporter';
 import {
     parseEventFile,
     parseCommonFile,
@@ -129,7 +130,7 @@ export class EventChainPanel {
                 data: graph,
             });
         } catch (e) {
-            console.error('[EventChainPanel] Failed to scan events:', e);
+            ErrorReporter.debug('EventChainPanel', 'Failed to scan events', e);
             this._panel.webview.postMessage({
                 command: 'render',
                 data: { nodes: [], edges: [] },

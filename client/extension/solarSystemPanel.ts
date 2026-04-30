@@ -5,6 +5,20 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { parseSolarSystemFile, resolveValue, type SolarSystem, type CelestialBody, type ValueOrRange } from './solarSystemParser';
 
+// ── WebView message types ──────────────────────────────────────────────────────
+type SolarPanelMessage =
+    | { command: 'goToLine'; line: number }
+    | { command: 'updateProperty'; line: number; property: string; value: string | number; valueType?: 'fixed' | 'range' | 'random' }
+    | { command: 'updateOrbit'; line: number; orbitDistance: number; orbitAngle: number }
+    | { command: 'movePlanetOrbit'; bodyLine: number; bodyEndLine: number; targetResolvedOrbit: number; targetOrbitAngle: number; isLockedOrbit?: boolean; isRingWorld?: boolean }
+    | { command: 'addPlanet'; systemEndLine: number; planetClass: string; orbitDistance: number; orbitAngle: number; size: number }
+    | { command: 'addStar'; systemLine: number; systemEndLine: number; firstBodyLine: number; planetClass: string; size: number }
+    | { command: 'addMoon'; parentLine: number; parentEndLine: number; planetClass: string; size: number; orbitDistance: number; orbitAngle: number }
+    | { command: 'addRingWorld'; systemEndLine: number; orbitDistance: number; segmentCount: number; segmentAngle: number; parentLine?: number; parentEndLine?: number }
+    | { command: 'addSibling'; siblingLine: number; siblingEndLine: number; bodyType: string; planetClass: string; size: number; orbitAngle: number }
+    | { command: 'deletePlanet'; line: number }
+    | { command: 'vscodeUndo' };
+
 export class SolarSystemPanel {
     public static currentPanel: SolarSystemPanel | undefined;
     private static readonly viewType = 'cwtools-solar-system-preview';
@@ -22,6 +36,13 @@ export class SolarSystemPanel {
     private _skipNextReload = false;
     private _contentSnapshots: string[] = [];
     private _lastSnapshotTime = 0;
+    private static readonly MAX_SNAPSHOTS = 20;
+    private _saveSnapshot(doc: vscode.TextDocument) {
+        this._saveSnapshot(doc);
+        if (this._contentSnapshots.length > SolarSystemPanel.MAX_SNAPSHOTS) {
+            this._contentSnapshots.shift();
+        }
+    }
     private _messageQueue: Promise<void> = Promise.resolve();
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
@@ -49,7 +70,7 @@ export class SolarSystemPanel {
         this._panel.webview.html = this._getHtml();
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage(async msg => {
+            this._panel.webview.onDidReceiveMessage(async (msg: SolarPanelMessage) => {
                 if (!msg?.command) return;
                 switch (msg.command) {
                     case 'goToLine': {
@@ -165,7 +186,7 @@ export class SolarSystemPanel {
         // Save snapshot for undo
         const now = Date.now();
         if (now - this._lastSnapshotTime > 500) {
-            this._contentSnapshots.push(doc.getText());
+            this._saveSnapshot(doc);
             this._lastSnapshotTime = now;
         }
 
@@ -288,7 +309,7 @@ export class SolarSystemPanel {
         const doc = this._document;
 
         // Save snapshot
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
         // Insert before the system's closing brace
@@ -320,7 +341,7 @@ export class SolarSystemPanel {
         if (!this._document) return;
         const doc = this._document;
 
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
         // Insert before the first body, or before system closing brace
@@ -353,7 +374,7 @@ export class SolarSystemPanel {
         if (!this._document) return;
         const doc = this._document;
 
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
         const edit = new vscode.WorkspaceEdit();
@@ -405,7 +426,7 @@ export class SolarSystemPanel {
         if (!this._document) return;
         const doc = this._document;
 
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
         const edit = new vscode.WorkspaceEdit();
@@ -444,7 +465,7 @@ export class SolarSystemPanel {
         const doc = this._document;
         const log = SolarSystemPanel._getLog();
 
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
         // Build segment classes: habitable, seam, tech (repeating)
@@ -542,7 +563,7 @@ export class SolarSystemPanel {
         if (!this._document) return;
         const doc = this._document;
 
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
         const distStr = this._formatValue('orbit_distance', msg.orbitDistance, 'fixed');
@@ -636,7 +657,7 @@ export class SolarSystemPanel {
         if (!this._document) return;
         const doc = this._document;
 
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
         const startLineIdx = msg.line - 1;
@@ -702,7 +723,7 @@ export class SolarSystemPanel {
         if (!this._document) { log.appendLine('  ABORT: no document'); return; }
         const doc = this._document;
 
-        this._contentSnapshots.push(doc.getText());
+        this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
         // ── Locked orbit (orbit_distance=0): only update angle ──────────────

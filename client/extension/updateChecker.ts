@@ -3,6 +3,7 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { ErrorReporter } from './ai/errorReporter';
 
 export async function checkForUpdates(context: vscode.ExtensionContext) {
     const config = vscode.workspace.getConfiguration('cwtools');
@@ -100,7 +101,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
             });
         }
     } catch (e) {
-        console.error('Failed to check for updates', e);
+        ErrorReporter.warn('UpdateChecker', 'Failed to check for updates', e);
     }
 }
 
@@ -148,7 +149,7 @@ async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string
                 });
                 return; // 安装成功即退出
             } catch (err: any) {
-                console.error(`下载失败 [${url}]:`, err);
+                ErrorReporter.warn('UpdateChecker', `下载失败 [${url}]`, err);
                 if (fs.existsSync(tmpPath)) {
                     fs.unlinkSync(tmpPath);
                 }

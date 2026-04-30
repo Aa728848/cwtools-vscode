@@ -33,13 +33,26 @@ export const STELLARIS_KNOWLEDGE = `
 - **NEVER suggest adding \`;\` between statements** — this will break the code.
 - Multiple key-value pairs on the same line are common and intentional in PDXScript.
 
-## Scope System
+## Strict Adherence to query_rules Schema (CRITICAL)
+PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
+- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties (like \`multiply\`, \`add\`, \`limit\`, \`count\`) into a block unless explicitly listed.
+- **Interpreting Syntax**:
+  - If syntax is \`yes/no\` or \`bool\`, use \`trigger = yes\`.
+  - If syntax is \`scope[...]\`, \`scope_group[...]\`, or \`<target>\`, use a scope target (e.g., \`FROM\`, \`event_target:X\`). **NEVER** use \`{ }\` code blocks for scopes! Example: \`is_background_planet = FROM\`.
+  - ONLY use a \`{ ... }\` block if the syntax explicitly shows \`{ ... }\` or \`clause\`.
+- **Unsupported Math**: If an effect (e.g. \`subtract_variable\`, \`add_modifier\`) doesn't support a math parameter like \`multiply = X\`, you MUST use workarounds:
+  1. **Inline Script Value**: \`value = { value = my_var multiply = 4 }\`
+  2. **Temp Variables**: Use \`multiply_variable\` on a \`temp_var\` beforehand.
+
+## Scope System & Scope Links (CRITICAL)
 Every block operates within a scope (Country, Planet, Ship, Fleet, Pop, Leader, …).
-Triggers and effects are only valid in specific scopes. Common transitions:
-- \`owner\` → Planet to Country
-- \`capital_scope\` → Country to Planet
-- \`solar_system\` → Planet to System
-- \`from\` / \`root\` / \`prev\` → context-relative references
+You can chain scopes using dot notation (e.g. \`owner.capital.owner\`) or nested blocks (\`owner = { capital_scope = { ... } }\`).
+**CRITICAL**: Do NOT reject logical scope links (like \`leader.planet\`, \`leader.owner\`, \`planet.owner\`, \`pop.planet\`) just because you cannot find an explicit "scope_change" rule for them. Many scope links (like \`owner\`, \`planet\`, \`fleet\`, \`army\`, \`leader\`, \`system\`) are hardcoded native properties that work seamlessly across logical entity transitions.
+- A leader can absolutely transition to \`owner\`, \`planet\`, \`fleet\`, or \`army\`.
+- A pop can transition to \`planet\`, \`owner\`, \`faction\`.
+- \`from\` / \`root\` / \`prev\` are used for context-relative references.
+Assume logical scope transitions are VALID unless the LSP explicitly throws an error during \`validate_code\`. Do NOT proactively declare them "illegal" in your plans or reviews based on your own assumptions.
 
 ## Vanilla Game Cache — Query Strategy
 The CWTools language server has already indexed the entire vanilla game.
@@ -107,6 +120,7 @@ export const HOI4_KNOWLEDGE = `
 
 ## HOI4 Scope System
 HOI4 scopes: Country, State, Character, Division, MilitaryIndustrialOrganization
+You can chain scopes using dot notation. Assume logical native links are valid.
 - \`ROOT\`, \`FROM\`, \`PREV\` — context-relative references
 - \`owner\` → State to Country
 - \`capital\` → Country to State
@@ -137,6 +151,7 @@ export const EU4_KNOWLEDGE = `
 
 ## EU4 Scope System
 EU4 scopes: Country, Province, TradeNode, Advisor, Monarch, Heir, Consort
+You can chain scopes using dot notation. Assume logical transitions (like \`owner\`, \`capital\`) are valid natively.
 - \`ROOT\`, \`FROM\`, \`PREV\` — context-relative references
 - \`owner\` → Province to Country
 - \`capital_scope\` → Country to Province
@@ -327,6 +342,18 @@ export const PARADOX_KNOWLEDGE = `
 - Comments: \`#\` for line comments
 - **NO semicolons** — statements separated by whitespace only
 - **NEVER suggest adding \`;\` between statements**
+
+## Strict Adherence to query_rules Schema (CRITICAL)
+PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
+- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties (like \`multiply\`, \`add\`, \`limit\`, \`count\`) into a block unless explicitly listed.
+- **Interpreting Syntax**:
+  - If syntax is \`yes/no\` or \`bool\`, use \`trigger = yes\`.
+  - If syntax is \`scope[...]\`, \`scope_group[...]\`, or \`<target>\`, use a scope target (e.g., \`FROM\`, \`event_target:X\`). **NEVER** use \`{ }\` code blocks for scopes!
+  - ONLY use a \`{ ... }\` block if the syntax explicitly shows \`{ ... }\` or \`clause\`.
+- **Unsupported Math**: If an effect doesn't support a math parameter like \`multiply = X\`, use workarounds:
+  1. **Inline Script Value**: \`value = { value = my_var multiply = 4 }\`
+  2. **Temp Variables**: Use \`multiply_variable\` on a \`temp_var\` beforehand.
 
 ## Vanilla Query Strategy
 Use CWTools LSP tools (\`query_types\`, \`query_rules\`, \`workspace_symbols\`) for all game construct lookups.

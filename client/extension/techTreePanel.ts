@@ -11,6 +11,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { ErrorReporter } from './ai/errorReporter';
 import {
     parseTechFile,
     mergeTechGraphs,
@@ -111,7 +112,7 @@ export class TechTreePanel {
             const graph = await this._buildTechGraph();
             this._panel.webview.postMessage({ command: 'render', data: graph });
         } catch (e) {
-            console.error('[TechTreePanel] Failed to scan tech files:', e);
+            ErrorReporter.debug('TechTreePanel', 'Failed to scan tech files', e);
             this._panel.webview.postMessage({ command: 'render', data: { nodes: [], edges: [] } });
         }
     }

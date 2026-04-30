@@ -642,11 +642,19 @@ type Server(client: ILanguageClient) =
             delayTime <-
                 TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 1, 500).Ticks, 2L * time.Ticks)))
             
-            // 定期清理不存在文件的缓存，防止内存泄
+            // 定期清理不存在文件的缓存，防止内存泄漏
+            // 使用 game.AllFiles() 获取所有工作区已知文件，而非 docs.OpenFiles()
+            // 这样只会清理真正不存在的文件缓存，而不是简单地清理未打开的文件
             try
                 let existingFiles = 
-                    docs.OpenFiles() 
-                    |> List.map (fun f -> f.FullName) 
+                    game.AllFiles() 
+                    |> List.choose (fun r ->
+                        let filePath =
+                            match r with
+                            | CWTools.Games.EntityResource(f, _) -> Some f
+                            | CWTools.Games.FileWithContentResource(f, _) -> Some f
+                            | CWTools.Games.FileResource(f, _) -> Some f
+                        filePath |> Option.map (fun f -> try FileInfo(f).FullName with _ -> f))
                     |> Set.ofList
                 game.CleanupCache existingFiles
             with e ->
@@ -1611,7 +1619,17 @@ type Server(client: ILanguageClient) =
 
         member this.DidCloseTextDocument(p: DidCloseTextDocumentParams) = async { 
             docs.Close p 
-            (semanticTokensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(p.textDocument.uri.LocalPath) |> ignore
+            let localPath = p.textDocument.uri.LocalPath
+            let fullPath = try FileInfo(localPath).FullName with _ -> localPath
+            // Clean all file-level caches to prevent memory leaks from closed files
+            (semanticTokensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
+            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(fullPath) |> ignore
+            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
+            (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(fullPath) |> ignore
+            (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
+            (locCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
+            cacheWriteTimes.TryRemove(localPath) |> ignore
+            cacheWriteTimes.TryRemove(fullPath) |> ignore
         }
 
         member this.DidChangeWatchedFiles(p: DidChangeWatchedFilesParams) =

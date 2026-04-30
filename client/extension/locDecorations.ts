@@ -53,6 +53,10 @@ const refPattern = /\$([A-Za-z_][A-Za-z0-9_.:]*)\$/g;
 const documentLocCache = new Map<string, Map<string, { value: string; uri: vs.Uri; line: number }>>();
 let initialScanPromise: Promise<void> | null = null;
 
+// Cached flat map to avoid rebuilding on every hover/definition request
+let cachedFlatMap: Map<string, { value: string; uri: vs.Uri; line: number }> | null = null;
+let flatMapDirty = true;
+
 function parseYmlContent(uri: vs.Uri, text: string) {
     const fileLocs = new Map<string, { value: string; uri: vs.Uri; line: number }>();
     const locPattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
@@ -66,6 +70,7 @@ function parseYmlContent(uri: vs.Uri, text: string) {
         }
     }
     documentLocCache.set(uri.toString(), fileLocs);
+    flatMapDirty = true;
 }
 
 async function performInitialScan(batchSize = 50) {
@@ -96,12 +101,16 @@ async function getLocMap(): Promise<Map<string, { value: string; uri: vs.Uri; li
     }
     await initialScanPromise;
 
+    if (!flatMapDirty && cachedFlatMap) return cachedFlatMap;
+
     const flatMap = new Map<string, { value: string; uri: vs.Uri; line: number }>();
     for (const fileLocs of documentLocCache.values()) {
         for (const [k, v] of fileLocs.entries()) {
             flatMap.set(k, v);
         }
     }
+    cachedFlatMap = flatMap;
+    flatMapDirty = false;
     return flatMap;
 }
 
@@ -279,6 +288,7 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
     });
     watcher.onDidDelete(uri => {
         documentLocCache.delete(uri.toString());
+        flatMapDirty = true;
     });
 
     // Fire off the background scan

@@ -182,12 +182,14 @@ function downloadFile(url: string, dest: string, progress: vscode.Progress<{ mes
             request = https.get(options, (response) => {
                 if (response.statusCode === 301 || response.statusCode === 302) {
                     if (response.headers.location) {
+                        response.resume();
                         download(response.headers.location);
                         return;
                     }
                 }
                 
                 if (response.statusCode !== 200) {
+                    response.resume();
                     return reject(new Error(`StatusCode: ${response.statusCode}`));
                 }
 
@@ -196,6 +198,10 @@ function downloadFile(url: string, dest: string, progress: vscode.Progress<{ mes
                 let lastIncrement = 0;
 
                 const file = fs.createWriteStream(dest);
+                file.on('error', (err) => {
+                    file.close();
+                    reject(err);
+                });
 
                 response.on('data', (chunk) => {
                     if (token.isCancellationRequested) {
@@ -220,8 +226,13 @@ function downloadFile(url: string, dest: string, progress: vscode.Progress<{ mes
 
                 response.pipe(file);
                 file.on('finish', () => {
-                    file.close();
-                    resolve();
+                    file.close((err) => {
+                        if (err) {
+                            reject(err);
+                        } else {
+                            resolve();
+                        }
+                    });
                 });
             }).on('error', (err) => {
                 reject(err);
@@ -258,6 +269,7 @@ function fetchLatestRelease(): Promise<any> {
             // handle redirects if necessary
             if (res.statusCode === 301 || res.statusCode === 302) {
                 if (res.headers.location) {
+                    res.resume();
                     const redirectUrl = new URL(res.headers.location);
                     options.hostname = redirectUrl.hostname;
                     options.path = redirectUrl.pathname + redirectUrl.search;

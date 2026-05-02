@@ -483,7 +483,7 @@
 						"%configuration.cwtools.ai.provider.enum.deepinfra%"
 					],
 					"default": "openai",
-					"description": "%configuration.cwtools.ai.provider.description%"
+					"markdownDescription": "%configuration.cwtools.ai.provider.description%"
 				},
 				"cwtools.ai.model": {
 					"scope": "window",

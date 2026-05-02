@@ -61,6 +61,8 @@ export interface AIProviderConfig {
      * (e.g. glm-4.1v but not glm-5), use isModelVisionCapable() for model-level check.
      */
     supportsVision: boolean;
+    /** URL to register an API key for this provider (displayed in Settings UI) */
+    registerUrl?: string;
 }
 
 export interface AIProviderUserConfig {

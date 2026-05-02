@@ -276,5 +276,6 @@ module LanguageServerFeatures =
                     client.ApplyWorkspaceEdit
                         { label = Some $"Pretriggers %s{fileInfo.Name}"
                           edit = docChanges }
+                    |> Async.Ignore
         }
 

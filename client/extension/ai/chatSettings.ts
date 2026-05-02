@@ -34,6 +34,7 @@ export class ChatSettingsManager {
             defaultEndpoint: p.endpoint,
             maxContextTokens: p.maxContextTokens,
             supportsFIM: p.supportsFIM,
+            registerUrl: p.registerUrl,
         }));
 
         const hasKeyMap: Record<string, boolean> = {};

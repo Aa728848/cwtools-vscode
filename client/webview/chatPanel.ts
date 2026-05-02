@@ -2643,10 +2643,18 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const p = (providers || settingsProviders).find((x: any) => x.id === providerId);
         const status = document.getElementById('apiKeyStatus')!;
         const group = document.getElementById('apiKeyGroup')!;
-        if (providerId === 'ollama') { group.style.display = 'none'; return; }
+        const providerHint = document.getElementById('providerHint')!;
+        if (providerId === 'ollama') { group.style.display = 'none'; providerHint.innerHTML = ''; return; }
         group.style.display = '';
+        
         if (p && p.hasKey) { status.innerHTML = svgIcon('check') + '已配置 API Key'; status.style.color = '#4caf50'; }
         else { status.innerHTML = svgIcon('warning') + '尚未配置 API Key'; status.style.color = '#ff9800'; }
+        
+        if (p && p.registerUrl) {
+            providerHint.innerHTML = `<a href="${p.registerUrl}" style="color:var(--vscode-textLink-foreground);">申请 API Key 地址</a>`;
+        } else {
+            providerHint.innerHTML = '';
+        }
     }
 
     function onProviderChange() {
@@ -2739,20 +2747,43 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
     });
 
-    function addMcpServerBlock(server = { name: '', transport: { type: 'stdio', command: '', args: [] } }) {
+    /** Convert env Record to KEY=VALUE text for textarea display */
+    function envToText(env?: Record<string, string>): string {
+        if (!env || typeof env !== 'object') return '';
+        return Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n');
+    }
+
+    /** Parse KEY=VALUE text back to Record */
+    function parseEnvText(text: string): Record<string, string> | undefined {
+        if (!text.trim()) return undefined;
+        const env: Record<string, string> = {};
+        for (const line of text.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const eqIdx = trimmed.indexOf('=');
+            if (eqIdx > 0) {
+                env[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
+            }
+        }
+        return Object.keys(env).length > 0 ? env : undefined;
+    }
+
+    function addMcpServerBlock(server: any = {}) {
         const list = document.getElementById('mcpServersList');
         if (!list) return;
         const div = document.createElement('div');
         div.className = 'mcp-server-block';
 
-        // Ensure transport exists
-        const t = server.transport || { type: 'stdio', command: '', args: [] };
+        // Normalize: support both flat MCPServerConfig { type, command, args, env }
+        // and legacy nested { transport: { type, command, args } } format
+        const t = server.transport || server;
+        const serverEnv: Record<string, string> | undefined = server.env || t.env;
 
         div.innerHTML = `
             <div class="mcp-row">
                 <input class="settings-input mcp-name" type="text" placeholder="Server 名称" value="${escapeHtml(server.name || '')}" style="flex:1" />
                 <select class="settings-select mcp-type" style="width:90px">
-                    <option value="stdio" ${t.type === 'stdio' ? 'selected' : ''}>stdio</option>
+                    <option value="stdio" ${(t.type || 'stdio') === 'stdio' ? 'selected' : ''}>stdio</option>
                     <option value="sse" ${t.type === 'sse' ? 'selected' : ''}>sse</option>
                 </select>
                 <button class="mcp-delete-btn" title="删除">🗑</button>
@@ -2767,12 +2798,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         function renderTransport() {
             if (typeSel.value === 'stdio') {
                 contentDiv.innerHTML = `
-                    <input class="settings-input mcp-command" type="text" placeholder="Command (例如: npx)" value="${t.type === 'stdio' ? escapeHtml(t.command || '') : ''}" />
-                    <input class="settings-input mcp-args" type="text" placeholder="Args (空格分隔)" value="${t.type === 'stdio' && t.args ? escapeHtml(t.args.join(' ')) : ''}" style="margin-top:4px" />
+                    <input class="settings-input mcp-command" type="text" placeholder="Command (例如: uvx, npx)" value="${(t.type || 'stdio') === 'stdio' ? escapeHtml(t.command || '') : ''}" />
+                    <input class="settings-input mcp-args" type="text" placeholder="Args (空格分隔)" value="${(t.type || 'stdio') === 'stdio' && t.args ? escapeHtml(t.args.join(' ')) : ''}" style="margin-top:4px" />
+                    <textarea class="settings-input mcp-env" rows="3" placeholder="环境变量 (每行 KEY=VALUE，# 开头为注释)" style="margin-top:4px; font-family:monospace; font-size:11px; resize:vertical">${escapeHtml(envToText(serverEnv))}</textarea>
                 `;
             } else {
                 contentDiv.innerHTML = `
-                    <input class="settings-input mcp-url" type="text" placeholder="SSE URL (例如: http://localhost:3000/sse)" value="${t.type === 'sse' ? escapeHtml((t as any).url || '') : ''}" />
+                    <input class="settings-input mcp-url" type="text" placeholder="SSE URL (例如: http://localhost:3000/sse)" value="${t.type === 'sse' ? escapeHtml(t.url || '') : ''}" />
                 `;
             }
         }
@@ -2819,20 +2851,21 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }, 1500);
         }
 
+        // Build flat MCPServerConfig objects (matching backend types.ts interface)
         const mcpServers = Array.from(document.querySelectorAll('.mcp-server-block')).map(block => {
             const type = (block.querySelector('.mcp-type') as HTMLSelectElement).value;
-            const transport: any = { type };
+            const name = (block.querySelector('.mcp-name') as HTMLInputElement).value.trim();
             if (type === 'stdio') {
-                transport.command = (block.querySelector('.mcp-command') as HTMLInputElement | null)?.value.trim() || '';
+                const command = (block.querySelector('.mcp-command') as HTMLInputElement | null)?.value.trim() || '';
                 const argsStr = (block.querySelector('.mcp-args') as HTMLInputElement | null)?.value.trim() || '';
-                transport.args = argsStr ? argsStr.split(/\s+/) : [];
+                const args = argsStr ? argsStr.split(/\s+/) : [];
+                const envText = (block.querySelector('.mcp-env') as HTMLTextAreaElement | null)?.value || '';
+                const env = parseEnvText(envText);
+                return { name, type, command, args, ...(env ? { env } : {}) };
             } else {
-                transport.url = (block.querySelector('.mcp-url') as HTMLInputElement | null)?.value.trim() || '';
+                const url = (block.querySelector('.mcp-url') as HTMLInputElement | null)?.value.trim() || '';
+                return { name, type, url };
             }
-            return {
-                name: (block.querySelector('.mcp-name') as HTMLInputElement).value.trim(),
-                transport
-            };
         });
 
         vscode.postMessage({

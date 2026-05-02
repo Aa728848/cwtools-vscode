@@ -122,6 +122,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                 <div class="settings-group">
                     <label class="settings-label">Provider</label>
                     <select class="settings-select" id="settingsProvider"></select>
+                    <div class="settings-hint" id="providerHint" style="margin-top: 4px;"></div>
                 </div>
                 <div class="settings-group">
                     <label class="settings-label">Model</label>

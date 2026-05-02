@@ -68,7 +68,7 @@
   "configuration.cwtools.ai.provider.enum.github": "GitHub 官方模型库",
   "configuration.cwtools.ai.provider.enum.together": "Together AI",
   "configuration.cwtools.ai.provider.enum.deepinfra": "DeepInfra",
-  "configuration.cwtools.ai.provider.description": "AI服务提供商",
+  "configuration.cwtools.ai.provider.description": "AI 服务提供商。API 申请地址：[OpenAI](https://platform.openai.com/api-keys) | [Claude](https://console.anthropic.com/) | [DeepSeek](https://platform.deepseek.com/) | [MiniMax](https://minimaxi.com/) | [智谱清言](https://bigmodel.cn/) | [通义千问](https://dashscope.console.aliyun.com/) | [硅基流动](https://cloud.siliconflow.cn/) | [OpenRouter](https://openrouter.ai/keys) | [GitHub Models](https://github.com/marketplace/models) | [Together AI](https://api.together.xyz/) | [DeepInfra](https://deepinfra.com/dash/api_keys)",
   "configuration.cwtools.ai.model.description": "AI模型名称（留空则使用提供商默认值）",
   "configuration.cwtools.ai.endpoint.description": "自定义API端点URL（仅用于 'custom'/'ollama' 提供商或需要覆盖默认端点时）",
   "configuration.cwtools.ai.agentFileWriteMode.enum.confirm": "写操作前弹出 diff 确认（默认，安全）",
@@ -110,8 +110,8 @@
   "commands.cwtools.ai.codeAction.explain": "AI: 解释此 CWTools 错误",
   "commands.cwtools.ai.codeAction.fixAll": "AI: 修复文件中所有 CWTools 错误",
   "commands.cwtools.ai.manageIgnoredDiagnostics.title": "AI: 管理忽略的兼容性报错",
-  “configuration.cwtools.ai.ignoredDiagnostics.description”: “将被 LSP 问题面板和 AI 代理完全忽略的兼容性报错键值列表（例如外部 Mod 引入的意外参数）。可通过”管理忽略的兼容性报错”命令进行交互式配置。”,
-  “configuration.cwtools.ai.braveSearchApiKey.description”: “Brave Search API 密钥，用于 web_search 工具。获取地址：https://brave.com/search/api/”,
-  “configuration.cwtools.ai.exaApiKey.description”: “Exa API 密钥，用于 codesearch 工具。获取地址：https://exa.ai”,
-  “configuration.cwtools.ai.mcp.servers.description”: “MCP（模型上下文协议）服务器配置，用于扩展 AI 工具能力。”
+  "configuration.cwtools.ai.ignoredDiagnostics.description": "将被 LSP 问题面板和 AI 代理完全忽略的兼容性报错键值列表（例如外部 Mod 引入的意外参数）。可通过“管理忽略的兼容性报错”命令进行交互式配置。",
+  "configuration.cwtools.ai.braveSearchApiKey.description": "Brave Search API 密钥，用于 web_search 工具。获取地址：https://brave.com/search/api/",
+  "configuration.cwtools.ai.exaApiKey.description": "Exa API 密钥，用于 codesearch 工具。获取地址：https://exa.ai",
+  "configuration.cwtools.ai.mcp.servers.description": "MCP（模型上下文协议）服务器配置，用于扩展 AI 工具能力。"
 }

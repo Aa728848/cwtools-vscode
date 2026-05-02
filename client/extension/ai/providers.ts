@@ -17,6 +17,7 @@ import { contentToString } from './types';
 export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     openai: {
         id: 'openai',
+        registerUrl: 'https://platform.openai.com/api-keys',
         name: 'OpenAI',
         endpoint: 'https://api.openai.com/v1',
         defaultModel: 'gpt-5.5',
@@ -33,6 +34,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     claude: {
         id: 'claude',
+        registerUrl: 'https://console.anthropic.com/',
         name: 'Claude (Anthropic)',
         endpoint: 'https://api.anthropic.com/v1',
         defaultModel: 'claude-opus-4-7',
@@ -53,6 +55,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     deepseek: {
         id: 'deepseek',
+        registerUrl: 'https://platform.deepseek.com/',
         name: 'DeepSeek',
         endpoint: 'https://api.deepseek.com/v1',
         defaultModel: 'deepseek-v4-pro',
@@ -70,6 +73,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     minimax: {
         id: 'minimax',
+        registerUrl: 'https://minimaxi.com/',
         name: 'MiniMax (按量计费)',
         // Pay-as-you-go: standard OpenAI-compatible endpoint
         endpoint: 'https://api.minimaxi.com/v1',
@@ -90,6 +94,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     'minimax-token-plan': {
         id: 'minimax-token-plan',
+        registerUrl: 'https://minimaxi.com/',
         name: 'MiniMax Token Plan',
         // Token Plan: Anthropic Messages API compatible endpoint
         // Docs: https://platform.minimax.io/docs/api-reference/text-anthropic-api
@@ -110,6 +115,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     glm: {
         id: 'glm',
+        registerUrl: 'https://bigmodel.cn/',
         name: 'GLM (智谱 Zhipu)',
         // Standard OpenAI-compat endpoint
         // Auth: API key is "{id}.{secret}" — buildAuthHeaders() auto-generates HS256 JWT
@@ -141,6 +147,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     qwen: {
         id: 'qwen',
+        registerUrl: 'https://dashscope.console.aliyun.com/',
         name: 'Qwen (通义千问)',
         // Standard OpenAI-compat, Bearer sk-xxx auth, supports tool_choice
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -169,6 +176,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     mimo: {
         id: 'mimo',
+        registerUrl: 'https://api.xiaomimimo.com/',
         name: 'MiMo (小米)',
         endpoint: 'https://api.xiaomimimo.com/v1',
         defaultModel: 'mimo-v2.5-pro',
@@ -223,6 +231,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     ollama: {
         id: 'ollama',
+        registerUrl: 'https://ollama.com/',
         name: 'Ollama (本地模型)',
         endpoint: 'http://localhost:11434/v1',
         defaultModel: '',
@@ -241,6 +250,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     siliconflow: {
         id: 'siliconflow',
+        registerUrl: 'https://cloud.siliconflow.cn/',
         name: 'SiliconFlow (硅基流动)',
         endpoint: 'https://api.siliconflow.cn/v1',
         defaultModel: 'deepseek-ai/DeepSeek-V3',
@@ -262,6 +272,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     openrouter: {
         id: 'openrouter',
+        registerUrl: 'https://openrouter.ai/keys',
         name: 'OpenRouter',
         endpoint: 'https://openrouter.ai/api/v1',
         defaultModel: 'deepseek/deepseek-v4-pro',
@@ -284,6 +295,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     github: {
         id: 'github',
+        registerUrl: 'https://github.com/marketplace/models',
         name: 'GitHub Models',
         endpoint: 'https://models.inference.ai.azure.com',
         defaultModel: 'DeepSeek-V3',
@@ -304,6 +316,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     together: {
         id: 'together',
+        registerUrl: 'https://api.together.xyz/',
         name: 'Together AI',
         endpoint: 'https://api.together.xyz/v1',
         defaultModel: 'deepseek-ai/DeepSeek-V3',
@@ -323,6 +336,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     },
     deepinfra: {
         id: 'deepinfra',
+        registerUrl: 'https://deepinfra.com/dash/api_keys',
         name: 'DeepInfra',
         endpoint: 'https://api.deepinfra.com/v1/openai',
         defaultModel: 'deepseek-ai/DeepSeek-V3',

@@ -2254,6 +2254,8 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
+        member this.ResolveDocumentLink(link: DocumentLink) = async { return link }
+
         member this.SemanticTokensFull(p: SemanticTokensParams) =
             // Token type indices (must match legend in capabilities):
             // 0=namespace, 1=type, 2=function, 3=variable, 4=parameter,
@@ -2565,13 +2567,17 @@ type Server(client: ILanguageClient) =
                                     && e.scope <> "embedded")
                                 |> List.map (fun f -> f.filepath)
 
-                            for f in filteredFiles do
-                                do! pretriggerForFile client game docs f
+                            filteredFiles
+                            |> List.map (fun f -> pretriggerForFile client game docs f)
+                            |> Async.Sequential
+                            |> Async.Ignore
+                            |> Async.RunSynchronously
                             None
                         | { command = "pretriggerThisFile"
                             arguments = x :: _ } ->
                             let filename = x.AsString()
-                            do! pretriggerForFile client game docs filename
+                            pretriggerForFile client game docs filename
+                            |> Async.RunSynchronously
                             None
                         | { command = "gettech"; arguments = _ } ->
                             match stlGameObj with

@@ -84,6 +84,8 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
     <div class="token-usage-label" id="tokenUsageLabel"></div>
 </div>
 
+<div id="floatingCardArea" class="floating-card-area"></div>
+
 <div class="input-wrapper" style="position:relative">
     <div id="slashPopup" class="slash-popup"></div>
     <div class="input-container">
@@ -233,6 +235,18 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                         <button class="key-toggle-btn" id="exaKeyToggleBtn" onclick="var k=document.getElementById('exaApiKey');k.type=k.type==='password'?'text':'password';">👁</button>
                     </div>
                     <div class="settings-hint">填写后 codesearch 工具将使用 Exa 语义代码搜索，结果质量更高。Key 请在 <a href="https://dashboard.exa.ai/" target="_blank" rel="noopener">dashboard.exa.ai</a> 获取。</div>
+                </div>
+                <div class="settings-group" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; margin-top: 10px;">
+                    <label class="settings-label">${svgIcon('plugin')} Agent Skills (实验性)</label>
+                    <div class="settings-hint">
+                        Agent 可以通过加载 <code>npx skills</code> 社区技能包来扩展能力（例如 MiniMax CLI）。<br>
+                        技能将仅安装在当前插件的本地存储中。
+                    </div>
+                    <div style="display: flex; gap: 8px; margin-top: 8px;">
+                        <input class="settings-input" id="skillSourceInput" type="text" placeholder="例如: MiniMax-AI/cli" autocomplete="off" />
+                        <button class="settings-test-btn" id="installSkillBtn" style="width: auto; padding: 0 12px;">安装/导入</button>
+                    </div>
+                    <div id="installedSkillsList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
                 </div>
             </div>
         </div>

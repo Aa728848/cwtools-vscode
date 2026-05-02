@@ -782,6 +782,8 @@ export type WebViewMessage =
     | { type: 'detectOllamaModels'; endpoint: string }
     | { type: 'fetchApiModels'; providerId: string; endpoint: string; apiKey: string }
     | { type: 'testConnection'; settings: PanelSettings } | { type: 'deleteDynamicModel'; providerId: string; modelId: string }
+    | { type: 'installSkill'; source: string }
+    | { type: 'deleteSkill'; skill: string }
     | { type: 'retractMessage'; messageIndex: number }
     | { type: 'confirmWriteFile'; messageId: string }
     | { type: 'cancelWriteFile'; messageId: string }
@@ -855,6 +857,8 @@ export type HostMessage =
     | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number }> }
     /** Topic imported successfully */
     | { type: 'topicImported'; topicId: string; title: string }
+    | { type: 'skillsList'; skills: string[] }
+    | { type: 'skillInstallComplete'; success: boolean }
     | { type: 'usageStats'; stats: any };
 
 /** Provider metadata sent to the settings WebView */

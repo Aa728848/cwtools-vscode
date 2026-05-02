@@ -56,7 +56,7 @@ npx tsc -p tsconfig.extension.json
 npx rollup -c
 ```
 
-## 4. 复制 Webview 静态资源
+## 4. 复制 Webview 静态资源与内置技能
 
 // turbo
 ```powershell

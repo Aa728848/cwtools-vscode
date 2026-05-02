@@ -7,8 +7,14 @@
  */
 
 import * as vs from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as cp from 'child_process';
+import { promisify } from 'util';
 import type { PanelSettings, HostMessage } from './types';
 import type { AIService } from './aiService';
+
+const execAsync = promisify(cp.exec);
 
 type PostMessageFn = (msg: HostMessage) => void;
 
@@ -17,7 +23,8 @@ export let lastAISettingsWriteTime = 0;
 export class ChatSettingsManager {
     constructor(
         private aiService: AIService,
-        private postMessage: PostMessageFn
+        private postMessage: PostMessageFn,
+        private globalStoragePath?: string
     ) {}
 
     /** Build the settingsData payload and send it to the WebView */
@@ -309,6 +316,76 @@ export class ChatSettingsManager {
                 friendly = 'Endpoint 地址不存在 (404) — 请检查 URL';
             }
             this.postMessage({ type: 'testConnectionResult', ok: false, message: '连接失败: ' + friendly });
+        }
+    }
+
+    async getSkillsList(): Promise<void> {
+        if (!this.globalStoragePath) {
+            this.postMessage({ type: 'skillsList', skills: [] });
+            return;
+        }
+        try {
+            const skillsDir = path.join(this.globalStoragePath, '.agents', 'skills');
+            if (!fs.existsSync(skillsDir)) {
+                this.postMessage({ type: 'skillsList', skills: [] });
+                return;
+            }
+            const dirs = await fs.promises.readdir(skillsDir, { withFileTypes: true });
+            const skills = dirs.filter(d => d.isDirectory()).map(d => d.name);
+            this.postMessage({ type: 'skillsList', skills });
+        } catch (e) {
+            this.postMessage({ type: 'skillsList', skills: [] });
+        }
+    }
+
+    async installSkill(source: string): Promise<void> {
+        if (!this.globalStoragePath) {
+            vs.window.showErrorMessage('无法获取插件存储路径，安装失败');
+            this.postMessage({ type: 'skillInstallComplete', success: false });
+            return;
+        }
+        try {
+            // Ensure global storage exists
+            const agentsSkillsDir = path.join(this.globalStoragePath, '.agents', 'skills');
+            if (!fs.existsSync(agentsSkillsDir)) {
+                await fs.promises.mkdir(agentsSkillsDir, { recursive: true });
+            }
+
+            if (path.isAbsolute(source) && fs.existsSync(source)) {
+                const stat = await fs.promises.stat(source);
+                if (stat.isDirectory()) {
+                    const skillName = path.basename(source);
+                    const destDir = path.join(agentsSkillsDir, skillName);
+                    await fs.promises.cp(source, destDir, { recursive: true, force: true });
+                    vs.window.showInformationMessage(`本地 Agent 技能 [${skillName}] 已成功安装`);
+                } else {
+                    throw new Error('本地路径必须是一个包含 SKILL.md 的文件夹');
+                }
+            } else {
+                // Run npx skills add. npx will create .agents/skills in the cwd (without -g)
+                await execAsync(`npx skills add ${source} -y`, { cwd: this.globalStoragePath });
+                vs.window.showInformationMessage(`Agent 技能 ${source} 已成功安装`);
+            }
+            this.postMessage({ type: 'skillInstallComplete', success: true });
+            await this.getSkillsList();
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            vs.window.showErrorMessage(`安装失败: ${msg}`);
+            this.postMessage({ type: 'skillInstallComplete', success: false });
+        }
+    }
+
+    async deleteSkill(skill: string): Promise<void> {
+        if (!this.globalStoragePath) return;
+        try {
+            const skillPath = path.join(this.globalStoragePath, '.agents', 'skills', skill);
+            if (fs.existsSync(skillPath)) {
+                await fs.promises.rm(skillPath, { recursive: true, force: true });
+                vs.window.showInformationMessage(`Agent 技能 ${skill} 已删除`);
+                await this.getSkillsList();
+            }
+        } catch (e) {
+            vs.window.showErrorMessage(`删除失败: ${e}`);
         }
     }
 }

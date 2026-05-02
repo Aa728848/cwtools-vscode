@@ -36,7 +36,8 @@ const BUILD_CLARIFICATION_RULE = `## 🛑 CRITICAL: Anti-Rush & Clarification (B
 When the user gives a broad, vague, or high-level request (e.g., "I want to make a crisis faction"), your very first response MUST be to TALK to the user.
 1. DO NOT immediately start scanning files or writing code.
 2. Ask the user for specific requirements directly in plain text.
-3. DO NOT use DOM Question Cards (\`:::question\`) in Build Mode, and NEVER use them inside Implementation Plans! Just ask them conversationally.`;
+3. DO NOT use DOM Question Cards (\`:::question\`) in Build Mode, and NEVER use them inside Implementation Plans! Just ask them conversationally.
+4. POST-TASK VALIDATION (CRITICAL): After completing your code generation or modifications, you MUST forcefully run the \`validate_code\` tool to check for any LSP errors. If your new code introduces errors (e.g., referencing a newly created special project, trait, or event that lacks an underlying common definition), you MUST process these errors and create the missing definitions in the appropriate folders before finishing the task.`;
 
 const PLAN_CLARIFICATION_RULE = `## 🛑 CRITICAL SYSTEM OVERRIDE: Clarification BEFORE Planning Phase
 When the user gives a broad, vague, or high-level request (e.g., "I want to make a crisis faction", "Make a new ship"), you MUST NOT enter the Planning Phase yet.
@@ -84,6 +85,26 @@ When analyzing problems, reviewing code, proposing optimization plans, or writin
 - If you are writing an Implementation Plan that contains proposed code snippets, you MUST verify that the syntax, properties, triggers, and effects you plan to write are 100% legal BEFORE you put them in the plan. Do not hallucinate code in your plan!
 - Do NOT judge code or propose standard programming patterns (e.g., loops, classes) if they do not explicitly exist and conform to PDXScript rules. Ensure your optimizations are actually fully supported by the game engine.`;
 
+const IMAGE_WORKFLOW_RULE = `## 🛑 CRITICAL: Image Workflow & Manipulation
+When you are developing PDXScript code and need an image (icon, background, etc.) OR when you are asked to modify ANY image, you MUST follow this exact workflow:
+1. **Prioritize Existing Assets**: Unless the user explicitly requested an AI-generated image, you MUST first attempt to find a suitable existing vanilla or mod image that fits the theme and context. Use \`search_mod_files\` or \`workspace_symbols\` to find similar usages.
+2. **Permission to Generate**: If no suitable existing image can be found, DO NOT generate one automatically. You MUST ask the user if they would like you to generate a custom image.
+3. **Image Understanding & Style Analysis**: 
+   - Note that your underlying model may lack native image understanding/vision capabilities. To understand or analyze the contents of an image, you MUST use the \`run_command\` tool to invoke an appropriate installed vision skill (such as the \`mmx vision <image_path>\` CLI command or other available tools) for image understanding.
+   - **BEFORE generating ANY new image**, you MUST first locate several similar images in the vanilla game files and use your vision skill (e.g., \`mmx vision\`) to analyze their style. Combine these stylistic insights with the user's specific requirements to formulate a highly detailed image prompt.
+4. **Image Generation & Manipulation (CRITICAL)**:
+   - **Generating Images**: Use the formulated prompt from the previous step with the \`run_command\` tool to execute an appropriate image generation skill (e.g., \`mmx image "prompt"\`). DO NOT hallucinate built-in agent tools; you must use \`run_command\`. If generating multiple images, you MUST execute the commands serially one by one, NEVER in parallel.
+   - **Generation Format**: When generating a new image via \`mmx\`, you MUST output a standard format (like \`.png\`). DO NOT generate \`.dds\` directly.
+   - **Image Manipulation & Conversion**: **FOR ANY IMAGE MODIFICATION TASK** (including pre-existing images or newly generated ones), you **MUST use the \`image-manipulation-image-magick\` skill** (via \`run_command\` executing \`magick\`) for cropping, resizing, and format conversion. **CRITICAL**: The final dimensions of your target image MUST exactly match the dimensions of the vanilla images used for the same purpose. Check vanilla sizes before resizing.
+   - **DDS Conversion Rules**: When using \`magick\` to convert an image to \`.dds\` format, you MUST check its dimensions: If BOTH width and height are multiples of 4, use DXT5 compression (add \`-define dds:compression=dxt5\`). Otherwise, use uncompressed 8.8.8.8 ARGB (add \`-define dds:compression=none\`).
+   - **OVERWRITE RULES FOR EXISTING IMAGES**: 
+     - **Vanilla Images**: You **MUST NEVER** overwrite any vanilla game files. You MUST save the modified image as a NEW file with a NEW name within the mod workspace.
+     - **Project/Mod Images**: If you need to modify an image that already exists in the current project workspace, you **MUST explicitly ask the user for permission** before overwriting it. If the user does not approve or you haven't asked yet, save it as a NEW file with a NEW name.
+5. **Integration & Registration**:
+   - **Sprite Registration**: If the game requires the image to be registered (e.g., in a \`.gfx\` file using \`spriteType\`), you MUST write the registration block.
+   - **Direct Path**: If the entity calls the image via a direct file path (e.g., \`icon = "gfx/.../icon.dds"\`), insert the correct path.
+   - **Same-Name Key**: If the game resolves the image by matching the file name to the entity key, ensure the file is named and placed correctly without explicit registration if that is the engine's convention.`;
+
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
 
 function buildBuildSystemPrompt(gameKnowledge: string, gameName: string): string {
@@ -92,6 +113,7 @@ ${LANGUAGE_MIRRORING_RULE}
 ${INTENT_VERIFICATION_RULE}
 ${BUILD_CLARIFICATION_RULE}
 ${CODE_COMPLIANCE_RULE}
+${IMAGE_WORKFLOW_RULE}
 
 ## Step 1 — Classify the Request
 
@@ -589,7 +611,11 @@ When multiple independent pieces of information are needed, batch your tool call
 export class PromptBuilder {
     private memoryParser: MemoryParser;
 
-    constructor(private workspaceRoot: string) {
+    constructor(
+        private workspaceRoot: string,
+        private globalStoragePath?: string,
+        private extensionPath?: string
+    ) {
         this.memoryParser = new MemoryParser(workspaceRoot);
     }
 
@@ -643,6 +669,9 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
 `;
         }
         
+        const skillsPrompt = this.getAgentSkillsPrompt();
+        if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;
+
         return finalPrompt;
     }
 
@@ -663,6 +692,9 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
         
+        const skillsPrompt = this.getAgentSkillsPrompt();
+        if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;
+
         return finalPrompt;
     }
 
@@ -796,6 +828,57 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         if (id === 'gemini' || id.includes('google')) return GEMINI_SUPPLEMENT;
         return OPENAI_SUPPLEMENT;
     }
+
+    /**
+     * Scans plugin-local storage for installed Agent Skills
+     * and compiles them into a prompt instruction so the Agent knows how to use them.
+     */
+    private getAgentSkillsPrompt(): string {
+        try {
+            const skills: string[] = [];
+            
+            // 1. Read built-in extension skills
+            if (this.extensionPath) {
+                const internalSkillsDir = path.join(this.extensionPath, 'resources', 'skills');
+                if (fs.existsSync(internalSkillsDir)) {
+                    const dirs = fs.readdirSync(internalSkillsDir, { withFileTypes: true });
+                    for (const dirent of dirs) {
+                        if (dirent.isDirectory()) {
+                            const skillMd = path.join(internalSkillsDir, dirent.name, 'SKILL.md');
+                            if (fs.existsSync(skillMd)) {
+                                const content = fs.readFileSync(skillMd, 'utf8').trim();
+                                if (content) skills.push(`### Skill: ${dirent.name}\n${content}`);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Read user-installed skills
+            if (this.globalStoragePath) {
+                const skillsDir = path.join(this.globalStoragePath, '.agents', 'skills');
+                if (fs.existsSync(skillsDir)) {
+                    const dirs = fs.readdirSync(skillsDir, { withFileTypes: true });
+                    for (const dirent of dirs) {
+                        if (dirent.isDirectory()) {
+                            const skillMd = path.join(skillsDir, dirent.name, 'SKILL.md');
+                            if (fs.existsSync(skillMd)) {
+                                const content = fs.readFileSync(skillMd, 'utf8').trim();
+                                if (content) skills.push(`### Skill: ${dirent.name}\n${content}`);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (skills.length === 0) return '';
+            return `\n## Installed Agent Skills\nYou have access to the following capabilities via installed CLI skills. Use the \`run_command\` tool to invoke them.\n\n${skills.join('\n\n')}`;
+        } catch (e) {
+            ErrorReporter.debug(SOURCE.PROMPT_BUILDER, 'Error reading agent skills', e);
+            return '';
+        }
+    }
+
 
 
     /**

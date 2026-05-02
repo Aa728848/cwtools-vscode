@@ -22,7 +22,8 @@ import type {
 } from './types';
 import { contentToString } from './types';
 import * as vs from 'vscode';
-
+import * as fs from 'fs';
+import * as path from 'path';
 // P1-7: contentToString is now imported from './types' — see import above.
 
 import { AIService } from './aiService';
@@ -601,17 +602,54 @@ export class AgentRunner {
         const modelVision = _cfgVision.model || _providerVision.defaultModel;
         const visionSupported = _providerVision.supportsVision && isModelVisionCapable(modelVision);
 
+        let effectiveUserMessage = userMessage;
         let effectiveImages = images && images.length > 0 ? images : undefined;
         if (effectiveImages && !visionSupported) {
-            emitStep({
-                type: 'error',
-                content: AGENT.VISION_UNSUPPORTED(_providerVision.name) +
-                    (_providerIdVision === 'minimax-token-plan'
-                        ? AGENT.VISION_MINIMAX_HINT
-                        : AGENT.VISION_GENERIC_HINT),
-                timestamp: Date.now(),
-            });
-            effectiveImages = undefined; // drop images, proceed text-only
+            // Vision fallback: save base64 images to local tmp dir and inject paths into prompt
+            const workspaceFolders = vs.workspace.workspaceFolders;
+            let fallbackSuccessful = false;
+            
+            if (workspaceFolders && workspaceFolders.length > 0) {
+                try {
+                    const tmpDir = path.join(workspaceFolders[0]!.uri.fsPath, '.vscode', 'tmp', 'vision');
+                    if (!fs.existsSync(tmpDir)) {
+                        fs.mkdirSync(tmpDir, { recursive: true });
+                    }
+                    const savedPaths: string[] = [];
+                    for (let i = 0; i < effectiveImages.length; i++) {
+                        const dataUrl = effectiveImages[i];
+                        if (!dataUrl) continue;
+                        const match = dataUrl.match(/^data:image\/(\w+);base64,/);
+                        const ext = match ? match[1] : 'png';
+                        const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "");
+                        const buffer = Buffer.from(base64Data, 'base64');
+                        const filePath = path.join(tmpDir, `upload_${Date.now()}_${i}.${ext}`);
+                        fs.writeFileSync(filePath, buffer);
+                        savedPaths.push(filePath);
+                    }
+                    
+                    effectiveUserMessage += `\n\n[System Notice: The user uploaded ${savedPaths.length} image(s). However, your current AI model does not support native image processing. To fulfill the user's request, the images have been saved to the following local paths:\n` +
+                        savedPaths.map(p => `- ${p}`).join('\n') +
+                        `\nYou MUST use the \`run_command\` tool with an appropriate installed vision skill (such as the \`mmx vision\` CLI or other available tools) to analyze these files before proceeding!]`;
+                    
+                    fallbackSuccessful = true;
+                } catch (e) {
+                    fallbackSuccessful = false;
+                }
+            }
+
+            if (!fallbackSuccessful) {
+                emitStep({
+                    type: 'error',
+                    content: AGENT.VISION_UNSUPPORTED(_providerVision.name) +
+                        (_providerIdVision === 'minimax-token-plan'
+                            ? AGENT.VISION_MINIMAX_HINT
+                            : AGENT.VISION_GENERIC_HINT),
+                    timestamp: Date.now(),
+                });
+            }
+
+            effectiveImages = undefined; // drop native images, proceed text-only with injected notice
         }
 
         // Build the user turn: multimodal ContentPart[] when images are provided,
@@ -619,13 +657,13 @@ export class AgentRunner {
         const userContent: string | ContentPart[] =
             effectiveImages && effectiveImages.length > 0
                 ? [
-                    { type: 'text' as const, text: userMessage },
+                    { type: 'text' as const, text: effectiveUserMessage },
                     ...effectiveImages.map(url => ({
                         type: 'image_url' as const,
                         image_url: { url, detail: 'auto' as const },
                     })),
                   ]
-                : userMessage;
+                : effectiveUserMessage;
 
         // Build the message array
         const messages: ChatMessage[] = [

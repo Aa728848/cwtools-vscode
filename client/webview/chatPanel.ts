@@ -240,6 +240,16 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey') as HTMLInputElement | null; if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
     bindBtn('fetchApiModelsBtn', () => { fetchApiModels(); });
     bindBtn('detectBtn', detectOllamaModels);
+    
+    bindBtn('installSkillBtn', () => {
+        const source = (document.getElementById('skillSourceInput') as HTMLInputElement).value.trim();
+        if (source) {
+            const btn = document.getElementById('installSkillBtn') as HTMLButtonElement;
+            btn.disabled = true;
+            btn.textContent = '安装中...';
+            vscode.postMessage({ type: 'installSkill', source });
+        }
+    });
     bindBtn('accChat', () => toggleAccordion('chatModelSection'));
     bindBtn('accInline', () => toggleAccordion('inlineSection'));
     bindBtn('accMcp', () => toggleAccordion('mcpSection'));
@@ -653,7 +663,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
     // ── Markdown renderer ──────────────────────────────────────────────────────
     function inlineMd(raw: string) {
-        let s = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const mediaBlocks: string[] = [];
+        let s = raw.replace(/<(video|audio)\s+([^>]+)>(?:<\/\1>)?/gi, (_: string, tag: string, attrs: string) => {
+            if (!/controls/i.test(attrs)) attrs += ' controls';
+            const style = tag.toLowerCase() === 'video' ? 'max-width:100%; border-radius:6px; margin:8px 0; display:block;' : 'width:100%; margin:8px 0; display:block;';
+            mediaBlocks.push(`<${tag.toLowerCase()} ${attrs} style="${style}"></${tag.toLowerCase()}>`);
+            return '\x01MEDIA' + (mediaBlocks.length - 1) + '\x01';
+        });
+
+        s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const codeBlocks: string[] = [];
         s = s.replace(/`([^`]+)`/g, (_: string, c: string) => {
             codeBlocks.push('<code>' + c.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') + '</code>');
@@ -666,9 +684,18 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         s = s.replace(/(^|\W)_([^_\n]+)_(\W|$)/g, '$1<em>$2</em>$3');
         s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
         s = s.replace(/\[Option:\s*([^\]]+)\]/gi, '<button class="suggest-card ai-option-btn popup-option" data-suggest="$1" style="display:flex; margin:6px 0; width:fit-content; max-width:98%; text-align:left; word-wrap:break-word; white-space:normal; align-items:flex-start;"><span class="suggest-card-icon" style="margin-top:2px;">👉</span>$1</button>');
+        
+        // Media links detection
+        s = s.replace(/!?\[([^\]]*)\]\(([^)]+\.(?:mp3|wav|ogg|aac|m4a|flac)(?:\?[^)]*)?)\)/gi, '<audio src="$2" controls style="width:100%; margin: 8px 0; display: block;"></audio>');
+        s = s.replace(/!?\[([^\]]*)\]\(([^)]+\.(?:mp4|webm|ogv|mov)(?:\?[^)]*)?)\)/gi, '<video src="$2" controls style="max-width:100%; border-radius:6px; margin: 8px 0; display: block;"></video>');
+        
+        s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%; border-radius:6px; margin: 8px 0; display: block;" />');
         s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        
         // eslint-disable-next-line no-control-regex
         s = s.replace(/\x01CODE(\d+)\x01/g, (_: string, i: string) => codeBlocks[parseInt(i)]!);
+        // eslint-disable-next-line no-control-regex
+        s = s.replace(/\x01MEDIA(\d+)\x01/g, (_: string, i: string) => mediaBlocks[parseInt(i)]!);
         return s;
     }
 
@@ -678,7 +705,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         // Phase 1: extract fenced code blocks to avoid mis-parsing their content
         const blocks: {lang: string; code: string; isCard?: boolean}[] = [];
         let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
-            const i = blocks.length; blocks.push({ lang: lang.trim(), code }); return '\x00BLOCK' + i + '\x00';
+            const i = blocks.length; blocks.push({ lang: lang.trim(), code }); return '\n\x00BLOCK' + i + '\x00\n';
         });
 
         // Phase 1.5: extract Question Cards (Highly resilient parser for smaller models)
@@ -1417,12 +1444,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     // ── Card dismiss helper ────────────────────────────────────────────────────
-    function dismissCard(el: HTMLElement, delay: number) {
+    function dismissCard(el: HTMLElement, delay: number, onComplete?: () => void) {
         setTimeout(() => {
             el.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
             el.style.opacity = '0';
             el.style.transform = 'translateY(-4px)';
-            setTimeout(() => el.remove(), 260);
+            setTimeout(() => {
+                el.remove();
+                if (onComplete) onComplete();
+            }, 260);
         }, delay || 400);
     }
     
@@ -1522,6 +1552,23 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         scrollBottom();
     }
 
+    // ── Floating Card Queue ──────────────────────────────────────────────────
+    let floatingCardQueue: HTMLElement[] = [];
+    let isShowingFloatingCard = false;
+
+    function processFloatingCardQueue() {
+        if (isShowingFloatingCard || floatingCardQueue.length === 0) return;
+        const div = floatingCardQueue.shift()!;
+        isShowingFloatingCard = true;
+        const floatingCardArea = document.getElementById('floatingCardArea');
+        if (floatingCardArea) {
+            floatingCardArea.appendChild(div);
+        } else {
+            chatArea.appendChild(div);
+        }
+        scrollBottom();
+    }
+
     // ── Permission request card ─────────────────────────────────────────────────
     function showPermissionCard(permissionId: string, tool: string, description: string, command: string) {
         const div = document.createElement('div');
@@ -1556,7 +1603,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             
             this.innerHTML = svgIcon('check') + '已允许';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
-            dismissCard(div, 400);
+            dismissCard(div, 400, () => {
+                isShowingFloatingCard = false;
+                processFloatingCardQueue();
+            });
         });
         
         (div.querySelector('.permission-deny-btn') as HTMLButtonElement).addEventListener('click', function () {
@@ -1568,7 +1618,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
-            dismissCard(div, 400);
+            dismissCard(div, 400, () => {
+                isShowingFloatingCard = false;
+                processFloatingCardQueue();
+            });
         });
         
         const alwaysBtn = div.querySelector('.permission-always-btn') as HTMLButtonElement;
@@ -1582,12 +1635,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 
                 this.innerHTML = svgIcon('check') + '已一直允许';
                 vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true, alwaysAllow: true });
-                dismissCard(div, 400);
+                dismissCard(div, 400, () => {
+                    isShowingFloatingCard = false;
+                    processFloatingCardQueue();
+                });
             });
         }
         
-        chatArea.appendChild(div);
-        scrollBottom();
+        floatingCardQueue.push(div);
+        processFloatingCardQueue();
     }
 
     // ── Message handler ────────────────────────────────────────────────────────
@@ -1623,6 +1679,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 
                 // Clear any unresolved interactive cards (permission, diff)
+                floatingCardQueue = [];
+                isShowingFloatingCard = false;
                 document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
                 const r = msg.result;
@@ -1665,6 +1723,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 
                 // Clear any unresolved interactive cards
+                floatingCardQueue = [];
+                isShowingFloatingCard = false;
                 document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
                 chatArea.appendChild(buildAssistantMessage(svgIcon('x') + ' ' + msg.error, [], Date.now()));
@@ -1812,6 +1872,43 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             case 'todoUpdate': renderTodos(msg.todos); break;
 
             case 'autoWriteFile': showAutoWriteCard(msg.file, msg.isNewFile); break;
+
+            case 'skillsList': {
+                const list = document.getElementById('installedSkillsList');
+                if (list) {
+                    list.innerHTML = '';
+                    if (!msg.skills || msg.skills.length === 0) {
+                        list.innerHTML = '<div style="opacity:0.5; font-size:11px;">暂无本地技能</div>';
+                    } else {
+                        msg.skills.forEach((skill: string) => {
+                            const row = document.createElement('div');
+                            row.style.display = 'flex';
+                            row.style.justifyContent = 'space-between';
+                            row.style.alignItems = 'center';
+                            row.innerHTML = `<span style="font-family:monospace;">${escapeHtml(skill)}</span>
+                                <button class="detect-btn" data-skill="${escapeHtml(skill)}" style="padding:0 6px; width:auto; border-radius:4px;" title="删除此技能">🗑</button>`;
+                            row.querySelector('button')!.addEventListener('click', (e) => {
+                                const btn = e.currentTarget as HTMLButtonElement;
+                                btn.disabled = true; btn.textContent = '...';
+                                vscode.postMessage({ type: 'deleteSkill', skill: btn.dataset.skill });
+                            });
+                            list.appendChild(row);
+                        });
+                    }
+                }
+                break;
+            }
+
+            case 'skillInstallComplete': {
+                const btn = document.getElementById('installSkillBtn') as HTMLButtonElement;
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '安装/导入';
+                }
+                const input = document.getElementById('skillSourceInput') as HTMLInputElement;
+                if (input && msg.success) input.value = '';
+                break;
+            }
 
             case 'settingsData':
                 if (msg.current && msg.current.maxContextTokens > 0) contextLimit = msg.current.maxContextTokens;

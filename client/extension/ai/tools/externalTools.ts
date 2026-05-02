@@ -248,7 +248,7 @@ export class ExternalToolHandler {
             'dotnet --version', 'dotnet --info', 'node --version',
             'npm list', 'npm ls', 'npm --version', 'npx --version',
             'cat ', 'type ', 'echo ', 'dir ', 'ls ', 'find ', 'grep ',
-            'wc ', 'head ', 'tail ', 'which ', 'where ',
+            'wc ', 'head ', 'tail ', 'which ', 'where ', 'mmx '
         ];
         const cmdLower = args.command.trim().toLowerCase();
         const isSafePrefix = SAFE_COMMAND_PREFIXES.some(p => cmdLower.startsWith(p));
@@ -304,7 +304,21 @@ export class ExternalToolHandler {
             return { stdout: '', stderr: `Blocked: Invalid working directory`, exitCode: 1 };
         }
 
-        if (this.ctx.onPermissionRequest) {
+        let requiresPermission = true;
+        if (cmdLower.startsWith('mmx ')) {
+            let hasPipeOrRedirect = false;
+            for (const pat of PIPE_REDIRECT_BLOCKED) {
+                if (pat.test(args.command)) {
+                    hasPipeOrRedirect = true;
+                    break;
+                }
+            }
+            if (!hasPipeOrRedirect) {
+                requiresPermission = false;
+            }
+        }
+
+        if (requiresPermission && this.ctx.onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const allowed = await this.ctx.onPermissionRequest(
                 permId,
@@ -315,7 +329,7 @@ export class ExternalToolHandler {
             if (!allowed) {
                 return { stdout: '', stderr: '用户拒绝了此命令的执行权限', exitCode: 1 };
             }
-        } else {
+        } else if (requiresPermission) {
             return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
         }
 

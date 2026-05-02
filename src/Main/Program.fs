@@ -733,8 +733,7 @@ type Server(client: ILanguageClient) =
 
             let analyze (file: VersionedTextDocumentIdentifier) force =
                 //eprintfn "Analyze %s" (file.uri.ToString())
-                let task = analyzeTask file.uri force
-                task.Start()
+                analyzeTask file.uri force |> ignore
 
             let rec loop (inprogress: bool) (state: Map<string, VersionedTextDocumentIdentifier * bool>) =
                 async {
@@ -809,27 +808,27 @@ type Server(client: ILanguageClient) =
     /// This prevents write-lock contention during rapid typing.
     let lintDebounceAgent =
         MailboxProcessor.Start(fun agent ->
-            let rec loop (pending: (VersionedTextDocumentIdentifier * bool) option) =
+            let rec loop (pending: Map<string, VersionedTextDocumentIdentifier * bool>) =
                 async {
                     // Wait up to 1500ms for a new message; if none, fire the pending lint
                     let! msgOpt = agent.TryReceive(1500)
                     match msgOpt with
                     | Some (UpdateRequest(ur, force)) ->
                         // New edit arrived reset the debounce timer
-                        return! loop (Some (ur, force))
+                        return! loop (pending |> Map.add ur.uri.LocalPath (ur, force))
                     | Some (WorkComplete _) ->
                         // Ignore WorkComplete messages in debounce agent
                         return! loop pending
                     | None ->
                         // Timeout: 1.5s of inactivity forward to lintAgent
-                        match pending with
-                        | Some (ur, force) ->
-                            lintAgent.Post(UpdateRequest(ur, force))
-                            return! loop None
-                        | None ->
-                            return! loop None
+                        if not pending.IsEmpty then
+                            for _, (ur, force) in pending |> Map.toSeq do
+                                lintAgent.Post(UpdateRequest(ur, force))
+                            return! loop Map.empty
+                        else
+                            return! loop pending
                 }
-            loop None)
+            loop Map.empty)
 
     let setupRulesCaches () =
         match cachePath, remoteRepoPath, useManualRules with

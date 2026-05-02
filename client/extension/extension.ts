@@ -187,7 +187,7 @@ export async function activate(context: ExtensionContext) {
 	const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 	// AgentToolExecutor gets a lazy getter so it can be registered before client starts
 	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot);
-	const promptBuilder = new PromptBuilder(workspaceRoot);
+	const promptBuilder = new PromptBuilder(workspaceRoot, context.globalStorageUri.fsPath, context.extensionPath);
 	const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder);
 	const usageTracker = new UsageTracker(context);
 	const chatPanelProvider = new AIChatPanelProvider(

@@ -77,7 +77,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         private storageUri: vs.Uri | undefined
     ) {
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
-        this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg));
+        this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
     }
 
     /**
@@ -212,6 +212,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'configureProvider':
             case 'openSettings':
                 await this.settingsManager.openSettingsPage();
+                await this.settingsManager.getSkillsList();
                 break;
             case 'saveSettings':
                 await this.settingsManager.saveSettings(msg.settings);
@@ -227,6 +228,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'deleteDynamicModel':
                 await this.settingsManager.deleteDynamicModel(msg.providerId, msg.modelId);
+                break;
+            case 'installSkill':
+                await this.settingsManager.installSkill(msg.source);
+                break;
+            case 'deleteSkill':
+                await this.settingsManager.deleteSkill(msg.skill);
                 break;
             case 'cancelGeneration':
                 this.cancelGeneration();

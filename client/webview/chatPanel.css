@@ -69,7 +69,8 @@ body.plan-mode .plan-indicator { display: block; }
 .todo-item.done { opacity: 0.4; text-decoration: line-through; }
 .todo-item.in_progress { color: var(--accent); }
 
-.chat-area { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 20px; min-height: 0; }
+.chat-area { flex: 1; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 20px; min-height: 0; }
+.chat-area > *:last-child { margin-bottom: 80px !important; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 .message { display: flex; flex-direction: column; animation: fadeIn 0.2s ease; gap: 4px; flex-shrink: 0; }
@@ -268,8 +269,12 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .retract-ok { background: var(--error); color: #fff; border: none; border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }
 .retract-cancel { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }
 
+/* ── Floating Card Area ── */
+.floating-card-area { flex-shrink: 0; padding: 0 16px; display: flex; flex-direction: column; gap: 8px; z-index: 10; margin-bottom: 8px; }
+.floating-card-area:empty { display: none; }
+
 /* ── Permission request card ── */
-.permission-card { border: 1px solid #d9a020; border-radius: 8px; overflow: hidden; margin: 6px 0; }
+.permission-card { border: 1px solid #d9a020; border-radius: 8px; overflow: hidden; margin: 0; background: var(--bg); box-shadow: 0 -2px 12px rgba(0,0,0,0.2); }
 .permission-card-header { background: rgba(217,160,32,0.12); padding: 9px 13px; font-size: 12px; display: flex; align-items: flex-start; gap: 8px; }
 .permission-card-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
 .permission-card-body { flex: 1; }

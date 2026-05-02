@@ -476,7 +476,7 @@ ${gameKnowledge}`;
 
 // ─── Inline Completion Prompt ─────────────────────────────────────────────────
 
-const INLINE_SYSTEM_PROMPT = `You are a PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the cursor position. No explanations, no markdown, no code fences. Output raw PDXScript only.
+const INLINE_SYSTEM_PROMPT = `You are a PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the cursor position. No explanations. Output raw PDXScript.
 
 Rules:
 - Booleans: yes/no (never true/false)
@@ -977,15 +977,19 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
             ? `\nVALID IDENTIFIERS (from Language Server):\n${options.lspSuggestions.join(' | ')}\nYou MUST choose from these identifiers if applicable to avoid hallucination.`
             : '';
 
+        const isOnlyWhitespace = linePrefix.trim().length === 0;
+
         const prompt = [
             `File: ${path.basename(options.filePath)}`,
             blockContext,
             codeBefore ? `\nCode before cursor:\n${codeBefore}` : '',
-            `\nCursor line prefix (already typed): "${linePrefix}"`,
+            isOnlyWhitespace 
+                ? `\n[CURSOR IS HERE — on a new line with ${linePrefix.length} indentation characters. Generate the next logical line(s) of code.]`
+                : `\nCursor line prefix (already typed): "${linePrefix}"\n[CURSOR HERE — continue from the prefix above. Do NOT repeat the prefix.]`,
             lineSuffix.trim() ? `Cursor line suffix (already exists): "${lineSuffix}"` : '',
-            `\n[CURSOR HERE — continue from the prefix above. Do NOT repeat the prefix.]`,
             linesAfter ? `\nCode after cursor:\n${linesAfter}` : '',
             lspHints,
+            `\nCRITICAL MANDATE: You MUST output at least one line of valid PDXScript code. Do NOT output an empty response. You may use markdown code blocks if necessary.`
         ].filter(Boolean).join('\n');
 
         return [

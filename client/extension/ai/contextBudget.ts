@@ -13,7 +13,7 @@ import { BUDGET } from './messages';
 // P1-7: contentToString moved to types.ts — single shared definition
 
 /** Default budget per tool result (characters). */
-const TOOL_RESULT_BUDGET_BASE = 15000;
+export const TOOL_RESULT_BUDGET_BASE = 15000;
 
 /**
  * Intelligently budget a tool result to fit within maxChars.

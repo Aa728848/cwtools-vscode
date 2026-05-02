@@ -665,23 +665,6 @@ export interface TokenUsage {
 
 // ─── Tool Result Types (Batch 2.1) ──────────────────────────────────────────
 
-/**
- * Structured tool result envelope — wraps any tool return value with
- * consistent success/error signaling for the AI reasoning loop.
- * Enables reliable doom-loop detection and structured error recovery.
- * (Named StructuredToolResult to avoid conflict with the existing ToolResult union type.)
- */
-export interface StructuredToolResult<T = unknown> {
-    success: boolean;
-    /** The payload data on success */
-    data?: T;
-    /** Human-readable error description on failure */
-    error?: string;
-    /** Recovery hint for the AI when an error occurs */
-    hint?: string;
-    /** Whether this error is retriable (default: true) */
-    retriable?: boolean;
-}
 
 /**
  * Agent checkpoint — serializable snapshot for long-task resilience (Batch 2.3).

@@ -21,6 +21,8 @@ import { PromptBuilder } from './promptBuilder';
 import { getProvider, getEffectiveModel, ALWAYS_THINKING_PREFIXES } from './providers';
 import { MCPClient } from './mcpClient';
 import { UsageTracker } from './usageTracker';
+import { getModelPricing } from './pricing';
+import { ErrorReporter } from './errorReporter';
 
 // ─── Thinking-model detection ────────────────────────────────────────────────
 
@@ -232,7 +234,8 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         const inlineModel = config.inlineCompletion.model
             || getEffectiveModel(inlineProvider, undefined);
         if (isAlwaysThinkingModel(inlineModel)) {
-            // Silently skip — these models are too slow for inline use
+            // Log and silently skip — these models are too slow for inline use
+            ErrorReporter.debug('InlineProvider', `Skipping inline completion: model ${inlineModel} is always-thinking`);
             return undefined;
         }
 
@@ -266,7 +269,8 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                         return;
                     }
                     resolve(completion);
-                } catch {
+                } catch (err) {
+                    ErrorReporter.warn('InlineProvider', 'Unexpected error in provideInlineCompletionItems', err);
                     resolve(undefined);
                 }
             }, debounceMs);
@@ -411,6 +415,11 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 });
 
                 if (token.isCancellationRequested || abortController.signal.aborted) return undefined;
+
+                if (!contentStr.trim()) {
+                    ErrorReporter.warn('InlineProvider', `Model ${inlineModel} returned empty FIM completion`);
+                }
+
                 completionText = contentStr.trim();
                 
             } else {
@@ -447,7 +456,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                     providerId: inlineProvider,
                     model: inlineModel,
                     temperature: disableThinking ? 0 : 0.2,
-                    maxTokens: 200,  // Keep responses short for inline
+                    maxTokens: 2048,  // Increased from 200 to prevent MiniMax API truncation bugs
                     // Pass abort signal so cancellation immediately releases the connection
                     abortSignal: abortController.signal,
                     // Disable thinking for models that support it
@@ -459,14 +468,26 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 const content = response.choices[0]?.message?.content;
                 const contentStr = typeof content === 'string' ? content : '';
 
+                if (!contentStr || contentStr.trim() === '') {
+                    const rawStrRep = JSON.stringify(contentStr);
+                    const fullResp = JSON.stringify(response);
+                    ErrorReporter.warn('InlineProvider', `Model ${inlineModel} returned empty completion. Raw: ${rawStrRep}. Response Dump: ${fullResp}`);
+                }
+
                 // Clean up the response
                 completionText = contentStr.trim();
 
-                // Remove markdown code fences if present
-                completionText = completionText
-                    .replace(/^```\w*\n?/, '')
-                    .replace(/\n?```$/, '')
-                    .trim();
+                // Robustly extract code from markdown fences if the model included conversational text
+                const codeBlockMatch = completionText.match(/```\w*\n([\s\S]*?)```/);
+                if (codeBlockMatch && codeBlockMatch[1]) {
+                    completionText = codeBlockMatch[1].trim();
+                } else {
+                    // Fallback to old strip just in case
+                    completionText = completionText
+                        .replace(/^```\w*\n?/, '')
+                        .replace(/\n?```$/, '')
+                        .trim();
+                }
 
                 // Strip <think>...</think> blocks if the model still outputs them
                 // Also handle unclosed <think> (truncated by max_tokens)
@@ -477,6 +498,10 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
 
                 // Track usage for chat-mode inline completion
                 if (response.usage) {
+                    const pricing = getModelPricing(response.model ?? inlineModel ?? '');
+                    const estimatedCostCny =
+                        ((response.usage.prompt_tokens ?? 0) / 1_000_000) * pricing[0] +
+                        ((response.usage.completion_tokens ?? 0) / 1_000_000) * pricing[1];
                     this.usageTracker.addUsage(
                         inlineProvider || this.aiService.getConfig().provider,
                         inlineModel || this.aiService.getConfig().model || 'unknown',
@@ -484,7 +509,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                             input: response.usage.prompt_tokens ?? 0,
                             output: response.usage.completion_tokens ?? 0,
                             total: response.usage.total_tokens ?? 0,
-                            estimatedCostCny: 0,
+                            estimatedCostCny,
                         }
                     );
                 }
@@ -541,7 +566,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             return result;
         } catch (err) {
             if (err instanceof Error && err.name !== 'AbortError') {
-                console.error('[InlineProvider] Completion error:', err.message);
+                ErrorReporter.warn('InlineProvider', `Completion error using ${config.inlineCompletion.provider || config.provider}`, err);
             }
             return undefined;
         } finally {

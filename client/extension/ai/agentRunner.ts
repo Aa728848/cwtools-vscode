@@ -32,7 +32,7 @@ import { getProvider, isModelVisionCapable } from './providers';
 import { getModelPricing } from './pricing';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
-import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace } from './contextBudget';
+import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace, TOOL_RESULT_BUDGET_BASE } from './contextBudget';
 import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
 
@@ -274,8 +274,7 @@ const COMPACTION_KEEP_LAST_N = 8;
 const MID_LOOP_COMPACTION_INTERVAL = 3;
 // Mid-loop compaction triggers at this fraction of context limit
 const MID_LOOP_COMPACTION_RATIO = 0.95;
-// Tool result budget: max chars per individual tool result (scaled by context limit)
-const TOOL_RESULT_BUDGET_BASE = 15000;
+
 // Minimum tool result budget (even for tiny context windows)
 const TOOL_RESULT_BUDGET_MIN = 3000;
 // Maximum tool result budget (even for huge context windows like 1M)
@@ -456,6 +455,31 @@ export class AgentRunner {
             );
         } catch {
             // Non-critical — silently ignore checkpoint failures
+        }
+    }
+
+    /**
+     * Load a previously saved checkpoint for UI display purposes.
+     * Returns null if no checkpoint exists or it is invalid.
+     * Note: this does NOT restore agent state — checkpoints are lossy
+     * (only 3 recent assistant message summaries, 500 chars each).
+     */
+    async loadCheckpoint(topicId: string): Promise<import('./types').AgentCheckpoint | null> {
+        try {
+            const fs = await import('fs');
+            const pathModule = await import('path');
+            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!wsRoot) return null;
+
+            const checkpointPath = pathModule.join(wsRoot, '.cwtools-ai', topicId, 'checkpoint.json');
+            if (!fs.existsSync(checkpointPath)) return null;
+
+            const raw = JSON.parse(fs.readFileSync(checkpointPath, 'utf-8'));
+            if (!raw || raw.version !== 1 || typeof raw.timestamp !== 'number') return null;
+
+            return raw as import('./types').AgentCheckpoint;
+        } catch {
+            return null;
         }
     }
 
@@ -920,9 +944,6 @@ export class AgentRunner {
         let forceStop = false;
         // Track files confirmed-written this session
         const confirmedWrittenFiles = new Set<string>();
-        // Track permanently allowed tool calls
-        const alwaysAllowedTools = new Set<string>();
-
         // Filter tools by mode
         let availableTools: typeof TOOL_DEFINITIONS;
         if (mode === 'plan') {
@@ -1001,10 +1022,9 @@ export class AgentRunner {
             }
 
             const announcedPaths = new Set<string>();
-            const WRITE_TOOLS_PEEK = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate']);
-            
+
             const tryAnnouncePath = (name: string, content: string) => {
-                if (!WRITE_TOOLS_PEEK.has(name)) return;
+                if (!WRITE_TOOLS.has(name)) return;
                 const pathMatch = content.match(/"file(?:Path)?"\s*:\s*"([^"]+)"/);
                 if (pathMatch && pathMatch[1]) {
                     const extractedPath = pathMatch[1];
@@ -1106,8 +1126,7 @@ export class AgentRunner {
                 tokenAccumulator.total += response.usage.total_tokens;
                 tokenAccumulator.estimatedCostCny += inputCost + outputCost;
                 tokenAccumulator.contextWindowTokens = response.usage.prompt_tokens;
-                // Enforce session-wide token budget (propagates through sub-agents via parentAccumulator)
-                this.aiService.reportUsage(tokenAccumulator.total);
+
             }
 
             const choice = response.choices[0];

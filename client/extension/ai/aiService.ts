@@ -14,18 +14,22 @@ import type {
     ChatMessage,
     ToolDefinition,
     AIUserConfig,
-    StreamChunk,
 } from './types';
 import {
     getProvider,
     getEffectiveEndpoint,
     getEffectiveModel,
     toClaudeRequest,
-    fromClaudeResponse,
     fetchOllamaModels,
     BUILTIN_PROVIDERS,
     getModelOutputTokens,
+    getDisableThinkingParams,
 } from './providers';
+
+// ─── Module-level constants ──────────────────────────────────────────────────
+
+/** Providers that reject the `detail` sub-field inside `image_url` objects. */
+const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
 
 // ─── API Key Management ──────────────────────────────────────────────────────
 
@@ -91,17 +95,6 @@ export class AIService {
     /** In-memory model override — avoids writing to workspace config (which triggers LS restart) */
     private modelOverride: string | null = null;
 
-    /** Global budget tracking to prevent runaway multi-agent costs (Currently disabled by user request) */
-    private sessionTokenUsage = 0;
-
-    public resetSessionBudget(): void {
-        this.sessionTokenUsage = 0;
-    }
-
-    public reportUsage(tokens: number): void {
-        this.sessionTokenUsage += tokens;
-        // The hard limit of 100M tokens has been removed globally to allow unlimited conversation sizes
-    }
 
     constructor(private context: vs.ExtensionContext) {
         this.keyManager = new ApiKeyManager(context.secrets);
@@ -270,7 +263,6 @@ export class AIService {
         if (options?.disableThinking) {
             // Data-driven lookup: each provider's disable-thinking params are defined
             // in providers.ts DISABLE_THINKING_PARAMS table instead of inline if-else.
-            const { getDisableThinkingParams } = await import('./providers');
             const thinkingParams = getDisableThinkingParams(model);
             if (thinkingParams) {
                 if (thinkingParams.extraBody) {
@@ -461,118 +453,6 @@ export class AIService {
         }
     }
 
-    /**
-     * Stream a chat completion. Yields partial content tokens.
-     */
-    async *chatCompletionStream(
-        messages: ChatMessage[],
-        options?: {
-            tools?: ToolDefinition[];
-            temperature?: number;
-            maxTokens?: number;
-            providerId?: string;
-            model?: string;
-        }
-    ): AsyncGenerator<StreamChunk | ChatCompletionResponse> {
-        const config = this.getConfig();
-        const providerId = options?.providerId ?? config.provider;
-        const provider = getProvider(providerId);
-
-        // Ollama doesn't require an API key
-        let apiKey = '';
-        if (providerId !== 'ollama') {
-            const key = await this.getKeyForProvider(providerId);
-            if (!key) {
-                throw new Error(`No API key configured for ${provider.name}.`);
-            }
-            apiKey = key;
-        }
-
-        const endpoint = getEffectiveEndpoint(providerId, config.endpoint);
-        const model = options?.model ?? getEffectiveModel(providerId, config.model);
-
-        // If provider doesn't support streaming, fall back to non-streaming
-        if (!provider.supportsStreaming) {
-            const response = await this.chatCompletion(messages, options);
-            yield response;
-            return;
-        }
-
-        const request: ChatCompletionRequest = {
-            model,
-            messages,
-            temperature: options?.temperature ?? 0.3,
-            max_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId),
-            stream: true,
-        };
-
-        // C1 Fix: local controller registered in Set for coordinated cancel()
-        const controller = new AbortController();
-        this.activeControllers.add(controller);
-
-        try {
-            const url = providerId === 'claude'
-                ? `${endpoint}/messages`
-                : `${endpoint}/chat/completions`;
-
-            const headers: Record<string, string> = {
-                'Content-Type': 'application/json',
-            };
-
-            if (providerId === 'claude') {
-                headers['x-api-key'] = apiKey;
-                headers['anthropic-version'] = '2023-06-01';
-            } else {
-                headers['Authorization'] = `Bearer ${apiKey}`;
-            }
-
-            const body = providerId === 'claude'
-                ? JSON.stringify(toClaudeRequest(request))
-                : JSON.stringify(request);
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers,
-                body,
-                signal: controller.signal,
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`AI API error (${response.status}): ${errorText}`);
-            }
-
-            const reader = response.body?.getReader();
-            if (!reader) throw new Error('No response body');
-
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() ?? '';
-
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed || trimmed === 'data: [DONE]') continue;
-                    if (!trimmed.startsWith('data: ')) continue;
-
-                    try {
-                        const data = JSON.parse(trimmed.slice(6));
-                        yield data as StreamChunk;
-                    } catch {
-                        // Skip malformed chunks
-                    }
-                }
-            }
-        } finally {
-            this.activeControllers.delete(controller);
-        }
-    }
 
     // ─── Auth header builder ──────────────────────────────────────────────────
 
@@ -649,7 +529,6 @@ export class AIService {
      */
     private sanitizeRequest(providerId: string, request: ChatCompletionRequest): ChatCompletionRequest {
         // ── Providers that reject image_url.detail ────────────────────────────
-        const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
 
         // ── MiniMax pay-as-you-go: strict message requirements ──────────────
         // Error 2013 causes: multiple system msgs, developer role, tool_choice, parallel_tool_calls
@@ -989,10 +868,16 @@ export class AIService {
                         const deltaType = delta?.type as string;
                         if (deltaType === 'text_delta') {
                             const chunk = (delta?.text as string) ?? '';
-                            textBuf += chunk;
-                            // Emit thinking tokens to caller in real-time
-                            if (chunk && onThinking) onThinking(chunk);
-                            if (chunk && onTextDelta) onTextDelta(chunk);
+                            // Route thinking vs text based on content block type:
+                            // Claude 'thinking' blocks → onThinking (reasoning UI)
+                            // Claude 'text' blocks → onTextDelta (response UI)
+                            if (currentBlockType === 'thinking') {
+                                reasoningBuf += chunk;
+                                if (chunk && onThinking) onThinking(chunk);
+                            } else {
+                                textBuf += chunk;
+                                if (chunk && onTextDelta) onTextDelta(chunk);
+                            }
                         } else if (deltaType === 'input_json_delta') {
                             const idx = (evt.index as number) ?? currentBlockIdx;
                             if (toolBlocks[idx]) {
@@ -1033,6 +918,8 @@ export class AIService {
         const message: ChatMessage & { tool_calls?: typeof toolCalls } = {
             role: 'assistant',
             content: textBuf || null,
+            // Include thinking tokens in the response (matches OpenAI path's reasoning_content)
+            reasoning_content: reasoningBuf || null,
         };
         if (toolCalls && toolCalls.length > 0) message.tool_calls = toolCalls;
 

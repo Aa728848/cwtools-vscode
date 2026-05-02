@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.9] - 2026-05-02
+
+### 🐛 Bug 修复与体验优化 (Bug Fixes & UX Improvements)
+- **[修复] Minimax 模型内联补全被误拦截**：修复了 `minimax-m2` 关键字误伤导致 Minimax 所有模型（包括适合轻量级补全的 `highspeed` 变体）被错误地判定为硬核思考大模型并禁止执行内联补全的拦截漏洞。
+- **[优化] 内联补全的错误诊断体验**：极大地提升了非 FIM 补全时“静默失败”带来的黑盒困扰。现在当遭遇模型空响应或内部异常被主动 `catch` 时，系统在保持 UI （编辑器中央）安静以维护打字心流的同时，将通过左下角状态栏黄色小喇叭图标闪烁警报，并将完整的堆栈或故障模型代号输出进专门的 `Eddy CWTool Code` 输出面板中。
+
+## [1.8.8] - 2026-05-02
+
+### 🛡️ AI 代理可靠性与技术债务修复 (Audit Hardening)
+- **[修复] Claude SSE Thinking Token 路由错误**：修复了流式传输中 `text_delta` 事件同时被分发给内容和思考回调的漏洞。现在系统按 `currentBlockType` 严格区分 thinking 和 text 块，并将 `reasoningBuf` 正确装配进回复响应上下文。
+- **[清理] AI 核心工具流代码净化**：删除了早期旧版本的废弃代码（如 50 余行的 `fromClaudeResponse` 以及基于 AsyncGenerator 的 `chatCompletionStream`），提升了全流式通讯底座的一致性与整洁度。
+- **[优化] 代理资源池配置隔离**：彻底移除了不活跃的占位型计费统计代码 `sessionTokenUsage`/`reportUsage`。将 `STRIP_IMAGE_DETAIL_PROVIDERS` 等变量提升为安全模块级常量，并从单点导入 `TOOL_RESULT_BUDGET_BASE` 避免配置重叠和冲突。
+- **[完善] 上下文预算池单元测试**：全面扩展了 `contextBudget` 等核心 Token 预算管理逻辑的单元覆盖度。新增了针对去重逻辑（dedup）、文件预读以及边界溢出等方面的 13 个专业用例。
+
 ## [1.8.7] - 2026-04-30
 
 ### ✨ 用户体验与性能优化 (UX & Performance)

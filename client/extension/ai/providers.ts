@@ -7,7 +7,8 @@
  *   GLM (Zhipu), Qwen (Tongyi), MiMo (Xiaomi), Ollama, Custom
  */
 
-import type { AIProviderConfig, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ContentPart } from './types';
+import type { AIProviderConfig, ChatCompletionRequest, ContentPart } from './types';
+import { contentToString } from './types';
 
 // ─── Built-in Provider Definitions ────────────────────────────────────────────
 
@@ -580,7 +581,6 @@ export const ALWAYS_THINKING_PREFIXES: string[] = [
     'o1', 'o3', 'o4-mini',
     'glm-z1', 'GLM-Z1',
     'gemini-2.5-pro', 'gemini-3.1-pro',
-    'minimax-m2',
     'QwQ', 'qwq',
     'Thinking', 'thinking',
 ];
@@ -1087,20 +1087,9 @@ export function getDisableThinkingParams(model: string): DisableThinkingResult |
  * Claude uses a different structure for system prompts, tools, and responses.
  */
 export function toClaudeRequest(request: ChatCompletionRequest): Record<string, unknown> {
-    // L5 Fix: content may be string | ContentPart[] | null — use helper to avoid
-    // .join() on an array (which produces "[object Object]" for ContentPart items).
-    const contentToStr = (c: string | ContentPart[] | null | undefined): string => {
-        if (!c) return '';
-        if (typeof c === 'string') return c;
-        return (c as ContentPart[])
-            .filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text')
-            .map(p => p.text)
-            .join('');
-    };
-
     // Extract system message
     const systemMessages = request.messages.filter(m => m.role === 'system');
-    const systemPrompt = systemMessages.map(m => contentToStr(m.content)).join('\n\n');
+    const systemPrompt = systemMessages.map(m => contentToString(m.content)).join('\n\n');
 
     // Convert non-system messages
     const claudeMessages: Array<Record<string, unknown>> = [];
@@ -1203,59 +1192,3 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
     return claudeRequest;
 }
 
-/**
- * Converts a Claude Messages API response to OpenAI-compatible format.
- */
-export function fromClaudeResponse(claudeResp: Record<string, unknown>): ChatCompletionResponse {
-    const content = claudeResp.content as Array<Record<string, unknown>> ?? [];
-
-    let textContent = '';
-    const toolCalls: ChatMessage['tool_calls'] = [];
-
-    for (const block of content) {
-        if (block.type === 'text') {
-            textContent += (block.text as string) ?? '';
-        } else if (block.type === 'tool_use') {
-            toolCalls.push({
-                id: block.id as string,
-                type: 'function',
-                function: {
-                    name: block.name as string,
-                    arguments: JSON.stringify(block.input),
-                },
-            });
-        }
-    }
-
-    const stopReason = claudeResp.stop_reason as string;
-    let finishReason: 'stop' | 'tool_calls' | 'length' = 'stop';
-    if (stopReason === 'tool_use') finishReason = 'tool_calls';
-    else if (stopReason === 'max_tokens') finishReason = 'length';
-
-    const message: ChatMessage = {
-        role: 'assistant',
-        content: textContent || null,
-    };
-    if (toolCalls.length > 0) {
-        message.tool_calls = toolCalls;
-    }
-
-    const usage = claudeResp.usage as Record<string, number> | undefined;
-
-    return {
-        id: (claudeResp.id as string) ?? '',
-        object: 'chat.completion',
-        created: Math.floor(Date.now() / 1000),
-        model: (claudeResp.model as string) ?? '',
-        choices: [{
-            index: 0,
-            message,
-            finish_reason: finishReason,
-        }],
-        usage: usage ? {
-            prompt_tokens: usage.input_tokens ?? 0,
-            completion_tokens: usage.output_tokens ?? 0,
-            total_tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
-        } : undefined,
-    };
-}

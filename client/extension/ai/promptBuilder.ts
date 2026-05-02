@@ -474,18 +474,7 @@ You are a script reviewer. Your ONLY job is to validate and trace execution flow
 ${gameKnowledge}`;
 }
 
-// ─── Inline Completion Prompt ─────────────────────────────────────────────────
 
-const INLINE_SYSTEM_PROMPT = `You are a PDXScript code completion engine. Generate ONLY the next 1-3 lines of code that logically follow from the cursor position. No explanations. Output raw PDXScript.
-
-Rules:
-- Booleans: yes/no (never true/false)
-- Key = value format
-- Indent with tabs to match context
-- Stay within the current scope
-- NEVER repeat text that already exists before the cursor (the line prefix is provided)
-- Output ONLY the new text to insert at the cursor position
-`;
 
 // ─── Model-specific instruction supplements ───────────────────────────────────
 
@@ -717,39 +706,6 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         return OPENAI_SUPPLEMENT;
     }
 
-    /**
-     * Build a lightweight system prompt for inline completion.
-     * Injects slim project hints (namespaces, key IDs) for better completion accuracy.
-     */
-    buildInlineSystemPrompt(): string {
-        const hints = this.getInlineProjectHints();
-        return INLINE_SYSTEM_PROMPT + (hints ? `\n${hints}` : '');
-    }
-
-    /**
-     * Extract lightweight project hints for inline completion.
-     * Only namespaces + top-5 frequently used IDs, kept under ~200 chars.
-     */
-    private getInlineProjectHints(): string {
-        const parsed = this.parseProjectRules();
-        if (!parsed) return '';
-        const parts: string[] = [];
-        if (parsed.namespaces?.length) {
-            parts.push(`Project namespaces: ${parsed.namespaces.join(', ')}`);
-        }
-        // Extract a few key identifiers for completion hints
-        if (parsed.knownIdentifiers) {
-            const ids = (parsed.knownIdentifiers.match(/`([^`]+)`/g) || [])
-                .map((s: string) => s.replace(/`/g, ''))
-                .filter((s: string) => s.length > 3 && !s.includes('/') && !s.includes('\\'))
-                .slice(0, 8);
-            if (ids.length > 0) {
-                parts.push(`Known IDs: ${ids.join(', ')}`);
-            }
-        }
-        if (parts.length === 0) return '';
-        return `Project hints: ${parts.join(' | ')}`;
-    }
 
     /**
      * Build a specialized compaction system prompt for context summarization.
@@ -925,78 +881,7 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         return null; // No meaningful block found
     }
 
-    /**
-     * Build a prompt for inline completion (lightweight, no tool use).
-     */
-    buildInlinePrompt(options: {
-        fileContent: string;
-        cursorLine: number;
-        cursorColumn: number;
-        filePath: string;
-        lspSuggestions?: string[];
-    }): ChatMessage[] {
-        const lines = options.fileContent.split('\n');
-        const startLine = Math.max(0, options.cursorLine - 15);
-        const endLine = options.cursorLine;
 
-        // Split cursor line into prefix (before cursor) and suffix (after cursor)
-        const cursorLineText = lines[endLine] ?? '';
-        const linePrefix = cursorLineText.substring(0, options.cursorColumn);
-        const lineSuffix = cursorLineText.substring(options.cursorColumn);
-
-        // Code before cursor line (not including the cursor line itself)
-        const codeBefore = endLine > startLine
-            ? lines.slice(startLine, endLine).join('\n')
-            : '';
-        const linesAfter = lines.slice(endLine + 1, endLine + 6).join('\n');
-
-        // Detect current block context — build a scope chain (e.g. "planet_event.option.trigger")
-        const scopeChain: string[] = [];
-        let braceDepth = 0;
-        for (let i = endLine; i >= 0; i--) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            const line = lines[i]!;
-            for (const ch of line) {
-                if (ch === '}') braceDepth++;
-                if (ch === '{') braceDepth--;
-            }
-            if (braceDepth < 0) {
-                const blockMatch = line.match(/^\s*([\w][\w.]*)\s*=/);
-                if (blockMatch) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    scopeChain.unshift(blockMatch[1]!);
-                }
-                braceDepth = 0;  // Continue scanning for outer blocks
-            }
-        }
-        const blockContext = scopeChain.length > 0
-            ? `Current scope: ${scopeChain.join('.')}`
-            : '';
-
-        const lspHints = options.lspSuggestions && options.lspSuggestions.length > 0
-            ? `\nVALID IDENTIFIERS (from Language Server):\n${options.lspSuggestions.join(' | ')}\nYou MUST choose from these identifiers if applicable to avoid hallucination.`
-            : '';
-
-        const isOnlyWhitespace = linePrefix.trim().length === 0;
-
-        const prompt = [
-            `File: ${path.basename(options.filePath)}`,
-            blockContext,
-            codeBefore ? `\nCode before cursor:\n${codeBefore}` : '',
-            isOnlyWhitespace 
-                ? `\n[CURSOR IS HERE — on a new line with ${linePrefix.length} indentation characters. Generate the next logical line(s) of code.]`
-                : `\nCursor line prefix (already typed): "${linePrefix}"\n[CURSOR HERE — continue from the prefix above. Do NOT repeat the prefix.]`,
-            lineSuffix.trim() ? `Cursor line suffix (already exists): "${lineSuffix}"` : '',
-            linesAfter ? `\nCode after cursor:\n${linesAfter}` : '',
-            lspHints,
-            `\nCRITICAL MANDATE: You MUST output at least one line of valid PDXScript code. Do NOT output an empty response. You may use markdown code blocks if necessary.`
-        ].filter(Boolean).join('\n');
-
-        return [
-            { role: 'system', content: INLINE_SYSTEM_PROMPT },
-            { role: 'user', content: prompt },
-        ];
-    }
 
     /**
      * Build a validation error context message for retry.

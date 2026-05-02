@@ -2533,15 +2533,25 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
 
         function updateInlineProviderSelect() {
-            const isFimChecked = (document.getElementById('inlineFimMode') as HTMLInputElement | null)?.checked ?? false;
             const currentPid = inlineSel.value;
-            const filteredProviders = isFimChecked
-                ? providers.filter((p: any) => p.supportsFIM)
-                : providers;
-            inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + filteredProviders.map((p: any) => '<option value="' + p.id + '"' + (p.id === currentPid ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
-            // If previously selected provider is no longer in list, reset
-            if (isFimChecked && currentPid && !filteredProviders.find((p: any) => p.id === currentPid)) {
-                inlineSel.value = '';
+            // Only FIM-capable providers can be used for inline completion
+            const filteredProviders = providers.filter((p: any) => p.supportsFIM);
+            
+            // Can we allow "Same as chat"? Only if the chat provider supports FIM.
+            const chatProviderDef = providers.find((p: any) => p.id === current.provider);
+            const chatSupportsFIM = chatProviderDef ? chatProviderDef.supportsFIM : false;
+            
+            let html = '';
+            if (chatSupportsFIM) {
+                html += '<option value="">- 与对话相同 -</option>';
+            }
+            html += filteredProviders.map((p: any) => '<option value="' + p.id + '"' + (p.id === currentPid ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+            
+            inlineSel.innerHTML = html;
+
+            // If the current selection is invalid (e.g., "Same as chat" but chat doesn't support FIM, or the provider was removed), auto-select a valid one.
+            if ((currentPid === '' && !chatSupportsFIM) || (currentPid !== '' && !filteredProviders.find((p: any) => p.id === currentPid))) {
+                inlineSel.value = filteredProviders.length > 0 ? filteredProviders[0].id : '';
             }
         }
 
@@ -2551,19 +2561,25 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             // Filter out thinking/reasoning models — they can't do inline completion
             ms = ms.filter((m: string) => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
 
-            // Filter out non-FIM models if FIM mode is enabled
-            const isFimNode = document.getElementById('inlineFimMode') as HTMLInputElement | null;
-            if (isFimNode && isFimNode.checked && p2) {
-                const fimCapableModels = {
-                    'deepseek-v4-pro': true, 'deepseek-v4-flash': true, 'deepseek-coder': true,
-                    'qwen2.5-coder': true, 'codellama': true, 'starcoder': true,
-                    'qwen': false, 'gpt-': false, 'claude-': false
-                };
+            // Always filter out non-FIM models since fallback Chat Mode is removed
+            if (p2) {
+                const fimRules = [
+                    { key: 'deepseek-v4-pro', capable: true },
+                    { key: 'deepseek-v4-flash', capable: true },
+                    { key: 'deepseek-coder', capable: true },
+                    { key: 'qwen2.5-coder', capable: true },
+                    { key: 'codellama', capable: true },
+                    { key: 'starcoder', capable: true },
+                    { key: 'qwen', capable: false }, // Catch-all for non-coder qwen
+                    { key: 'gpt-', capable: false },
+                    { key: 'claude-', capable: false },
+                    { key: 'gemini-', capable: false }
+                ];
                 ms = ms.filter((m: string) => {
                     if (!m) return p2.supportsFIM;
                     const lower = m.toLowerCase();
-                    for (const [key, capable] of Object.entries(fimCapableModels)) {
-                        if (lower.includes(key.toLowerCase())) return capable;
+                    for (const rule of fimRules) {
+                        if (lower.includes(rule.key)) return rule.capable;
                     }
                     return p2.supportsFIM;
                 });
@@ -2575,14 +2591,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
         }
         const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement;
-        const fimModeSel = document.getElementById('inlineFimMode') as HTMLInputElement | null;
-        if (fimModeSel) {
-            fimModeSel.checked = current.inlineCompletion?.fimMode ?? false;
-            fimModeSel.onchange = () => {
-                updateInlineProviderSelect();
-                updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
-            };
-        }
+
         updateInlineProviderSelect();
         updateInlineModelSelect(current.inlineCompletion?.provider, current.inlineCompletion?.model, ollamaModels);
         inlineProviderSel.onchange = () => updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
@@ -2842,7 +2851,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     endpoint: (document.getElementById('inlineEndpoint') as HTMLInputElement).value.trim(),
                     debounceMs: parseInt((document.getElementById('inlineDebounce') as HTMLInputElement).value) || 500,
                     overlapStripping: (document.getElementById('inlineOverlapStripping') as HTMLInputElement | null)?.checked ?? true,
-                    fimMode: (document.getElementById('inlineFimMode') as HTMLInputElement | null)?.checked ?? false,
                 },
                 mcp: { servers: mcpServers }
             }

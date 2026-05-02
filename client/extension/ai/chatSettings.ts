@@ -65,7 +65,6 @@ export class ChatSettingsManager {
                 endpoint: config.inlineCompletion.endpoint,
                 debounceMs: config.inlineCompletion.debounceMs,
                 overlapStripping: config.inlineCompletion.overlapStripping,
-                fimMode: config.inlineCompletion.fimMode,
             },
             mcp: {
                 servers: config.mcp.servers
@@ -171,7 +170,6 @@ export class ChatSettingsManager {
             await cfg.update('inlineCompletion.endpoint', settings.inlineCompletion.endpoint, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.fimMode', settings.inlineCompletion.fimMode, vs.ConfigurationTarget.Global);
         }
 
         if (settings.mcp?.servers) {

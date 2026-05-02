@@ -169,11 +169,6 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <span class="settings-toggle-label">启用 AI 补全</span>
                     <label class="toggle-switch"><input type="checkbox" id="inlineEnabled"><span class="toggle-track"></span></label>
                 </div>
-                <div class="settings-toggle-row" style="margin-top:12px;">
-                    <span class="settings-toggle-label" style="display:block;">启用 FIM 模式 (需选择支持的模型)</span>
-                    <label class="toggle-switch"><input type="checkbox" id="inlineFimMode"><span class="toggle-track"></span></label>
-                    <div class="settings-hint" style="margin-top:4px;">使用针对补全优化的高速 Endpoint。启用后将在列表内过滤不支持的模型。</div>
-                </div>
                 <div class="settings-group">
                     <label class="settings-label">Provider</label>
                     <select class="settings-select" id="inlineProvider"><option value="">- 与对话相同 -</option></select>

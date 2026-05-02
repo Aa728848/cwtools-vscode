@@ -107,7 +107,6 @@ export interface AIUserConfig {
         model: string;
         endpoint: string;
         overlapStripping: boolean;
-        fimMode: boolean;
     };
     mcp: {
         servers: MCPServerConfig[];
@@ -904,7 +903,6 @@ export interface PanelSettings {
         endpoint: string;
         debounceMs: number;
         overlapStripping: boolean;
-        fimMode: boolean;
     };
     mcp?: {
         servers: MCPServerConfig[];

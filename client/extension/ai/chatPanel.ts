@@ -125,7 +125,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Handle messages from WebView
         // Fix #2: capture disposables so they are released with the view
         webviewView.webview.onDidReceiveMessage(
-            (msg: WebViewMessage) => { if (msg?.type) void this.handleWebViewMessage(msg); },
+            async (msg: WebViewMessage) => { 
+                if (!msg?.type) return;
+                try {
+                    await this.handleWebViewMessage(msg);
+                } catch (e) {
+                    console.error(`[AI] Error handling webview message '${msg.type}':`, e);
+                }
+            },
             this,
             this._viewDisposables
         );

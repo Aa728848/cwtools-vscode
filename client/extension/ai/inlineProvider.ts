@@ -29,38 +29,9 @@ import { ErrorReporter } from './errorReporter';
 // Fix #4: Use shared ALWAYS_THINKING_PREFIXES from providers.ts (single source of truth)
 const THINKING_MODEL_PREFIXES = ALWAYS_THINKING_PREFIXES;
 
-/**
- * Models that support thinking but can disable it via API parameters.
- * For these, we pass disableThinking=true to aiService.chatCompletion().
- *
- * API methods per provider:
- *   - Claude: don't send `thinking` param (default = no thinking)
- *   - Qwen3+: `enable_thinking: false` in extra_body, or `/no_think` prompt
- *   - Gemini 2.5 Flash: `thinking_budget: 0`
- *   - Gemini 3 Flash/Lite: `thinking_level: "minimal"`
- *   - GLM thinking models: `thinking: {type: "disabled"}`
- */
-const THINKING_DISABLEABLE_PREFIXES: string[] = [
-    'claude-opus',            // Claude Opus — don't send thinking param
-    'claude-sonnet',          // Claude Sonnet 4.6 — thinking.type="disabled"
-    'claude-haiku',           // Claude Haiku 4.5 — no thinking by default
-    'gemini-2.5-flash',       // Gemini 2.5 Flash — thinkingBudget=0
-    'gemini-3-flash',         // Gemini 3 Flash — thinkingLevel=minimal
-    'gemini-3.1-flash',       // Gemini 3.1 Flash Lite — thinkingLevel=minimal
-    'qwen3',                  // Qwen3/3.5/3.6+ — enable_thinking=false
-    'qwen-max',               // Qwen Max — enable_thinking=false
-    'qwen-turbo',             // Qwen Turbo — non-thinking, but safe to pass
-    'glm-4.1v-thinking',      // GLM thinking — thinking.type=disabled
-];
-
 /** Returns true if the model always thinks and CANNOT disable thinking */
 function isAlwaysThinkingModel(model: string): boolean {
     const lower = model.toLowerCase();
-
-    // If it natively supports disabling, it's not "always" thinking
-    if (isDisableableThinkingModel(model)) {
-        return false;
-    }
 
     // Dynamic checks for fetched models
     if (lower.includes('-r1') || lower.includes('reasoner') || lower.includes('think') || lower.match(/^o[13]/)) {
@@ -70,11 +41,7 @@ function isAlwaysThinkingModel(model: string): boolean {
     return THINKING_MODEL_PREFIXES.some(prefix => lower.startsWith(prefix));
 }
 
-/** Returns true if the model supports thinking but CAN disable it */
-function isDisableableThinkingModel(model: string): boolean {
-    const lower = model.toLowerCase();
-    return THINKING_DISABLEABLE_PREFIXES.some(prefix => lower.startsWith(prefix));
-}
+
 
 // ─── LRU Cache ───────────────────────────────────────────────────────────────
 
@@ -283,7 +250,6 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         token: vs.CancellationToken
     ): Promise<vs.InlineCompletionItem[] | undefined> {
         const config = this.aiService.getConfig();
-        const fimMode = config.inlineCompletion.fimMode;
 
         // ── Build cache key from context ──
         const linePrefix = document.lineAt(position.line).text.substring(0, position.character).trim();
@@ -291,54 +257,21 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         const cached = this.completionCache.get(cacheKey, document.version);
         if (cached) return cached;
 
-        // ── Fetch LSP suggestions with 150ms timeout (Chat mode only) ──
-        // FIM models infer context themselves; skip to avoid unnecessary latency.
-        let lspSuggestions: string[] = [];
-        if (!fimMode) {
-            try {
-                const lspPromise = vs.commands.executeCommand<vs.CompletionList>(
-                    'vscode.executeCompletionItemProvider',
-                    document.uri,
-                    position
-                );
-                const timeoutPromise = new Promise<null>(r => setTimeout(() => r(null), 150));
-                const completions = await Promise.race([lspPromise, timeoutPromise]);
-
-                if (completions && 'items' in completions && completions.items) {
-                    const invalidKinds = [
-                        vs.CompletionItemKind.Snippet,
-                        vs.CompletionItemKind.Keyword
-                    ];
-                    lspSuggestions = completions.items
-                        .filter(item => item.kind === undefined || !invalidKinds.includes(item.kind))
-                        .map(item => typeof item.label === 'string' ? item.label : item.label.label)
-                        .slice(0, 20);
-                }
-            } catch {
-                // LSP timeout or error — continue with empty suggestions
-            }
-
-            if (token.isCancellationRequested) return undefined;
-
-            // ── Local fast-path: simple kv pattern with ≤5 clear LSP results ──
-            // Pattern: `key = ` or `key =` at cursor — if LSP has few clear results, use directly
-            if (lspSuggestions.length > 0 && lspSuggestions.length <= 5) {
-                const kvMatch = linePrefix.match(/^\s*[\w.]+\s*=\s*$/);
-                if (kvMatch) {
-                    const item = new vs.InlineCompletionItem(
-                        lspSuggestions[0] ?? '',
-                        new vs.Range(position, position)
-                    );
-                    const result = [item];
-                    this.completionCache.set(cacheKey, result, document.version);
-                    return result;
-                }
-            }
-        }
-
         // Determine provider and model for inline completion
         const inlineProvider = config.inlineCompletion.provider || config.provider;
         const inlineModel = config.inlineCompletion.model || undefined;
+
+        // Determine if the selected provider natively supports FIM
+        let fimMode = false;
+        try {
+            const { BUILTIN_PROVIDERS } = await import('./providers');
+            const providerDef = BUILTIN_PROVIDERS[inlineProvider];
+            if (providerDef && providerDef.supportsFIM) {
+                fimMode = true;
+            }
+        } catch {
+            // Ignore dynamic import failure
+        }
 
         // ── Cancel previous in-flight request ──
         if (this.currentAbortController) {
@@ -385,135 +318,46 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 }
             }
 
-            if (fimMode) {
-                // ── FIM Mode ──
-                const totalLines = document.lineCount;
-                const contextStart = Math.max(0, position.line - 30);
-                const contextEnd = Math.min(totalLines, position.line + 31);
-                
-                // Prefix: from contextStart to cursor
-                let prefixDoc = document.getText(new vs.Range(
-                    new vs.Position(contextStart, 0),
-                    position
-                ));
-                if (mcpContextStr) {
-                    prefixDoc = `<mcp_context>\n${mcpContextStr}\n</mcp_context>\n\n${prefixDoc}`;
-                }
-                
-                // Suffix: from cursor to contextEnd
-                const suffixDoc = document.getText(new vs.Range(
-                    position,
-                    new vs.Position(contextEnd, 0)
-                ));
-
-                const contentStr = await this.aiService.fimCompletion(prefixDoc, suffixDoc, {
-                    providerId: inlineProvider,
-                    model: inlineModel,
-                    temperature: 0.2,
-                    maxTokens: 200,
-                    abortSignal: abortController.signal
-                });
-
-                if (token.isCancellationRequested || abortController.signal.aborted) return undefined;
-
-                if (!contentStr.trim()) {
-                    ErrorReporter.warn('InlineProvider', `Model ${inlineModel} returned empty FIM completion`);
-                }
-
-                completionText = contentStr.trim();
-                
-            } else {
-                // ── Chat Mode (Legacy) ──
-                // ── Extract limited context (±30 lines around cursor) ──
-                const totalLines = document.lineCount;
-                const contextStart = Math.max(0, position.line - 30);
-                const contextEnd = Math.min(totalLines, position.line + 31);
-                const contextLines: string[] = [];
-                for (let i = contextStart; i < contextEnd; i++) {
-                    contextLines.push(document.lineAt(i).text);
-                }
-                const contextContent = contextLines.join('\n');
-
-                // Build the lightweight inline prompt with limited context
-                const messages = this.promptBuilder.buildInlinePrompt({
-                    fileContent: contextContent,
-                    cursorLine: position.line - contextStart,  // Adjust to relative line
-                    cursorColumn: position.character,
-                    filePath: document.uri.fsPath,
-                    lspSuggestions: lspSuggestions.length > 0 ? lspSuggestions : undefined
-                });
-
-                if (mcpContextStr) {
-                    // Prepend MCP context as a system message
-                    messages.unshift({ role: 'system', content: `Background context from MCP servers:\n${mcpContextStr}` });
-                }
-
-                // Determine effective model for thinking-disable check
-                const effectiveModel = inlineModel || getEffectiveModel(inlineProvider, undefined);
-                const disableThinking = isDisableableThinkingModel(effectiveModel);
-
-                const response = await this.aiService.chatCompletion(messages, {
-                    providerId: inlineProvider,
-                    model: inlineModel,
-                    temperature: disableThinking ? 0 : 0.2,
-                    maxTokens: 2048,  // Increased from 200 to prevent MiniMax API truncation bugs
-                    // Pass abort signal so cancellation immediately releases the connection
-                    abortSignal: abortController.signal,
-                    // Disable thinking for models that support it
-                    disableThinking,
-                } as Parameters<typeof this.aiService.chatCompletion>[1]);
-
-                if (token.isCancellationRequested || abortController.signal.aborted) return undefined;
-
-                const content = response.choices[0]?.message?.content;
-                const contentStr = typeof content === 'string' ? content : '';
-
-                if (!contentStr || contentStr.trim() === '') {
-                    const rawStrRep = JSON.stringify(contentStr);
-                    const fullResp = JSON.stringify(response);
-                    ErrorReporter.warn('InlineProvider', `Model ${inlineModel} returned empty completion. Raw: ${rawStrRep}. Response Dump: ${fullResp}`);
-                }
-
-                // Clean up the response
-                completionText = contentStr.trim();
-
-                // Robustly extract code from markdown fences if the model included conversational text
-                const codeBlockMatch = completionText.match(/```\w*\n([\s\S]*?)```/);
-                if (codeBlockMatch && codeBlockMatch[1]) {
-                    completionText = codeBlockMatch[1].trim();
-                } else {
-                    // Fallback to old strip just in case
-                    completionText = completionText
-                        .replace(/^```\w*\n?/, '')
-                        .replace(/\n?```$/, '')
-                        .trim();
-                }
-
-                // Strip <think>...</think> blocks if the model still outputs them
-                // Also handle unclosed <think> (truncated by max_tokens)
-                completionText = completionText
-                    .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
-                    .replace(/<think>[\s\S]*$/g, '')  // unclosed think at end
-                    .trim();
-
-                // Track usage for chat-mode inline completion
-                if (response.usage) {
-                    const pricing = getModelPricing(response.model ?? inlineModel ?? '');
-                    const estimatedCostCny =
-                        ((response.usage.prompt_tokens ?? 0) / 1_000_000) * pricing[0] +
-                        ((response.usage.completion_tokens ?? 0) / 1_000_000) * pricing[1];
-                    this.usageTracker.addUsage(
-                        inlineProvider || this.aiService.getConfig().provider,
-                        inlineModel || this.aiService.getConfig().model || 'unknown',
-                        {
-                            input: response.usage.prompt_tokens ?? 0,
-                            output: response.usage.completion_tokens ?? 0,
-                            total: response.usage.total_tokens ?? 0,
-                            estimatedCostCny,
-                        }
-                    );
-                }
+            if (!fimMode) {
+                // If model doesn't support FIM, we no longer fallback to slow Chat Mode.
+                return undefined;
             }
+
+            // ── FIM Mode ──
+            const totalLines = document.lineCount;
+            const contextStart = Math.max(0, position.line - 30);
+            const contextEnd = Math.min(totalLines, position.line + 31);
+            
+            // Prefix: from contextStart to cursor
+            let prefixDoc = document.getText(new vs.Range(
+                new vs.Position(contextStart, 0),
+                position
+            ));
+            if (mcpContextStr) {
+                prefixDoc = `<mcp_context>\n${mcpContextStr}\n</mcp_context>\n\n${prefixDoc}`;
+            }
+            
+            // Suffix: from cursor to contextEnd
+            const suffixDoc = document.getText(new vs.Range(
+                position,
+                new vs.Position(contextEnd, 0)
+            ));
+
+            const contentStr = await this.aiService.fimCompletion(prefixDoc, suffixDoc, {
+                providerId: inlineProvider,
+                model: inlineModel,
+                temperature: 0.2,
+                maxTokens: 200,
+                abortSignal: abortController.signal
+            });
+
+            if (token.isCancellationRequested || abortController.signal.aborted) return undefined;
+
+            if (!contentStr.trim()) {
+                ErrorReporter.warn('InlineProvider', `Model ${inlineModel} returned empty FIM completion`);
+            }
+
+            completionText = contentStr.trim();
 
             if (!completionText || completionText.length === 0) return undefined;
 

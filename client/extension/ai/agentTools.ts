@@ -97,7 +97,7 @@ export class AgentToolExecutor {
     public agentRunnerRef?: {
         runSubAgent(
             prompt: string,
-            mode: 'explore' | 'general' | 'build' | 'review' | 'gui_expert' | 'script_reviewer',
+            mode: import('./types').AgentMode,
             parentOptions?: import('./agentRunner').AgentRunnerOptions,
             onStep?: (step: import('./types').AgentStep) => void,
             parentAccumulator?: import('./types').TokenUsage,

@@ -575,12 +575,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (fileBadges) fileBadges.innerHTML = '';
     }
 
-    const MODE_META = {
+    const MODE_META: Record<string, { label: string | null; bodyClass: string }> = {
         build: { label: null, bodyClass: 'build-mode' },
         plan: { label: '计划模式 — 只读分析，不修改文件', bodyClass: 'plan-mode' },
         explore: { label: '分析模式 — 探索代码库结构', bodyClass: 'explore-mode' },
         general: { label: '问答模式 — 通用问答', bodyClass: 'general-mode' },
         review: { label: '审查模式 — 代码审查', bodyClass: 'review-mode' },
+        loc_translator: { label: '翻译模式 — 本地化文件翻译（子代理专用）', bodyClass: 'build-mode' },
+        loc_writer: { label: '写作模式 — 本地化内容创作（子代理专用）', bodyClass: 'build-mode' },
     };
 
     /**

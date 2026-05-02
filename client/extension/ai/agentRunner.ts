@@ -321,6 +321,8 @@ export interface AgentRunnerOptions {
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
     /** If provided, file mutations are written to this memory overlay instead of disk. */
     vfsOverlay?: Map<string, string>;
+    /** Topic ID for checkpoint persistence — threaded from run() context */
+    topicId?: string;
 }
 
 /** Tools allowed in Plan mode (read-only, no validate_code / write operations) */
@@ -356,6 +358,23 @@ const REVIEW_MODE_TOOLS: AgentToolName[] = [
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'web_fetch', 'search_web', 'glob_files', 'codesearch',
+];
+
+/** Loc Translator mode: read localisation files, write translated output */
+const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
+    'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch',
+    'list_directory', 'glob_files', 'search_mod_files', 'workspace_symbols',
+    'document_symbols', 'get_file_context', 'get_diagnostics',
+    'todo_write', 'web_fetch', 'search_web', 'codesearch',
+];
+
+/** Loc Writer mode: create new localisation entries from scratch */
+const LOC_WRITER_TOOLS: AgentToolName[] = [
+    'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch',
+    'list_directory', 'glob_files', 'search_mod_files', 'workspace_symbols',
+    'document_symbols', 'get_file_context', 'get_diagnostics',
+    'query_types', 'query_rules', 'query_references',
+    'todo_write', 'web_fetch', 'search_web', 'codesearch',
 ];
 
 
@@ -631,6 +650,11 @@ export class AgentRunner {
 
 
         try {
+            // Wire topicId from context into options for checkpoint persistence
+            if (context.topicId) {
+                options = { ...options, topicId: context.topicId };
+            }
+
             // Phase 1: Agent reasoning loop (with tool calls)
             const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator);
 
@@ -954,6 +978,10 @@ export class AgentRunner {
             availableTools = TOOL_DEFINITIONS.filter(t => REVIEW_MODE_TOOLS.includes(t.function.name as AgentToolName));
         } else if (mode === 'general') {
             availableTools = TOOL_DEFINITIONS.filter(t => !GENERAL_EXCLUDED_TOOLS.includes(t.function.name as AgentToolName));
+        } else if (mode === 'loc_translator') {
+            availableTools = TOOL_DEFINITIONS.filter(t => LOC_TRANSLATOR_TOOLS.includes(t.function.name as AgentToolName));
+        } else if (mode === 'loc_writer') {
+            availableTools = TOOL_DEFINITIONS.filter(t => LOC_WRITER_TOOLS.includes(t.function.name as AgentToolName));
         } else {
             availableTools = TOOL_DEFINITIONS;
         }
@@ -1002,7 +1030,7 @@ export class AgentRunner {
                     iteration,
                     messages,
                     Array.from(confirmedWrittenFiles),
-                    undefined // topicId not available here — wired from run()
+                    options?.topicId
                 );
             }
 
@@ -1781,7 +1809,7 @@ export class AgentRunner {
      */
     async runSubAgent(
         prompt: string,
-        mode: 'explore' | 'general' | 'build',
+        mode: AgentMode,
         parentOptions?: AgentRunnerOptions,
         onStep?: (step: AgentStep) => void,
         parentAccumulator?: TokenUsage,

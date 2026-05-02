@@ -18,11 +18,12 @@ import * as vs from 'vscode';
 import type { ChatCompletionResponse } from './types';
 import { AIService } from './aiService';
 import { PromptBuilder } from './promptBuilder';
-import { getProvider, getEffectiveModel, ALWAYS_THINKING_PREFIXES } from './providers';
+import { getProvider, getEffectiveModel, ALWAYS_THINKING_PREFIXES, BUILTIN_PROVIDERS } from './providers';
 import { MCPClient } from './mcpClient';
 import { UsageTracker } from './usageTracker';
 import { getModelPricing } from './pricing';
 import { ErrorReporter } from './errorReporter';
+import { SOURCE } from './messages';
 
 // ─── Thinking-model detection ────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             if (!this.mcpClients.has(serverConf.name)) {
                 const client = new MCPClient(serverConf);
                 client.connect().catch((e) => {
-                    console.error(`[MCP] Failed to connect to ${serverConf.name}`, e);
+                    ErrorReporter.warn(SOURCE.INLINE_PROVIDER, `MCP: Failed to connect to ${serverConf.name}`, e);
                 });
                 this.mcpClients.set(serverConf.name, client);
             }
@@ -262,16 +263,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         const inlineModel = config.inlineCompletion.model || undefined;
 
         // Determine if the selected provider natively supports FIM
-        let fimMode = false;
-        try {
-            const { BUILTIN_PROVIDERS } = await import('./providers');
-            const providerDef = BUILTIN_PROVIDERS[inlineProvider];
-            if (providerDef && providerDef.supportsFIM) {
-                fimMode = true;
-            }
-        } catch {
-            // Ignore dynamic import failure
-        }
+        const fimMode = !!BUILTIN_PROVIDERS[inlineProvider]?.supportsFIM;
 
         // ── Cancel previous in-flight request ──
         if (this.currentAbortController) {

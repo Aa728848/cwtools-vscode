@@ -21,7 +21,6 @@ export type {
     GenerationResult,
     AgentStep,
     AgentMode,
-    AgentModeConfig,
     TodoItem,
     ChatTopic,
     ChatHistoryMessage,

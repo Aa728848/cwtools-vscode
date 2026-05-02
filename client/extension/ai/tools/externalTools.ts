@@ -6,7 +6,7 @@
 import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import type { TodoItem, TodoWriteResult } from '../types';
+import type { AgentMode, TodoItem, TodoWriteResult } from '../types';
 
 // ─── Context type ────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ export interface ExternalToolContext {
     agentRunnerRef?: {
         runSubAgent(
             prompt: string,
-            mode: 'explore' | 'general' | 'build' | 'review' | 'gui_expert' | 'script_reviewer',
+            mode: AgentMode,
             parentOptions?: import('../agentRunner').AgentRunnerOptions,
             onStep?: (step: import('../types').AgentStep) => void,
             parentAccumulator?: import('../types').TokenUsage,
@@ -550,7 +550,7 @@ export class ExternalToolHandler {
 
         try {
             const executeTask = async (task: any, idx: number) => {
-                const mode = (task.subagent_type ?? 'build') as 'explore' | 'general' | 'build' | 'review' | 'gui_expert' | 'script_reviewer';
+                const mode: AgentMode = (task.subagent_type ?? 'build') as AgentMode;
                 this.ctx.onStep?.({
                     type: 'subtask_start',
                     content: `Sub-task ${idx + 1}/${tasksToRun.length}: ${task.description}`,

@@ -41,8 +41,6 @@ let private scriptedParamRegex =
         @"\$([A-Za-z_][A-Za-z0-9_]*)\$",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
-let private TODO () = raise (Exception "TODO")
-
 [<assembly: AssemblyDescription("CWTools language server for PDXScript")>]
 do ()
 
@@ -223,9 +221,6 @@ let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) 
 type Server(client: ILanguageClient) =
     do setupLogger client
     let docs = DocumentStore()
-
-    let notFound (doc: Uri) () : 'Any =
-        raise (Exception $"%s{doc.ToString()} does not exist")
 
     let mutable activeGame = STL
     let mutable isVanillaFolder = false
@@ -712,20 +707,20 @@ type Server(client: ILanguageClient) =
             let mutable needsDeepAnalyse = false
 
             let analyzeTask uri force =
-                new Task(fun () ->
+                async {
                     let mutable nextTime = nextAnalyseTime
 
                     try
                         try
                             let shallowAnalyse = DateTime.Now < nextTime
                             logDiag $"lint force: %b{force}, shallow: %b{shallowAnalyse}"
-                            lint uri (shallowAnalyse && (not force)) false |> Async.RunSynchronously
+                            do! lint uri (shallowAnalyse && (not force)) false
 
                             if not shallowAnalyse then
                                 delayedAnalyze ()
                                 logDiag "lint after delayed"
                                 // Somehow get updated localisation errors after loccache is updated
-                                lint uri true false |> Async.RunSynchronously
+                                do! lint uri true false
                                 nextTime <- DateTime.Now.Add(delayTime)
                                 needsDeepAnalyse <- false
                             else
@@ -733,7 +728,8 @@ type Server(client: ILanguageClient) =
                         with e ->
                             logError $"uri %A{uri.LocalPath} \n exception %A{e}"
                     finally
-                        agent.Post(WorkComplete(nextTime)))
+                        agent.Post(WorkComplete(nextTime))
+                } |> Async.StartAsTask
 
             let analyze (file: VersionedTextDocumentIdentifier) force =
                 //eprintfn "Analyze %s" (file.uri.ToString())
@@ -799,7 +795,7 @@ type Server(client: ILanguageClient) =
 
                         for doc in docs.OpenFiles() do
                             let uri = Uri(doc.FullName)
-                            lint uri true false |> Async.RunSynchronously
+                            do! lint uri true false
 
                         return! loop false state
                     | None, true ->
@@ -1392,10 +1388,7 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.queryStaticModifiers"
                                           "cwtools.ai.queryVariables"
                                           "cwtools.exportTypes"
-                                          "typeGraphInfo"
-                                          "getFileTypes"
-                                          "getDataForFile"
-                                          "getTypesForFile" ] }
+                                          "getFileTypes" ] }
                             inlayHintProvider = true
                             renameProvider = false
                             semanticTokensProvider =
@@ -1698,7 +1691,7 @@ type Server(client: ILanguageClient) =
             |> catchError None
 
         member this.ResolveCompletionItem(p: CompletionItem) =
-            async { return completionResolveItem gameObj p |> Async.RunSynchronously }
+            async { return! completionResolveItem gameObj p }
             |> catchError p
 
         member this.SignatureHelp(p: TextDocumentPositionParams) =
@@ -1835,8 +1828,32 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        // P0 Fix: was TODO() return empty list instead of crashing
-        member this.DocumentHighlight(_: TextDocumentPositionParams) = async { return [] }
+        member this.DocumentHighlight(p: TextDocumentPositionParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let position = PosHelper.fromZ p.position.line p.position.character
+                        let path = getPathFromDoc p.textDocument.uri
+                        let currentUri = p.textDocument.uri
+
+                        let refs =
+                            game.FindAllRefs
+                                position
+                                path
+                                (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
+
+                        match refs with
+                        | Some locations ->
+                            locations
+                            |> List.filter (fun loc -> loc.FileName = currentUri.LocalPath)
+                            |> List.map (fun loc ->
+                                { range = convRangeToLSPRange loc
+                                  kind = DocumentHighlightKind.Read })
+                        | None -> []
+                    | None -> []
+            }
+            |> catchError []
 
         member this.DocumentSymbols(p: DocumentSymbolParams) =
             let symbolKindForType (typeName: string) =
@@ -2188,9 +2205,54 @@ type Server(client: ILanguageClient) =
                         return generatedHints
             }
             |> catchError []
-        // P0 Fix: was TODO() return empty list / identity instead of crashing
-        member this.DocumentLink(_: DocumentLinkParams) = async { return [] }
-        member this.ResolveDocumentLink(link: DocumentLink) = async { return link }
+        member this.DocumentLink(p: DocumentLinkParams) =
+            async {
+                return
+                    match gameObj with
+                    | Some _ ->
+                        let filePath = p.textDocument.uri.LocalPath
+                        let text = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
+                        let workspaceRoot =
+                            workspaceFolders
+                            |> List.tryHead
+                            |> Option.map (fun f -> f.uri.LocalPath)
+                            |> Option.defaultValue ""
+
+                        // Match quoted strings that look like file paths (contain / and common extensions)
+                        let pathRegex =
+                            System.Text.RegularExpressions.Regex(
+                                @"""([^""]+\.(?:dds|tga|png|gfx|gui|txt|yml|asset|sfx))""",
+                                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+
+                        let getLineCol (offset: int) =
+                            let mutable line = 0
+                            let mutable col = 0
+                            for i = 0 to min (offset - 1) (text.Length - 1) do
+                                if text.[i] = '\n' || (text.[i] = '\r' && i + 1 < text.Length && text.[i + 1] = '\n') then
+                                    if text.[i] = '\r' then () // skip \r in \r\n
+                                    else line <- line + 1; col <- 0
+                                else col <- col + 1
+                            (line, col)
+
+                        pathRegex.Matches(text)
+                        |> Seq.cast<System.Text.RegularExpressions.Match>
+                        |> Seq.choose (fun m ->
+                            let relativePath = m.Groups.[1].Value
+                            let fullPath = System.IO.Path.Combine(workspaceRoot, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar))
+                            if System.IO.File.Exists(fullPath) then
+                                let startOffset = m.Groups.[1].Index
+                                let endOffset = startOffset + m.Groups.[1].Length
+                                let (sl, sc) = getLineCol startOffset
+                                let (el, ec) = getLineCol endOffset
+                                Some {
+                                    range = { ``start`` = { line = sl; character = sc }; ``end`` = { line = el; character = ec } }
+                                    target = Some (Uri(fullPath))
+                                }
+                            else None)
+                        |> List.ofSeq
+                    | None -> []
+            }
+            |> catchError []
 
         member this.SemanticTokensFull(p: SemanticTokensParams) =
             // Token type indices (must match legend in capabilities):
@@ -2503,12 +2565,13 @@ type Server(client: ILanguageClient) =
                                     && e.scope <> "embedded")
                                 |> List.map (fun f -> f.filepath)
 
-                            filteredFiles |> List.iter (pretriggerForFile client game docs)
+                            for f in filteredFiles do
+                                do! pretriggerForFile client game docs f
                             None
                         | { command = "pretriggerThisFile"
                             arguments = x :: _ } ->
                             let filename = x.AsString()
-                            pretriggerForFile client game docs filename
+                            do! pretriggerForFile client game docs filename
                             None
                         | { command = "gettech"; arguments = _ } ->
                             match stlGameObj with
@@ -3233,17 +3296,6 @@ type Server(client: ILanguageClient) =
                                                "error", JsonValue.String $"No entity found for file: {filePath}" |]
                             Some result
 
-                        // M8 Fix: previously these were declared as isReadCmd=true in LanguageServer.fs
-                        // but had no implementation they would silently return null.
-                        // Return a structured not-implemented response so callers can detect the gap.
-                        | { command = "typeGraphInfo"; arguments = _ }
-                        | { command = "getFileTypes"; arguments = _ }
-                        | { command = "getDataForFile"; arguments = _ }
-                        | { command = "getTypesForFile"; arguments = _ } ->
-                            Some(
-                                JsonValue.Record
-                                    [| "ok",    JsonValue.Boolean false
-                                       "error", JsonValue.String "Command is declared but not implemented on the server" |])
 
                         | _ -> None
 

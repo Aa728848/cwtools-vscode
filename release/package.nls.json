@@ -78,7 +78,6 @@
   "configuration.cwtools.ai.maxRetries.description": "Maximum validation-retry rounds for generated code",
   "configuration.cwtools.ai.maxContextTokens.description": "Override max context window size (tokens). 0 = use provider default. Useful for Ollama or custom providers.",
   "configuration.cwtools.ai.inlineCompletion.enabled.description": "Enable AI inline code completion",
-  "configuration.cwtools.ai.inlineCompletion.fimMode.description": "Enable FIM (Fill-in-the-Middle) mode for inline completion. Only supports specific FIM-capable models to improve quality and speed.",
   "configuration.cwtools.ai.inlineCompletion.debounceMs.description": "Delay before triggering inline AI completion (ms)",
   "configuration.cwtools.ai.inlineCompletion.overlapStripping.description": "Enable automatic detection and trimming of overlapping suffix code to prevent duplication.",
   "configuration.cwtools.ai.inlineCompletion.provider.description": "Provider for inline completion (leave empty to use main provider)",
@@ -111,5 +110,8 @@
   "commands.cwtools.ai.codeAction.explain": "AI: Explain this CWTools error",
   "commands.cwtools.ai.codeAction.fixAll": "AI: Fix all CWTools errors in file",
   "commands.cwtools.ai.manageIgnoredDiagnostics.title": "AI: Manage Ignored Diagnostics",
-  "configuration.cwtools.ai.ignoredDiagnostics.description": "List of diagnostic keys (e.g. external mod keys) to be completely ignored by the LSP Problems panel and AI Agent. Modifiable via 'Manage Ignored Diagnostics' command."
+  "configuration.cwtools.ai.ignoredDiagnostics.description": "List of diagnostic keys (e.g. external mod keys) to be completely ignored by the LSP Problems panel and AI Agent. Modifiable via 'Manage Ignored Diagnostics' command.",
+  "configuration.cwtools.ai.braveSearchApiKey.description": "Brave Search API key for web_search tool. Get one at https://brave.com/search/api/",
+  "configuration.cwtools.ai.exaApiKey.description": "Exa API key for codesearch tool. Get one at https://exa.ai",
+  "configuration.cwtools.ai.mcp.servers.description": "MCP (Model Context Protocol) server configurations for extending AI tool capabilities."
 }

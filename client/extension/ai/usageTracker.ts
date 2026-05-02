@@ -1,5 +1,6 @@
 import * as vs from 'vscode';
 import { TokenUsage } from './types';
+import { ErrorReporter } from './errorReporter';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -332,7 +333,7 @@ export class UsageTracker {
         const before = data.records.length;
         data.records = data.records.filter(r => r.timestamp >= cutoff);
         if (data.records.length < before) {
-            console.log(`[UsageTracker] Purged ${before - data.records.length} records older than ${AUTO_CLEANUP_DAYS} days`);
+            ErrorReporter.debug('UsageTracker', `Purged ${before - data.records.length} records older than ${AUTO_CLEANUP_DAYS} days`);
         }
     }
 }

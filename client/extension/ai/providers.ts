@@ -8,6 +8,8 @@
  */
 
 import type { AIProviderConfig, ChatCompletionRequest, ContentPart } from './types';
+import { ErrorReporter } from './errorReporter';
+import { SOURCE } from './messages';
 import { contentToString } from './types';
 
 // ─── Built-in Provider Definitions ────────────────────────────────────────────
@@ -782,7 +784,7 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
  * Verified limits (2026-04):
  *   OpenAI GPT-5.4/5.5:   128K output
  *   DeepSeek V4 official:  384K output (1M context)
- *   Claude Opus/Sonnet 4:  8K standard, 300K via Batch API beta
+ *   Claude Opus/Sonnet 4:  16K conservative default (check Anthropic docs for current limits)
  *   Gemini 2.5/3.x:       65K output
  *   GLM-5:                 128K output (200K context)
  *   MiniMax M2.x:          shared 204K budget (input+output)
@@ -807,9 +809,10 @@ export function getModelOutputTokens(model: string, providerId?: string): number
         return 384000; // DeepSeek V4 hard cap: 384K
     }
     if (providerId === 'claude' || lower.includes('claude')) {
-        // ⚠ Claude standard Messages API hard cap is 8192.
-        // Exceeding returns 400 — do NOT raise without beta header.
-        return 8192;
+        // Claude Messages API: output token limit depends on model and API version.
+        // Check current Anthropic API docs for extended output / max_tokens support.
+        // Conservative default — override via cwtools.ai.maxContextTokens if needed.
+        return 16384;
     }
     if (providerId === 'minimax' || providerId === 'minimax-token-plan' || providerId?.includes('minimax') || lower.includes('minimax')) {
         // MiniMax: shared 204K budget (input+output). Leave room for input.
@@ -853,7 +856,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
  */
 export function getProvider(id: string): AIProviderConfig {
     if (id && !(id in BUILTIN_PROVIDERS)) {
-        console.warn(`[Eddy AI] Unknown provider "${id}", falling back to openai.`);
+        ErrorReporter.debug(SOURCE.AI_SERVICE, `Unknown provider "${id}", falling back to openai.`);
     }
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     return BUILTIN_PROVIDERS[id] ?? BUILTIN_PROVIDERS['openai']!;

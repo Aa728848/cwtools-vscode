@@ -801,9 +801,11 @@ export class FileToolHandler {
 
     async listDirectory(args: { directory: string; recursive?: boolean }): Promise<import('../types').ListDirectoryResult> {
         try {
-            const dirPath = path.isAbsolute(args.directory)
-                ? args.directory
-                : path.join(this.ctx.workspaceRoot, args.directory);
+            const dirPath = this.resolveAndAssertInWorkspace(
+                path.isAbsolute(args.directory)
+                    ? args.directory
+                    : path.join(this.ctx.workspaceRoot, args.directory)
+            );
 
             if (!fs.existsSync(dirPath)) {
                 return { entries: [], path: dirPath };

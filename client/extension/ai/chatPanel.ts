@@ -130,7 +130,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 try {
                     await this.handleWebViewMessage(msg);
                 } catch (e) {
-                    console.error(`[AI] Error handling webview message '${msg.type}':`, e);
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, `Error handling webview message '${msg.type}'`, e);
                 }
             },
             this,
@@ -620,13 +620,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
                 // P0 Fix: reject paths outside workspace to prevent path traversal
                 if (!isWithinWorkspace(snap.filePath)) {
-                    console.warn(`[Retract] Skipping file outside workspace: ${snap.filePath}`);
+                    ErrorReporter.debug(SOURCE.CHAT_PANEL, `Retract: Skipping file outside workspace: ${snap.filePath}`);
                     skippedFiles++;
                     continue;
                 }
 
                 if ((snap as any)._tooLarge) {
-                    console.warn(`[Retract] Skipping file due to being too large: ${snap.filePath}`);
+                    ErrorReporter.debug(SOURCE.CHAT_PANEL, `Retract: Skipping file due to being too large: ${snap.filePath}`);
                     skippedFiles++;
                     continue;
                 }
@@ -860,7 +860,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // WebView is hidden or the user ignores the confirmation card.
             const timeout = setTimeout(() => {
                 if (this.pendingWriteResolvers.has(messageId)) {
-                    console.warn(`[Eddy CWTool Code] Write confirm timeout for ${file} — auto-denying (safety default)`);
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, `Write confirm timeout for ${file} — auto-denying (safety default)`);
                     void this.resolveWriteConfirmation(messageId, false);
                 }
             }, AIChatPanelProvider.WRITE_CONFIRM_TIMEOUT_MS);
@@ -1102,7 +1102,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (lastUserMsg?.role === 'user') {
             this.topicManager.currentTopic.messages.pop();
             this.conversationMessages.pop();
-            await this.handleUserMessage(lastUserMsg.content);
+            await this.handleUserMessage(lastUserMsg.content, lastUserMsg.images);
         }
     }
 

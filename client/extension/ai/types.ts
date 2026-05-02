@@ -11,20 +11,10 @@
  * - explore: Parallel read-only exploration; focuses on understanding codebase, no validation
  * - general: Full tool access like build, but no todo_write; suited for research tasks
  * - review:  Read-only mode focused on code review, finding issues, and providing feedback.
+ * - loc_translator: Specialized for translating YML localisation files between languages.
+ * - loc_writer: Specialized for writing new YML localisation entries from scratch.
  */
-export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'review' | 'gui_expert' | 'script_reviewer';
-
-export interface AgentModeConfig {
-    mode: AgentMode;
-    label: string;
-    description: string;
-    /** Tools allowed in this mode (null = all) */
-    allowedTools: AgentToolName[] | null;
-    /** Whether this mode can modify files */
-    canModifyFiles: boolean;
-    /** Whether validation loop runs */
-    runValidation: boolean;
-}
+export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer';
 
 // ─── MCP Settings ────────────────────────────────────────────────────────────
 
@@ -501,7 +491,6 @@ export type AgentToolName =
     | 'ignore_validation_error'
     | 'remove_ignored_diagnostic'
     | 'get_ignored_diagnostics'
-    | 'analyze_diagnostic_error'
     | 'get_pdx_block'
     // ── MCP tools ──
     | 'mcp_call';
@@ -525,6 +514,7 @@ export interface ReadFileResult {
 export interface WriteFileArgs {
     file: string;
     content: string;
+    encoding?: 'utf8' | 'utf8bom';
 }
 
 export interface WriteFileResult {
@@ -543,6 +533,7 @@ export interface EditFileArgs {
     newString: string;
     /** If true, replace all occurrences; default false */
     replaceAll?: boolean;
+    encoding?: 'utf8' | 'utf8bom';
 }
 
 export interface EditFileResult {
@@ -593,7 +584,7 @@ export interface SpawnSubAgentsArgs {
         dependsOn?: string[];
         description: string;
         prompt: string;
-        subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer';
+        subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer' | 'plan' | 'review' | 'loc_translator' | 'loc_writer';
         /** Max wall-clock time in ms for this sub-task. Exceeded tasks return partial results with a timeout marker. */
         deadlineMs?: number;
     }>;
@@ -602,7 +593,7 @@ export interface SpawnSubAgentsArgs {
     // Legacy single task support
     description?: string;
     prompt?: string;
-    subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer';
+    subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer' | 'plan' | 'review' | 'loc_translator' | 'loc_writer';
 }
 
 export interface SpawnSubAgentsResult {

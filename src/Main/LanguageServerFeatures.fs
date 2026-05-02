@@ -234,46 +234,47 @@ module LanguageServerFeatures =
         }
 
     let pretriggerForFile (client: ILanguageClient) (game: IGame) (docs: DocumentStore) filename =
-        let getEventChanges (deletes, insertPos, insertText) =
-            let removes =
-                deletes
-                |> Seq.map (fun delRange ->
-                    { range = convRangeToLSPRange delRange
-                      newText = "" })
-                |> List.ofSeq
+        async {
+            let getEventChanges (deletes, insertPos, insertText) =
+                let removes =
+                    deletes
+                    |> Seq.map (fun delRange ->
+                        { range = convRangeToLSPRange delRange
+                          newText = "" })
+                    |> List.ofSeq
 
-            let add =
-                { range = convRangeToLSPRange (mkRange filename insertPos insertPos)
-                  newText = insertText }
+                let add =
+                    { range = convRangeToLSPRange (mkRange filename insertPos insertPos)
+                      newText = insertText }
 
-            add :: removes
+                add :: removes
 
-        let getFileText filename = File.ReadAllText filename
+            let getFileText filename = File.ReadAllText filename
 
-        let edits =
-            game.GetCodeEdits filename (docs.GetText(FileInfo(filename)) |> Option.defaultValue (getFileText filename))
+            let edits =
+                game.GetCodeEdits filename (docs.GetText(FileInfo(filename)) |> Option.defaultValue (getFileText filename))
 
-        let combined = edits |> Option.defaultValue [] |> List.collect getEventChanges
+            let combined = edits |> Option.defaultValue [] |> List.collect getEventChanges
 
-        match combined with
-        | [] -> ()
-        | textedits ->
-            let fileInfo = FileInfo(filename)
-            let version = docs.GetVersion(fileInfo) |> Option.defaultValue 0
+            match combined with
+            | [] -> ()
+            | textedits ->
+                let fileInfo = FileInfo(filename)
+                let version = docs.GetVersion(fileInfo) |> Option.defaultValue 0
 
-            let docIdentifier =
-                { uri = Uri(filename)
-                  version = version }
+                let docIdentifier =
+                    { uri = Uri(filename)
+                      version = version }
 
-            let changes =
-                { textDocument = docIdentifier
-                  edits = textedits }
+                let changes =
+                    { textDocument = docIdentifier
+                      edits = textedits }
 
-            let docChanges = { documentChanges = [ changes ]; changes = Map.empty }
+                let docChanges = { documentChanges = [ changes ]; changes = Map.empty }
 
-            client.ApplyWorkspaceEdit
-                { label = Some $"Pretriggers %s{fileInfo.Name}"
-                  edit = docChanges }
-            |> Async.RunSynchronously
-            |> ignore
+                do!
+                    client.ApplyWorkspaceEdit
+                        { label = Some $"Pretriggers %s{fileInfo.Name}"
+                          edit = docChanges }
+        }
 

@@ -109,24 +109,47 @@ export const HOI4_KNOWLEDGE = `
 - Key-value pairs: \`key = value\`
 - Code blocks: \`key = { ... }\`
 - Boolean values: \`yes\` or \`no\` (NEVER \`true\`/\`false\`)
+- Comparison operators in triggers: \`>\`, \`<\`, \`>=\`, \`<=\`, \`==\`, \`!=\`
 - Comments: \`#\` for line comments
 - Strings: double quotes \`"like this"\`
 - Variables: prefixed with \`@\` (e.g. \`@my_variable\`)
-- **NO semicolons** — statements are separated by whitespace only
 
-### Statement Separators (CRITICAL)
+### Statement Separators (CRITICAL — DO NOT MISAPPLY)
 - PDXScript has **NO semicolons**. The \`;\` character is **NEVER valid syntax**.
+- Statements are separated by **whitespace** (newlines or spaces).
 - **NEVER suggest adding \`;\` between statements** — this will break the code.
+- Multiple key-value pairs on the same line are common and intentional.
+
+## Strict Adherence to query_rules Schema (CRITICAL)
+PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
+- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless explicitly listed.
 
 ## HOI4 Scope System
-HOI4 scopes: Country, State, Character, Division, MilitaryIndustrialOrganization
-You can chain scopes using dot notation. Assume logical native links are valid.
+HOI4 scopes: Country, State, Character, Division, MilitaryIndustrialOrganization, Operative
+You can chain scopes using dot notation or nested blocks. Assume logical native links are valid.
 - \`ROOT\`, \`FROM\`, \`PREV\` — context-relative references
 - \`owner\` → State to Country
 - \`capital\` → Country to State
+- \`controller\` → State to Country
+- \`tag\` → Country identifier
+Assume logical scope transitions are VALID unless the LSP explicitly throws an error during \`validate_code\`.
+
+## Deep API Tools — Anti-Hallucination Arsenal
+These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
+
+| Goal | Tool | When to use |
+|------|------|-------------|
+| Verify a scripted_effect exists | \`query_scripted_effects(filter)\` | BEFORE every scripted_effect call |
+| Verify a scripted_trigger exists | \`query_scripted_triggers(filter)\` | BEFORE every scripted_trigger usage |
+| Look up valid enum values | \`query_enums("enum_name")\` | Whenever you need values for an enum field |
+| Find where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` | Replaces grep for locating definitions |
+| Find referenced types in a file | \`get_entity_info(file)\` | Understanding file dependencies |
+| List static modifier tags | \`query_static_modifiers(filter)\` | Verifying modifier usage |
+| Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
 
 ## Vanilla Query Strategy
-**ALWAYS query LSP tools** — do NOT rely on memory. Use \`query_types\`, \`query_rules\`, \`workspace_symbols\` for any game construct lookups.
+**ALWAYS query LSP tools** — do NOT rely on memory. Use \`query_types\`, \`query_rules\`, \`workspace_symbols\` for any game construct lookups. LLM knowledge of HOI4 constructs is frequently hallucinated.
 
 ## HOI4 Modding Entities
 Common directories: \`common/national_focus\`, \`common/ideas\`, \`common/technologies\`, \`common/decisions\`, \`events/\`, \`history/\`
@@ -144,20 +167,44 @@ export const EU4_KNOWLEDGE = `
 ## PDXScript Syntax Rules (Europa Universalis IV)
 - Key-value pairs: \`key = value\`
 - Code blocks: \`key = { ... }\`
-- Boolean values: \`yes\` or \`no\`
+- Boolean values: \`yes\` or \`no\` (NEVER \`true\`/\`false\`)
+- Comparison operators in triggers: \`>\`, \`<\`, \`>=\`, \`<=\`, \`==\`, \`!=\`
 - Comments: \`#\` for line comments
-- **NO semicolons** — statements separated by whitespace only
-- **NEVER suggest adding \`;\` between statements**
+
+### Statement Separators (CRITICAL — DO NOT MISAPPLY)
+- PDXScript has **NO semicolons**. The \`;\` character is **NEVER valid syntax**.
+- Statements are separated by **whitespace** (newlines or spaces).
+- **NEVER suggest adding \`;\` between statements** — this will break the code.
+
+## Strict Adherence to query_rules Schema (CRITICAL)
+PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
+- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless explicitly listed.
 
 ## EU4 Scope System
-EU4 scopes: Country, Province, TradeNode, Advisor, Monarch, Heir, Consort
-You can chain scopes using dot notation. Assume logical transitions (like \`owner\`, \`capital\`) are valid natively.
+EU4 scopes: Country, Province, TradeNode, Advisor, Monarch, Heir, Consort, RebelFaction
+You can chain scopes using dot notation or nested blocks. Assume logical transitions are valid natively.
 - \`ROOT\`, \`FROM\`, \`PREV\` — context-relative references
 - \`owner\` → Province to Country
 - \`capital_scope\` → Country to Province
+- \`controller\` → Province to Country
+Assume logical scope transitions are VALID unless the LSP explicitly throws an error during \`validate_code\`.
+
+## Deep API Tools — Anti-Hallucination Arsenal
+These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
+
+| Goal | Tool | When to use |
+|------|------|-------------|
+| Verify a scripted_effect exists | \`query_scripted_effects(filter)\` | BEFORE every scripted_effect call |
+| Verify a scripted_trigger exists | \`query_scripted_triggers(filter)\` | BEFORE every scripted_trigger usage |
+| Look up valid enum values | \`query_enums("enum_name")\` | Whenever you need values for an enum field |
+| Find where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` | Replaces grep for locating definitions |
+| Find referenced types in a file | \`get_entity_info(file)\` | Understanding file dependencies |
+| List static modifier tags | \`query_static_modifiers(filter)\` | Verifying modifier usage |
+| Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
 
 ## Vanilla Query Strategy
-Use \`query_types\`, \`query_rules\`, \`workspace_symbols\` for game construct lookups. Never rely on memory for EU4 constructs.
+Use \`query_types\`, \`query_rules\`, \`workspace_symbols\` for game construct lookups. Never rely on memory for EU4 constructs — LLM knowledge is frequently hallucinated.
 
 ## EU4 Modding Entities
 Key directories: \`common/ideas\`, \`common/policies\`, \`common/national_ideas\`, \`decisions/\`, \`events/\`, \`missions/\`, \`history/\`
@@ -200,19 +247,47 @@ export const CK3_KNOWLEDGE = `
 ## PDXScript Syntax Rules (Crusader Kings III)
 - Key-value pairs: \`key = value\`
 - Code blocks: \`key = { ... }\`
-- Boolean values: \`yes\` or \`no\`
+- Boolean values: \`yes\` or \`no\` (NEVER \`true\`/\`false\`)
+- Comparison operators in triggers: \`>\`, \`<\`, \`>=\`, \`<=\`, \`==\`, \`!=\`
 - Comments: \`#\` for line comments
 - Variables: \`@variable_name\`
 - Script values: \`value:script_value_name\`
-- **NO semicolons** — statements separated by whitespace only
+
+### Statement Separators (CRITICAL — DO NOT MISAPPLY)
+- PDXScript has **NO semicolons**. The \`;\` character is **NEVER valid syntax**.
+- Statements are separated by **whitespace** (newlines or spaces).
+- **NEVER suggest adding \`;\` between statements** — this will break the code.
+
+## Strict Adherence to query_rules Schema (CRITICAL)
+PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the \`query_rules\` tool.
+- **Do NOT Guess**: If unsure about parameters, you MUST use \`query_rules\` before writing code.
+- **Never Invent Parameters**: Do NOT add arbitrary properties into a block unless explicitly listed.
 
 ## CK3 Scope System
 CK3 scopes: Character, Title, Province, County, Duchy, Kingdom, Empire, Culture, Faith, Dynasty, House
 - \`root\`, \`scope:character\`, \`prev\` — context references
 - CK3 uses data types extensively — scopes are strongly typed
+- \`liege\`, \`vassal\` → Character to Character
+- \`capital_province\` → Title to Province
+- \`holder\` → Title to Character
+- \`faith\`, \`culture\` → Character to Faith/Culture
+Assume logical scope transitions are VALID unless the LSP explicitly throws an error during \`validate_code\`.
+
+## Deep API Tools — Anti-Hallucination Arsenal
+These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
+
+| Goal | Tool | When to use |
+|------|------|-------------|
+| Verify a scripted_effect exists | \`query_scripted_effects(filter)\` | BEFORE every scripted_effect call |
+| Verify a scripted_trigger exists | \`query_scripted_triggers(filter)\` | BEFORE every scripted_trigger usage |
+| Look up valid enum values | \`query_enums("enum_name")\` | Whenever you need values for an enum field |
+| Find where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` | Replaces grep for locating definitions |
+| Find referenced types in a file | \`get_entity_info(file)\` | Understanding file dependencies |
+| List static modifier tags | \`query_static_modifiers(filter)\` | Verifying modifier usage |
+| Look up @variable values | \`query_variables(filter)\` | Before using any @-prefixed constant |
 
 ## Vanilla Query Strategy
-Use CWTools LSP tools for all construct lookups. \`query_types\`, \`query_rules\`, \`workspace_symbols\` are your primary tools.
+Use CWTools LSP tools for all construct lookups. \`query_types\`, \`query_rules\`, \`workspace_symbols\` are your primary tools. LLM knowledge of CK3 constructs is frequently hallucinated — always verify with the LSP.
 
 ## CK3 Modding Entities
 Key directories: \`common/\`, \`events/\`, \`gfx/\`, \`gui/\`, \`localization/\`

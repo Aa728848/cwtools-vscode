@@ -13,7 +13,8 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, No
 
 import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
-import { UI } from './ai/messages';
+import { UI, SOURCE } from './ai/messages';
+import { ErrorReporter } from './ai/errorReporter';
 import { SolarSystemPanel } from './solarSystemPanel';
 import { EventChainPanel } from './eventChainPanel';
 import { TechTreePanel } from './techTreePanel';
@@ -52,7 +53,7 @@ function safeRegisterCommand(context: ExtensionContext, commandId: string, handl
 export async function activate(context: ExtensionContext) {
 
 	// 后台检查扩展更新
-	await checkForUpdates(context).catch(console.error);
+	await checkForUpdates(context).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
 	registerLocalizationFeatures(context);
@@ -619,7 +620,7 @@ export async function activate(context: ExtensionContext) {
 			default: repoPathStr = stellarisRemote; break;
 		}
 		const repoPath = await getBestRepoPath(repoPathStr);
-		console.log(language + " " + repoPath);
+		ErrorReporter.debug('Extension', `Language: ${language}, repo: ${repoPath}`);
 
 		// If the extension is launched in debug mode then the debug server options are used
 		// Otherwise the run options are used
@@ -909,7 +910,7 @@ export async function activate(context: ExtensionContext) {
 					dir = path.join(dir, "game");
 					break;
 			}
-			console.log(path.join(dir, "common"));
+			ErrorReporter.debug('Extension', `Game common path: ${path.join(dir, "common")}`);
 			if (game === "" || !(fs.existsSync(path.join(dir, "common")))) {
 				await window.showErrorMessage("The selected folder does not appear to be a supported game folder")
 			}
@@ -1026,7 +1027,7 @@ export async function activate(context: ExtensionContext) {
 				try {
 					sub.dispose();
 				} catch (e) {
-					console.error(e);
+					ErrorReporter.debug('Extension', 'Failed to dispose subscription', e);
 				}
 			}
 			// Clear the array to prevent accumulation

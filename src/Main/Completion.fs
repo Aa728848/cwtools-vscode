@@ -51,6 +51,7 @@ let private getLineAt (text: string) (lineIdx: int) =
             text.Substring(idx, lineEnd - idx)
 
 let completionCache = System.Collections.Concurrent.ConcurrentDictionary<int, CompletionItem>()
+let private rangeCacheLock = obj()
 let mutable private rangeCache: (string * int * int * Range * Range) option = None
 
 let mutable private completionCacheKey = 0
@@ -236,7 +237,8 @@ let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
 /// Compute ranges for InsertReplaceEdit based on word boundaries using simple position data
 let computeCompletionRanges (filetext: string) (line: int) (character: int) =
     // Check cache first - if same file content, line, and character, return cached result
-    match rangeCache with
+    let cached = lock rangeCacheLock (fun () -> rangeCache)
+    match cached with
     | Some(cachedText, cachedLine, cachedChar, cachedInsert, cachedReplace) when
         cachedText = filetext && cachedLine = line && cachedChar = character
         ->
@@ -277,7 +279,7 @@ let computeCompletionRanges (filetext: string) (line: int) (character: int) =
               ``end`` = { line = line - 1; character = wordEnd } }
 
         // Cache the result
-        rangeCache <- Some(filetext, line, character, insertRange, replaceRange)
+        lock rangeCacheLock (fun () -> rangeCache <- Some(filetext, line, character, insertRange, replaceRange))
 
         (insertRange, replaceRange)
 

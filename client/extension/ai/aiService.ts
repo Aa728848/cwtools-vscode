@@ -25,6 +25,8 @@ import {
     getModelOutputTokens,
     getDisableThinkingParams,
 } from './providers';
+import { ErrorReporter } from './errorReporter';
+import { SOURCE } from './messages';
 
 // ─── Module-level constants ──────────────────────────────────────────────────
 
@@ -397,7 +399,7 @@ export class AIService {
                 });
                 if (!response.ok) {
                     const err = await response.text();
-                    console.error(`[FIM] Ollama API error (${response.status}): ${err}`);
+                    ErrorReporter.warn(SOURCE.AI_SERVICE, `FIM: Ollama API error (${response.status}): ${err}`);
                     throw new Error(`Ollama API error (${response.status}): ${err}`);
                 }
                 const data = await response.json() as { response?: string };
@@ -415,7 +417,7 @@ export class AIService {
                     url = endpoint.replace(/\/$/, '') + '/completions';
                 }
 
-                console.log(`[FIM] Requesting: ${url} model=${model}`);
+                ErrorReporter.debug(SOURCE.AI_SERVICE, `FIM: Requesting: ${url} model=${model}`);
 
                 const response = await fetch(url, {
                     method: 'POST',
@@ -435,7 +437,7 @@ export class AIService {
                 });
                 if (!response.ok) {
                     const err = await response.text();
-                    console.error(`[FIM] ${provider.name} API error (${response.status}): ${err}`);
+                    ErrorReporter.warn(SOURCE.AI_SERVICE, `FIM: ${provider.name} API error (${response.status}): ${err}`);
                     throw new Error(`${provider.name} FIM API error (${response.status}): ${err}`);
                 }
                 const data = await response.json() as {
@@ -591,7 +593,7 @@ export class AIService {
             if (response.status === 429 && retries < maxRetries) {
                 const jitter = Math.floor(Math.random() * delays[retries]! * 0.25);
                 const delay = delays[retries]! + jitter;
-                console.warn(`[AIService] 429 Rate Limit hit for ${providerId}. Retrying in ${delay}ms...`);
+                ErrorReporter.debug(SOURCE.AI_SERVICE, `429 Rate Limit hit for ${providerId}. Retrying in ${delay}ms...`);
                 await new Promise(r => setTimeout(r, delay));
                 retries++;
                 continue;
@@ -1140,7 +1142,7 @@ export class AIService {
                         }
                     }
                 } catch (e) {
-                    console.error(`Failed to fetch models from ${provider.name}:`, e);
+                    ErrorReporter.debug(SOURCE.AI_SERVICE, `Failed to fetch models from ${provider.name}`, e);
                 }
             }
         });

@@ -5,6 +5,7 @@
 
 // ─── Data Types ─────────────────────────────────────────────────────────────
 import { safeEval } from './exprEval';
+import { ErrorReporter } from './ai/errorReporter';
 
 export interface GuiElement {
     type: string;
@@ -189,10 +190,10 @@ class Parser {
                 const result = safeEval(inner);
                 return typeof result === 'number' && !isNaN(result) ? result : expr;
             } else {
-                console.warn("Expression math regex failed or contains unresolved variables:", inner);
+                ErrorReporter.debug('GuiParser', `Expression math regex failed or contains unresolved variables: ${inner}`);
             }
         } catch (e) {
-            console.warn("Expression evaluation threw:", inner, e);
+            ErrorReporter.debug('GuiParser', `Expression evaluation threw: ${inner}`, e);
             return expr;
         }
         return expr; // Unresolved or non-math expr

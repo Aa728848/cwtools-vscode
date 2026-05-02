@@ -563,12 +563,6 @@
 					"default": false,
 					"description": "%configuration.cwtools.ai.inlineCompletion.enabled.description%"
 				},
-				"cwtools.ai.inlineCompletion.fimMode": {
-					"scope": "window",
-					"type": "boolean",
-					"default": false,
-					"description": "%configuration.cwtools.ai.inlineCompletion.fimMode.description%"
-				},
 				"cwtools.ai.inlineCompletion.debounceMs": {
 					"scope": "window",
 					"type": "integer",
@@ -647,6 +641,36 @@
 					},
 					"default": [],
 					"description": "%configuration.cwtools.ai.ignoredDiagnostics.description%"
+				},
+				"cwtools.ai.braveSearchApiKey": {
+					"scope": "window",
+					"type": "string",
+					"default": "",
+					"description": "%configuration.cwtools.ai.braveSearchApiKey.description%"
+				},
+				"cwtools.ai.exaApiKey": {
+					"scope": "window",
+					"type": "string",
+					"default": "",
+					"description": "%configuration.cwtools.ai.exaApiKey.description%"
+				},
+				"cwtools.ai.mcp.servers": {
+					"scope": "window",
+					"type": "array",
+					"default": [],
+					"description": "%configuration.cwtools.ai.mcp.servers.description%",
+					"items": {
+						"type": "object",
+						"properties": {
+							"name": { "type": "string", "description": "Server name" },
+							"type": { "type": "string", "enum": ["stdio", "sse"], "description": "Transport type" },
+							"command": { "type": "string", "description": "Command for stdio transport" },
+							"args": { "type": "array", "items": { "type": "string" }, "description": "Command arguments" },
+							"env": { "type": "object", "description": "Environment variables" },
+							"url": { "type": "string", "description": "URL for SSE transport" }
+						},
+						"required": ["name", "type"]
+					}
 				}
 			}
 		},

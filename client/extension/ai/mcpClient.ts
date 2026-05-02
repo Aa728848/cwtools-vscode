@@ -4,15 +4,9 @@ import * as path from 'path';
 import * as http from 'http';
 import * as https from 'https';
 import { URL } from 'url';
-
-export interface MCPServerConfig {
-    name: string;
-    type: 'stdio' | 'sse';
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-    url?: string;
-}
+import { MCPServerConfig } from './types';
+import { ErrorReporter } from './errorReporter';
+import { SOURCE } from './messages';
 
 export class MCPClient {
     private process: cp.ChildProcess | null = null;
@@ -54,11 +48,11 @@ export class MCPClient {
         });
 
         this.process.stderr?.on('data', (data) => {
-            console.warn(`[MCP Server ${this.config.name}] ${data.toString()}`);
+            ErrorReporter.debug(SOURCE.MCP_CLIENT, `Server ${this.config.name}: ${data.toString()}`);
         });
 
         this.process.on('close', (code) => {
-            console.log(`[MCP Server ${this.config.name}] exited with code ${code}`);
+            ErrorReporter.debug(SOURCE.MCP_CLIENT, `Server ${this.config.name} exited with code ${code}`);
             this.cleanup();
         });
 
@@ -118,7 +112,7 @@ export class MCPClient {
                                 const message = JSON.parse(data);
                                 this.handleMessage(message);
                             } catch (e) {
-                                console.error(`[MCP] Failed to parse SSE message`, e);
+                                ErrorReporter.warn(SOURCE.MCP_CLIENT, 'Failed to parse SSE message', e);
                             }
                         }
                     }
@@ -151,7 +145,7 @@ export class MCPClient {
                 const message = JSON.parse(line);
                 this.handleMessage(message);
             } catch (e) {
-                console.error(`[MCP] Failed to parse message: ${line}`, e);
+                ErrorReporter.warn(SOURCE.MCP_CLIENT, `Failed to parse message: ${line}`, e);
             }
         }
     }
@@ -169,10 +163,24 @@ export class MCPClient {
         }
     }
 
+    private static readonly REQUEST_TIMEOUT_MS = 30_000;
+
     private sendRequest(method: string, params: any = {}): Promise<any> {
         return new Promise((resolve, reject) => {
             const id = ++this.messageId;
-            this.pendingRequests.set(id, { resolve, reject });
+
+            // Timeout: reject and clean up if server doesn't respond within 30s
+            const timer = setTimeout(() => {
+                if (this.pendingRequests.has(id)) {
+                    this.pendingRequests.delete(id);
+                    reject(new Error(`MCP request '${method}' timed out after ${MCPClient.REQUEST_TIMEOUT_MS}ms`));
+                }
+            }, MCPClient.REQUEST_TIMEOUT_MS);
+
+            this.pendingRequests.set(id, {
+                resolve: (val: any) => { clearTimeout(timer); resolve(val); },
+                reject: (err: any) => { clearTimeout(timer); reject(err); },
+            });
 
             const payload = JSON.stringify({
                 jsonrpc: '2.0',
@@ -194,13 +202,17 @@ export class MCPClient {
                     }
                 }, (res) => {
                     if (res.statusCode && res.statusCode >= 400) {
+                        clearTimeout(timer);
+                        this.pendingRequests.delete(id);
                         reject(new Error(`MCP POST failed: ${res.statusCode}`));
                     }
                 });
-                req.on('error', reject);
+                req.on('error', (e) => { clearTimeout(timer); this.pendingRequests.delete(id); reject(e); });
                 req.write(payload);
                 req.end();
             } else {
+                clearTimeout(timer);
+                this.pendingRequests.delete(id);
                 reject(new Error('Connection not established'));
             }
         });
@@ -214,6 +226,9 @@ export class MCPClient {
             },
             capabilities: {},
         });
+        if (!res || typeof res !== 'object' || !res.serverInfo) {
+            throw new Error('MCP initialize: invalid response — missing serverInfo');
+        }
         this.initialized = true;
         // send initialized notification
         const payload = JSON.stringify({
@@ -233,7 +248,7 @@ export class MCPClient {
                     'Content-Length': Buffer.byteLength(payload)
                 }
             });
-            req.on('error', (e) => console.error(e));
+            req.on('error', (e) => ErrorReporter.warn(SOURCE.MCP_CLIENT, 'SSE POST request failed', e));
             req.write(payload);
             req.end();
         }

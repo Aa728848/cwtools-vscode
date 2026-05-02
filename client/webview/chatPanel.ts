@@ -1637,10 +1637,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     updateTokenUsage(gaugeUsage, contextLimit);
                     // Show cost badge
                     const label = document.getElementById('tokenUsageLabel');
-                    if (label && r.tokenUsage.estimatedCostUsd > 0) {
-                        const cost = r.tokenUsage.estimatedCostUsd < 0.001
-                            ? '<$0.001'
-                            : '$' + r.tokenUsage.estimatedCostUsd.toFixed(4);
+                    if (label && r.tokenUsage.estimatedCostCny > 0) {
+                        const cost = r.tokenUsage.estimatedCostCny < 0.01
+                            ? '<¥0.01'
+                            : '¥' + r.tokenUsage.estimatedCostCny.toFixed(2);
                         label.textContent = label.textContent + '  ·  ' + cost;
                     }
                 } else {
@@ -1873,7 +1873,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 // ── Summary ──
                 html += `<div style="margin-bottom: 10px; font-weight: 600; font-size: 13px;">
                     总计消耗: <span style="color:var(--accent);">${stats.totalTokens.toLocaleString()}</span> tokens<br>
-                    预估成本: <span style="color:#4caf50;">$${typeof stats.totalCostUsd === 'number' ? stats.totalCostUsd.toFixed(4) : '0.0000'}</span><br>
+                    预估成本: <span style="color:#4caf50;">¥${typeof stats.totalCostCny === 'number' ? stats.totalCostCny.toFixed(2) : '0.00'}</span><br>
                     <span style="font-size:11px; opacity:0.6;">共 ${stats.totalCalls ?? 0} 次调用</span>
                 </div>`;
 
@@ -1883,7 +1883,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 for (const [providerId, pStats] of Object.entries(stats.byProvider || {})) {
                     html += `<div style="display:flex; justify-content:space-between; margin-bottom: 3px;">
                                 <span style="opacity:0.8;">${providerId}</span>
-                                <span><b>${(pStats as any).tokens.toLocaleString()}</b> <span style="opacity:0.5; font-size:10px;">($${typeof (pStats as any).costUsd === 'number' ? (pStats as any).costUsd.toFixed(4) : '0.0000'})</span></span>
+                                <span><b>${(pStats as any).tokens.toLocaleString()}</b> <span style="opacity:0.5; font-size:10px;">(¥${typeof (pStats as any).costCny === 'number' ? (pStats as any).costCny.toFixed(2) : '0.00'})</span></span>
                              </div>`;
                 }
                 html += '</div>';
@@ -1919,7 +1919,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     for (const d of [...recent].reverse()) {
                         const h = Math.max(3, Math.round((d.tokens / maxTokens) * 56));
                         const dayLabel = d.date.slice(5); // MM-DD
-                        html += `<div title="${d.date}: ${d.tokens.toLocaleString()} tokens, ${d.callCount} 次调用, $${d.costUsd.toFixed(4)}" style="flex:1; min-width:12px; max-width:28px;">
+                        html += `<div title="${d.date}: ${d.tokens.toLocaleString()} tokens, ${d.callCount} 次调用, ¥${d.costCny.toFixed(2)}" style="flex:1; min-width:12px; max-width:28px;">
                             <div style="background:var(--accent); opacity:0.7; height:${h}px; border-radius:2px 2px 0 0;"></div>
                             <div style="font-size:7px; text-align:center; opacity:0.4; margin-top:1px; overflow:hidden; white-space:nowrap;">${dayLabel}</div>
                         </div>`;
@@ -2303,8 +2303,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     const label = document.getElementById('tokenUsageLabel');
                     if (label) {
                         const base = `~${formatNum(gaugeUsage)} / ${formatNum(contextLimit)} tokens`;
-                        const cost = u.estimatedCostUsd > 0
-                            ? '  ·  ' + (u.estimatedCostUsd < 0.001 ? '<$0.001' : '$' + u.estimatedCostUsd.toFixed(4))
+                        const cost = u.estimatedCostCny > 0
+                            ? '  ·  ' + (u.estimatedCostCny < 0.01 ? '<¥0.01' : '¥' + u.estimatedCostCny.toFixed(2))
                             : '';
                         label.textContent = base + cost;
                     }

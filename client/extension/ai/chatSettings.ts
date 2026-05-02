@@ -206,7 +206,7 @@ export class ChatSettingsManager {
             return;
         }
 
-        if (providerId.startsWith('minimax') || providerId === 'opencode') {
+        if (providerId.startsWith('minimax') || providerId.startsWith('mimo') || providerId === 'opencode') {
             const { BUILTIN_PROVIDERS } = await import('./providers');
             const models = (BUILTIN_PROVIDERS[providerId]?.models || []).map(m => ({ id: m }));
             this.postMessage({ type: 'apiModelsFetched', providerId, models, error: '' });

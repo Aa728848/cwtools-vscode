@@ -657,8 +657,8 @@ export interface TokenUsage {
     input: number;
     /** Output/completion tokens */
     output: number;
-    /** Estimated cost in USD (based on provider pricing table) */
-    estimatedCostUsd: number;
+    /** Estimated cost in CNY (based on provider pricing table) */
+    estimatedCostCny: number;
     /** Final prompt tokens for the conversation window, used to drive the UI fullness progress bar */
     contextWindowTokens?: number;
 }

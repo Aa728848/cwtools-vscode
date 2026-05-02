@@ -484,7 +484,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                             input: response.usage.prompt_tokens ?? 0,
                             output: response.usage.completion_tokens ?? 0,
                             total: response.usage.total_tokens ?? 0,
-                            estimatedCostUsd: 0,
+                            estimatedCostCny: 0,
                         }
                     );
                 }

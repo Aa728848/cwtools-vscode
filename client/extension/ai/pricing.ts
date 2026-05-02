@@ -1,14 +1,18 @@
 /**
  * CWTools AI Module — Model Pricing Table
  *
- * Per-model cost table (USD per 1M tokens, [input, output]).
+ * Per-model cost table (CNY per 1M tokens, [input, output]).
  * Uses cache-miss (standard) input rate as the representative figure.
  *
- * Sources (verified 2026-04):
- *   OpenAI:    https://openai.com/api/pricing
- *   Anthropic: https://www.anthropic.com/api
- *   DeepSeek:  https://platform.deepseek.com/
+ * Sources (verified 2026-05):
+ *   OpenAI:    https://developers.openai.com/api/docs/pricing.md
+ *   Anthropic: https://platform.claude.com/docs/en/docs/about-claude/models
+ *   DeepSeek:  https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+ *   MiniMax:   https://platform.minimaxi.com/docs/guides/pricing-paygo.md
+ *   GLM:       https://open.bigmodel.cn/pricing
+ *   Qwen:      https://help.aliyun.com/zh/model-studio/billing-for-model-studio
  *   Google:    https://ai.google.dev/pricing
+ *   MiMo:      https://platform.xiaomimimo.com/static/docs/pricing.md
  */
 
 import pricingData from './pricingData.json';

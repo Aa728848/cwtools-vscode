@@ -10,7 +10,7 @@ export interface UsageRecord {
     inputTokens: number;
     outputTokens: number;
     totalTokens: number;
-    costUsd: number;
+    costCny: number;
     /** Tool calls made in this request (Batch 4.2) */
     toolCalls?: Record<string, number>;
     /** Response latency in ms (Batch 4.2) */
@@ -21,27 +21,27 @@ export interface UsageRecord {
 
 export interface ProviderStats {
     tokens: number;
-    costUsd: number;
+    costCny: number;
 }
 
 export interface DailyStats {
     date: string; // YYYY-MM-DD
     tokens: number;
-    costUsd: number;
+    costCny: number;
     callCount: number;
 }
 
 export interface ModelDistribution {
     model: string;
     tokens: number;
-    costUsd: number;
+    costCny: number;
     callCount: number;
     percentage: number; // 0-100
 }
 
 export interface UsageStats {
     totalTokens: number;
-    totalCostUsd: number;
+    totalCostCny: number;
     totalCalls: number;
     byProvider: Record<string, ProviderStats>;
     dailyStats: DailyStats[];
@@ -95,7 +95,7 @@ export class UsageTracker {
             inputTokens: usage.input ?? 0,
             outputTokens: usage.output ?? 0,
             totalTokens: usage.total,
-            costUsd: usage.estimatedCostUsd ?? 0,
+            costCny: usage.estimatedCostCny ?? 0,
             toolCalls: options?.toolCalls,
             durationMs: options?.durationMs,
             topicId: options?.topicId,
@@ -115,36 +115,36 @@ export class UsageTracker {
 
         // Aggregates
         let totalTokens = 0;
-        let totalCostUsd = 0;
+        let totalCostCny = 0;
         const byProvider: Record<string, ProviderStats> = {};
-        const dailyMap = new Map<string, { tokens: number; costUsd: number; callCount: number }>();
-        const modelMap = new Map<string, { tokens: number; costUsd: number; callCount: number }>();
+        const dailyMap = new Map<string, { tokens: number; costCny: number; callCount: number }>();
+        const modelMap = new Map<string, { tokens: number; costCny: number; callCount: number }>();
 
         for (const r of records) {
             totalTokens += r.totalTokens;
-            totalCostUsd += r.costUsd;
+            totalCostCny += r.costCny;
 
             // By provider
             if (!byProvider[r.provider]) {
-                byProvider[r.provider] = { tokens: 0, costUsd: 0 };
+                byProvider[r.provider] = { tokens: 0, costCny: 0 };
             }
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             byProvider[r.provider]!.tokens += r.totalTokens;
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            byProvider[r.provider]!.costUsd += r.costUsd;
+            byProvider[r.provider]!.costCny += r.costCny;
 
             // By day
             const day = new Date(r.timestamp).toISOString().slice(0, 10);
-            const d = dailyMap.get(day) ?? { tokens: 0, costUsd: 0, callCount: 0 };
+            const d = dailyMap.get(day) ?? { tokens: 0, costCny: 0, callCount: 0 };
             d.tokens += r.totalTokens;
-            d.costUsd += r.costUsd;
+            d.costCny += r.costCny;
             d.callCount += 1;
             dailyMap.set(day, d);
 
             // By model
-            const m = modelMap.get(r.model) ?? { tokens: 0, costUsd: 0, callCount: 0 };
+            const m = modelMap.get(r.model) ?? { tokens: 0, costCny: 0, callCount: 0 };
             m.tokens += r.totalTokens;
-            m.costUsd += r.costUsd;
+            m.costCny += r.costCny;
             m.callCount += 1;
             modelMap.set(r.model, m);
         }
@@ -191,7 +191,7 @@ export class UsageTracker {
 
         return {
             totalTokens,
-            totalCostUsd,
+            totalCostCny,
             totalCalls: records.length,
             byProvider,
             dailyStats,
@@ -207,14 +207,14 @@ export class UsageTracker {
     getDailyStats(days: number = 30): DailyStats[] {
         const cutoff = Date.now() - days * 86_400_000;
         const data = this.loadData();
-        const dailyMap = new Map<string, { tokens: number; costUsd: number; callCount: number }>();
+        const dailyMap = new Map<string, { tokens: number; costCny: number; callCount: number }>();
 
         for (const r of data.records) {
             if (r.timestamp < cutoff) continue;
             const day = new Date(r.timestamp).toISOString().slice(0, 10);
-            const d = dailyMap.get(day) ?? { tokens: 0, costUsd: 0, callCount: 0 };
+            const d = dailyMap.get(day) ?? { tokens: 0, costCny: 0, callCount: 0 };
             d.tokens += r.totalTokens;
-            d.costUsd += r.costUsd;
+            d.costCny += r.costCny;
             d.callCount += 1;
             dailyMap.set(day, d);
         }
@@ -229,14 +229,14 @@ export class UsageTracker {
      */
     getModelDistribution(): ModelDistribution[] {
         const data = this.loadData();
-        const modelMap = new Map<string, { tokens: number; costUsd: number; callCount: number }>();
+        const modelMap = new Map<string, { tokens: number; costCny: number; callCount: number }>();
         let total = 0;
 
         for (const r of data.records) {
             total += r.totalTokens;
-            const m = modelMap.get(r.model) ?? { tokens: 0, costUsd: 0, callCount: 0 };
+            const m = modelMap.get(r.model) ?? { tokens: 0, costCny: 0, callCount: 0 };
             m.tokens += r.totalTokens;
-            m.costUsd += r.costUsd;
+            m.costCny += r.costCny;
             m.callCount += 1;
             modelMap.set(r.model, m);
         }
@@ -256,7 +256,7 @@ export class UsageTracker {
      */
     getTotalCost(): number {
         const data = this.loadData();
-        return data.records.reduce((acc, r) => acc + r.costUsd, 0);
+        return data.records.reduce((acc, r) => acc + r.costCny, 0);
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -282,7 +282,7 @@ export class UsageTracker {
         }
 
         // CSV format
-        const headers = ['timestamp', 'date', 'provider', 'model', 'inputTokens', 'outputTokens', 'totalTokens', 'costUsd', 'durationMs', 'topicId', 'toolCalls'];
+        const headers = ['timestamp', 'date', 'provider', 'model', 'inputTokens', 'outputTokens', 'totalTokens', 'costCny', 'durationMs', 'topicId', 'toolCalls'];
         const rows = records.map(r => [
             r.timestamp,
             new Date(r.timestamp).toISOString(),
@@ -291,7 +291,7 @@ export class UsageTracker {
             r.inputTokens,
             r.outputTokens,
             r.totalTokens,
-            r.costUsd.toFixed(6),
+            r.costCny.toFixed(6),
             r.durationMs ?? '',
             r.topicId ?? '',
             r.toolCalls ? Object.entries(r.toolCalls).map(([k, v]) => `${k}:${v}`).join(';') : '',

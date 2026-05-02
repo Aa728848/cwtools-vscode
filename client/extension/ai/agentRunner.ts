@@ -275,7 +275,7 @@ const MID_LOOP_COMPACTION_INTERVAL = 3;
 // Mid-loop compaction triggers at this fraction of context limit
 const MID_LOOP_COMPACTION_RATIO = 0.95;
 // Tool result budget: max chars per individual tool result (scaled by context limit)
-const TOOL_RESULT_BUDGET_BASE = 8000;
+const TOOL_RESULT_BUDGET_BASE = 15000;
 // Minimum tool result budget (even for tiny context windows)
 const TOOL_RESULT_BUDGET_MIN = 3000;
 // Maximum tool result budget (even for huge context windows like 1M)
@@ -534,7 +534,7 @@ export class AgentRunner {
 
         // Accumulate token usage across all API calls in this generation
         // (declared here so compaction call and sub-agent dispatch can also contribute to the total)
-        const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
+        const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
 
         // Propagate runner options + accumulator to tool executor for sub-agent dispatch
         this.toolExecutor.parentRunnerOptions = options;
@@ -853,7 +853,7 @@ export class AgentRunner {
                 tokenAccumulator.input += compactionResponse.usage.prompt_tokens;
                 tokenAccumulator.output += compactionResponse.usage.completion_tokens;
                 tokenAccumulator.total += compactionResponse.usage.total_tokens;
-                tokenAccumulator.estimatedCostUsd +=
+                tokenAccumulator.estimatedCostCny +=
                     (compactionResponse.usage.prompt_tokens / 1_000_000) * pricing[0] +
                     (compactionResponse.usage.completion_tokens / 1_000_000) * pricing[1];
             }
@@ -1104,7 +1104,7 @@ export class AgentRunner {
                 tokenAccumulator.input += response.usage.prompt_tokens;
                 tokenAccumulator.output += response.usage.completion_tokens;
                 tokenAccumulator.total += response.usage.total_tokens;
-                tokenAccumulator.estimatedCostUsd += inputCost + outputCost;
+                tokenAccumulator.estimatedCostCny += inputCost + outputCost;
                 tokenAccumulator.contextWindowTokens = response.usage.prompt_tokens;
                 // Enforce session-wide token budget (propagates through sub-agents via parentAccumulator)
                 this.aiService.reportUsage(tokenAccumulator.total);
@@ -1794,7 +1794,7 @@ export class AgentRunner {
             onStep,
         };
 
-        const subTokens: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostUsd: 0 };
+        const subTokens: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
 
         try {
             const result = await this.reasoningLoop(messages, onStep ?? (() => { }), mode, subOptions, subTokens, onFileWrite);
@@ -1803,7 +1803,7 @@ export class AgentRunner {
                 parentAccumulator.total += subTokens.total;
                 parentAccumulator.input += subTokens.input;
                 parentAccumulator.output += subTokens.output;
-                parentAccumulator.estimatedCostUsd += subTokens.estimatedCostUsd;
+                parentAccumulator.estimatedCostCny += subTokens.estimatedCostCny;
             }
             return result;
         } catch (e) {

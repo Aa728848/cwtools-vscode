@@ -4,7 +4,7 @@
  * Supports: OpenAI, Claude, Google Gemini, DeepSeek,
  *   MiniMax (pay-as-you-go, OpenAI compat),
  *   MiniMax Token Plan (Anthropic compat, api.minimaxi.com),
- *   GLM (Zhipu), Qwen (Tongyi), Ollama, Custom
+ *   GLM (Zhipu), Qwen (Tongyi), MiMo (Xiaomi), Ollama, Custom
  */
 
 import type { AIProviderConfig, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ContentPart } from './types';
@@ -163,6 +163,36 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         // (qwen-vl, qwen2.5-vl) must be specified manually; use isModelVisionCapable().
         supportsFIM: false,
         supportsVision: false,
+    },
+    mimo: {
+        id: 'mimo',
+        name: 'MiMo (小米)',
+        endpoint: 'https://api.xiaomimimo.com/v1',
+        defaultModel: 'mimo-v2.5-pro',
+        models: ['mimo-v2.5-pro', 'mimo-v2.5', 'mimo-v2-pro', 'mimo-v2-omni', 'mimo-v2-flash'],
+        supportsToolUse: true,
+        requiresApiKey: true,
+        supportsStreaming: true,
+        maxContextTokens: 1000000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsFIM: false,
+        supportsVision: true,
+    },
+    'mimo-token-plan': {
+        id: 'mimo-token-plan',
+        name: 'MiMo Token Plan (小米)',
+        endpoint: 'https://token-plan-cn.xiaomimimo.com/v1',
+        defaultModel: 'mimo-v2.5-pro',
+        models: ['mimo-v2.5-pro', 'mimo-v2.5', 'mimo-v2-pro', 'mimo-v2-omni', 'mimo-v2-flash'],
+        supportsToolUse: true,
+        requiresApiKey: true,
+        supportsStreaming: true,
+        maxContextTokens: 1000000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsFIM: false,
+        supportsVision: true,
     },
     google: {
         id: 'google',
@@ -466,6 +496,15 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     // Listed: deepseek-v4-pro, deepseek-v4-flash
     'deepseek-v4-pro': false,
     'deepseek-v4-flash': false,
+
+    // ── MiMo (Xiaomi) ────────────────────────────────────────────────────────
+    // mimo-v2.5-pro and mimo-v2-omni are multimodal (support image input).
+    // mimo-v2.5, mimo-v2-pro, mimo-v2-flash are text-only.
+    'mimo-v2.5-pro': true,
+    'mimo-v2-omni': true,
+    'mimo-v2-pro': false,
+    'mimo-v2.5': false,
+    'mimo-v2-flash': false,
 };
 
 /**
@@ -600,6 +639,13 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gemini-2.5-flash': 1048576,
     'gemini-2.5-flash-lite': 1048576,
 
+    // ── MiMo (Xiaomi) ─────────────────────────────────────────────────────────
+    'mimo-v2.5-pro': 1000000,
+    'mimo-v2.5': 1000000,
+    'mimo-v2-pro': 1000000,
+    'mimo-v2-omni': 1000000,
+    'mimo-v2-flash': 1000000,
+
     // ── Model Family Fallbacks ────────────────────────────────────────────────────
     // These are used as Tier-2 inference when the API doesn't return context_length
     // (e.g. SiliconFlow, GitHub Models). Matched via substring/prefix in getModelContextTokens().
@@ -669,6 +715,9 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // MiniMax family
     'MiniMax': 200000,
     'minimax': 200000,
+
+    // MiMo family (Xiaomi)
+    'mimo': 1000000,
 
     // Meta Llama family
     'Llama-3.3': 128000,
@@ -771,6 +820,9 @@ export function getModelOutputTokens(model: string, providerId?: string): number
     }
     if (providerId === 'qwen' || (lower.includes('qwen') && (lower.includes('3') || lower.includes('max') || lower.includes('plus')))) {
         return 65536; // Qwen3.x hard cap: 65536
+    }
+    if (providerId === 'mimo' || providerId === 'mimo-token-plan' || providerId?.includes('mimo') || lower.includes('mimo')) {
+        return 65536; // MiMo output limit (conservative; verify against API docs)
     }
 
     // ── Model-name based inference (proxy/OpenAI-compat providers) ────────

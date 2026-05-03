@@ -67,6 +67,11 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     codesearch: 20_000,
     // Shell — 30s
     run_command: 120_000,
+    // MiniMax CLI Media
+    mmx_generate_image: 120_000,
+    mmx_generate_video: 300_000,
+    mmx_generate_music: 300_000,
+    mmx_generate_speech: 60_000,
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 
@@ -323,6 +328,16 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.removeIgnoredDiagnostic(args as any); break;
             case 'get_ignored_diagnostics':
                 result = await this.externalHandler.getIgnoredDiagnostics(); break;
+
+            // ── MiniMax CLI Media tools ────────────────────────────────
+            case 'mmx_generate_image':
+                result = await this.externalHandler.mmxGenerateImage(args as any); break;
+            case 'mmx_generate_video':
+                result = await this.externalHandler.mmxGenerateVideo(args as any); break;
+            case 'mmx_generate_music':
+                result = await this.externalHandler.mmxGenerateMusic(args as any); break;
+            case 'mmx_generate_speech':
+                result = await this.externalHandler.mmxGenerateSpeech(args as any); break;
             case 'analyze_diagnostic_error':
                 result = {
                     success: true,

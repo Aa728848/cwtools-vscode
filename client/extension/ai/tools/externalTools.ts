@@ -753,4 +753,195 @@ export class ExternalToolHandler {
             };
         }
     }
+
+    // ─── MiniMax CLI Media Generation Tools ─────────────────────────────
+
+    /** Cached result of mmx CLI availability check (null = not checked yet) */
+    private mmxAvailable: boolean | null = null;
+
+    /** Check if mmx CLI is installed and accessible. Caches result for the session. */
+    private async ensureMmxAvailable(): Promise<boolean> {
+        if (this.mmxAvailable !== null) return this.mmxAvailable;
+        try {
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+            await execAsync('mmx --version', { timeout: 10000 });
+            this.mmxAvailable = true;
+        } catch {
+            this.mmxAvailable = false;
+        }
+        return this.mmxAvailable;
+    }
+
+    /** Ensure the media output directory exists and return its path. */
+    private async getMediaOutputDir(): Promise<string> {
+        const mediaDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai', 'media');
+        if (!fs.existsSync(mediaDir)) {
+            fs.mkdirSync(mediaDir, { recursive: true });
+        }
+        return mediaDir;
+    }
+
+    /** Execute an mmx command with permission gating and streaming output. */
+    private async execMmx(
+        toolLabel: string,
+        command: string,
+        timeoutMs: number = 120000
+    ): Promise<{ success: boolean; stdout: string; stderr: string; message: string }> {
+        if (!(await this.ensureMmxAvailable())) {
+            return {
+                success: false, stdout: '', stderr: '',
+                message: 'MiniMax CLI (mmx) is not installed. Please run `npm install -g mmx-cli` and `mmx auth login --api-key <key>` first.'
+            };
+        }
+
+        // Request user permission
+        if (this.ctx.onPermissionRequest) {
+            const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const allowed = await this.ctx.onPermissionRequest(
+                permId,
+                toolLabel,
+                `AI 请求使用 MiniMax CLI 执行媒体生成：\n\n${command}`,
+                command
+            );
+            if (!allowed) {
+                return { success: false, stdout: '', stderr: '', message: '用户拒绝了此媒体生成请求。' };
+            }
+        }
+
+        this.ctx.onStep?.({
+            type: 'thinking',
+            content: `[MiniMax CLI] Executing: ${command.substring(0, 200)}...`,
+            timestamp: Date.now(),
+        });
+
+        try {
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+            const { stdout, stderr } = await execAsync(command, {
+                timeout: timeoutMs,
+                cwd: this.ctx.workspaceRoot,
+            });
+
+            this.ctx.onStep?.({
+                type: 'thinking',
+                content: `[MiniMax CLI] Completed: ${stdout.trim().substring(0, 300)}`,
+                timestamp: Date.now(),
+            });
+
+            return { success: true, stdout: stdout.trim(), stderr: stderr.trim(), message: 'OK' };
+        } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            return { success: false, stdout: '', stderr: errMsg, message: `MiniMax CLI execution failed: ${errMsg}` };
+        }
+    }
+
+    // ─── mmx_generate_image ─────────────────────────────────────────────
+
+    async mmxGenerateImage(args: {
+        prompt: string;
+        aspectRatio?: string;
+        count?: number;
+    }): Promise<{ success: boolean; message: string; files?: string[] }> {
+        const outDir = await this.getMediaOutputDir();
+        const timestamp = Date.now();
+        const outPath = path.join(outDir, `image_${timestamp}`);
+
+        let cmd = `mmx image generate --prompt "${args.prompt.replace(/"/g, '\\"')}" --non-interactive --no-color --out-dir "${outPath}"`;
+        if (args.aspectRatio) cmd += ` --aspect-ratio ${args.aspectRatio}`;
+        if (args.count && args.count > 1) cmd += ` --n ${Math.min(args.count, 4)}`;
+
+        const result = await this.execMmx('mmx_generate_image', cmd, 120000);
+        if (!result.success) return { success: false, message: result.message };
+
+        // Collect generated files
+        const files: string[] = [];
+        if (fs.existsSync(outPath)) {
+            const entries = fs.readdirSync(outPath);
+            for (const entry of entries) {
+                files.push(path.join(outPath, entry));
+            }
+        }
+
+        return {
+            success: true,
+            message: `Generated ${files.length} image(s) in ${outPath}`,
+            files,
+        };
+    }
+
+    // ─── mmx_generate_video ─────────────────────────────────────────────
+
+    async mmxGenerateVideo(args: {
+        prompt: string;
+    }): Promise<{ success: boolean; message: string; file?: string }> {
+        const outDir = await this.getMediaOutputDir();
+        const timestamp = Date.now();
+        const outFile = path.join(outDir, `video_${timestamp}.mp4`);
+
+        const cmd = `mmx video generate --prompt "${args.prompt.replace(/"/g, '\\"')}" --non-interactive --no-color --download "${outFile}"`;
+
+        const result = await this.execMmx('mmx_generate_video', cmd, 300000);
+        if (!result.success) return { success: false, message: result.message };
+
+        return {
+            success: true,
+            message: `Video generated: ${outFile}`,
+            file: fs.existsSync(outFile) ? outFile : undefined,
+        };
+    }
+
+    // ─── mmx_generate_music ─────────────────────────────────────────────
+
+    async mmxGenerateMusic(args: {
+        prompt: string;
+        lyrics?: string;
+        instrumental?: boolean;
+        lyricsOptimizer?: boolean;
+    }): Promise<{ success: boolean; message: string; file?: string }> {
+        const outDir = await this.getMediaOutputDir();
+        const timestamp = Date.now();
+        const outFile = path.join(outDir, `music_${timestamp}.mp3`);
+
+        let cmd = `mmx music generate --prompt "${args.prompt.replace(/"/g, '\\"')}" --non-interactive --no-color --out "${outFile}"`;
+        if (args.lyrics) cmd += ` --lyrics "${args.lyrics.replace(/"/g, '\\"')}"`;
+        if (args.instrumental) cmd += ' --instrumental';
+        if (args.lyricsOptimizer) cmd += ' --lyrics-optimizer';
+
+        const result = await this.execMmx('mmx_generate_music', cmd, 300000);
+        if (!result.success) return { success: false, message: result.message };
+
+        return {
+            success: true,
+            message: `Music generated: ${outFile}`,
+            file: fs.existsSync(outFile) ? outFile : undefined,
+        };
+    }
+
+    // ─── mmx_generate_speech ────────────────────────────────────────────
+
+    async mmxGenerateSpeech(args: {
+        text: string;
+        voice?: string;
+        speed?: number;
+    }): Promise<{ success: boolean; message: string; file?: string }> {
+        const outDir = await this.getMediaOutputDir();
+        const timestamp = Date.now();
+        const outFile = path.join(outDir, `speech_${timestamp}.mp3`);
+
+        let cmd = `mmx speech synthesize --text "${args.text.replace(/"/g, '\\"')}" --non-interactive --no-color --out "${outFile}"`;
+        if (args.voice) cmd += ` --voice ${args.voice}`;
+        if (args.speed && args.speed !== 1.0) cmd += ` --speed ${args.speed}`;
+
+        const result = await this.execMmx('mmx_generate_speech', cmd, 60000);
+        if (!result.success) return { success: false, message: result.message };
+
+        return {
+            success: true,
+            message: `Speech generated: ${outFile}`,
+            file: fs.existsSync(outFile) ? outFile : undefined,
+        };
+    }
 }

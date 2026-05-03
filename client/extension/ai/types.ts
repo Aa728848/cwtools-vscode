@@ -494,6 +494,11 @@ export type AgentToolName =
     | 'remove_ignored_diagnostic'
     | 'get_ignored_diagnostics'
     | 'get_pdx_block'
+    // ── MiniMax CLI Media tools ──
+    | 'mmx_generate_image'
+    | 'mmx_generate_video'
+    | 'mmx_generate_music'
+    | 'mmx_generate_speech'
     // ── MCP tools ──
     | 'mcp_call';
 

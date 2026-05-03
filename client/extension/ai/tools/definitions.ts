@@ -689,6 +689,70 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // ─── MiniMax CLI Media Tools ─────────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'mmx_generate_image',
+            description: '🎨 Generate image(s) from a text prompt using MiniMax CLI (mmx). Requires `mmx` CLI installed and authenticated. Output is saved to the workspace `.cwtools-ai/media/` directory. Each invocation requires user permission.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    prompt: { type: 'string', description: 'Text description of the image to generate. Be vivid and detailed for best results.' },
+                    aspectRatio: { type: 'string', description: 'Aspect ratio, e.g. "1:1", "16:9", "9:16", "4:3". Default: "1:1"' },
+                    count: { type: 'number', description: 'Number of images to generate (1-4). Default: 1' },
+                },
+                required: ['prompt'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'mmx_generate_video',
+            description: '🎬 Generate a video from a text prompt using MiniMax CLI (mmx). Video generation is asynchronous and may take 1-3 minutes. Requires `mmx` CLI installed and authenticated. Output is saved to the workspace `.cwtools-ai/media/` directory. Each invocation requires user permission.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    prompt: { type: 'string', description: 'Text description of the video to generate. Be descriptive about motion, scene, and style.' },
+                },
+                required: ['prompt'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'mmx_generate_music',
+            description: '🎵 Generate music from a text prompt using MiniMax CLI (mmx). Supports lyrics, instrumental mode, and auto-lyric generation. Requires `mmx` CLI installed and authenticated. Output is saved to the workspace `.cwtools-ai/media/` directory. Each invocation requires user permission.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    prompt: { type: 'string', description: 'Music style/genre description, e.g. "Upbeat pop, energetic, summer vibes"' },
+                    lyrics: { type: 'string', description: 'Optional lyrics text. Use [verse], [chorus], [bridge] tags for structure.' },
+                    instrumental: { type: 'boolean', description: 'If true, generate instrumental music without vocals. Default: false' },
+                    lyricsOptimizer: { type: 'boolean', description: 'If true, auto-generate lyrics from the prompt. Default: false' },
+                },
+                required: ['prompt'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'mmx_generate_speech',
+            description: '🗣️ Synthesize speech (TTS) from text using MiniMax CLI (mmx). Supports 30+ voices and speed control. Requires `mmx` CLI installed and authenticated. Output is saved to the workspace `.cwtools-ai/media/` directory. Each invocation requires user permission.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    text: { type: 'string', description: 'The text to convert to speech.' },
+                    voice: { type: 'string', description: 'Voice name, e.g. "English_magnetic_voiced_man", "Chinese_female_sweet". Use `mmx speech voices` to list all available voices.' },
+                    speed: { type: 'number', description: 'Speech speed multiplier (0.5 to 2.0). Default: 1.0' },
+                },
+                required: ['text'],
+            },
+        },
+    },
     // ─── MCP Tools ──────────────────────────────────────────────────────
     {
         type: 'function',

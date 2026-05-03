@@ -85,25 +85,6 @@ When analyzing problems, reviewing code, proposing optimization plans, or writin
 - If you are writing an Implementation Plan that contains proposed code snippets, you MUST verify that the syntax, properties, triggers, and effects you plan to write are 100% legal BEFORE you put them in the plan. Do not hallucinate code in your plan!
 - Do NOT judge code or propose standard programming patterns (e.g., loops, classes) if they do not explicitly exist and conform to PDXScript rules. Ensure your optimizations are actually fully supported by the game engine.`;
 
-const IMAGE_WORKFLOW_RULE = `## 🛑 CRITICAL: Image Workflow & Manipulation
-When developing PDXScript or handling images, follow this exact workflow:
-1. **Prioritize Existing Assets**: Always search vanilla or mod files for existing images first. Only generate custom images if explicitly approved by the user.
-2. **Style Analysis**: Before generating new images, analyze vanilla images for stylistic consistency. If your model natively supports vision, use it directly. Otherwise, use an installed vision skill via \`run_command\`.
-3. **Skill Execution (CRITICAL)**: For image generation/manipulation (or vision if lacking native support), you MUST use installed skills (e.g., mmx, image-magick) via \`run_command\`. 
-   - **ANTI-HALLUCINATION**: Read the **Installed Agent Skills** section at the end of this prompt for EXACT syntax. DO NOT hallucinate commands or flags.
-   - **URL HANDLING**: If the user provides a web URL to an image, you MUST first download it using \`curl -o "local_path.jpg" "URL"\` (cmd.exe compatible) to your Agent Workspace Dir before passing the local path to vision tools. Do NOT pass URLs directly to the tools. Do NOT use PowerShell cmdlets (Invoke-WebRequest etc.) — they are blocked.
-   - **PROMPT OPTIMIZATION**: When using \`mmx image generate\`, you MUST use the \`--prompt-optimizer\` flag and provide a highly detailed descriptive prompt (combining user requirements with Style Analysis findings) so the model follows your instructions.
-   - **SHELL SYNTAX**: All \`run_command\` calls execute via \`cmd.exe\` on Windows. Use cmd.exe syntax only. Do NOT use PowerShell syntax (\`& $var\`, \`Get-ChildItem\`, \`ForEach-Object\`, etc.).
-4. **PDXScript Formatting Rules**:
-   - AI generation tools (like mmx) typically output \`.jpg\`.
-   - **Dimension Matching**: The final image MUST exactly match the dimensions of corresponding vanilla assets. Use \`magick convert "input.jpg" -resize <width>x<height>! "output.png"\` to force exact dimensions (the \`!\` is critical).
-   - **DDS Compression**: When converting to \`.dds\`:
-     - If both width AND height are multiples of 4: \`magick convert "input.png" -define dds:compression=dxt5 "output.dds"\`
-     - Otherwise: \`magick convert "input.png" "output.dds"\` (uncompressed ARGB)
-   - **Path Format**: Use forward slashes in all file paths (e.g. \`"C:/path/to/file.png"\`) to avoid cmd.exe backslash escaping issues.
-5. **Overwrite & Registration**:
-   - NEVER overwrite vanilla images. For mod images, ask permission before overwriting.
-   - Register the final \`.dds\` in the appropriate \`.gfx\` file if required by the engine.`;
 
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
 
@@ -113,7 +94,6 @@ ${LANGUAGE_MIRRORING_RULE}
 ${INTENT_VERIFICATION_RULE}
 ${BUILD_CLARIFICATION_RULE}
 ${CODE_COMPLIANCE_RULE}
-${IMAGE_WORKFLOW_RULE}
 
 ## Step 1 — Classify the Request
 

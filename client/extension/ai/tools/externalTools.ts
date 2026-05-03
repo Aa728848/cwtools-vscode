@@ -248,8 +248,7 @@ export class ExternalToolHandler {
             'dotnet --version', 'dotnet --info', 'node --version',
             'npm list', 'npm ls', 'npm --version', 'npx --version',
             'cat ', 'type ', 'echo ', 'dir ', 'ls ', 'find ', 'grep ',
-            'wc ', 'head ', 'tail ', 'which ', 'where ', 'mmx ',
-            'magick identify ',  // ImageMagick read-only metadata queries
+            'wc ', 'head ', 'tail ', 'which ', 'where ', 'mmx ', 'mmx --version',
         ];
         const cmdLower = args.command.trim().toLowerCase();
         const isSafePrefix = SAFE_COMMAND_PREFIXES.some(p => cmdLower.startsWith(p));
@@ -305,19 +304,7 @@ export class ExternalToolHandler {
             return { stdout: '', stderr: `Blocked: Invalid working directory`, exitCode: 1 };
         }
 
-        let requiresPermission = true;
-        if (cmdLower.startsWith('mmx ')) {
-            let hasPipeOrRedirect = false;
-            for (const pat of PIPE_REDIRECT_BLOCKED) {
-                if (pat.test(args.command)) {
-                    hasPipeOrRedirect = true;
-                    break;
-                }
-            }
-            if (!hasPipeOrRedirect) {
-                requiresPermission = false;
-            }
-        }
+        const requiresPermission = true;
 
         if (requiresPermission && this.ctx.onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -334,11 +321,7 @@ export class ExternalToolHandler {
             return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
         }
 
-        // Auto-extend timeout for mmx vision/image commands — these involve API
-        // round-trips (image upload + processing + response) that regularly exceed 30s
-        const isMmxApiCommand = cmdLower.startsWith('mmx vision') || cmdLower.startsWith('mmx image');
-        const defaultTimeout = isMmxApiCommand ? 90000 : 30000;
-        const timeoutMs = Math.min(args.timeoutMs ?? defaultTimeout, 120000);
+        const timeoutMs = Math.min(args.timeoutMs ?? 30000, 120000);
         const { spawn } = await import('child_process');
 
         // Parse command into binary + args on the platform shell

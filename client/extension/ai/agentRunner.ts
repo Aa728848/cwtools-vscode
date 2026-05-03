@@ -605,56 +605,82 @@ export class AgentRunner {
         let effectiveUserMessage = userMessage;
         let effectiveImages = images && images.length > 0 ? images : undefined;
         if (effectiveImages && !visionSupported) {
-            // Vision fallback: save base64 images to local tmp dir and inject paths into prompt
-            const workspaceFolders = vs.workspace.workspaceFolders;
-            let fallbackSuccessful = false;
-            
-            if (workspaceFolders && workspaceFolders.length > 0) {
+            let minimaxCliUsed = false;
+            if (_providerIdVision.startsWith('minimax')) {
                 try {
-                    const tmpDir = path.join(workspaceFolders[0]!.uri.fsPath, '.vscode', 'tmp', 'vision');
-                    if (!fs.existsSync(tmpDir)) {
-                        fs.mkdirSync(tmpDir, { recursive: true });
-                    }
-                    const savedPaths: string[] = [];
+                    const cp = await import('child_process');
+                    const util = await import('util');
+                    const os = await import('os');
+                    const execAsync = util.promisify(cp.exec);
+
+                    // Check if mmx is installed
+                    await execAsync('mmx --version');
+
+                    emitStep({
+                        type: 'thinking',
+                        content: 'Using MiniMax CLI to process images...',
+                        timestamp: Date.now(),
+                    });
+
+                    let visionText = '\n\n[System Notice: The user attached image(s) to this message. Since you do not have native vision capabilities, the images were automatically analyzed by an external Vision AI. Below is the textual description of what the image contains. You MUST use this description to answer the user\'s prompt. Do NOT use file-system tools (like list_directory) to answer questions about the image unless specifically asked to correlate them.]\n';
+                    
                     for (let i = 0; i < effectiveImages.length; i++) {
-                        const dataUrl = effectiveImages[i];
-                        if (!dataUrl) continue;
-                        const match = dataUrl.match(/^data:image\/(\w+);base64,/);
-                        const ext = match ? match[1] : 'png';
-                        const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "");
-                        const buffer = Buffer.from(base64Data, 'base64');
-                        const filePath = path.join(tmpDir, `upload_${Date.now()}_${i}.${ext}`);
-                        fs.writeFileSync(filePath, buffer);
-                        // Normalize to forward slashes — avoids cmd.exe backslash+quote
-                        // parsing edge cases on Windows and is accepted by mmx/Node.js
-                        savedPaths.push(filePath.replace(/\\/g, '/'));
+                        const img = effectiveImages[i];
+                        if (!img) continue;
+                        
+                        const base64Index = img.indexOf('base64,');
+                        if (base64Index > -1) {
+                            const header = img.substring(0, base64Index);
+                            const extMatch = header.match(/^data:image\/([^;]+)/);
+                            const rawExt = extMatch && extMatch[1] ? extMatch[1] : 'jpg';
+                            const ext = rawExt === 'jpeg' ? 'jpg' : rawExt.replace(/[^a-zA-Z0-9]/g, '');
+                            
+                            const base64Data = img.substring(base64Index + 7);
+                            const tempFilePath = path.join(os.tmpdir(), `mmx_img_${Date.now()}_${i}.${ext}`);
+                            
+                            try {
+                                await fs.promises.writeFile(tempFilePath, Buffer.from(base64Data, 'base64'));
+                                const { stdout } = await execAsync(`mmx vision describe --image "${tempFilePath}" --non-interactive --no-color`, { timeout: 60000 });
+                                const vlmResult = stdout.trim();
+                                visionText += `\nImage ${i + 1}:\n${vlmResult}\n`;
+                                emitStep({
+                                    type: 'thinking',
+                                    content: `[VLM Image ${i + 1}]: ${vlmResult}`,
+                                    timestamp: Date.now(),
+                                });
+                            } catch (err) {
+                                const errMsg = err instanceof Error ? err.message : String(err);
+                                visionText += `\nImage ${i + 1}: Failed to analyze (${errMsg})\n`;
+                                emitStep({
+                                    type: 'thinking',
+                                    content: `[VLM Image ${i + 1} Failed]: ${errMsg}`,
+                                    timestamp: Date.now(),
+                                });
+                            } finally {
+                                if (fs.existsSync(tempFilePath)) {
+                                    await fs.promises.unlink(tempFilePath).catch(() => {});
+                                }
+                            }
+                        } else {
+                            visionText += `\nImage ${i + 1}: Invalid image data format.\n`;
+                            emitStep({
+                                type: 'thinking',
+                                content: `[VLM Image ${i + 1}]: Invalid format`,
+                                timestamp: Date.now(),
+                            });
+                        }
                     }
-                    
-                    // Build ready-to-run mmx commands so the AI can copy-paste
-                    const commandExamples = savedPaths.map(p =>
-                        `mmx vision describe --image "${p}" --prompt "Describe this image in detail." --output json --quiet`
-                    );
-                    
-                    effectiveUserMessage += `\n\n[System Notice: The user uploaded ${savedPaths.length} image(s). Your current AI model (${_providerVision.name}) does NOT support native image processing. The images have been saved locally. You MUST analyze them using the \`run_command\` tool with the EXACT commands below before proceeding.\n\n` +
-                        `**Saved image paths:**\n` +
-                        savedPaths.map(p => `- "${p}"`).join('\n') +
-                        `\n\n**Ready-to-run commands (copy-paste these EXACTLY into run_command):**\n` +
-                        commandExamples.map(c => `\`\`\`\n${c}\n\`\`\``).join('\n') +
-                        `\n\nCRITICAL RULES:\n` +
-                        `1. Use the EXACT paths above — do NOT modify, shorten, or hallucinate different paths.\n` +
-                        `2. Set timeoutMs to at least 60000 (60 seconds) for vision API calls.\n` +
-                        `3. If the command fails, report the exact error to the user — do NOT retry with different paths.]`;
-                    
-                    fallbackSuccessful = true;
+                    visionText += '\n[End of Image Descriptions]\n';
+                    effectiveUserMessage += visionText;
+                    minimaxCliUsed = true;
+                    effectiveImages = undefined;
                 } catch (e) {
-                    // Log the error for debugging instead of silently swallowing
-                    ErrorReporter.debug(SOURCE.AGENT_RUNNER, 'Vision fallback: failed to save images to tmp dir', e);
-                    fallbackSuccessful = false;
+                    // mmx not installed or error, fall through to default unsupported message
                 }
             }
 
-            if (!fallbackSuccessful) {
-                // Emit UI warning
+            if (!minimaxCliUsed) {
+                // Vision not supported: emit UI warning and inject notice for the AI
                 emitStep({
                     type: 'error',
                     content: AGENT.VISION_UNSUPPORTED(_providerVision.name) +
@@ -663,12 +689,9 @@ export class AgentRunner {
                             : AGENT.VISION_GENERIC_HINT),
                     timestamp: Date.now(),
                 });
-                // CRITICAL: Also inject a notice into the AI's message so it knows
-                // images were uploaded but couldn't be processed — prevents hallucination
-                effectiveUserMessage += `\n\n[System Notice: The user uploaded image(s), but the system failed to save them locally for vision analysis. Your current AI model (${_providerVision.name}) does not support native image processing. Please inform the user that their image cannot be analyzed with the current provider, and suggest switching to a vision-capable provider (e.g., Claude, Gemini, GPT-4o). Do NOT attempt to guess or hallucinate image paths — the images are not available.]`;
+                effectiveUserMessage += `\n\n[System Notice: The user uploaded image(s), but your current AI model (${_providerVision.name}) does not support native image processing. Please inform the user that their image cannot be analyzed with the current provider, and suggest switching to a vision-capable provider (e.g., Claude, Gemini, GPT-4o). Do NOT attempt to guess or hallucinate image content — the images are not available to you.]`;
+                effectiveImages = undefined; // drop native images, proceed text-only
             }
-
-            effectiveImages = undefined; // drop native images, proceed text-only with injected notice
         }
 
         // Build the user turn: multimodal ContentPart[] when images are provided,

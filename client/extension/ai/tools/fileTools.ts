@@ -13,6 +13,7 @@ import * as readline from 'readline';
 import { parsePdx, PdxNode } from '../../guiParser';
 import type { ValidationError } from '../types';
 import { getCachedFile, setCachedFile } from '../fileCache';
+import { fuzzyReplace } from './replacerSuite';
 
 // ─── Shared file-system helpers ──────────────────────────────────────────────
 
@@ -166,7 +167,7 @@ export class FileToolHandler {
                             content: '',
                             totalLines,
                             truncated: true,
-                            _hint: `文件共有 ${totalLines} 行 — 太长无法完整读取。建议：先调用 document_symbols("${args.file}") 定位你所需的部分，然后再使用 startLine 和 endLine 参数重新调用 read_file（每次最多读取 ${threshold} 行）。`,
+                            _hint: `File has ${totalLines} lines — too long to read in full. Suggestion: call document_symbols("${args.file}") to locate the section you need, then re-invoke read_file with startLine and endLine parameters (max ${threshold} lines per call).`,
                         };
                     }
                     return { content: cached, totalLines, truncated: false };
@@ -209,7 +210,7 @@ export class FileToolHandler {
                     }
                 }
             } catch (e) {
-                return { content: `读取文件出错：${String(e)}`, totalLines: 0, truncated: false };
+                return { content: `Error reading file:${String(e)}`, totalLines: 0, truncated: false };
             }
 
             // Cache the full content for potential re-reads within this loop
@@ -230,9 +231,9 @@ export class FileToolHandler {
                     content: '',
                     totalLines,
                     truncated: true,
-                    _hint: `文件共有 ${totalLines} 行 — 太长无法完整读取。` +
-                        `建议：先调用 document_symbols("${args.file}") 定位你所需的部分，` +
-                        `然后再使用 startLine 和 endLine 参数重新调用 read_file（每次最多读取 ${threshold} 行）。`,
+                    _hint: `File has ${totalLines} lines — too long to read in full. ` +
+                        `Suggestion: call document_symbols("${args.file}") to locate the section you need, ` +
+                        `then re-invoke read_file with startLine and endLine parameters (max ${threshold} lines per call).`,
                 };
             }
 
@@ -263,18 +264,18 @@ export class FileToolHandler {
 
             return {
                 content: truncated
-                    ? resultContent + `\n[... 已在 ~${MAX_READ_CHARS} 字符处截断 ...]`
+                    ? resultContent + `\n[... truncated at ~${MAX_READ_CHARS} chars ...]`
                     : resultContent,
                 totalLines,
                 truncated,
                 ...(truncated ? {
-                    _hint: `输出已截断。文件总行数为 ${totalLines}。` +
-                        `当前显示的最后一行约在 ~${lastLineReturned}。` +
-                        `要读取下一部分，请使用 startLine=${lastLineReturned + 1} 重新调用 read_file。`,
+                    _hint: `Output truncated. Total lines: ${totalLines}. ` +
+                        `Last displayed line: ~${lastLineReturned}. ` +
+                        `To read the next section, call read_file with startLine=${lastLineReturned + 1}.`,
                 } : {}),
             };
         } catch (e) {
-            return { content: `读取文件出错：${String(e)}`, totalLines: 0, truncated: false };
+            return { content: `Error reading file:${String(e)}`, totalLines: 0, truncated: false };
         }
     }
 
@@ -287,7 +288,7 @@ export class FileToolHandler {
                 
                 // 安全阻断：禁止覆写（但允许 .md 格式的计划/文档被覆写）
                 if (fs.existsSync(args.file) && !this.ctx.vfsOverlay && !args.file.toLowerCase().endsWith('.md')) {
-                    return { success: false, message: "文件已存在！为防止破坏性覆盖，严禁使用 write_file 覆写已有文件。请使用 edit_file 或 multiedit 进行局部改写。仅允许通过此工具覆写 .md 格式的文档！" };
+                    return { success: false, message: "File already exists. To prevent destructive overwrites, write_file cannot overwrite existing files — use edit_file or multiedit for partial edits. Only .md documents can be overwritten via this tool." };
                 }
 
                 const { content: originalContent, hasBom } = this.readTextFile(args.file);
@@ -299,7 +300,7 @@ export class FileToolHandler {
                     const messageId = `write_${crypto.randomUUID()}`;
                     const confirmed = await this.ctx.onPendingWrite(args.file, args.content, messageId);
                     if (!confirmed) {
-                        return { success: false, message: '用户取消了写入操作' };
+                        return { success: false, message: 'User cancelled the write operation' };
                     }
                 } else if (this.ctx.onAutoWritten && !this.ctx.vfsOverlay) {
                     const isNewFile = !fs.existsSync(args.file);
@@ -307,9 +308,9 @@ export class FileToolHandler {
                 }
 
                 this.writeTextFile(args.file, args.content, hasBom, args.encoding);
-                return { success: true, message: `文件已写入: ${args.file}` };
+                return { success: true, message: `File written: ${args.file}` };
             } catch (e) {
-                return { success: false, message: `写入失败: ${String(e)}` };
+                return { success: false, message: `Write failed: ${String(e)}` };
             }
         });
     }
@@ -326,7 +327,7 @@ export class FileToolHandler {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return {
                 success: false,
-                message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。示例：edit_file({ "filePath": "/path/to/file.txt", "oldString": "...", "newString": "..." })',
+                message: 'Error: missing or invalid "filePath" parameter. Must provide an absolute file path. Example: edit_file({ "filePath": "/path/to/file.txt", "oldString": "...", "newString": "..." })',
             } as any;
         }
 
@@ -346,7 +347,7 @@ export class FileToolHandler {
                 newContent = args.newString;
             } else {
                 if (args.oldString === args.newString) {
-                    return { success: false, message: 'oldString 与 newString 完全相同，无需修改' };
+                    return { success: false, message: 'oldString and newString are identical — no change needed' };
                 }
                 const ending = this.detectLineEnding(originalContent);
                 const old = this.convertLineEnding(this.normalizeLineEndings(args.oldString), ending);
@@ -363,7 +364,7 @@ export class FileToolHandler {
             if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !this.ctx.vfsOverlay) {
                 const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `edit_${Date.now()}`);
                 if (!confirmed) {
-                    return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
+                    return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
                 }
             } else if (this.ctx.onAutoWritten && !this.ctx.vfsOverlay) {
                 this.ctx.onAutoWritten(filePath, false);
@@ -372,7 +373,7 @@ export class FileToolHandler {
             try {
                 this.writeTextFile(filePath, newContent, hasBom, args.encoding);
             } catch (e) {
-                return { success: false, message: `写入失败: ${String(e)}` };
+                return { success: false, message: `Write failed: ${String(e)}` };
             }
 
             const diagnostics = await this.getLspDiagnosticsForFile(filePath);
@@ -393,11 +394,11 @@ export class FileToolHandler {
             const nearbyDiags = editedLines.size > 0
                 ? diagnostics.filter(d => editedLines.has(d.line))
                 : diagnostics;
-            let message = `文件已更新: ${path.basename(filePath)}`;
+            let message = `File updated: ${path.basename(filePath)}`;
             const errors = nearbyDiags.filter(d => d.severity === 'error');
             if (errors.length > 0) {
-                message += `\n\nLSP 检测到 ${errors.length} 个错误，请修复：\n` +
-                    errors.slice(0, 5).map(e => `  第 ${e.line + 1} 行: ${e.message}`).join('\n');
+                message += `\n\nLSP detected ${errors.length} error(s) — please fix:\n` +
+                    errors.slice(0, 5).map(e => `  Line ${e.line + 1}: ${e.message}`).join('\n');
             }
             return {
                 success: true, message, diff, diagnostics: nearbyDiags,
@@ -412,10 +413,10 @@ export class FileToolHandler {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return {
                 success: false,
-                message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。',
+                message: 'Error: missing or invalid "filePath" parameter. Must provide an absolute file path.',
             } as any;
         }
-        
+
         return this.executeWithLock(args.filePath, async () => {
             try {
                 args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
@@ -504,7 +505,7 @@ export class FileToolHandler {
         if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
             const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `ast_${Date.now()}`);
             if (!confirmed) {
-                return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
+                return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
             }
         } else if (this.ctx.onAutoWritten) {
             this.ctx.onAutoWritten(filePath, false);
@@ -513,14 +514,14 @@ export class FileToolHandler {
         try {
             this.writeTextFile(filePath, newContent, hasBom, args.encoding);
         } catch (e) {
-            return { success: false, message: `写入失败: ${String(e)}` };
+            return { success: false, message: `Write failed: ${String(e)}` };
         }
 
             const diagnostics = await this.getLspDiagnosticsForFile(filePath);
             return {
                 success: true,
                 nodeFound: true,
-                message: `AST surgery successful (${args.action} on ${args.targetPath.join(' -> ')}). 文件已更新: ${path.basename(filePath)}`,
+                message: `AST surgery successful (${args.action} on ${args.targetPath.join(' -> ')}). File updated: ${path.basename(filePath)}`,
                 diff,
                 diagnostics
             };
@@ -537,7 +538,7 @@ export class FileToolHandler {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return {
                 success: false,
-                message: '错误：缺少或无效的 "filePath" 参数。必须提供绝对文件路径。',
+                message: 'Error: missing or invalid "filePath" parameter. Must provide an absolute file path.',
             } as any;
         }
         return this.executeWithLock(args.filePath, async () => {
@@ -565,7 +566,7 @@ export class FileToolHandler {
             } catch (e) {
                 // P1 Fix: fail-fast — stop on first error to avoid misleading messages
                 // from subsequent edits operating on an inconsistent intermediate state
-                errors.push(`编辑块 #${i + 1} 失败：${e instanceof Error ? e.message : String(e)}`);
+                errors.push(`Edit block #${i + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
                 break;
             }
         }
@@ -573,7 +574,7 @@ export class FileToolHandler {
         if (errors.length > 0) {
             return {
                 success: false,
-                message: `${errors.length} 个编辑块应用失败，文件未做任何修改：\n${errors.join('\n')}`,
+                message: `${errors.length} edit block(s) failed — file was not modified:\n${errors.join('\n')}`,
             };
         }
 
@@ -582,7 +583,7 @@ export class FileToolHandler {
             const messageId = `multiedit_${crypto.randomUUID()}`;
             const confirmed = await this.ctx.onPendingWrite(filePath, content, messageId);
             if (!confirmed) {
-                return { success: false, message: '用户取消了编辑操作', pendingDiff: diff };
+                return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
             }
         } else if (this.ctx.onAutoWritten) {
             this.ctx.onAutoWritten(filePath, false);
@@ -591,7 +592,7 @@ export class FileToolHandler {
         try {
             this.writeTextFile(filePath, content, hasBom, args.encoding);
         } catch (e) {
-            return { success: false, message: `写入失败: ${String(e)}` };
+            return { success: false, message: `Write failed: ${String(e)}` };
         }
 
         const diagnostics = await this.getLspDiagnosticsForFile(filePath);
@@ -630,11 +631,11 @@ export class FileToolHandler {
              }
         }
 
-        let message = `multiedit: ${args.edits.length} 个编辑已应用到 ${path.basename(filePath)}`;
+        let message = `multiedit: ${args.edits.length} edit(s) applied to ${path.basename(filePath)}`;
         const errorDiags = nearbyDiags.filter(d => d.severity === 'error');
         if (errorDiags.length > 0) {
-            message += `\n\nLSP 检测到 ${errorDiags.length} 个错误：\n` +
-                errorDiags.slice(0, 5).map(e => `  第 ${e.line + 1} 行: ${e.message}`).join('\n');
+            message += `\n\nLSP detected ${errorDiags.length} error(s):\n` +
+                errorDiags.slice(0, 5).map(e => `  Line ${e.line + 1}: ${e.message}`).join('\n');
         }
         return {
             success: true, message, diff, diagnostics: nearbyDiags,
@@ -717,7 +718,7 @@ export class FileToolHandler {
         }
 
         if (hunks.length === 0) {
-            return { success: false, filesChanged: [], errors: ['补丁中未找到有效的修改块（hunks）'] };
+            return { success: false, filesChanged: [], errors: ['No valid hunks found in patch'] };
         }
 
         const byFile = new Map<string, { content: string; hasBom: boolean; hunks: HunkPatch[] }>();
@@ -771,7 +772,7 @@ export class FileToolHandler {
                     return {
                         success: false,
                         filesChanged: [],
-                        errors: [`${path.basename(filePath)}: 用户取消了写入操作，所有文件均未修改`],
+                        errors: [`${path.basename(filePath)}: User cancelled write — no files were modified`],
                     };
                 }
             }
@@ -786,7 +787,7 @@ export class FileToolHandler {
                 this.writeTextFile(filePath, newContent, hasBom);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
             } catch (e) {
-                errors.push(`写入 ${path.basename(filePath)} 失败：${e instanceof Error ? e.message : String(e)}`);
+                errors.push(`Writing ${path.basename(filePath)} failed: ${e instanceof Error ? e.message : String(e)}`);
             }
         }
 
@@ -894,6 +895,7 @@ export class FileToolHandler {
 
     // ─── OpenCode Replacer Suite ─────────────────────────────────────────────
     // Ported from: opencode/packages/opencode/src/tool/edit.ts
+    // Strategies extracted to ./replacerSuite.ts for testability.
 
     private normalizeLineEndings(text: string): string { return text.split('\r\n').join('\n'); }
     private detectLineEnding(text: string): '\n' | '\r\n' { return text.includes('\r\n') ? '\r\n' : '\n'; }
@@ -901,178 +903,9 @@ export class FileToolHandler {
         return ending === '\n' ? text : text.split('\n').join('\r\n');
     }
 
-    // P2-12 Fix: Rolling-array Levenshtein — O(min(n,m)) space instead of O(n*m)
-    private levenshtein(a: string, b: string): number {
-        if (!a.length || !b.length) return Math.max(a.length, b.length);
-        // Ensure b is the shorter string for minimal memory usage
-        if (a.length < b.length) { const t = a; a = b; b = t; }
-        let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-        let curr = new Array<number>(b.length + 1);
-        for (let i = 1; i <= a.length; i++) {
-            curr[0] = i;
-            for (let j = 1; j <= b.length; j++) {
-                const c = a[i - 1] === b[j - 1] ? 0 : 1;
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + c);
-            }
-            [prev, curr] = [curr, prev];
-        }
-        return prev[b.length]!;
-    }
-
-    private *simpleReplacer(_c: string, find: string): Generator<string> { yield find; }
-
-    private *lineTrimmedReplacer(content: string, find: string): Generator<string> {
-        const oL = content.split('\n'), sL = find.split('\n');
-        if (sL[sL.length - 1] === '') sL.pop();
-        for (let i = 0; i <= oL.length - sL.length; i++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            if (sL.every((s, j) => oL[i + j]!.trim() === s.trim())) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                let st = 0; for (let k = 0; k < i; k++) st += oL[k]!.length + 1;
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                let en = st; for (let k = 0; k < sL.length; k++) { en += oL[i + k]!.length; if (k < sL.length - 1) en += 1; }
-                yield content.substring(st, en);
-            }
-        }
-    }
-
-    private *blockAnchorReplacer(content: string, find: string): Generator<string> {
-        const oL = content.split('\n'), sL = find.split('\n');
-        if (sL.length < 3) return;
-        if (sL[sL.length - 1] === '') sL.pop();
-        const first = sL[0]!.trim(), last = sL[sL.length - 1]!.trim();
-        const cands: { s: number; e: number }[] = [];
-        for (let i = 0; i < oL.length; i++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            if (oL[i]!.trim() !== first) continue;
-            for (let j = i + 2; j < oL.length; j++) { if (oL[j]!.trim() === last) { cands.push({ s: i, e: j }); break; } }
-        }
-        if (!cands.length) return;
-        const score = (s: number, e: number) => {
-            const check = Math.min(sL.length - 2, e - s - 1);
-            if (check <= 0) return 1.0;
-            let sim = 0;
-            for (let j = 1; j < sL.length - 1 && j < e - s; j++) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                const mx = Math.max(oL[s + j]!.trim().length, sL[j]!.trim().length);
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                if (mx) sim += (1 - this.levenshtein(oL[s + j]!.trim(), sL[j]!.trim()) / mx) / check;
-            }
-            return sim;
-        };
-        const extract = (s: number, e: number) => {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            let st = 0; for (let k = 0; k < s; k++) st += oL[k]!.length + 1;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            let en = st; for (let k = s; k <= e; k++) { en += oL[k]!.length; if (k < e) en += 1; }
-            return content.substring(st, en);
-        };
-        if (cands.length === 1) { if (score(cands[0]!.s, cands[0]!.e) >= 0) yield extract(cands[0]!.s, cands[0]!.e); return; }
-        let best = cands[0]!, bestSim = -1;
-        for (const { s, e } of cands) { const sim = score(s, e); if (sim > bestSim) { bestSim = sim; best = { s, e }; } }
-        if (bestSim >= 0.3) yield extract(best.s, best.e);
-    }
-
-    private *whitespaceNormalizedReplacer(content: string, find: string): Generator<string> {
-        const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
-        const nF = norm(find), lns = content.split('\n'), fL = find.split('\n');
-        if (fL.length === 1) { for (const l of lns) { if (norm(l) === nF) yield l; } return; }
-        for (let i = 0; i <= lns.length - fL.length; i++)
-            if (norm(lns.slice(i, i + fL.length).join('\n')) === nF) yield lns.slice(i, i + fL.length).join('\n');
-    }
-
-    private *indentationFlexibleReplacer(content: string, find: string): Generator<string> {
-        const strip = (text: string) => {
-            const lns = text.split('\n'), ne = lns.filter(l => l.trim().length > 0);
-            if (!ne.length) return text;
-            const min = Math.min(...ne.map(l => { const m = l.match(/^(\s*)/); return m ? m[1]!.length : 0; }));
-            return lns.map(l => l.trim().length === 0 ? l : l.slice(min)).join('\n');
-        };
-        const nF = strip(find), lns = content.split('\n'), fL = find.split('\n');
-        for (let i = 0; i <= lns.length - fL.length; i++) {
-            const b = lns.slice(i, i + fL.length).join('\n');
-            if (strip(b) === nF) yield b;
-        }
-    }
-
-    private *escapeNormalizedReplacer(content: string, find: string): Generator<string> {
-        const un = (s: string) => s.replace(/\\(n|t|r|'|"|`|\\|\n|\$)/g, (_m, c: string) =>
-            ({ n: '\n', t: '\t', r: '\r', "'": "'", '"': '"', '`': '`', '\\': '\\', '\n': '\n', '$': '$' }[c] ?? _m));
-        const uF = un(find);
-        if (content.includes(uF)) { yield uF; return; }
-        const lns = content.split('\n'), fL = uF.split('\n');
-        if (fL.length > 1) for (let i = 0; i <= lns.length - fL.length; i++) {
-            const b = lns.slice(i, i + fL.length).join('\n');
-            if (un(b) === uF) yield b;
-        }
-    }
-
-    private *trimmedBoundaryReplacer(content: string, find: string): Generator<string> {
-        const trimmed = find.trim();
-        if (trimmed === find) return;
-        if (content.includes(trimmed)) { yield trimmed; return; }
-        const lns = content.split('\n'), fL = find.split('\n');
-        for (let i = 0; i <= lns.length - fL.length; i++) {
-            const b = lns.slice(i, i + fL.length).join('\n');
-            if (b.trim() === trimmed) yield b;
-        }
-    }
-
-    private *contextAwareReplacer(content: string, find: string): Generator<string> {
-        const fL = find.split('\n');
-        if (fL.length < 3) return;
-        if (fL[fL.length - 1] === '') fL.pop();
-        const cL = content.split('\n');
-        const fl = fL[0]!.trim(), ll = fL[fL.length - 1]!.trim();
-        for (let i = 0; i < cL.length; i++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            if (cL[i]!.trim() !== fl) continue;
-            for (let j = i + 2; j < cL.length; j++) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                if (cL[j]!.trim() !== ll) continue;
-                const b = cL.slice(i, j + 1);
-                if (b.length !== fL.length) break;
-                let hit = 0, tot = 0;
-                for (let k = 1; k < b.length - 1; k++) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    if (b[k]!.trim().length || fL[k]!.trim().length) { tot++; if (b[k]!.trim() === fL[k]!.trim()) hit++; }
-                }
-                if (tot === 0 || hit / tot >= 0.5) { yield b.join('\n'); break; }
-                break;
-            }
-        }
-    }
-
-    /** Main replace: try each of the 8 Replacers in order, first match wins */
+    /** Main replace: delegates to fuzzyReplace (8 strategies, first match wins) */
     replace(content: string, oldString: string, newString: string, replaceAll: boolean): string {
-        if (oldString === newString) throw new Error('oldString 与 newString 完全相同，无需修改');
-        const replacers = [
-            this.simpleReplacer.bind(this),
-            this.lineTrimmedReplacer.bind(this),
-            this.blockAnchorReplacer.bind(this),
-            this.whitespaceNormalizedReplacer.bind(this),
-            this.indentationFlexibleReplacer.bind(this),
-            this.escapeNormalizedReplacer.bind(this),
-            this.trimmedBoundaryReplacer.bind(this),
-            this.contextAwareReplacer.bind(this),
-        ] as const;
-        for (const replacer of replacers) {
-            for (const search of replacer(content, oldString)) {
-                const idx = content.indexOf(search);
-                if (idx === -1) continue;
-                if (replaceAll) return search.length > 0 ? content.split(search).join(newString) : content;
-                const lastIdx = content.lastIndexOf(search);
-                if (idx !== lastIdx) throw new Error(
-                    '在文件中找到多个匹配项。请在 oldString 中提供更多上下文使其唯一，或使用 replaceAll=true。'
-                );
-                return content.substring(0, idx) + newString + content.substring(idx + search.length);
-            }
-        }
-        throw new Error(
-            '找不到该内容。严禁在 oldString 中省略上下文或使用 "..." 代表未修改代码！请完整包含从替换起点到终点的所有代码文本，确保空白符完全对齐。\n' +
-            '提示：务必先使用 read_file 获取确切文本，然后再在 oldString 中提供与文件完全相同的片段。'
-        );
+        return fuzzyReplace(content, oldString, newString, replaceAll);
     }
 
     private buildUnifiedDiff(filePath: string, original: string, modified: string): string {
@@ -1084,6 +917,6 @@ export class FileToolHandler {
             if (oL[i] === mL[j]) { i++; j++; }
             else { changed++; if (i < oL.length) { diff += `- ${oL[i++]}\n`; } if (j < mL.length) { diff += `+ ${mL[j++]}\n`; } }
         }
-        return changed === 0 ? diff + '(无变更)\n' : diff;
+        return changed === 0 ? diff + '(no changes)\n' : diff;
     }
 }

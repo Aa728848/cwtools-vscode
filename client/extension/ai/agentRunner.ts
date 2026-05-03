@@ -212,7 +212,7 @@ class WriteQueue {
         return new Promise((resolve, reject) => {
             this.queue = this.queue
                 .then(() => fn().then(resolve, reject))
-                .catch(() => { /* swallow to keep the queue alive — a rejected write must not stall subsequent writes */ });
+                .catch((err) => { ErrorReporter.warn(SOURCE.AGENT_RUNNER, 'WriteQueue: swallowed rejected write to keep queue alive', err); });
         });
     }
 }

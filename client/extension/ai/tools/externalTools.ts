@@ -248,7 +248,8 @@ export class ExternalToolHandler {
             'dotnet --version', 'dotnet --info', 'node --version',
             'npm list', 'npm ls', 'npm --version', 'npx --version',
             'cat ', 'type ', 'echo ', 'dir ', 'ls ', 'find ', 'grep ',
-            'wc ', 'head ', 'tail ', 'which ', 'where ', 'mmx '
+            'wc ', 'head ', 'tail ', 'which ', 'where ', 'mmx ',
+            'magick identify ',  // ImageMagick read-only metadata queries
         ];
         const cmdLower = args.command.trim().toLowerCase();
         const isSafePrefix = SAFE_COMMAND_PREFIXES.some(p => cmdLower.startsWith(p));
@@ -333,7 +334,11 @@ export class ExternalToolHandler {
             return { stdout: '', stderr: 'run_command: no permission handler configured', exitCode: 1 };
         }
 
-        const timeoutMs = Math.min(args.timeoutMs ?? 30000, 120000);
+        // Auto-extend timeout for mmx vision/image commands — these involve API
+        // round-trips (image upload + processing + response) that regularly exceed 30s
+        const isMmxApiCommand = cmdLower.startsWith('mmx vision') || cmdLower.startsWith('mmx image');
+        const defaultTimeout = isMmxApiCommand ? 90000 : 30000;
+        const timeoutMs = Math.min(args.timeoutMs ?? defaultTimeout, 120000);
         const { spawn } = await import('child_process');
 
         // Parse command into binary + args on the platform shell

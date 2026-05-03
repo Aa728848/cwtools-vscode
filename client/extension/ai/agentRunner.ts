@@ -625,20 +625,36 @@ export class AgentRunner {
                         const buffer = Buffer.from(base64Data, 'base64');
                         const filePath = path.join(tmpDir, `upload_${Date.now()}_${i}.${ext}`);
                         fs.writeFileSync(filePath, buffer);
-                        savedPaths.push(filePath);
+                        // Normalize to forward slashes — avoids cmd.exe backslash+quote
+                        // parsing edge cases on Windows and is accepted by mmx/Node.js
+                        savedPaths.push(filePath.replace(/\\/g, '/'));
                     }
                     
-                    effectiveUserMessage += `\n\n[System Notice: The user uploaded ${savedPaths.length} image(s). However, your current AI model does not support native image processing. To fulfill the user's request, the images have been saved to the following local paths:\n` +
-                        savedPaths.map(p => `- ${p}`).join('\n') +
-                        `\nYou MUST use the \`run_command\` tool with an appropriate installed vision skill (such as the \`mmx vision\` CLI or other available tools) to analyze these files before proceeding!]`;
+                    // Build ready-to-run mmx commands so the AI can copy-paste
+                    const commandExamples = savedPaths.map(p =>
+                        `mmx vision describe --image "${p}" --prompt "Describe this image in detail." --output json --quiet`
+                    );
+                    
+                    effectiveUserMessage += `\n\n[System Notice: The user uploaded ${savedPaths.length} image(s). Your current AI model (${_providerVision.name}) does NOT support native image processing. The images have been saved locally. You MUST analyze them using the \`run_command\` tool with the EXACT commands below before proceeding.\n\n` +
+                        `**Saved image paths:**\n` +
+                        savedPaths.map(p => `- "${p}"`).join('\n') +
+                        `\n\n**Ready-to-run commands (copy-paste these EXACTLY into run_command):**\n` +
+                        commandExamples.map(c => `\`\`\`\n${c}\n\`\`\``).join('\n') +
+                        `\n\nCRITICAL RULES:\n` +
+                        `1. Use the EXACT paths above — do NOT modify, shorten, or hallucinate different paths.\n` +
+                        `2. Set timeoutMs to at least 60000 (60 seconds) for vision API calls.\n` +
+                        `3. If the command fails, report the exact error to the user — do NOT retry with different paths.]`;
                     
                     fallbackSuccessful = true;
                 } catch (e) {
+                    // Log the error for debugging instead of silently swallowing
+                    ErrorReporter.debug(SOURCE.AGENT_RUNNER, 'Vision fallback: failed to save images to tmp dir', e);
                     fallbackSuccessful = false;
                 }
             }
 
             if (!fallbackSuccessful) {
+                // Emit UI warning
                 emitStep({
                     type: 'error',
                     content: AGENT.VISION_UNSUPPORTED(_providerVision.name) +
@@ -647,6 +663,9 @@ export class AgentRunner {
                             : AGENT.VISION_GENERIC_HINT),
                     timestamp: Date.now(),
                 });
+                // CRITICAL: Also inject a notice into the AI's message so it knows
+                // images were uploaded but couldn't be processed — prevents hallucination
+                effectiveUserMessage += `\n\n[System Notice: The user uploaded image(s), but the system failed to save them locally for vision analysis. Your current AI model (${_providerVision.name}) does not support native image processing. Please inform the user that their image cannot be analyzed with the current provider, and suggest switching to a vision-capable provider (e.g., Claude, Gemini, GPT-4o). Do NOT attempt to guess or hallucinate image paths — the images are not available.]`;
             }
 
             effectiveImages = undefined; // drop native images, proceed text-only with injected notice

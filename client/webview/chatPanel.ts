@@ -1200,7 +1200,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 const el = document.createElement('div');
                 const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : s.type === 'compaction' ? svgIconNoMargin('gear') : '·';
                 el.className = 'special-step';
-                el.textContent = icon + ' ' + (s.content || '');
+                el.innerHTML = icon + ' ' + escapeHtml(s.content || '');
                 div.appendChild(el);
             }
         }
@@ -1359,7 +1359,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             const el = document.createElement('div');
             el.className = 'special-step';
             const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : svgIconNoMargin('gear');
-            el.textContent = icon + ' ' + (s.content || '');
+            el.innerHTML = icon + ' ' + escapeHtml(s.content || '');
             currentAssistantDiv.appendChild(el);
         }
         scrollBottom();

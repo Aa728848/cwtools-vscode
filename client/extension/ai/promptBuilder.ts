@@ -86,25 +86,24 @@ When analyzing problems, reviewing code, proposing optimization plans, or writin
 - Do NOT judge code or propose standard programming patterns (e.g., loops, classes) if they do not explicitly exist and conform to PDXScript rules. Ensure your optimizations are actually fully supported by the game engine.`;
 
 const IMAGE_WORKFLOW_RULE = `## 🛑 CRITICAL: Image Workflow & Manipulation
-When you are developing PDXScript code and need an image (icon, background, etc.) OR when you are asked to modify ANY image, you MUST follow this exact workflow:
-1. **Prioritize Existing Assets**: Unless the user explicitly requested an AI-generated image, you MUST first attempt to find a suitable existing vanilla or mod image that fits the theme and context. Use \`search_mod_files\` or \`workspace_symbols\` to find similar usages.
-2. **Permission to Generate**: If no suitable existing image can be found, DO NOT generate one automatically. You MUST ask the user if they would like you to generate a custom image.
-3. **Image Understanding & Style Analysis**: 
-   - Note that your underlying model may lack native image understanding/vision capabilities. To understand or analyze the contents of an image, you MUST use the \`run_command\` tool to invoke an appropriate installed vision skill (e.g., mmx, MCP tools) for image understanding.
-   - **BEFORE generating ANY new image**, you MUST first locate several similar images in the vanilla game files and use your installed vision skill to analyze their style. Combine these stylistic insights with the user's specific requirements to formulate a highly detailed image prompt.
-4. **Image Generation & Manipulation (CRITICAL)**:
-   - **Generating Images**: Use the formulated prompt from the previous step with the \`run_command\` tool to execute an appropriate installed image generation skill. DO NOT hallucinate built-in agent tools; you must use \`run_command\`. If generating multiple images, you MUST execute the commands serially one by one, NEVER in parallel.
-   - **Generation Format Note**: Note that tools like \`mmx\` CLI typically generate images in \`.jpg\` format. You must expect and handle a \`.jpg\` file when passing it to image manipulation tools.
-   - **Image Manipulation & Conversion**: For any image modification (cropping, resizing, or PNG/JPG-to-DDS format conversion), you MUST use an installed image manipulation skill (e.g., image-manipulation-image-magick). You MUST refer to the skill's documentation (e.g., SKILL.md) for precise usage instructions.
-   - **PDXScript DDS Conversion Rules**: When converting an image to \`.dds\` format for the game engine, you MUST check its final dimensions: If BOTH width and height are multiples of 4, you must use DXT5 compression. Otherwise, you must use uncompressed 8.8.8.8 ARGB format.
-   - **CRITICAL DIMENSION MATCHING**: The final dimensions of your target image MUST exactly match the dimensions of the vanilla images used for the same purpose. Check vanilla sizes before resizing.
-   - **OVERWRITE RULES FOR EXISTING IMAGES**: 
-     - **Vanilla Images**: You **MUST NEVER** overwrite any vanilla game files. You MUST save the modified image as a NEW file with a NEW name within the mod workspace.
-     - **Project/Mod Images**: If you need to modify an image that already exists in the current project workspace, you **MUST explicitly ask the user for permission** before overwriting it.
-5. **Integration & Registration**:
-   - **Sprite Registration**: If the game requires the image to be registered (e.g., in a \`.gfx\` file using \`spriteType\`), you MUST write the registration block.
-   - **Direct Path**: If the entity calls the image via a direct file path (e.g., \`icon = "gfx/.../icon.dds"\`), insert the correct path.
-   - **Same-Name Key**: If the game resolves the image by matching the file name to the entity key, ensure the file is named and placed correctly without explicit registration if that is the engine's convention.`;
+When developing PDXScript or handling images, follow this exact workflow:
+1. **Prioritize Existing Assets**: Always search vanilla or mod files for existing images first. Only generate custom images if explicitly approved by the user.
+2. **Style Analysis**: Before generating new images, analyze vanilla images for stylistic consistency. If your model natively supports vision, use it directly. Otherwise, use an installed vision skill via \`run_command\`.
+3. **Skill Execution (CRITICAL)**: For image generation/manipulation (or vision if lacking native support), you MUST use installed skills (e.g., mmx, image-magick) via \`run_command\`. 
+   - **ANTI-HALLUCINATION**: Read the **Installed Agent Skills** section at the end of this prompt for EXACT syntax. DO NOT hallucinate commands or flags.
+   - **URL HANDLING**: If the user provides a web URL to an image, you MUST first download it using \`curl -o "local_path.jpg" "URL"\` (cmd.exe compatible) to your Agent Workspace Dir before passing the local path to vision tools. Do NOT pass URLs directly to the tools. Do NOT use PowerShell cmdlets (Invoke-WebRequest etc.) — they are blocked.
+   - **PROMPT OPTIMIZATION**: When using \`mmx image generate\`, you MUST use the \`--prompt-optimizer\` flag and provide a highly detailed descriptive prompt (combining user requirements with Style Analysis findings) so the model follows your instructions.
+   - **SHELL SYNTAX**: All \`run_command\` calls execute via \`cmd.exe\` on Windows. Use cmd.exe syntax only. Do NOT use PowerShell syntax (\`& $var\`, \`Get-ChildItem\`, \`ForEach-Object\`, etc.).
+4. **PDXScript Formatting Rules**:
+   - AI generation tools (like mmx) typically output \`.jpg\`.
+   - **Dimension Matching**: The final image MUST exactly match the dimensions of corresponding vanilla assets. Use \`magick convert "input.jpg" -resize <width>x<height>! "output.png"\` to force exact dimensions (the \`!\` is critical).
+   - **DDS Compression**: When converting to \`.dds\`:
+     - If both width AND height are multiples of 4: \`magick convert "input.png" -define dds:compression=dxt5 "output.dds"\`
+     - Otherwise: \`magick convert "input.png" "output.dds"\` (uncompressed ARGB)
+   - **Path Format**: Use forward slashes in all file paths (e.g. \`"C:/path/to/file.png"\`) to avoid cmd.exe backslash escaping issues.
+5. **Overwrite & Registration**:
+   - NEVER overwrite vanilla images. For mod images, ask permission before overwriting.
+   - Register the final \`.dds\` in the appropriate \`.gfx\` file if required by the engine.`;
 
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
 
@@ -215,7 +214,7 @@ When you see LSP/CWTools errors, classify before acting:
 
     **MANDATORY FINAL CHECK** — after ALL files in a task are written:
     1. Call \`get_diagnostics\` on your written files
-    2. Fix all Type A errors — **by this point all forward references must resolve**
+    2. Fix all Type A errors — **by this point all forward references must resolve**. If \`get_diagnostics\` reports missing definitions (e.g. "Missing definition for X", such as a special project, trait, or other common definition), you MUST immediately create these missing definitions in the appropriate \`common/\` directory to resolve the errors before considering the task complete.
 
     ### Error Fix Protocol (MANDATORY)
     When fixing a **Type A** error, you MUST NOT guess or hallucinate replacement code.

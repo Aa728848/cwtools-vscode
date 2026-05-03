@@ -380,7 +380,7 @@ const LOC_WRITER_TOOLS: AgentToolName[] = [
 
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate']);
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate', 'deploy_mod_asset']);
 const READ_ONLY_TOOLS = new Set<string>([
     'read_file', 'list_directory', 'search_mod_files',
     'get_file_context', 'document_symbols', 'workspace_symbols',

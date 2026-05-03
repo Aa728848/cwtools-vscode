@@ -72,6 +72,10 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     mmx_generate_video: 300_000,
     mmx_generate_music: 300_000,
     mmx_generate_speech: 60_000,
+    // Media Asset Conversion
+    convert_image_to_dds: 60_000,
+    convert_audio: 60_000,
+    deploy_mod_asset: 30_000,
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 
@@ -338,6 +342,15 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.mmxGenerateMusic(args as any); break;
             case 'mmx_generate_speech':
                 result = await this.externalHandler.mmxGenerateSpeech(args as any); break;
+
+            // ── Media Asset Conversion tools ──────────────────────────
+            case 'convert_image_to_dds':
+                result = await this.externalHandler.convertImageToDds(args as any); break;
+            case 'convert_audio':
+                result = await this.externalHandler.convertAudio(args as any); break;
+            case 'deploy_mod_asset':
+                result = await this.externalHandler.deployModAsset(args as any); break;
+
             case 'analyze_diagnostic_error':
                 result = {
                     success: true,

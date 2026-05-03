@@ -266,6 +266,35 @@ The CWTools LSP does NOT instantly reflect newly written localisation keys. Ther
 1. **If \`get_diagnostics\` reports "Missing localisation key" errors**: Do NOT blindly re-add the key. Instead, call \`search_mod_files(query="KEY_NAME", fileExtension=".yml")\` to check if the key already exists in a .yml file. If found, the error is a stale LSP cache — ignore it.
 2. **When you create ANY new localisation key**: After writing the .yml file, verify the key was written correctly by calling \`search_mod_files(query="KEY_NAME", fileExtension=".yml")\` to confirm it appears in the expected file.
 3. **Never duplicate localisation keys**: If \`search_mod_files\` confirms the key exists, do NOT write it again.
+
+## Media Asset Pipeline (Icons, Textures, Sound Effects, Music)
+When creating new game entities (technologies, traditions, edicts, events, etc.), some may require custom visual or audio assets.
+
+### When to Consider Media Generation
+- **Icons/Sprites**: New technologies, traditions, edicts, civics, ascension perks, archaeological sites, relics — anything that displays a unique icon in the UI
+- **Sound Effects**: Events with \`sound = \` or UI elements with custom audio
+- **Music/BGM**: Custom soundtrack additions
+
+### Decision Flow (MANDATORY before generating any media asset)
+1. **Check for existing assets FIRST** (two-stage search):
+   - **Mod workspace**: \`workspace_symbols("GFX_your_keyword")\` — finds spriteType definitions within the current mod project. Note: \`workspace_symbols\` does NOT search vanilla files!
+   - **Vanilla game files**: \`search_mod_files(query="your_keyword", directory="gfx", searchContext="vanilla", fileExtension=".gfx")\` — searches vanilla .gfx files for matching sprite definitions.
+   - Prefer reusing existing assets whenever a suitable match is found.
+2. **If no existing asset matches AND the task benefits from a custom one**: You MUST explicitly ask the user whether they want you to generate a new asset. **Never silently generate images or audio without user consent.** Example: *"This technology needs an icon. Would you like me to generate a custom icon, or should I use an existing vanilla sprite (e.g. \`GFX_tech_mine_exotic_gas\`)?"*
+3. **If the user agrees to generation**: Call the appropriate tool. If it returns an error indicating the required CLI tool is not installed (mmx, ImageMagick, ffmpeg), **do NOT retry or work around it**. Instead:
+   - Inform the user which tool is missing and how to install it
+   - Leave a \`# TODO: [MEDIA ASSET REQUIRED] icon/sound not generated — install [tool_name] and re-run\` comment in the code
+   - Use a placeholder vanilla asset reference (e.g. \`icon = "GFX_ship_part_empty_slot"\`) so the code remains valid
+4. **If the user declines or tools are unavailable**: Use the closest matching vanilla asset and note the substitution in the walkthrough.
+
+### Full Generation Pipeline (when all tools are available)
+\`\`\`
+Step 1: mmx_generate_image(prompt, aspect_ratio)  → .cwtools-ai/media/xxx.png
+Step 2: convert_image_to_dds(source, compression="dxt5")  → .cwtools-ai/media/xxx.dds
+Step 3: deploy_mod_asset(source, target="gfx/interface/icons/my_icon.dds")
+Step 4: edit_file("interface/my_mod.gfx", register spriteType)
+\`\`\`
+For audio: \`mmx_generate_music\`/\`mmx_generate_speech\` → \`convert_audio(targetFormat="ogg")\` → \`deploy_mod_asset(target="sound/...")\`
 ${gameKnowledge}`;
 }
 
@@ -296,8 +325,9 @@ Structure your plan as:
 1. **Objective** — What will be achieved
 2. **Files to modify/create** — List with absolute paths
 3. **Implementation steps** — Numbered, ordered by dependency. **DO NOT** write detailed Localisation text/story content inside the plan! If the user requested rich story/text, merely note it briefly (e.g. "Generate rich plot for event X"). You MUST include code blocks to demonstrate the plan, but keep them strictly under 50 lines. For any code blocks over 50 lines, you MUST use abbreviated pseudo-code showing only the head and tail, omitting the middle with \`// ... omitted ...\`. Only write the actual long string content and full code during the Phase 4 Execution. Filling the plan with massive text or full code blocks causes token explosions.
-4. **Scope chain** — Where code will execute
-5. **Potential issues** — Edge cases and scope errors
+4. **Media assets needed** — If the task involves new game entities that may need icons, sounds, or music, list them with a ⚠️ marker. For each, note: what asset is needed, which tools are required (mmx CLI + ImageMagick/ffmpeg), and a fallback vanilla asset ID if generation is unavailable. Example: \`⚠️ Icon: new technology icon → requires mmx CLI + ImageMagick | Fallback: GFX_tech_mine_exotic_gas\`
+5. **Scope chain** — Where code will execute
+6. **Potential issues** — Edge cases and scope errors
 
 **Important**: At the end of your plan, remind the user to click "同意执行" or switch to "Build" mode to actually generate the code.
 

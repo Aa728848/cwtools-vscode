@@ -499,6 +499,10 @@ export type AgentToolName =
     | 'mmx_generate_video'
     | 'mmx_generate_music'
     | 'mmx_generate_speech'
+    // ── Media Asset Conversion tools ──
+    | 'convert_image_to_dds'
+    | 'convert_audio'
+    | 'deploy_mod_asset'
     // ── MCP tools ──
     | 'mcp_call';
 

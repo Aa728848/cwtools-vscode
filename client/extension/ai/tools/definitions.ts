@@ -753,6 +753,58 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // ─── Media Asset Conversion Tools ────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'convert_image_to_dds',
+            description: '🖼️ Convert a PNG/JPG/TGA image to DDS format (required by Clausewitz engine for icons, sprites, and textures). Uses ImageMagick. Supports DXT5/BC3 compression with mipmaps. Requires ImageMagick installed and accessible. Custom path can be set via cwtools.ai.imageMagickPath setting.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    sourcePath: { type: 'string', description: 'Absolute path to the source image file (PNG, JPG, or TGA).' },
+                    outputDir: { type: 'string', description: 'Directory to write the converted DDS file to. Can be absolute or relative to workspace root (e.g. "gfx/interface/icons/").' },
+                    compression: { type: 'string', enum: ['dxt5', 'dxt1', 'none'], description: 'DDS compression type. "dxt5" (default): supports alpha channel, use for most icons. "dxt1": no alpha, smaller file size. "none": uncompressed.' },
+                    generateMipmaps: { type: 'boolean', description: 'Whether to generate mipmaps (default true). Required for most in-game textures.' },
+                },
+                required: ['sourcePath'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'convert_audio',
+            description: '🔊 Convert audio files between formats (MP3→OGG for BGM/voice, MP3→WAV for UI sound effects). Uses ffmpeg. Clausewitz engine requires .ogg (Vorbis) for music/voice and .wav (16-bit PCM) for UI sounds. Requires ffmpeg installed and accessible. Custom path can be set via cwtools.ai.ffmpegPath setting.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    sourcePath: { type: 'string', description: 'Absolute path to the source audio file.' },
+                    outputDir: { type: 'string', description: 'Directory to write the converted file to. Can be absolute or relative to workspace root (e.g. "sound/vo/").' },
+                    targetFormat: { type: 'string', enum: ['ogg', 'wav'], description: 'Target audio format. "ogg": Vorbis encoding for BGM and voice lines. "wav": 16-bit PCM for UI sound effects.' },
+                    sampleRate: { type: 'number', description: 'Output sample rate in Hz (e.g. 44100, 48000). Default: keep original.' },
+                    channels: { type: 'number', description: 'Number of audio channels. 1 = mono (recommended for voice/sfx), 2 = stereo (recommended for music). Default: keep original.' },
+                },
+                required: ['sourcePath', 'targetFormat'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'deploy_mod_asset',
+            description: '📦 Copy a generated/converted media asset file to its final location in the mod workspace. Requires user permission. Use this after convert_image_to_dds or convert_audio to place files in the correct game directory (e.g. gfx/interface/icons/, sound/vo/). The retract system can undo this operation.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    sourcePath: { type: 'string', description: 'Absolute path to the source file to deploy.' },
+                    targetRelativePath: { type: 'string', description: 'Target path relative to workspace root (e.g. "gfx/interface/icons/tech/my_tech.dds" or "sound/vo/my_voice.ogg").' },
+                    overwrite: { type: 'boolean', description: 'If true, overwrite existing file at target. Default: false (fails if file exists).' },
+                },
+                required: ['sourcePath', 'targetRelativePath'],
+            },
+        },
+    },
     // ─── MCP Tools ──────────────────────────────────────────────────────
     {
         type: 'function',

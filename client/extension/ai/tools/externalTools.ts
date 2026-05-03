@@ -944,4 +944,261 @@ export class ExternalToolHandler {
             file: fs.existsSync(outFile) ? outFile : undefined,
         };
     }
+
+    // ─── Media Asset Conversion Tools ────────────────────────────────────
+
+    /** Cached result of ImageMagick availability check (null = not checked yet) */
+    private imageMagickAvailable: boolean | null = null;
+    /** Cached result of ffmpeg availability check (null = not checked yet) */
+    private ffmpegAvailable: boolean | null = null;
+
+    /** Resolve the ImageMagick binary path (custom setting or default 'magick'). */
+    private getImageMagickBin(): string {
+        return vs.workspace.getConfiguration('cwtools.ai').get<string>('imageMagickPath') || 'magick';
+    }
+
+    /** Resolve the ffmpeg binary path (custom setting or default 'ffmpeg'). */
+    private getFfmpegBin(): string {
+        return vs.workspace.getConfiguration('cwtools.ai').get<string>('ffmpegPath') || 'ffmpeg';
+    }
+
+    /** Check if ImageMagick is installed and accessible. Caches result for the session. */
+    private async ensureImageMagickAvailable(): Promise<boolean> {
+        if (this.imageMagickAvailable !== null) return this.imageMagickAvailable;
+        try {
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+            await execAsync(`${this.getImageMagickBin()} --version`, { timeout: 10000 });
+            this.imageMagickAvailable = true;
+        } catch {
+            this.imageMagickAvailable = false;
+        }
+        return this.imageMagickAvailable;
+    }
+
+    /** Check if ffmpeg is installed and accessible. Caches result for the session. */
+    private async ensureFfmpegAvailable(): Promise<boolean> {
+        if (this.ffmpegAvailable !== null) return this.ffmpegAvailable;
+        try {
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+            await execAsync(`${this.getFfmpegBin()} -version`, { timeout: 10000 });
+            this.ffmpegAvailable = true;
+        } catch {
+            this.ffmpegAvailable = false;
+        }
+        return this.ffmpegAvailable;
+    }
+
+    // ─── convert_image_to_dds ───────────────────────────────────────────
+
+    async convertImageToDds(args: {
+        sourcePath: string;
+        outputDir?: string;
+        compression?: 'dxt5' | 'dxt1' | 'none';
+        generateMipmaps?: boolean;
+    }): Promise<{ success: boolean; message: string; outputFile?: string }> {
+        if (!(await this.ensureImageMagickAvailable())) {
+            return {
+                success: false,
+                message: `ImageMagick is not installed or not found at "${this.getImageMagickBin()}". Please install ImageMagick (https://imagemagick.org/) and ensure it is in your PATH, or set the custom path in cwtools.ai.imageMagickPath.`,
+            };
+        }
+
+        if (!fs.existsSync(args.sourcePath)) {
+            return { success: false, message: `Source file not found: ${args.sourcePath}` };
+        }
+
+        // Resolve output directory
+        const outDir = args.outputDir
+            ? (path.isAbsolute(args.outputDir) ? args.outputDir : path.join(this.ctx.workspaceRoot, args.outputDir))
+            : path.dirname(args.sourcePath);
+        if (!fs.existsSync(outDir)) {
+            fs.mkdirSync(outDir, { recursive: true });
+        }
+
+        // Build output filename: same basename, .dds extension
+        const baseName = path.basename(args.sourcePath, path.extname(args.sourcePath));
+        const outFile = path.join(outDir, `${baseName}.dds`);
+
+        // Build ImageMagick command
+        const magickBin = this.getImageMagickBin();
+        const compression = args.compression ?? 'dxt5';
+        const mipmaps = args.generateMipmaps !== false; // default true
+
+        // ImageMagick DDS defines
+        let ddsDefines = '';
+        if (compression === 'dxt5') {
+            ddsDefines = '-define dds:compression=dxt5';
+        } else if (compression === 'dxt1') {
+            ddsDefines = '-define dds:compression=dxt1';
+        } else {
+            ddsDefines = '-define dds:compression=none';
+        }
+        if (mipmaps) {
+            ddsDefines += ' -define dds:mipmaps=true';
+        } else {
+            ddsDefines += ' -define dds:mipmaps=0';
+        }
+
+        const cmd = `${magickBin} convert "${args.sourcePath}" ${ddsDefines} "${outFile}"`;
+
+        const result = await this.execMmx('convert_image_to_dds', cmd, 60000);
+        if (!result.success) {
+            return { success: false, message: `ImageMagick conversion failed: ${result.stderr || result.message}` };
+        }
+
+        if (!fs.existsSync(outFile)) {
+            return { success: false, message: `Conversion completed but output file not found: ${outFile}` };
+        }
+
+        return {
+            success: true,
+            message: `Image converted to DDS (${compression}, mipmaps=${mipmaps}): ${outFile}`,
+            outputFile: outFile,
+        };
+    }
+
+    // ─── convert_audio ──────────────────────────────────────────────────
+
+    async convertAudio(args: {
+        sourcePath: string;
+        outputDir?: string;
+        targetFormat: 'ogg' | 'wav';
+        sampleRate?: number;
+        channels?: number;
+    }): Promise<{ success: boolean; message: string; outputFile?: string }> {
+        if (!(await this.ensureFfmpegAvailable())) {
+            return {
+                success: false,
+                message: `ffmpeg is not installed or not found at "${this.getFfmpegBin()}". Please install ffmpeg (https://ffmpeg.org/) and ensure it is in your PATH, or set the custom path in cwtools.ai.ffmpegPath.`,
+            };
+        }
+
+        if (!fs.existsSync(args.sourcePath)) {
+            return { success: false, message: `Source file not found: ${args.sourcePath}` };
+        }
+
+        // Resolve output directory
+        const outDir = args.outputDir
+            ? (path.isAbsolute(args.outputDir) ? args.outputDir : path.join(this.ctx.workspaceRoot, args.outputDir))
+            : path.dirname(args.sourcePath);
+        if (!fs.existsSync(outDir)) {
+            fs.mkdirSync(outDir, { recursive: true });
+        }
+
+        const baseName = path.basename(args.sourcePath, path.extname(args.sourcePath));
+        const outFile = path.join(outDir, `${baseName}.${args.targetFormat}`);
+        const ffmpegBin = this.getFfmpegBin();
+
+        // Build ffmpeg command based on target format
+        let cmd: string;
+        if (args.targetFormat === 'ogg') {
+            // Vorbis encoding, quality 4 (~128kbps)
+            cmd = `${ffmpegBin} -y -i "${args.sourcePath}" -c:a libvorbis -q:a 4`;
+        } else {
+            // WAV: 16-bit PCM, default 44100 Hz
+            const sr = args.sampleRate ?? 44100;
+            cmd = `${ffmpegBin} -y -i "${args.sourcePath}" -acodec pcm_s16le -ar ${sr}`;
+        }
+
+        // Optional sample rate override for OGG
+        if (args.targetFormat === 'ogg' && args.sampleRate) {
+            cmd += ` -ar ${args.sampleRate}`;
+        }
+
+        // Optional channel override
+        if (args.channels) {
+            cmd += ` -ac ${args.channels}`;
+        }
+
+        cmd += ` "${outFile}"`;
+
+        const result = await this.execMmx('convert_audio', cmd, 60000);
+        if (!result.success) {
+            return { success: false, message: `ffmpeg conversion failed: ${result.stderr || result.message}` };
+        }
+
+        if (!fs.existsSync(outFile)) {
+            return { success: false, message: `Conversion completed but output file not found: ${outFile}` };
+        }
+
+        return {
+            success: true,
+            message: `Audio converted to ${args.targetFormat.toUpperCase()}: ${outFile}`,
+            outputFile: outFile,
+        };
+    }
+
+    // ─── deploy_mod_asset ───────────────────────────────────────────────
+
+    async deployModAsset(args: {
+        sourcePath: string;
+        targetRelativePath: string;
+        overwrite?: boolean;
+    }): Promise<{ success: boolean; message: string; finalPath?: string }> {
+        if (!fs.existsSync(args.sourcePath)) {
+            return { success: false, message: `Source file not found: ${args.sourcePath}` };
+        }
+
+        // Compute absolute target path
+        const targetPath = path.join(this.ctx.workspaceRoot, args.targetRelativePath);
+        const targetDir = path.dirname(targetPath);
+
+        // Check overwrite safety
+        if (fs.existsSync(targetPath) && !args.overwrite) {
+            return {
+                success: false,
+                message: `Target file already exists: ${targetPath}. Set overwrite=true to replace it.`,
+            };
+        }
+
+        // Request user permission
+        if (this.ctx.onPermissionRequest) {
+            const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const allowed = await this.ctx.onPermissionRequest(
+                permId,
+                'deploy_mod_asset',
+                `AI 请求将媒体资产部署到 Mod 工作区：\n\n【源文件】：${args.sourcePath}\n【目标位置】：${args.targetRelativePath}\n【覆盖现有】：${args.overwrite ? '是' : '否'}`,
+            );
+            if (!allowed) {
+                return { success: false, message: '用户拒绝了此资产部署请求。' };
+            }
+        }
+
+        try {
+            // Ensure target directory exists
+            if (!fs.existsSync(targetDir)) {
+                fs.mkdirSync(targetDir, { recursive: true });
+            }
+
+            // Snapshot for retract system (before writing)
+            const previousContent = fs.existsSync(targetPath)
+                ? fs.readFileSync(targetPath).toString('base64')
+                : null;
+            this.ctx.onBeforeFileWrite?.(targetPath, previousContent);
+
+            // Copy the file
+            fs.copyFileSync(args.sourcePath, targetPath);
+
+            this.ctx.onStep?.({
+                type: 'thinking',
+                content: `[Deploy] ${path.basename(args.sourcePath)} → ${args.targetRelativePath}`,
+                timestamp: Date.now(),
+            });
+
+            return {
+                success: true,
+                message: `Asset deployed: ${args.targetRelativePath}`,
+                finalPath: targetPath,
+            };
+        } catch (e) {
+            return {
+                success: false,
+                message: `Failed to deploy asset: ${e instanceof Error ? e.message : String(e)}`,
+            };
+        }
+    }
 }

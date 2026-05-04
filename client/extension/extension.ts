@@ -860,31 +860,45 @@ export async function activate(context: ExtensionContext) {
 			await commands.executeCommand('workbench.action.reloadWindow');
 		})
 		client.onNotification(promptVanillaPath, async (param: string) => {
-			let gameDisplay = ""
-			switch (param) {
-				case "stellaris": gameDisplay = "Stellaris"; break;
-				case "hoi4": gameDisplay = "Hearts of Iron IV"; break;
-				case "eu4": gameDisplay = "Europa Universalis IV"; break;
-				case "ck2": gameDisplay = "Crusader Kings II"; break;
-				case "imperator": gameDisplay = "Imperator"; break;
-				case "vic2": gameDisplay = "Victoria II"; break;
-				case "vic3": gameDisplay = "Victoria 3"; break;
-				case "ck3": gameDisplay = "Crusader Kings III"; break;
-				case "eu5": gameDisplay = "Europa Universalis V"; break;
-			}
-			const result = await window.showInformationMessage("Please select the vanilla installation folder for " + gameDisplay, "Select folder");
-			if (!result) {
+			// ── Game metadata mapping ──────────────────────────────────────────
+			const gameInfoMap: Record<string, { display: string; steamFolder: string; subdir?: string; steamAppId: string }> = {
+				stellaris:  { display: 'Stellaris',              steamFolder: 'Stellaris',              steamAppId: '281990' },
+				hoi4:       { display: 'Hearts of Iron IV',      steamFolder: 'Hearts of Iron IV',      steamAppId: '394360' },
+				eu4:        { display: 'Europa Universalis IV',   steamFolder: 'Europa Universalis IV',  steamAppId: '236850' },
+				ck2:        { display: 'Crusader Kings II',       steamFolder: 'Crusader Kings II',       steamAppId: '203770' },
+				imperator:  { display: 'Imperator: Rome',        steamFolder: 'ImperatorRome',           subdir: 'game', steamAppId: '859580' },
+				vic2:       { display: 'Victoria II',            steamFolder: 'Victoria 2',              steamAppId: '42960' },
+				vic3:       { display: 'Victoria 3',             steamFolder: 'Victoria 3',              subdir: 'game', steamAppId: '529340' },
+				ck3:        { display: 'Crusader Kings III',      steamFolder: 'Crusader Kings III',      subdir: 'game', steamAppId: '1158310' },
+				eu5:        { display: 'Europa Universalis V',    steamFolder: 'Europa Universalis V',    subdir: 'game', steamAppId: '0' },
+			};
+			const info = gameInfoMap[param];
+			if (!info) return;
+
+			// ── Phase 1: Try auto-detection ───────────────────────────────────
+			const detectedPath = await autoDetectGamePath(info.steamFolder, info.subdir);
+			if (detectedPath) {
+				ErrorReporter.debug('Extension', `Auto-detected vanilla path for ${param}: ${detectedPath}`);
+				await workspace.getConfiguration("cwtools").update("cache." + param, detectedPath, true);
+				await reloadExtension("Reloading to generate vanilla cache", undefined, true);
 				return;
 			}
+
+			// ── Phase 2: Fall back to manual folder selection ─────────────────
+			const result = await window.showInformationMessage(
+				"未能自动检测到 " + info.display + " 的安装目录，请手动选择",
+				"选择文件夹"
+			);
+			if (!result) return;
+
 			const uri = await window.showOpenDialog({
 				canSelectFiles: false,
 				canSelectFolders: true,
 				canSelectMany: false,
-				openLabel: "Select vanilla installation folder for " + gameDisplay
+				openLabel: "Select vanilla installation folder for " + info.display
 			});
-			if (!uri) {
-				return;
-			}
+			if (!uri) return;
+
 			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 			const directory = uri[0]!;
 			const gameFolder = path.basename(directory.fsPath)
@@ -1136,7 +1150,84 @@ export async function activate(context: ExtensionContext) {
 		isVanillaFolder = true;
 	}
 
+	// ── Auto-detect localization language when user hasn't explicitly configured it ──
+	await autoDetectLocLanguage();
+
 	await init(languageId, isVanillaFolder);
+}
+
+/**
+ * Scans the workspace's localisation directories to determine which language
+ * has the most YML files. If `cwtools.localisation.languages` has never been
+ * explicitly set by the user (i.e., it's still using the package.json default),
+ * this function automatically sets it to the detected language.
+ *
+ * This helps mod authors whose primary language isn't English: they no longer
+ * need to manually configure the validation language.
+ */
+async function autoDetectLocLanguage(): Promise<void> {
+	const config = workspace.getConfiguration('cwtools');
+	const inspected = config.inspect<string[]>('localisation.languages');
+
+	// If the user has explicitly set this at any level, respect their choice
+	if (inspected?.globalValue || inspected?.workspaceValue || inspected?.workspaceFolderValue) {
+		return;
+	}
+
+	const wsFolders = workspace.workspaceFolders;
+	if (!wsFolders || wsFolders.length === 0) return;
+
+	// Mapping: setting value → file name tag (used in *l_<tag>.yml patterns)
+	const langTagMap: Array<[string, string]> = [
+		['English', 'english'],
+		['French', 'french'],
+		['German', 'german'],
+		['Spanish', 'spanish'],
+		['Russian', 'russian'],
+		['Braz_Por', 'braz_por'],
+		['Polish', 'polish'],
+		['Chinese', 'simp_chinese'],
+		['Korean', 'korean'],
+		['Japanese', 'japanese'],
+		['Turkish', 'turkish'],
+	];
+
+	try {
+		const wsRoot = wsFolders[0]!;
+		const counts = new Map<string, number>();
+
+		// Count YML files for each language in parallel
+		const promises = langTagMap.map(async ([settingName, fileTag]) => {
+			const pattern = new vs.RelativePattern(
+				wsRoot,
+				`**/{localisation,localisation_synced,localization}/**/*l_${fileTag}.yml`
+			);
+			const files = await workspace.findFiles(pattern, '**/node_modules/**', 500);
+			counts.set(settingName, files.length);
+		});
+
+		await Promise.all(promises);
+
+		// Find the language with the most files
+		let bestLang = 'English';
+		let bestCount = 0;
+		for (const [lang, count] of counts) {
+			if (count > bestCount) {
+				bestCount = count;
+				bestLang = lang;
+			}
+		}
+
+		// Only override if we found localisation files and the best language isn't English
+		// (since English is already the default)
+		if (bestCount > 0 && bestLang !== 'English') {
+			await config.update('localisation.languages', [bestLang], vs.ConfigurationTarget.Workspace);
+			ErrorReporter.debug('Extension', `Auto-detected localisation language: ${bestLang} (${bestCount} files)`);
+		}
+	} catch (e) {
+		// Non-critical — if detection fails, just use the default
+		ErrorReporter.debug('Extension', 'Failed to auto-detect localisation language', e);
+	}
 }
 
 
@@ -1155,3 +1246,143 @@ export async function reloadExtension(prompt: string, buttonText?: string, force
 	}
 }
 // export default defaultClient;
+
+/**
+ * Auto-detect a Paradox game's vanilla installation path by scanning
+ * Steam library folders (Windows registry + libraryfolders.vdf) and
+ * common non-Steam install locations.
+ *
+ * @param steamFolderName - The game's folder name under steamapps/common/ (e.g. "Stellaris")
+ * @param subdir - Optional subdirectory containing the actual game data (e.g. "game" for CK3/VIC3)
+ * @returns The validated game data path, or undefined if not found
+ */
+async function autoDetectGamePath(steamFolderName: string, subdir?: string): Promise<string | undefined> {
+	try {
+		const steamLibraries = getSteamLibraryPaths();
+
+		// Check each Steam library for the game
+		for (const lib of steamLibraries) {
+			const gamePath = path.join(lib, 'steamapps', 'common', steamFolderName);
+			const dataPath = subdir ? path.join(gamePath, subdir) : gamePath;
+			if (fs.existsSync(path.join(dataPath, 'common'))) {
+				return dataPath;
+			}
+		}
+
+		// Also try alternative folder names (some games have variant names)
+		const altNames = getAlternativeFolderNames(steamFolderName);
+		for (const altName of altNames) {
+			for (const lib of steamLibraries) {
+				const gamePath = path.join(lib, 'steamapps', 'common', altName);
+				const dataPath = subdir ? path.join(gamePath, subdir) : gamePath;
+				if (fs.existsSync(path.join(dataPath, 'common'))) {
+					return dataPath;
+				}
+			}
+		}
+	} catch (e) {
+		ErrorReporter.debug('Extension', 'Auto-detect game path failed', e);
+	}
+	return undefined;
+}
+
+/**
+ * Get all Steam library folder paths by reading the Steam installation
+ * directory from the registry (Windows) or known paths (macOS/Linux),
+ * then parsing libraryfolders.vdf for additional library locations.
+ */
+function getSteamLibraryPaths(): string[] {
+	const libraries: string[] = [];
+
+	let steamPath: string | undefined;
+
+	if (os.platform() === 'win32') {
+		// Try reading Steam path from Windows registry
+		try {
+			const cp = require('child_process');
+			// Try HKLM WOW6432Node first (most common on 64-bit Windows)
+			for (const regKey of [
+				'HKLM\\SOFTWARE\\WOW6432Node\\Valve\\Steam',
+				'HKLM\\SOFTWARE\\Valve\\Steam',
+			]) {
+				try {
+					const result = cp.execSync(
+						`reg query "${regKey}" /v InstallPath`,
+						{ encoding: 'utf8', timeout: 3000, windowsHide: true }
+					);
+					const match = result.match(/InstallPath\s+REG_SZ\s+(.+)/);
+					if (match?.[1]) {
+						steamPath = match[1].trim();
+						break;
+					}
+				} catch { /* try next key */ }
+			}
+		} catch { /* registry not available */ }
+
+		// Fallback: check common Windows Steam paths
+		if (!steamPath) {
+			const candidates = [
+				'C:\\Program Files (x86)\\Steam',
+				'C:\\Program Files\\Steam',
+				'D:\\Steam',
+				'D:\\SteamLibrary',
+			];
+			for (const c of candidates) {
+				if (fs.existsSync(path.join(c, 'steam.exe')) || fs.existsSync(path.join(c, 'steamapps'))) {
+					steamPath = c;
+					break;
+				}
+			}
+		}
+	} else if (os.platform() === 'darwin') {
+		const macPath = path.join(os.homedir(), 'Library', 'Application Support', 'Steam');
+		if (fs.existsSync(macPath)) steamPath = macPath;
+	} else {
+		// Linux
+		const linuxPaths = [
+			path.join(os.homedir(), '.steam', 'steam'),
+			path.join(os.homedir(), '.local', 'share', 'Steam'),
+		];
+		for (const lp of linuxPaths) {
+			if (fs.existsSync(lp)) { steamPath = lp; break; }
+		}
+	}
+
+	if (steamPath) {
+		libraries.push(steamPath);
+
+		// Parse libraryfolders.vdf for additional library paths
+		const vdfPath = path.join(steamPath, 'steamapps', 'libraryfolders.vdf');
+		if (fs.existsSync(vdfPath)) {
+			try {
+				const content = fs.readFileSync(vdfPath, 'utf8');
+				// Match "path" entries: "path"		"D:\\SteamLibrary"
+				const pathRegex = /"path"\s+"([^"]+)"/g;
+				let match;
+				while ((match = pathRegex.exec(content)) !== null) {
+					const libPath = match[1]!.replace(/\\\\/g, '\\');
+					if (!libraries.includes(libPath) && fs.existsSync(libPath)) {
+						libraries.push(libPath);
+					}
+				}
+			} catch {
+				// VDF parse failure is non-critical
+			}
+		}
+	}
+
+	return libraries;
+}
+
+/**
+ * Some games have variant folder names across platforms or versions.
+ * Return alternative names to check.
+ */
+function getAlternativeFolderNames(steamFolderName: string): string[] {
+	const map: Record<string, string[]> = {
+		'Victoria 2': ['Victoria II'],
+		'ImperatorRome': ['Imperator'],
+		'Imperator': ['ImperatorRome'],
+	};
+	return map[steamFolderName] || [];
+}

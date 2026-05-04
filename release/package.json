@@ -1065,6 +1065,7 @@
 		"vscode-languageclient": "^9.0.1"
 	},
 	"extensionPack": [
-		"tboby.paradox-syntax"
+		"tboby.paradox-syntax",
+		"anthonyj.stellaris-localisation-syntax"
 	]
 }

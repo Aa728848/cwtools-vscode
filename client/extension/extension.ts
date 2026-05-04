@@ -24,6 +24,7 @@ import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelPr
 import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
+import { registerGraphicsFeatures } from './graphicsFeatures';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
@@ -508,6 +509,9 @@ export async function activate(context: ExtensionContext) {
 		(msg: string) => chatPanelProvider.sendProgrammaticMessage(msg),
 		['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox']
 	);
+
+	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
+	registerGraphicsFeatures(context);
 
 	const init = async function (language: string, isVanillaFolder: boolean) {
 		vs.languages.setLanguageConfiguration(language, {

@@ -609,7 +609,34 @@ function createImageHover(
 
 // ─── Registration ───────────────────────────────────────────────────────────
 
+/**
+ * Clean up old temporary preview images (older than 24 hours) from the OS temp directory
+ * to prevent disk space bloating over time.
+ */
+function cleanupOldTempFiles() {
+    try {
+        const tmp = os.tmpdir();
+        const files = fs.readdirSync(tmp);
+        const now = Date.now();
+        for (const file of files) {
+            if (file.startsWith('cwt_prev_') && file.endsWith('.png')) {
+                const fullPath = path.join(tmp, file);
+                const stat = fs.statSync(fullPath);
+                // Delete if older than 24 hours
+                if (now - stat.mtimeMs > 24 * 60 * 60 * 1000) {
+                    fs.unlinkSync(fullPath);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to cleanup old temp hover files', e);
+    }
+}
+
 export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
+    // Run background cleanup 5 seconds after activation
+    setTimeout(cleanupOldTempFiles, 5000);
+
     const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
     const gfxSelector: vs.DocumentSelector = [
         ...gameLanguages.map(lang => ({ scheme: 'file', language: lang })),

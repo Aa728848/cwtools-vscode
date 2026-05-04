@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.4] - 2026-05-04
+
+### ✨ 新特性 (Features)
+- **[新功能] 原版代码智能对比 (Vanilla Code Comparison)**
+  - 支持跨平台解析游戏原版文件（通过 `cwtools.cache.*` 路径设定）
+  - 引入 CodeLens 内联提示，直观显示代码块与原版的匹配及修改状态
+  - 支持块级差异查看（通过 CodeLens 或右键菜单触发单个代码块 Diff）
+  - 支持文件级差异查看（自动搜集并组合所有被修改的代码块展开 Diff）
+  - 采用 LRU 高速缓存与基于 tokenizer 的花括号深度解析，保障性能与鲁棒性
+  - （可选）新增行级 Gutter Decorations 高亮显示
+
+### 🐛 Bug 修复与体验优化 (Bug Fixes & UX)
+- **[修复] 原版对比的跨对象错乱匹配 Bug**（通过严格鉴权提取 `id` 和 `name` 属性，彻底消除无 ID 事件导致的错误合并 Diff）
+
 ## [1.9.3] - 2026-05-04
 
 ### 🐛 Bug 修复与 UI 重构 (Bug Fixes & UI Refactoring)

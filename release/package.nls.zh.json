@@ -113,5 +113,8 @@
   "configuration.cwtools.ai.ignoredDiagnostics.description": "将被 LSP 问题面板和 AI 代理完全忽略的兼容性报错键值列表（例如外部 Mod 引入的意外参数）。可通过“管理忽略的兼容性报错”命令进行交互式配置。",
   "configuration.cwtools.ai.braveSearchApiKey.description": "Brave Search API 密钥，用于 web_search 工具。获取地址：https://brave.com/search/api/",
   "configuration.cwtools.ai.exaApiKey.description": "Exa API 密钥，用于 codesearch 工具。获取地址：https://exa.ai",
-  "configuration.cwtools.ai.mcp.servers.description": "MCP（模型上下文协议）服务器配置，用于扩展 AI 工具能力。"
+  "configuration.cwtools.ai.mcp.servers.description": "MCP（模型上下文协议）服务器配置，用于扩展 AI 工具能力。",
+  "commands.cwtools.vanillaCompare.diff.title": "与原版对比代码块",
+  "commands.cwtools.vanillaCompare.fileDiff.title": "与原版对比文件",
+  "configuration.cwtools.vanillaCompare.showGutterDecorations.description": "在编辑器行号区域显示与原版不同的行级差异装饰。使用与 Git SCM 不同的颜色样式以作区分。"
 }

@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Eddy",
 	"license": "MIT",
-	"version": "1.9.3",
+	"version": "1.9.4",
 	"preview": true,
 	"activationEvents": [
 		"onLanguage:stellaris",
@@ -104,6 +104,18 @@
 					"command": "cwtools.visualizeTechTree",
 					"when": "resourceExtname == .txt && resourcePath =~ /technology/",
 					"group": "navigation"
+				},
+				{
+					"command": "cwtools.vanillaCompare.fileDiff",
+					"when": "resourceExtname == .txt",
+					"group": "navigation"
+				}
+			],
+			"editor/context": [
+				{
+					"command": "cwtools.vanillaCompare.diff",
+					"when": "resourceExtname == .txt",
+					"group": "cwtools@1"
 				}
 			]
 		},
@@ -233,6 +245,18 @@
 				"title": "%commands.cwtools.visualizeTechTree.title%",
 				"category": "cwtools",
 				"icon": "$(circuit-board)"
+			},
+			{
+				"command": "cwtools.vanillaCompare.diff",
+				"title": "%commands.cwtools.vanillaCompare.diff.title%",
+				"category": "cwtools",
+				"icon": "$(compare-changes)"
+			},
+			{
+				"command": "cwtools.vanillaCompare.fileDiff",
+				"title": "%commands.cwtools.vanillaCompare.fileDiff.title%",
+				"category": "cwtools",
+				"icon": "$(diff-multiple)"
 			}
 		],
 		"keybindings": [
@@ -671,6 +695,12 @@
 						},
 						"required": ["name", "type"]
 					}
+				},
+				"cwtools.vanillaCompare.showGutterDecorations": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.cwtools.vanillaCompare.showGutterDecorations.description%"
 				}
 			}
 		},

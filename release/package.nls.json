@@ -113,5 +113,8 @@
   "configuration.cwtools.ai.ignoredDiagnostics.description": "List of diagnostic keys (e.g. external mod keys) to be completely ignored by the LSP Problems panel and AI Agent. Modifiable via 'Manage Ignored Diagnostics' command.",
   "configuration.cwtools.ai.braveSearchApiKey.description": "Brave Search API key for web_search tool. Get one at https://brave.com/search/api/",
   "configuration.cwtools.ai.exaApiKey.description": "Exa API key for codesearch tool. Get one at https://exa.ai",
-  "configuration.cwtools.ai.mcp.servers.description": "MCP (Model Context Protocol) server configurations for extending AI tool capabilities."
+  "configuration.cwtools.ai.mcp.servers.description": "MCP (Model Context Protocol) server configurations for extending AI tool capabilities.",
+  "commands.cwtools.vanillaCompare.diff.title": "Compare Block with Vanilla",
+  "commands.cwtools.vanillaCompare.fileDiff.title": "Compare File with Vanilla",
+  "configuration.cwtools.vanillaCompare.showGutterDecorations.description": "Show line-level diff decorations in the editor gutter for blocks that differ from vanilla. Uses distinct colors from Git SCM decorations."
 }

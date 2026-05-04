@@ -25,6 +25,7 @@ import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
 import { registerGraphicsFeatures } from './graphicsFeatures';
+import { registerVanillaCompare } from './vanillaCompare';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
@@ -512,6 +513,9 @@ export async function activate(context: ExtensionContext) {
 
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
 	registerGraphicsFeatures(context);
+
+	// ── Vanilla Code Comparison: block-level and file-level diff against vanilla game ──
+	registerVanillaCompare(context);
 
 	const init = async function (language: string, isVanillaFolder: boolean) {
 		vs.languages.setLanguageConfiguration(language, {

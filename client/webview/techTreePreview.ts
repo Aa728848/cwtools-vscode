@@ -15,6 +15,7 @@
  */
 
 import cytoscape from 'cytoscape';
+import { svgIconNoMargin } from './svgIcons';
 // @ts-ignore
 import elk from 'cytoscape-elk';
 
@@ -263,9 +264,9 @@ cy.on('mouseover', 'node', evt => {
     const d = evt.target.data();
     const areaLabel: Record<string, string> = { physics: '物理学', society: '社会学', engineering: '工程学', unknown: '未知' };
     const flags = [
-        d.isStartTech ? '🌟 起始科技' : '',
-        d.isRare ? '💜 稀有' : '',
-        d.isDangerous ? '⚠️ 危险' : '',
+        d.isStartTech ? `${svgIconNoMargin('star')} 起始科技` : '',
+        d.isRare ? `${svgIconNoMargin('shield')} 稀有` : '',
+        d.isDangerous ? `${svgIconNoMargin('warning')} 危险` : '',
     ].filter(Boolean).join(' ');
 
     tooltip.innerHTML = `

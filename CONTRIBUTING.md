@@ -1,48 +1,48 @@
-# Contributing to Eddy's Stellaris CWTools
+# 贡献指南
 
-Thank you for your interest in contributing! This guide covers environment setup, development workflow, debugging, and code conventions.
-
----
-
-## Prerequisites
-
-| Tool | Version | Purpose |
-|------|---------|---------|
-| **Node.js** | ≥ 20.x | TypeScript compilation, webview bundling |
-| **npm** | ≥ 10.x | Package management |
-| **.NET SDK** | ≥ 8.0 | F# Language Server compilation |
-| **VS Code** | ≥ 1.90 | Extension host runtime |
-| **Git** | Latest | Source control + submodule management |
+感谢您对本项目的关注！本指南涵盖环境搭建、开发流程、调试方法和代码规范。
 
 ---
 
-## Getting Started
+## 环境要求
 
-### 1. Clone with Submodules
+| 工具 | 版本 | 用途 |
+|------|------|------|
+| **Node.js** | ≥ 20.x | TypeScript 编译、Webview 打包 |
+| **npm** | ≥ 10.x | 包管理 |
+| **.NET SDK** | ≥ 9.0 | F# 语言服务器编译 |
+| **VS Code** | ≥ 1.90 | 扩展宿主运行时 |
+| **Git** | 最新版 | 源码管理 + 子模块 |
+
+---
+
+## 快速开始
+
+### 1. 克隆（含子模块）
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
 cd cwtools-vscode
 ```
 
-If you already cloned without submodules:
+已有仓库但缺少子模块：
 ```bash
 git submodule update --init --recursive
 ```
 
-### 2. Install Dependencies
+### 2. 安装依赖
 
 ```bash
 npm install
 ```
 
-### 3. Build the F# Language Server
+### 3. 构建 F# 语言服务器
 
 ```bash
 dotnet build src/LSP/
 ```
 
-Or use the convenience scripts:
+或使用便捷脚本：
 ```bash
 # Windows
 .\build.cmd
@@ -51,19 +51,19 @@ Or use the convenience scripts:
 ./build.sh
 ```
 
-### 4. Build the TypeScript Extension
+### 4. 构建 TypeScript 扩展
 
 ```bash
 npm run compile
 ```
 
-This runs two steps:
-1. `tsc -p ./tsconfig.extension.json` — compiles extension context code to `release/bin/`
-2. `rollup -c` — bundles webview scripts (`chatPanel.ts`, `guiPreview.ts`, `solarSystemPreview.ts`) into `release/bin/client/webview/`
+包含两步：
+1. `tsc -p ./tsconfig.extension.json` — 编译扩展上下文代码到 `release/bin/`
+2. `rollup -c` — 打包 5 个 Webview 脚本（`chatPanel`, `guiPreview`, `solarSystemPreview`, `eventChainPreview`, `techTreePreview`）到 `release/bin/client/webview/`
 
-### 5. Using a Local CWTools F# Repo
+### 5. 使用本地 CWTools F# 仓库
 
-To develop against a local cwtools git repo, create `cwtools.local.props`:
+如需针对本地 cwtools 仓库开发，创建 `cwtools.local.props`：
 
 ```xml
 <Project>
@@ -74,145 +74,196 @@ To develop against a local cwtools git repo, create `cwtools.local.props`:
 </Project>
 ```
 
-Adjust `<CwtoolsPath>` to point to your local repo. The default assumes it's adjacent to this repo.
+调整 `<CwtoolsPath>` 指向你的本地仓库。
 
 ---
 
-## Development Workflow
+## 开发流程
 
-### Running & Debugging
+### 运行与调试
 
-1. Open the repo in VS Code
-2. Press **F5** (or Run → Start Debugging)
-3. This launches a new **Extension Development Host** window with the extension loaded
-4. Make changes → restart the host (Ctrl+Shift+F5) to reload
+1. 在 VS Code 中打开本仓库
+2. 按 **F5**（或 运行 → 开始调试）
+3. 将启动新的 **扩展开发主机** 窗口，扩展已加载
+4. 修改代码后重启主机（Ctrl+Shift+F5）重新加载
 
-### Webview Debugging
+### Webview 调试
 
-Webview scripts (chat panel, GUI preview, solar preview) run in isolated browser sandboxes. To debug them:
+Webview 脚本（聊天面板、GUI 预览、星系预览、事件链、科技树）在隔离浏览器沙盒中运行。调试方法：
 
-1. In the Extension Development Host window, open the Command Palette (`Ctrl+Shift+P`)
-2. Run: **Developer: Open Webview Developer Tools**
-3. This opens Chrome DevTools for the active webview — you can set breakpoints, inspect DOM, etc.
+1. 在扩展开发主机窗口中，打开命令面板（`Ctrl+Shift+P`）
+2. 执行：**Developer: Open Webview Developer Tools**
+3. 打开 Chrome DevTools — 可设置断点、检查 DOM 等
 
-> ⚠️ **Important**: Webview scripts cannot access `require()`, `vscode` API, or Node.js modules. All communication with the extension host must go through `postMessage`. See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
+> ⚠️ **重要**：Webview 脚本无法访问 `require()`、`vscode` API 或 Node.js 模块。与扩展宿主的通信必须通过 `postMessage`。详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
-### Watch Mode
+### 监视模式
 
-For rapid iteration on extension code:
+快速迭代开发：
 ```bash
-# Terminal 1: Watch TypeScript
+# 终端 1：监视 TypeScript
 npx tsc -p ./tsconfig.extension.json --watch
 
-# Terminal 2: Watch webview bundles (re-run manually after changes)
+# 终端 2：监视 Webview 打包
 npx rollup -c --watch
 ```
 
 ---
 
-## Build Scripts
+## 构建脚本
 
-| Command | Description |
-|---------|-------------|
-| `npm run compile` | Full build (extension + webviews) |
-| `npm run lint` | ESLint on `client/` |
-| `npm run test` | Compile + VS Code integration tests |
-| `npm run test:unit` | Unit tests via `ts-mocha` |
-| `npm run test:coverage` | Unit tests with coverage report |
+| 命令 | 描述 |
+|------|------|
+| `npm run compile` | 完整构建（扩展 + 5 个 Webview） |
+| `npm run lint` | ESLint 检查 `client/` |
+| `npm run test` | 编译 + VS Code 集成测试 |
+| `npm run test:unit` | 通过 `ts-mocha` 运行单元测试 |
+| `npm run test:coverage` | 带覆盖率报告的单元测试 |
 
 ---
 
-## Project Structure
+## 项目结构
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full module map. Quick summary:
+详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 获取完整模块地图。简要概览：
 
 ```
 client/
-├── extension/          # Extension context (Node.js)
-│   ├── ai/             # AI agent module
-│   │   ├── tools/      # Tool implementations
-│   │   ├── agentRunner.ts    # Core reasoning loop
-│   │   ├── aiService.ts      # Provider HTTP client
-│   │   └── chatPanel.ts      # Webview host
-│   └── extension.ts    # Main entry
-├── webview/             # Webview scripts (browser sandbox)
-│   ├── chatPanel.ts     # Chat UI + markdown renderer
-│   ├── guiPreview.ts    # GUI canvas renderer
-│   └── solarSystemPreview.ts
-└── test/                # Tests
+├── extension/              # 扩展上下文 (Node.js)
+│   ├── ai/                 # AI Agent 模块 (27+ 文件)
+│   │   ├── tools/          # 工具实现 (5 个文件)
+│   │   ├── agentRunner.ts  # 核心推理循环
+│   │   ├── aiService.ts    # 提供商 HTTP 客户端
+│   │   ├── chatPanel.ts    # Webview 宿主
+│   │   ├── providers.ts    # 16+ 提供商配置
+│   │   └── diffEngine.ts   # Myers diff 算法
+│   ├── extension.ts        # 主入口
+│   ├── guiPanel.ts         # GUI 预览宿主
+│   ├── solarSystemPanel.ts # 星系可视化器宿主
+│   ├── eventChainPanel.ts  # 事件链可视化器宿主
+│   ├── techTreePanel.ts    # 科技树可视化器宿主
+│   └── codeActions.ts      # AI Quick Fix
+├── webview/                # Webview 脚本 (浏览器沙盒)
+│   ├── chatPanel.ts        # 聊天 UI + Markdown 渲染器
+│   ├── guiPreview.ts       # GUI Canvas 渲染器
+│   ├── solarSystemPreview.ts
+│   ├── eventChainPreview.ts    # Cytoscape.js 事件链图
+│   └── techTreePreview.ts      # Cytoscape.js 科技树图
+└── test/                   # 测试
+    ├── unit/               # 单元测试 (7 个文件)
+    └── suite/              # 集成测试
 
-src/LSP/                 # F# Language Server
-submodules/cwtools/      # CWTools library (git submodule)
+src/LSP/                    # F# 语言服务器
+submodules/cwtools/         # CWTools F# 库 (Git 子模块)
 ```
 
 ---
 
-## Code Conventions
+## 代码规范
 
 ### TypeScript
 
-- **Strict mode**: `strict: true` in all tsconfig files
-- **No `any`**: Prefer proper types. Use `unknown` + type guards if the type is truly unknown
-- **Naming**: `camelCase` for variables/functions, `PascalCase` for types/interfaces, `UPPER_SNAKE_CASE` for constants
-- **Imports**: Group by: (1) Node.js builtins, (2) VS Code API, (3) local modules
-- **Error handling**: Use `ErrorReporter` (in `ai/errorReporter.ts`) instead of bare `console.error`. Three tiers:
-  - `ErrorReporter.fatal(source, msg)` — shows notification to user
-  - `ErrorReporter.warn(source, msg)` — shows in status bar
-  - `ErrorReporter.debug(source, msg)` — output channel only
-- **UI strings**: All user-visible Chinese text should go in `ai/messages.ts`, not hardcoded
+- **严格模式**：所有 tsconfig 启用 `strict: true` + `noUncheckedIndexedAccess: true`
+- **禁用 `any`**：优先使用正确类型。类型真正未知时使用 `unknown` + 类型守卫
+- **命名**：`camelCase` 用于变量/函数，`PascalCase` 用于类型/接口，`UPPER_SNAKE_CASE` 用于常量
+- **导入排序**：(1) Node.js 内置模块, (2) VS Code API, (3) 本地模块
+- **错误处理**：使用 `ErrorReporter`（`ai/errorReporter.ts`）代替裸 `console.error`：
+  - `ErrorReporter.fatal(source, msg)` — 向用户显示通知
+  - `ErrorReporter.warn(source, msg)` — 状态栏显示
+  - `ErrorReporter.debug(source, msg)` — 仅输出通道
+- **UI 字符串**：所有用户可见中文文本应放在 `ai/messages.ts`，不要硬编码
 
-### AI Module Specifics
+### AI 模块特定规范
 
-- **Tool safety**: When adding a new tool that mutates files, add it to the write-lock guard list in `agentRunner.ts` to prevent race conditions during parallel sub-agent execution
-- **Context isolation**: Never import `vscode` in webview scripts. Never use `require()` in webview code
-- **Memory safety**: Use bounded caches (LRU) for any data that grows with usage. The LSP cache in `lspTools.ts` is the reference pattern (128 entries max + TTL)
-- **Token estimation**: Use `estimateTokenCount()` in `agentRunner.ts` for all token math. It auto-selects fast vs. precise path
+- **工具安全**：添加修改文件的新工具时，必须将其加入 `agentRunner.ts` 中的 `WRITE_TOOLS` 集合，确保并行子代理执行时的串行写入
+- **上下文隔离**：永远不要在 Webview 脚本中导入 `vscode`。永远不要在 Webview 代码中使用 `require()`
+- **内存安全**：对任何随使用增长的数据使用有界缓存（LRU）。`lspTools.ts` 中的 LSP 缓存是参考模式（128 条目 + TTL）
+- **Token 估算**：使用 `agentRunner.ts` 中的 `estimateTokenCount()` 进行所有 token 计算。自动选择快速 vs. 精确路径
+- **工具分发**：新增工具时需同步更新 `agentTools.ts`（路由）、`tools/definitions.ts`（Schema）和 `types.ts`（类型）
 
 ### CSS
 
-- Use VS Code theme CSS variables (e.g., `var(--vscode-editor-background)`) instead of hardcoded colors
-- Ensure minimum contrast ratio of 4.5:1 for accessibility
-- Support `prefers-reduced-motion` for animations
+- 使用 VS Code 主题 CSS 变量（如 `var(--vscode-editor-background)`），不硬编码颜色
+- 确保最低 4.5:1 对比度以满足无障碍要求
+- 动画支持 `prefers-reduced-motion`
+
+### ESLint 配置
+
+项目使用 ESLint 9 平面配置（`eslint.config.mjs`），关键规则：
+- `@typescript-eslint/no-floating-promises: error` — 防止未处理的 Promise
+- `@typescript-eslint/no-misused-promises: error` — 防止 Promise 误用
+- `prefer-promise-reject-errors: error` — 拒绝时使用 Error 对象
 
 ---
 
-## Pull Request Checklist
+## Pull Request 检查清单
 
-Before submitting a PR, please verify:
+提交 PR 前请验证：
 
-- [ ] `npm run compile` passes with zero errors
-- [ ] `npm run lint` passes (or new warnings are justified)
-- [ ] Existing comments and docstrings are preserved
-- [ ] No new `any` types without justification
-- [ ] UI strings are in `messages.ts`, not hardcoded
-- [ ] New write-capable tools are added to the lock guard list
-- [ ] New webview features use `postMessage` for extension communication
-- [ ] Tested in Extension Development Host:
-  - [ ] Chat panel opens and sends messages
-  - [ ] Mode switching works (Build/Plan/Explore/General/Review)
-  - [ ] GUI Preview renders (if touched)
-  - [ ] No console errors in Webview DevTools
+- [ ] `npm run compile` 零错误通过
+- [ ] `npm run lint` 通过（或新警告有合理理由）
+- [ ] 现有注释和文档字符串已保留
+- [ ] 无未说明理由的 `any` 类型
+- [ ] UI 字符串在 `messages.ts` 中，未硬编码
+- [ ] 新写操作工具已加入 `WRITE_TOOLS` 锁守卫集合
+- [ ] 新 Webview 功能通过 `postMessage` 与扩展通信
+- [ ] 新工具同步更新了 `definitions.ts`、`agentTools.ts`、`types.ts`
+- [ ] 在扩展开发主机中测试通过：
+  - [ ] 聊天面板可打开并发送消息
+  - [ ] 模式切换正常（Build/Plan/Explore/General/Review/LocTranslator/LocWriter）
+  - [ ] GUI 预览可渲染（如有修改）
+  - [ ] 事件链/科技树可视化器正常（如有修改）
+  - [ ] Webview DevTools 无控制台错误
 
 ---
 
-## Packaging
+## 打包
 
-To build `.vsix` packages for distribution:
+构建 `.vsix` 分发包：
 
 ```powershell
-# Windows — builds for all 3 platforms
+# Windows — 构建全部 3 个平台
 .\package.ps1
 ```
 
-This produces platform-specific packages in the project root:
+产出平台特定包：
 - `cwtools-vscode-*-win32-x64.vsix`
 - `cwtools-vscode-*-linux-x64.vsix`
 - `cwtools-vscode-*-darwin-x64.vsix`
 
 ---
 
-## Getting Help
+## 测试
 
-- **Architecture overview**: See [ARCHITECTURE.md](./ARCHITECTURE.md)
-- **AI coding guide**: See [CLAUDE.md](./CLAUDE.md) (guidance for AI assistants working on this repo)
-- **Issues**: Open a GitHub Issue for bugs or feature requests
+### 单元测试
+
+位于 `client/test/unit/`，覆盖核心模块：
+
+| 测试文件 | 覆盖模块 |
+|---------|---------|
+| `contextBudget.test.ts` | Token 预算与压缩逻辑 |
+| `diffEngine.test.ts` | Myers diff 算法正确性 |
+| `editFileReplacer.test.ts` | 8 种模糊替换策略 |
+| `jsonRepair.test.ts` | JSON 修复逻辑 |
+| `pricing.test.ts` | 成本估算 |
+| `providers.test.ts` | 提供商配置与能力检测 |
+| `toolCallParser.test.ts` | 非标准工具调用解析 |
+
+运行单元测试：
+```bash
+npm run test:unit
+```
+
+### 集成测试
+
+位于 `client/test/suite/`，需要 VS Code 运行时：
+```bash
+npm run test
+```
+
+---
+
+## 获取帮助
+
+- **架构概览**：见 [ARCHITECTURE.md](./ARCHITECTURE.md)
+- **AI 编码指南**：见 [CLAUDE.md](./CLAUDE.md)（AI 助手工作指南）
+- **问题反馈**：提交 GitHub Issue

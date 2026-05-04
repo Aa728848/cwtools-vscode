@@ -238,7 +238,7 @@ export class ChatTopicManager {
                     if (!matchContext) {
                         const start = Math.max(0, codeIdx - 40);
                         const end = Math.min(m.code!.length, codeIdx + q.length + 40);
-                        matchContext = '📄 ' + (start > 0 ? '...' : '') +
+                        matchContext = '[code] ' + (start > 0 ? '...' : '') +
                             m.code!.substring(start, end).replace(/\n/g, ' ') +
                             (end < m.code!.length ? '...' : '');
                     }
@@ -289,12 +289,12 @@ export class ChatTopicManager {
 
         for (const msg of topic.messages) {
             if (msg.role === 'user') {
-                lines.push(`## 👤 用户`);
+                lines.push(`## 用户`);
                 lines.push(``);
                 lines.push(msg.content);
                 lines.push(``);
             } else if (msg.role === 'assistant') {
-                lines.push(`## 🤖 Eddy CWTool Code`);
+                lines.push(`## Eddy CWTool Code`);
                 lines.push(``);
                 if (msg.content) {
                     lines.push(msg.content);

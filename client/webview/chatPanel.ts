@@ -412,7 +412,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
         const badge = document.createElement('span');
         badge.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:rgba(100,120,255,0.15);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:11px;';
-        badge.innerHTML = `📄 ${escapeHtml(file.split('/').pop())} <button style="background:none;border:none;cursor:pointer;color:inherit;padding:0;font-size:10px;" data-file="${escapeHtml(file)}">✕</button>`;
+        badge.innerHTML = `${svgIconNoMargin('file')} ${escapeHtml(file.split('/').pop())} <button style="background:none;border:none;cursor:pointer;color:inherit;padding:0;font-size:10px;" data-file="${escapeHtml(file)}">✕</button>`;
         badge.querySelector('button')!.addEventListener('click', () => {
             pendingFiles = pendingFiles.filter(f => f !== file);
             badge.remove();
@@ -1774,7 +1774,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 const notif = document.createElement('div');
                 notif.className = 'special-step';
                 notif.style.cssText = 'padding:6px 0;opacity:0.6;font-size:11px;';
-                notif.textContent = `🔀 已从此处分叉为新话题: ${msg.title}`;
+                notif.innerHTML = `${svgIconNoMargin('gitBranch')} 已从此处分叉为新话题: ${escapeHtml(msg.title)}`;
                 chatArea.appendChild(notif);
                 scrollBottom();
                 break;
@@ -1849,9 +1849,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 const banner = document.createElement('div');
                 banner.className = 'special-step';
                 banner.style.cssText = 'padding:6px 8px;background:rgba(255,200,50,0.08);border-left:2px solid #ffc832;font-size:11px;opacity:0.8;margin:4px 0;';
-                banner.textContent = msg.isGenerating
-                    ? '⚡ AI 正在后台运行（面板重新打开时恢复显示）'
-                    : '📋 以下为 AI 上次运行记录';
+                banner.innerHTML = msg.isGenerating
+                    ? `${svgIconNoMargin('zap')} AI 正在后台运行（面板重新打开时恢复显示）`
+                    : `${svgIconNoMargin('clipboard')} 以下为 AI 上次运行记录`;
                 chatArea.appendChild(banner);
                 // Replay each step
                 for (const step of msg.steps) {
@@ -1886,7 +1886,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                             row.style.justifyContent = 'space-between';
                             row.style.alignItems = 'center';
                             row.innerHTML = `<span style="font-family:monospace;">${escapeHtml(skill)}</span>
-                                <button class="detect-btn" data-skill="${escapeHtml(skill)}" style="padding:0 6px; width:auto; border-radius:4px;" title="删除此技能">🗑</button>`;
+                                <button class="detect-btn" data-skill="${escapeHtml(skill)}" style="padding:0 6px; width:auto; border-radius:4px;" title="删除此技能">${svgIconNoMargin('trash')}</button>`;
                             row.querySelector('button')!.addEventListener('click', (e) => {
                                 const btn = e.currentTarget as HTMLButtonElement;
                                 btn.disabled = true; btn.textContent = '...';
@@ -2434,7 +2434,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
                     const baseName = f.file.replace(/\\/g, '/').split('/').pop() || f.file;
                     const relPath = f.file.replace(/\\/g, '/');
-                    const statusIcon = f.status === 'created' ? '🆕' : f.status === 'deleted' ? '🗑️' : '✏️';
+                    const statusIcon = f.status === 'created' ? svgIconNoMargin('filePlus') : f.status === 'deleted' ? svgIconNoMargin('trash') : svgIconNoMargin('pencil');
                     const statsText = f.additions != null ? `<span class="ds-add">+${f.additions}</span> <span class="ds-del">-${f.deletions || 0}</span>` : escapeHtml(f.diffPreview);
 
                     const fileHeader = document.createElement('div');
@@ -2883,7 +2883,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     <option value="stdio" ${(t.type || 'stdio') === 'stdio' ? 'selected' : ''}>stdio</option>
                     <option value="sse" ${t.type === 'sse' ? 'selected' : ''}>sse</option>
                 </select>
-                <button class="mcp-delete-btn" title="删除">🗑</button>
+                <button class="mcp-delete-btn" title="删除">${svgIconNoMargin('trash')}</button>
             </div>
             <div class="mcp-transport-content"></div>
         `;

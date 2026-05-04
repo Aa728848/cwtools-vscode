@@ -38,7 +38,10 @@ export class SolarSystemPanel {
     private _lastSnapshotTime = 0;
     private static readonly MAX_SNAPSHOTS = 20;
     private _saveSnapshot(doc: vscode.TextDocument) {
-        this._saveSnapshot(doc);
+        const now = Date.now();
+        if (now - this._lastSnapshotTime < 500) return;
+        this._lastSnapshotTime = now;
+        this._contentSnapshots.push(doc.getText());
         if (this._contentSnapshots.length > SolarSystemPanel.MAX_SNAPSHOTS) {
             this._contentSnapshots.shift();
         }
@@ -1160,8 +1163,8 @@ export class SolarSystemPanel {
             <span class="separator">|</span>
             <span id="tilt-level">55°</span>
             <span class="separator">|</span>
-            <button id="btn-edit" title="切换编辑模式 (E)" class="edit-toggle">✏️</button>
-            <button id="btn-labels" title="切换标签">🏷️</button>
+            <button id="btn-edit" title="切换编辑模式 (E)" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
+            <button id="btn-labels" title="切换标签"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"></path><path d="M7 7h.01"></path></svg></button>
             <button id="btn-orbits" title="切换轨道线">◎</button>
         </div>
     </div>
@@ -1186,69 +1189,69 @@ export class SolarSystemPanel {
     <div id="context-menu" class="hidden">
         <div id="ctx-planets">
             <div class="ctx-title">添加天体</div>
-            <button data-action="add-continental">🌍 大陆星球</button>
-            <button data-action="add-ocean">🌊 海洋星球</button>
-            <button data-action="add-tropical">🌴 热带星球</button>
-            <button data-action="add-desert">🏜️ 沙漠星球</button>
-            <button data-action="add-arctic">❄️ 极地星球</button>
-            <button data-action="add-arid">☀️ 干旱星球</button>
-            <button data-action="add-gas_giant">🪐 气态巨行星</button>
-            <button data-action="add-barren">🪨 贫瘠星球</button>
-            <button data-action="add-frozen">🧊 冰冻星球</button>
-            <button data-action="add-molten">🔥 熔融星球</button>
-            <button data-action="add-toxic">☣️ 剧毒星球</button>
-            <button data-action="add-asteroid">💫 小行星</button>
-            <button data-action="add-g_star">⭐ G型星 (黄)</button>
-            <button data-action="add-b_star">💠 B型星 (蓝白)</button>
-            <button data-action="add-a_star">🔷 A型星 (白)</button>
-            <button data-action="add-f_star">🌟 F型星 (黄白)</button>
-            <button data-action="add-k_star">🟠 K型星 (橙)</button>
-            <button data-action="add-m_star">🔴 M型星 (红)</button>
-            <button data-action="add-t_star">🟤 T型星 (褐)</button>
-            <button data-action="add-black_hole">🕳️ 黑洞</button>
-            <button data-action="add-neutron_star">⚡ 中子星</button>
-            <button data-action="add-pulsar">💜 脉冲星</button>
+            <button data-action="add-continental"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#4caf50"/></svg> 大陆星球</button>
+            <button data-action="add-ocean"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#2196f3"/></svg> 海洋星球</button>
+            <button data-action="add-tropical"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#8bc34a"/></svg> 热带星球</button>
+            <button data-action="add-desert"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> 沙漠星球</button>
+            <button data-action="add-arctic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#b3e5fc"/></svg> 极地星球</button>
+            <button data-action="add-arid"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ffc107"/></svg> 干旱星球</button>
+            <button data-action="add-gas_giant"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ce93d8"/></svg> 气态巨行星</button>
+            <button data-action="add-barren"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#9e9e9e"/></svg> 贫瘠星球</button>
+            <button data-action="add-frozen"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#80deea"/></svg> 冰冻星球</button>
+            <button data-action="add-molten"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff5722"/></svg> 熔融星球</button>
+            <button data-action="add-toxic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#76ff03"/></svg> 剧毒星球</button>
+            <button data-action="add-asteroid"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#bdbdbd"/></svg> 小行星</button>
+            <button data-action="add-g_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ffeb3b"/></svg> G型星 (黄)</button>
+            <button data-action="add-b_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#64b5f6"/></svg> B型星 (蓝白)</button>
+            <button data-action="add-a_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#e3f2fd"/></svg> A型星 (白)</button>
+            <button data-action="add-f_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#fff9c4"/></svg> F型星 (黄白)</button>
+            <button data-action="add-k_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> K型星 (橙)</button>
+            <button data-action="add-m_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#f44336"/></svg> M型星 (红)</button>
+            <button data-action="add-t_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#795548"/></svg> T型星 (褐)</button>
+            <button data-action="add-black_hole"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#212121"/></svg> 黑洞</button>
+            <button data-action="add-neutron_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#e0e0e0"/></svg> 中子星</button>
+            <button data-action="add-pulsar"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ba68c8"/></svg> 脉冲星</button>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0" id="ctx-ring-sep"></div>
-        <div id="ctx-ringworld"><button data-action="add-ringworld">💍 环形世界</button></div>
+        <div id="ctx-ringworld"><button data-action="add-ringworld"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="none" stroke="#ffd700" stroke-width="2"/></svg> 环形世界</button></div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-moon-sep"></div>
         <div id="ctx-moons" style="display:none">
             <div class="ctx-title" id="ctx-moon-title">添加卫星</div>
-            <button data-action="moon-barren">🪨 贫瘠卫星</button>
-            <button data-action="moon-barren_cold">🌑 寒冷贫瘠卫星</button>
-            <button data-action="moon-frozen">🧊 冰冻卫星</button>
-            <button data-action="moon-continental">🌍 大陆卫星</button>
-            <button data-action="moon-ocean">🌊 海洋卫星</button>
-            <button data-action="moon-tropical">🌴 热带卫星</button>
-            <button data-action="moon-desert">🏜️ 沙漠卫星</button>
-            <button data-action="moon-toxic">☣️ 剧毒卫星</button>
+            <button data-action="moon-barren"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#9e9e9e"/></svg> 贫瘠卫星</button>
+            <button data-action="moon-barren_cold"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#616161"/></svg> 寒冷贫瘠卫星</button>
+            <button data-action="moon-frozen"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#80deea"/></svg> 冰冻卫星</button>
+            <button data-action="moon-continental"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#4caf50"/></svg> 大陆卫星</button>
+            <button data-action="moon-ocean"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#2196f3"/></svg> 海洋卫星</button>
+            <button data-action="moon-tropical"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#8bc34a"/></svg> 热带卫星</button>
+            <button data-action="moon-desert"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> 沙漠卫星</button>
+            <button data-action="moon-toxic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#76ff03"/></svg> 剧毒卫星</button>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-sibling-sep"></div>
         <div id="ctx-sibling" style="display:none">
             <div class="ctx-title" id="ctx-sibling-title">在同轨道创建</div>
-            <button data-action="sib-continental">🌍 大陆</button>
-            <button data-action="sib-ocean">🌊 海洋</button>
-            <button data-action="sib-tropical">🌴 热带</button>
-            <button data-action="sib-desert">🏜️ 沙漠</button>
-            <button data-action="sib-arctic">❄️ 极地</button>
-            <button data-action="sib-arid">☀️ 干旱</button>
-            <button data-action="sib-gas_giant">🪐 气态巨行星</button>
-            <button data-action="sib-barren">🪨 贫瘠</button>
-            <button data-action="sib-frozen">🧊 冰冻</button>
-            <button data-action="sib-molten">🔥 熔融</button>
-            <button data-action="sib-toxic">☣️ 剧毒</button>
-            <button data-action="sib-barren_cold">🌑 寒冷贫瘠</button>
-            <button data-action="sib-ice_asteroid">💫 冰晶小行星</button>
-            <button data-action="sib-g_star">⭐ G型星</button>
-            <button data-action="sib-b_star">💠 B型星</button>
-            <button data-action="sib-a_star">🔷 A型星</button>
-            <button data-action="sib-f_star">🌟 F型星</button>
-            <button data-action="sib-k_star">🟠 K型星</button>
-            <button data-action="sib-m_star">🔴 M型星</button>
-            <button data-action="sib-t_star">🟤 T型星</button>
-            <button data-action="sib-black_hole">🕳️ 黑洞</button>
-            <button data-action="sib-neutron_star">⚡ 中子星</button>
-            <button data-action="sib-pulsar">💜 脉冲星</button>
+            <button data-action="sib-continental"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#4caf50"/></svg> 大陆</button>
+            <button data-action="sib-ocean"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#2196f3"/></svg> 海洋</button>
+            <button data-action="sib-tropical"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#8bc34a"/></svg> 热带</button>
+            <button data-action="sib-desert"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> 沙漠</button>
+            <button data-action="sib-arctic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#b3e5fc"/></svg> 极地</button>
+            <button data-action="sib-arid"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ffc107"/></svg> 干旱</button>
+            <button data-action="sib-gas_giant"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ce93d8"/></svg> 气态巨行星</button>
+            <button data-action="sib-barren"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#9e9e9e"/></svg> 贫瘠</button>
+            <button data-action="sib-frozen"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#80deea"/></svg> 冰冻</button>
+            <button data-action="sib-molten"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff5722"/></svg> 熔融</button>
+            <button data-action="sib-toxic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#76ff03"/></svg> 剧毒</button>
+            <button data-action="sib-barren_cold"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#616161"/></svg> 寒冷贫瘠</button>
+            <button data-action="sib-ice_asteroid"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#b3e5fc"/></svg> 冰晶小行星</button>
+            <button data-action="sib-g_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ffeb3b"/></svg> G型星</button>
+            <button data-action="sib-b_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#64b5f6"/></svg> B型星</button>
+            <button data-action="sib-a_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#e3f2fd"/></svg> A型星</button>
+            <button data-action="sib-f_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#fff9c4"/></svg> F型星</button>
+            <button data-action="sib-k_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> K型星</button>
+            <button data-action="sib-m_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#f44336"/></svg> M型星</button>
+            <button data-action="sib-t_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#795548"/></svg> T型星</button>
+            <button data-action="sib-black_hole"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#212121"/></svg> 黑洞</button>
+            <button data-action="sib-neutron_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#e0e0e0"/></svg> 中子星</button>
+            <button data-action="sib-pulsar"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ba68c8"/></svg> 脉冲星</button>
         </div>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>

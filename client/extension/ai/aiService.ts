@@ -983,7 +983,7 @@ export class AIService {
                             detail: `大小: ${m.size}`,
                         }));
                         modelItems.push({
-                            label: '✏️ 手动输入模型名...',
+                            label: '$(edit) 手动输入模型名...',
                             description: '',
                             detail: '',
                         });
@@ -993,7 +993,7 @@ export class AIService {
                             placeHolder: '选择一个已安装的模型...',
                         });
                         if (selectedModel) {
-                            if (selectedModel.label.startsWith('✏️')) {
+                            if (selectedModel.label.startsWith('$(edit)')) {
                                 const modelName = await vs.window.showInputBox({
                                     title: 'Ollama Model Name',
                                     prompt: 'Enter the model name (e.g. qwen3:32b)',
@@ -1028,7 +1028,7 @@ export class AIService {
             }));
 
             modelItems.push({
-                label: '✏️ 手动输入模型名...',
+                label: '$(edit) 手动输入模型名...',
                 description: '',
             });
 
@@ -1037,7 +1037,7 @@ export class AIService {
                 placeHolder: 'Choose a model...',
             });
             if (selectedModel) {
-                if (selectedModel.label.startsWith('✏️')) {
+                if (selectedModel.label.startsWith('$(edit)')) {
                     const modelName = await vs.window.showInputBox({
                         title: 'Model Name',
                         prompt: 'Enter the model name',
@@ -1163,7 +1163,7 @@ export class AIService {
         }
 
         modelItems.push({
-            label: '✏️ 手动输入模型名...',
+            label: '$(edit) 手动输入模型名...',
             description: '',
         });
 
@@ -1176,7 +1176,7 @@ export class AIService {
 
         if (selectedModel) {
             let modelName: string | undefined;
-            if (selectedModel.label.startsWith('✏️')) {
+            if (selectedModel.label.startsWith('$(edit)')) {
                 modelName = await vs.window.showInputBox({
                     title: 'Model Name',
                     prompt: 'Enter the model name manually',

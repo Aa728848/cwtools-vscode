@@ -270,7 +270,7 @@ export class ChatSettingsManager {
         if (dynamicModelsConfig[providerId]) {
             dynamicModelsConfig[providerId] = dynamicModelsConfig[providerId].filter(m => m !== modelId);
             await vscodeConfig.update('dynamicModels', dynamicModelsConfig, vs.ConfigurationTarget.Global);
-            vs.window.showInformationMessage(`✅ 已删除动态拉取的模型: ${modelId}`);
+            vs.window.showInformationMessage(`✓ 已删除动态拉取的模型: ${modelId}`);
             await this.openSettingsPage();
         }
     }
@@ -300,7 +300,7 @@ export class ChatSettingsManager {
                 [{ role: 'user', content: 'Hi' }],
                 { maxTokens: 5, providerId, model, apiKey, endpoint }
             );
-            this.postMessage({ type: 'testConnectionResult', ok: true, message: '连接成功 ✅' });
+            this.postMessage({ type: 'testConnectionResult', ok: true, message: '连接成功 ✓' });
         } catch (e: unknown) {
             const raw = e instanceof Error ? e.message : String(e);
             let friendly = raw;
@@ -311,7 +311,7 @@ export class ChatSettingsManager {
             } else if (raw.includes('403') || raw.includes('Forbidden')) {
                 friendly = 'API Key 权限不足';
             } else if (raw.includes('429')) {
-                friendly = '请求过于频繁 (429) — Key 有效 ✅';
+                friendly = '请求过于频繁 (429) — Key 有效 ✓';
             } else if (raw.includes('404')) {
                 friendly = 'Endpoint 地址不存在 (404) — 请检查 URL';
             }

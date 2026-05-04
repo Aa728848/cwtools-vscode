@@ -1693,7 +1693,7 @@ export class AgentRunner {
             if (result.isValid) {
                 emitStep({
                     type: 'validation',
-                    content: `✅ 验证通过 (${result.errors.length} 警告)`,
+                    content: `✓ 验证通过 (${result.errors.length} 警告)`,
                     timestamp: Date.now(),
                 });
 
@@ -1709,7 +1709,7 @@ export class AgentRunner {
             if (retryCount >= MAX_VALIDATION_RETRIES) {
                 emitStep({
                     type: 'validation',
-                    content: `⚠️ ${MAX_VALIDATION_RETRIES} 次修正后仍有错误`,
+                    content: `⚠ ${MAX_VALIDATION_RETRIES} 次修正后仍有错误`,
                     timestamp: Date.now(),
                 });
                 break;
@@ -1724,7 +1724,7 @@ export class AgentRunner {
 
             emitStep({
                 type: 'validation',
-                content: `❌ 发现 ${result.errors.filter(e => e.severity === 'error').length} 个错误，正在修正 (第 ${retryCount}/${MAX_VALIDATION_RETRIES} 次)...`,
+                content: `✗ 发现 ${result.errors.filter(e => e.severity === 'error').length} 个错误，正在修正 (第 ${retryCount}/${MAX_VALIDATION_RETRIES} 次)...`,
                 timestamp: Date.now(),
             });
 

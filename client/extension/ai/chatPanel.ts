@@ -372,7 +372,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (!config.enabled) {
             this.postMessage({
                 type: 'generationError',
-                error: 'AI 功能未启用。请先点击 ⚙️ 配置 AI Provider。',
+                error: 'AI 功能未启用。请先点击⚙配置 AI Provider。',
             });
             return;
         }
@@ -478,7 +478,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.postMessage({ type: 'generationComplete', result: { ...result, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({
                     role: 'assistant',
-                    content: '📋 计划已生成，已在批注视图中打开',
+                    content: '计划已生成，已在批注视图中打开',
                     timestamp: Date.now(),
                     steps: result.steps,
                 });
@@ -1021,11 +1021,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const action = await vs.window.showInformationMessage(
                 '是否接受 AI 生成的代码变更？',
                 { modal: false },
-                '✅ 接受',
-                '❌ 拒绝'
+                '✓ 接受',
+                '✗ 拒绝'
             );
 
-            if (action === '✅ 接受') {
+            if (action === '✓ 接受') {
                 // Apply the edit
                 const edit = new vs.WorkspaceEdit();
                 edit.insert(document.uri, new vs.Position(insertLine + 1, 0), code + '\n');

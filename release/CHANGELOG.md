@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.3] - 2026-05-04
+
+### 🐛 Bug 修复与 UI 重构 (Bug Fixes & UI Refactoring)
+- **[重构] 全面迁移 UI 图标至 SVG 系统 (Emoji to SVG Migration)**，解决在不同平台与字体下的渲染不一致问题
+- **[修复] `guiPanel` 与 `solarSystemPanel` 编辑模式静默失效 (Maximum call stack size exceeded) 的严重漏洞**（修复了因 `_saveSnapshot` 无限递归导致的编辑器崩溃问题）
+
+
 ## [1.9.2] - 2026-05-02
 
 ### ✨ AI Agent Skills 管理系统本地化隔离 (Local Agent Skills Isolation)

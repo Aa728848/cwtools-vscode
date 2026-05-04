@@ -36,7 +36,10 @@ export class GuiPanel {
     private _lastSnapshotTime = 0;  // debounce: only save one snapshot per 500ms batch
     private static readonly MAX_SNAPSHOTS = 20;
     private _saveSnapshot(doc: vscode.TextDocument) {
-        this._saveSnapshot(doc);
+        const now = Date.now();
+        if (now - this._lastSnapshotTime < 500) return;
+        this._lastSnapshotTime = now;
+        this._contentSnapshots.push(doc.getText());
         if (this._contentSnapshots.length > GuiPanel.MAX_SNAPSHOTS) {
             this._contentSnapshots.shift();
         }
@@ -958,14 +961,14 @@ export class GuiPanel {
     <div id="toolbar">
         <span id="title">GUI 预览</span>
         <div id="controls">
-            <button id="btn-edit" title="切换编辑模式 (E)" class="edit-toggle">✏️</button>
+            <button id="btn-edit" title="切换编辑模式 (E)" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
             <span class="separator">|</span>
             <button id="btn-zoom-in" title="放大">+</button>
             <span id="zoom-level">100%</span>
             <button id="btn-zoom-out" title="缩小">−</button>
             <button id="btn-fit" title="适应窗口">⊡</button>
             <button id="btn-reset" title="重置">↻</button>
-            <button id="btn-preview" title="预览模式 (隐藏边框)">👁</button>
+            <button id="btn-preview" title="预览模式 (隐藏边框)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
             <button id="btn-anim" title="播放精灵动画">▶</button>
             <select id="resolution-select" title="预览分辨率">
                 <option value="auto">自适应</option>
@@ -973,7 +976,7 @@ export class GuiPanel {
                 <option value="2560x1440">1440p</option>
                 <option value="3840x2160">4K</option>
             </select>
-            <button id="btn-search" title="搜索元素 (Ctrl+F)">🔍</button>
+            <button id="btn-search" title="搜索元素 (Ctrl+F)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
             <button id="btn-layers" title="切换图层面板">☰</button>
             <span class="separator edit-only">|</span>
             <button id="btn-align-left" title="左对齐" class="edit-only align-btn" disabled>⬅</button>

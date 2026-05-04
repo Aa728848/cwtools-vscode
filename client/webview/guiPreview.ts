@@ -2,6 +2,7 @@
  * GUI Preview Webview - renders Paradox GUI elements visually.
  * Runs inside the VS Code webview context.
  */
+import { svgIconNoMargin } from './svgIcons';
 
 const vscode = acquireVsCodeApi();
 
@@ -589,7 +590,7 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
             div.classList.add('has-texture');
             const sl = document.createElement('span');
             sl.className = 'sprite-ref';
-            sl.textContent = `📦 ${el.spriteKey ?? texPath}`;
+            sl.innerHTML = `${svgIconNoMargin('package')} ${escHtml(el.spriteKey ?? texPath)}`;
             sl.title = texPath;
             div.appendChild(sl);
         } else if (el.spriteTexture.startsWith('data:') || el.spriteTexture.includes('://')) {
@@ -955,7 +956,7 @@ function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 
         // Visibility toggle
         const toggle = document.createElement('button');
         toggle.className = 'layer-toggle';
-        toggle.textContent = '👁';
+        toggle.innerHTML = svgIconNoMargin('eye');
         toggle.title = '切换可见性';
         toggle.onclick = (e) => {
             e.stopPropagation();
@@ -976,7 +977,7 @@ function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 
                 if (layerItem) {
                     layerItem.classList.toggle('hidden-el', !willShow);
                     const btn = layerItem.querySelector('.layer-toggle');
-                    if (btn) btn.textContent = willShow ? '👁' : '🚫';
+                    if (btn) btn.innerHTML = willShow ? svgIconNoMargin('eye') : svgIconNoMargin('eyeOff');
                 }
             }
         };

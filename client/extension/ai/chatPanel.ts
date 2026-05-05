@@ -882,7 +882,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             // ── Open VSCode native diff editor ────────────────────────────────
             const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-            const tmpDir = path.join(workspaceRoot, '.cwtools-ai-tmp');
+            const tmpDir = path.join(workspaceRoot, '.cwtools-ai', 'tmp');
             const ext = path.extname(file) || '.txt';
             const tempPath = path.join(tmpDir, `__pending_${messageId}${ext}`);
 
@@ -1245,7 +1245,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         const IGNORE_DIRS = new Set([
             'node_modules', '.git', '.cwtools', '__pycache__',
-            'bin', 'obj', '.cwtools-ai-tmp', '.cwtools-ai-exports',
+            'bin', 'obj',
         ]);
 
         const files: string[] = [];

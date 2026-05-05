@@ -851,11 +851,11 @@ export class LspToolHandler {
             }
 
             // Fallback: Temp-file approach
-            let tempSubdir = '.cwtools-ai-tmp';
+            let tempSubdir = path.join('.cwtools-ai', 'tmp');
             if (args.targetFile) {
                 const relToWs = path.relative(wsRoot, path.dirname(args.targetFile));
                 if (relToWs && !relToWs.startsWith('..') && !path.isAbsolute(relToWs)) {
-                    tempSubdir = path.join('.cwtools-ai-tmp', relToWs);
+                    tempSubdir = path.join('.cwtools-ai', 'tmp', relToWs);
                 }
             }
             const tempDir = path.join(wsRoot, tempSubdir);
@@ -1012,7 +1012,7 @@ export class LspToolHandler {
                 if (!pathNorm.includes(fileNorm)) continue;
             }
 
-            if (fsPath.includes('.cwtools-ai-tmp')) continue;
+            if (fsPath.includes(`${path.sep}.cwtools-ai${path.sep}tmp`)) continue;
 
             filesWithDiags.add(fsPath);
 
@@ -1057,7 +1057,7 @@ export class LspToolHandler {
 
         let totalDiagCount = 0;
         for (const [uri, diags] of allPairs) {
-            if (uri.fsPath.includes('.cwtools-ai-tmp')) continue;
+            if (uri.fsPath.includes(`${path.sep}.cwtools-ai${path.sep}tmp`)) continue;
             if (args.file) {
                 const fileNorm = args.file.replace(/\\/g, '/').toLowerCase();
                 if (!uri.fsPath.replace(/\\/g, '/').toLowerCase().includes(fileNorm)) continue;

@@ -245,24 +245,9 @@ async function buildVanillaBlockIndex(
     return index;
 }
 
-// ─── Vanilla Content Provider ─────────────────────────────────────────────────
-
-class VanillaContentProvider implements vs.TextDocumentContentProvider {
-    private _content = '';
-    readonly onDidChange = new vs.EventEmitter<vs.Uri>().event;
-
-    setContent(text: string): void { this._content = text; }
-    provideTextDocumentContent(): string { return this._content; }
-}
-
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 export function registerVanillaCompare(context: vs.ExtensionContext): void {
-    const vanillaProvider = new VanillaContentProvider();
-
-    context.subscriptions.push(
-        vs.workspace.registerTextDocumentContentProvider('cwtools-vanilla', vanillaProvider)
-    );
 
     // ── Command: Block-level diff (right-click context menu) ──────────────
     context.subscriptions.push(
@@ -321,25 +306,30 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     return;
                 }
 
-                // Open diff view: vanilla block vs mod block
-                vanillaProvider.setContent(match.block.content);
-                const vanillaUri = vs.Uri.parse(`cwtools-vanilla:/${identity}.txt`);
-
-                const modLines = doc.getText().split('\n');
-                const modBlockText = modLines.slice(startLine, endLine! + 1).join('\n');
-
+                // Write vanilla block content to a temp file (left / read-only side)
                 const tmpDir = path.join(os.tmpdir(), 'cwtools-vanilla-compare');
                 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-                const modTmpPath = path.join(tmpDir, `mod_${identity}.txt`);
-                fs.writeFileSync(modTmpPath, modBlockText, 'utf-8');
+                const vanillaTmpPath = path.join(tmpDir, `vanilla_${identity}.txt`);
+                fs.writeFileSync(vanillaTmpPath, match.block.content, 'utf-8');
 
+                // Right side = real mod file (edits sync directly to the actual document)
                 await vs.commands.executeCommand('vscode.diff',
-                    vanillaUri, vs.Uri.file(modTmpPath),
+                    vs.Uri.file(vanillaTmpPath), uri,
                     `Vanilla vs Mod: ${identity}`,
                     { preview: true, viewColumn: vs.ViewColumn.Beside }
                 );
 
-                setTimeout(() => { try { fs.unlinkSync(modTmpPath); } catch { /* */ } }, 60_000);
+                // Scroll to the relevant block range in the diff editor
+                setTimeout(async () => {
+                    const diffEditor = vs.window.activeTextEditor;
+                    if (diffEditor && diffEditor.document.uri.toString() === uri!.toString()) {
+                        const range = new vs.Range(startLine!, 0, endLine!, 0);
+                        diffEditor.revealRange(range, vs.TextEditorRevealType.InCenter);
+                    }
+                }, 300);
+
+                // Clean up vanilla temp file after a delay
+                setTimeout(() => { try { fs.unlinkSync(vanillaTmpPath); } catch { /* */ } }, 120_000);
             }
         )
     );
@@ -366,19 +356,33 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 // Build vanilla block index for the directory
                 const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys);
 
-                // Match each mod block independently
+                // Build a vanilla-side file with only blocks that have matches in the mod
+                // Right side = real mod file (edits sync directly to the actual document)
+                const tmpDir = path.join(os.tmpdir(), 'cwtools-vanilla-compare');
+                if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+                const vanillaTmpPath = path.join(tmpDir, `vanilla_${path.basename(relPath)}`);
+
+                // Reconstruct vanilla file preserving the same block order as the mod
                 const vanillaLines: string[] = [];
-                const modLines: string[] = [];
                 let matchCount = 0;
+                const modText = doc.getText();
+                const allModLines = modText.split('\n');
 
                 for (const modBlock of modBlocks) {
                     const identity = blockIdentity(modBlock, idKeys);
-                    if (!identity) continue; // Skip blocks that don't have a unique identity
+                    if (!identity) {
+                        // For unmatched blocks, include mod content as-is to keep line alignment
+                        vanillaLines.push(modBlock.content);
+                        continue;
+                    }
 
                     const match = vanillaIndex.get(identity);
-                    if (!match) continue;
+                    if (!match) {
+                        // Block exists in mod but not vanilla — include mod content for alignment
+                        vanillaLines.push(modBlock.content);
+                        continue;
+                    }
                     vanillaLines.push(match.block.content);
-                    modLines.push(modBlock.content);
                     matchCount++;
                 }
 
@@ -387,24 +391,46 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     return;
                 }
 
-                // Write matched blocks to temp files and diff
-                const tmpDir = path.join(os.tmpdir(), 'cwtools-vanilla-compare');
-                if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-                const vanillaTmpPath = path.join(tmpDir, 'vanilla_matched.txt');
-                const modTmpPath = path.join(tmpDir, 'mod_matched.txt');
-                fs.writeFileSync(vanillaTmpPath, vanillaLines.join('\n\n'), 'utf-8');
-                fs.writeFileSync(modTmpPath, modLines.join('\n\n'), 'utf-8');
+                // Include any content between/around blocks (comments, blank lines, etc.)
+                // by building a full vanilla mirror of the mod file
+                const vanillaFullLines: string[] = [];
+                let lastEndLine = 0;
+                let blockIdx = 0;
+                for (const modBlock of modBlocks) {
+                    // Preserve inter-block content (comments, whitespace)
+                    if (modBlock.startLine > lastEndLine) {
+                        for (let i = lastEndLine; i < modBlock.startLine; i++) {
+                            vanillaFullLines.push(allModLines[i]!);
+                        }
+                    }
+                    // Use matched vanilla content or original mod content
+                    const identity = blockIdentity(modBlock, idKeys);
+                    const match = identity ? vanillaIndex.get(identity) : undefined;
+                    if (match) {
+                        vanillaFullLines.push(match.block.content);
+                    } else {
+                        vanillaFullLines.push(modBlock.content);
+                    }
+                    lastEndLine = modBlock.endLine + 1;
+                    blockIdx++;
+                }
+                // Trailing content after the last block
+                for (let i = lastEndLine; i < allModLines.length; i++) {
+                    vanillaFullLines.push(allModLines[i]!);
+                }
+
+                fs.writeFileSync(vanillaTmpPath, vanillaFullLines.join('\n'), 'utf-8');
 
                 await vs.commands.executeCommand('vscode.diff',
-                    vs.Uri.file(vanillaTmpPath), vs.Uri.file(modTmpPath),
+                    vs.Uri.file(vanillaTmpPath), doc.uri,
                     `Vanilla vs Mod: ${path.basename(relPath)} (${matchCount} blocks)`,
                     { preview: true, viewColumn: vs.ViewColumn.Beside }
                 );
 
+                // Clean up vanilla temp file after a delay
                 setTimeout(() => {
                     try { fs.unlinkSync(vanillaTmpPath); } catch { /* */ }
-                    try { fs.unlinkSync(modTmpPath); } catch { /* */ }
-                }, 60_000);
+                }, 120_000);
             }
         )
     );

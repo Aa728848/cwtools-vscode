@@ -166,7 +166,26 @@ function parseGfxFile(uri: vs.Uri, text: string): GfxEntry[] {
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
-        // Track brace depth
+        // Skip commented lines
+        if (line.trimStart().startsWith('#')) continue;
+
+        const tm = texRe.exec(line);
+        if (tm) {
+            currentTex = tm[1]!;
+        }
+
+        const nm = nameRe.exec(line);
+        if (nm) {
+            // If we already have a pending name without closure, emit it first
+            if (currentName) {
+                entries.push({ name: currentName, uri, line: currentNameLine, texturefile: currentTex });
+                currentTex = undefined; // clear for the new name
+            }
+            currentName = nm[1]!;
+            currentNameLine = i;
+        }
+
+        // Track brace depth AFTER extracting values for this line
         for (const ch of line) {
             if (ch === '{') depth++;
             else if (ch === '}') {
@@ -178,23 +197,6 @@ function parseGfxFile(uri: vs.Uri, text: string): GfxEntry[] {
                     currentTex = undefined;
                 }
             }
-        }
-        // Skip commented lines
-        if (line.trimStart().startsWith('#')) continue;
-
-        const nm = nameRe.exec(line);
-        if (nm) {
-            // If we already have a pending name without closure, emit it first
-            if (currentName) {
-                entries.push({ name: currentName, uri, line: currentNameLine, texturefile: currentTex });
-            }
-            currentName = nm[1]!;
-            currentNameLine = i;
-            currentTex = undefined;
-        }
-        const tm = texRe.exec(line);
-        if (tm && currentName) {
-            currentTex = tm[1]!;
         }
     }
     // Flush any remaining entry
@@ -309,6 +311,16 @@ class GfxHoverProvider implements vs.HoverProvider {
         const wordRange = document.getWordRangeAtPosition(position, GFX_PREFIX_RE);
         if (!wordRange) return null;
 
+        const lineText = document.lineAt(position).text;
+        const beforeWord = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
+        const afterWord = lineText.substring(wordRange.end.character);
+        
+        // Prevent duplicate hovers: if this word is part of a file path, ImageHoverProvider handles it.
+        if (beforeWord === '/' || beforeWord === '\\' || 
+            afterWord.startsWith('.dds') || afterWord.startsWith('.png') || afterWord.startsWith('.tga')) {
+            return null;
+        }
+
         const word = document.getText(wordRange);
         const index = await getGfxIndex();
         const entry = index.get(word);
@@ -354,21 +366,55 @@ const ICON_SEARCH_DIRS = [
  * icon directories for a matching .dds file and shows a preview.
  */
 class IconHoverProvider implements vs.HoverProvider {
-    provideHover(document: vs.TextDocument, position: vs.Position): vs.Hover | null {
+    async provideHover(document: vs.TextDocument, position: vs.Position): Promise<vs.Hover | null> {
         // Match identifier-like words (must contain at least one underscore to avoid noise)
         const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z][A-Za-z0-9_]*_[A-Za-z0-9_]*/  );
         if (!wordRange) return null;
 
+        const lineText = document.lineAt(position).text;
+        const beforeWord = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
+        const afterWord = lineText.substring(wordRange.end.character);
+        
+        // Prevent duplicate hovers: if this word is part of a file path, ImageHoverProvider handles it.
+        if (beforeWord === '/' || beforeWord === '\\' || 
+            afterWord.startsWith('.dds') || afterWord.startsWith('.png') || afterWord.startsWith('.tga')) {
+            return null;
+        }
+
         const word = document.getText(wordRange);
-        // Skip GFX_ references (handled by GfxHoverProvider) and very short names
-        if (word.startsWith('GFX_') || word.length < 4) return null;
+        if (word.length < 4) return null;
+
+        const candidates = new Set<string>();
+        candidates.add(`${word}.dds`);
+        candidates.add(`${word}.png`);
+
+        if (word.startsWith('GFX_')) {
+            // Check if it's explicitly defined in a .gfx file first
+            const index = await getGfxIndex();
+            if (index.has(word)) {
+                return null; // Defer to GfxHoverProvider
+            }
+
+            // Fallback for engine implicitly registered images (e.g. event pictures, traits)
+            const noGfx = word.substring(4);
+            candidates.add(`${noGfx}.dds`);
+            candidates.add(`${noGfx}.png`);
+
+            const match = /^GFX_(evt|trait|building|tech|relic|origin|ship_part|ap|situation)_?(.*)/.exec(word);
+            if (match && match[2]) {
+                candidates.add(`${match[2]}.dds`);
+                candidates.add(`${match[1]}_${match[2]}.dds`);
+            }
+        }
 
         // Search convention-based icon paths
         for (const dir of ICON_SEARCH_DIRS) {
-            const relativePath = `${dir}/${word}.dds`;
-            const fullPath = resolveAssetPathRaw(relativePath);
-            if (fullPath) {
-                return createImageHover(fullPath, relativePath, wordRange, word);
+            for (const cand of candidates) {
+                const relativePath = `${dir}/${cand}`;
+                const fullPath = resolveAssetPathRaw(relativePath);
+                if (fullPath) {
+                    return createImageHover(fullPath, relativePath, wordRange, word);
+                }
             }
         }
         return null;

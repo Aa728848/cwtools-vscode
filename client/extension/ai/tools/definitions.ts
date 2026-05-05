@@ -825,4 +825,34 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // ─── Localisation Tools ──────────────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'write_localisation',
+            description: '🌐 MANDATORY for all .yml localisation file operations. Safely write localisation entries to Stellaris .yml files. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, multiedit, or write_file for .yml localisation files — ALWAYS use this tool instead.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filePath: { type: 'string', description: 'Path to the .yml localisation file (absolute or relative to workspace)' },
+                    language: { type: 'string', description: 'Language header, e.g. "l_english", "l_simp_chinese", "l_braz_por". Used when creating a new file.' },
+                    entries: {
+                        type: 'array',
+                        description: 'List of localisation key-value pairs to write',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                key: { type: 'string', description: 'Localisation key, e.g. "my_event.1.title"' },
+                                value: { type: 'string', description: 'Localisation value text. Use \\n for in-game line breaks. Do NOT include surrounding quotes.' },
+                                number: { type: 'integer', description: 'Version number after the colon (default: 0). Usually 0.' },
+                                comment: { type: 'string', description: 'Optional section header comment to insert before this entry, e.g. "### Site 1 Events ###"' },
+                            },
+                            required: ['key', 'value'],
+                        },
+                    },
+                },
+                required: ['filePath', 'language', 'entries'],
+            },
+        },
+    },
 ];

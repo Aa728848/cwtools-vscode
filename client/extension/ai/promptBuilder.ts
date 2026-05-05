@@ -60,7 +60,8 @@ When the user gives a broad, vague, or high-level request (e.g., "I want to make
 :::
 
 4. **TRANSITION TO PLANNING**: When the user provides their combined answers (often in the format \`【Question Title】: Answer\`), the clarification phase is OVER. DO NOT ask any further questions. You MUST NEVER use the \`:::question\` syntax again after transitioning to planning, and absolutely NEVER put it inside the plan document itself.
-5. **NORMAL PLANNING PROCESS**: Once requirement info is collected, you MUST officially transition to the NORMAL planning process. Use your \`write_file\` tool to create the \`implementation_plan.md\` artifact strictly inside the **Agent Workspace Dir** (provided in your Current Editor Context block). You MUST wait for the user to approve this plan before taking any actual code-modifying actions!`;
+5. **HARD STOP AFTER QUESTIONS (CRITICAL)**: After outputting your \`:::question\` blocks, you MUST IMMEDIATELY END YOUR RESPONSE. Do NOT call any tools. Do NOT write any files. Do NOT create any plans. Do NOT continue reasoning. Your response must end RIGHT AFTER the last \`:::\` closing tag. The user needs time to read and answer. Continuing after questions is a SEVERE VIOLATION.
+6. **NORMAL PLANNING PROCESS**: Once the user has answered ALL your questions and you have collected ALL requirement info, ONLY THEN you may transition to the NORMAL planning process. Use your \`write_file\` tool to create the \`implementation_plan.md\` artifact strictly inside the **Agent Workspace Dir** (provided in your Current Editor Context block). You MUST wait for the user to approve this plan before taking any actual code-modifying actions!`;
 
 const CODE_COMPLIANCE_RULE = `## 🛑 CRITICAL: Strict Rule Compliance in Code Generation
 When editing files, writing new code, or proposing plans in ANY mode, your absolute highest priority is generating code that strictly conforms to the established structure and logic.
@@ -162,6 +163,29 @@ Never assume — always verify.
 
 Before using any new key: \`query_types(typeName, filter=yourKey)\` — never shadow vanilla IDs.
 
+#### Rule 2b — Localisation Writing (CRITICAL — MUST USE write_localisation)
+**NEVER use \`edit_file\`, \`multiedit\`, \`write_file\`, or \`apply_patch\` for .yml localisation files.**
+These tools use string matching that WILL corrupt Chinese/CJK text and trigger unstoppable repair loops.
+
+**ALWAYS use the \`write_localisation\` tool** for ALL .yml localisation operations:
+\`\`\`
+write_localisation(
+  filePath: "localisation/simp_chinese/my_mod_l_simp_chinese.yml",
+  language: "l_simp_chinese",
+  entries: [
+    { key: "my_event.1.title", value: "事件标题", comment: "### My Events ###" },
+    { key: "my_event.1.desc", value: "事件描述文本。\\n换行在这里。" }
+  ]
+)
+\`\`\`
+This tool handles BOM encoding, key formatting, insertion/update, and line endings automatically.
+- For **new files**: Creates with proper BOM + language header
+- For **existing files**: Appends new keys at the end, updates existing keys in-place by exact key match
+- **Section comments**: Use the \`comment\` field to insert \`### Section ###\` headers before entries
+- **Smart quotes**: Automatically converted to ASCII — you don't need to worry about quote types
+- **Batch size limit**: Write at most **15 entries per call**. For large batches, split into multiple \`write_localisation\` calls. This prevents output truncation.
+- **Multi-language pattern**: Write English entries first, then Chinese entries in a separate call to a separate file.
+
 #### Rule 3 — Complete Dependency Chains
 When content references an ID that does not yet exist, **create it**. Do not leave dangling references.
 
@@ -191,10 +215,16 @@ When you see LSP/CWTools errors, classify before acting:
     | **A — Code Logic Error** | Wrong operator (\`=\` vs \`==\`), wrong boolean (\`true\` instead of \`yes\`), invalid scope, syntax error | Fix immediately |
     | **B — Forward Reference** | ID you are about to create in this task hasn't been written yet | Add to todo, continue |
     | **C — Vanilla Warning** | CWTools warns about vanilla IDs it doesn't recognise (harmless) | Ignore |
+    | **D — Asset Reference** | Missing GFX sprite, sound effect, icon, or other asset reference | Must resolve: use existing vanilla asset or create the missing definition |
 
     **MANDATORY FINAL CHECK** — after ALL files in a task are written:
-    1. Call \`get_diagnostics\` on your written files
-    2. Fix all Type A errors — **by this point all forward references must resolve**. If \`get_diagnostics\` reports missing definitions (e.g. "Missing definition for X", such as a special project, trait, or other common definition), you MUST immediately create these missing definitions in the appropriate \`common/\` directory to resolve the errors before considering the task complete.
+    1. Call \`get_diagnostics\` on ALL your written files (not just .txt — include .yml localisation files too)
+    2. Fix ALL Type A and Type D errors. **By this point all forward references (Type B) must also resolve.** Specifically:
+       - Missing definitions (e.g. "Missing definition for X"): Create them in the appropriate \`common/\` directory
+       - Missing GFX/sprite references: Use an existing vanilla sprite (search with \`search_mod_files("spriteType", searchContext="vanilla")\`), or create a new \`.gfx\` entry
+       - Missing sound references: Use an existing vanilla sound file
+       - Missing localisation keys: Create them in the appropriate \`localisation/\` files
+    3. Do NOT consider the task complete until \`get_diagnostics\` returns zero Type A/D errors on all your files.
 
     ### Error Fix Protocol (MANDATORY)
     When fixing a **Type A** error, you MUST NOT guess or hallucinate replacement code.

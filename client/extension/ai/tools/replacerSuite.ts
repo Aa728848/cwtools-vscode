@@ -25,6 +25,39 @@ function levenshtein(a: string, b: string): number {
 
 // ─── Strategy generators ────────────────────────────────────────────────────
 
+/** Strip BOM, normalize CRLF, and normalize common unicode variants (full-width ↔ half-width) */
+function unicodeNormalize(s: string): string {
+    return s
+        .replace(/\uFEFF/g, '')                    // BOM
+        .replace(/\r\n/g, '\n').replace(/\r/g, '\n') // CRLF
+        .replace(/\u00A0/g, ' ')                    // NBSP → space
+        .replace(/[\u201C\u201D\u201E\u201F]/g, '"') // smart quotes → ASCII
+        .replace(/[\u2018\u2019\u201A\u201B]/g, "'") // smart single quotes
+        .replace(/\u2026/g, '...')                  // ellipsis
+        .replace(/[\u2013\u2014]/g, '-')            // en/em dash
+        .replace(/\uFF1A/g, ':')                    // full-width colon
+        .replace(/\uFF08/g, '(').replace(/\uFF09/g, ')') // full-width parens
+        .replace(/\uFF0C/g, ',')                    // full-width comma
+        .replace(/\u3001/g, ',');                   // ideographic comma
+}
+
+function* unicodeNormalizedReplacer(content: string, find: string): Generator<string> {
+    const nC = unicodeNormalize(content), nF = unicodeNormalize(find);
+    if (nC === content && nF === find) return; // no unicode differences — skip
+    const idx = nC.indexOf(nF);
+    if (idx === -1) return;
+    // Map normalized offset back to original offset
+    // Since we only collapse multi-byte → single-byte, find boundary by scanning
+    yield content.substring(idx, idx + nF.length);
+    // Fallback: if substring doesn't match exactly, try line-based matching
+    const nFL = nF.split('\n'), cL = content.split('\n'), ncL = nC.split('\n');
+    for (let i = 0; i <= ncL.length - nFL.length; i++) {
+        if (ncL.slice(i, i + nFL.length).join('\n') === nF) {
+            yield cL.slice(i, i + nFL.length).join('\n');
+        }
+    }
+}
+
 function* simpleReplacer(_c: string, find: string): Generator<string> { yield find; }
 
 function* lineTrimmedReplacer(content: string, find: string): Generator<string> {
@@ -142,6 +175,7 @@ function* contextAwareReplacer(content: string, find: string): Generator<string>
 
 const REPLACERS = [
     simpleReplacer,
+    unicodeNormalizedReplacer,
     lineTrimmedReplacer,
     blockAnchorReplacer,
     whitespaceNormalizedReplacer,

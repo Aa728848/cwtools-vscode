@@ -380,7 +380,7 @@ const LOC_WRITER_TOOLS: AgentToolName[] = [
 
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate', 'deploy_mod_asset']);
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation']);
 const READ_ONLY_TOOLS = new Set<string>([
     'read_file', 'list_directory', 'search_mod_files',
     'get_file_context', 'document_symbols', 'workspace_symbols',
@@ -1100,6 +1100,9 @@ export class AgentRunner {
             )
         );
 
+        // Global tool call counter for timeline step indexing (Phase 4)
+        let globalToolCallIndex = 0;
+
         while (iteration < maxToolIterations) {
             options?.abortSignal?.throwIfAborted();
             iteration++;
@@ -1326,6 +1329,19 @@ export class AgentRunner {
                 return this.cleanFinalContent(contentToString(assistantMessage.content));
             }
 
+            // ── Question Card Halt: stop loop when AI asks user questions ──
+            // If the assistant's text contains :::question blocks, the user needs
+            // to answer before the AI should proceed. Force-stop the loop.
+            const assistantText = contentToString(assistantMessage.content);
+            if (assistantText.includes(':::question')) {
+                emitStep({
+                    type: 'validation',
+                    content: '检测到问题卡片 — 等待用户回答后再继续',
+                    timestamp: Date.now(),
+                });
+                return this.cleanFinalContent(assistantText);
+            }
+
             // ── Two-phase doom-loop detection: phase 1 (pre-exec) ──
             // Track (prevSig → currSig) pairs. If the same pair repeats
             // ≥ DOOM_LOOP_PAIR_THRESHOLD times, flag for phase-2 hash check.
@@ -1378,7 +1394,7 @@ export class AgentRunner {
                         toolArgsParseError = `JSON parse error: ${e instanceof Error ? e.message : String(e)}. Raw arguments: ${toolCall.function.arguments?.substring(0, 200)}`;
                     }
                 }
-                emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now() });
+                emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now(), stepIndex: ++globalToolCallIndex, iterationInfo: `Iteration ${iteration}/${maxToolIterations}` });
                 parsedCalls.push({ toolName, toolArgs, toolArgsParseError, toolCall });
             }
 
@@ -1414,7 +1430,14 @@ export class AgentRunner {
                 const { toolName, toolArgs, toolCall } = ci;
 
                 if (ci.toolArgsParseError) {
-                    toolResults[i] = { ok: false, error: `Tool argument JSON parse failed — ${ci.toolArgsParseError}. Please retry with valid JSON arguments.` };
+                    let errMsg = `Tool argument JSON parse failed — ${ci.toolArgsParseError}. Please retry with valid JSON arguments.`;
+                    // Add tool-specific truncation recovery guidance
+                    if (toolName === 'write_localisation') {
+                        errMsg += '\n\n⚠️ Your entries array was truncated by the output length limit. Split into SMALLER batches: call write_localisation multiple times with at most 15 entries each.';
+                    } else if (toolName === 'multiedit') {
+                        errMsg += '\n\n⚠️ Your edits array was truncated. Split into SMALLER batches: call multiedit with fewer edits, or use multiple edit_file calls.';
+                    }
+                    toolResults[i] = { ok: false, error: errMsg };
                     continue;
                 }
 

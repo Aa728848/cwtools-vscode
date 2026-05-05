@@ -60,10 +60,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
     <div class="topics-list" id="topicsList"></div>
 </div>
 <div class="mode-indicator" id="modeIndicator">${svgIcon('clipboard')}Plan Mode — 只读分析，不修改文件</div>
-<div class="todo-panel" id="todoPanel">
-    <div class="todo-panel-title">Tasks</div>
+<details class="todo-panel" id="todoPanel">
+    <summary class="todo-panel-title">Tasks</summary>
     <div id="todoList"></div>
-</div>
+</details>
 
 <div class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="AI 对话消息区">
     <div class="empty-state" id="emptyState">

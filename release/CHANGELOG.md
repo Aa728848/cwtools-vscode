@@ -1,5 +1,52 @@
 # Changelog
 
+## [1.9.6] - 2026-05-06
+
+### 🔄 时间线交织修复 (Chronological Interleaving)
+- **[P0 修复] 完成消息丢失交织布局**
+  - 修复了 AI 输出时正常交织显示（think→text→tool→think→tool→text），但完成后变为分组排列的 Bug
+  - 根因：`flushText()` 把中间文本追加到 `content` 变量延迟到底部渲染，而非在当前位置创建 `msg-bubble`
+  - 现在完成消息与流式消息保持一致的时间线交织顺序
+
+### 📁 工具文件名保留 (Tool Args Preservation)
+- **[修复] tool_result 更新时丢失文件名**
+  - 修复了流式渲染中 `tool_result` 回调创建 `fakeCall` 时使用空 `toolArgs: {}` 导致文件名丢失的问题
+  - 新方案：将 `toolArgs` 序列化存储到 `data-call-args` 属性中，`tool_result` 到达时反序列化恢复
+  - `read_file`、`edit_file` 等工具现在在结果返回后仍能正确显示操作的文件名
+
+### ❓ 问题卡片重设计 (Question Card Redesign)
+- **[UI] Claude Code 风格问题决策卡**
+  - 问题卡片使用蓝色边框替代金色，配合脉冲动画吸引注意力
+  - 新增「⏳ 等待你的选择…」提示标签
+  - 选项按钮增大触控区域和 hover 微动画，提升交互反馈
+  - 选项描述增加缩进对齐
+
+## [1.9.5] - 2026-05-05
+
+### 🎨 AI 代理 UI/UX 架构重构 (Agent UI Refactoring)
+- **[P0 修复] Thinking/text_delta 路由混淆 Bug**
+  - 修复了 `text_delta`（最终回复流）被错误路由到 Thinking 折叠块的严重显示 Bug
+  - AI 的推理过程与最终回复现在正确分离显示
+- **[新架构] 纯函数渲染模块 `messageRenderer.ts`**
+  - 从 167KB 的 `chatPanel.ts` 单体中提取 8 个可测试纯函数
+  - 新增 54 个单元测试（`messageRenderer.test.ts`），总测试 85 个全部通过
+- **[新特性] Claude Code 风格线性工具时间线**
+  - 工具执行从折叠式列表改为线性时间线，每步显示 `1. 2. 3.` 编号
+  - 实时显示工具执行耗时（45ms / 2.5s / 2m 5s）
+  - `edit_file` 工具显示参数摘要（old/new 内容预览）
+- **[新特性] 内联 Diff 预览**
+  - 工具执行结果中的代码变更直接内联显示（最多 20 行，超出折叠）
+  - 绿色高亮新增行、红色高亮删除行，附带行号
+- **[新特性] 权限确认内联化**
+  - 权限请求按钮（允许/拒绝/始终允许）直接嵌入工具时间线步骤中
+  - 使用事件委托模式，无需为每个按钮单独绑定事件
+- **[优化] 进度指示元数据**
+  - `AgentStep` 新增 `stepIndex`、`durationMs`、`iterationInfo` 字段
+  - `agentRunner` 全局计数器跨迭代跟踪工具调用序号
+- **[优化] 空间利用**
+  - Todo 面板改为折叠式 `<details>` 元素，默认收起
+  - 聊天区域间距紧凑化（gap 20→14px, padding 16→12px）
+
 ## [1.9.4] - 2026-05-04
 
 ### ✨ 新特性 (Features)

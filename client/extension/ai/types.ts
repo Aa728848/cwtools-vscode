@@ -503,6 +503,8 @@ export type AgentToolName =
     | 'convert_image_to_dds'
     | 'convert_audio'
     | 'deploy_mod_asset'
+    // ── Localisation tools ──
+    | 'write_localisation'
     // ── MCP tools ──
     | 'mcp_call';
 
@@ -728,6 +730,12 @@ export interface AgentStep {
         filesRequested: string[];
         status: 'pending' | 'approved' | 'rejected';
     };
+    /** Global 1-based index of this tool call within the reasoning loop */
+    stepIndex?: number;
+    /** Tool execution duration in milliseconds (tool_result only) */
+    durationMs?: number;
+    /** Iteration context string, e.g. "Iteration 3/10" */
+    iterationInfo?: string;
 }
 
 export interface GenerationResult {

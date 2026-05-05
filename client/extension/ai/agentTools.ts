@@ -312,6 +312,8 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.listDirectory(args as any); break;
             case 'glob_files':
                 result = await this.fileHandler.globFiles(args as any); break;
+            case 'write_localisation':
+                result = await this.fileHandler.writeLocalisation(args as any); break;
 
             // ── External / agent tools ────────────────────────────────────
             case 'web_fetch':

@@ -57,6 +57,9 @@ export interface FileToolContext {
 // ─── Handler class ───────────────────────────────────────────────────────────
 
 export class FileToolHandler {
+    /** Per-file edit failure counter — used to escalate .yml errors */
+    private editFailCount = new Map<string, number>();
+
     constructor(private ctx: FileToolContext) { }
 
     private async executeWithLock<T>(filePath: string, operation: () => Promise<T> | T): Promise<T> {
@@ -237,6 +240,12 @@ export class FileToolHandler {
                 };
             }
 
+            // Strip BOM from first line (readline doesn't strip it, but readTextFile/editFile do,
+            // causing BOM mismatch when the AI copies text from read_file into edit_file's oldString)
+            if (slice.length > 0 && slice[0]!.charCodeAt(0) === 0xFEFF) {
+                slice[0] = slice[0]!.slice(1);
+            }
+
             // Format with succinct line prefix (saves ~1 token per line vs "1234: ")
             const numbered = slice.map((l, i) => `${start + i} | ${l}`).join('\n');
 
@@ -286,9 +295,10 @@ export class FileToolHandler {
             try {
                 args.file = this.resolveAndAssertInWorkspace(args.file);
                 
-                // 安全阻断：禁止覆写（但允许 .md 格式的计划/文档被覆写）
-                if (fs.existsSync(args.file) && !this.ctx.vfsOverlay && !args.file.toLowerCase().endsWith('.md')) {
-                    return { success: false, message: "File already exists. To prevent destructive overwrites, write_file cannot overwrite existing files — use edit_file or multiedit for partial edits. Only .md documents can be overwritten via this tool." };
+                // 安全阻断：禁止覆写（但允许 .md 格式被覆写）
+                const lowerFile = args.file.toLowerCase();
+                if (fs.existsSync(args.file) && !this.ctx.vfsOverlay && !lowerFile.endsWith('.md')) {
+                    return { success: false, message: "File already exists. To prevent destructive overwrites, write_file cannot overwrite existing files — use edit_file, multiedit, or write_localisation (for .yml) instead. Only .md documents can be overwritten." };
                 }
 
                 const { content: originalContent, hasBom } = this.readTextFile(args.file);
@@ -355,7 +365,17 @@ export class FileToolHandler {
                 try {
                     newContent = this.replace(originalContent, old, next, args.replaceAll ?? false);
                 } catch (e) {
-                    return { success: false, message: String(e) };
+                    const errMsg = String(e);
+                    // For .yml files, escalate with per-file failure count
+                    if (filePath.endsWith('.yml')) {
+                        const failCount = (this.editFailCount.get(filePath) || 0) + 1;
+                        this.editFailCount.set(filePath, failCount);
+                        return {
+                            success: false,
+                            message: errMsg + `\n\n🚨 YML BLOCKED (failure #${failCount}): You MUST NOT use edit_file/multiedit for .yml files. Use write_localisation(filePath, language, entries) instead — it handles encoding, formatting, and insertion correctly.`,
+                        };
+                    }
+                    return { success: false, message: errMsg };
                 }
             }
 
@@ -572,10 +592,13 @@ export class FileToolHandler {
         }
 
         if (errors.length > 0) {
-            return {
-                success: false,
-                message: `${errors.length} edit block(s) failed — file was not modified:\n${errors.join('\n')}`,
-            };
+            let msg = `${errors.length} edit block(s) failed — file was not modified:\n${errors.join('\n')}`;
+            if (filePath.endsWith('.yml')) {
+                const failCount = (this.editFailCount.get(filePath) || 0) + 1;
+                this.editFailCount.set(filePath, failCount);
+                msg += `\n\n🚨 YML BLOCKED (failure #${failCount}): You MUST NOT use multiedit for .yml files. Use write_localisation(filePath, language, entries) instead — it handles encoding, formatting, and insertion correctly.`;
+            }
+            return { success: false, message: msg };
         }
 
         const diff = this.buildUnifiedDiff(filePath, originalContent, content);
@@ -918,5 +941,138 @@ export class FileToolHandler {
             else { changed++; if (i < oL.length) { diff += `- ${oL[i++]}\n`; } if (j < mL.length) { diff += `+ ${mL[j++]}\n`; } }
         }
         return changed === 0 ? diff + '(no changes)\n' : diff;
+    }
+
+    // ─── write_localisation ──────────────────────────────────────────────
+
+    async writeLocalisation(args: {
+        filePath: string;
+        language: string;
+        entries: Array<{ key: string; value: string; number?: number; comment?: string }>;
+    }): Promise<import('../types').EditFileResult> {
+        return this.executeWithLock(args.filePath, async () => {
+            try {
+                const filePath = this.resolveAndAssertInWorkspace(args.filePath);
+                if (!filePath.toLowerCase().endsWith('.yml')) {
+                    return { success: false, message: 'write_localisation only works with .yml files.' };
+                }
+                if (!args.entries || args.entries.length === 0) {
+                    return { success: false, message: 'No entries provided.' };
+                }
+
+                const BOM = '\uFEFF';
+                let lines: string[];
+                let hasBom = true;
+                let originalContent = '';
+
+                if (fs.existsSync(filePath)) {
+                    // Read existing file
+                    const raw = await fs.promises.readFile(filePath, 'utf-8');
+                    originalContent = raw;
+                    hasBom = raw.startsWith(BOM);
+                    const clean = hasBom ? raw.slice(1) : raw;
+                    lines = clean.split(/\r?\n/);
+                } else {
+                    // Create new file with header
+                    const lang = args.language || 'l_english';
+                    lines = [`${lang}:`];
+                    this.ctx.onBeforeFileWrite?.(filePath, null);
+                }
+
+                // Build a map of existing keys → line index for O(1) lookup
+                const keyLineMap = new Map<string, number>();
+                // Match any Stellaris loc key: leading space, key chars, colon, optional digits, then space or quote
+                const keyRegex = /^\s+([\w.\-]+):\d*\s*(?:"|$)/;
+                for (let i = 0; i < lines.length; i++) {
+                    const m = lines[i]!.match(keyRegex);
+                    if (m) keyLineMap.set(m[1]!, i);
+                }
+
+                // Process entries: update existing or append new
+                const appendLines: string[] = [];
+                let updated = 0, added = 0;
+
+                for (const entry of args.entries) {
+                    const num = entry.number ?? 0;
+                    // Sanitize value for Stellaris yml format
+                    // AI sends JSON \n → 0x0A newline; or JSON \\n → literal \n
+                    // Stellaris needs literal \n (backslash+n) for in-game line breaks
+                    const val = entry.value
+                        .replace(/\r\n/g, String.raw`\n`)     // CRLF → literal \n
+                        .replace(/\n/g, String.raw`\n`)        // LF → literal \n
+                        .replace(/\r/g, '')                     // stray CR → remove
+                        .replace(/\t/g, String.raw`\t`)        // tab → literal \t
+                        .replace(/\u201C|\u201D/g, '"')         // smart quotes → ASCII
+                        .replace(/\u2018|\u2019/g, "'");        // smart apostrophes → ASCII
+                    const formattedLine = ` ${entry.key}:${num} "${val}"`;
+
+                    if (keyLineMap.has(entry.key)) {
+                        // Update existing key in-place
+                        const lineIdx = keyLineMap.get(entry.key)!;
+                        lines[lineIdx] = formattedLine;
+                        updated++;
+                    } else {
+                        // Append: add section comment if provided
+                        if (entry.comment) {
+                            appendLines.push(` ${entry.comment}`);
+                        }
+                        appendLines.push(formattedLine);
+                        added++;
+                    }
+                }
+
+                // Append new entries at end of file
+                if (appendLines.length > 0) {
+                    // Remove trailing empty lines to prevent double-blank-line accumulation
+                    while (lines.length > 0 && lines[lines.length - 1]!.trim() === '') {
+                        lines.pop();
+                    }
+                    lines.push(...appendLines);
+                }
+
+                // Ensure file ends cleanly (remove trailing empty lines, add single newline)
+                while (lines.length > 0 && lines[lines.length - 1]!.trim() === '') {
+                    lines.pop();
+                }
+                const finalContent = lines.join('\n') + '\n';
+                const withBom = (hasBom ? BOM : '') + finalContent;
+
+                if (fs.existsSync(filePath)) {
+                    this.ctx.onBeforeFileWrite?.(filePath, originalContent);
+                }
+
+                // Confirm mode
+                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.ctx.vfsOverlay) {
+                    const messageId = `writeloc_${crypto.randomUUID()}`;
+                    const confirmed = await this.ctx.onPendingWrite(filePath, withBom, messageId);
+                    if (!confirmed) {
+                        return { success: false, message: 'User rejected localisation write.' };
+                    }
+                }
+
+                // Write
+                if (this.ctx.vfsOverlay) {
+                    this.ctx.vfsOverlay.set(filePath, withBom);
+                } else {
+                    const dir = path.dirname(filePath);
+                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                    await fs.promises.writeFile(filePath, withBom, 'utf-8');
+                }
+
+                // Clear failure counter for this file since we succeeded
+                this.editFailCount.delete(filePath);
+
+                const diff = this.buildUnifiedDiff(filePath, originalContent, withBom);
+
+                return {
+                    success: true,
+                    message: `Localisation updated: ${added} added, ${updated} updated. Total entries: ${args.entries.length}`,
+                    diff,
+                    stats: { linesAdded: added, linesRemoved: 0 },
+                };
+            } catch (e) {
+                return { success: false, message: `write_localisation failed: ${e instanceof Error ? e.message : String(e)}` };
+            }
+        });
     }
 }

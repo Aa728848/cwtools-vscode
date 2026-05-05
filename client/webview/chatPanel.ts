@@ -1,4 +1,5 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
+import { classifySteps, routeLiveStep, buildToolPairHtml, buildThinkingBlockHtml, buildAssistantMessageHtml, escapeHtml as mrEscapeHtml, type RendererStep, type ToolPairOptions } from './messageRenderer';
 
 /** Type-safe getElementById with generic cast */
 function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -720,23 +721,24 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             inQuestion = false;
             if (qOptions.length > 0) {
                 const optionsHtml = qOptions.map(opt => `
-                    <button class="permission-allow-btn ai-option-btn popup-option" data-suggest="${escapeHtml(opt.text)}" style="display:flex; flex-direction:column; align-items:flex-start; text-align:left; width:100%; margin:4px 0; padding:6px 10px; line-height:1.4;">
+                    <button class="ai-option-btn popup-option" data-suggest="${escapeHtml(opt.text)}" style="display:flex; flex-direction:column; align-items:flex-start; text-align:left; width:100%; margin:3px 0; padding:8px 12px; line-height:1.4; cursor:pointer;">
                         <span style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px;">${svgIcon('pointer')} ${escapeHtml(opt.text)}</span>
-                        ${opt.desc.trim() ? `<span style="font-size:11.5px; opacity:0.75; margin-top:2px; font-weight:normal;">${escapeHtml(opt.desc.trim())}</span>` : ''}
+                        ${opt.desc.trim() ? `<span style="font-size:11.5px; opacity:0.65; margin-top:3px; font-weight:normal; padding-left:22px;">${escapeHtml(opt.desc.trim())}</span>` : ''}
                     </button>
                 `).join('');
                 
                 const displayStyle = questionCardIndex === 0 ? "block" : "none";
                 const qIndex = questionCardIndex++;
                 const cardHtml = `
-                <div class="permission-card question-card" data-qindex="${qIndex}" style="margin: 12px 0; display:${displayStyle};">
+                <div class="permission-card question-card" data-qindex="${qIndex}" style="margin: 14px 0; display:${displayStyle};">
                     <div class="permission-card-header">
-                        <span class="permission-card-icon" style="font-size:16px;">${svgIcon('question')}</span>
+                        <span class="permission-card-icon" style="font-size:18px;">${svgIcon('question')}</span>
                         <div class="permission-card-body">
-                            <div class="permission-card-title" style="font-weight:600; font-size:14px; margin-bottom:4px;">${escapeHtml(qTitle)}</div>
+                            <div class="permission-card-title">${escapeHtml(qTitle)}</div>
+                            <div style="font-size:11px; opacity:0.5; margin-top:4px;">⏳ 等待你的选择…</div>
                         </div>
                     </div>
-                    <div class="permission-card-actions" style="display:block; padding:0 12px 12px;">
+                    <div class="permission-card-actions" style="display:flex; flex-direction:column; gap:3px; padding:6px 14px 14px; border-top:none;">
                         ${optionsHtml}
                     </div>
                 </div>`;
@@ -1139,74 +1141,148 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             '<span class="msg-time">' + (msgTime || '') + '</span>';
         div.appendChild(hdr);
 
+        let hadTextDelta = false;
         if (steps && steps.length > 0) {
-            // 1. Thinking block (thinking_content, text_delta AND narrative 'thinking' type)
-            const thinkSteps = steps.filter((s: any) => s.type === 'thinking_content' || s.type === 'thinking' || s.type === 'text_delta');
-            if (thinkSteps.length > 0) {
+            // Phase 7: Chronological rendering — steps appear in timestamp order,
+            // creating new sections when the phase transitions (thinking → tool → text → ...).
+            const sorted = [...steps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
+            let currentPhase: string | null = null;
+            let thinkBuf: any[] = [];
+            let textBuf: string[] = [];
+            let toolCallBuf: any[] = [];
+            let toolResultBuf: any[] = [];
+            let globalToolIdx = 0;
+
+            const phaseOf = (type: string) => {
+                if (type === 'thinking' || type === 'thinking_content') return 'thinking';
+                if (type === 'tool_call' || type === 'tool_result') return 'tool';
+                if (type === 'text_delta') return 'text';
+                return 'special';
+            };
+
+            const flushThinking = () => {
+                if (thinkBuf.length === 0) return;
                 let thinkText = '';
-                for (const s of thinkSteps) {
+                for (const s of thinkBuf) {
                     if (s.type === 'thinking' && thinkText) thinkText += '\n\n---\n\n' + (s.content || '');
                     else thinkText += (s.content || '');
                 }
                 thinkText = thinkText.trim();
-                const estTokens = Math.ceil(thinkText.length / 4);
-
-                const det = document.createElement('details');
-                det.className = 'thinking-block';
-                const sum = document.createElement('summary');
-                sum.innerHTML = '<span class="think-pulse"></span>Thinking · ' +
-                    thinkSteps.length + ' block(s) &nbsp;<span class="think-tokens">~' + formatNum(estTokens) + ' tokens</span>';
-                det.appendChild(sum);
-                const body = document.createElement('div');
-                body.className = 'thinking-body markdown-body';
-                body.innerHTML = renderMarkdown(thinkText);
-                det.appendChild(body);
-                div.appendChild(det);
-            }
-
-            // 2. Tool calls block — pair each tool_call with its tool_result
-            const toolCallSteps = steps.filter((s: any) => s.type === 'tool_call');
-            const toolResultSteps = steps.filter((s: any) => s.type === 'tool_result');
-
-            if (toolCallSteps.length > 0) {
-                const det = document.createElement('details');
-                det.className = 'tool-group';
-                det.open = false;
-                const sum = document.createElement('summary');
-                sum.innerHTML = '<span class="tg-icon">⚙</span>' +
-                    toolCallSteps.length + ' tool call' + (toolCallSteps.length !== 1 ? 's' : '');
-                det.appendChild(sum);
-
-                const body = document.createElement('div');
-                body.className = 'tool-group-body';
-                for (let i = 0; i < toolCallSteps.length; i++) {
-                    const call = toolCallSteps[i];
-                    // Match corresponding result by index or toolName
-                    const result = toolResultSteps.find((r: any) => r.toolName === call.toolName && !r._matched);
-                    if (result) result._matched = true;
-                    body.innerHTML += buildToolPair(call, result);
+                if (thinkText) {
+                    const estTokens = Math.ceil(thinkText.length / 4);
+                    const det = document.createElement('details');
+                    det.className = 'thinking-block';
+                    const sum = document.createElement('summary');
+                    sum.innerHTML = '<span class="think-pulse"></span>Thinking · ' +
+                        thinkBuf.length + ' block(s) &nbsp;<span class="think-tokens">~' + formatNum(estTokens) + ' tokens</span>';
+                    det.appendChild(sum);
+                    const body = document.createElement('div');
+                    body.className = 'thinking-body markdown-body';
+                    body.innerHTML = renderMarkdown(thinkText);
+                    det.appendChild(body);
+                    div.appendChild(det);
                 }
-                det.appendChild(body);
-                div.appendChild(det);
+                thinkBuf = [];
+            };
+
+            const flushText = () => {
+                if (textBuf.length === 0) return;
+                const text = textBuf.join('').trim();
+                if (text) {
+                    const b = document.createElement('div');
+                    b.className = 'msg-bubble';
+                    b.innerHTML = renderMarkdown(text);
+                    div.appendChild(b);
+                }
+                textBuf = [];
+            };
+
+            const flushTools = () => {
+                if (toolCallBuf.length === 0) return;
+                const timelineDiv = document.createElement('div');
+                timelineDiv.className = 'tool-timeline';
+                const resultsCopy = [...toolResultBuf];
+                const toolPairs: HTMLElement[] = [];
+                for (const call of toolCallBuf) {
+                    globalToolIdx++;
+                    const resultIdx = resultsCopy.findIndex((r: any) => r.toolName === call.toolName);
+                    let result: RendererStep | undefined;
+                    if (resultIdx >= 0) {
+                        result = resultsCopy.splice(resultIdx, 1)[0];
+                    }
+                    const pairHtml = buildToolPairHtml(call, result, {
+                        stepIndex: call.stepIndex || globalToolIdx,
+                        showDuration: true,
+                        showParams: true,
+                        showDiff: true,
+                    });
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = pairHtml;
+                    toolPairs.push((wrapper.firstElementChild || wrapper) as HTMLElement);
+                }
+
+                const COLLAPSE_THRESHOLD = 2;
+                if (toolPairs.length > COLLAPSE_THRESHOLD) {
+                    // Show first 2 directly, collapse the rest
+                    for (let ti = 0; ti < 2; ti++) timelineDiv.appendChild(toolPairs[ti]!);
+                    const det = document.createElement('details');
+                    det.className = 'tool-collapse';
+                    const sum = document.createElement('summary');
+                    sum.textContent = `+${toolPairs.length - 2} more tool calls`;
+                    det.appendChild(sum);
+                    for (let ti = 2; ti < toolPairs.length; ti++) det.appendChild(toolPairs[ti]!);
+                    timelineDiv.appendChild(det);
+                } else {
+                    for (const tp of toolPairs) timelineDiv.appendChild(tp);
+                }
+
+                div.appendChild(timelineDiv);
+                toolCallBuf = [];
+                toolResultBuf = [];
+            };
+
+            const flushCurrent = () => {
+                if (currentPhase === 'thinking') flushThinking();
+                else if (currentPhase === 'text') flushText();
+                else if (currentPhase === 'tool') flushTools();
+            };
+
+            for (const s of sorted) {
+                const phase = phaseOf(s.type);
+
+                if (phase === 'special') {
+                    const el = document.createElement('div');
+                    const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : s.type === 'compaction' ? svgIconNoMargin('gear') : '·';
+                    el.className = 'special-step';
+                    el.innerHTML = icon + ' ' + escapeHtml(s.content || '');
+                    div.appendChild(el);
+                    continue;
+                }
+
+                // tool_result pairs with tool_call — don't change phase
+                if (s.type === 'tool_result') {
+                    toolResultBuf.push(s);
+                    continue;
+                }
+
+                // Phase transition: flush previous group
+                if (phase !== currentPhase) {
+                    flushCurrent();
+                    currentPhase = phase;
+                }
+
+                if (phase === 'thinking') thinkBuf.push(s);
+                else if (phase === 'text') { textBuf.push(s.content || ''); hadTextDelta = true; }
+                else if (phase === 'tool') toolCallBuf.push(s);
             }
 
-            // Also show non-tool, non-thinking special steps (errors, compaction, etc.)
-            const specialSteps = steps.filter((s: any) =>
-                s.type !== 'tool_call' && s.type !== 'tool_result' &&
-                s.type !== 'thinking_content' && s.type !== 'thinking' &&
-                s.type !== 'text_delta'
-            );
-            for (const s of specialSteps) {
-                const el = document.createElement('div');
-                const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : s.type === 'compaction' ? svgIconNoMargin('gear') : '·';
-                el.className = 'special-step';
-                el.innerHTML = icon + ' ' + escapeHtml(s.content || '');
-                div.appendChild(el);
-            }
+            // Flush last group
+            flushCurrent();
         }
 
-        // 3. Text response
-        if (content && content.trim()) {
+        // Final text response — only render if no text_delta steps were rendered inline
+        // (otherwise content is a duplicate of what text_delta already streamed)
+        if (!hadTextDelta && content && content.trim()) {
             const b = document.createElement('div');
             b.className = 'msg-bubble';
             b.innerHTML = renderMarkdown(content);
@@ -1236,32 +1312,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             '<span class="msg-role">CWTools AI</span>';
         div.appendChild(hdr);
 
-        // Thinking block — initially hidden
-        const thinkDet = document.createElement('details');
-        thinkDet.className = 'thinking-block'; thinkDet.id = 'liveThink'; thinkDet.style.display = 'none';
-        const thinkSum = document.createElement('summary');
-        thinkSum.id = 'liveThinkSum';
-        thinkSum.innerHTML = '<span class="think-pulse spinning"></span>Thinking...';
-        thinkDet.appendChild(thinkSum);
-        const thinkBody = document.createElement('div');
-        thinkBody.className = 'thinking-body'; thinkBody.id = 'liveThinkBody';
-        thinkDet.appendChild(thinkBody);
-        div.appendChild(thinkDet);
-
-        // Tool group — initially hidden
-        const toolDet = document.createElement('details');
-        toolDet.className = 'tool-group'; toolDet.id = 'liveToolGroup'; toolDet.style.display = 'none'; toolDet.open = true;
-        const toolSum = document.createElement('summary');
-        toolSum.id = 'liveToolSum';
-        toolSum.innerHTML = '<span class="tg-icon">⚙</span><span id="liveToolCount">0 tool calls</span>';
-        toolDet.appendChild(toolSum);
-        const toolBody = document.createElement('div');
-        toolBody.className = 'tool-group-body'; toolBody.id = 'liveToolBody';
-        toolDet.appendChild(toolBody);
-        div.appendChild(toolDet);
-
         return div;
     }
+
+    // Phase tracking for live streaming interleaved layout
+    let livePhase: string | null = null;
+    let liveThinkBlock: HTMLElement | null = null;
+    let liveThinkBody: HTMLElement | null = null;
+    let liveThinkSum: HTMLElement | null = null;
+    let liveToolTimeline: HTMLElement | null = null;
 
     // ── Streaming text-delta live bubble ──────────────────────────────────────
     let liveTextBubble: HTMLDivElement | null = null;
@@ -1290,25 +1349,55 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     function applyLiveStep(s: any) {
         if (!currentAssistantDiv) return;
 
-        // ── text_delta: streaming token ────────────────────────────────────────
-        if (s.type === 'text_delta' || s.type === 'thinking_content' || s.type === 'thinking') {
-            const tb = document.getElementById('liveThink');
-            const tbd = document.getElementById('liveThinkBody');
-            const tsum = document.getElementById('liveThinkSum');
-            if (tb) tb.style.display = '';
-            if (tbd) {
-                // Append: use separator only for distinct reasoning blocks (type='thinking'),
-                // streaming delta tokens (type='thinking_content' or 'text_delta') are appended directly
+        const target = routeLiveStep(s);
+
+        // Determine the new phase
+        const newPhase = target === 'thinking' ? 'thinking' : target === 'text_bubble' ? 'text' : target === 'tool_call' ? 'tool' : target === 'tool_result' ? 'tool' : 'special';
+
+        // ── Phase transition: finalize current container and start new one ──
+        if (newPhase !== 'special' && newPhase !== livePhase && target !== 'tool_result') {
+            // Finalize previous text bubble if transitioning away from text
+            if (livePhase === 'text' && liveTextBubble) {
+                flushLiveText();
+            }
+            // Finalize previous thinking block if transitioning away from thinking
+            if (livePhase === 'thinking' && liveThinkBlock) {
+                const pulse = liveThinkBlock.querySelector('.think-pulse');
+                if (pulse) pulse.classList.remove('spinning');
+                // Clear refs so a new thinking block will be created on next thinking phase
+                liveThinkBlock = null; liveThinkBody = null; liveThinkSum = null;
+                liveThinkContent = '';
+            }
+            // Clear tool timeline ref if transitioning away from tool
+            if (livePhase === 'tool' && newPhase !== 'tool') {
+                liveToolTimeline = null;
+            }
+            livePhase = newPhase;
+        }
+
+        // ── Thinking: create or reuse a thinking block at current position ──
+        if (target === 'thinking') {
+            if (!liveThinkBlock) {
+                liveThinkBlock = document.createElement('details');
+                liveThinkBlock.className = 'thinking-block'; (liveThinkBlock as HTMLDetailsElement).open = false;
+                liveThinkSum = document.createElement('summary');
+                liveThinkSum.innerHTML = '<span class="think-pulse spinning"></span>Thinking...';
+                liveThinkBlock.appendChild(liveThinkSum);
+                liveThinkBody = document.createElement('div');
+                liveThinkBody.className = 'thinking-body markdown-body';
+                liveThinkBlock.appendChild(liveThinkBody);
+                currentAssistantDiv.appendChild(liveThinkBlock);
+            }
+            if (liveThinkBody) {
                 if (s.type === 'thinking' && liveThinkContent) {
                     liveThinkContent += '\n\n---\n\n' + (s.content || '');
                 } else {
                     liveThinkContent += (s.content || '');
                 }
-                tbd.className = 'thinking-body markdown-body';
-                tbd.innerHTML = renderMarkdown(liveThinkContent);
-                if (tsum) {
+                liveThinkBody.innerHTML = renderMarkdown(liveThinkContent);
+                if (liveThinkSum) {
                     const est = Math.ceil(liveThinkContent.length / 4);
-                    tsum.innerHTML = '<span class="think-pulse spinning"></span>Thinking &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
+                    liveThinkSum.innerHTML = '<span class="think-pulse spinning"></span>Thinking &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
                 }
             }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
@@ -1318,44 +1407,84 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             return;
         }
 
-        // Non-text-delta: flush any pending streaming text first
-        if (liveTextContent) flushLiveText();
+        // ── text_delta: create or reuse a text bubble at current position ──
+        if (target === 'text_bubble') {
+            const bubble = ensureLiveTextBubble();
+            if (bubble) {
+                liveTextContent += (s.content || '');
+                bubble.innerHTML = renderMarkdown(liveTextContent);
+            }
+            if (s.transactionCard && s.transactionCard.status === 'pending') {
+                showTransactionCard(s.transactionCard);
+            }
+            scrollBottom();
+            return;
+        }
 
-        if (s.type === 'tool_call') {
-            const tg = document.getElementById('liveToolGroup');
-            const tb = document.getElementById('liveToolBody');
-            const tc = document.getElementById('liveToolCount');
-            if (tg) tg.style.display = '';
-            if (tb) {
-                // Each call gets a pending <div class="tool-pair" data-tool="..."> that the result will update
-                const pairDiv = document.createElement('div');
-                pairDiv.className = 'tool-pair';
-                pairDiv.dataset.tool = s.toolName || '';
-                pairDiv.dataset.callIdx = String(tb.querySelectorAll('.tool-pair').length);
-                pairDiv.innerHTML = buildToolPair(s, null);
-                tb.appendChild(pairDiv);
+        // ── tool_call: create or reuse a tool timeline at current position ──
+        if (target === 'tool_call') {
+            if (!liveToolTimeline) {
+                liveToolTimeline = document.createElement('div');
+                liveToolTimeline.className = 'tool-timeline';
+                currentAssistantDiv.appendChild(liveToolTimeline);
             }
-            if (tc) {
-                const count = document.getElementById('liveToolBody')?.querySelectorAll('.tool-pair').length || 0;
-                tc.textContent = count + ' tool call' + (count !== 1 ? 's' : '');
+            const stepIdx = s.stepIndex || (liveToolTimeline.querySelectorAll('.tool-pair').length + 1);
+            const pairDiv = document.createElement('div');
+            pairDiv.className = 'tool-pair';
+            pairDiv.dataset.tool = s.toolName || '';
+            pairDiv.dataset.callIdx = String(stepIdx);
+            pairDiv.dataset.callTs = String(s.timestamp || Date.now());
+            // Store toolArgs so we can recover them when tool_result arrives
+            try { pairDiv.dataset.callArgs = JSON.stringify(s.toolArgs || {}); } catch { pairDiv.dataset.callArgs = '{}'; }
+            pairDiv.innerHTML = buildToolPairHtml(s as RendererStep, undefined, { stepIndex: stepIdx, showDuration: false });
+
+            // Auto-collapse: when tool count exceeds threshold, wrap overflow in <details>
+            const LIVE_COLLAPSE_THRESHOLD = 2;
+            const directPairs = liveToolTimeline.querySelectorAll(':scope > .tool-pair');
+            if (directPairs.length >= LIVE_COLLAPSE_THRESHOLD) {
+                let collapseEl = liveToolTimeline.querySelector(':scope > .tool-collapse') as HTMLDetailsElement | null;
+                if (!collapseEl) {
+                    collapseEl = document.createElement('details');
+                    collapseEl.className = 'tool-collapse';
+                    const sum = document.createElement('summary');
+                    collapseEl.appendChild(sum);
+                    liveToolTimeline.appendChild(collapseEl);
+                }
+                // Move the 3rd+ direct pairs into the collapse
+                const toMove = Array.from(liveToolTimeline.querySelectorAll(':scope > .tool-pair')).slice(2);
+                for (const m of toMove) collapseEl.appendChild(m);
+                // Append new pair into collapse too
+                collapseEl.appendChild(pairDiv);
+                const insideCount = collapseEl.querySelectorAll('.tool-pair').length;
+                (collapseEl.querySelector('summary') as HTMLElement).textContent = `+${insideCount} more tool calls`;
+                collapseEl.open = true; // keep open during streaming so user can see progress
+            } else {
+                liveToolTimeline.appendChild(pairDiv);
             }
-        } else if (s.type === 'tool_result') {
-            const tb = document.getElementById('liveToolBody');
-            if (tb) {
-                // Find the unresolved pair for this tool
-                const pairs = Array.from(tb.querySelectorAll('.tool-pair[data-tool="' + s.toolName + '"]:not([data-resolved])'));
+        } else if (target === 'tool_result') {
+            // Find the most recent unresolved tool pair across ALL timelines
+            const allTimelines = currentAssistantDiv.querySelectorAll('.tool-timeline');
+            for (let i = allTimelines.length - 1; i >= 0; i--) {
+                const tl = allTimelines[i]!;
+                const pairs = Array.from(tl.querySelectorAll('.tool-pair[data-tool="' + s.toolName + '"]:not([data-resolved])'));
                 if (pairs.length > 0) {
-                    const pair = pairs[0];
-                    (pair as HTMLElement).dataset.resolved = '1';
-                    // Find the call step that matches this result
-                    const callDiv = pair!.querySelector('.tp-call');
-                    // Build fresh pair with result
-                    const fakeCall = { toolName: s.toolName, toolArgs: {} };
-                    pair!.innerHTML = buildToolPair(fakeCall, s);
+                    const pair = pairs[0] as HTMLElement;
+                    pair.dataset.resolved = '1';
+                    const callTs = parseInt(pair.dataset.callTs || '0', 10);
+                    const stepIdx = parseInt(pair.dataset.callIdx || '0', 10);
+                    // Recover original toolArgs from stored data
+                    let recoveredArgs: Record<string, unknown> = {};
+                    try { recoveredArgs = JSON.parse(pair.dataset.callArgs || '{}'); } catch { /* ignore */ }
+                    const fakeCall: RendererStep = { type: 'tool_call', toolName: s.toolName, toolArgs: recoveredArgs, content: '', timestamp: callTs };
+                    pair.innerHTML = buildToolPairHtml(fakeCall, s as RendererStep, {
+                        stepIndex: stepIdx,
+                        showDuration: true,
+                        showDiff: true,
+                    });
+                    break;
                 }
             }
-        } else if (s.type === 'error' || s.type === 'validation' || s.type === 'compaction') {
-            if (!currentAssistantDiv) return;
+        } else if (target === 'special') {
             const el = document.createElement('div');
             el.className = 'special-step';
             const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : svgIconNoMargin('gear');
@@ -1364,6 +1493,35 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
         scrollBottom();
     }
+
+    // ── Phase 5: Event delegation for inline permission buttons in tool timeline ──
+    chatArea.addEventListener('click', (e) => {
+        const btn = (e.target as HTMLElement).closest('.tp-perm-btn') as HTMLElement | null;
+        if (!btn) return;
+        const permId = btn.dataset.perm;
+        const action = btn.dataset.action;
+        if (!permId || !action) return;
+
+        // Disable all sibling buttons
+        const parent = btn.closest('.tp-perm-actions');
+        if (parent) {
+            parent.querySelectorAll('.tp-perm-btn').forEach(b => {
+                (b as HTMLButtonElement).disabled = true;
+                (b as HTMLElement).style.opacity = '0.4';
+            });
+        }
+
+        if (action === 'allow') {
+            btn.textContent = '✓ 已允许';
+            vscode.postMessage({ type: 'permissionResponse', permissionId: permId, allowed: true });
+        } else if (action === 'deny') {
+            btn.textContent = '✗ 已拒绝';
+            vscode.postMessage({ type: 'permissionResponse', permissionId: permId, allowed: false });
+        } else if (action === 'always') {
+            btn.textContent = '✓ 已一直允许';
+            vscode.postMessage({ type: 'permissionResponse', permissionId: permId, allowed: true, alwaysAllow: true });
+        }
+    });
 
     // ── User message ───────────────────────────────────────────────────────────
     // Builds inline image thumbnails (clickable lightbox) from images array
@@ -1492,31 +1650,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
     // ── Diff card ──────────────────────────────────────────────────────────────
     function showAutoWriteCard(file: string, isNewFile: boolean) {
-        const wrap = document.createElement('div');
-        wrap.className = 'msg-bubble assistant';
-        wrap.style.border = '1px solid var(--accent)';
-        wrap.style.background = 'rgba(100, 200, 100, 0.05)';
-
         const fileName = (file || '').split(/[\\/]/).pop() || file;
-
-        wrap.innerHTML = `
-            <div class="code-wrapper" style="margin: 0; border: none; background: transparent;">
-                <div class="code-header" style="justify-content: space-between;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-size: 16px;">${svgIconNoMargin('sparkles')}</span>
-                        <span style="color:var(--accent); font-weight:600;">自动应用更改 (Auto Applied)</span>
-                    </div>
-                </div>
-                <div class="code-content" style="padding: 12px; font-family: var(--vscode-editor-font-family, monospace); white-space: normal;">
-                    <div style="margin-bottom: 8px;">
-                        <span style="opacity: 0.6;">文件:</span> 
-                        <span style="font-weight: 600; color: var(--vscode-textPreformat-foreground);">${escapeHtml(fileName)}</span>
-                        ${isNewFile ? '<span style="border: 1px solid var(--accent); color: var(--accent); border-radius: 3px; padding: 1px 4px; font-size: 10px; margin-left: 6px;">新文件</span>' : ''}
-                    </div>
-                    <div style="font-size: 11px; opacity: 0.6; word-break: break-all; margin-bottom: 4px;">路径: ${escapeHtml(file)}</div>
-                </div>
-            </div>`;
-
+        const wrap = document.createElement('div');
+        wrap.className = 'auto-write-row';
+        const tag = isNewFile ? '<span class="aw-tag aw-new">NEW</span>' : '<span class="aw-tag aw-mod">MOD</span>';
+        wrap.innerHTML = `${svgIconNoMargin('sparkles')} ${tag} <span class="aw-file">${escapeHtml(fileName)}</span>`;
+        wrap.title = file;
         chatArea.appendChild(wrap);
         scrollBottom();
     }
@@ -1654,6 +1793,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             case 'addUserMessage':
                 setGenerating(true);
                 liveTextBubble = null; liveTextContent = ''; liveThinkContent = '';
+                livePhase = null; liveThinkBlock = null; liveThinkBody = null; liveThinkSum = null; liveToolTimeline = null;
                 addUserMessage(msg.text, msg.messageIndex, msg.images);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
@@ -1663,6 +1803,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             case 'startBackgroundGeneration':
                 setGenerating(true);
                 liveTextBubble = null; liveTextContent = ''; liveThinkContent = '';
+                livePhase = null; liveThinkBlock = null; liveThinkBody = null; liveThinkSum = null; liveToolTimeline = null;
                 // Do not add user message bubble, but still render the assistant div
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
@@ -1720,6 +1861,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             case 'generationError':
                 setGenerating(false);
                 liveTextBubble = null; liveTextContent = ''; liveThinkContent = '';
+                livePhase = null; liveThinkBlock = null; liveThinkBody = null; liveThinkSum = null; liveToolTimeline = null;
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 
                 // Clear any unresolved interactive cards
@@ -1739,6 +1881,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 setGenerating(false);
                 currentAssistantDiv = null;
                 liveTextBubble = null; liveTextContent = ''; liveThinkContent = '';
+                livePhase = null; liveThinkBlock = null; liveThinkBody = null; liveThinkSum = null; liveToolTimeline = null;
                 totalConversationTokens = 0;
                 { const bar = document.getElementById('tokenUsageBar'); if (bar) bar.style.display = 'none'; }
                 startPlaceholderRotation();
@@ -1830,9 +1973,33 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'pendingWriteFile': showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile); break;
 
-            case 'permissionRequest':
-                showPermissionCard(msg.permissionId, msg.tool, msg.description, msg.command);
+            case 'permissionRequest': {
+                // Render inline permission step in the tool timeline
+                if (currentAssistantDiv) {
+                    if (!liveToolTimeline) {
+                        liveToolTimeline = document.createElement('div');
+                        liveToolTimeline.className = 'tool-timeline';
+                        currentAssistantDiv.appendChild(liveToolTimeline);
+                    }
+                    const permStep: RendererStep = {
+                        type: 'permission_request',
+                        content: msg.command || msg.description || '',
+                        toolName: msg.tool || '',
+                        permissionId: msg.permissionId,
+                        timestamp: Date.now(),
+                    };
+                    const stepIdx = liveToolTimeline.querySelectorAll('.tool-pair').length + 1;
+                    const pairDiv = document.createElement('div');
+                    pairDiv.className = 'tool-pair';
+                    pairDiv.dataset.tool = msg.tool || '';
+                    pairDiv.dataset.permId = msg.permissionId || '';
+                    pairDiv.innerHTML = buildToolPairHtml(permStep, undefined, { stepIndex: stepIdx });
+                    liveToolTimeline.appendChild(pairDiv);
+                    scrollBottom();
+                }
+                // Floating card removed — inline timeline buttons are the only UI
                 break;
+            }
 
             case 'modeChanged':
                 switchMode(msg.mode, /* fromUI */ false);

@@ -62,14 +62,18 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 /* ── Indicators ── */
 .plan-indicator { display: none; padding: 5px 16px; font-size: 11px; color: cornflowerblue; background: rgba(100,149,237,0.07); border-bottom: 1px solid var(--border); text-align: center; }
 body.plan-mode .plan-indicator { display: block; }
-.todo-panel { display: none; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.todo-panel { display: none; border-bottom: 1px solid var(--border); }
 .todo-panel.has-items { display: block; }
-.todo-panel-title { font-size: 10px; font-weight: 600; opacity: 0.5; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+.todo-panel > summary { cursor: pointer; padding: 6px 14px; font-size: 10px; font-weight: 600; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.05em; list-style: none; display: flex; align-items: center; gap: 5px; user-select: none; }
+.todo-panel > summary::-webkit-details-marker { display: none; }
+.todo-panel > summary::before { content: '▶'; font-size: 7px; opacity: 0.4; transition: transform 0.15s; }
+.todo-panel[open] > summary::before { transform: rotate(90deg); }
+.todo-panel > #todoList { padding: 2px 14px 8px; }
 .todo-item { font-size: 12px; padding: 2px 0; display: flex; align-items: flex-start; gap: 6px; }
 .todo-item.done { opacity: 0.4; text-decoration: line-through; }
 .todo-item.in_progress { color: var(--accent); }
 
-.chat-area { flex: 1; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 20px; min-height: 0; }
+.chat-area { flex: 1; overflow-y: auto; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .chat-area > *:not(.empty-state):last-child { margin-bottom: 80px !important; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -288,6 +292,46 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .permission-deny-btn { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 4px; padding: 4px 14px; cursor: pointer; font-size: 11px; transition: background 0.15s; }
 .permission-deny-btn:hover { background: rgba(255,255,255,0.05); }
 
+/* ── Question Card (Claude Code-style decision prompt) ── */
+.question-card {
+    border-color: rgba(100, 149, 237, 0.6) !important;
+    background: var(--bg) !important;
+    margin: 14px 0 !important;
+    box-shadow: 0 0 0 1px rgba(100, 149, 237, 0.15), 0 4px 16px rgba(0,0,0,0.25) !important;
+    animation: questionPulse 2s ease-in-out 1;
+}
+.question-card .permission-card-header {
+    background: rgba(100, 149, 237, 0.1);
+    padding: 12px 14px;
+}
+.question-card .permission-card-title {
+    font-size: 14px !important;
+    font-weight: 600;
+    color: var(--fg);
+}
+.question-card .permission-card-actions {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 4px 14px 14px;
+    border-top: none;
+}
+.question-card .ai-option-btn {
+    background: rgba(100, 149, 237, 0.08) !important;
+    border: 1px solid rgba(100, 149, 237, 0.25) !important;
+    border-radius: 6px !important;
+    color: var(--fg) !important;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.question-card .ai-option-btn:hover {
+    background: rgba(100, 149, 237, 0.18) !important;
+    border-color: rgba(100, 149, 237, 0.5) !important;
+    transform: translateX(2px);
+}
+@keyframes questionPulse {
+    0% { box-shadow: 0 0 0 1px rgba(100,149,237,0.15), 0 4px 16px rgba(0,0,0,0.25); }
+    50% { box-shadow: 0 0 0 3px rgba(100,149,237,0.3), 0 4px 20px rgba(100,149,237,0.15); }
+    100% { box-shadow: 0 0 0 1px rgba(100,149,237,0.15), 0 4px 16px rgba(0,0,0,0.25); }
+}
+
 /* ── Plan file card ── */
 .plan-file-card { display: flex; align-items: flex-start; gap: 10px; background: rgba(100,149,237,0.07); border: 1px solid rgba(100,149,237,0.25); border-radius: 8px; padding: 10px 12px; margin: 6px 0; }
 .plan-file-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
@@ -441,5 +485,98 @@ body.review-mode .mode-indicator { color: #f48771; }
 .ds-line-add .ds-prefix { color: #4caf50; }
 .ds-line-del { background: rgba(244, 67, 54, 0.12); }
 .ds-line-del .ds-prefix { color: #f44336; }
-.ds-line-ctx { background: transparent; }
+/* ── Tool Timeline (linear step list, replaces collapsed tool-group for finalized messages) ── */
+.tool-timeline { margin: 6px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tool-timeline > .tool-pair { padding: 5px 12px; }
+.tool-timeline > .tool-pair:not(:last-child) { border-bottom: 1px solid rgba(255,255,255,0.04); }
+
+/* Collapsible tool group */
+.tool-collapse { border-top: 1px solid rgba(255,255,255,0.04); }
+.tool-collapse > summary {
+    padding: 4px 12px; font-size: 11px; opacity: 0.5; cursor: pointer;
+    user-select: none; list-style: none; display: flex; align-items: center; gap: 6px;
+    transition: opacity 0.15s;
+}
+.tool-collapse > summary:hover { opacity: 0.8; }
+.tool-collapse > summary::before { content: '▸'; font-size: 10px; transition: transform 0.15s; }
+.tool-collapse[open] > summary::before { transform: rotate(90deg); }
+.tool-collapse > .tool-pair { padding: 5px 12px; }
+.tool-collapse > .tool-pair:not(:last-child) { border-bottom: 1px solid rgba(255,255,255,0.04); }
+
+/* Step index */
+.tp-idx { font-size: 10px; opacity: 0.4; font-weight: 600; margin-right: 2px; flex-shrink: 0; font-family: var(--vscode-editor-font-family, monospace); }
+/* Duration badge */
+.tp-duration { font-size: 10px; opacity: 0.35; margin-left: auto; flex-shrink: 0; font-family: var(--vscode-editor-font-family, monospace); padding: 0 4px; }
+
+/* Parameter preview */
+.tp-params { font-size: 10.5px; padding: 3px 12px 3px 28px; opacity: 0.6; }
+.tp-param { display: flex; gap: 4px; align-items: baseline; }
+.tp-param-label { font-weight: 600; flex-shrink: 0; font-size: 10px; text-transform: uppercase; opacity: 0.5; }
+.tp-param code { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; background: rgba(255,255,255,0.06); padding: 0 3px; border-radius: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; display: inline-block; }
+
+/* Inline diff preview */
+.inline-diff { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; margin: 4px 12px 4px 28px; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; max-height: 280px; overflow-y: auto; }
+.diff-line { display: flex; padding: 0 6px; white-space: pre; line-height: 1.5; }
+.diff-ln { width: 32px; min-width: 32px; text-align: right; opacity: 0.25; user-select: none; flex-shrink: 0; padding-right: 4px; }
+.diff-prefix { width: 12px; min-width: 12px; text-align: center; flex-shrink: 0; opacity: 0.6; }
+.diff-add { background: rgba(76,175,80,0.1); }
+.diff-add .diff-prefix { color: var(--success); }
+.diff-remove { background: rgba(244,67,54,0.1); }
+.diff-remove .diff-prefix { color: var(--error); }
+.diff-ctx { background: transparent; }
+.diff-more { justify-content: center; opacity: 0.35; padding: 3px; font-style: italic; }
+
+/* Collapsible diff in tool pair */
+.tool-diff-details { margin: 2px 12px 2px 28px; }
+.tool-diff-summary {
+    font-size: 11px; cursor: pointer; user-select: none;
+    opacity: 0.55; padding: 2px 0; list-style: none;
+    display: flex; align-items: center; gap: 4px;
+    transition: opacity 0.15s;
+}
+.tool-diff-summary:hover { opacity: 0.85; }
+.tool-diff-summary::before { content: '▸'; font-size: 9px; transition: transform 0.15s; }
+.tool-diff-details[open] > .tool-diff-summary::before { transform: rotate(90deg); }
+.tool-diff-details .inline-diff { margin: 2px 0; }
+
+/* Inline permission buttons in timeline */
+.tp-permission {
+    flex-wrap: wrap; gap: 4px;
+    background: rgba(217,160,32,0.06);
+    border: 1px solid rgba(217,160,32,0.2);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+.tp-permission .tp-file {
+    flex: 1; min-width: 0;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px; opacity: 0.85;
+    word-break: break-all; white-space: normal;
+    max-width: none;
+}
+.tp-perm-actions { display: flex; gap: 5px; flex-basis: 100%; padding-left: 0; margin-top: 6px; }
+.tp-perm-btn { font-size: 11px; border-radius: 4px; padding: 4px 14px; cursor: pointer; border: none; font-family: inherit; transition: opacity 0.15s, transform 0.1s; }
+.tp-perm-btn:hover { opacity: 0.85; transform: scale(0.98); }
+.tp-perm-allow { background: var(--success); color: #fff; }
+.tp-perm-deny { background: none; border: 1px solid var(--border); color: var(--fg); }
+.tp-perm-always { background: rgba(76,175,80,0.15); color: var(--success); border: 1px solid rgba(76,175,80,0.4); }
+
+/* ── Compact auto-write row (Claude Code style) ── */
+.auto-write-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px; margin: 2px 0;
+    font-size: 12px;
+    color: var(--fg); opacity: 0.85;
+    border-left: 2px solid var(--success);
+    background: rgba(76,175,80,0.04);
+    border-radius: 0 4px 4px 0;
+}
+.auto-write-row:hover { opacity: 1; background: rgba(76,175,80,0.08); }
+.aw-tag {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+    padding: 1px 5px; border-radius: 3px; text-transform: uppercase;
+}
+.aw-new { background: rgba(76,175,80,0.2); color: var(--success); }
+.aw-mod { background: rgba(100,149,237,0.2); color: cornflowerblue; }
+.aw-file { font-family: var(--vscode-editor-font-family, monospace); font-weight: 500; }
 

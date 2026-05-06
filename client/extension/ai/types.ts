@@ -894,9 +894,11 @@ export type HostMessage =
     /** Plan file saved to disk — tells webview to show the Open/Submit card */
     | { type: 'planFileSaved'; filePath: string; relPath: string }
     | { type: 'walkthroughFileSaved'; filePath: string; relPath: string }
+    | { type: 'blueprintFileSaved'; filePath: string; relPath: string }
     /** Send plan sections to webview for interactive inline annotation */
     | { type: 'renderPlan'; sections: string[]; planText?: string }
     | { type: 'renderWalkthrough'; sections: string[] }
+    | { type: 'renderBlueprint'; sections: string[]; planText?: string }
     /** Return workspace file list for @ mention popup */
     | { type: 'fileList'; files: string[] }
     /** Token usage stats after generation completes */

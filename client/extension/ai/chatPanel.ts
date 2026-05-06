@@ -510,6 +510,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 if (wroteWalkthrough) {
                     void this.renderWalkthroughUI(wtPath, topicId, result.steps);
                 }
+
+                // ── Check if Blueprint was generated ──
+                const bpPath = path.join(wsRoot, '.cwtools-ai', topicId, 'design_blueprint.md');
+                const normBpPath = path.normalize(bpPath).toLowerCase();
+                const wroteBlueprint = this._currentMessageSnapshots?.some(s =>
+                    path.normalize(s.filePath).toLowerCase() === normBpPath
+                );
+                if (wroteBlueprint) {
+                    void this.renderBlueprintUI(bpPath, topicId, result.steps);
+                }
             }
 
             // ── Send token usage stats to UI ────────────────────────────────────
@@ -841,6 +851,41 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         } catch (e) {
             ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to parse walkthrough.md', e);
+        }
+    }
+
+    private async renderBlueprintUI(filePath: string, topicId: string, steps?: any[]) {
+        try {
+            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const relPath = path.posix.join('.cwtools-ai', topicId, 'design_blueprint.md');
+
+            this.postMessage({ type: 'blueprintFileSaved', filePath, relPath });
+
+            const sections: string[] = [];
+            let currentSection = '';
+            let inCodeBlock = false;
+            for (const line of content.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+                if (line.startsWith('```')) {
+                    inCodeBlock = !inCodeBlock;
+                }
+                if (!inCodeBlock && line.match(/^#{1,3}\s/)) {
+                    if (currentSection.trim()) sections.push(currentSection.trim());
+                    currentSection = line + '\n';
+                } else {
+                    currentSection += line + '\n';
+                }
+            }
+            if (currentSection.trim()) sections.push(currentSection.trim());
+            if (sections.length === 0 && content.trim()) sections.push(content.trim());
+            this.postMessage({ type: 'renderBlueprint', sections, planText: content });
+
+            if (steps) {
+                steps.push({ type: 'blueprint_card', content: filePath, toolResult: sections, timestamp: Date.now() });
+                this.topicManager.saveTopics();
+            }
+
+        } catch (e) {
+            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to parse design_blueprint.md', e);
         }
     }
 

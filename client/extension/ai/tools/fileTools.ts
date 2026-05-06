@@ -52,6 +52,10 @@ export interface FileToolContext {
     onAutoWritten?: (file: string, isNewFile: boolean) => void;
     vfsOverlay?: Map<string, string>;
     vfsLocks?: Map<string, Promise<void>>;
+    /** Parent runner options (for topicId access in blueprint save) */
+    parentRunnerOptions?: { topicId?: string };
+    /** Step callback for real-time UI events */
+    onStep?: (step: import('../types').AgentStep) => void;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -295,10 +299,11 @@ export class FileToolHandler {
             try {
                 args.file = this.resolveAndAssertInWorkspace(args.file);
                 
-                // 安全阻断：禁止覆写（但允许 .md 格式被覆写）
+                // 安全阻断：禁止覆写（但允许 .md 格式、或 AI 本轮创建的文件被覆写）
                 const lowerFile = args.file.toLowerCase();
-                if (fs.existsSync(args.file) && !this.ctx.vfsOverlay && !lowerFile.endsWith('.md')) {
-                    return { success: false, message: "File already exists. To prevent destructive overwrites, write_file cannot overwrite existing files — use edit_file, multiedit, or write_localisation (for .yml) instead. Only .md documents can be overwritten." };
+                const isOwnFile = !!(args as any)._autoApply; // AI created this file in this session
+                if (fs.existsSync(args.file) && !this.ctx.vfsOverlay && !lowerFile.endsWith('.md') && !isOwnFile) {
+                    return { success: false, message: "File already exists. To prevent destructive overwrites, write_file cannot overwrite existing files — use edit_file, multiedit, or write_localisation (for .yml) instead. Only .md documents or files you created in this conversation can be overwritten." };
                 }
 
                 const { content: originalContent, hasBom } = this.readTextFile(args.file);
@@ -1080,7 +1085,9 @@ export class FileToolHandler {
 
     async writeDesignBlueprint(args: import('../types').WriteDesignBlueprintArgs): Promise<import('../types').WriteDesignBlueprintResult> {
         try {
-            const blueprintDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai');
+            // Save to topic-scoped folder (same as Implementation_Plan.md)
+            const topicId = this.ctx.parentRunnerOptions?.topicId || 'default';
+            const blueprintDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai', topicId);
             if (!fs.existsSync(blueprintDir)) fs.mkdirSync(blueprintDir, { recursive: true });
             const blueprintPath = path.join(blueprintDir, 'design_blueprint.md');
 
@@ -1187,6 +1194,18 @@ export class FileToolHandler {
 
             const content = lines.join('\n');
             fs.writeFileSync(blueprintPath, content, 'utf-8');
+
+            // Also save a copy to root .cwtools-ai/ for Build mode to reference
+            const rootBlueprintDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai');
+            if (!fs.existsSync(rootBlueprintDir)) fs.mkdirSync(rootBlueprintDir, { recursive: true });
+            fs.writeFileSync(path.join(rootBlueprintDir, 'design_blueprint.md'), content, 'utf-8');
+
+            // Emit step event so chatPanel can display the blueprint in the UI
+            this.ctx.onStep?.({
+                type: 'blueprint_card',
+                content: blueprintPath,
+                timestamp: Date.now(),
+            } as any);
 
             return {
                 success: true,

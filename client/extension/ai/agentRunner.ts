@@ -1635,7 +1635,19 @@ export class AgentRunner {
             return '[Agent Execution Terminated]: Tool execution failed consecutively or doom-loop detected.';
         }
 
-        // Max iterations reached — try to get a final response without tools
+        // Max iterations reached — notify user and try to get a final summary
+        emitStep({
+            type: 'error',
+            content: `⚠ 执行循环已达到最大迭代次数 (${iteration}/${maxToolIterations})。任务可能未完成。请发送"继续"以从断点恢复。`,
+            timestamp: Date.now(),
+        });
+
+        // Inject a system hint so the final response summarizes progress
+        messages.push({
+            role: 'user',
+            content: `[SYSTEM] You have reached the maximum iteration limit (${iteration} iterations). Your task is NOT complete. Please:\n1. Summarize what you have completed so far (files written, entities created)\n2. List what remains to be done\n3. Save your progress in todo_write if you haven't already\nThe user can send "继续" to resume from this point.`,
+        });
+
         const finalResponse = await this.aiService.chatCompletion(messages, {
             providerId: options?.providerId,
             model: options?.model,

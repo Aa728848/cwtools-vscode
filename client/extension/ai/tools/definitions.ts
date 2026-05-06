@@ -255,7 +255,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_file',
-            description: 'Write content to a file. **CRITICAL: You are ONLY allowed to use this tool to create BRAND-NEW files or overwrite Markdown (.md) documents/plans.** If you try to overwrite an existing code file with this tool, it will crash and block you. To edit an existing code file, you MUST use `edit_file` or `multiedit`.',
+            description: 'Write content to a file. You can use this tool to: (1) create BRAND-NEW files, (2) overwrite Markdown (.md) documents/plans, or (3) fully rewrite files YOU created earlier in this conversation. If you try to overwrite a pre-existing file you did NOT create in this session, it will be blocked — use `edit_file` or `multiedit` for those. For complete file rewrites of your own code, this is PREFERRED over edit_file when the majority of content changes.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -473,7 +473,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'spawn_sub_agents',
-            description: 'Dispatch one or more sub-tasks to specialized sub-agents. They run independently and in parallel (up to 3). They return findings as text. Use "build" for editing code directly, "explore" for codebase exploration (read-only), "general" for research (all read + web tools).',
+            description: 'Dispatch one or more sub-tasks to specialized sub-agents. They run independently and in parallel (up to 5). They return findings as text. Use "build" for editing code directly, "explore" for codebase exploration (read-only), "general" for research (all read + web tools). IMPORTANT: For explore/general sub-agents doing archetype research, set deadlineMs to at least 120000 (120s). Complex entity analysis (archaeological sites, situation systems, event chains) may need 180000-300000ms. The default (no deadline) means no timeout — prefer explicit deadlines to avoid runaway tasks.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -486,6 +486,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                                 description: { type: 'string', description: 'Short label for this sub-task (shown in UI)' },
                                 prompt: { type: 'string', description: 'Detailed prompt for the sub-agent. Include all context it needs.' },
                                 subagent_type: { type: 'string', enum: ['build', 'explore', 'general'], description: 'Sub-agent mode. Default: "build"' },
+                                deadlineMs: { type: 'number', description: 'Max wall-clock time in ms. Recommended: explore/general tasks 120000-300000ms, build tasks 180000-600000ms. Do NOT use 30000 for research tasks — they will timeout.' },
                             },
                             required: ['description', 'prompt'],
                         },

@@ -76,6 +76,8 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     convert_image_to_dds: 60_000,
     convert_audio: 60_000,
     deploy_mod_asset: 30_000,
+    // Sub-agents
+    spawn_sub_agents: 600_000,
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 
@@ -232,7 +234,14 @@ export class AgentToolExecutor {
      * to prevent hangs on network filesystems, LSP deadlocks, or unresponsive external services.
      */
     async execute(toolName: string, args: Record<string, unknown>): Promise<unknown> {
-        const timeout = TOOL_TIMEOUTS[toolName] ?? DEFAULT_TOOL_TIMEOUT;
+        let timeout = TOOL_TIMEOUTS[toolName];
+        if (timeout === undefined) {
+            if (toolName.startsWith('mcp_') || toolName === 'mcp_call') {
+                timeout = 120_000; // MCP tools can involve network calls or complex processing
+            } else {
+                timeout = DEFAULT_TOOL_TIMEOUT;
+            }
+        }
         try {
             const result = await Promise.race([
                 this.executeInternal(toolName, args),

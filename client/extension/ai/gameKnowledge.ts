@@ -100,6 +100,98 @@ Stellaris localisation files use YAML-like format in the \`localisation/\` direc
    my_event.1.title:0 "The Discovery"
    my_event.1.desc:0 "We have found §Gsomething§! interesting on [Root.GetName]."
   \`\`\`
+
+## Complex Entity Archetypes (Cascading Trigger Pipelines)
+
+When designing entities that span multiple game subsystems, think in terms of a
+**cascading trigger pipeline** — each node triggers the next, potentially crossing
+scope boundaries. ALL scope data below is verified against CWTools .cwt rules.
+
+### Archaeological Site Pipeline Pattern
+\`\`\`
+[on_action / MTTH] → [archaeological_site] → stage fleet_events → [special_project] → [relic/reward]
+\`\`\`
+- Site STAGE events are **fleet_event** (this=fleet, from=archaeological_site) — NOT planet_event!
+- \`archaeology = yes\` flag is MANDATORY on all stage events
+- Access country via \`owner = { }\`, access planet via \`from = { planet = { } }\`
+- special_project on_success scope depends on its \`event_scope\` field:
+  - \`event_scope = ship_event\` → this = ship, from = creation scope
+  - \`event_scope = planet_event\` → this = planet, from = creation scope
+  - \`event_scope = country_event\` → this = country, from = creation scope
+- Chain sites use scripted_effects to spawn next site within fleet scope
+- Final stage grants relic via \`owner = { add_relic = r_xxx }\`
+- Use \`save_event_target_as\` in site events + \`event_target:\` in project for scope persistence
+
+### General Event Chain Pattern
+\`\`\`
+1. Entry trigger (on_action / MTTH / situation / anomaly / planet_event)
+2. Branch events (player choices create diverging paths via options)
+3. Delayed follow-ups (country_event { days = X } or planet_event { days = X })
+4. Resolution event (grants rewards, clears flags/variables)
+\`\`\`
+- Use \`set_country_flag\` / \`set_global_flag\` to track chain state
+- Use \`event_target:\` to pass scope references across chain links
+- Use \`saved_event_target:\` for cross-event scope persistence
+
+### Scope Chain Rules (Verified from CWTools .cwt Rules)
+
+#### Archaeological Site Scopes (source: anomalies_and_archaeology.cwt)
+| Context | this | from | ROOT |
+|---------|------|------|------|
+| weight | planet | — | planet |
+| allow / potential | fleet | archaeological_site | fleet |
+| visible / on_visible | country | archaeological_site | country |
+| on_create | archaeological_site | — | archaeological_site |
+| on_roll_failed | fleet | archaeological_site | fleet |
+| stage event | fleet | archaeological_site | fleet |
+| on_arch_stage_finished | fleet | archaeological_site | fleet |
+| on_arch_site_finished | fleet | archaeological_site | fleet |
+
+#### Special Project Scopes (source: special_projects.cwt)
+| Context | this | from | Notes |
+|---------|------|------|-------|
+| fail_trigger / abort_trigger | country | event_scope (MIGHT NOT EXIST) | push_scope = country |
+| on_success | event_scope* | creation scope | *depends on event_scope field |
+| on_fail / on_cancel | country | creation scope | push_scope = country |
+
+#### Common Scope Transitions
+| From | To | Mechanism | Notes |
+|------|----|-----------|-------|
+| Fleet | Country | \`owner = { ... }\` | In fleet_event |
+| Fleet | Planet | \`from = { planet = { } }\` or \`orbit = { }\` | Via arc site's planet |
+| Country | Planet | \`capital_scope\` / \`random_owned_planet\` | |
+| Planet | Country | \`owner = { ... }\` | |
+| System | Planet | \`random_system_planet = { ... }\` | |
+| Any | Saved | \`event_target:name = { ... }\` | Cross-event persistence |
+
+### on_action Trigger Points (Verified from on_actions.csv)
+
+#### Planet-Scope (this=planet, root=planet)
+- \`on_colonized\` — planet colonized
+- \`on_building_complete\` — building finished
+- \`on_district_complete\` — district finished
+- \`on_blocker_cleared\` — blocker cleared
+- \`on_colony_1_year_old\` ... \`on_colony_10_years_old\` — colony age milestones
+
+#### Planet-Scope with FROM=country (this=planet, from=country)
+- \`on_terraforming_complete\` — terraforming done
+- \`on_planet_transfer\` — planet transferred
+- \`on_planet_conquer\` — planet conquered
+
+#### Country-Scope (this=country, root=country)
+- \`on_tech_increased\` — technology completed
+- \`on_monthly_pulse_country\` — monthly pulse
+- \`on_yearly_pulse_country\` — yearly pulse
+
+#### Ship/Fleet-Scope
+- \`on_survey\` — survey completed (this=ship, from=planet)
+- \`on_planet_surveyed\` — planet surveyed (this=planet, from=country, fromfrom=fleet)
+- \`on_entering_system_fleet\` — fleet enters system (this=fleet, from=system)
+
+#### Archaeological on_actions
+- \`on_arch_stage_finished\` — excavation stage done (this=fleet, from=archaeological_site)
+- \`on_arch_site_finished\` — excavation complete (this=fleet, from=archaeological_site)
+- \`on_relic_activated\` — relic activated (this=country, root=country)
 `;
 
 // ─── HOI4 Knowledge ──────────────────────────────────────────────────────────

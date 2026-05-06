@@ -314,6 +314,8 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.globFiles(args as any); break;
             case 'write_localisation':
                 result = await this.fileHandler.writeLocalisation(args as any); break;
+            case 'write_design_blueprint':
+                result = await this.fileHandler.writeDesignBlueprint(args as any); break;
 
             // ── External / agent tools ────────────────────────────────────
             case 'web_fetch':
@@ -328,8 +330,7 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.todoWrite(args as any); break;
             case 'spawn_sub_agents':
                 result = await this.externalHandler.spawnSubAgents(args as any); break;
-            case 'ignore_validation_error':
-                result = await this.externalHandler.ignoreValidationError(args as any); break;
+            // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
             case 'remove_ignored_diagnostic':
                 result = await this.externalHandler.removeIgnoredDiagnostic(args as any); break;
             case 'get_ignored_diagnostics':

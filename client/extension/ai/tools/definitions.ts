@@ -55,21 +55,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    {
-        type: 'function',
-        function: {
-            name: 'ignore_validation_error',
-            description: 'Provide an explicit override to ignore a CWTools LSP validation error if you are confident the code is structurally correct (e.g. newer game specific syntax or valid dynamic modifier). This will prompt the human user for Permission. If granted, the rule is saved to local memory permanently.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    errorId: { type: 'string', description: 'The exact error ID, rule name, or text snippet being falsely flagged by the LSP.' },
-                    reason: { type: 'string', description: 'A brief technical explanation of why this error is a false positive and should be ignored.' },
-                },
-                required: ['errorId', 'reason'],
-            },
-        },
-    },
+    // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
     {
         type: 'function',
         function: {
@@ -852,6 +838,56 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                 },
                 required: ['filePath', 'language', 'entries'],
+            },
+        },
+    },
+    // ─── Design Blueprint Tools ─────────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'write_design_blueprint',
+            description: 'Write a structured design blueprint for a game entity pipeline to the Agent Workspace. You MUST use this tool in Plan Mode BEFORE writing any implementation plan when the task involves: (1) event chains (2+ connected events), (2) archaeological sites, special projects, relics, situations, or anomalies, (3) any task producing 2+ game entity files that reference each other. The blueprint documents entity topology, scope chains, ID allocations, branching logic, media asset requirements, and file dependency order. It is saved as design_blueprint.md and displayed to the user for approval before Build phase begins.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    title: { type: 'string', description: 'Blueprint title, e.g. "Ancient Databank Excavation Pipeline"' },
+                    entities: {
+                        type: 'array',
+                        description: 'All game entities in the cascade pipeline, ordered by trigger sequence',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string', description: 'Entity ID (e.g. "d_ancient_databank", "ns.100", "MY_PROJECT")' },
+                                type: { type: 'string', description: 'Entity type (must match CWT type system). Common types: on_action, anomaly_category, archaeological_site_type, special_project, event_chain, situation_type, relic, artifact_action, technology, building, decision, edict, fleet_event, planet_event, country_event, ship_event, scripted_effect, scripted_trigger, static_modifier, deposit, solar_system_initializer' },
+                                file: { type: 'string', description: 'Target file path relative to workspace root' },
+                                triggeredBy: { type: 'string', description: 'What triggers this entity (e.g. "MTTH", "on_colonized", "stage 2 completion of d_ancient_databank")' },
+                                fires: { type: 'array', items: { type: 'string' }, description: 'IDs of downstream entities this one triggers' },
+                                scopeContext: { type: 'string', description: 'Scope context in CWT format: "this=X root=X from=Y fromfrom=Z". MUST be verified against CWT .cwt rules. Example for arc site stage: "this=fleet root=fleet from=archaeological_site". For special_project on_success: depends on event_scope field.' },
+                            },
+                            required: ['id', 'type', 'file'],
+                        },
+                    },
+                    eventIdAllocation: {
+                        type: 'object',
+                        description: 'Pre-allocated event ID ranges for the entire pipeline',
+                        properties: {
+                            namespace: { type: 'string', description: 'Event namespace' },
+                            ranges: { type: 'string', description: 'Allocation plan, e.g. "100-109: site stage events, 200-209: reward events, 300-309: special project events"' },
+                        },
+                    },
+                    localisationKeys: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'All localisation key prefixes to be created (e.g. "my_site_name", "my_site.100.title")',
+                    },
+                    dependencyOrder: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'File creation order (dependencies first). Files listed earlier must be written before later ones.',
+                    },
+                    notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
+                },
+                required: ['title', 'entities', 'dependencyOrder'],
             },
         },
     },

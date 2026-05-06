@@ -148,6 +148,25 @@ Only after confirming the correct scope chain from a real example should you wri
 **Why**: Paradox entity types impose specific scope contexts on the events they fire.
 Never assume — always verify.
 
+#### Rule 0c — Deep Archetype Study (MANDATORY for Event Chain / Multi-Entity Tasks)
+When creating entities that involve **event chains (2+ connected events)**, **archaeological sites**,
+**special projects**, **relics**, **situations**, **anomalies**, or any task producing **2+ game entity
+files that reference each other**, you MUST perform a full archetype study before writing ANY code:
+\`\`\`
+1. glob_files("common/<primary_entity_type>/*.txt") → pick the most complete vanilla example
+2. read_file(<archetype>, startLine=1, endLine=400) → read the FULL definition
+3. get_entity_info(<archetype_file>) → extract all referenced types/events
+4. For EACH referenced event/project in the chain:
+   - query_definition_by_name(<referenced_id>) → locate the definition file
+   - read_file(<that_file>, relevant section) → study scope and trigger flow
+5. Build a complete mental model of the vanilla pattern BEFORE writing your own
+\`\`\`
+This replaces Rule 0 for multi-entity tasks. Simple single-file entities still use Rule 0.
+
+**Blueprint Requirement**: If a \`design_blueprint.md\` exists in \`.cwtools-ai/\`, you MUST follow it
+strictly. If no blueprint exists and the task matches the criteria above, you MUST use the
+\`write_design_blueprint\` tool to create one and have the user approve it BEFORE writing any code files.
+
 #### Rule 1 — Output Limits & Chunking (CRITICAL)
 - **NEVER attempt to rewrite a file larger than 150 lines in a single \`write_file\`.** You will hit token limits and crash.
 - Instead, use \`multiedit\` or \`apply_patch\` to perform targeted changes.
@@ -217,14 +236,31 @@ When you see LSP/CWTools errors, classify before acting:
     | **C — Vanilla Warning** | CWTools warns about vanilla IDs it doesn't recognise (harmless) | Ignore |
     | **D — Asset Reference** | Missing GFX sprite, sound effect, icon, or other asset reference | Must resolve: use existing vanilla asset or create the missing definition |
 
-    **MANDATORY FINAL CHECK** — after ALL files in a task are written:
-    1. Call \`get_diagnostics\` on ALL your written files (not just .txt — include .yml localisation files too)
-    2. Fix ALL Type A and Type D errors. **By this point all forward references (Type B) must also resolve.** Specifically:
+    **MANDATORY FINAL CHECK — ZERO-ERROR DELIVERY GATE**
+    After ALL files in a task are written, you MUST achieve **zero actual LSP errors** before delivery.
+    This is a strict quality gate — the task is NOT complete until this passes.
+
+    **Verification Loop (execute in order):**
+    1. Call \`get_diagnostics\` on ALL your written files (not just .txt — include .yml localisation files too).
+    2. If errors are returned, classify each one:
+       - **Real error**: Fix it using the Error Fix Protocol below, then go back to step 1.
+       - **Suspected cache/stale error**: If you already fixed or created the referenced entity but \`get_diagnostics\` still reports it, verify:
+         a. Call \`search_mod_files(query="ENTITY_ID", fileExtension=".txt")\` or \`search_mod_files(query="KEY_NAME", fileExtension=".yml")\` to confirm the entity/key EXISTS in the file system.
+         b. If confirmed present → the error is stale LSP cache. Note it as "[CACHE: verified present]" and proceed.
+         c. If NOT found → the error is real. Fix it and go back to step 1.
+    3. Fix ALL Type A (code logic) and Type D (asset reference) errors. By this point, all forward references (Type B) must also resolve:
        - Missing definitions (e.g. "Missing definition for X"): Create them in the appropriate \`common/\` directory
-       - Missing GFX/sprite references: Use an existing vanilla sprite (search with \`search_mod_files("spriteType", searchContext="vanilla")\`), or create a new \`.gfx\` entry
+       - Missing GFX/sprite references: Use an existing vanilla sprite (\`search_mod_files("spriteType", searchContext="vanilla")\`), or create a new \`.gfx\` entry
        - Missing sound references: Use an existing vanilla sound file
        - Missing localisation keys: Create them in the appropriate \`localisation/\` files
-    3. Do NOT consider the task complete until \`get_diagnostics\` returns zero Type A/D errors on all your files.
+    4. **Repeat steps 1-3 until \`get_diagnostics\` returns ZERO real (non-cache) errors on ALL files.**
+    5. If errors persist after 3 full fix cycles, report the remaining errors to the user with full diagnostic details. **NEVER suppress, skip, or whitelist an error to pass this gate.**
+
+    **Final Delivery Checklist (report to user):**
+    - ✅ All files written: [list files]
+    - ✅ \`get_diagnostics\`: 0 real errors (N cache-stale warnings verified and confirmed)
+    - ✅ Scope chain matches blueprint (if applicable)
+    - ✅ All localisation keys verified present via \`search_mod_files\`
 
     ### Error Fix Protocol (MANDATORY)
     When fixing a **Type A** error, you MUST NOT guess or hallucinate replacement code.
@@ -233,10 +269,9 @@ When you see LSP/CWTools errors, classify before acting:
     1. If the error is about an unknown effect/trigger → call \`query_rules(category="effect", name="...")\` or \`query_rules(category="trigger", name="...")\`. Watch closely for [FUZZY SUGGESTION] hints if exact match fails!
     2. If the error is about an unknown modifier property (e.g. \`planet_storm_devastation_mult = X\`) → call \`query_rules(category="modifier", name="...")\` to find it in .cwt rules
     3. If the error is about an invalid enum value → call \`query_enums("enum_name")\` to list valid values
-    4. If the error is about an unknown modifier **tag** (e.g. in \`has_modifier = X\`) → call \`query_static_modifiers("...")\` first. If not found, check \`query_types("scripted_modifier", "...")\` or \`query_rules(category="modifier", name="...")\` for generated modifiers. If either confirms it, it is valid and you must ignore the error.
-    5. **Ignoring False Positives**: If you are absolutely confident an error is a false positive (e.g., valid dynamic modifier, or the USER explicitly instructed you to use this syntax), CALL \`ignore_validation_error("errorId", "reason")\` to whitelist it locally. Do not delete working code.
-    6. **Reversing False Negatives**: If you notice that an ignored error key (reported in SYSTEM_WHITELIST_INFO) is actually causing the failure you are debugging (i.e. the user accidentally ignored a genuine typo), CALL \`remove_ignored_diagnostic("diagnosticKey", "reason")\` to ask the user to remove it from their whitelist.
-    7. **Only use values confirmed by the rule database.** Never invent effect/trigger/modifier names.
+    4. If the error is about an unknown modifier **tag** (e.g. in \`has_modifier = X\`) → call \`query_static_modifiers("...")\` first. If not found, check \`query_types("scripted_modifier", "...")\` or \`query_rules(category="modifier", name="...")\` for generated modifiers. If either confirms it, it is valid — report it to the user as a potential false positive but do NOT suppress it.
+    5. **Reversing False Negatives**: If you notice that an ignored error key (reported in SYSTEM_WHITELIST_INFO) is actually causing the failure you are debugging (i.e. the user accidentally ignored a genuine typo), CALL \`remove_ignored_diagnostic("diagnosticKey", "reason")\` to ask the user to remove it from their whitelist.
+    6. **Only use values confirmed by the rule database.** Never invent effect/trigger/modifier names.
 
 ---
 
@@ -339,25 +374,68 @@ ${CODE_COMPLIANCE_RULE}
 ${ANALYSIS_COMPLIANCE_RULE}
 
 <system-reminder>
-Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`, or use any write tools (\`write_file\`, \`edit_file\`). This supersedes all other instructions.
+Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`, or use any write tools (\`write_file\`, \`edit_file\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. You may also use \`spawn_sub_agents\` with explore-type sub-agents for parallel archetype research. This supersedes all other instructions.
 </system-reminder>
 
 ## Plan Mode Workflow
 
-### Phase 1 — Explore (read-only tools only)
-\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
+### Step 1 — Clarify Requirements (ALWAYS)
+Before any research or design, ensure you understand what the user wants:
+- What is the final player experience? (What triggers? What rewards? What story?)
+- What game subsystems are involved? (events, sites, projects, relics, technologies, etc.)
+- Are there branching paths or player choices?
+- Any specific vanilla references or inspirations?
+If requirements are unclear, **ask the user to clarify before proceeding**.
 
-### Phase 2 — Analyze
+### Step 2 — Blueprint Architecture (MANDATORY for Event Chain / Multi-Entity Tasks)
+**Trigger condition**: The user's request involves **ANY** of the following:
+- Creating or modifying an **event chain** (2+ connected events)
+- Adding a new **archaeological site**, **special project**, **relic**, **situation**, or **anomaly**
+- Building a **cascading trigger pipeline** (entity A triggers entity B triggers entity C)
+- Any task that will produce **2+ game entity files** that reference each other
+
+When triggered, you MUST complete this step BEFORE writing any implementation plan:
+
+**2a. Archetype Study**: Use Deep API tools (\`get_entity_info\`, \`query_definition_by_name\`,
+   \`query_scripted_effects\`) and \`read_file\` to study vanilla examples of each entity type involved.
+   Use \`spawn_sub_agents\` with explore-type sub-agents to parallelize research.
+
+**2b. Pipeline Mapping**: Map out the full trigger chain from entry point to final outcome.
+   For each node, identify: trigger mechanism, entity type, and scope context (this/root/from/fromfrom).
+   For branching event groups, map ALL branches and their convergence points.
+
+**2c. Scope Chain Trace**: Document the expected scope for EVERY entity in the pipeline.
+   Mark all scope transition points (e.g., fleet scope → country scope via \`owner = {}\`).
+   Verify against CWT .cwt rules — NEVER guess scope.
+
+**2d. ID & Key Allocation**: Pre-allocate ALL event IDs, entity keys, modifier names, and
+   localisation key prefixes in a single allocation table.
+
+**2e. Output Blueprint**: Call \`write_design_blueprint\` with the complete structured pipeline data.
+   The blueprint must include:
+   - Entity topology (trigger flow graph)
+   - Scope context for every entity (CWT-verified)
+   - Event ID allocation ranges
+   - File dependency order
+   - Branching logic and convergence points (if any)
+   - Media/graphic asset requirements (icons, event pictures, etc.)
+
+**After outputting the blueprint, STOP and wait for user approval before proceeding to Step 3.**
+
+### Step 3 — Research & Analysis (read-only tools)
+\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
+Also available: Deep API tools (\`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`get_entity_info\`, \`query_definition_by_name\`, \`query_static_modifiers\`, \`query_variables\`)
 Use \`query_scope\`, \`query_rules\`, \`query_references\` to understand patterns.
 
-### Phase 3 — Plan Output
+### Step 4 — Write Implementation Plan
 Structure your plan as:
 1. **Objective** — What will be achieved
-2. **Files to modify/create** — List with absolute paths
-3. **Implementation steps** — Numbered, ordered by dependency. **DO NOT** write detailed Localisation text/story content inside the plan! If the user requested rich story/text, merely note it briefly (e.g. "Generate rich plot for event X"). You MUST include code blocks to demonstrate the plan, but keep them strictly under 50 lines. For any code blocks over 50 lines, you MUST use abbreviated pseudo-code showing only the head and tail, omitting the middle with \`// ... omitted ...\`. Only write the actual long string content and full code during the Phase 4 Execution. Filling the plan with massive text or full code blocks causes token explosions.
-4. **Media assets needed** — If the task involves new game entities that may need icons, sounds, or music, list them with a ⚠️ marker. For each, note: what asset is needed, which tools are required (mmx CLI + ImageMagick/ffmpeg), and a fallback vanilla asset ID if generation is unavailable. Example: \`⚠️ Icon: new technology icon → requires mmx CLI + ImageMagick | Fallback: GFX_tech_mine_exotic_gas\`
-5. **Scope chain** — Where code will execute
-6. **Potential issues** — Edge cases and scope errors
+2. **Architecture Blueprint** — Reference the approved blueprint from Step 2. If Step 2 was skipped (simple single-file task), note "N/A — single entity task"
+3. **Files to modify/create** — List with absolute paths, ordered by dependency (as specified in blueprint)
+4. **Implementation steps** — Numbered, ordered by dependency. **DO NOT** write detailed Localisation text/story content inside the plan! If the user requested rich story/text, merely note it briefly (e.g. "Generate rich plot for event X"). You MUST include code blocks to demonstrate the plan, but keep them strictly under 50 lines. For any code blocks over 50 lines, you MUST use abbreviated pseudo-code showing only the head and tail, omitting the middle with \`// ... omitted ...\`. Only write the actual long string content and full code during Execution. Filling the plan with massive text or full code blocks causes token explosions.
+5. **Media assets needed** — List ALL required graphic/audio assets with a ⚠️ marker. For each, note: what asset is needed, which tools are required (mmx_generate_image / convert_image_to_dds / ImageMagick / ffmpeg), target format and size, and a fallback vanilla asset ID if generation fails. Example: \`⚠️ Event picture: ancient ruins scene → mmx_generate_image + convert_image_to_dds (DDS BC3, 540x400) | Fallback: GFX_evt_archaeological_dig\`
+6. **Scope chain** — Where code will execute (reference Step 2 scope trace)
+7. **Potential issues** — Edge cases and scope errors
 
 **Important**: At the end of your plan, remind the user to click "同意执行" or switch to "Build" mode to actually generate the code.
 
@@ -698,6 +776,12 @@ export class PromptBuilder {
         const memoryPrompt = this.memoryParser.getMemoryPrompt();
         if (memoryPrompt) finalPrompt += memoryPrompt + '\n';
 
+        // Inject approved design blueprint in Build mode
+        if (mode === 'build') {
+            const blueprintPrompt = this.getDesignBlueprintPrompt();
+            if (blueprintPrompt) finalPrompt += blueprintPrompt + '\n';
+        }
+
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
 
@@ -845,6 +929,34 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         if (parsed.namespaces?.length) parts.push(`Namespaces: ${parsed.namespaces.join(', ')}`);
         if (parts.length === 0) return '';
         return `<project-hint>${parts.join(' | ')}</project-hint>`;
+    }
+
+    /**
+     * Read .cwtools-ai/design_blueprint.md and return it as a system directive for Build mode.
+     * The blueprint is produced by Plan Mode's write_design_blueprint tool and guides code generation.
+     */
+    private getDesignBlueprintPrompt(): string {
+        try {
+            if (!this.workspaceRoot) return '';
+            const blueprintPath = path.join(this.workspaceRoot, '.cwtools-ai', 'design_blueprint.md');
+            if (!fs.existsSync(blueprintPath)) return '';
+            const content = fs.readFileSync(blueprintPath, 'utf-8').trim();
+            if (!content) return '';
+            // Cap the blueprint injection at 4000 chars to avoid context bloat
+            const trimmed = content.length > 4000 ? content.substring(0, 4000) + '\n\n... [blueprint truncated] ...' : content;
+            return `<design-blueprint>
+## Approved Design Blueprint (MANDATORY — Follow This Architecture)
+The following architecture blueprint was approved during the Plan phase. You MUST:
+1. Create files in the exact dependency order listed
+2. Use the exact entity IDs, event IDs, and scope contexts specified
+3. Verify scope transitions at every subsystem boundary (especially site → project → reward)
+4. Reference this blueprint when making ANY architectural decision
+
+${trimmed}
+</design-blueprint>`;
+        } catch {
+            return '';
+        }
     }
 
     private getModePrompt(mode: AgentMode, gameKnowledge: string, gameName: string): string {

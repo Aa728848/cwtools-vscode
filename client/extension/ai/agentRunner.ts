@@ -326,13 +326,23 @@ export interface AgentRunnerOptions {
     topicId?: string;
 }
 
-/** Tools allowed in Plan mode (read-only, no validate_code / write operations) */
+/** Tools allowed in Plan mode (read-only + architecture design tools) */
 const PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'todo_write',
     'read_file', 'list_directory', 'get_diagnostics', 'web_fetch', 'search_web',
     'glob_files', 'codesearch',
+    // Deep API tools for archetype study in Plan mode
+    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
+    'get_entity_info', 'query_definition', 'query_definition_by_name',
+    'query_static_modifiers', 'query_variables',
+    // Sub-agent dispatch for parallel exploration
+    'spawn_sub_agents',
+    // Structured design blueprint output
+    'write_design_blueprint',
+    // Memory tools for persisting architectural state
+    'set_memory', 'get_memory', 'search_memory',
 ];
 
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */

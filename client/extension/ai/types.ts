@@ -425,7 +425,8 @@ export type ToolArgs =
     | CodesearchArgs
     | AnalyzeDiagnosticErrorArgs
     | SetMemoryArgs
-    | GetMemoryArgs;
+    | GetMemoryArgs
+    | WriteDesignBlueprintArgs;
 
 export type ToolResult =
     | QueryScopeResult
@@ -446,7 +447,8 @@ export type ToolResult =
     | SpawnSubAgentsResult
     | AnalyzeDiagnosticErrorResult
     | SetMemoryResult
-    | GetMemoryResult;
+    | GetMemoryResult
+    | WriteDesignBlueprintResult;
 
 export type AgentToolName =
     | 'query_scope'
@@ -490,7 +492,7 @@ export type AgentToolName =
     | 'query_static_modifiers'
     | 'query_variables'
     // ── Error Resolution tools ──
-    | 'ignore_validation_error'
+    // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
     | 'remove_ignored_diagnostic'
     | 'get_ignored_diagnostics'
     | 'get_pdx_block'
@@ -505,6 +507,8 @@ export type AgentToolName =
     | 'deploy_mod_asset'
     // ── Localisation tools ──
     | 'write_localisation'
+    // ── Design tools ──
+    | 'write_design_blueprint'
     // ── MCP tools ──
     | 'mcp_call';
 
@@ -620,6 +624,35 @@ export interface AnalyzeDiagnosticErrorArgs {
     file: string;
     errorCode: string;
     reflection: string;
+}
+
+// ─── Design Blueprint Tool Types ─────────────────────────────────────────────
+
+export interface BlueprintEntity {
+    id: string;
+    type: string;
+    file: string;
+    triggeredBy?: string;
+    fires?: string[];
+    scopeContext?: string;
+}
+
+export interface WriteDesignBlueprintArgs {
+    title: string;
+    entities: BlueprintEntity[];
+    eventIdAllocation?: {
+        namespace: string;
+        ranges: string;
+    };
+    localisationKeys?: string[];
+    dependencyOrder: string[];
+    notes?: string;
+}
+
+export interface WriteDesignBlueprintResult {
+    success: boolean;
+    message: string;
+    filePath: string;
 }
 
 export interface AnalyzeDiagnosticErrorResult {

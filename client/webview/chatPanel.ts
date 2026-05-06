@@ -123,7 +123,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     });
 
     // ── Dynamic Event Delegation for AI Options ─────────────────────────────────
-    chatArea.addEventListener('click', e => {
+    document.body.addEventListener('click', e => {
         const target = e.target as HTMLElement;
         const btn = target.closest('.ai-option-btn') as HTMLElement;
         if (btn) {
@@ -132,47 +132,67 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 // Check if this is part of a question-card wizard
                 const card = btn.closest('.question-card') as HTMLElement;
                 if (card) {
-                    const bubble = card.closest('.message.assistant') as HTMLElement;
-                    if (bubble) {
-                        const allCards = Array.from(bubble.querySelectorAll('.question-card')) as HTMLElement[];
+                    const container = card.closest('.question-wizard-container') as HTMLElement 
+                                   || card.closest('.message.assistant') as HTMLElement;
+                    if (container) {
+                        const allCards = Array.from(container.querySelectorAll('.question-card')) as HTMLElement[];
                         const cardIndex = allCards.indexOf(card);
                         
                         const titleSpan = card.querySelector('.permission-card-title');
                         const cardTitle = titleSpan && titleSpan.textContent ? titleSpan.textContent.replace('❓ ', '').trim() : `问题 ${cardIndex + 1}`;
 
-                        // Always hide current card
-                        card.style.display = 'none';
+                        // Prevent double click by disabling buttons in current card
+                        const allBtns = Array.from(card.querySelectorAll('button')) as HTMLButtonElement[];
+                        allBtns.forEach(b => { b.style.pointerEvents = 'none'; });
+                        btn.classList.add('selected');
 
                         if (allCards.length > 1) {
                             // Wizard Mode
-                            const answers = (bubble as any)._collectedAnswers || [];
+                            const answers = (container as any)._collectedAnswers || [];
                             answers[cardIndex] = text;
-                            (bubble as any)._collectedAnswers = answers;
+                            (container as any)._collectedAnswers = answers;
                             
-                            // Show next card if available
-                            if (cardIndex + 1 < allCards.length) {
-                                allCards[cardIndex + 1]!.style.display = 'block';
-                                return; // DO NOT send message yet
-                            } else {
-                                // Final card! Prepare the batched message
-                                let combinedMessage = "";
-                                allCards.forEach((c, idx) => {
-                                    const tSpan = c.querySelector('.permission-card-title');
-                                    const title = tSpan && tSpan.textContent ? tSpan.textContent.replace('❓ ', '').trim() : `问题 ${idx + 1}`;
-                                    combinedMessage += `【${title}】: ${answers[idx]}\n`;
-                                });
-                                // Append to existing input
-                                input.value = (input.value ? input.value + '\n\n' : '') + combinedMessage.trim() + '\n';
-                                autoResizeInput();
-                                input.focus();
-                                return;
-                            }
+                            // User wants compact view: point click -> card disappears -> next appears
+                            dismissCard(card, 100, () => {
+                                // Show next card if available
+                                if (cardIndex + 1 < allCards.length) {
+                                    allCards[cardIndex + 1]!.style.display = 'block';
+                                } else {
+                                    // Final card! Prepare the batched message
+                                    let combinedMessage = "";
+                                    allCards.forEach((c, idx) => {
+                                        const tSpan = c.querySelector('.permission-card-title');
+                                        const title = tSpan && tSpan.textContent ? tSpan.textContent.replace('❓ ', '').trim() : `问题 ${idx + 1}`;
+                                        combinedMessage += `【${title}】: ${answers[idx]}\n`;
+                                    });
+                                    
+                                    // Cleanup the floating container
+                                    if (container.classList.contains('question-wizard-container')) {
+                                        container.remove();
+                                        isShowingFloatingCard = false;
+                                        processFloatingCardQueue();
+                                    }
+                                    
+                                    // Append to existing input
+                                    input.value = (input.value ? input.value + '\n\n' : '') + combinedMessage.trim() + '\n';
+                                    autoResizeInput();
+                                    input.focus();
+                                }
+                            }, false); // <--- DO NOT remove from DOM, so index is preserved!
+                            return;
                         } else {
                             // Single Card Mode
-                            const formattedText = `【${cardTitle}】: ${text}`;
-                            input.value = (input.value ? input.value + '\n\n' : '') + formattedText + '\n';
-                            autoResizeInput();
-                            input.focus();
+                            dismissCard(card, 100, () => {
+                                if (container.classList.contains('question-wizard-container')) {
+                                    container.remove();
+                                    isShowingFloatingCard = false;
+                                    processFloatingCardQueue();
+                                }
+                                const formattedText = `【${cardTitle}】: ${text}`;
+                                input.value = (input.value ? input.value + '\n\n' : '') + formattedText + '\n';
+                                autoResizeInput();
+                                input.focus();
+                            }, false);
                             return;
                         }
                     }
@@ -756,8 +776,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const lines15 = text.split('\n');
         for (let j = 0; j < lines15.length; j++) {
             const line = (lines15[j] || '').trim();
-            // Start of a question block
-            const qStartMatch = line.match(/^(?::::\s*)?question\s+(.+)$/i);
+            // Start of a question block (allow optional leading bullet point)
+            const qStartMatch = line.match(/^(?:[-*+]\s+)?(?::::\s*)?question\s+(.+)$/i);
             if (qStartMatch) {
                 flushQuestionCard(); // Flush previous if it wasn't gracefully closed
                 inQuestion = true;
@@ -766,11 +786,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
             
             if (inQuestion) {
-                if (line === ':::') {
+                if (line.match(/^(?:[-*+]\s+)?:::\s*$/)) {
                     flushQuestionCard();
                     continue;
                 }
-                const optMatch = line.match(/^\[Option:\s*([^\]]+)\]\s*(.*)$/i);
+                const optMatch = line.match(/^(?:[-*+]\s+|\d+\.\s+)?\[Option:\s*([^\]]+)\]\s*(.*)$/i);
                 if (optMatch) {
                     qOptions.push({ text: optMatch[1] || '', desc: optMatch[2] || '' });
                 } else if (qOptions.length > 0 && line !== '') {
@@ -1221,16 +1241,16 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     toolPairs.push((wrapper.firstElementChild || wrapper) as HTMLElement);
                 }
 
-                const COLLAPSE_THRESHOLD = 2;
+                const COLLAPSE_THRESHOLD = 1;
                 if (toolPairs.length > COLLAPSE_THRESHOLD) {
-                    // Show first 2 directly, collapse the rest
-                    for (let ti = 0; ti < 2; ti++) timelineDiv.appendChild(toolPairs[ti]!);
+                    // Show first 1 directly, collapse the rest
+                    timelineDiv.appendChild(toolPairs[0]!);
                     const det = document.createElement('details');
                     det.className = 'tool-collapse';
                     const sum = document.createElement('summary');
-                    sum.textContent = `+${toolPairs.length - 2} more tool calls`;
+                    sum.textContent = `+${toolPairs.length - 1} more tool calls`;
                     det.appendChild(sum);
-                    for (let ti = 2; ti < toolPairs.length; ti++) det.appendChild(toolPairs[ti]!);
+                    for (let ti = 1; ti < toolPairs.length; ti++) det.appendChild(toolPairs[ti]!);
                     timelineDiv.appendChild(det);
                 } else {
                     for (const tp of toolPairs) timelineDiv.appendChild(tp);
@@ -1439,7 +1459,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             pairDiv.innerHTML = buildToolPairHtml(s as RendererStep, undefined, { stepIndex: stepIdx, showDuration: false });
 
             // Auto-collapse: when tool count exceeds threshold, wrap overflow in <details>
-            const LIVE_COLLAPSE_THRESHOLD = 2;
+            const LIVE_COLLAPSE_THRESHOLD = 1;
             const directPairs = liveToolTimeline.querySelectorAll(':scope > .tool-pair');
             if (directPairs.length >= LIVE_COLLAPSE_THRESHOLD) {
                 let collapseEl = liveToolTimeline.querySelector(':scope > .tool-collapse') as HTMLDetailsElement | null;
@@ -1449,24 +1469,22 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     const sum = document.createElement('summary');
                     collapseEl.appendChild(sum);
                     liveToolTimeline.appendChild(collapseEl);
-                    // Track user manual close — respect their intent
+                    // Track user manual open — respect their intent
                     collapseEl.addEventListener('toggle', () => {
-                        if (!(collapseEl as HTMLDetailsElement).open) {
-                            (collapseEl as HTMLElement).dataset.userClosed = '1';
-                        } else {
-                            delete (collapseEl as HTMLElement).dataset.userClosed;
+                        if ((collapseEl as HTMLDetailsElement).open) {
+                            (collapseEl as HTMLElement).dataset.userOpened = '1';
                         }
                     });
                 }
-                // Move the 3rd+ direct pairs into the collapse
-                const toMove = Array.from(liveToolTimeline.querySelectorAll(':scope > .tool-pair')).slice(2);
+                // Move the 2nd+ direct pairs into the collapse
+                const toMove = Array.from(liveToolTimeline.querySelectorAll(':scope > .tool-pair')).slice(1);
                 for (const m of toMove) collapseEl.appendChild(m);
                 // Append new pair into collapse too
                 collapseEl.appendChild(pairDiv);
                 const insideCount = collapseEl.querySelectorAll('.tool-pair').length;
                 (collapseEl.querySelector('summary') as HTMLElement).textContent = `+${insideCount} more tool calls`;
-                // Only auto-open if the user hasn't manually closed it
-                if (!(collapseEl as HTMLElement).dataset.userClosed) {
+                // Default collapsed — only auto-open if the user has manually opened it
+                if ((collapseEl as HTMLElement).dataset.userOpened) {
                     collapseEl.open = true;
                 }
             } else {
@@ -1613,13 +1631,19 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     // ── Card dismiss helper ────────────────────────────────────────────────────
-    function dismissCard(el: HTMLElement, delay: number, onComplete?: () => void) {
+    function dismissCard(el: HTMLElement, delay: number, onComplete?: () => void, removeDom: boolean = true) {
         setTimeout(() => {
             el.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
             el.style.opacity = '0';
             el.style.transform = 'translateY(-4px)';
             setTimeout(() => {
-                el.remove();
+                if (removeDom) {
+                    el.remove();
+                } else {
+                    el.style.display = 'none';
+                    el.style.opacity = '1';
+                    el.style.transform = '';
+                }
                 if (onComplete) onComplete();
             }, 260);
         }, delay || 400);
@@ -1842,6 +1866,22 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     Date.now()
                 );
                 chatArea.appendChild(completedMsg);
+
+                // Batch 3.4: Extract question cards to the floating card queue
+                const allQCards = Array.from(completedMsg.querySelectorAll('.question-card')) as HTMLElement[];
+                if (allQCards.length > 0) {
+                    const wizardDiv = document.createElement('div');
+                    wizardDiv.className = 'question-wizard-container';
+                    allQCards.forEach((c, idx) => {
+                        c.parentNode?.removeChild(c);
+                        wizardDiv.appendChild(c);
+                        // Reset display to only show the first one
+                        c.style.display = idx === 0 ? 'block' : 'none';
+                    });
+                    floatingCardQueue.push(wizardDiv);
+                    if (!isShowingFloatingCard) processFloatingCardQueue();
+                }
+
                 // Use real tokenUsage from result if available, else fall back to rough estimate
                 if (r.tokenUsage && r.tokenUsage.total > 0) {
                     const gaugeUsage = r.tokenUsage.contextWindowTokens ?? r.tokenUsage.input ?? r.tokenUsage.total;

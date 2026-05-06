@@ -466,8 +466,10 @@ export class FileToolHandler {
             }
             const filePath = args.filePath;
             const { content: originalContent, hasBom } = this.readTextFile(filePath);
-            const ending = this.detectLineEnding(originalContent);
-            const lines = originalContent.split('\n');
+            const ending = originalContent.includes('\r\n') ? '\r\n' as const : '\n' as const;
+            // Normalize to LF for consistent line splitting — prevents \r\r\n corruption
+            const normalizedContent = originalContent.replace(/\r\n/g, '\n');
+            const lines = normalizedContent.split('\n');
 
             // Validate line numbers against file
             if (args.startLine > lines.length) {
@@ -481,16 +483,18 @@ export class FileToolHandler {
             const startIdx = args.startLine - 1;
             const endIdx = args.endLine - 1;
             const targetLines = lines.slice(startIdx, endIdx + 1);
-            const targetContent = targetLines.join('\n');
 
             this.ctx.onBeforeFileWrite?.(filePath, originalContent);
 
             // Build new content by replacing the line range
-            const newContentLines = this.normalizeLineEndings(args.newContent).split('\n');
+            // Normalize newContent to LF too so everything is consistent
+            const newContentLines = args.newContent.replace(/\r\n/g, '\n').split('\n');
             const before = lines.slice(0, startIdx);
             const after = lines.slice(endIdx + 1);
             const newLines = [...before, ...newContentLines, ...after];
-            const newContent = this.convertLineEnding(newLines.join('\n'), ending);
+            // Join with LF, then convert back to original line ending
+            const joined = newLines.join('\n');
+            const newContent = ending === '\r\n' ? joined.replace(/\n/g, '\r\n') : joined;
 
             if (newContent === originalContent) {
                 return { success: false, message: 'No change: the replacement content is identical to the existing content at the specified line range.' };
@@ -1302,11 +1306,6 @@ export class FileToolHandler {
 
             const content = lines.join('\n');
             fs.writeFileSync(blueprintPath, content, 'utf-8');
-
-            // Also save a copy to root .cwtools-ai/ for Build mode to reference
-            const rootBlueprintDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai');
-            if (!fs.existsSync(rootBlueprintDir)) fs.mkdirSync(rootBlueprintDir, { recursive: true });
-            fs.writeFileSync(path.join(rootBlueprintDir, 'design_blueprint.md'), content, 'utf-8');
 
             // Emit step event so chatPanel can display the blueprint in the UI
             this.ctx.onStep?.({

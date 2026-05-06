@@ -422,7 +422,6 @@ export type ToolArgs =
     | EditFileArgs
     | ReplaceLinesArgs
     | ListDirectoryArgs
-    | SpawnSubAgentsArgs
     | CodesearchArgs
     | AnalyzeDiagnosticErrorArgs
     | SetMemoryArgs
@@ -446,7 +445,6 @@ export type ToolResult =
     | EditFileResult
     | ReplaceLinesResult
     | ListDirectoryResult
-    | SpawnSubAgentsResult
     | AnalyzeDiagnosticErrorResult
     | SetMemoryResult
     | GetMemoryResult
@@ -479,7 +477,6 @@ export type AgentToolName =
     | 'multiedit'
     | 'replace_lines'
     | 'ast_mutate'
-    | 'spawn_sub_agents'
     | 'analyze_diagnostic_error'
     | 'set_memory'
     | 'get_memory'
@@ -621,31 +618,6 @@ export interface ListDirectoryResult {
 export interface CodesearchArgs {
     query: string;
     maxResults?: number;
-}
-
-export interface SpawnSubAgentsArgs {
-    tasks?: Array<{
-        id: string;
-        dependsOn?: string[];
-        description: string;
-        prompt: string;
-        subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer' | 'plan' | 'review' | 'loc_translator' | 'loc_writer';
-        /** Max wall-clock time in ms for this sub-task. Exceeded tasks return partial results with a timeout marker. */
-        deadlineMs?: number;
-    }>;
-    /** If true, executes tasks sequentially instead of concurrently (overridden by DAG logic if dependsOn is used). */
-    sequential?: boolean;
-    // Legacy single task support
-    description?: string;
-    prompt?: string;
-    subagent_type?: 'build' | 'explore' | 'general' | 'gui_expert' | 'script_reviewer' | 'plan' | 'review' | 'loc_translator' | 'loc_writer';
-}
-
-export interface SpawnSubAgentsResult {
-    results: Array<{
-        description: string;
-        result: string;
-    }>;
 }
 
 export interface AnalyzeDiagnosticErrorArgs {

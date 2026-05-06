@@ -267,8 +267,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.resolvePermissionRequest(msg.permissionId, msg.allowed, msg.alwaysAllow);
                 break;
             case 'openPlanFile':
-                // Simply open the plan markdown file in the native VSCode editor
-                vs.commands.executeCommand('vscode.open', vs.Uri.file(msg.filePath));
+                // Open the plan markdown file in VS Code's Markdown Preview (rendered view)
+                vs.commands.executeCommand('markdown.showPreview', vs.Uri.file(msg.filePath));
                 break;
             case 'submitPlanAnnotations': {
                 // Auto-switch to build mode on plan approval and send execution command
@@ -438,6 +438,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     mode: this.currentMode,
                     model: this.aiService.getConfig().model || undefined,
                     streaming: true,  // Enable typewriter text effect
+                    topicId: this.topicManager.currentTopic?.id,
                     onStep: (step) => {
                         this._liveSteps.push(step);
                         this.postMessage({ type: 'agentStep', step });

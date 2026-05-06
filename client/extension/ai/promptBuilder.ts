@@ -163,7 +163,7 @@ files that reference each other**, you MUST perform a full archetype study befor
 \`\`\`
 This replaces Rule 0 for multi-entity tasks. Simple single-file entities still use Rule 0.
 
-**Blueprint Requirement**: If a \`design_blueprint.md\` exists in \`.cwtools-ai/\`, you MUST follow it
+**Blueprint Requirement**: If a \`design_blueprint.md\` exists in the topic directory, you MUST follow it
 strictly. If no blueprint exists and the task matches the criteria above, you MUST use the
 \`write_design_blueprint\` tool to create one and have the user approve it BEFORE writing any code files.
 
@@ -401,7 +401,7 @@ ${CODE_COMPLIANCE_RULE}
 ${ANALYSIS_COMPLIANCE_RULE}
 
 <system-reminder>
-Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`, or use any write tools (\`write_file\`, \`edit_file\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. You may also use \`spawn_sub_agents\` with explore-type sub-agents for parallel archetype research. This supersedes all other instructions.
+Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`, or use any write tools (\`write_file\`, \`edit_file\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. This supersedes all other instructions.
 </system-reminder>
 
 ## Plan Mode Workflow
@@ -423,7 +423,6 @@ Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`
 **1c. Archetype Research**: For each entity type identified in 1b, study a vanilla example:
    - Use \`search_mod_files(query="...", searchContext="vanilla")\` or \`query_definition_by_name\` to find a representative archetype
    - Use \`read_file\` to study its structure, scope chain, and trigger patterns
-   - Use \`spawn_sub_agents\` with explore-type sub-agents to parallelize research across entity types
    - This research will inform your questions in Step 2 — you need to know what decisions exist before asking
 
 **Output of Step 1**: You should now have a mental model of:
@@ -988,9 +987,26 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
     private getDesignBlueprintPrompt(): string {
         try {
             if (!this.workspaceRoot) return '';
-            const blueprintPath = path.join(this.workspaceRoot, '.cwtools-ai', 'design_blueprint.md');
-            if (!fs.existsSync(blueprintPath)) return '';
-            const content = fs.readFileSync(blueprintPath, 'utf-8').trim();
+            const aiDir = path.join(this.workspaceRoot, '.cwtools-ai');
+            if (!fs.existsSync(aiDir)) return '';
+
+            // Scan topic directories for the most recently modified blueprint
+            let bestPath = '';
+            let bestMtime = 0;
+            const entries = fs.readdirSync(aiDir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (!entry.isDirectory() || !entry.name.startsWith('topic_')) continue;
+                const bp = path.join(aiDir, entry.name, 'design_blueprint.md');
+                if (fs.existsSync(bp)) {
+                    const stat = fs.statSync(bp);
+                    if (stat.mtimeMs > bestMtime) {
+                        bestMtime = stat.mtimeMs;
+                        bestPath = bp;
+                    }
+                }
+            }
+            if (!bestPath) return '';
+            const content = fs.readFileSync(bestPath, 'utf-8').trim();
             if (!content) return '';
             // Cap the blueprint injection at 4000 chars to avoid context bloat
             const trimmed = content.length > 4000 ? content.substring(0, 4000) + '\n\n... [blueprint truncated] ...' : content;

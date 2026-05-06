@@ -44,7 +44,7 @@ const MAX_TOOL_ITERATIONS_BASE = 150;
 // Phase 2 — normalized result hash: compare hashes of adjacent same-name tool results.
 //   Same hash = "spinning in place" → confirmed doom-loop → stop.
 //   Different hash = "making progress" → reset pair counter and continue.
-const DOOM_LOOP_PAIR_THRESHOLD = 4;
+const DOOM_LOOP_PAIR_THRESHOLD = 14;
 
 // Lightweight 32-bit FNV-1a hash for normalized tool result comparison.
 function fnv32a(str: string): number {
@@ -337,8 +337,6 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_definition', 'query_definition_by_name',
     'query_static_modifiers', 'query_variables',
-    // Sub-agent dispatch for parallel exploration
-    'spawn_sub_agents',
     // Structured design blueprint output
     'write_design_blueprint',
     // Memory tools for persisting architectural state
@@ -419,10 +417,7 @@ export class AgentRunner {
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
         private promptBuilder: PromptBuilder
-    ) {
-        // Wire up sub-agent dispatch: give the tool executor a reference to this runner
-        this.toolExecutor.agentRunnerRef = this;
-    }
+    ) { }
 
     // ─── Transaction Management ────────────────────────────────────────────────
     public pendingTransactions = new Map<string, Map<string, string>>();
@@ -1941,64 +1936,6 @@ export class AgentRunner {
             return cleaned;
         } catch {
             return null;
-        }
-    }
-
-    // ─── Sub-Agent Dispatch ───────────────────────────────────────────────────
-
-    /**
-     * Run a sub-agent task with a restricted tool set (explore or general mode).
-     * L8 Fix: accepts optional parentAccumulator so sub-agent token costs are
-     * merged into the parent generation's token counter (UI shows full cost).
-     */
-    async runSubAgent(
-        prompt: string,
-        mode: AgentMode,
-        parentOptions?: AgentRunnerOptions,
-        onStep?: (step: AgentStep) => void,
-        parentAccumulator?: TokenUsage,
-        onFileWrite?: (filePath: string, prevContent: string | null) => void,
-        parentContextHint?: string,
-    ): Promise<string> {
-        // P3: sub-agents use slim CWTOOLS.md (only mod info + namespaces)
-        // to avoid bloating narrow-scope sub-agent contexts with full project rules
-        const subSystemPrompt = this.promptBuilder.buildSlimSystemPromptForMode(
-            mode,
-            this.aiService.getConfig().provider
-        );
-
-        // Inject parent context summary so sub-agents don't start from scratch
-        const contextualizedPrompt = parentContextHint
-            ? `## Context from parent agent\n${parentContextHint}\n\n---\n\n## Your task\n${prompt}`
-            : prompt;
-
-        const messages: ChatMessage[] = [
-            { role: 'system', content: subSystemPrompt },
-            { role: 'user', content: contextualizedPrompt },
-        ];
-
-        const subOptions: AgentRunnerOptions = {
-            providerId: parentOptions?.providerId,
-            model: parentOptions?.model,
-            mode,
-            abortSignal: parentOptions?.abortSignal,
-            onStep,
-        };
-
-        const subTokens: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
-
-        try {
-            const result = await this.reasoningLoop(messages, onStep ?? (() => { }), mode, subOptions, subTokens, onFileWrite);
-            // L8 Fix: merge sub-agent token usage into parent accumulator
-            if (parentAccumulator) {
-                parentAccumulator.total += subTokens.total;
-                parentAccumulator.input += subTokens.input;
-                parentAccumulator.output += subTokens.output;
-                parentAccumulator.estimatedCostCny += subTokens.estimatedCostCny;
-            }
-            return result;
-        } catch (e) {
-            return `Sub-agent error: ${e instanceof Error ? e.message : String(e)}`;
         }
     }
 }

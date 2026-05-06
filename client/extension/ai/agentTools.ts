@@ -77,8 +77,6 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     convert_image_to_dds: 60_000,
     convert_audio: 60_000,
     deploy_mod_asset: 30_000,
-    // Sub-agents
-    spawn_sub_agents: 900_000,
     // Git
     git_ops: 30_000,
 };
@@ -105,20 +103,7 @@ export class AgentToolExecutor {
     public onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     /** Agent file write mode from config */
     public fileWriteMode: 'confirm' | 'auto' = 'confirm';
-    /**
-     * Reference to the parent AgentRunner for task sub-agent dispatch.
-     */
-    public agentRunnerRef?: {
-        runSubAgent(
-            prompt: string,
-            mode: import('./types').AgentMode,
-            parentOptions?: import('./agentRunner').AgentRunnerOptions,
-            onStep?: (step: import('./types').AgentStep) => void,
-            parentAccumulator?: import('./types').TokenUsage,
-            onFileWrite?: (filePath: string, prevContent: string | null) => void
-        ): Promise<string>;
-        pendingTransactions: Map<string, Map<string, string>>;
-    };
+
     /** Parent AgentRunner options (used for sub-agent dispatch to inherit provider/model/abort) */
     public parentRunnerOptions?: import('./agentRunner').AgentRunnerOptions;
     /** Parent token accumulator (used for sub-agent dispatch to merge costs) */
@@ -344,8 +329,7 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.searchCode(args as any); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any); break;
-            case 'spawn_sub_agents':
-                result = await this.externalHandler.spawnSubAgents(args as any); break;
+            // spawn_sub_agents — REMOVED: sub-agent system not suitable for current architecture
             // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
             case 'remove_ignored_diagnostic':
                 result = await this.externalHandler.removeIgnoredDiagnostic(args as any); break;

@@ -470,32 +470,6 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    {
-        type: 'function',
-        function: {
-            name: 'spawn_sub_agents',
-            description: 'Dispatch one or more sub-tasks to specialized sub-agents. They run independently and in parallel (up to 5). They return findings as text. Use "build" for editing code directly, "explore" for codebase exploration (read-only), "general" for research (all read + web tools). IMPORTANT: All sub-agents now have a fixed 15-minute (900000ms) timeout and MUST complete before the main agent can continue.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    tasks: {
-                        type: 'array',
-                        description: 'List of sub-tasks to run in parallel',
-                        items: {
-                            type: 'object',
-                            properties: {
-                                description: { type: 'string', description: 'Short label for this sub-task (shown in UI)' },
-                                prompt: { type: 'string', description: 'Detailed prompt for the sub-agent. Include all context it needs.' },
-                                subagent_type: { type: 'string', enum: ['build', 'explore', 'general'], description: 'Sub-agent mode. Default: "build"' },
-                            },
-                            required: ['description', 'prompt'],
-                        },
-                    },
-                },
-                required: ['tasks'],
-            },
-        },
-    },
     // ─── CWTools Deep API tools ──────────────────────────────────────
     {
         type: 'function',

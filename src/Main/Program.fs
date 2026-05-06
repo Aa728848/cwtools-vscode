@@ -883,10 +883,46 @@ type Server(client: ILanguageClient) =
             match gameConfig with
             | None -> ()
             | Some (cacheFile, serializeFn, vanillaPathOpt, promptName) ->
-                let doesCacheExist = File.Exists(gameCachePath + cacheFile + ".cwb")
+                let cacheFilePath = gameCachePath + cacheFile + ".cwb"
+                let doesCacheExist = File.Exists(cacheFilePath)
 
+                let mutable isOutdated = false
                 if doesCacheExist && not forceCreate then
-                    logInfo (sprintf "Cache exists at %s" (gameCachePath + ".cwb"))
+                    try
+                        match vanillaPathOpt with
+                        | Some vp ->
+                            let cacheTime = File.GetLastWriteTimeUtc(cacheFilePath)
+                            let parent = 
+                                let p = System.IO.Directory.GetParent(vp)
+                                if p <> null then p.FullName else vp
+                            let checkPaths = [
+                                vp
+                                parent
+                                System.IO.Path.Combine(vp, "common")
+                                System.IO.Path.Combine(vp, "events")
+                                System.IO.Path.Combine(vp, "checksum_manifest.txt")
+                                System.IO.Path.Combine(parent, "checksum_manifest.txt")
+                                System.IO.Path.Combine(vp, "launcher-settings.json")
+                                System.IO.Path.Combine(parent, "launcher-settings.json")
+                            ]
+                            let latestTime =
+                                checkPaths
+                                |> List.choose (fun p ->
+                                    if File.Exists(p) then Some (File.GetLastWriteTimeUtc(p))
+                                    elif System.IO.Directory.Exists(p) then Some (System.IO.Directory.GetLastWriteTimeUtc(p))
+                                    else None)
+                                |> function
+                                    | [] -> System.DateTime.MinValue
+                                    | times -> times |> List.max
+                            if latestTime > cacheTime then
+                                isOutdated <- true
+                                logInfo (sprintf "Vanilla cache %s is outdated. Latest vanilla update: %O, Cache time: %O" cacheFilePath latestTime cacheTime)
+                        | None -> ()
+                    with e -> 
+                        logInfo (sprintf "Failed to check cache outdated status: %A" e)
+
+                if doesCacheExist && not forceCreate && not isOutdated then
+                    logInfo (sprintf "Cache exists and is up-to-date at %s" cacheFilePath)
                 else
                     match vanillaPathOpt with
                     | Some vp ->

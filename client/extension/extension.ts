@@ -544,7 +544,57 @@ export async function activate(context: ExtensionContext) {
 		
 		async function getBestRepoPath(originalUrl: string): Promise<string> {
 			const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-			const isCN = timeZone === 'Asia/Shanghai' || timeZone === 'Asia/Chongqing' || timeZone === 'Asia/Urumqi';
+			let isCN = timeZone === 'Asia/Shanghai' || timeZone === 'Asia/Chongqing' || timeZone === 'Asia/Urumqi';
+
+			const customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim();
+			if (customProxy) {
+				if (customProxy.toLowerCase() === 'none' || customProxy.toLowerCase() === 'direct') {
+					return originalUrl;
+				}
+				return customProxy.endsWith('/') ? customProxy + originalUrl : customProxy + '/' + originalUrl;
+			}
+			
+			// If the user has a local proxy environment configured, assume direct connection works
+			if (process.env.http_proxy || process.env.https_proxy || process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
+				return originalUrl;
+			}
+
+			// If timezone is CN, verify via IP API in case user is using a VPN/Proxy
+			if (isCN) {
+				try {
+					const isOutsideCN = await new Promise<boolean>((resolve) => {
+						const req = require('https').request('https://api.myip.com', { method: 'GET', timeout: 1500 }, (res: any) => {
+							let data = '';
+							res.on('data', (chunk: any) => data += chunk);
+							res.on('end', () => {
+								try {
+									const json = JSON.parse(data);
+									if (json && json.cc && json.cc !== 'CN') {
+										resolve(true);
+									} else {
+										resolve(false);
+									}
+								} catch {
+									resolve(false);
+								}
+							});
+						});
+						req.on('error', () => resolve(false));
+						req.on('timeout', () => { req.destroy(); resolve(false); });
+						req.end();
+					});
+					if (isOutsideCN) {
+						isCN = false;
+						ErrorReporter.debug('Extension', 'Detected foreign IP via VPN/Proxy, routing to GitHub.');
+					}
+				} catch (e) {
+					// Ignore API failures
+				}
+			}
+
+			if (!isCN) {
+				return originalUrl;
+			}
 
 			if (isCN && originalUrl === stellarisRemote) {
 				const giteeUrl = 'https://gitee.com/cChen2422/cwtools-stellaris-config';
@@ -561,23 +611,6 @@ export async function activate(context: ExtensionContext) {
 				} catch (e) {
 					// Fallback to github logic below if Gitee is completely down
 				}
-			}
-
-			const customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim();
-			if (customProxy) {
-				if (customProxy.toLowerCase() === 'none' || customProxy.toLowerCase() === 'direct') {
-					return originalUrl;
-				}
-				return customProxy.endsWith('/') ? customProxy + originalUrl : customProxy + '/' + originalUrl;
-			}
-			
-			// If the user has a local proxy environment configured, assume direct connection works
-			if (process.env.http_proxy || process.env.https_proxy || process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
-				return originalUrl;
-			}
-
-			if (!isCN) {
-				return originalUrl;
 			}
 
 			return new Promise(resolve => {

@@ -218,7 +218,7 @@ export class ExternalToolHandler {
 
     // ─── runCommand ──────────────────────────────────────────────────────────
 
-    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number }): Promise<{
+    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; requestEscalation?: boolean }): Promise<{
         stdout: string;
         stderr: string;
         exitCode: number;
@@ -254,18 +254,24 @@ export class ExternalToolHandler {
         const isSafePrefix = SAFE_COMMAND_PREFIXES.some(p => cmdLower.startsWith(p));
 
         const bypassSandbox = vs.workspace.getConfiguration('cwtools.ai.developer').get<boolean>('disableSecuritySandbox') === true;
+        let escalationReason = '';
 
         if (!bypassSandbox) {
+            let triggeredBlock: RegExp | null = null;
             for (const pat of ALWAYS_BLOCKED) {
-                if (pat.test(args.command)) {
-                    return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${pat.source}). Please use built-in tools instead of generic shell pipes/chains.`, exitCode: 1 };
+                if (pat.test(args.command)) { triggeredBlock = pat; break; }
+            }
+            if (!triggeredBlock && !isSafePrefix) {
+                for (const pat of PIPE_REDIRECT_BLOCKED) {
+                    if (pat.test(args.command)) { triggeredBlock = pat; break; }
                 }
             }
-            if (!isSafePrefix) {
-                for (const pat of PIPE_REDIRECT_BLOCKED) {
-                    if (pat.test(args.command)) {
-                        return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${pat.source}). Please use built-in tools instead of generic shell pipes/chains.`, exitCode: 1 };
-                    }
+            
+            if (triggeredBlock) {
+                if (args.requestEscalation) {
+                    escalationReason = `触发沙盒规则: ${triggeredBlock.source}`;
+                } else {
+                    return { stdout: '', stderr: `Blocked: Command execution prohibited due to matching safety pattern (${triggeredBlock.source}). If you are ABSOLUTELY sure this is required, you can retry with "requestEscalation": true to ask the user for a one-time privilege override.`, exitCode: 1 };
                 }
             }
         }
@@ -298,7 +304,11 @@ export class ExternalToolHandler {
             }
 
             if (!isWithinWorkspace && !bypassSandbox) {
-                return { stdout: '', stderr: `Blocked: Working directory must be within the workspace root`, exitCode: 1 };
+                if (args.requestEscalation) {
+                    escalationReason = '工作目录越界访问';
+                } else {
+                    return { stdout: '', stderr: `Blocked: Working directory must be within the workspace root. If you are ABSOLUTELY sure this is required, you can retry with "requestEscalation": true to ask the user for a one-time privilege override.`, exitCode: 1 };
+                }
             }
         } catch (e) {
             return { stdout: '', stderr: `Blocked: Invalid working directory`, exitCode: 1 };
@@ -308,10 +318,14 @@ export class ExternalToolHandler {
 
         if (requiresPermission && this.ctx.onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const description = escalationReason 
+                ? `⚠️ AI 申请提权越过安全沙盒执行高危操作 (${escalationReason})：${args.command}`
+                : `AI 请求执行终端命令：${args.command}`;
+            
             const allowed = await this.ctx.onPermissionRequest(
                 permId,
                 'run_command',
-                `AI 请求执行终端命令：${args.command}`,
+                description,
                 args.command
             );
             if (!allowed) {

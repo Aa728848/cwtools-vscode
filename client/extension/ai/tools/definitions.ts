@@ -391,6 +391,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     command: { type: 'string', description: 'The shell command to execute' },
                     cwd: { type: 'string', description: 'Working directory (defaults to workspace root)' },
                     timeoutMs: { type: 'number', description: 'Timeout in milliseconds (default 15000, max 60000)' },
+                    requestEscalation: { type: 'boolean', description: 'Set to true ONLY if you previously attempted this command and it was blocked by the security sandbox. This triggers a high-danger prompt asking the user for a one-time privilege override.' },
                 },
                 required: ['command'],
             },

@@ -420,6 +420,7 @@ export type ToolArgs =
     | ReadFileArgs
     | WriteFileArgs
     | EditFileArgs
+    | ReplaceLinesArgs
     | ListDirectoryArgs
     | SpawnSubAgentsArgs
     | CodesearchArgs
@@ -443,6 +444,7 @@ export type ToolResult =
     | ReadFileResult
     | WriteFileResult
     | EditFileResult
+    | ReplaceLinesResult
     | ListDirectoryResult
     | SpawnSubAgentsResult
     | AnalyzeDiagnosticErrorResult
@@ -475,6 +477,7 @@ export type AgentToolName =
     | 'run_command'
     | 'apply_patch'
     | 'multiedit'
+    | 'replace_lines'
     | 'ast_mutate'
     | 'spawn_sub_agents'
     | 'analyze_diagnostic_error'
@@ -509,6 +512,8 @@ export type AgentToolName =
     | 'write_localisation'
     // ── Design tools ──
     | 'write_design_blueprint'
+    // ── Git tools ──
+    | 'git_ops'
     // ── MCP tools ──
     | 'mcp_call';
 
@@ -554,6 +559,29 @@ export interface EditFileArgs {
 }
 
 export interface EditFileResult {
+    success: boolean;
+    message: string;
+    /** Unified diff of the change */
+    diff?: string;
+    /** LSP diagnostics detected after the edit */
+    diagnostics?: ValidationError[];
+    /** If agentFileWriteMode === 'confirm', write was queued, not yet applied */
+    pendingDiff?: string;
+}
+
+export interface ReplaceLinesArgs {
+    /** Absolute path to the file to modify */
+    filePath: string;
+    /** Start line number (1-based, inclusive) */
+    startLine: number;
+    /** End line number (1-based, inclusive) */
+    endLine: number;
+    /** The replacement content for the specified line range */
+    newContent: string;
+    encoding?: 'utf8' | 'utf8bom';
+}
+
+export interface ReplaceLinesResult {
     success: boolean;
     message: string;
     /** Unified diff of the change */

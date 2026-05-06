@@ -1,4 +1,6 @@
 {
+  "name": "cwtools-vscode",
+  "version": "1.9.7",
   "scripts": {
     "compile": "tsc -p ./tsconfig.extension.json && rollup -c",
     "test": "npm run compile && vscode-test -c ./.vscode-test.js",

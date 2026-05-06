@@ -593,20 +593,15 @@ export class ExternalToolHandler {
                             parentContextHint
                         );
 
-                        let r: string;
-                        if (task.deadlineMs && task.deadlineMs > 0) {
-                            // Enforce minimum deadline: explore/general need at least 90s for research
-                            const minDeadline = (mode === 'explore' || mode === 'general') ? 90_000 : 60_000;
-                            const effectiveDeadline = Math.max(task.deadlineMs, minDeadline);
-                            r = await Promise.race([
-                                runPromise,
-                                new Promise<string>((_, reject) =>
-                                    setTimeout(() => reject(new Error(`TIMEOUT:${effectiveDeadline}`)), effectiveDeadline)
-                                ),
-                            ]);
-                        } else {
-                            r = await runPromise;
-                        }
+                        // Enforce a strict 15-minute (900,000ms) timeout for ALL sub-agents.
+                        // This guarantees sub-agents must complete before continuing, removing early truncation.
+                        const effectiveDeadline = 900_000;
+                        const r: string = await Promise.race([
+                            runPromise,
+                            new Promise<string>((_, reject) =>
+                                setTimeout(() => reject(new Error(`TIMEOUT:${effectiveDeadline}`)), effectiveDeadline)
+                            ),
+                        ]);
 
                         this.ctx.onStep?.({
                             type: 'subtask_complete',

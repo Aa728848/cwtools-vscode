@@ -58,6 +58,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     write_file: 30_000,
     edit_file: 30_000,
     multiedit: 30_000,
+    replace_lines: 30_000,
     apply_patch: 30_000,
     list_directory: 30_000,
     glob_files: 30_000,
@@ -77,7 +78,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     convert_audio: 60_000,
     deploy_mod_asset: 30_000,
     // Sub-agents
-    spawn_sub_agents: 600_000,
+    spawn_sub_agents: 900_000,
+    // Git
+    git_ops: 30_000,
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 
@@ -325,6 +328,10 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.writeLocalisation(args as any); break;
             case 'write_design_blueprint':
                 result = await this.fileHandler.writeDesignBlueprint(args as any); break;
+            case 'git_ops':
+                result = await this.fileHandler.gitOps(args as any); break;
+            case 'replace_lines':
+                result = await this.fileHandler.replaceLines(args as any); break;
 
             // ── External / agent tools ────────────────────────────────────
             case 'web_fetch':

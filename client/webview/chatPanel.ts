@@ -1449,6 +1449,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     const sum = document.createElement('summary');
                     collapseEl.appendChild(sum);
                     liveToolTimeline.appendChild(collapseEl);
+                    // Track user manual close — respect their intent
+                    collapseEl.addEventListener('toggle', () => {
+                        if (!(collapseEl as HTMLDetailsElement).open) {
+                            (collapseEl as HTMLElement).dataset.userClosed = '1';
+                        } else {
+                            delete (collapseEl as HTMLElement).dataset.userClosed;
+                        }
+                    });
                 }
                 // Move the 3rd+ direct pairs into the collapse
                 const toMove = Array.from(liveToolTimeline.querySelectorAll(':scope > .tool-pair')).slice(2);
@@ -1457,7 +1465,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 collapseEl.appendChild(pairDiv);
                 const insideCount = collapseEl.querySelectorAll('.tool-pair').length;
                 (collapseEl.querySelector('summary') as HTMLElement).textContent = `+${insideCount} more tool calls`;
-                collapseEl.open = true; // keep open during streaming so user can see progress
+                // Only auto-open if the user hasn't manually closed it
+                if (!(collapseEl as HTMLElement).dataset.userClosed) {
+                    collapseEl.open = true;
+                }
             } else {
                 liveToolTimeline.appendChild(pairDiv);
             }

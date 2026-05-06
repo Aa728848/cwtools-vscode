@@ -38,7 +38,7 @@ import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
 
 // Base fallback tool iterations (dynamically scaled in reasoningLoop)
-const MAX_TOOL_ITERATIONS_BASE = 50;
+const MAX_TOOL_ITERATIONS_BASE = 150;
 // Doom-loop detection: two-phase approach.
 // Phase 1 — signature-pair tracking: (prevSig, currSig) pairs. Same pair ≥ PAIR_THRESHOLD triggers Phase 2.
 // Phase 2 — normalized result hash: compare hashes of adjacent same-name tool results.
@@ -343,6 +343,8 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
     'write_design_blueprint',
     // Memory tools for persisting architectural state
     'set_memory', 'get_memory', 'search_memory',
+    // Git operations for investigation
+    'git_ops',
 ];
 
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
@@ -355,6 +357,8 @@ const EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'query_definition', 'query_definition_by_name', 'codesearch',
+    // Git operations for investigation
+    'git_ops',
 ];
 
 /** General mode: all tools EXCEPT todo_write (research without task tracking) */
@@ -369,28 +373,32 @@ const REVIEW_MODE_TOOLS: AgentToolName[] = [
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'web_fetch', 'search_web', 'glob_files', 'codesearch',
+    // Git operations for investigation
+    'git_ops',
 ];
 
 /** Loc Translator mode: read localisation files, write translated output */
 const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
-    'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch',
+    'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch', 'replace_lines',
     'list_directory', 'glob_files', 'search_mod_files', 'workspace_symbols',
     'document_symbols', 'get_file_context', 'get_diagnostics',
     'todo_write', 'web_fetch', 'search_web', 'codesearch',
+    'write_localisation', 'git_ops',
 ];
 
 /** Loc Writer mode: create new localisation entries from scratch */
 const LOC_WRITER_TOOLS: AgentToolName[] = [
-    'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch',
+    'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch', 'replace_lines',
     'list_directory', 'glob_files', 'search_mod_files', 'workspace_symbols',
     'document_symbols', 'get_file_context', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references',
     'todo_write', 'web_fetch', 'search_web', 'codesearch',
+    'write_localisation', 'git_ops',
 ];
 
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation']);
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation', 'git_ops', 'replace_lines']);
 const READ_ONLY_TOOLS = new Set<string>([
     'read_file', 'list_directory', 'search_mod_files',
     'get_file_context', 'document_symbols', 'workspace_symbols',
@@ -1238,16 +1246,27 @@ export class AgentRunner {
             }
 
             // Accumulate token usage from this API call
-            if (tokenAccumulator && response.usage) {
-                const pricing = getModelPricing(response.model ?? options?.model ?? '');
-                const inputCost = (response.usage.prompt_tokens / 1_000_000) * pricing[0];
-                const outputCost = (response.usage.completion_tokens / 1_000_000) * pricing[1];
-                tokenAccumulator.input += response.usage.prompt_tokens;
-                tokenAccumulator.output += response.usage.completion_tokens;
-                tokenAccumulator.total += response.usage.total_tokens;
-                tokenAccumulator.estimatedCostCny += inputCost + outputCost;
-                tokenAccumulator.contextWindowTokens = response.usage.prompt_tokens;
+            if (tokenAccumulator) {
+                let promptTokens = response.usage?.prompt_tokens;
+                let completionTokens = response.usage?.completion_tokens;
 
+                // Fallback to estimation if API did not return usage stats (e.g. streaming without stream_options)
+                if (promptTokens === undefined || completionTokens === undefined) {
+                    promptTokens = promptTokens ?? messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+                    const assistantContentStr = response.choices[0]?.message ? contentToString(response.choices[0].message.content) : '';
+                    completionTokens = completionTokens ?? estimateTokenCount(assistantContentStr);
+                }
+                const totalTokens = response.usage?.total_tokens ?? (promptTokens + completionTokens);
+
+                const pricing = getModelPricing(response.model ?? options?.model ?? '');
+                const inputCost = (promptTokens / 1_000_000) * pricing[0];
+                const outputCost = (completionTokens / 1_000_000) * pricing[1];
+                
+                tokenAccumulator.input += promptTokens;
+                tokenAccumulator.output += completionTokens;
+                tokenAccumulator.total += totalTokens;
+                tokenAccumulator.estimatedCostCny += inputCost + outputCost;
+                tokenAccumulator.contextWindowTokens = promptTokens;
             }
 
             const choice = response.choices[0];
@@ -1502,7 +1521,7 @@ export class AgentRunner {
                                     if (content[c] === '}') closeCount++;
                                 }
                                 if (openCount !== closeCount) {
-                                    toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). Please fix your code, use analyze_diagnostic_error to reflect, and retry.` };
+                                    toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). This almost ALWAYS means your code output was truncated due to API length limits. DO NOT retry write_file with the same massive file! Instead, split your task using todo_write, or use edit_file / multiedit to apply the changes incrementally.` };
                                 } else {
                                     const args = (confirmedWrittenFiles.has(filePath)) ? { ...toolArgs, _autoApply: true } : toolArgs;
                                     toolResults[i] = await this.toolExecutor.execute(toolName, args);

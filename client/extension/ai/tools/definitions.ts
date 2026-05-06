@@ -474,7 +474,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'spawn_sub_agents',
-            description: 'Dispatch one or more sub-tasks to specialized sub-agents. They run independently and in parallel (up to 5). They return findings as text. Use "build" for editing code directly, "explore" for codebase exploration (read-only), "general" for research (all read + web tools). IMPORTANT: For explore/general sub-agents doing archetype research, set deadlineMs to at least 120000 (120s). Complex entity analysis (archaeological sites, situation systems, event chains) may need 180000-300000ms. The default (no deadline) means no timeout — prefer explicit deadlines to avoid runaway tasks.',
+            description: 'Dispatch one or more sub-tasks to specialized sub-agents. They run independently and in parallel (up to 5). They return findings as text. Use "build" for editing code directly, "explore" for codebase exploration (read-only), "general" for research (all read + web tools). IMPORTANT: All sub-agents now have a fixed 15-minute (900000ms) timeout and MUST complete before the main agent can continue.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -487,7 +487,6 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                                 description: { type: 'string', description: 'Short label for this sub-task (shown in UI)' },
                                 prompt: { type: 'string', description: 'Detailed prompt for the sub-agent. Include all context it needs.' },
                                 subagent_type: { type: 'string', enum: ['build', 'explore', 'general'], description: 'Sub-agent mode. Default: "build"' },
-                                deadlineMs: { type: 'number', description: 'Max wall-clock time in ms. Recommended: explore/general tasks 120000-300000ms, build tasks 180000-600000ms. Do NOT use 30000 for research tasks — they will timeout.' },
                             },
                             required: ['description', 'prompt'],
                         },
@@ -848,7 +847,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_design_blueprint',
-            description: 'Write a structured design blueprint for a game entity pipeline to the Agent Workspace. You MUST use this tool in Plan Mode BEFORE writing any implementation plan when the task involves: (1) event chains (2+ connected events), (2) archaeological sites, special projects, relics, situations, or anomalies, (3) any task producing 2+ game entity files that reference each other. The blueprint documents entity topology, scope chains, ID allocations, branching logic, media asset requirements, and file dependency order. It is saved as design_blueprint.md and displayed to the user for approval before Build phase begins.',
+            description: 'Write a structured design blueprint for a game entity pipeline to the Agent Workspace. You MUST use this tool in Plan Mode BEFORE writing any implementation plan when the task involves: (1) event chains (2+ connected events), (2) archaeological sites, special projects, relics, situations, or anomalies, (3) any task producing 2+ game entity files that reference each other. The blueprint documents entity topology, scope chains, ID allocations, branching logic, media asset requirements, and file dependency order. It is saved as design_blueprint.md and displayed to the user for approval before Build phase begins. NOTE: When researching entities for this blueprint, you MUST combine and cross-reference Vanilla AST folders, the CWT code rule base, and mature instance templates from the project.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -863,7 +862,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                                 type: { type: 'string', description: 'Entity type (must match CWT type system). Common types: on_action, anomaly_category, archaeological_site_type, special_project, event_chain, situation_type, relic, artifact_action, technology, building, decision, edict, fleet_event, planet_event, country_event, ship_event, scripted_effect, scripted_trigger, static_modifier, deposit, solar_system_initializer' },
                                 file: { type: 'string', description: 'Target file path relative to workspace root' },
                                 triggeredBy: { type: 'string', description: 'What triggers this entity (e.g. "MTTH", "on_colonized", "stage 2 completion of d_ancient_databank")' },
-                                fires: { type: 'array', items: { type: 'string' }, description: 'IDs of downstream entities this one triggers' },
+                                fires: { type: 'array', items: { type: 'string' }, description: 'IDs of downstream entities this one triggers, with scope transition notation. Format each entry as \"targetId via scope_path\" (e.g. \"ns.100 via owner = { country_event }\", \"MY_PROJECT via fleet event_target\"). Plain IDs are accepted but scope paths are STRONGLY recommended to catch scope chain errors early.' },
                                 scopeContext: { type: 'string', description: 'Scope context in CWT format: "this=X root=X from=Y fromfrom=Z". MUST be verified against CWT .cwt rules. Example for arc site stage: "this=fleet root=fleet from=archaeological_site". For special_project on_success: depends on event_scope field.' },
                             },
                             required: ['id', 'type', 'file'],
@@ -890,6 +889,41 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },
                 required: ['title', 'entities', 'dependencyOrder'],
+            },
+        },
+    },
+    // ── Git Operations tool ──────────────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'git_ops',
+            description: 'Execute safe git operations in the workspace. Use this to inspect changes or revert files to their last committed state when edits have gone wrong. Only available when the workspace has a git repository. Actions: "status" (see modified files), "diff" (see changes for a file), "checkout" (revert a file to HEAD — destructive, discards uncommitted changes to that file).',
+            parameters: {
+                type: 'object',
+                properties: {
+                    action: { type: 'string', enum: ['status', 'diff', 'checkout'], description: 'Git operation: "status" = list modified files, "diff" = show changes for a specific file, "checkout" = revert a file to HEAD (discard all uncommitted changes)' },
+                    file: { type: 'string', description: 'File path (required for "diff" and "checkout" actions). Relative to workspace root or absolute.' },
+                },
+                required: ['action'],
+            },
+        },
+    },
+    // ── Line-Range Replacement tool ──────────────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'replace_lines',
+            description: 'Replace a range of lines in a file with new content. Use this when edit_file fails repeatedly (e.g., "Content not found") because the file has been modified since you last read it. Requires exact line numbers from a RECENT read_file call. The tool verifies that the line range content is reasonably similar to what you expect before replacing. This is safer than write_file for targeted repairs and does not require string matching.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filePath: { type: 'string', description: 'Absolute path to the file to modify' },
+                    startLine: { type: 'number', description: 'Start line number (1-based, inclusive)' },
+                    endLine: { type: 'number', description: 'End line number (1-based, inclusive). Must be >= startLine.' },
+                    newContent: { type: 'string', description: 'The replacement content for the specified line range' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Omit to auto-detect.' },
+                },
+                required: ['filePath', 'startLine', 'endLine', 'newContent'],
             },
         },
     },

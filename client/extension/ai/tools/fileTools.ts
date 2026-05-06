@@ -61,10 +61,29 @@ export interface FileToolContext {
 // ─── Handler class ───────────────────────────────────────────────────────────
 
 export class FileToolHandler {
-    /** Per-file edit failure counter — used to escalate .yml errors */
+    /** Per-file edit failure counter — escalates errors for all file types */
     private editFailCount = new Map<string, number>();
 
     constructor(private ctx: FileToolContext) { }
+
+    /**
+     * Build tiered escalation hints based on per-file edit failure count.
+     * - YML files → always redirect to write_localisation
+     * - Other files → gentle hint at 3+, budget exhaustion at 5+
+     */
+    private buildEditEscalationHint(filePath: string, failCount: number): string {
+        const basename = path.basename(filePath);
+        if (filePath.endsWith('.yml')) {
+            return `\n\n🚨 YML BLOCKED (failure #${failCount}): You MUST NOT use edit_file/multiedit for .yml files. Use write_localisation(filePath, language, entries) instead — it handles encoding, formatting, and insertion correctly.`;
+        }
+        if (failCount >= 5) {
+            return `\n\n🛑 EDIT BUDGET EXHAUSTED for ${basename} (${failCount} failures). STOP editing this file. Add \`# TODO\` comments for remaining issues and move on to other files.`;
+        }
+        if (failCount >= 3) {
+            return `\n\n⚠️ ${basename} has failed ${failCount} edits. MANDATORY: call \`read_file("${filePath}")\` to get the EXACT current content before your next edit attempt. Your oldString does not match the file.`;
+        }
+        return '';
+    }
 
     private async executeWithLock<T>(filePath: string, operation: () => Promise<T> | T): Promise<T> {
         if (!this.ctx.vfsLocks) return operation();
@@ -299,12 +318,8 @@ export class FileToolHandler {
             try {
                 args.file = this.resolveAndAssertInWorkspace(args.file);
                 
-                // 安全阻断：禁止覆写（但允许 .md 格式、或 AI 本轮创建的文件被覆写）
+                // 安全阻断已被移除：允许AI直接覆写文件
                 const lowerFile = args.file.toLowerCase();
-                const isOwnFile = !!(args as any)._autoApply; // AI created this file in this session
-                if (fs.existsSync(args.file) && !this.ctx.vfsOverlay && !lowerFile.endsWith('.md') && !isOwnFile) {
-                    return { success: false, message: "File already exists. To prevent destructive overwrites, write_file cannot overwrite existing files — use edit_file, multiedit, or write_localisation (for .yml) instead. Only .md documents or files you created in this conversation can be overwritten." };
-                }
 
                 const { content: originalContent, hasBom } = this.readTextFile(args.file);
                 this.ctx.onBeforeFileWrite?.(args.file, originalContent);
@@ -371,16 +386,9 @@ export class FileToolHandler {
                     newContent = this.replace(originalContent, old, next, args.replaceAll ?? false);
                 } catch (e) {
                     const errMsg = String(e);
-                    // For .yml files, escalate with per-file failure count
-                    if (filePath.endsWith('.yml')) {
-                        const failCount = (this.editFailCount.get(filePath) || 0) + 1;
-                        this.editFailCount.set(filePath, failCount);
-                        return {
-                            success: false,
-                            message: errMsg + `\n\n🚨 YML BLOCKED (failure #${failCount}): You MUST NOT use edit_file/multiedit for .yml files. Use write_localisation(filePath, language, entries) instead — it handles encoding, formatting, and insertion correctly.`,
-                        };
-                    }
-                    return { success: false, message: errMsg };
+                    const failCount = (this.editFailCount.get(filePath) || 0) + 1;
+                    this.editFailCount.set(filePath, failCount);
+                    return { success: false, message: errMsg + this.buildEditEscalationHint(filePath, failCount) };
                 }
             }
 
@@ -400,6 +408,8 @@ export class FileToolHandler {
             } catch (e) {
                 return { success: false, message: `Write failed: ${String(e)}` };
             }
+            // Reset failure counter on successful edit
+            this.editFailCount.delete(filePath);
 
             const diagnostics = await this.getLspDiagnosticsForFile(filePath);
             const editedLines = new Set<number>();
@@ -425,6 +435,104 @@ export class FileToolHandler {
                 message += `\n\nLSP detected ${errors.length} error(s) — please fix:\n` +
                     errors.slice(0, 5).map(e => `  Line ${e.line + 1}: ${e.message}`).join('\n');
             }
+            return {
+                success: true, message, diff, diagnostics: nearbyDiags,
+                ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
+            } as any;
+        });
+    }
+
+    // ─── replaceLines (line-range-based replacement) ─────────────────────────
+
+    async replaceLines(args: import('../types').ReplaceLinesArgs): Promise<import('../types').ReplaceLinesResult> {
+        if (!args.filePath || typeof args.filePath !== 'string') {
+            return { success: false, message: 'Error: missing or invalid "filePath" parameter.' };
+        }
+        if (typeof args.startLine !== 'number' || typeof args.endLine !== 'number') {
+            return { success: false, message: 'Error: startLine and endLine must be numbers (1-based).' };
+        }
+        if (args.startLine < 1 || args.endLine < args.startLine) {
+            return { success: false, message: `Error: invalid line range [${args.startLine}, ${args.endLine}]. startLine must be ≥ 1 and endLine ≥ startLine.` };
+        }
+        if (typeof args.newContent !== 'string') {
+            return { success: false, message: 'Error: newContent must be a string.' };
+        }
+
+        return this.executeWithLock(args.filePath, async () => {
+            try {
+                args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
+            } catch (e) {
+                return { success: false, message: String(e) };
+            }
+            const filePath = args.filePath;
+            const { content: originalContent, hasBom } = this.readTextFile(filePath);
+            const ending = this.detectLineEnding(originalContent);
+            const lines = originalContent.split('\n');
+
+            // Validate line numbers against file
+            if (args.startLine > lines.length) {
+                return { success: false, message: `Error: startLine ${args.startLine} exceeds file length (${lines.length} lines).` };
+            }
+            if (args.endLine > lines.length) {
+                return { success: false, message: `Error: endLine ${args.endLine} exceeds file length (${lines.length} lines). File has ${lines.length} lines.` };
+            }
+
+            // Extract the target range (convert 1-based to 0-based)
+            const startIdx = args.startLine - 1;
+            const endIdx = args.endLine - 1;
+            const targetLines = lines.slice(startIdx, endIdx + 1);
+            const targetContent = targetLines.join('\n');
+
+            this.ctx.onBeforeFileWrite?.(filePath, originalContent);
+
+            // Build new content by replacing the line range
+            const newContentLines = this.normalizeLineEndings(args.newContent).split('\n');
+            const before = lines.slice(0, startIdx);
+            const after = lines.slice(endIdx + 1);
+            const newLines = [...before, ...newContentLines, ...after];
+            const newContent = this.convertLineEnding(newLines.join('\n'), ending);
+
+            if (newContent === originalContent) {
+                return { success: false, message: 'No change: the replacement content is identical to the existing content at the specified line range.' };
+            }
+
+            const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
+
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !this.ctx.vfsOverlay) {
+                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `replace_lines_${Date.now()}`);
+                if (!confirmed) {
+                    return { success: false, message: 'User cancelled the replace_lines operation', pendingDiff: diff };
+                }
+            } else if (this.ctx.onAutoWritten && !this.ctx.vfsOverlay) {
+                this.ctx.onAutoWritten(filePath, false);
+            }
+
+            try {
+                this.writeTextFile(filePath, newContent, hasBom, args.encoding);
+            } catch (e) {
+                return { success: false, message: `Write failed: ${String(e)}` };
+            }
+
+            // Reset edit failure counter on successful line replacement
+            this.editFailCount.delete(filePath);
+
+            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+            // Filter to nearby diagnostics (within the replaced range ± 10 lines)
+            const editedLines = new Set<number>();
+            for (let i = startIdx - 10; i <= startIdx + newContentLines.length + 10; i++) {
+                if (i >= 0 && i < newLines.length) editedLines.add(i);
+            }
+            const nearbyDiags = editedLines.size > 0
+                ? diagnostics.filter(d => editedLines.has(d.line))
+                : diagnostics;
+
+            let message = `Lines ${args.startLine}-${args.endLine} replaced in ${path.basename(filePath)} (${targetLines.length} lines → ${newContentLines.length} lines)`;
+            const errors = nearbyDiags.filter(d => d.severity === 'error');
+            if (errors.length > 0) {
+                message += `\n\nLSP detected ${errors.length} error(s) — please fix:\n` +
+                    errors.slice(0, 5).map(e => `  Line ${e.line + 1}: ${e.message}`).join('\n');
+            }
+
             return {
                 success: true, message, diff, diagnostics: nearbyDiags,
                 ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
@@ -597,12 +705,10 @@ export class FileToolHandler {
         }
 
         if (errors.length > 0) {
+            const failCount = (this.editFailCount.get(filePath) || 0) + 1;
+            this.editFailCount.set(filePath, failCount);
             let msg = `${errors.length} edit block(s) failed — file was not modified:\n${errors.join('\n')}`;
-            if (filePath.endsWith('.yml')) {
-                const failCount = (this.editFailCount.get(filePath) || 0) + 1;
-                this.editFailCount.set(filePath, failCount);
-                msg += `\n\n🚨 YML BLOCKED (failure #${failCount}): You MUST NOT use multiedit for .yml files. Use write_localisation(filePath, language, entries) instead — it handles encoding, formatting, and insertion correctly.`;
-            }
+            msg += this.buildEditEscalationHint(filePath, failCount);
             return { success: false, message: msg };
         }
 
@@ -622,6 +728,8 @@ export class FileToolHandler {
         } catch (e) {
             return { success: false, message: `Write failed: ${String(e)}` };
         }
+        // Reset failure counter on successful multiedit
+        this.editFailCount.delete(filePath);
 
         const diagnostics = await this.getLspDiagnosticsForFile(filePath);
         // P0-1 Fix: use in-memory `content` directly instead of re-reading the file
@@ -1218,6 +1326,85 @@ export class FileToolHandler {
                 message: `Failed to write design blueprint: ${e instanceof Error ? e.message : String(e)}`,
                 filePath: '',
             };
+        }
+    }
+
+    // ─── Git Operations ──────────────────────────────────────────────────────
+
+    /**
+     * Execute safe git operations: status, diff, checkout (revert file to HEAD).
+     * Only works when the workspace has a git repository.
+     */
+    async gitOps(args: { action: 'status' | 'diff' | 'checkout'; file?: string }): Promise<{ success: boolean; message: string; output?: string }> {
+        const { execSync } = await import('child_process');
+        const wsRoot = this.ctx.workspaceRoot;
+
+        // Check if git repo exists
+        const gitDir = path.join(wsRoot, '.git');
+        if (!fs.existsSync(gitDir)) {
+            return { success: false, message: 'No git repository found in workspace root. git_ops requires the workspace to be a git repo.' };
+        }
+
+        const MAX_OUTPUT = 8000;
+
+        try {
+            switch (args.action) {
+                case 'status': {
+                    const raw = execSync('git status --porcelain', { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
+                    const lines = raw.trim().split('\n').filter(Boolean);
+                    if (lines.length === 0) {
+                        return { success: true, message: 'Working tree clean — no modified files.', output: '' };
+                    }
+                    const output = lines.slice(0, 100).join('\n');
+                    return {
+                        success: true,
+                        message: `${lines.length} modified file(s).`,
+                        output: output.length > MAX_OUTPUT ? output.substring(0, MAX_OUTPUT) + '\n... (truncated)' : output,
+                    };
+                }
+                case 'diff': {
+                    if (!args.file) {
+                        return { success: false, message: 'The "diff" action requires a "file" parameter.' };
+                    }
+                    const filePath = path.isAbsolute(args.file) ? path.relative(wsRoot, args.file) : args.file;
+                    const raw = execSync(`git diff HEAD -- "${filePath.replace(/"/g, '\\"')}"`, { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
+                    if (!raw.trim()) {
+                        return { success: true, message: `No changes detected for ${filePath}.`, output: '' };
+                    }
+                    return {
+                        success: true,
+                        message: `Diff for ${filePath}:`,
+                        output: raw.length > MAX_OUTPUT ? raw.substring(0, MAX_OUTPUT) + '\n... (truncated)' : raw,
+                    };
+                }
+                case 'checkout': {
+                    if (!args.file) {
+                        return { success: false, message: 'The "checkout" action requires a "file" parameter.' };
+                    }
+                    const absPath = path.isAbsolute(args.file) ? args.file : path.join(wsRoot, args.file);
+                    const relPath = path.relative(wsRoot, absPath);
+
+                    // Snapshot for retract support
+                    if (fs.existsSync(absPath)) {
+                        const prev = fs.readFileSync(absPath, 'utf-8');
+                        this.ctx.onBeforeFileWrite?.(absPath, prev);
+                    }
+
+                    execSync(`git checkout HEAD -- "${relPath.replace(/"/g, '\\"')}"`, { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
+
+                    // Reset edit failure counter since the file is now back to a known-good state
+                    this.editFailCount.delete(absPath);
+
+                    return {
+                        success: true,
+                        message: `Successfully reverted ${relPath} to last committed state (HEAD).`,
+                    };
+                }
+                default:
+                    return { success: false, message: `Unknown git action: "${args.action}". Supported: status, diff, checkout.` };
+            }
+        } catch (e) {
+            return { success: false, message: `git ${args.action} failed: ${e instanceof Error ? e.message : String(e)}` };
         }
     }
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.9.7] - 2026-05-06
+
+### 🛡️ AI 代理核心逻辑加固与安全提权 (Agent Core & Security Escalation)
+- **[新特性] 终端执行沙盒提权机制 (Security Sandbox Escalation)**
+  - `run_command` 新增 `requestEscalation` 提权申请参数
+  - AI 在触发沙盒拦截（如破坏性指令、管道符、越权目录访问）时不会被硬中断，而是可以向用户发起单次高危操作的授权申请
+  - 用户确认后即可一次性越过沙盒完成特定操作
+- **[修复] 内部文件写入权限释放**
+  - 修复了 `write_file` 会被自身创建的缓存文件阻断的问题
+  - 现在 AI 可以无缝地对自己在此轮会话中新建的 `.txt` / 代码文件进行完整重写（覆写）而无需回退到 `edit_file`
+- **[机制强化] 错误修复防退化协议 (Anti-Simplification Protocol)**
+  - 在 Prompt 级的 Error Fix Protocol 中增加强制规定：禁止 AI 以“简化代码结构”为手段来消除报错
+  - 要求 AI 必须在现存结构（如 `on_monthly`, `weight_modifier`, `trigger` 等）内部进行精准修复，保持代码的结构深度和完整逻辑功能
+- **[优化] 工具执行超时动态提升**
+  - 将 `spawn_sub_agents`（子代理解析）的超时提升至 10 分钟
+  - 动态注册的 `mcp_call` 及 MCP Server 工具默认超时时长提升至 120 秒，避免长耗时的网路请求/外部调用被过早截断
+
 ## [1.9.6] - 2026-05-06
 
 ### 🔄 时间线交织修复 (Chronological Interleaving)

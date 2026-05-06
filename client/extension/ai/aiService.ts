@@ -654,10 +654,18 @@ export class AIService {
             ...this.buildAuthHeaders(providerId, apiKey),
         };
 
+        const requestPayload = this.sanitizeRequest(providerId, { ...request, stream: true });
+        
+        // Inject stream_options for providers that need it to return usage in streams.
+        // OpenAI, DeepSeek, GLM, Qwen require it. We omit it for minimax (strict schema).
+        if (providerId !== 'minimax') {
+            (requestPayload as any).stream_options = { include_usage: true };
+        }
+
         const response = await this.fetchWithRetry(url, {
             method: 'POST',
             headers,
-            body: JSON.stringify(this.sanitizeRequest(providerId, { ...request, stream: true })),
+            body: JSON.stringify(requestPayload),
             signal: controller.signal,
         }, providerId);
 

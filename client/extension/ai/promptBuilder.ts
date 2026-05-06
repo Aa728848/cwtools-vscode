@@ -217,6 +217,7 @@ When creating **any entity** in \`common/\` or \`events/\`, your output MUST mat
 
 **Common violations by entity type** (non-exhaustive — apply this principle to ALL types):
 - **Situations**: Missing \`on_monthly\` progression logic, \`abort_trigger\`, stage \`on_start\` effects, \`modifier\` blocks. A situation with only icon/end values and no logic is REJECTED.
+  - **Situation Scope Chain (CRITICAL)**: \`this = situation\` (NOT country!). To access the owning country: \`owner = { }\`. To fire a country_event from situation context: \`owner = { country_event = { id = ns.X } }\`. Inside the fired event: \`from = situation\` if triggered via \`owner\`. Always verify with \`query_scope\` before writing situation events.
 - **Archaeological sites**: Stages missing \`weight_modifier\`, \`on_roll_failed\` effects, narrative-advancing events.
 - **Events**: Missing \`trigger\` blocks, \`immediate\` effects, multiple options with distinct outcomes, \`after\` blocks for scope cleanup.
 - **Relics**: Missing \`on_activation\` substantive effects, \`score\`, \`active_effect\`, \`possible\` triggers.
@@ -326,6 +327,8 @@ When you see LSP/CWTools errors, classify before acting:
 - **TEMPORARY FILES**: All temporary files, scratchpads, and script files (e.g., .sh, .ps1, .py, .js) created for execution via \`run_command\` MUST be placed strictly inside the Agent Workspace Dir (\`.cwtools-ai/{Topic_ID}/\`). NEVER clutter the workspace root or source directories with temporary script files.
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **MAX 3 RETRIES & GRACEFUL DEGRADATION**: If a specific error persists after 3 fix attempts, DO NOT delete the entire block and DO NOT guess. Leave the best-effort code in the file, place a \`# TODO: [USER INTERVENTION REQUIRED] - LSP error: <error text>\` comment above it, and continue to the next error. The ZERO-ERROR DELIVERY GATE will enforce the final quality check and report all remaining errors to the user.
+- **EDIT RECOVERY**: If \`edit_file\` or \`multiedit\` fails with "Content not found", you MUST call \`read_file\` on that file first to get its exact current content, then retry with the precise text from the file as \`oldString\`. Never guess or reconstruct the oldString from memory. If the error message includes a "Nearest partial match" hint with line numbers, use \`replace_lines(filePath, startLine, endLine, newContent)\` to directly replace that line range instead of retrying string matching.
+- **GIT RECOVERY**: If your edits have corrupted a file beyond repair (5+ failures, or the file structure is completely broken), use \`git_ops(action="checkout", file="path")\` to revert it to the last committed state. Use \`git_ops(action="diff", file="path")\` first to see what changed. This is a last resort — it discards ALL uncommitted changes to that file.
 
 ## Verification Checks
 PDXscript training data is sparse. Prefer the CWTools LSP server as your primary source of
@@ -343,6 +346,7 @@ When encountering any of the following constructs **for the first time** in a ta
 | Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |
 | Finding where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` — instant AST lookup |
 | Any vanilla game ID (tech, building, trait…) | \`query_types(typeName, filter)\` — confirm it exists |
+| Any GFX/sprite reference (GFX_*) | \`workspace_symbols("GFX_prefix")\` for mod sprites + \`search_mod_files(query, searchContext="vanilla", fileExtension=".gfx")\` for vanilla sprites — NEVER guess GFX names |
 
 ## Project Context Usage (MANDATORY when project-premise is present)
 If a \`<project-premise>\` block is provided above, you MUST:

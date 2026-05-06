@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { fuzzyReplace } from '../../extension/ai/tools/replacerSuite';
+import { fuzzyReplace, findNearestMatch } from '../../extension/ai/tools/replacerSuite';
 
 const replace = (content: string, oldStr: string, newStr: string, replaceAll = false) =>
     fuzzyReplace(content, oldStr, newStr, replaceAll);
@@ -162,6 +162,91 @@ describe('FileToolHandler.replace — OpenCode Replacer Suite', () => {
             // Strategy 8 should skip — falls through to error
             const result = replace(content, 'a\nb', 'x');
             expect(result).to.equal('x'); // matched by strategy 1 (exact)
+        });
+    });
+
+    // ─── Strategy 10: similarityReplacer ──────────────────────────────────
+
+    describe('Strategy 10: similarityReplacer (75% Jaccard)', () => {
+        it('matches when ~78% of lines are the same (above 75% threshold)', () => {
+            // 7 of 8 lines match, 1 differs → Jaccard = 7/9 = 77.8% > 75%
+            const content = 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8';
+            const find =   'line1\nline2\nline3\nline4\nlineX\nline6\nline7\nline8';
+            const result = replace(content, find, 'MATCHED');
+            expect(result).to.equal('MATCHED');
+        });
+
+        it('rejects when similarity is below 75% threshold', () => {
+            // All lines different — no earlier strategy should match
+            const content = 'alpha1\nbeta2\ngamma3\ndelta4\nepsilon5\nzeta6';
+            const find =   'qqq1\nrrr2\nsss3\nttt4\nuuu5\nvvv6';
+            // Jaccard: 0 intersection → 0% → below 75%
+            expect(() => replace(content, find, 'X')).to.throw('Content not found');
+        });
+
+        it('handles window tolerance (content matches a sub-window)', () => {
+            // Content has extra lines, find targets a sub-range
+            const content = 'header\nalpha\nbeta\ngamma\ndelta\nfooter';
+            const find =   'alpha\nbeta\ngamma\ndelta';
+            // Exact 4-line match — will be caught by simpleReplacer (Strategy 1) first
+            const result = replace(content, find, 'WINDOW');
+            expect(result).to.equal('header\nWINDOW\nfooter');
+        });
+    });
+
+    // ─── findNearestMatch helper ──────────────────────────────────────────
+
+    describe('findNearestMatch', () => {
+        it('returns nearest match info for partially similar content', () => {
+            const content = 'header\nalpha\nbeta\ngamma\nfooter';
+            const find = 'alpha\nbeta\nXXXX';
+            const result = findNearestMatch(content, find);
+            expect(result).to.not.be.null;
+            expect(result!.startLine).to.be.greaterThan(0);
+            expect(result!.similarity).to.be.greaterThan(15);
+        });
+
+        it('returns null for completely unrelated content', () => {
+            const content = 'aaa\nbbb\nccc';
+            const find = 'xxx\nyyy\nzzz';
+            const result = findNearestMatch(content, find);
+            expect(result).to.be.null;
+        });
+
+        it('returns correct line numbers (1-based)', () => {
+            const content = 'line1\nline2\nalpha\nbeta\nline5';
+            const find = 'alpha\nbeta';
+            const result = findNearestMatch(content, find);
+            expect(result).to.not.be.null;
+            expect(result!.startLine).to.equal(3); // 1-based
+            expect(result!.endLine).to.equal(4);
+            expect(result!.similarity).to.equal(100);
+        });
+    });
+
+    // ─── Enhanced error messages ──────────────────────────────────────────
+
+    describe('Enhanced error messages', () => {
+        it('includes nearest match hint in error when partial match exists', () => {
+            const content = 'header\nalpha\nbeta\ngamma\nfooter';
+            const find = 'alpha\nbeta\nXXXX_NOMATCH';
+            try {
+                replace(content, find, 'X');
+                expect.fail('Should have thrown');
+            } catch (e: any) {
+                expect(e.message).to.include('Nearest partial match');
+                expect(e.message).to.include('replace_lines');
+            }
+        });
+
+        it('includes basic hint when no partial match exists', () => {
+            try {
+                replace('abc', 'xyz_totally_different', 'X');
+                expect.fail('Should have thrown');
+            } catch (e: any) {
+                expect(e.message).to.include('Content not found');
+                expect(e.message).to.include('read_file');
+            }
         });
     });
 

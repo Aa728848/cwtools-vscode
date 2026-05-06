@@ -171,6 +171,117 @@ function* contextAwareReplacer(content: string, find: string): Generator<string>
     }
 }
 
+/**
+ * Strategy 10: Similarity-based global fuzzy replacer.
+ * Uses a sliding window of ±3 lines around findLines.length to scan content.
+ * Computes line-level Jaccard similarity and yields the best match if ≥ 75%.
+ */
+function* similarityReplacer(content: string, find: string): Generator<string> {
+    const fL = find.split('\n');
+    if (fL.length < 2) return; // too short for meaningful similarity
+    if (fL[fL.length - 1]!.trim() === '') fL.pop();
+    const cL = content.split('\n');
+    if (cL.length < fL.length) return;
+
+    const SIMILARITY_THRESHOLD = 0.75;
+    const WINDOW_TOLERANCE = 3; // allow ±3 lines from expected length
+
+    // Normalize lines for comparison: trim + collapse whitespace
+    const normLine = (l: string) => l.trim().replace(/\s+/g, ' ');
+    const findNormed = new Set(fL.map(normLine).filter(l => l.length > 0));
+
+    let bestScore = -1;
+    let bestStart = -1;
+    let bestEnd = -1;
+
+    const minWin = Math.max(1, fL.length - WINDOW_TOLERANCE);
+    const maxWin = fL.length + WINDOW_TOLERANCE;
+
+    for (let winSize = fL.length; winSize >= minWin; winSize--) {
+        if (winSize > maxWin) continue;
+        for (let i = 0; i <= cL.length - winSize; i++) {
+            const windowNormed = new Set<string>();
+            for (let k = i; k < i + winSize; k++) {
+                const n = normLine(cL[k]!);
+                if (n.length > 0) windowNormed.add(n);
+            }
+            // Jaccard similarity: |intersection| / |union|
+            let intersection = 0;
+            for (const line of findNormed) {
+                if (windowNormed.has(line)) intersection++;
+            }
+            const union = findNormed.size + windowNormed.size - intersection;
+            const score = union > 0 ? intersection / union : 0;
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestStart = i;
+                bestEnd = i + winSize - 1;
+            }
+        }
+        // If exact window size already found a good match, no need for smaller windows
+        if (bestScore >= SIMILARITY_THRESHOLD) break;
+    }
+
+    if (bestScore >= SIMILARITY_THRESHOLD && bestStart >= 0) {
+        yield cL.slice(bestStart, bestEnd + 1).join('\n');
+    }
+}
+
+// ─── Nearest match finder (for enhanced error messages) ─────────────────────
+
+/**
+ * Find the best partial match in content for reporting purposes.
+ * Returns { startLine (1-based), endLine (1-based), similarity, preview } or null.
+ */
+export function findNearestMatch(content: string, find: string): {
+    startLine: number; endLine: number; similarity: number; preview: string;
+} | null {
+    const fL = find.split('\n');
+    if (fL.length < 1) return null;
+    if (fL[fL.length - 1]!.trim() === '') fL.pop();
+    const cL = content.split('\n');
+    if (cL.length === 0) return null;
+
+    const normLine = (l: string) => l.trim().replace(/\s+/g, ' ');
+    const findNormed = new Set(fL.map(normLine).filter(l => l.length > 0));
+    if (findNormed.size === 0) return null;
+
+    let bestScore = 0;
+    let bestStart = 0;
+    let bestEnd = 0;
+    const winSize = fL.length;
+
+    for (let i = 0; i <= cL.length - Math.min(winSize, cL.length); i++) {
+        const end = Math.min(i + winSize, cL.length);
+        const windowNormed = new Set<string>();
+        for (let k = i; k < end; k++) {
+            const n = normLine(cL[k]!);
+            if (n.length > 0) windowNormed.add(n);
+        }
+        let intersection = 0;
+        for (const line of findNormed) {
+            if (windowNormed.has(line)) intersection++;
+        }
+        const union = findNormed.size + windowNormed.size - intersection;
+        const score = union > 0 ? intersection / union : 0;
+        if (score > bestScore) {
+            bestScore = score;
+            bestStart = i;
+            bestEnd = end - 1;
+        }
+    }
+
+    if (bestScore < 0.15) return null; // too dissimilar to be useful
+    const preview = cL.slice(bestStart, bestEnd + 1).slice(0, 5).join('\n');
+    return {
+        startLine: bestStart + 1,
+        endLine: bestEnd + 1,
+        similarity: Math.round(bestScore * 100),
+        preview: preview.length > 300 ? preview.substring(0, 300) + '...' : preview,
+    };
+}
+
 // ─── Main replace function ──────────────────────────────────────────────────
 
 const REPLACERS = [
@@ -183,11 +294,13 @@ const REPLACERS = [
     escapeNormalizedReplacer,
     trimmedBoundaryReplacer,
     contextAwareReplacer,
+    similarityReplacer,
 ] as const;
 
 /**
- * Try each of the 8 Replacers in order, first match wins.
+ * Try each of the 10 Replacers in order, first match wins.
  * Throws if no strategy can find oldString in content.
+ * Error message includes nearest match info to help the AI self-correct.
  */
 export function fuzzyReplace(content: string, oldString: string, newString: string, replaceAll: boolean): string {
     if (oldString === newString) throw new Error('oldString and newString are identical — no change needed');
@@ -203,8 +316,15 @@ export function fuzzyReplace(content: string, oldString: string, newString: stri
             return content.substring(0, idx) + newString + content.substring(idx + search.length);
         }
     }
-    throw new Error(
-        'Content not found. Do NOT omit context or use "..." in oldString! Include the full text from start to end of the replacement, ensuring whitespace matches exactly.\n' +
-        'Tip: use read_file first to get the exact text, then provide an identical fragment in oldString.'
-    );
+    // Enhanced error: find nearest match to help AI self-correct
+    const nearest = findNearestMatch(content, oldString);
+    let errMsg = 'Content not found. Do NOT omit context or use "..." in oldString! Include the full text from start to end of the replacement, ensuring whitespace matches exactly.';
+    if (nearest) {
+        errMsg += `\n\nNearest partial match found at lines ${nearest.startLine}-${nearest.endLine} (similarity: ${nearest.similarity}%).` +
+            `\nPreview of actual content at those lines:\n${nearest.preview}` +
+            `\n\n💡 Use replace_lines(filePath, startLine=${nearest.startLine}, endLine=${nearest.endLine}, newContent=...) for direct line-range replacement.`;
+    } else {
+        errMsg += '\nTip: use read_file first to get the exact text, then provide an identical fragment in oldString.';
+    }
+    throw new Error(errMsg);
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.8] - 2026-05-07
+
+### 🐛 Bug 修复与体验优化 (Bug Fixes & UX Improvements)
+- **[修复] `inline_script` 深度补全与跳转导航 (Inline Script Completion & Navigation)**
+  - 修复了控制流节点（如 `switch` / `if`）导致深层级（如 `trigger` / `desc`）中调用的 `inline_script` 补全类型降级到根级事件的问题。采用 "Best-of-Both" 双轨解析策略，智能应用最深层精准补全。
+  - 修复了从一个 `inline_script` 内部调用另一个 `inline_script` 时上下文丢失的问题，新增级联调用栈追溯（Rule Path Chaining）支持无限嵌套深度的规则解析。
+  - 修复了所有文件中 Ctrl+Click 点击 `inline_script = { script = path }` 无法跳转到对应脚本文件定义的问题。通过绕过 AST 展开后的空节点，引入文本感知回退策略重构了代码导航锚点映射。
+
 ## [1.9.7] - 2026-05-06
 
 ### 🛡️ AI 代理核心逻辑加固与安全提权 (Agent Core & Security Escalation)

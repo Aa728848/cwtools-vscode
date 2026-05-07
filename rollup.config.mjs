@@ -118,4 +118,26 @@ export default [
             copyFile('client/webview/techTreePreview.css', 'release/bin/client/webview/techTreePreview.css'),
         ],
     },
+    // Entity Preview webview bundle
+    {
+        input: './client/webview/entityPreview.ts',
+        output: {
+            file: './release/bin/client/webview/entityPreview.js',
+            format: "iife",
+            name: "cwtoolsentitypreview",
+            indent: false,
+        },
+        plugins: [
+            resolve({ browser: true }),
+            commonjs(),
+            typescript({
+                tsconfig: "tsconfig.webview-entity.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
+            copyFile('client/webview/entityPreview.css', 'release/bin/client/webview/entityPreview.css'),
+        ],
+    },
 ];

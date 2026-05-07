@@ -13,6 +13,7 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, No
 
 import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
+import { EntityPanel } from './entityPanel';
 import { UI, SOURCE } from './ai/messages';
 import { ErrorReporter } from './ai/errorReporter';
 import { SolarSystemPanel } from './solarSystemPanel';
@@ -1065,6 +1066,22 @@ export async function activate(context: ExtensionContext) {
 			await TechTreePanel.create(context.extensionPath, editor?.document);
 		});
 
+		// Entity Preview command
+		safeRegisterCommand(context, "cwtools.previewEntity", async () => {
+			const editor = vs.window.activeTextEditor;
+			if (!editor) {
+				vs.window.showWarningMessage('No active editor to preview');
+				return;
+			}
+			const doc = editor.document;
+			const fileName = doc.fileName.toLowerCase();
+			if (!fileName.endsWith('.asset')) {
+				vs.window.showWarningMessage('Entity Preview is only available for .asset files');
+				return;
+			}
+			await EntityPanel.create(context.extensionPath, doc);
+		});
+
 		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {
 			// Stop the language server client first
 			if (defaultClient) {
@@ -1073,6 +1090,9 @@ export async function activate(context: ExtensionContext) {
 			// Dispose GUI panel if open
 			if (GuiPanel.currentPanel) {
 				try { GuiPanel.currentPanel.dispose(); } catch (_) { /* ignore */ }
+			}
+			if (EntityPanel.currentPanel) {
+				try { EntityPanel.currentPanel.dispose(); } catch (_) { /* ignore */ }
 			}
 			// L7 Fix: dispose the chat panel provider before re-activating so its
 			// WebView is closed and callbacks don't reference a stale agentRunner.

@@ -1,0 +1,351 @@
+/* ── Entity Preview Webview Styles ─────────────────────────────────────────── */
+/* Uses VS Code theme CSS variables for consistent look across themes */
+
+:root {
+    --ep-bg: var(--vscode-editor-background, #1e1e1e);
+    --ep-fg: var(--vscode-editor-foreground, #cccccc);
+    --ep-border: var(--vscode-panel-border, #333);
+    --ep-toolbar-bg: var(--vscode-titleBar-activeBackground, #2d2d2d);
+    --ep-input-bg: var(--vscode-input-background, #3c3c3c);
+    --ep-input-fg: var(--vscode-input-foreground, #cccccc);
+    --ep-input-border: var(--vscode-input-border, #555);
+    --ep-button-bg: var(--vscode-button-background, #0e639c);
+    --ep-button-fg: var(--vscode-button-foreground, #ffffff);
+    --ep-hover-bg: var(--vscode-list-hoverBackground, #2a2d2e);
+    --ep-select-bg: var(--vscode-list-activeSelectionBackground, #094771);
+    --ep-select-fg: var(--vscode-list-activeSelectionForeground, #ffffff);
+    --ep-accent: var(--vscode-focusBorder, #007fd4);
+    --ep-badge-bg: var(--vscode-badge-background, #4d4d4d);
+    --ep-badge-fg: var(--vscode-badge-foreground, #ffffff);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: var(--ep-bg);
+    color: var(--ep-fg);
+    font-family: var(--vscode-font-family, 'Segoe UI', system-ui, sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────────────── */
+
+#toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--ep-toolbar-bg);
+    border-bottom: 1px solid var(--ep-border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    min-height: 36px;
+}
+
+#toolbar .entity-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--ep-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+#toolbar select {
+    background: var(--ep-input-bg);
+    color: var(--ep-input-fg);
+    border: 1px solid var(--ep-input-border);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    outline: none;
+}
+
+#toolbar select:focus {
+    border-color: var(--ep-accent);
+}
+
+#toolbar label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+#toolbar label input[type="checkbox"] {
+    accent-color: var(--ep-accent);
+}
+
+.toolbar-separator {
+    width: 1px;
+    height: 20px;
+    background: var(--ep-border);
+    margin: 0 4px;
+}
+
+.toolbar-btn {
+    background: var(--ep-button-bg);
+    color: var(--ep-button-fg);
+    border: none;
+    border-radius: 3px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.toolbar-btn svg {
+    flex-shrink: 0;
+}
+
+.toolbar-btn:hover {
+    opacity: 0.85;
+}
+
+.toolbar-btn:active {
+    opacity: 0.7;
+}
+
+/* ── Canvas Container ─────────────────────────────────────────────────────── */
+
+#canvas-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    min-height: 200px;
+}
+
+#canvas-container canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* ── Loading Overlay ──────────────────────────────────────────────────────── */
+
+#loading-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    z-index: 100;
+    transition: opacity 0.3s ease;
+}
+
+#loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#loading-overlay .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--ep-border);
+    border-top-color: var(--ep-accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+#loading-overlay .progress-text {
+    font-size: 12px;
+    color: var(--ep-fg);
+    opacity: 0.8;
+}
+
+#loading-overlay .progress-bar {
+    width: 200px;
+    height: 4px;
+    background: var(--ep-border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+#loading-overlay .progress-bar-fill {
+    height: 100%;
+    background: var(--ep-accent);
+    width: 0%;
+    transition: width 0.2s ease;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #loading-overlay .spinner { animation: none; }
+    #loading-overlay .progress-bar-fill { transition: none; }
+}
+
+/* ── Info Panel ────────────────────────────────────────────────────────────── */
+
+#info-panel {
+    padding: 8px 12px;
+    background: var(--ep-toolbar-bg);
+    border-top: 1px solid var(--ep-border);
+    flex-shrink: 0;
+    font-size: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+#info-panel .info-group {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+#info-panel .info-label {
+    opacity: 0.6;
+}
+
+#info-panel .info-value {
+    font-weight: 500;
+}
+
+#info-panel .info-badge {
+    background: var(--ep-badge-bg);
+    color: var(--ep-badge-fg);
+    padding: 1px 6px;
+    border-radius: 9px;
+    font-size: 11px;
+}
+
+/* ── Entity Tree Panel ────────────────────────────────────────────────────── */
+
+#entity-tree {
+    max-height: 150px;
+    overflow-y: auto;
+    border-top: 1px solid var(--ep-border);
+    padding: 6px 0;
+    font-size: 12px;
+    flex-shrink: 0;
+    background: var(--ep-toolbar-bg);
+}
+
+#entity-tree .tree-title {
+    padding: 2px 12px;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.6;
+    margin-bottom: 2px;
+}
+
+#entity-tree .tree-item {
+    padding: 2px 12px 2px 20px;
+    cursor: pointer;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    white-space: nowrap;
+}
+
+#entity-tree .tree-item:hover {
+    background: var(--ep-hover-bg);
+}
+
+#entity-tree .tree-item.selected {
+    background: var(--ep-select-bg);
+    color: var(--ep-select-fg);
+}
+
+#entity-tree .tree-item .tree-icon {
+    opacity: 0.5;
+    font-size: 11px;
+}
+
+#entity-tree .tree-item .tree-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#entity-tree .tree-item .tree-sublabel {
+    opacity: 0.5;
+    font-size: 11px;
+}
+
+/* ── Empty State ──────────────────────────────────────────────────────────── */
+
+#empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 12px;
+    opacity: 0.6;
+    padding: 40px;
+    text-align: center;
+}
+
+#empty-state .empty-icon {
+    font-size: 48px;
+    opacity: 0.3;
+}
+
+#empty-state .empty-text {
+    font-size: 14px;
+}
+
+#empty-state .empty-hint {
+    font-size: 12px;
+    opacity: 0.6;
+    max-width: 300px;
+}
+
+/* ── Error State ──────────────────────────────────────────────────────────── */
+
+#error-banner {
+    padding: 8px 12px;
+    background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+    border-bottom: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+    color: var(--vscode-inputValidation-errorForeground, #ffffff);
+    font-size: 12px;
+    display: none;
+    align-items: center;
+    gap: 8px;
+}
+
+#error-banner.visible {
+    display: flex;
+}
+
+/* ── Scrollbar Theming ────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background, #424242);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-hoverBackground, #555555);
+}

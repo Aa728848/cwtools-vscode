@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Eddy",
 	"license": "MIT",
-	"version": "1.9.8",
+	"version": "1.9.9",
 	"preview": true,
 	"activationEvents": [
 		"onLanguage:stellaris",
@@ -103,6 +103,11 @@
 				{
 					"command": "cwtools.visualizeTechTree",
 					"when": "resourceExtname == .txt && resourcePath =~ /technology/",
+					"group": "navigation"
+				},
+				{
+					"command": "cwtools.previewEntity",
+					"when": "resourceExtname == .asset",
 					"group": "navigation"
 				},
 				{
@@ -257,6 +262,12 @@
 				"title": "%commands.cwtools.vanillaCompare.fileDiff.title%",
 				"category": "cwtools",
 				"icon": "$(diff-multiple)"
+			},
+			{
+				"command": "cwtools.previewEntity",
+				"title": "Preview Entity Model",
+				"category": "cwtools",
+				"icon": "$(symbol-misc)"
 			}
 		],
 		"keybindings": [

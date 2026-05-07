@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.9] - 2026-05-08
+
+### ✨ 新特性 (Features)
+- **[新功能] 3D 实体模型可视化预览 (3D Entity Viewer)**
+  - 全新支持 Paradox `.asset` 与 `.mesh` 文件的 3D 可视化预览
+  - 点击编辑器标题栏的图标即可直接在 Webview 中渲染实体（Entity）及其关联的 Mesh 模型
+  - 支持多光源配置、相机漫游、拖拽旋转缩放等 3D 交互功能
+  - 内置 PDX Mesh 专用解析器和 Web Worker 异步加载，确保主线程不阻塞
+
 ## [1.9.8] - 2026-05-07
 
 ### 🐛 Bug 修复与体验优化 (Bug Fixes & UX Improvements)

@@ -9,12 +9,18 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { parsePdxMesh, type ParsedMeshFile, type ParsedSubMesh } from './pdxMeshParser';
+import { parsePdxMesh, parsePdxAnim, type ParsedMeshFile, type ParsedSubMesh, type ParsedAnimation, type ParsedLocator } from './pdxMeshParser';
 
 // ── VS Code API ──────────────────────────────────────────────────────────────
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void; getState(): unknown; setState(s: unknown): void };
 const vscode = acquireVsCodeApi();
+
+/** Send log to extension's Output Channel (visible in VS Code Output panel → "Entity Preview") */
+function webviewLog(text: string, level: 'info' | 'warn' | 'error' = 'info') {
+    console.log(`[Entity] ${text}`);
+    vscode.postMessage({ command: 'log', text, level });
+}
 
 // ── i18n ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +33,7 @@ const i18n: Record<string, { en: string; zh: string }> = {
     wireframe:      { en: 'Wireframe',                     zh: '线框' },
     locators:       { en: 'Locators',                      zh: '定位器' },
     disableNormals: { en: 'Disable Normals',               zh: '禁用法线' },
+    bones:          { en: 'Bones',                          zh: '骨骼' },
     loading:        { en: 'Loading...',                     zh: '加载中...' },
     noEntity:       { en: 'No entity loaded',              zh: '未加载实体' },
     openHint:       { en: 'Open a .asset file and click preview', zh: '打开 .asset 文件并点击预览按钮' },
@@ -63,6 +70,7 @@ interface AttachData {
     resolvedMeshSettings: ResolvedMeshSetting[];
     textureMap: Record<string, string>;
     scale?: number;
+    meshScale?: number;
     locators: Array<{
         name: string;
         position?: [number, number, number];
@@ -70,12 +78,16 @@ interface AttachData {
         scale?: number;
     }>;
     attachData?: AttachData[];
+    defaultState?: string;
+    getStateFromParent?: boolean;
+    animations?: Array<{ stateName: string; animName: string; animBase64: string }>;
 }
 
 interface EntityData {
     name: string;
     pdxmesh?: string;
     scale?: number;
+    meshScale?: number;
     resolvedMeshSettings?: ResolvedMeshSetting[];
     textureMap?: Record<string, string>;  // relative path → webview URI
     locators?: Array<{
@@ -85,7 +97,8 @@ interface EntityData {
         scale?: number;
     }>;
     attaches?: Array<{ locatorName: string; entityName: string }>;
-    states?: Array<{ name: string }>;
+    states?: Array<{ name: string; animation?: string }>;
+    defaultState?: string;
     attachData?: AttachData[];
 }
 
@@ -93,6 +106,7 @@ interface RenderMessage {
     command: 'render';
     entity: EntityData;
     meshBase64?: string;  // base64-encoded .mesh binary
+    animations?: Array<{ stateName: string; animName: string; animBase64: string }>;
     fileName: string;
 }
 
@@ -116,6 +130,7 @@ const entityNameEl = toolbar.querySelector('.entity-name') as HTMLElement;
 const wireframeToggle = document.getElementById('chk-wireframe') as HTMLInputElement;
 const locatorToggle = document.getElementById('chk-locators') as HTMLInputElement;
 const normalToggle = document.getElementById('chk-normals') as HTMLInputElement;
+const bonesToggle = document.getElementById('chk-bones') as HTMLInputElement;
 
 // Property inputs
 const propPx = document.getElementById('prop-px') as HTMLInputElement;
@@ -137,6 +152,21 @@ let locatorHelpers: THREE.Group | null = null;
 let animationFrameId = 0;
 let selectedLocator: THREE.Object3D | null = null;
 let currentEntity: EntityData | null = null;
+let skeletonHelper: THREE.SkeletonHelper | null = null;
+// Animation system
+let mixer: THREE.AnimationMixer | null = null;
+interface ChildMixerEntry {
+    mixer: THREE.AnimationMixer;
+    clips: Map<string, THREE.AnimationClip>; // stateName → clip
+    getStateFromParent: boolean;
+    currentAction: THREE.AnimationAction | null;
+}
+const childMixers: ChildMixerEntry[] = [];
+const clock = new THREE.Clock();
+const animationClips = new Map<string, THREE.AnimationClip>(); // stateName → clip
+let currentAction: THREE.AnimationAction | null = null;
+let isAnimPlaying = true;
+let animLooping = true;
 // Snapshot of selected locator's original position/rotation at selection time
 let selectedLocatorSnapshot: { px: number; py: number; pz: number; rx: number; ry: number; rz: number } | null = null;
 const raycaster = new THREE.Raycaster();
@@ -144,7 +174,7 @@ const mouse = new THREE.Vector2();
 
 function initThree() {
     // Renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -254,13 +284,44 @@ function autoSaveLocator() {
 
 // Locator label DOM elements
 const locatorLabelEls: Map<string, HTMLDivElement> = new Map();
+let isWebviewVisible = true;
 
 function animate() {
+    if (!isWebviewVisible) return; // don't schedule frames when hidden
     animationFrameId = requestAnimationFrame(animate);
     controls.update();
+
+    // Update animation mixers
+    const delta = clock.getDelta();
+    if (mixer && isAnimPlaying) {
+        mixer.update(delta);
+        updateTimelineUI();
+    }
+    // Always update child entity mixers
+    for (const cm of childMixers) cm.mixer.update(delta);
+
+
+
     renderer.render(scene, camera);
     updateLocatorLabels();
 }
+
+// Pause render loop when webview is not visible to save resources
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        isWebviewVisible = false;
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = 0;
+        }
+    } else {
+        isWebviewVisible = true;
+        if (!animationFrameId && !isDisposed) {
+            clock.getDelta(); // flush accumulated delta
+            animate();
+        }
+    }
+});
 
 function handleResize() {
     const w = canvasContainer.clientWidth;
@@ -294,7 +355,13 @@ function createLocatorLabel(name: string, source: string): HTMLDivElement {
 }
 
 function updateLocatorLabels() {
-    if (!locatorHelpers || !locatorHelpers.visible) return;
+    if (!locatorHelpers || !locatorHelpers.visible) {
+        // Ensure all labels are hidden when locators are not visible
+        for (const el of locatorLabelEls.values()) {
+            el.style.display = 'none';
+        }
+        return;
+    }
 
     const w = canvasContainer.clientWidth;
     const h = canvasContainer.clientHeight;
@@ -335,6 +402,27 @@ function updateLocatorLabels() {
 const _locatorHitGeo = new THREE.SphereGeometry(0.25, 8, 6);
 const _locatorHitMat = new THREE.MeshBasicMaterial({ visible: false });
 
+/**
+ * Convert PDX script rotation (degrees) to a Three.js Euler.
+ *
+ * PDX/Clausewitz rotation format: { ry, rx, rz } (Yaw, Pitch, Roll)
+ *   - First value  = rotation around Y axis (yaw)
+ *   - Second value = rotation around X axis (pitch)
+ *   - Third value  = rotation around Z axis (roll)
+ *
+ * modelGroup has a PI rotation around Y, which negates local X and Z axes.
+ * Therefore X and Z rotations must be negated to preserve world-space orientation.
+ * Y axis is unchanged by PI rotation, so Y rotation is applied as-is.
+ */
+function pdxScriptEuler(ryDeg: number, rxDeg: number, rzDeg: number): THREE.Euler {
+    return new THREE.Euler(
+        -rxDeg * Math.PI / 180,
+         ryDeg * Math.PI / 180,
+        -rzDeg * Math.PI / 180,
+        'YXZ',
+    );
+}
+
 /** Create a locator Group: invisible hit sphere + AxesHelper visual */
 function createLocatorGroup(name: string, size: number, source: string): THREE.Group {
     const group = new THREE.Group();
@@ -352,6 +440,61 @@ function createLocatorGroup(name: string, size: number, source: string): THREE.G
     group.add(axes);
 
     return group;
+}
+
+
+
+
+/**
+ * Apply PDX locator transform to a Three.js object.
+ * Handles `tx` (full transform matrix) and `p`/`q` (position + quaternion).
+ * PDX locator tx is 16 floats (4x4 column-major), bone tx is 12 floats (3x4 column-major).
+ */
+function applyLocatorTransform(obj: THREE.Object3D, loc: ParsedLocator) {
+    if (loc.transform) {
+        const tx = loc.transform;
+        const m = new THREE.Matrix4();
+
+        if (tx.length >= 16) {
+            // 4x4 column-major (locator format): stride=4
+            // Column 0: [0,1,2,3], Column 1: [4,5,6,7], Column 2: [8,9,10,11], Column 3: [12,13,14,15]
+            // Three.js Matrix4.set() takes row-major arguments
+            m.set(
+                tx[0]!, tx[4]!, tx[8]!,  tx[12]!,  // row 0
+                tx[1]!, tx[5]!, tx[9]!,  tx[13]!,  // row 1
+                tx[2]!, tx[6]!, tx[10]!, tx[14]!,  // row 2
+                tx[3]!, tx[7]!, tx[11]!, tx[15]!,  // row 3
+            );
+        } else if (tx.length >= 12) {
+            // 3x4 column-major (bone format): stride=3
+            // Column 0: [0,1,2], Column 1: [3,4,5], Column 2: [6,7,8], Column 3: [9,10,11]
+            m.set(
+                tx[0]!, tx[3]!, tx[6]!, tx[9]!,   // row 0
+                tx[1]!, tx[4]!, tx[7]!, tx[10]!,   // row 1
+                tx[2]!, tx[5]!, tx[8]!, tx[11]!,   // row 2
+                0,      0,      0,      1,          // row 3
+            );
+        } else {
+            // Fallback to p/q
+            obj.position.set(loc.position[0], loc.position[1], loc.position[2]);
+            const q = new THREE.Quaternion(loc.rotation[0], loc.rotation[1], loc.rotation[2], loc.rotation[3]);
+            obj.setRotationFromQuaternion(q);
+            return;
+        }
+
+        // Decompose into position, quaternion, scale
+        const pos = new THREE.Vector3();
+        const quat = new THREE.Quaternion();
+        const scl = new THREE.Vector3();
+        m.decompose(pos, quat, scl);
+
+        obj.position.copy(pos);
+        obj.quaternion.copy(quat);
+    } else {
+        obj.position.set(loc.position[0], loc.position[1], loc.position[2]);
+        const q = new THREE.Quaternion(loc.rotation[0], loc.rotation[1], loc.rotation[2], loc.rotation[3]);
+        obj.setRotationFromQuaternion(q);
+    }
 }
 
 function onLocatorPointerDown(event: PointerEvent) {
@@ -384,7 +527,7 @@ function onLocatorPointerDown(event: PointerEvent) {
     }
 }
 
-function selectLocator(obj: THREE.Object3D) {
+function selectLocator(obj: THREE.Object3D, editable = true) {
     // Unhighlight previous
     if (selectedLocator) {
         const prevLabel = locatorLabelEls.get(selectedLocator.name);
@@ -395,22 +538,41 @@ function selectLocator(obj: THREE.Object3D) {
     }
 
     selectedLocator = obj;
-    transformCtrl.attach(obj);
 
-    // Snapshot the original position/rotation for Reset
-    const euler = new THREE.Euler().setFromQuaternion(obj.quaternion, 'XYZ');
-    selectedLocatorSnapshot = {
-        px: obj.position.x,
-        py: obj.position.y,
-        pz: obj.position.z,
-        rx: euler.x * 180 / Math.PI,
-        ry: euler.y * 180 / Math.PI,
-        rz: euler.z * 180 / Math.PI,
-    };
+    if (editable) {
+        transformCtrl.attach(obj);
 
-    updatePropsFromLocator(obj);
-    propsPanel.classList.remove('hidden');
-    propsName.textContent = obj.name;
+        // Snapshot the original position/rotation for Reset
+        const euler = new THREE.Euler().setFromQuaternion(obj.quaternion, 'XYZ');
+        selectedLocatorSnapshot = {
+            px: obj.position.x,
+            py: obj.position.y,
+            pz: obj.position.z,
+            rx: euler.x * 180 / Math.PI,
+            ry: euler.y * 180 / Math.PI,
+            rz: euler.z * 180 / Math.PI,
+        };
+
+        updatePropsFromLocator(obj);
+        propsPanel.classList.remove('hidden');
+        propsName.textContent = obj.name;
+
+        // Show hint
+        const hintEntry = i18n['transformHint'];
+        if (hintEntry) {
+            transformHint.textContent = isChinese ? hintEntry.zh : hintEntry.en;
+        }
+        transformHint.classList.remove('hidden');
+        transformHint.classList.add('visible');
+    } else {
+        // View-only: detach transform controls, hide props panel
+        transformCtrl.detach();
+        propsPanel.classList.add('hidden');
+        transformHint.classList.add('hidden');
+        transformHint.classList.remove('visible');
+        // Focus camera on the locator
+        focusOnObject(obj);
+    }
 
     // Highlight selected label
     const label = locatorLabelEls.get(obj.name);
@@ -418,14 +580,6 @@ function selectLocator(obj: THREE.Object3D) {
         label.style.background = 'rgba(0, 127, 212, 0.75)';
         label.style.fontWeight = '600';
     }
-
-    // Show hint
-    const hintEntry = i18n['transformHint'];
-    if (hintEntry) {
-        transformHint.textContent = isChinese ? hintEntry.zh : hintEntry.en;
-    }
-    transformHint.classList.remove('hidden');
-    transformHint.classList.add('visible');
 
     // Highlight in entity tree
     highlightTreeItem(obj.name);
@@ -490,9 +644,301 @@ function highlightTreeItem(name: string | null) {
     const items = entityTree.querySelectorAll('.tree-item');
     items.forEach(item => {
         const el = item as HTMLElement;
-        el.classList.toggle('selected', el.dataset.locator === name);
+        // Check both old-style data-locator and new data-locator-idx
+        const isMatch = el.dataset.locator === name ||
+            (el.querySelector('.tree-label')?.textContent === name && el.hasAttribute('data-locator-idx'));
+        el.classList.toggle('selected', !!name && isMatch);
     });
 }
+
+/**
+ * Build a THREE.Bone hierarchy from ParsedBone data.
+ * PDX stores 3×4 inverse bind matrices (tx property) as 12 floats.
+ *
+ * The PDX format stores the matrix in COLUMN-MAJOR order:
+ *   [ m00, m10, m20, m01, m11, m21, m02, m12, m22, tx, ty, tz ]
+ * This represents a 3×4 matrix where the last 3 values are the translation column.
+ */
+function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').ParsedBone[]): THREE.Bone | null {
+    if (parsedBones.length === 0) return null;
+
+    console.log(`[Skeleton] Building from ${parsedBones.length} bones`);
+
+    const bones: THREE.Bone[] = [];
+    for (const pb of parsedBones) {
+        const bone = new THREE.Bone();
+        bone.name = pb.name;
+        bones.push(bone);
+    }
+
+    // Build hierarchy
+    for (let i = 0; i < parsedBones.length; i++) {
+        const pb = parsedBones[i]!;
+        if (pb.parentIndex >= 0 && pb.parentIndex < bones.length) {
+            bones[pb.parentIndex]!.add(bones[i]!);
+        }
+    }
+
+    // Helper: construct a Matrix4 from PDX's column-major 3×4 layout
+    function pdxToMatrix4(m: Float32Array): THREE.Matrix4 {
+        const mat = new THREE.Matrix4();
+        // PDX column-major 3×4: [col0.x, col0.y, col0.z, col1.x, col1.y, col1.z, col2.x, col2.y, col2.z, col3.x, col3.y, col3.z]
+        // THREE.Matrix4.elements is column-major 4×4:
+        mat.elements[0]  = m[0]!; mat.elements[1]  = m[1]!; mat.elements[2]  = m[2]!; mat.elements[3]  = 0;
+        mat.elements[4]  = m[3]!; mat.elements[5]  = m[4]!; mat.elements[6]  = m[5]!; mat.elements[7]  = 0;
+        mat.elements[8]  = m[6]!; mat.elements[9]  = m[7]!; mat.elements[10] = m[8]!; mat.elements[11] = 0;
+        mat.elements[12] = m[9]!; mat.elements[13] = m[10]!; mat.elements[14] = m[11]!; mat.elements[15] = 1;
+        return mat;
+    }
+
+    // Compute world-space bind pose matrices for all bones
+    const worldMatrices: THREE.Matrix4[] = [];
+    for (let i = 0; i < parsedBones.length; i++) {
+        const pb = parsedBones[i]!;
+        const m = pb.inverseBindMatrix;
+        if (!m || m.length < 12) {
+            worldMatrices.push(new THREE.Matrix4());
+            continue;
+        }
+
+        const invBind = pdxToMatrix4(m);
+        // Check determinant — skip if matrix is degenerate
+        const det = invBind.determinant();
+        if (Math.abs(det) < 1e-10) {
+            // Use identity matrix (bone at origin in world space)
+            worldMatrices.push(new THREE.Matrix4());
+            continue;
+        }
+
+        const worldMat = invBind.clone().invert();
+        worldMatrices.push(worldMat);
+    }
+
+    // Compute local transforms from world transforms
+    for (let i = 0; i < parsedBones.length; i++) {
+        const pb = parsedBones[i]!;
+        const worldMat = worldMatrices[i]!;
+
+        let localMat: THREE.Matrix4;
+        if (pb.parentIndex >= 0 && pb.parentIndex < parsedBones.length) {
+            // local = parentWorld.inverse * childWorld
+            const parentWorld = worldMatrices[pb.parentIndex]!;
+            const parentWorldInv = parentWorld.clone().invert();
+            localMat = parentWorldInv.multiply(worldMat);
+        } else {
+            localMat = worldMat;
+        }
+
+        const pos = new THREE.Vector3();
+        const rot = new THREE.Quaternion();
+        const scl = new THREE.Vector3();
+        localMat.decompose(pos, rot, scl);
+        bones[i]!.position.copy(pos);
+        bones[i]!.quaternion.copy(rot);
+        // Avoid degenerate scale
+        if (scl.x > 0.001 && scl.y > 0.001 && scl.z > 0.001) {
+            bones[i]!.scale.copy(scl);
+        }
+    }
+
+    // Find root bone (no parent)
+    const rootIdx = parsedBones.findIndex(b => b.parentIndex < 0);
+    const root = rootIdx >= 0 ? bones[rootIdx]! : bones[0]!;
+
+    // Force update world matrices so SkeletonHelper can render
+    root.updateWorldMatrix(false, true);
+
+    console.log(`[Skeleton] Built hierarchy: root="${root.name}", total=${bones.length} bones`);
+    return root;
+}
+
+// ── Animation System ─────────────────────────────────────────────────────────
+
+/**
+ * Convert a ParsedAnimation into a Three.js AnimationClip.
+ * Creates keyframe tracks that reference bone names in the scene graph.
+ * boneNameMap: maps animation bone index → actual scene bone name
+ */
+function pdxAnimToClip(anim: ParsedAnimation, clipName: string, boneNameMap?: Map<number, string>): THREE.AnimationClip {
+    const tracks: THREE.KeyframeTrack[] = [];
+    const duration = (anim.sampleCount - 1) / anim.fps;
+
+    for (let boneIdx = 0; boneIdx < anim.bones.length; boneIdx++) {
+        const bone = anim.bones[boneIdx]!;
+        // Use remapped name if available, otherwise original
+        const targetName = boneNameMap?.get(boneIdx) ?? bone.name;
+
+        // Build time array: one time per sample
+        const sampleCount = bone.rotations
+            ? bone.rotations.length / 4
+            : bone.translations
+                ? bone.translations.length / 3
+                : bone.scales
+                    ? bone.scales.length
+                    : 0;
+
+        if (sampleCount === 0) continue;
+
+        const times = new Float32Array(sampleCount);
+        for (let i = 0; i < sampleCount; i++) {
+            times[i] = i / anim.fps;
+        }
+
+        // Translation track
+        if (bone.translations && bone.translations.length >= sampleCount * 3) {
+            tracks.push(new THREE.VectorKeyframeTrack(
+                `${targetName}.position`,
+                times as unknown as number[],
+                bone.translations as unknown as number[],
+            ));
+        }
+
+        // Rotation track (quaternion xyzw)
+        if (bone.rotations && bone.rotations.length >= sampleCount * 4) {
+            tracks.push(new THREE.QuaternionKeyframeTrack(
+                `${targetName}.quaternion`,
+                times as unknown as number[],
+                bone.rotations as unknown as number[],
+            ));
+        }
+
+        // Scale track (uniform → expand to xyz)
+        if (bone.scales && bone.scales.length >= sampleCount) {
+            const scaleData = new Float32Array(sampleCount * 3);
+            for (let i = 0; i < sampleCount; i++) {
+                const s = bone.scales[i]!;
+                scaleData[i * 3] = s;
+                scaleData[i * 3 + 1] = s;
+                scaleData[i * 3 + 2] = s;
+            }
+            tracks.push(new THREE.VectorKeyframeTrack(
+                `${targetName}.scale`,
+                times as unknown as number[],
+                scaleData as unknown as number[],
+            ));
+        }
+    }
+
+    const clip = new THREE.AnimationClip(clipName, duration > 0 ? duration : 1 / anim.fps, tracks);
+    webviewLog(`[Anim] Clip "${clipName}": ${tracks.length} tracks, duration=${clip.duration.toFixed(2)}s, fps=${anim.fps}`);
+    return clip;
+}
+
+/**
+ * Initialize animations from decoded buffers.
+ * Creates AnimationMixer on the modelGroup and parses all clips.
+ * animData: Map of animName → { buffer, stateName }
+ */
+function initAnimations(animBuffers: Map<string, ArrayBuffer>) {
+    if (!currentModel) return;
+
+    // Clean up previous mixer
+    if (mixer) {
+        mixer.stopAllAction();
+        mixer.uncacheRoot(currentModel);
+        mixer = null;
+    }
+    animationClips.clear();
+    currentAction = null;
+
+    mixer = new THREE.AnimationMixer(currentModel);
+
+    // Build bone name map from scene graph: index → scene bone name
+    // This remaps animation bone indices to actual bone names in the hierarchy
+    const sceneBones: THREE.Bone[] = [];
+    currentModel.traverse(obj => {
+        if (obj instanceof THREE.Bone) sceneBones.push(obj);
+    });
+    const boneNameMap = new Map<number, string>();
+    for (let i = 0; i < sceneBones.length; i++) {
+        boneNameMap.set(i, sceneBones[i]!.name);
+    }
+    if (sceneBones.length > 0) {
+        webviewLog(`[Anim] Scene bones: [${sceneBones.map(b => b.name).join(', ')}]`);
+    }
+
+    for (const [animName, buffer] of animBuffers) {
+        try {
+            const parsed = parsePdxAnim(buffer);
+            const clip = pdxAnimToClip(parsed, animName, boneNameMap);
+            animationClips.set(animName, clip);
+        } catch (err) {
+            webviewLog(`[Anim] Failed to parse animation "${animName}": ${err}`, 'error');
+        }
+    }
+
+    webviewLog(`[Anim] Loaded ${animationClips.size} animation clips: [${Array.from(animationClips.keys()).join(', ')}]`);
+
+    // Auto-play the first available clip
+    const firstClip = animationClips.values().next().value;
+    if (firstClip) {
+        switchAnimation(firstClip);
+    }
+
+    // Show timeline
+    showTimeline(true);
+}
+
+/**
+ * Switch to a different AnimationClip with crossfade.
+ */
+function switchAnimation(clip: THREE.AnimationClip) {
+    if (!mixer) return;
+
+    const newAction = mixer.clipAction(clip);
+    newAction.setLoop(animLooping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+    newAction.clampWhenFinished = !animLooping;
+
+    if (currentAction && currentAction !== newAction) {
+        // Crossfade from old to new
+        newAction.reset();
+        newAction.play();
+        currentAction.crossFadeTo(newAction, 0.3, true);
+    } else {
+        newAction.reset();
+        newAction.play();
+    }
+
+    currentAction = newAction;
+    clock.start();
+    isAnimPlaying = true;
+
+    // Update play button
+    const playBtn = document.getElementById('btn-anim-play');
+    if (playBtn) playBtn.textContent = '⏸';
+}
+
+/**
+ * Show/hide the animation timeline bar.
+ */
+function showTimeline(show: boolean) {
+    const timeline = document.getElementById('timeline');
+    if (timeline) timeline.style.display = show ? 'flex' : 'none';
+}
+
+/**
+ * Update the timeline scrub bar and time display.
+ */
+function updateTimelineUI() {
+    if (!currentAction) return;
+    const scrub = document.getElementById('anim-scrub') as HTMLInputElement | null;
+    const timeDisplay = document.getElementById('anim-time');
+    if (!scrub || !timeDisplay) return;
+
+    const time = currentAction.time;
+    const duration = currentAction.getClip().duration;
+
+    scrub.max = '1000';
+    scrub.value = String(Math.round((time / duration) * 1000));
+
+    const fmt = (t: number) => {
+        const s = Math.floor(t);
+        const ms = Math.floor((t - s) * 10);
+        return `${s}.${ms}`;
+    };
+    timeDisplay.textContent = `${fmt(time)} / ${fmt(duration)}s`;
+}
+
 
 /**
  * DDS header parsing for webview-side texture loading.
@@ -1202,13 +1648,63 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         scene.remove(locatorHelpers);
         locatorHelpers = null;
     }
+    if (skeletonHelper) {
+        scene.remove(skeletonHelper);
+        skeletonHelper = null;
+    }
+    // Clean up animations
+    if (mixer) {
+        mixer.stopAllAction();
+        mixer = null;
+    }
+    for (const cm of childMixers) cm.mixer.stopAllAction();
+    childMixers.length = 0;
+    animationClips.clear();
+    currentAction = null;
+    showTimeline(false);
 
     currentEntity = entity;
     totalTriangles = 0;
     totalVertices = 0;
 
     if (!meshBuffer) {
-        showError('No mesh data available');
+        // No mesh data — this entity may only have attach directives (e.g., turret_entity).
+        // Create an empty model group so attachments and entity tree still work.
+        const modelGroup = new THREE.Group();
+        modelGroup.name = entity.name;
+        const scale = entity.scale ?? 1.0;
+        modelGroup.scale.setScalar(scale);
+        modelGroup.rotation.y = Math.PI;
+
+        // Still set up locator helpers for script-defined locators
+        locatorHelpers = new THREE.Group();
+        locatorHelpers.name = 'locators';
+        locatorHelpers.visible = locatorToggle.checked;
+        if (entity.locators) {
+            for (const loc of entity.locators) {
+                const group = createLocatorGroup(loc.name, 0.5, 'script');
+                if (loc.position) group.position.set(loc.position[0], loc.position[1], loc.position[2]);
+                if (loc.rotation) {
+                    group.setRotationFromEuler(pdxScriptEuler(loc.rotation[0], loc.rotation[1], loc.rotation[2]));
+                }
+                locatorHelpers.add(group);
+            }
+        }
+        modelGroup.add(locatorHelpers);
+        scene.add(modelGroup);
+        currentModel = modelGroup;
+
+        // Load attach children if any
+        if (entity.attachData && entity.attachData.length > 0) {
+            await loadAttachChildren(entity.attachData, locatorHelpers, modelGroup, entity.defaultState);
+        }
+
+        fitCameraToModel(modelGroup);
+        updateInfoPanel(entity);
+        updateEntityTree(entity);
+        updateStateSelector(entity);
+        showLoading(false);
+        emptyState.style.display = 'none';
         return;
     }
 
@@ -1232,14 +1728,49 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         // Maya Z+ forward → Three.js Z- forward: rotate 180° around Y
         modelGroup.rotation.y = Math.PI;
 
-        // Build geometry and per-submesh materials
+        // Build ONE shared skeleton from the first shape that has bones.
+        // PDX models: all shapes share the same bone structure (same names).
+        // Creating one hierarchy avoids duplicate bone names which confuse AnimationMixer.
         let submeshIndex = 0;
+        let sharedBoneRoot: THREE.Bone | null = null;
+        let meshParent: THREE.Object3D = modelGroup; // where to attach meshes
+        const firstSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
+        if (firstSkelShape) {
+            sharedBoneRoot = buildSkeletonFromParsedBones(firstSkelShape.skeleton);
+            if (sharedBoneRoot) {
+                sharedBoneRoot.userData.isSkeleton = true;
+                modelGroup.add(sharedBoneRoot);
+                // Find the DEEPEST leaf bone — this is the bone the animation drives.
+                // For PDX 2-bone chains: animaton_rrot → root, animation targets "root".
+                // Meshes must be under the animated bone for transforms to propagate.
+                const findLeafBone = (bone: THREE.Bone): THREE.Bone => {
+                    for (const child of bone.children) {
+                        if (child instanceof THREE.Bone) {
+                            return findLeafBone(child);
+                        }
+                    }
+                    return bone;
+                };
+                meshParent = findLeafBone(sharedBoneRoot);
+                webviewLog(`[Skeleton] Mesh parent bone: "${meshParent.name}" (root: "${sharedBoneRoot.name}")`);
+            }
+        }
+
+        // Apply pdxmesh scale (from .gfx definition) — scales mesh geometry to match entity locator space
+        const meshScale = entity.meshScale ?? 1.0;
+        if (meshScale !== 1.0) {
+            const meshContainer = new THREE.Group();
+            meshContainer.name = 'meshScaleContainer';
+            meshContainer.scale.setScalar(meshScale);
+            meshParent.add(meshContainer);
+            meshParent = meshContainer;
+            webviewLog(`[Root] Applied meshScale=${meshScale}`);
+        }
+        // meshScale also applies to mesh-embedded locators below
+
         for (const shape of parsed.shapes) {
             for (const subMesh of shape.meshes) {
                 const geo = buildGeometry(subMesh);
-
-                // Resolve textures for this submesh:
-                // GFX/entity meshsettings (by name) → mesh binary material → textureMap
                 const meshMat = subMesh.material;
                 const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
                     shader: meshMat.shader,
@@ -1248,8 +1779,6 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                     specular: meshMat.specular,
                 }, entity);
 
-                console.log(`[PDX Mesh] Submesh ${submeshIndex} "${subMesh.name}" [${textures.shader}/${textures.shaderCategory}]: diffuse=${textures.diffuse ? '✓' : '✗'}, normal=${textures.normal ? '✓' : '✗'}, specular=${textures.specular ? '✓' : '✗'}`);
-
                 const material = await createSubmeshMaterial(textures);
                 const mesh = new THREE.Mesh(geo, material);
                 mesh.name = `submesh_${submeshIndex}`;
@@ -1257,9 +1786,15 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                 totalTriangles += (subMesh.indices.length / 3);
                 totalVertices += (subMesh.positions.length / 3);
 
-                modelGroup.add(mesh);
+                meshParent.add(mesh);
                 submeshIndex++;
             }
+        }
+
+        // Debug: root mesh bounding box
+        const rootBBox = new THREE.Box3();
+        modelGroup.traverse(obj => { if ((obj as THREE.Mesh).isMesh) { (obj as THREE.Mesh).geometry.computeBoundingBox(); rootBBox.expandByObject(obj); } });
+        if (!rootBBox.isEmpty()) {
         }
 
         // ── Locator Visualization ────────────────────────────────────
@@ -1272,10 +1807,24 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
 
         for (const loc of parsed.locators) {
             const group = createLocatorGroup(loc.name, 0.5, 'mesh');
-            group.position.set(loc.position[0], loc.position[1], loc.position[2]);
-            const q = new THREE.Quaternion(loc.rotation[0], loc.rotation[1], loc.rotation[2], loc.rotation[3]);
-            group.setRotationFromQuaternion(q);
-            locatorHelpers.add(group);
+            applyLocatorTransform(group, loc);
+            // Mesh-embedded locators are in pre-meshScale space; scale position to entity space
+            if (meshScale !== 1.0) {
+                group.position.multiplyScalar(meshScale);
+            }
+
+
+            // If locator has a parent bone, attach it to that bone so it follows animation
+            if (loc.parentBone && sharedBoneRoot) {
+                const parentBone = modelGroup.getObjectByName(loc.parentBone);
+                if (parentBone) {
+                    parentBone.add(group);
+                } else {
+                    locatorHelpers.add(group);
+                }
+            } else {
+                locatorHelpers.add(group);
+            }
             meshLocatorNames.add(loc.name);
         }
 
@@ -1286,43 +1835,53 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                 if (existing && loc.position) {
                     existing.position.set(loc.position[0], loc.position[1], loc.position[2]);
                     if (loc.rotation) {
-                        const euler = new THREE.Euler(
-                            loc.rotation[0] * Math.PI / 180,
-                            loc.rotation[1] * Math.PI / 180,
-                            loc.rotation[2] * Math.PI / 180,
-                            'XYZ',
-                        );
-                        existing.setRotationFromEuler(euler);
+                        existing.setRotationFromEuler(pdxScriptEuler(loc.rotation[0], loc.rotation[1], loc.rotation[2]));
                     }
                     existing.userData = { source: 'override', isLocator: true };
                 } else if (loc.position) {
                     const group = createLocatorGroup(loc.name, 0.4, 'script');
                     group.position.set(loc.position[0], loc.position[1], loc.position[2]);
                     if (loc.rotation) {
-                        const euler = new THREE.Euler(
-                            loc.rotation[0] * Math.PI / 180,
-                            loc.rotation[1] * Math.PI / 180,
-                            loc.rotation[2] * Math.PI / 180,
-                            'XYZ',
-                        );
-                        group.setRotationFromEuler(euler);
+                        group.setRotationFromEuler(pdxScriptEuler(loc.rotation[0], loc.rotation[1], loc.rotation[2]));
                     }
                     locatorHelpers.add(group);
+
                 }
             }
         }
 
         modelGroup.add(locatorHelpers);
+
+        // ── Skeleton Visualization ───────────────────────────────────
+        try {
+            if (sharedBoneRoot) {
+                modelGroup.updateMatrixWorld(true);
+                skeletonHelper = new THREE.SkeletonHelper(modelGroup);
+                skeletonHelper.visible = bonesToggle.checked;
+                (skeletonHelper.material as THREE.LineBasicMaterial).color.setHex(0x4fc3f7);
+                (skeletonHelper.material as THREE.LineBasicMaterial).linewidth = 1;
+                (skeletonHelper.material as THREE.LineBasicMaterial).depthTest = false;
+                skeletonHelper.renderOrder = 999;
+                scene.add(skeletonHelper);
+                webviewLog(`[Skeleton] Helper created for shared bone root "${sharedBoneRoot.name}"`);
+            } else {
+                webviewLog('[Skeleton] No skeleton data in parsed shapes');
+            }
+        } catch (skelErr) {
+            webviewLog(`[Skeleton] Failed to build skeleton visualization: ${skelErr}`, 'error');
+            skeletonHelper = null;
+        }
+
         scene.add(modelGroup);
         currentModel = modelGroup;
 
         // ── Recursive Attach Loading ─────────────────────────────────
         if (entity.attachData && entity.attachData.length > 0) {
             setProgress(80, 'Loading attachments...');
-            await loadAttachChildren(entity.attachData, locatorHelpers, modelGroup);
+            await loadAttachChildren(entity.attachData, locatorHelpers, modelGroup, entity.defaultState);
         }
 
-        // Fit camera to model
+        // Fit camera to model (only mesh geometry, not bones/locators)
         fitCameraToModel(modelGroup);
 
         // Update UI
@@ -1341,93 +1900,243 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
 
 /**
  * Recursively load and mount child entities at their locator positions.
+ * @param parentStateName The active state name from the parent entity, used by children with getStateFromParent=true
  */
 async function loadAttachChildren(
     children: AttachData[],
     parentLocators: THREE.Group,
     parentGroup: THREE.Group,
+    parentStateName?: string,
 ) {
     for (const child of children) {
         try {
-            if (!child.meshBase64) continue;
-
-            // Find the locator in the parent where this child attaches
-            const locator = parentLocators.getObjectByName(child.locatorName);
+            // Find the attach target:
+            // 1. Direct children of parentLocators (locator helpers)
+            // 2. Bone-parented locators (locators attached to bones in the skeleton)
+            // 3. Bones themselves
+            let locator: THREE.Object3D | undefined = parentLocators.children.find(c => c.name === child.locatorName);
+            let attachType = 'locator';
             if (!locator) {
-                console.warn(`[Attach] Locator "${child.locatorName}" not found for "${child.entityName}"`);
-                continue;
+                // Search bone-parented locators and bones throughout the model
+                parentGroup.traverse(obj => {
+                    if (!locator && obj.name === child.locatorName && obj.userData?.isLocator) {
+                        locator = obj;
+                    }
+                });
+                if (locator) {
+                    attachType = 'bone-locator';
+                }
             }
-
-            // Decode mesh buffer
-            const binaryStr = atob(child.meshBase64);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-            const meshBuffer = bytes.buffer;
-
-            const parsed = parsePdxMesh(meshBuffer);
+            if (!locator) {
+                parentGroup.traverse(obj => {
+                    if (!locator && obj instanceof THREE.Bone && obj.name === child.locatorName) {
+                        locator = obj;
+                    }
+                });
+                if (locator) {
+                    attachType = 'bone';
+                }
+            }
+            if (!locator) {
+                console.warn(`[Attach] Target "${child.locatorName}" not found for "${child.entityName}" — attaching to parent root`);
+                locator = parentGroup;
+                attachType = 'fallback';
+            }
 
             const childGroup = new THREE.Group();
             childGroup.name = `attach_${child.entityName}`;
+
+            // Dedicated locator group to avoid name collisions with bones/meshes
+            const childLocatorGroup = new THREE.Group();
+            childLocatorGroup.name = 'locators';
+            childLocatorGroup.visible = locatorToggle.checked;
 
             // Apply child entity scale
             const scale = child.scale ?? 1.0;
             childGroup.scale.setScalar(scale);
 
-            // Build child entity data for texture resolution
-            const childEntityData: EntityData = {
-                name: child.entityName,
-                resolvedMeshSettings: child.resolvedMeshSettings,
-                textureMap: child.textureMap,
-            };
+            let childLeafBone: THREE.Object3D | null = null;
 
-            // Build geometry and materials for child
-            let submeshIndex = 0;
-            for (const shape of parsed.shapes) {
-                for (const subMesh of shape.meshes) {
-                    const geo = buildGeometry(subMesh);
-                    const meshMat = subMesh.material;
-                    const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
-                        shader: meshMat.shader,
-                        diffuse: meshMat.diffuse,
-                        normal: meshMat.normal,
-                        specular: meshMat.specular,
-                    }, childEntityData);
+            if (child.meshBase64) {
+                // Decode mesh buffer
+                const binaryStr = atob(child.meshBase64);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+                const meshBuffer = bytes.buffer;
 
-                    const material = await createSubmeshMaterial(textures);
-                    const mesh = new THREE.Mesh(geo, material);
-                    mesh.name = `${child.entityName}_submesh_${submeshIndex}`;
+                const parsed = parsePdxMesh(meshBuffer);
 
-                    totalTriangles += (subMesh.indices.length / 3);
-                    totalVertices += (subMesh.positions.length / 3);
+                // Build child entity data for texture resolution
+                const childEntityData: EntityData = {
+                    name: child.entityName,
+                    resolvedMeshSettings: child.resolvedMeshSettings,
+                    textureMap: child.textureMap,
+                };
 
-                    childGroup.add(mesh);
-                    submeshIndex++;
+                // Apply pdxmesh scale (from .gfx definition)
+                const childMeshScale = child.meshScale ?? 1.0;
+                let childMeshParent: THREE.Object3D = childGroup;
+
+
+                // Build skeleton for child entity (needed for own animations)
+                const firstChildSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
+                if (firstChildSkelShape) {
+                    const childBoneRoot = buildSkeletonFromParsedBones(firstChildSkelShape.skeleton);
+                    if (childBoneRoot) {
+                        childGroup.add(childBoneRoot);
+                        // Find deepest leaf bone for mesh attachment
+                        const findLeaf = (bone: THREE.Bone): THREE.Bone => {
+                            for (const c of bone.children) { if (c instanceof THREE.Bone) return findLeaf(c); }
+                            return bone;
+                        };
+                        childMeshParent = findLeaf(childBoneRoot);
+                        childLeafBone = childMeshParent;
+                    }
+                }
+
+                // Apply meshScale container
+                if (childMeshScale !== 1.0) {
+                    const meshContainer = new THREE.Group();
+                    meshContainer.name = 'meshScaleContainer';
+                    meshContainer.scale.setScalar(childMeshScale);
+                    childMeshParent.add(meshContainer);
+                    childMeshParent = meshContainer;
+                }
+
+                // Build geometry and materials for child
+                let submeshIndex = 0;
+                for (const shape of parsed.shapes) {
+                    for (const subMesh of shape.meshes) {
+                        const geo = buildGeometry(subMesh);
+                        const meshMat = subMesh.material;
+                        const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
+                            shader: meshMat.shader,
+                            diffuse: meshMat.diffuse,
+                            normal: meshMat.normal,
+                            specular: meshMat.specular,
+                        }, childEntityData);
+
+                        const material = await createSubmeshMaterial(textures);
+                        const mesh = new THREE.Mesh(geo, material);
+                        mesh.name = `${child.entityName}_submesh_${submeshIndex}`;
+
+                        totalTriangles += (subMesh.indices.length / 3);
+                        totalVertices += (subMesh.positions.length / 3);
+
+                        childMeshParent.add(mesh);
+                        submeshIndex++;
+                    }
+                }
+
+                // Add mesh-embedded locators to dedicated group
+                for (const loc of parsed.locators) {
+                    const group = createLocatorGroup(loc.name, 0.3, 'mesh');
+                    applyLocatorTransform(group, loc);
+                    // Scale mesh-embedded locator positions from mesh space to entity space
+                    if (childMeshScale !== 1.0) {
+                        group.position.multiplyScalar(childMeshScale);
+                    }
+                    childLocatorGroup.add(group);
                 }
             }
 
-            // Add child locators
-            const childLocatorGroup = new THREE.Group();
-            childLocatorGroup.name = 'locators';
-            childLocatorGroup.visible = locatorToggle.checked;
-
-            for (const loc of parsed.locators) {
-                const group = createLocatorGroup(loc.name, 0.3, 'mesh');
-                group.position.set(loc.position[0], loc.position[1], loc.position[2]);
-                const q = new THREE.Quaternion(loc.rotation[0], loc.rotation[1], loc.rotation[2], loc.rotation[3]);
-                group.setRotationFromQuaternion(q);
-                childLocatorGroup.add(group);
+            // Add script-defined locators (override existing mesh locators or add new ones)
+            if (child.locators && child.locators.length > 0) {
+                for (const loc of child.locators) {
+                    const existing = childLocatorGroup.getObjectByName(loc.name);
+                    if (existing) {
+                        if (loc.position) existing.position.set(loc.position[0], loc.position[1], loc.position[2]);
+                        if (loc.rotation) {
+                            existing.setRotationFromEuler(pdxScriptEuler(loc.rotation[0], loc.rotation[1], loc.rotation[2]));
+                        }
+                        existing.userData = { source: 'override', isLocator: true };
+                    } else {
+                        const group = createLocatorGroup(loc.name, 0.3, 'script');
+                        if (loc.position) group.position.set(loc.position[0], loc.position[1], loc.position[2]);
+                        if (loc.rotation) {
+                            group.setRotationFromEuler(pdxScriptEuler(loc.rotation[0], loc.rotation[1], loc.rotation[2]));
+                        }
+                        childLocatorGroup.add(group);
+                    }
+                }
             }
 
-            childGroup.add(childLocatorGroup);
+            // Attach locators to the leaf bone (if skeleton exists) so that
+            // bone animations propagate to locators and their grandchildren.
+            // Without this, locators are siblings of bones and don't follow animation.
+            if (childLeafBone) {
+                childLeafBone.add(childLocatorGroup);
+            } else {
+                childGroup.add(childLocatorGroup);
+            }
 
             // Mount child at the locator position in parent's coordinate space
             locator.add(childGroup);
 
-            console.log(`[Attach] Mounted "${child.entityName}" at locator "${child.locatorName}" (depth=${childGroup.name})`);
 
-            // Recursively load grandchildren
+            // Initialize child entity animations
+            let childActiveState: string | undefined;
+            if (child.animations && child.animations.length > 0) {
+                const childMixer = new THREE.AnimationMixer(childGroup);
+                const childBones: THREE.Bone[] = [];
+                childGroup.traverse(obj => { if (obj instanceof THREE.Bone) childBones.push(obj); });
+                const childBoneNameMap = new Map<number, string>();
+                for (let i = 0; i < childBones.length; i++) childBoneNameMap.set(i, childBones[i]!.name);
+
+                const clipMap = new Map<string, THREE.AnimationClip>();
+                for (const animEntry of child.animations) {
+                    try {
+                        const bin = atob(animEntry.animBase64);
+                        const buf = new Uint8Array(bin.length);
+                        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+                        const clip = pdxAnimToClip(parsePdxAnim(buf.buffer), animEntry.animName, childBoneNameMap);
+                        clipMap.set(animEntry.stateName, clip);
+                    } catch (err) {
+                        webviewLog(`[ChildAnim] Failed "${animEntry.animName}" for "${child.entityName}": ${err}`, 'error');
+                    }
+                }
+
+                // Determine which state to play:
+                // getStateFromParent = true → use parent's state
+                // getStateFromParent = false/undefined (default no) → use child's own defaultState
+                const targetState = child.getStateFromParent === true
+                    ? parentStateName
+                    : child.defaultState;
+                childActiveState = targetState;
+
+                // If a specific target state is set, only play that state's clip.
+                // Don't fall back to first clip — a state without animation means "stay static".
+                // Only use the first clip as fallback when no target state is specified at all.
+                const targetClip = targetState
+                    ? clipMap.get(targetState)
+                    : clipMap.values().next().value;
+                let childCurrentAction: THREE.AnimationAction | null = null;
+                if (targetClip) {
+                    childCurrentAction = childMixer.clipAction(targetClip);
+                    childCurrentAction.setLoop(THREE.LoopRepeat, Infinity);
+                    childCurrentAction.play();
+                }
+
+                childMixers.push({
+                    mixer: childMixer,
+                    clips: clipMap,
+                    getStateFromParent: child.getStateFromParent === true,
+                    currentAction: childCurrentAction,
+                });
+                isAnimPlaying = true;
+                clock.start();
+            } else {
+                // No animations — propagate state correctly:
+                // getStateFromParent=yes → pass parent's state through
+                // getStateFromParent=no/undefined → use own defaultState
+                childActiveState = child.getStateFromParent === true
+                    ? parentStateName
+                    : child.defaultState;
+            }
+
+            // Recursively load grandchildren, propagating the active state
             if (child.attachData && child.attachData.length > 0) {
-                await loadAttachChildren(child.attachData as AttachData[], childLocatorGroup, childGroup);
+                await loadAttachChildren(child.attachData as AttachData[], childLocatorGroup, childGroup, childActiveState);
             }
         } catch (e) {
             console.warn(`[Attach] Failed to load "${child.entityName}":`, e);
@@ -1436,17 +2145,36 @@ async function loadAttachChildren(
 }
 
 function fitCameraToModel(model: THREE.Object3D) {
-    const box = new THREE.Box3().setFromObject(model);
+    // Compute bounding box from mesh geometry only (exclude bones, locators, helpers)
+    const box = new THREE.Box3();
+    model.traverse(obj => {
+        if (obj instanceof THREE.Mesh && obj.geometry) {
+            obj.geometry.computeBoundingBox();
+            if (obj.geometry.boundingBox) {
+                const meshBox = obj.geometry.boundingBox.clone();
+                meshBox.applyMatrix4(obj.matrixWorld);
+                box.union(meshBox);
+            }
+        }
+    });
+
+    if (box.isEmpty()) {
+        // Fallback: use full bounding box
+        box.setFromObject(model);
+    }
+
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
 
     const maxDim = Math.max(size.x, size.y, size.z);
-    const dist = maxDim * 2.0;
+    // Use FOV-based distance so the model fills ~80% of the viewport
+    const fovRad = camera.fov * Math.PI / 180;
+    const dist = (maxDim / 2) / Math.tan(fovRad / 2) * 1.1;
 
     camera.position.copy(center);
-    camera.position.x += dist * 0.5;
-    camera.position.y += dist * 0.3;
-    camera.position.z += dist * 0.8;
+    camera.position.x += dist * 0.35;
+    camera.position.y += dist * 0.2;
+    camera.position.z += dist * 0.85;
 
     controls.target.copy(center);
     controls.update();
@@ -1470,14 +2198,27 @@ function showError(msg: string) {
     setTimeout(() => errorBanner.classList.remove('visible'), 8000);
 }
 
-function updateInfoPanel(entity: EntityData, parsed: ParsedMeshFile) {
-    const locCount = parsed.locators.length + (entity.locators?.length ?? 0);
+/** Capture current viewport as PNG and send to extension for saving */
+function takeScreenshot() {
+    if (!renderer) return;
+    // Force a render so the buffer is fresh
+    renderer.render(scene, camera);
+    const dataUrl = renderer.domElement.toDataURL('image/png');
+    // Strip the data:image/png;base64, prefix
+    const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+    vscode.postMessage({ command: 'screenshot', data: base64 });
+}
+
+function updateInfoPanel(entity: EntityData, parsed?: ParsedMeshFile) {
+    const locCount = (parsed?.locators.length ?? 0) + (entity.locators?.length ?? 0);
+    const boneCount = parsed?.shapes.reduce((sum, s) => sum + s.skeleton.length, 0) ?? 0;
     infoPanel.innerHTML = `
         <div class="info-group"><span class="info-label">Mesh:</span><span class="info-value">${entity.pdxmesh ?? '-'}</span></div>
         <div class="info-group"><span class="info-label">Triangles:</span><span class="info-value">${totalTriangles.toLocaleString()}</span></div>
         <div class="info-group"><span class="info-label">Vertices:</span><span class="info-value">${totalVertices.toLocaleString()}</span></div>
-        <div class="info-group"><span class="info-label">Shapes:</span><span class="info-badge">${parsed.shapes.length}</span></div>
+        <div class="info-group"><span class="info-label">Shapes:</span><span class="info-badge">${parsed?.shapes.length ?? 0}</span></div>
         <div class="info-group"><span class="info-label">Locators:</span><span class="info-badge">${locCount}</span></div>
+        ${boneCount > 0 ? `<div class="info-group"><span class="info-label">Bones:</span><span class="info-badge">${boneCount}</span></div>` : ''}
         ${entity.scale ? `<div class="info-group"><span class="info-label">Scale:</span><span class="info-value">${entity.scale}</span></div>` : ''}
     `;
 }
@@ -1486,45 +2227,205 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
     let html = '<div class="tree-title">Entity Tree</div>';
 
     // Recursive helper to render entity hierarchy
-    function renderEntityNode(e: EntityData, depth: number) {
+    function renderEntityNode(e: EntityData & { pdxmesh?: string }, depth: number) {
         const pad = 12 + depth * 16;
-        html += `<div class="tree-item" style="padding-left:${pad}px"><span class="tree-icon">📦</span><span class="tree-label">${e.name}</span><span class="tree-sublabel">${e.pdxmesh ?? ''}</span></div>`;
+        const hasChildren = (e.attachData && e.attachData.length > 0);
+        const toggleCls = hasChildren ? 'tree-toggle' : 'tree-toggle-placeholder';
+        const toggleIcon = hasChildren ? '▼' : '';
+
+        html += `<div class="tree-item tree-entity" data-entity-name="${e.name}" style="padding-left:${pad}px">`;
+        html += `<span class="${toggleCls}">${toggleIcon}</span>`;
+        html += `<span class="tree-icon">📦</span>`;
+        html += `<span class="tree-label">${e.name}</span>`;
+        if (e.pdxmesh) html += `<span class="tree-sublabel">${e.pdxmesh}</span>`;
+        html += `</div>`;
 
         if (e.attachData) {
+            html += `<div class="tree-children" data-parent="${e.name}">`;
             for (const child of e.attachData) {
                 const childPad = pad + 16;
-                html += `<div class="tree-item" style="padding-left:${childPad}px"><span class="tree-icon">🔗</span><span class="tree-label">${child.locatorName}</span><span class="tree-sublabel">→ ${child.entityName}</span></div>`;
-                // Render child as a sub-entity
+                html += `<div class="tree-item tree-attach" data-attach-locator="${child.locatorName}" style="padding-left:${childPad}px">`;
+                html += `<span class="tree-toggle-placeholder"></span>`;
+                html += `<span class="tree-icon">🔗</span>`;
+                html += `<span class="tree-label">${child.locatorName}</span>`;
+                html += `<span class="tree-sublabel">→ ${child.entityName}</span>`;
+                html += `</div>`;
                 renderEntityNode({
                     name: child.entityName,
+                    pdxmesh: undefined,
                     attachData: child.attachData,
                 }, depth + 2);
             }
+            html += `</div>`;
         }
     }
 
     renderEntityNode(entity, 0);
 
-    // List locators
-    if (locatorHelpers && locatorHelpers.children.length > 0) {
-        html += '<div class="tree-title" style="margin-top:4px">Locators</div>';
+    // Collect ALL locators: locatorHelpers + bone-parented ones
+    const allLocators: THREE.Object3D[] = [];
+    if (locatorHelpers) {
         for (const child of locatorHelpers.children) {
+            allLocators.push(child);
+        }
+    }
+    if (currentModel) {
+        currentModel.traverse(obj => {
+            const src = (obj.userData as { source?: string }).source;
+            if (src && (src === 'mesh' || src === 'script' || src === 'override')) {
+                if (!allLocators.includes(obj)) {
+                    allLocators.push(obj);
+                }
+            }
+        });
+    }
+
+    // List locators (top level)
+    if (allLocators.length > 0) {
+        html += '<div class="tree-title tree-title-locators" style="margin-top:4px">';
+        html += `<span class="tree-toggle">▼</span>`;
+        html += `Locators <span class="tree-sublabel">(${allLocators.length})</span>`;
+        html += '</div>';
+        html += '<div class="tree-children" data-parent="locators">';
+        for (let i = 0; i < allLocators.length; i++) {
+            const child = allLocators[i]!;
             const src = (child.userData as { source?: string }).source ?? 'mesh';
             const icon = src === 'mesh' ? '🟢' : src === 'override' ? '🟡' : '🔵';
-            html += `<div class="tree-item" data-locator="${child.name}" style="padding-left:28px"><span class="tree-icon">${icon}</span><span class="tree-label">${child.name}</span><span class="tree-sublabel">${src}</span></div>`;
+            const isBoneParented = child.parent instanceof THREE.Bone;
+            const boneSuffix = isBoneParented ? ` [${child.parent!.name}]` : '';
+            // Find which entity this locator belongs to (walk up to find attach_ group)
+            let ownerEntity = '';
+            let p = child.parent;
+            while (p) {
+                if (p.name.startsWith('attach_')) {
+                    ownerEntity = p.name.replace('attach_', '');
+                    break;
+                }
+                p = p.parent;
+            }
+            const ownerSuffix = ownerEntity ? ` (${ownerEntity})` : '';
+            html += `<div class="tree-item tree-locator" data-locator-idx="${i}" ${isBoneParented ? 'data-bone-parented="true"' : ''} style="padding-left:28px"><span class="tree-toggle-placeholder"></span><span class="tree-icon">${icon}</span><span class="tree-label">${child.name}</span><span class="tree-sublabel">${src}${boneSuffix}${ownerSuffix}</span></div>`;
+        }
+        html += '</div>';
+    }
+
+    // List skeleton bones (top level)
+    if (parsed) {
+        const shapesWithBones = parsed.shapes.filter(s => s.skeleton.length > 0);
+        const totalBones = shapesWithBones.reduce((sum, s) => sum + s.skeleton.length, 0);
+        if (totalBones > 0) {
+            html += '<div class="tree-title" style="margin-top:4px">';
+            html += `<span class="tree-toggle">▶</span>`;
+            html += `Bones <span class="tree-sublabel">(${totalBones} in ${shapesWithBones.length} shapes)</span>`;
+            html += '</div>';
+            html += '<div class="tree-children collapsed" data-parent="bones">';
+            for (let si = 0; si < shapesWithBones.length; si++) {
+                const shape = shapesWithBones[si]!;
+                const shapeName = shape.meshes[0]?.name ?? `Shape ${si}`;
+                html += `<div class="tree-item" style="padding-left:28px"><span class="tree-toggle-placeholder"></span><span class="tree-icon">📦</span><span class="tree-label">${shapeName}</span><span class="tree-sublabel">${shape.skeleton.length} bones</span></div>`;
+                for (const bone of shape.skeleton) {
+                    const parentName = bone.parentIndex >= 0 ? shape.skeleton[bone.parentIndex]?.name ?? '?' : 'root';
+                    html += `<div class="tree-item" style="padding-left:44px"><span class="tree-toggle-placeholder"></span><span class="tree-icon">🦴</span><span class="tree-label">${bone.name}</span><span class="tree-sublabel">${parentName === 'root' ? 'root' : '← ' + parentName}</span></div>`;
+                }
+            }
+            html += '</div>';
         }
     }
 
     entityTree.innerHTML = html;
 
-    // Add click handlers for locator items
-    entityTree.querySelectorAll<HTMLElement>('[data-locator]').forEach(el => {
+    // ── Click handlers ──
+
+    // Click locator → select in 3D viewport using direct object reference (avoids name collisions)
+    entityTree.querySelectorAll<HTMLElement>('[data-locator-idx]').forEach(el => {
         el.addEventListener('click', () => {
-            const name = el.dataset.locator!;
-            const loc = locatorHelpers?.getObjectByName(name);
-            if (loc) selectLocator(loc);
+            const idx = parseInt(el.dataset.locatorIdx!, 10);
+            const isBoneParented = el.dataset.boneParented === 'true';
+            const loc = allLocators[idx];
+            if (loc) {
+                selectLocator(loc, !isBoneParented);
+            }
         });
     });
+
+    // Click entity → camera focus on its 3D group
+    entityTree.querySelectorAll<HTMLElement>('[data-entity-name]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            // Don't focus if they clicked the toggle
+            if ((e.target as HTMLElement).classList.contains('tree-toggle')) return;
+            const name = el.dataset.entityName!;
+            focusOnEntityByName(name);
+        });
+    });
+
+    // Click attach locator → select the locator in 3D
+    entityTree.querySelectorAll<HTMLElement>('[data-attach-locator]').forEach(el => {
+        el.addEventListener('click', () => {
+            const locName = el.dataset.attachLocator!;
+            // Search locatorHelpers and model for bone-parented
+            let loc = locatorHelpers?.getObjectByName(locName);
+            if (!loc && currentModel) {
+                loc = currentModel.getObjectByName(locName);
+            }
+            if (loc) {
+                selectLocator(loc);
+                focusOnObject(loc);
+            }
+        });
+    });
+
+    // Toggle fold/unfold
+    entityTree.querySelectorAll<HTMLElement>('.tree-toggle').forEach(toggle => {
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const parent = toggle.closest('.tree-item, .tree-title') as HTMLElement | null;
+            if (!parent) return;
+            const nextSibling = parent.nextElementSibling as HTMLElement | null;
+            if (nextSibling && nextSibling.classList.contains('tree-children')) {
+                const isCollapsed = nextSibling.classList.toggle('collapsed');
+                toggle.textContent = isCollapsed ? '▶' : '▼';
+            }
+        });
+    });
+}
+
+/** Focus camera on a named entity group in the scene */
+function focusOnEntityByName(name: string) {
+    if (!currentModel) return;
+    // Search the model hierarchy for a group matching the entity name
+    let target: THREE.Object3D | null = null;
+    currentModel.traverse(obj => {
+        if (obj.name === name || obj.name === `entity_${name}`) {
+            target = obj;
+        }
+    });
+    // If not found by entity name, try the root model
+    if (!target) target = currentModel;
+    focusOnObject(target);
+}
+
+/** Focus camera on any Object3D */
+function focusOnObject(obj: THREE.Object3D) {
+    const box = new THREE.Box3().setFromObject(obj);
+    if (box.isEmpty()) {
+        // For locators/empty groups, use position directly
+        controls.target.copy(obj.getWorldPosition(new THREE.Vector3()));
+        controls.update();
+        return;
+    }
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fovRad = camera.fov * Math.PI / 180;
+    const dist = Math.max((maxDim / 2) / Math.tan(fovRad / 2) * 1.1, 0.5);
+
+    camera.position.copy(center);
+    camera.position.x += dist * 0.35;
+    camera.position.y += dist * 0.2;
+    camera.position.z += dist * 0.85;
+
+    controls.target.copy(center);
+    controls.update();
 }
 
 function updateStateSelector(entity: EntityData) {
@@ -1545,6 +2446,83 @@ function updateStateSelector(entity: EntityData) {
 
 // ── Toolbar Event Handlers ───────────────────────────────────────────────────
 
+// State selector → switch animation
+document.getElementById('sel-state')?.addEventListener('change', (e) => {
+    const stateName = (e.target as HTMLSelectElement).value;
+    // Find animation name for this state from entity data
+    const stateInfo = currentEntity?.states?.find(s => s.name === stateName);
+    const animName = stateInfo?.animation;
+    const clip = animName ? animationClips.get(animName) : undefined;
+    if (clip) {
+        switchAnimation(clip);
+    }
+
+    // Propagate state change to all getStateFromParent child mixers
+    for (const entry of childMixers) {
+        if (!entry.getStateFromParent) continue;
+        const childClip = entry.clips.get(stateName);
+        if (childClip) {
+            const newAction = entry.mixer.clipAction(childClip);
+            newAction.setLoop(THREE.LoopRepeat, Infinity);
+            if (entry.currentAction && entry.currentAction !== newAction) {
+                newAction.reset();
+                newAction.play();
+                entry.currentAction.crossFadeTo(newAction, 0.3, true);
+            } else {
+                newAction.reset();
+                newAction.play();
+            }
+            entry.currentAction = newAction;
+        }
+    }
+});
+
+// Animation timeline controls
+document.getElementById('btn-anim-play')?.addEventListener('click', () => {
+    if (!mixer || !currentAction) return;
+    isAnimPlaying = !isAnimPlaying;
+    const btn = document.getElementById('btn-anim-play');
+    if (btn) btn.textContent = isAnimPlaying ? '⏸' : '▶';
+    if (isAnimPlaying) {
+        currentAction.paused = false;
+        clock.start();
+    } else {
+        currentAction.paused = true;
+    }
+});
+
+document.getElementById('anim-scrub')?.addEventListener('input', (e) => {
+    if (!mixer || !currentAction) return;
+    const val = Number((e.target as HTMLInputElement).value);
+    const duration = currentAction.getClip().duration;
+    const time = (val / 1000) * duration;
+    currentAction.time = time;
+    mixer.update(0); // Force update to this frame
+    updateTimelineUI();
+});
+
+document.getElementById('btn-anim-loop')?.addEventListener('click', () => {
+    animLooping = !animLooping;
+    const btn = document.getElementById('btn-anim-loop');
+    if (btn) btn.textContent = animLooping ? '🔁' : '➡️';
+    if (currentAction) {
+        currentAction.setLoop(animLooping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+        currentAction.clampWhenFinished = !animLooping;
+    }
+});
+
+document.getElementById('btn-anim-speed')?.addEventListener('click', () => {
+    if (!mixer) return;
+    // Cycle: 1x → 2x → 0.5x → 0.25x → 1x
+    const speeds = [1, 2, 0.5, 0.25];
+    const current = mixer.timeScale;
+    const idx = speeds.indexOf(current);
+    const next = speeds[(idx + 1) % speeds.length]!;
+    mixer.timeScale = next;
+    const btn = document.getElementById('btn-anim-speed');
+    if (btn) btn.textContent = `${next}x`;
+});
+
 wireframeToggle.addEventListener('change', () => {
     if (!currentModel) return;
     currentModel.traverse((obj) => {
@@ -1556,7 +2534,10 @@ wireframeToggle.addEventListener('change', () => {
 
 locatorToggle.addEventListener('change', () => {
     if (locatorHelpers) locatorHelpers.visible = locatorToggle.checked;
-    // Hide labels when locators are hidden
+    // Hide/show HTML label overlays
+    for (const el of locatorLabelEls.values()) {
+        el.style.display = locatorToggle.checked ? '' : 'none';
+    }
     if (!locatorToggle.checked) {
         deselectLocator();
     }
@@ -1587,6 +2568,10 @@ normalToggle.addEventListener('change', () => {
             }
         }
     });
+});
+
+bonesToggle.addEventListener('change', () => {
+    if (skeletonHelper) skeletonHelper.visible = bonesToggle.checked;
 });
 
 // Focus button — reframe camera to fit model (like Maya's F key)
@@ -1626,8 +2611,17 @@ document.getElementById('btn-reset')?.addEventListener('click', () => {
 });
 document.getElementById('btn-props-close')?.addEventListener('click', deselectLocator);
 
+// Screenshot button
+document.getElementById('btn-screenshot')?.addEventListener('click', takeScreenshot);
+
 // Keyboard shortcuts: F=focus, W=translate, E=rotate (Maya-style), Escape=deselect, Ctrl+Z=undo
 window.addEventListener('keydown', (e) => {
+    // Ctrl+Shift+S → screenshot
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        takeScreenshot();
+        return;
+    }
     // Forward Ctrl+Z / Ctrl+Shift+Z to extension for undo/redo
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -1685,6 +2679,17 @@ function disposeAll() {
     // Deselect and cleanup labels
     deselectLocator();
     clearLocatorLabels();
+
+    // Dispose animation mixers
+    if (mixer) {
+        mixer.stopAllAction();
+        mixer = null;
+    }
+    for (const cm of childMixers) cm.mixer.stopAllAction();
+    childMixers.length = 0;
+    animationClips.clear();
+    currentAction = null;
+    showTimeline(false);
 
     // Dispose TransformControls
     if (transformCtrl) {
@@ -1784,7 +2789,24 @@ window.addEventListener('message', async (event) => {
                 }
                 meshBuffer = bytes.buffer;
             }
+            // Decode animation data
+            const animBuffers = new Map<string, ArrayBuffer>();
+            if (data.animations) {
+                for (const anim of data.animations) {
+                    const binary = atob(anim.animBase64);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        bytes[i] = binary.charCodeAt(i);
+                    }
+                    animBuffers.set(anim.animName, bytes.buffer);
+                    webviewLog(`[Anim] Decoded "${anim.animName}" for state "${anim.stateName}" (${bytes.length} bytes)`);
+                }
+            }
             await loadModel(data.entity, meshBuffer);
+            // Initialize animations after model is loaded
+            if (animBuffers.size > 0) {
+                initAnimations(animBuffers);
+            }
             break;
         }
         case 'dispose': {

@@ -24,6 +24,7 @@ export interface LocatorOverride {
 export interface AttachDefinition {
     locatorName: string;
     entityName: string;
+    getStateFromParent?: boolean;
 }
 
 export interface MeshSettingOverride {
@@ -52,6 +53,7 @@ export interface EntityDefinition {
     attaches: AttachDefinition[];
     meshSettings: MeshSettingOverride[];
     clone?: string;
+    getStateFromParent?: boolean;
     line: number;
     endLine: number;
     filePath: string;
@@ -233,6 +235,11 @@ function parseEntityBlock(ctx: ParseCtx, filePath: string): EntityDefinition {
             case 'state': entity.states.push(parseStateBlock(ctx)); break;
             case 'attach': entity.attaches.push(...parseAttachBlock(ctx)); break;
             case 'meshsettings': entity.meshSettings.push(parseMeshSettingBlock(ctx)); break;
+            case 'get_state_from_parent': {
+                const val = advance(ctx)!.value.replace(/"/g, '').toLowerCase();
+                entity.getStateFromParent = val === 'yes';
+                break;
+            }
             default: {
                 const next = peek(ctx);
                 if (next?.value === '{') { advance(ctx); skipBlock(ctx); }

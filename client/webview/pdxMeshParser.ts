@@ -51,6 +51,8 @@ export interface ParsedLocator {
     position: [number, number, number];
     rotation: [number, number, number, number]; // quaternion (x,y,z,w)
     parentBone?: string;
+    /** Full 4x4 transform matrix (column-major 12 floats from PDX tx property) */
+    transform?: Float32Array;
 }
 
 export interface ParsedShape {
@@ -383,9 +385,26 @@ function extractSkeleton(skelNode: PdxNode): ParsedBone[] {
 
 function extractLocators(locatorRoot: PdxNode): ParsedLocator[] {
     return locatorRoot.children.map(locNode => {
+        const pa = asString(locNode.props.get('pa') ?? []);
+        const txProp = locNode.props.get('tx');
+
+        if (txProp) {
+            // Full transform matrix (12 floats: 3x4 column-major, same as bone tx)
+            const tx = asFloat32(txProp);
+            // PDX tx is a 3x4 column-major matrix:
+            // col0: tx[0..2], col1: tx[3..5], col2: tx[6..8], col3(translation): tx[9..11]
+            // Blender reads it as: row0=(tx[0],tx[3],tx[6],tx[9]), row1=(tx[1],tx[4],tx[7],tx[10]), ...
+            return {
+                name: locNode.name,
+                position: [tx[9] ?? 0, tx[10] ?? 0, tx[11] ?? 0] as [number, number, number],
+                rotation: [0, 0, 0, 1] as [number, number, number, number], // will be overridden by transform
+                parentBone: pa || undefined,
+                transform: tx,
+            };
+        }
+
         const p = asNumberArray(locNode.props.get('p') ?? [0, 0, 0]);
         const q = asNumberArray(locNode.props.get('q') ?? [0, 0, 0, 1]);
-        const pa = asString(locNode.props.get('pa') ?? []);
         return {
             name: locNode.name,
             position: [p[0] ?? 0, p[1] ?? 0, p[2] ?? 0],
@@ -411,10 +430,6 @@ export function parsePdxMesh(
 
     const result: ParsedMeshFile = { shapes: [], locators: [] };
 
-    // Debug: log the top-level tree structure
-    console.log('[PDX Mesh] Tree root children:', tree.children.map(c =>
-        `${c.name}(props=[${[...c.props.keys()].join(',')}], children=[${c.children.map(cc => cc.name).join(',')}])`
-    ).join(' | '));
 
     // Find the 'object' root node (contains shapes)
     const objectRoot = tree.children.find(c => c.name === 'object');
@@ -422,7 +437,7 @@ export function parsePdxMesh(
         // Iterate ALL children of object — don't filter by name.
         // PDX mesh files may name shape nodes differently.
         for (const shapeNode of objectRoot.children) {
-            console.log(`[PDX Mesh] object child: "${shapeNode.name}", props=[${[...shapeNode.props.keys()].join(',')}], children=[${shapeNode.children.map(c => c.name).join(',')}]`);
+
 
             const lodProp = shapeNode.props.get('lod');
             const lod = lodProp ? asNumberArray(lodProp)[0] ?? 0 : 0;
@@ -480,7 +495,138 @@ export function parsePdxMesh(
         result.locators = extractLocators(locatorRoot);
     }
 
-    console.log(`[PDX Mesh] Result: ${result.shapes.length} shapes, ${result.shapes.reduce((s, sh) => s + sh.meshes.length, 0)} submeshes, ${result.locators.length} locators`);
 
     return result;
+}
+
+// ── PDX Animation (.anim) Parser ─────────────────────────────────────────────
+
+export interface ParsedAnimBone {
+    name: string;
+    /** Which channels are animated: combination of 't','q','s' */
+    animatedChannels: string;
+    translations?: Float32Array;  // N*3 (xyz per frame)
+    rotations?: Float32Array;     // N*4 (quaternion xyzw per frame)
+    scales?: Float32Array;        // N*1 (uniform scale per frame)
+}
+
+export interface ParsedAnimation {
+    fps: number;
+    sampleCount: number;
+    boneCount: number;
+    bones: ParsedAnimBone[];
+}
+
+/**
+ * Parse a PDX .anim binary file into structured animation data.
+ *
+ * .anim format (from io_pdx_mesh reference):
+ *   info { fps(float), sa(int=frameCount), j(int=boneCount) }
+ *     bone_name { sa(string="q"/"tq"/"tqs"), t(float[3]), q(float[4]), s(float[1]) }
+ *     bone_name { ... }
+ *   samples { t(float[...]), q(float[...]), s(float[...]) }
+ *
+ * The 'sa' on each bone tells which channels are animated.
+ * The 'samples' node contains FLAT arrays where data is interleaved:
+ *   for each frame: for each bone (that has that channel): extract stride
+ */
+export function parsePdxAnim(buffer: ArrayBuffer): ParsedAnimation {
+    const tree = parseToTree(buffer);
+
+    // Find 'info' node
+    const infoNode = tree.children.find(c => c.name === 'info');
+    if (!infoNode) throw new Error('[PDX Anim] No "info" node found');
+
+    const fpsProp = infoNode.props.get('fps');
+    const saProp = infoNode.props.get('sa');
+    const jProp = infoNode.props.get('j');
+
+    const fps = fpsProp ? asNumberArray(fpsProp)[0] ?? 15 : 15;
+    const sampleCount = saProp ? asNumberArray(saProp)[0] ?? 1 : 1;
+    const boneCount = jProp ? asNumberArray(jProp)[0] ?? 0 : 0;
+
+
+
+    // Parse bone info from CHILDREN of 'info' node (not top-level!)
+    const boneInfos: Array<{ name: string; sa: string }> = [];
+    for (const child of infoNode.children) {
+        const saPropBone = child.props.get('sa');
+        const sa = saPropBone ? asString(saPropBone) : '';
+
+        boneInfos.push({ name: child.name, sa });
+
+    }
+
+    // Find 'samples' node (child of root, sibling of 'info')
+    const samplesNode = tree.children.find(c => c.name === 'samples');
+
+    // Build per-bone keyframe tracks by deinterleaving samples
+    const bones: ParsedAnimBone[] = [];
+
+    if (samplesNode && sampleCount > 1) {
+        const sampleQ = samplesNode.props.get('q') ? asFloat32(samplesNode.props.get('q')!) : null;
+        const sampleT = samplesNode.props.get('t') ? asFloat32(samplesNode.props.get('t')!) : null;
+        const sampleS = samplesNode.props.get('s') ? asFloat32(samplesNode.props.get('s')!) : null;
+
+
+
+        // Determine scale stride (1 for uniform, 3 for non-uniform)
+        const scaleLen = 1; // Stellaris uses uniform scale
+
+        // Allocate output per-bone arrays
+        const boneData = new Map<string, ParsedAnimBone>();
+        for (const bi of boneInfos) {
+            const bone: ParsedAnimBone = { name: bi.name, animatedChannels: bi.sa };
+            if (bi.sa.includes('q')) bone.rotations = new Float32Array(sampleCount * 4);
+            if (bi.sa.includes('t')) bone.translations = new Float32Array(sampleCount * 3);
+            if (bi.sa.includes('s')) bone.scales = new Float32Array(sampleCount);
+            boneData.set(bi.name, bone);
+        }
+
+        // Deinterleave: for each frame, for each bone (in order), extract stride
+        let qIdx = 0, tIdx = 0, sIdx = 0;
+        for (let frame = 0; frame < sampleCount; frame++) {
+            for (const bi of boneInfos) {
+                const bone = boneData.get(bi.name)!;
+                if (bi.sa.includes('q') && sampleQ && bone.rotations) {
+                    bone.rotations[frame * 4 + 0] = sampleQ[qIdx]!;
+                    bone.rotations[frame * 4 + 1] = sampleQ[qIdx + 1]!;
+                    bone.rotations[frame * 4 + 2] = sampleQ[qIdx + 2]!;
+                    bone.rotations[frame * 4 + 3] = sampleQ[qIdx + 3]!;
+                    qIdx += 4;
+                }
+                if (bi.sa.includes('t') && sampleT && bone.translations) {
+                    bone.translations[frame * 3 + 0] = sampleT[tIdx]!;
+                    bone.translations[frame * 3 + 1] = sampleT[tIdx + 1]!;
+                    bone.translations[frame * 3 + 2] = sampleT[tIdx + 2]!;
+                    tIdx += 3;
+                }
+                if (bi.sa.includes('s') && sampleS && bone.scales) {
+                    bone.scales[frame] = sampleS[sIdx]!;
+                    sIdx += scaleLen;
+                }
+            }
+        }
+
+        for (const bi of boneInfos) {
+            bones.push(boneData.get(bi.name)!);
+        }
+    } else {
+        // No samples or 1 frame — use initial pose from info bone props
+        for (const bi of boneInfos) {
+            const child = infoNode.children.find(c => c.name === bi.name)!;
+            const tProp = child.props.get('t');
+            const qProp = child.props.get('q');
+            const sProp = child.props.get('s');
+            bones.push({
+                name: bi.name,
+                animatedChannels: bi.sa,
+                translations: tProp ? asFloat32(tProp) : undefined,
+                rotations: qProp ? asFloat32(qProp) : undefined,
+                scales: sProp ? asFloat32(sProp) : undefined,
+            });
+        }
+    }
+
+    return { fps, sampleCount, boneCount, bones };
 }

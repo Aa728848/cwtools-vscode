@@ -15,7 +15,9 @@ type EntityPanelMessage =
     | { command: 'openFile' }
     | { command: 'updateLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }
     | { command: 'undo' }
-    | { command: 'redo' };
+    | { command: 'redo' }
+    | { command: 'screenshot'; data: string }
+    | { command: 'log'; text: string; level?: 'info' | 'warn' | 'error' };
 
 export class EntityPanel {
     public static currentPanel: EntityPanel | undefined;
@@ -29,6 +31,7 @@ export class EntityPanel {
     private _skipNextReload = false;
     private _currentEntityName: string | undefined;
     private _currentEntityIndex = 0;
+    private static _outputChannel: vscode.OutputChannel | undefined;
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
@@ -131,6 +134,33 @@ export class EntityPanel {
                             await this._loadAndRender(this._document, this._currentEntityIndex);
                             this._panel.reveal();
                         }
+                        break;
+                    }
+                    case 'screenshot': {
+                        const uri = await vscode.window.showSaveDialog({
+                            defaultUri: vscode.Uri.file(
+                                path.join(
+                                    path.dirname(this._document?.uri.fsPath ?? ''),
+                                    `${this._currentEntityName ?? 'entity'}_screenshot.png`,
+                                ),
+                            ),
+                            filters: { 'PNG Image': ['png'] },
+                            title: 'Save Screenshot / 保存截图',
+                        });
+                        if (uri && msg.command === 'screenshot') {
+                            const buf = Buffer.from(msg.data, 'base64');
+                            await fs.promises.writeFile(uri.fsPath, buf);
+                            vscode.window.showInformationMessage(`Screenshot saved: ${path.basename(uri.fsPath)}`);
+                        }
+                        break;
+                    }
+                    case 'log': {
+                        if (!EntityPanel._outputChannel) {
+                            EntityPanel._outputChannel = vscode.window.createOutputChannel('Entity Preview');
+                            EntityPanel._outputChannel.show(true); // auto-show, preserve focus
+                        }
+                        const prefix = msg.level === 'error' ? '❌' : msg.level === 'warn' ? '⚠️' : 'ℹ️';
+                        EntityPanel._outputChannel.appendLine(`${prefix} ${msg.text}`);
                         break;
                     }
                 }
@@ -339,6 +369,7 @@ export class EntityPanel {
 
         // Resolve mesh file path
         let meshBuffer: ArrayBuffer | undefined;
+        let meshFileDir: string | undefined;
         // Per-submesh material overrides from GFX/entity, keyed by mesh index
         const resolvedMeshSettings: Array<{
             name: string;
@@ -351,12 +382,14 @@ export class EntityPanel {
         // Map of relative texture path → webview URI for mesh-embedded materials
         const textureMap: Record<string, string> = {};
 
+        let meshScale: number | undefined;
         if (entity.pdxmesh) {
             const meshDef = this._entityGraph.meshes.get(entity.pdxmesh);
             if (meshDef) {
+                meshScale = meshDef.scale;
                 // Find the .mesh binary file
                 const meshFilePath = this._resolveFilePath(meshDef.file, searchRoots);
-                const meshFileDir = meshFilePath ? path.dirname(meshFilePath) : undefined;
+                meshFileDir = meshFilePath ? path.dirname(meshFilePath) : undefined;
                 if (meshFilePath) {
                     try {
                         const data = await fs.promises.readFile(meshFilePath);
@@ -438,12 +471,39 @@ export class EntityPanel {
             meshBase64 = Buffer.from(meshBuffer).toString('base64');
         }
 
+        // Discover animation files for each state (deduplicate by animName)
+        const animations: Array<{ stateName: string; animName: string; animBase64: string }> = [];
+        const seenAnims = new Set<string>();
+        for (const state of entity.states) {
+            if (state.animation && !seenAnims.has(state.animation)) {
+                seenAnims.add(state.animation);
+                const animFile = this._findAnimFile(state.animation, searchRoots, meshFileDir);
+                if (animFile) {
+                    try {
+                        const animBuffer = fs.readFileSync(animFile);
+                        animations.push({
+                            stateName: state.name,
+                            animName: state.animation,
+                            animBase64: animBuffer.toString('base64'),
+                        });
+                        console.log(`[Entity] Found animation "${state.animation}" → ${animFile}`);
+                    } catch { /* skip unreadable anim files */ }
+                } else {
+                    console.log(`[Entity] Animation "${state.animation}" not found for state "${state.name}"`);
+                }
+            }
+        }
+        if (animations.length > 0) {
+            console.log(`[Entity] Total animations: ${animations.length}`);
+        }
+
         await this._panel.webview.postMessage({
             command: 'render',
             entity: {
                 name: entity.name,
                 pdxmesh: entity.pdxmesh,
                 scale: entity.scale,
+                meshScale,
                 resolvedMeshSettings,
                 textureMap,
                 locators: entity.locators.map(l => ({
@@ -453,10 +513,12 @@ export class EntityPanel {
                     scale: l.scale,
                 })),
                 attaches: entity.attaches,
-                states: entity.states.map(s => ({ name: s.name })),
+                states: entity.states.map(s => ({ name: s.name, animation: s.animation })),
+                defaultState: entity.defaultState,
                 attachData,
             },
             meshBase64,
+            animations: animations.length > 0 ? animations : undefined,
             fileName: path.basename(document.fileName),
         });
     }
@@ -467,6 +529,51 @@ export class EntityPanel {
             const full = path.join(root, normalized);
             if (fs.existsSync(full)) return full;
         }
+        return null;
+    }
+
+    /**
+     * Search for a .anim file by animation name.
+     * Strategy:
+     * 1. Direct match: {name}.anim in mesh dir / searchRoots
+     * 2. Suffix match: *_{name}.anim in mesh dir (Stellaris convention)
+     * 3. Recursive search in gfx/models
+     */
+    private _findAnimFile(animName: string, searchRoots: string[], meshFileDir?: string): string | null {
+        const fileName = animName.endsWith('.anim') ? animName : `${animName}.anim`;
+        const suffix = `_${animName}.anim`.toLowerCase();
+
+        // 1. Direct match in mesh directory
+        if (meshFileDir) {
+            const direct = path.join(meshFileDir, fileName);
+            if (fs.existsSync(direct)) return direct;
+
+            // 2. Suffix match: *_{animName}.anim in mesh directory
+            try {
+                const entries = fs.readdirSync(meshFileDir);
+                for (const entry of entries) {
+                    if (entry.toLowerCase().endsWith(suffix)) {
+                        return path.join(meshFileDir, entry);
+                    }
+                }
+            } catch { /* skip */ }
+        }
+
+        // 3. Direct match in searchRoots
+        for (const root of searchRoots) {
+            const full = path.join(root, fileName);
+            if (fs.existsSync(full)) return full;
+        }
+
+        // 4. Recursive search in gfx/models subdirectories
+        for (const root of searchRoots) {
+            const gfxDir = path.join(root, 'gfx', 'models');
+            if (fs.existsSync(gfxDir)) {
+                const found = this._findFileRecursive(gfxDir, fileName);
+                if (found) return found;
+            }
+        }
+
         return null;
     }
 
@@ -553,8 +660,12 @@ export class EntityPanel {
         resolvedMeshSettings: Array<{ name: string; index: number; diffuse?: string; normal?: string; specular?: string; shader?: string }>;
         textureMap: Record<string, string>;
         scale?: number;
+        meshScale?: number;
         locators: Array<{ name: string; position?: [number, number, number]; rotation?: [number, number, number]; scale?: number }>;
         attachData?: unknown[];
+        defaultState?: string;
+        getStateFromParent?: boolean;
+        animations?: Array<{ stateName: string; animName: string; animBase64: string }>;
     }>> {
         if (currentDepth >= maxDepth || !entity.attaches || entity.attaches.length === 0) {
             return [];
@@ -567,23 +678,32 @@ export class EntityPanel {
             resolvedMeshSettings: Array<{ name: string; index: number; diffuse?: string; normal?: string; specular?: string; shader?: string }>;
             textureMap: Record<string, string>;
             scale?: number;
+            meshScale?: number;
             locators: Array<{ name: string; position?: [number, number, number]; rotation?: [number, number, number]; scale?: number }>;
             attachData?: unknown[];
+            defaultState?: string;
+            getStateFromParent?: boolean;
+            animations?: Array<{ stateName: string; animName: string; animBase64: string }>;
         }> = [];
 
         for (const attach of entity.attaches) {
             try {
                 const childEntity = graph.entities.get(attach.entityName);
-                if (!childEntity) continue;
+                if (!childEntity) {
+                    console.warn(`[EntityPanel] Attach entity "${attach.entityName}" not found in entity graph (locator: ${attach.locatorName})`);
+                    continue;
+                }
 
                 // Resolve mesh
                 let meshBase64: string | undefined;
                 const childMeshSettings: Array<{ name: string; index: number; diffuse?: string; normal?: string; specular?: string; shader?: string }> = [];
                 const childTextureMap: Record<string, string> = { ...parentTextureMap };
 
+                let childMeshScale: number | undefined;
                 if (childEntity.pdxmesh) {
                     const meshDef = graph.meshes.get(childEntity.pdxmesh);
                     if (meshDef) {
+                        childMeshScale = meshDef.scale;
                         const meshFilePath = this._resolveFilePath(meshDef.file, searchRoots);
                         const meshFileDir = meshFilePath ? path.dirname(meshFilePath) : undefined;
 
@@ -634,6 +754,37 @@ export class EntityPanel {
                 // Recursively resolve child's attaches
                 const childAttachData = await this._resolveAttachData(childEntity, graph, searchRoots, childTextureMap, currentDepth + 1, maxDepth);
 
+                // Resolve child's animations (needed for both own-state and parent-state modes)
+                let childAnimations: Array<{ stateName: string; animName: string; animBase64: string }> | undefined;
+                if (childEntity.states.length > 0) {
+                    const meshDef = childEntity.pdxmesh ? graph.meshes.get(childEntity.pdxmesh) : undefined;
+                    const childMeshFileDir = meshDef ? (() => { const p = this._resolveFilePath(meshDef.file, searchRoots); return p ? path.dirname(p) : undefined; })() : undefined;
+                    childAnimations = [];
+                    // Cache loaded anim data by animName (multiple states may share same animation file)
+                    const animCache = new Map<string, string>();
+                    for (const state of childEntity.states) {
+                        if (!state.animation) continue;
+                        let base64 = animCache.get(state.animation);
+                        if (base64 === undefined) {
+                            const animFile = this._findAnimFile(state.animation, searchRoots, childMeshFileDir);
+                            if (animFile) {
+                                try {
+                                    base64 = fs.readFileSync(animFile).toString('base64');
+                                    animCache.set(state.animation, base64);
+                                } catch { /* skip */ }
+                            }
+                        }
+                        if (base64) {
+                            childAnimations.push({
+                                stateName: state.name,
+                                animName: state.animation,
+                                animBase64: base64,
+                            });
+                        }
+                    }
+                    if (childAnimations.length === 0) childAnimations = undefined;
+                }
+
                 results.push({
                     locatorName: attach.locatorName,
                     entityName: attach.entityName,
@@ -641,6 +792,7 @@ export class EntityPanel {
                     resolvedMeshSettings: childMeshSettings,
                     textureMap: childTextureMap,
                     scale: childEntity.scale,
+                    meshScale: childMeshScale,
                     locators: childEntity.locators.map(l => ({
                         name: l.name,
                         position: l.position,
@@ -648,6 +800,9 @@ export class EntityPanel {
                         scale: l.scale,
                     })),
                     attachData: childAttachData,
+                    defaultState: childEntity.defaultState,
+                    getStateFromParent: childEntity.getStateFromParent,
+                    animations: childAnimations,
                 });
             } catch (e) {
                 console.warn(`[EntityPanel] Failed to resolve attach "${attach.entityName}": ${e}`);
@@ -701,7 +856,7 @@ export class EntityPanel {
     private async _buildEntityGraph(searchRoots: string[]): Promise<EntityGraph> {
         const assetFiles: Array<{ path: string; content: string }> = [];
         const gfxFiles: Array<{ path: string; content: string }> = [];
-        const maxFiles = 300;
+        const maxFiles = 1000;
 
         for (const root of searchRoots) {
             const gfxDir = path.join(root, 'gfx');
@@ -784,6 +939,7 @@ export class EntityPanel {
         <span class="toolbar-separator"></span>
         <label><input type="checkbox" id="chk-wireframe"> <span data-i18n="wireframe">Wireframe</span></label>
         <label><input type="checkbox" id="chk-locators" checked> <span data-i18n="locators">Locators</span></label>
+        <label><input type="checkbox" id="chk-bones"> <span data-i18n="bones">Bones</span></label>
         <label><input type="checkbox" id="chk-normals"> <span data-i18n="disableNormals">Disable Normals</span></label>
     </div>
 
@@ -799,6 +955,14 @@ export class EntityPanel {
             <div class="empty-hint" data-i18n="openHint">Open a .asset file and click preview</div>
         </div>
         <div id="transform-hint" class="hidden"></div>
+    </div>
+
+    <div id="timeline" style="display:none">
+        <button id="btn-anim-play" class="timeline-btn" title="Play/Pause">▶</button>
+        <input type="range" id="anim-scrub" min="0" max="1000" value="0" class="timeline-scrub">
+        <span id="anim-time" class="timeline-time">0.0 / 0.0s</span>
+        <button id="btn-anim-loop" class="timeline-btn" title="Loop">🔁</button>
+        <button id="btn-anim-speed" class="timeline-btn" title="Speed">1x</button>
     </div>
 
     <div id="properties-panel" class="hidden">

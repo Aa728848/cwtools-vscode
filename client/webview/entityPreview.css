@@ -232,7 +232,7 @@ body {
 /* ── Entity Tree Panel ────────────────────────────────────────────────────── */
 
 #entity-tree {
-    max-height: 150px;
+    max-height: 300px;
     overflow-y: auto;
     border-top: 1px solid var(--ep-border);
     padding: 6px 0;
@@ -349,3 +349,169 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--vscode-scrollbarSlider-hoverBackground, #555555);
 }
+
+/* ── Transform Mode Buttons ──────────────────────────────────────────────── */
+
+.tool-mode {
+    opacity: 0.6;
+    transition: opacity 0.15s, background 0.15s;
+}
+
+.tool-mode.active {
+    opacity: 1;
+    background: var(--ep-accent);
+}
+
+.tool-mode:hover {
+    opacity: 0.9;
+}
+
+/* ── Properties Panel ────────────────────────────────────────────────────── */
+
+#properties-panel {
+    position: absolute;
+    right: 12px;
+    top: 48px;
+    width: 240px;
+    background: var(--ep-toolbar-bg);
+    border: 1px solid var(--ep-border);
+    border-radius: 6px;
+    z-index: 50;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+
+#properties-panel.hidden {
+    display: none;
+}
+
+.props-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--ep-border);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.props-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.6;
+}
+
+.props-name {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ep-accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.props-close {
+    background: none;
+    border: none;
+    color: var(--ep-fg);
+    font-size: 16px;
+    cursor: pointer;
+    opacity: 0.5;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.props-close:hover {
+    opacity: 1;
+}
+
+.props-body {
+    padding: 8px 10px;
+}
+
+.props-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.props-row label {
+    font-size: 11px;
+    width: 72px;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.props-row input[type="number"] {
+    flex: 1;
+    background: var(--ep-input-bg);
+    color: var(--ep-input-fg);
+    border: 1px solid var(--ep-input-border);
+    border-radius: 3px;
+    padding: 3px 6px;
+    font-size: 12px;
+    outline: none;
+    font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.props-row input[type="number"]:focus {
+    border-color: var(--ep-accent);
+}
+
+.props-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    justify-content: flex-end;
+}
+
+.toolbar-btn.secondary {
+    background: var(--ep-input-bg);
+    color: var(--ep-fg);
+}
+
+/* ── Transform Hint ──────────────────────────────────────────────────────── */
+
+#transform-hint {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.75);
+    color: var(--ep-fg);
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    z-index: 20;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+#transform-hint.visible {
+    opacity: 1;
+}
+
+#transform-hint.hidden {
+    display: none;
+}
+
+/* ── Locator Labels ──────────────────────────────────────────────────────── */
+
+.locator-label {
+    position: absolute;
+    pointer-events: none;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    white-space: nowrap;
+    z-index: 10;
+    transform: translate(-50%, -100%);
+    margin-top: -4px;
+}
+

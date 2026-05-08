@@ -12,7 +12,10 @@ type EntityPanelMessage =
     | { command: 'goToLine'; line: number }
     | { command: 'selectState'; stateName: string }
     | { command: 'selectEntity'; index: number }
-    | { command: 'openFile' };
+    | { command: 'openFile' }
+    | { command: 'updateLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }
+    | { command: 'undo' }
+    | { command: 'redo' };
 
 export class EntityPanel {
     public static currentPanel: EntityPanel | undefined;
@@ -23,6 +26,9 @@ export class EntityPanel {
     private _document: vscode.TextDocument | undefined;
     private _searchRoots: string[] = [];
     private _entityGraph: EntityGraph | null = null;
+    private _skipNextReload = false;
+    private _currentEntityName: string | undefined;
+    private _currentEntityIndex = 0;
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
@@ -92,6 +98,41 @@ export class EntityPanel {
                         }
                         break;
                     }
+                    case 'updateLocator': {
+                        await this._handleUpdateLocator(msg);
+                        break;
+                    }
+                    case 'undo': {
+                        if (this._document) {
+                            // Focus the text editor so undo targets the .asset file
+                            await vscode.window.showTextDocument(this._document.uri, {
+                                viewColumn: vscode.ViewColumn.One,
+                                preserveFocus: false,
+                            });
+                            await vscode.commands.executeCommand('undo');
+                            // Save and re-render
+                            await this._document.save();
+                            this._skipNextReload = true;
+                            await this._loadAndRender(this._document, this._currentEntityIndex);
+                            // Return focus to the webview
+                            this._panel.reveal();
+                        }
+                        break;
+                    }
+                    case 'redo': {
+                        if (this._document) {
+                            await vscode.window.showTextDocument(this._document.uri, {
+                                viewColumn: vscode.ViewColumn.One,
+                                preserveFocus: false,
+                            });
+                            await vscode.commands.executeCommand('redo');
+                            await this._document.save();
+                            this._skipNextReload = true;
+                            await this._loadAndRender(this._document, this._currentEntityIndex);
+                            this._panel.reveal();
+                        }
+                        break;
+                    }
                 }
             }, null, this._disposables),
         );
@@ -100,11 +141,136 @@ export class EntityPanel {
         this._disposables.push(
             vscode.workspace.onDidSaveTextDocument(async savedDoc => {
                 if (savedDoc.uri.fsPath === document.uri.fsPath) {
+                    if (this._skipNextReload) {
+                        this._skipNextReload = false;
+                        return;
+                    }
                     this._entityGraph = null; // invalidate cache
                     await this._loadAndRender(savedDoc);
                 }
             }),
         );
+    }
+
+    /**
+     * Handle locator position/rotation update from the webview.
+     * - If the locator already exists in the .asset script → update it in-place.
+     * - If the locator is mesh-embedded with no script override → insert a new block.
+     */
+    private async _handleUpdateLocator(msg: { locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }) {
+        if (!this._document) return;
+        const doc = this._document;
+        const text = doc.getText();
+        const lines = text.split('\n');
+
+        // Match locator name (with or without quotes)
+        const escapedName = msg.locatorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const locNamePattern = new RegExp(`name\\s*=\\s*"?${escapedName}"?`, 'i');
+
+        // First, find the current entity block
+        const entityName = this._currentEntityName;
+        let entityBlockStart = -1;
+        let entityBlockEnd = -1;
+
+        if (entityName) {
+            const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
+            // Find the entity = { ... } block containing this entity name
+            for (let i = 0; i < lines.length; i++) {
+                if (/entity\s*=\s*\{/.test(lines[i]!)) {
+                    let depth = 0;
+                    let blockEnd = i;
+                    let hasName = false;
+                    for (let j = i; j < lines.length; j++) {
+                        for (const ch of lines[j]!) {
+                            if (ch === '{') depth++;
+                            if (ch === '}') depth--;
+                        }
+                        if (entityNamePat.test(lines[j]!)) hasName = true;
+                        if (depth <= 0) { blockEnd = j; break; }
+                    }
+                    if (hasName) {
+                        entityBlockStart = i;
+                        entityBlockEnd = blockEnd;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Try to find existing locator block within the entity
+        let locLineIndex = -1;
+        const searchStart = entityBlockStart >= 0 ? entityBlockStart : 0;
+        const searchEnd = entityBlockEnd >= 0 ? entityBlockEnd : lines.length - 1;
+
+        for (let i = searchStart; i <= searchEnd; i++) {
+            const line = lines[i]!;
+            // Match: locator = { name = xxx ... }
+            if (/locator\s*=\s*\{/.test(line) && locNamePattern.test(line)) {
+                locLineIndex = i;
+                break;
+            }
+            // Multi-line: locator = { on one line, name = xxx on next
+            if (/locator\s*=\s*\{/.test(line)) {
+                let depth = 0;
+                let blockEnd = i;
+                let foundName = false;
+                for (let j = i; j <= searchEnd; j++) {
+                    for (const ch of lines[j]!) {
+                        if (ch === '{') depth++;
+                        if (ch === '}') depth--;
+                    }
+                    if (locNamePattern.test(lines[j]!)) foundName = true;
+                    if (depth <= 0) { blockEnd = j; break; }
+                }
+                if (foundName) {
+                    // Replace entire multi-line block
+                    const indent = lines[i]!.match(/^(\s*)/)?.[1] ?? '\t';
+                    const p = msg.position;
+                    const r = msg.rotation;
+                    const newLine = `${indent}locator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }`;
+                    const startPos = new vscode.Position(i, 0);
+                    const endPos = new vscode.Position(blockEnd, lines[blockEnd]!.length);
+                    const edit = new vscode.WorkspaceEdit();
+                    edit.replace(doc.uri, new vscode.Range(startPos, endPos), newLine);
+                    this._skipNextReload = true;
+                    await vscode.workspace.applyEdit(edit);
+                    await doc.save();
+                    return;
+                }
+            }
+        }
+
+        if (locLineIndex >= 0) {
+            // Update existing single-line locator
+            const indent = lines[locLineIndex]!.match(/^(\s*)/)?.[1] ?? '\t';
+            const p = msg.position;
+            const r = msg.rotation;
+            const newLine = `${indent}locator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }`;
+            const range = new vscode.Range(
+                new vscode.Position(locLineIndex, 0),
+                new vscode.Position(locLineIndex, lines[locLineIndex]!.length),
+            );
+            const edit = new vscode.WorkspaceEdit();
+            edit.replace(doc.uri, range, newLine);
+            this._skipNextReload = true;
+            await vscode.workspace.applyEdit(edit);
+            await doc.save();
+        } else if (entityBlockEnd >= 0) {
+            // Insert new locator block into entity definition (before closing brace)
+            const p = msg.position;
+            const r = msg.rotation;
+            const newLine = `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
+            const insertPos = new vscode.Position(entityBlockEnd, 0);
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(doc.uri, insertPos, newLine);
+            this._skipNextReload = true;
+            await vscode.workspace.applyEdit(edit);
+            await doc.save();
+            console.log(`[EntityPanel] Inserted new locator "${msg.locatorName}" into entity "${entityName}"`);
+        } else {
+            console.warn(`[EntityPanel] Cannot find entity block to insert locator "${msg.locatorName}"`);
+        }
     }
 
     private _getGamePath(): string | null {
@@ -168,6 +334,8 @@ export class EntityPanel {
         });
 
         const entity = currentEntities[Math.min(entityIndex, currentEntities.length - 1)]!;
+        this._currentEntityName = entity.name;
+        this._currentEntityIndex = entityIndex;
 
         // Resolve mesh file path
         let meshBuffer: ArrayBuffer | undefined;
@@ -261,6 +429,9 @@ export class EntityPanel {
         // This lets the webview look up mesh-embedded material texture paths
         await this._buildTextureMap(textureMap, searchRoots);
 
+        // Recursively resolve attach data (child entities)
+        const attachData = await this._resolveAttachData(entity, this._entityGraph!, searchRoots, textureMap, 0, 8);
+
         // Send data to webview
         let meshBase64: string | undefined;
         if (meshBuffer) {
@@ -283,6 +454,7 @@ export class EntityPanel {
                 })),
                 attaches: entity.attaches,
                 states: entity.states.map(s => ({ name: s.name })),
+                attachData,
             },
             meshBase64,
             fileName: path.basename(document.fileName),
@@ -361,6 +533,128 @@ export class EntityPanel {
             }
         } catch { /* skip */ }
         return null;
+    }
+
+    /**
+     * Recursively resolve attach data for child entities.
+     * Returns an array of resolved child entity data including mesh buffers and textures.
+     */
+    private async _resolveAttachData(
+        entity: EntityDefinition,
+        graph: EntityGraph,
+        searchRoots: string[],
+        parentTextureMap: Record<string, string>,
+        currentDepth: number,
+        maxDepth: number,
+    ): Promise<Array<{
+        locatorName: string;
+        entityName: string;
+        meshBase64?: string;
+        resolvedMeshSettings: Array<{ name: string; index: number; diffuse?: string; normal?: string; specular?: string; shader?: string }>;
+        textureMap: Record<string, string>;
+        scale?: number;
+        locators: Array<{ name: string; position?: [number, number, number]; rotation?: [number, number, number]; scale?: number }>;
+        attachData?: unknown[];
+    }>> {
+        if (currentDepth >= maxDepth || !entity.attaches || entity.attaches.length === 0) {
+            return [];
+        }
+
+        const results: Array<{
+            locatorName: string;
+            entityName: string;
+            meshBase64?: string;
+            resolvedMeshSettings: Array<{ name: string; index: number; diffuse?: string; normal?: string; specular?: string; shader?: string }>;
+            textureMap: Record<string, string>;
+            scale?: number;
+            locators: Array<{ name: string; position?: [number, number, number]; rotation?: [number, number, number]; scale?: number }>;
+            attachData?: unknown[];
+        }> = [];
+
+        for (const attach of entity.attaches) {
+            try {
+                const childEntity = graph.entities.get(attach.entityName);
+                if (!childEntity) continue;
+
+                // Resolve mesh
+                let meshBase64: string | undefined;
+                const childMeshSettings: Array<{ name: string; index: number; diffuse?: string; normal?: string; specular?: string; shader?: string }> = [];
+                const childTextureMap: Record<string, string> = { ...parentTextureMap };
+
+                if (childEntity.pdxmesh) {
+                    const meshDef = graph.meshes.get(childEntity.pdxmesh);
+                    if (meshDef) {
+                        const meshFilePath = this._resolveFilePath(meshDef.file, searchRoots);
+                        const meshFileDir = meshFilePath ? path.dirname(meshFilePath) : undefined;
+
+                        if (meshFilePath) {
+                            try {
+                                const data = await fs.promises.readFile(meshFilePath);
+                                const buf = Buffer.from(data);
+                                meshBase64 = buf.toString('base64');
+                            } catch { /* skip */ }
+                        }
+
+                        // Resolve meshsettings
+                        for (const ms of meshDef.meshSettings) {
+                            const name = ms.name || '__unnamed';
+                            const idx = ms.index ?? 0;
+                            childMeshSettings.push({
+                                name, index: idx,
+                                diffuse: ms.textureDiffuse ? this._resolveTextureUri(ms.textureDiffuse, searchRoots, meshFileDir) : undefined,
+                                normal: ms.textureNormal ? this._resolveTextureUri(ms.textureNormal, searchRoots, meshFileDir) : undefined,
+                                specular: ms.textureSpecular ? this._resolveTextureUri(ms.textureSpecular, searchRoots, meshFileDir) : undefined,
+                                shader: ms.shader,
+                            });
+                        }
+
+                        // Entity-level meshsettings override
+                        for (const ms of childEntity.meshSettings) {
+                            const name = ms.name || '__unnamed';
+                            const idx = ms.index ?? 0;
+                            const existing = childMeshSettings.find(s => s.name === name && s.index === idx);
+                            if (existing) {
+                                if (ms.textureDiffuse) existing.diffuse = this._resolveTextureUri(ms.textureDiffuse, searchRoots, meshFileDir);
+                                if (ms.textureNormal) existing.normal = this._resolveTextureUri(ms.textureNormal, searchRoots, meshFileDir);
+                                if (ms.textureSpecular) existing.specular = this._resolveTextureUri(ms.textureSpecular, searchRoots, meshFileDir);
+                                if (ms.shader) existing.shader = ms.shader;
+                            } else {
+                                childMeshSettings.push({
+                                    name, index: idx,
+                                    diffuse: ms.textureDiffuse ? this._resolveTextureUri(ms.textureDiffuse, searchRoots, meshFileDir) : undefined,
+                                    normal: ms.textureNormal ? this._resolveTextureUri(ms.textureNormal, searchRoots, meshFileDir) : undefined,
+                                    specular: ms.textureSpecular ? this._resolveTextureUri(ms.textureSpecular, searchRoots, meshFileDir) : undefined,
+                                    shader: ms.shader,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Recursively resolve child's attaches
+                const childAttachData = await this._resolveAttachData(childEntity, graph, searchRoots, childTextureMap, currentDepth + 1, maxDepth);
+
+                results.push({
+                    locatorName: attach.locatorName,
+                    entityName: attach.entityName,
+                    meshBase64,
+                    resolvedMeshSettings: childMeshSettings,
+                    textureMap: childTextureMap,
+                    scale: childEntity.scale,
+                    locators: childEntity.locators.map(l => ({
+                        name: l.name,
+                        position: l.position,
+                        rotation: l.rotation,
+                        scale: l.scale,
+                    })),
+                    attachData: childAttachData,
+                });
+            } catch (e) {
+                console.warn(`[EntityPanel] Failed to resolve attach "${attach.entityName}": ${e}`);
+            }
+        }
+
+        return results;
     }
 
     /**
@@ -481,11 +775,15 @@ export class EntityPanel {
     <div id="toolbar">
         <span class="entity-name" data-i18n="title">Entity Preview</span>
         <select id="sel-entity" style="display:none"></select>
+        <select id="sel-state" style="display:none"></select>
         <span class="toolbar-separator"></span>
         <button id="btn-focus" class="toolbar-btn" title="F"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="3"/></svg> <span data-i18n="focus">Focus (F)</span></button>
         <span class="toolbar-separator"></span>
+        <button id="btn-translate" class="toolbar-btn tool-mode active" title="W" data-mode="translate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="14,7 19,12 14,17"/><line x1="12" y1="5" x2="12" y2="19"/><polyline points="7,14 12,19 17,14"/></svg> <span>W</span></button>
+        <button id="btn-rotate" class="toolbar-btn tool-mode" title="E" data-mode="rotate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><polyline points="21,3 21,9 15,9"/></svg> <span>E</span></button>
+        <span class="toolbar-separator"></span>
         <label><input type="checkbox" id="chk-wireframe"> <span data-i18n="wireframe">Wireframe</span></label>
-        <label><input type="checkbox" id="chk-locators"> <span data-i18n="locators">Locators</span></label>
+        <label><input type="checkbox" id="chk-locators" checked> <span data-i18n="locators">Locators</span></label>
         <label><input type="checkbox" id="chk-normals"> <span data-i18n="disableNormals">Disable Normals</span></label>
     </div>
 
@@ -500,8 +798,28 @@ export class EntityPanel {
             <div class="empty-text" data-i18n="noEntity">No entity loaded</div>
             <div class="empty-hint" data-i18n="openHint">Open a .asset file and click preview</div>
         </div>
+        <div id="transform-hint" class="hidden"></div>
     </div>
 
+    <div id="properties-panel" class="hidden">
+        <div class="props-header">
+            <span class="props-title">Properties</span>
+            <span class="props-name" id="props-locator-name"></span>
+            <button class="props-close" id="btn-props-close">&times;</button>
+        </div>
+        <div class="props-body">
+            <div class="props-row"><label>Position X</label><input type="number" step="0.1" id="prop-px"></div>
+            <div class="props-row"><label>Position Y</label><input type="number" step="0.1" id="prop-py"></div>
+            <div class="props-row"><label>Position Z</label><input type="number" step="0.1" id="prop-pz"></div>
+            <div class="props-row"><label>Rotation X</label><input type="number" step="1" id="prop-rx"></div>
+            <div class="props-row"><label>Rotation Y</label><input type="number" step="1" id="prop-ry"></div>
+            <div class="props-row"><label>Rotation Z</label><input type="number" step="1" id="prop-rz"></div>
+            <div class="props-actions">
+                <button class="toolbar-btn" id="btn-apply" data-i18n="apply">Apply</button>
+                <button class="toolbar-btn secondary" id="btn-reset" data-i18n="reset">Reset</button>
+            </div>
+        </div>
+    </div>
     <div id="entity-tree"></div>
     <div id="info-panel"></div>
 

@@ -8,6 +8,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { parsePdxMesh, type ParsedMeshFile, type ParsedSubMesh } from './pdxMeshParser';
 
 // ── VS Code API ──────────────────────────────────────────────────────────────
@@ -29,6 +30,9 @@ const i18n: Record<string, { en: string; zh: string }> = {
     loading:        { en: 'Loading...',                     zh: '加载中...' },
     noEntity:       { en: 'No entity loaded',              zh: '未加载实体' },
     openHint:       { en: 'Open a .asset file and click preview', zh: '打开 .asset 文件并点击预览按钮' },
+    apply:          { en: 'Apply',                         zh: '应用' },
+    reset:          { en: 'Reset',                         zh: '重置' },
+    transformHint:  { en: 'Click locator to select · W Translate · E Rotate', zh: '点击定位器选中 · W 移动 · E 旋转' },
 };
 
 function applyI18n() {
@@ -52,6 +56,22 @@ interface ResolvedMeshSetting {
     shader?: string;
 }
 
+interface AttachData {
+    locatorName: string;
+    entityName: string;
+    meshBase64?: string;
+    resolvedMeshSettings: ResolvedMeshSetting[];
+    textureMap: Record<string, string>;
+    scale?: number;
+    locators: Array<{
+        name: string;
+        position?: [number, number, number];
+        rotation?: [number, number, number];
+        scale?: number;
+    }>;
+    attachData?: AttachData[];
+}
+
 interface EntityData {
     name: string;
     pdxmesh?: string;
@@ -66,6 +86,7 @@ interface EntityData {
     }>;
     attaches?: Array<{ locatorName: string; entityName: string }>;
     states?: Array<{ name: string }>;
+    attachData?: AttachData[];
 }
 
 interface RenderMessage {
@@ -86,6 +107,9 @@ const infoPanel = document.getElementById('info-panel')!;
 const entityTree = document.getElementById('entity-tree')!;
 const errorBanner = document.getElementById('error-banner')!;
 const emptyState = document.getElementById('empty-state')!;
+const propsPanel = document.getElementById('properties-panel')!;
+const propsName = document.getElementById('props-locator-name')!;
+const transformHint = document.getElementById('transform-hint')!;
 
 // Toolbar controls
 const entityNameEl = toolbar.querySelector('.entity-name') as HTMLElement;
@@ -93,15 +117,30 @@ const wireframeToggle = document.getElementById('chk-wireframe') as HTMLInputEle
 const locatorToggle = document.getElementById('chk-locators') as HTMLInputElement;
 const normalToggle = document.getElementById('chk-normals') as HTMLInputElement;
 
+// Property inputs
+const propPx = document.getElementById('prop-px') as HTMLInputElement;
+const propPy = document.getElementById('prop-py') as HTMLInputElement;
+const propPz = document.getElementById('prop-pz') as HTMLInputElement;
+const propRx = document.getElementById('prop-rx') as HTMLInputElement;
+const propRy = document.getElementById('prop-ry') as HTMLInputElement;
+const propRz = document.getElementById('prop-rz') as HTMLInputElement;
+
 // ── Three.js Setup ───────────────────────────────────────────────────────────
 
 let renderer: THREE.WebGLRenderer;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let controls: OrbitControls;
+let transformCtrl: TransformControls;
 let currentModel: THREE.Group | null = null;
 let locatorHelpers: THREE.Group | null = null;
 let animationFrameId = 0;
+let selectedLocator: THREE.Object3D | null = null;
+let currentEntity: EntityData | null = null;
+// Snapshot of selected locator's original position/rotation at selection time
+let selectedLocatorSnapshot: { px: number; py: number; pz: number; rx: number; ry: number; rz: number } | null = null;
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
 
 function initThree() {
     // Renderer
@@ -156,14 +195,71 @@ function initThree() {
     grid.material.transparent = true;
     scene.add(grid);
 
+    // TransformControls (Maya-style: W=translate, E=rotate)
+    // In Three.js r155+, TransformControls is NOT an Object3D;
+    // we must add getHelper() to the scene for the gizmo to render.
+    transformCtrl = new TransformControls(camera, renderer.domElement);
+    transformCtrl.setMode('translate');
+    // Fixed size — TransformControls auto-scales based on camera distance
+    transformCtrl.setSize(0.7);
+    transformCtrl.addEventListener('dragging-changed', (event) => {
+        const isDragging = (event as unknown as { value: boolean }).value;
+        controls.enabled = !isDragging;
+        // Auto-save when gizmo drag finishes
+        if (!isDragging && selectedLocator) {
+            autoSaveLocator();
+        }
+    });
+    transformCtrl.addEventListener('objectChange', () => {
+        if (selectedLocator) updatePropsFromLocator(selectedLocator);
+    });
+    const transformHelper = transformCtrl.getHelper();
+    scene.add(transformHelper);
+
+    // Click handler for locator selection — use 'pointerup' with distance check
+    // to avoid interfering with TransformControls drag events
+    let pointerDownPos = { x: 0, y: 0 };
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+        pointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+    renderer.domElement.addEventListener('pointerup', (e) => {
+        // Only treat as "click" if the pointer didn't move (not a drag)
+        const dx = e.clientX - pointerDownPos.x;
+        const dy = e.clientY - pointerDownPos.y;
+        if (dx * dx + dy * dy < 9) {
+            onLocatorPointerDown(e);
+        }
+    });
+
     handleResize();
     animate();
 }
+
+/** Auto-save locator position/rotation to the .asset file after gizmo drag */
+function autoSaveLocator() {
+    if (!selectedLocator) return;
+    const euler = new THREE.Euler().setFromQuaternion(selectedLocator.quaternion, 'XYZ');
+    vscode.postMessage({
+        command: 'updateLocator',
+        locatorName: selectedLocator.name,
+        position: [selectedLocator.position.x, selectedLocator.position.y, selectedLocator.position.z],
+        rotation: [
+            euler.x * 180 / Math.PI,
+            euler.y * 180 / Math.PI,
+            euler.z * 180 / Math.PI,
+        ],
+        scale: 1,
+    });
+}
+
+// Locator label DOM elements
+const locatorLabelEls: Map<string, HTMLDivElement> = new Map();
 
 function animate() {
     animationFrameId = requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
+    updateLocatorLabels();
 }
 
 function handleResize() {
@@ -175,7 +271,228 @@ function handleResize() {
     renderer.setSize(w, h, false);
 }
 
-// ── Texture Loading ──────────────────────────────────────────────────────────
+// ── Locator Labels (2D overlay) ──────────────────────────────────────────────
+
+// Pre-allocated vectors for projection (avoid per-frame GC pressure)
+const _labelWorldPos = new THREE.Vector3();
+const _labelProjected = new THREE.Vector3();
+
+function clearLocatorLabels() {
+    for (const el of locatorLabelEls.values()) el.remove();
+    locatorLabelEls.clear();
+}
+
+function createLocatorLabel(name: string, source: string): HTMLDivElement {
+    const el = document.createElement('div');
+    el.className = 'locator-label';
+    el.textContent = name;
+    // Set color once at creation based on source
+    el.style.borderLeft = source === 'mesh' ? '2px solid #4CAF50' :
+        source === 'override' ? '2px solid #FFC107' : '2px solid #2196F3';
+    canvasContainer.appendChild(el);
+    return el;
+}
+
+function updateLocatorLabels() {
+    if (!locatorHelpers || !locatorHelpers.visible) return;
+
+    const w = canvasContainer.clientWidth;
+    const h = canvasContainer.clientHeight;
+    if (w === 0 || h === 0) return;
+    const halfW = w / 2;
+    const halfH = h / 2;
+
+    for (const child of locatorHelpers.children) {
+        let el = locatorLabelEls.get(child.name);
+        if (!el) {
+            const src = (child.userData as { source?: string }).source ?? 'mesh';
+            el = createLocatorLabel(child.name, src);
+            locatorLabelEls.set(child.name, el);
+        }
+
+        // Project 3D → 2D using pre-allocated vectors
+        child.getWorldPosition(_labelWorldPos);
+        _labelProjected.copy(_labelWorldPos).project(camera);
+
+        if (_labelProjected.z > 1) {
+            el.style.display = 'none';
+            continue;
+        }
+
+        const x = (_labelProjected.x * halfW) + halfW;
+        const y = -(_labelProjected.y * halfH) + halfH;
+        el.style.display = '';
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+
+        // Only update highlight styling when selection changes (handled in selectLocator/deselectLocator)
+    }
+}
+
+// ── Locator Selection & Properties ───────────────────────────────────────────
+
+// Shared invisible sphere geometry for locator hit targets
+const _locatorHitGeo = new THREE.SphereGeometry(0.25, 8, 6);
+const _locatorHitMat = new THREE.MeshBasicMaterial({ visible: false });
+
+/** Create a locator Group: invisible hit sphere + AxesHelper visual */
+function createLocatorGroup(name: string, size: number, source: string): THREE.Group {
+    const group = new THREE.Group();
+    group.name = name;
+    group.userData = { source, isLocator: true };
+
+    // Invisible sphere for raycasting (Mesh is much more reliable than LineSegments)
+    const hitMesh = new THREE.Mesh(_locatorHitGeo, _locatorHitMat);
+    hitMesh.name = `${name}_hit`;
+    group.add(hitMesh);
+
+    // Visible axes
+    const axes = new THREE.AxesHelper(size);
+    axes.name = `${name}_axes`;
+    group.add(axes);
+
+    return group;
+}
+
+function onLocatorPointerDown(event: PointerEvent) {
+    if (!locatorHelpers || !locatorHelpers.visible) return;
+    if (event.button !== 0) return;
+
+    // Check if click is on TransformControls gizmo (don't deselect)
+    if (transformCtrl.dragging) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+
+    // Raycast against locator hit meshes (recursive=true to find spheres inside Groups)
+    const intersects = raycaster.intersectObjects(locatorHelpers.children, true);
+
+    if (intersects.length > 0) {
+        // Walk up to find the top-level locator Group (direct child of locatorHelpers)
+        let target = intersects[0]!.object;
+        while (target.parent && target.parent !== locatorHelpers) {
+            target = target.parent;
+        }
+        if (target.userData?.isLocator) {
+            selectLocator(target);
+        }
+    } else {
+        deselectLocator();
+    }
+}
+
+function selectLocator(obj: THREE.Object3D) {
+    // Unhighlight previous
+    if (selectedLocator) {
+        const prevLabel = locatorLabelEls.get(selectedLocator.name);
+        if (prevLabel) {
+            prevLabel.style.background = 'rgba(0, 0, 0, 0.65)';
+            prevLabel.style.fontWeight = 'normal';
+        }
+    }
+
+    selectedLocator = obj;
+    transformCtrl.attach(obj);
+
+    // Snapshot the original position/rotation for Reset
+    const euler = new THREE.Euler().setFromQuaternion(obj.quaternion, 'XYZ');
+    selectedLocatorSnapshot = {
+        px: obj.position.x,
+        py: obj.position.y,
+        pz: obj.position.z,
+        rx: euler.x * 180 / Math.PI,
+        ry: euler.y * 180 / Math.PI,
+        rz: euler.z * 180 / Math.PI,
+    };
+
+    updatePropsFromLocator(obj);
+    propsPanel.classList.remove('hidden');
+    propsName.textContent = obj.name;
+
+    // Highlight selected label
+    const label = locatorLabelEls.get(obj.name);
+    if (label) {
+        label.style.background = 'rgba(0, 127, 212, 0.75)';
+        label.style.fontWeight = '600';
+    }
+
+    // Show hint
+    const hintEntry = i18n['transformHint'];
+    if (hintEntry) {
+        transformHint.textContent = isChinese ? hintEntry.zh : hintEntry.en;
+    }
+    transformHint.classList.remove('hidden');
+    transformHint.classList.add('visible');
+
+    // Highlight in entity tree
+    highlightTreeItem(obj.name);
+}
+
+function deselectLocator() {
+    if (selectedLocator) {
+        // Unhighlight label
+        const label = locatorLabelEls.get(selectedLocator.name);
+        if (label) {
+            label.style.background = 'rgba(0, 0, 0, 0.65)';
+            label.style.fontWeight = 'normal';
+        }
+        selectedLocator = null;
+        selectedLocatorSnapshot = null;
+        transformCtrl.detach();
+        propsPanel.classList.add('hidden');
+        transformHint.classList.remove('visible');
+        highlightTreeItem(null);
+    }
+}
+
+function updatePropsFromLocator(obj: THREE.Object3D) {
+    propPx.value = obj.position.x.toFixed(3);
+    propPy.value = obj.position.y.toFixed(3);
+    propPz.value = obj.position.z.toFixed(3);
+
+    // Convert quaternion to euler degrees for display
+    const euler = new THREE.Euler().setFromQuaternion(obj.quaternion, 'XYZ');
+    propRx.value = (euler.x * 180 / Math.PI).toFixed(2);
+    propRy.value = (euler.y * 180 / Math.PI).toFixed(2);
+    propRz.value = (euler.z * 180 / Math.PI).toFixed(2);
+}
+
+function applyPropsToLocator() {
+    if (!selectedLocator) return;
+    selectedLocator.position.set(
+        parseFloat(propPx.value) || 0,
+        parseFloat(propPy.value) || 0,
+        parseFloat(propPz.value) || 0,
+    );
+    const rx = (parseFloat(propRx.value) || 0) * Math.PI / 180;
+    const ry = (parseFloat(propRy.value) || 0) * Math.PI / 180;
+    const rz = (parseFloat(propRz.value) || 0) * Math.PI / 180;
+    selectedLocator.setRotationFromEuler(new THREE.Euler(rx, ry, rz, 'XYZ'));
+
+    // Send to extension for file write-back
+    vscode.postMessage({
+        command: 'updateLocator',
+        locatorName: selectedLocator.name,
+        position: [selectedLocator.position.x, selectedLocator.position.y, selectedLocator.position.z],
+        rotation: [
+            parseFloat(propRx.value) || 0,
+            parseFloat(propRy.value) || 0,
+            parseFloat(propRz.value) || 0,
+        ],
+        scale: 1,
+    });
+}
+
+function highlightTreeItem(name: string | null) {
+    const items = entityTree.querySelectorAll('.tree-item');
+    items.forEach(item => {
+        const el = item as HTMLElement;
+        el.classList.toggle('selected', el.dataset.locator === name);
+    });
+}
 
 /**
  * DDS header parsing for webview-side texture loading.
@@ -866,6 +1183,10 @@ let totalTriangles = 0;
 let totalVertices = 0;
 
 async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined) {
+    // Deselect and clear labels
+    deselectLocator();
+    clearLocatorLabels();
+
     // Clear previous model
     if (currentModel) {
         scene.remove(currentModel);
@@ -882,6 +1203,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         locatorHelpers = null;
     }
 
+    currentEntity = entity;
     totalTriangles = 0;
     totalVertices = 0;
 
@@ -926,7 +1248,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                     specular: meshMat.specular,
                 }, entity);
 
-                console.log(`[PDX Mesh] Submesh ${submeshIndex} [${textures.shader}/${textures.shaderCategory}]: diffuse=${textures.diffuse ? '✓' : '✗'}, normal=${textures.normal ? '✓' : '✗'}, specular=${textures.specular ? '✓' : '✗'}`);
+                console.log(`[PDX Mesh] Submesh ${submeshIndex} "${subMesh.name}" [${textures.shader}/${textures.shaderCategory}]: diffuse=${textures.diffuse ? '✓' : '✗'}, normal=${textures.normal ? '✓' : '✗'}, specular=${textures.specular ? '✓' : '✗'}`);
 
                 const material = await createSubmeshMaterial(textures);
                 const mesh = new THREE.Mesh(geo, material);
@@ -940,24 +1262,26 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
             }
         }
 
-        // Add locator visualization
+        // ── Locator Visualization ────────────────────────────────────
         locatorHelpers = new THREE.Group();
         locatorHelpers.name = 'locators';
         locatorHelpers.visible = locatorToggle.checked;
 
+        // Track which locators come from mesh vs script
+        const meshLocatorNames = new Set<string>();
+
         for (const loc of parsed.locators) {
-            const helper = new THREE.AxesHelper(0.5);
-            helper.position.set(loc.position[0], loc.position[1], loc.position[2]);
+            const group = createLocatorGroup(loc.name, 0.5, 'mesh');
+            group.position.set(loc.position[0], loc.position[1], loc.position[2]);
             const q = new THREE.Quaternion(loc.rotation[0], loc.rotation[1], loc.rotation[2], loc.rotation[3]);
-            helper.setRotationFromQuaternion(q);
-            helper.name = loc.name;
-            locatorHelpers.add(helper);
+            group.setRotationFromQuaternion(q);
+            locatorHelpers.add(group);
+            meshLocatorNames.add(loc.name);
         }
 
-        // Also add script-defined locators
+        // Script-defined locators (override or new)
         if (entity.locators) {
             for (const loc of entity.locators) {
-                // Check if this overrides a mesh locator
                 const existing = locatorHelpers.getObjectByName(loc.name);
                 if (existing && loc.position) {
                     existing.position.set(loc.position[0], loc.position[1], loc.position[2]);
@@ -966,14 +1290,14 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                             loc.rotation[0] * Math.PI / 180,
                             loc.rotation[1] * Math.PI / 180,
                             loc.rotation[2] * Math.PI / 180,
-                            'XYZ', // Maya default rotation order
+                            'XYZ',
                         );
                         existing.setRotationFromEuler(euler);
                     }
+                    existing.userData = { source: 'override', isLocator: true };
                 } else if (loc.position) {
-                    // New script-only locator
-                    const helper = new THREE.AxesHelper(0.4);
-                    helper.position.set(loc.position[0], loc.position[1], loc.position[2]);
+                    const group = createLocatorGroup(loc.name, 0.4, 'script');
+                    group.position.set(loc.position[0], loc.position[1], loc.position[2]);
                     if (loc.rotation) {
                         const euler = new THREE.Euler(
                             loc.rotation[0] * Math.PI / 180,
@@ -981,10 +1305,9 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                             loc.rotation[2] * Math.PI / 180,
                             'XYZ',
                         );
-                        helper.setRotationFromEuler(euler);
+                        group.setRotationFromEuler(euler);
                     }
-                    helper.name = loc.name;
-                    locatorHelpers.add(helper);
+                    locatorHelpers.add(group);
                 }
             }
         }
@@ -993,12 +1316,19 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         scene.add(modelGroup);
         currentModel = modelGroup;
 
+        // ── Recursive Attach Loading ─────────────────────────────────
+        if (entity.attachData && entity.attachData.length > 0) {
+            setProgress(80, 'Loading attachments...');
+            await loadAttachChildren(entity.attachData, locatorHelpers, modelGroup);
+        }
+
         // Fit camera to model
         fitCameraToModel(modelGroup);
 
         // Update UI
         updateInfoPanel(entity, parsed);
-        updateEntityTree(entity);
+        updateEntityTree(entity, parsed);
+        updateStateSelector(entity);
         showLoading(false);
         emptyState.style.display = 'none';
 
@@ -1006,6 +1336,102 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         const msg = err instanceof Error ? err.message : String(err);
         showError(`Failed to load mesh: ${msg}`);
         showLoading(false);
+    }
+}
+
+/**
+ * Recursively load and mount child entities at their locator positions.
+ */
+async function loadAttachChildren(
+    children: AttachData[],
+    parentLocators: THREE.Group,
+    parentGroup: THREE.Group,
+) {
+    for (const child of children) {
+        try {
+            if (!child.meshBase64) continue;
+
+            // Find the locator in the parent where this child attaches
+            const locator = parentLocators.getObjectByName(child.locatorName);
+            if (!locator) {
+                console.warn(`[Attach] Locator "${child.locatorName}" not found for "${child.entityName}"`);
+                continue;
+            }
+
+            // Decode mesh buffer
+            const binaryStr = atob(child.meshBase64);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+            const meshBuffer = bytes.buffer;
+
+            const parsed = parsePdxMesh(meshBuffer);
+
+            const childGroup = new THREE.Group();
+            childGroup.name = `attach_${child.entityName}`;
+
+            // Apply child entity scale
+            const scale = child.scale ?? 1.0;
+            childGroup.scale.setScalar(scale);
+
+            // Build child entity data for texture resolution
+            const childEntityData: EntityData = {
+                name: child.entityName,
+                resolvedMeshSettings: child.resolvedMeshSettings,
+                textureMap: child.textureMap,
+            };
+
+            // Build geometry and materials for child
+            let submeshIndex = 0;
+            for (const shape of parsed.shapes) {
+                for (const subMesh of shape.meshes) {
+                    const geo = buildGeometry(subMesh);
+                    const meshMat = subMesh.material;
+                    const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
+                        shader: meshMat.shader,
+                        diffuse: meshMat.diffuse,
+                        normal: meshMat.normal,
+                        specular: meshMat.specular,
+                    }, childEntityData);
+
+                    const material = await createSubmeshMaterial(textures);
+                    const mesh = new THREE.Mesh(geo, material);
+                    mesh.name = `${child.entityName}_submesh_${submeshIndex}`;
+
+                    totalTriangles += (subMesh.indices.length / 3);
+                    totalVertices += (subMesh.positions.length / 3);
+
+                    childGroup.add(mesh);
+                    submeshIndex++;
+                }
+            }
+
+            // Add child locators
+            const childLocatorGroup = new THREE.Group();
+            childLocatorGroup.name = 'locators';
+            childLocatorGroup.visible = locatorToggle.checked;
+
+            for (const loc of parsed.locators) {
+                const group = createLocatorGroup(loc.name, 0.3, 'mesh');
+                group.position.set(loc.position[0], loc.position[1], loc.position[2]);
+                const q = new THREE.Quaternion(loc.rotation[0], loc.rotation[1], loc.rotation[2], loc.rotation[3]);
+                group.setRotationFromQuaternion(q);
+                childLocatorGroup.add(group);
+            }
+
+            childGroup.add(childLocatorGroup);
+
+            // Mount child at the locator position in parent's coordinate space
+            locator.add(childGroup);
+
+            console.log(`[Attach] Mounted "${child.entityName}" at locator "${child.locatorName}" (depth=${childGroup.name})`);
+
+            // Recursively load grandchildren
+            if (child.attachData && child.attachData.length > 0) {
+                await loadAttachChildren(child.attachData as AttachData[], childLocatorGroup, childGroup);
+            }
+        } catch (e) {
+            console.warn(`[Attach] Failed to load "${child.entityName}":`, e);
+        }
     }
 }
 
@@ -1056,17 +1482,65 @@ function updateInfoPanel(entity: EntityData, parsed: ParsedMeshFile) {
     `;
 }
 
-function updateEntityTree(entity: EntityData) {
+function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
     let html = '<div class="tree-title">Entity Tree</div>';
-    html += `<div class="tree-item selected"><span class="tree-icon">📦</span><span class="tree-label">${entity.name}</span><span class="tree-sublabel">${entity.pdxmesh ?? ''}</span></div>`;
 
-    if (entity.attaches) {
-        for (const attach of entity.attaches) {
-            html += `<div class="tree-item" style="padding-left:36px"><span class="tree-icon">🔗</span><span class="tree-label">${attach.locatorName}</span><span class="tree-sublabel">→ ${attach.entityName}</span></div>`;
+    // Recursive helper to render entity hierarchy
+    function renderEntityNode(e: EntityData, depth: number) {
+        const pad = 12 + depth * 16;
+        html += `<div class="tree-item" style="padding-left:${pad}px"><span class="tree-icon">📦</span><span class="tree-label">${e.name}</span><span class="tree-sublabel">${e.pdxmesh ?? ''}</span></div>`;
+
+        if (e.attachData) {
+            for (const child of e.attachData) {
+                const childPad = pad + 16;
+                html += `<div class="tree-item" style="padding-left:${childPad}px"><span class="tree-icon">🔗</span><span class="tree-label">${child.locatorName}</span><span class="tree-sublabel">→ ${child.entityName}</span></div>`;
+                // Render child as a sub-entity
+                renderEntityNode({
+                    name: child.entityName,
+                    attachData: child.attachData,
+                }, depth + 2);
+            }
+        }
+    }
+
+    renderEntityNode(entity, 0);
+
+    // List locators
+    if (locatorHelpers && locatorHelpers.children.length > 0) {
+        html += '<div class="tree-title" style="margin-top:4px">Locators</div>';
+        for (const child of locatorHelpers.children) {
+            const src = (child.userData as { source?: string }).source ?? 'mesh';
+            const icon = src === 'mesh' ? '🟢' : src === 'override' ? '🟡' : '🔵';
+            html += `<div class="tree-item" data-locator="${child.name}" style="padding-left:28px"><span class="tree-icon">${icon}</span><span class="tree-label">${child.name}</span><span class="tree-sublabel">${src}</span></div>`;
         }
     }
 
     entityTree.innerHTML = html;
+
+    // Add click handlers for locator items
+    entityTree.querySelectorAll<HTMLElement>('[data-locator]').forEach(el => {
+        el.addEventListener('click', () => {
+            const name = el.dataset.locator!;
+            const loc = locatorHelpers?.getObjectByName(name);
+            if (loc) selectLocator(loc);
+        });
+    });
+}
+
+function updateStateSelector(entity: EntityData) {
+    const sel = document.getElementById('sel-state') as HTMLSelectElement;
+    sel.innerHTML = '';
+    if (entity.states && entity.states.length > 0) {
+        for (const s of entity.states) {
+            const opt = document.createElement('option');
+            opt.value = s.name;
+            opt.textContent = s.name;
+            sel.appendChild(opt);
+        }
+        sel.style.display = 'inline-block';
+    } else {
+        sel.style.display = 'none';
+    }
 }
 
 // ── Toolbar Event Handlers ───────────────────────────────────────────────────
@@ -1082,6 +1556,10 @@ wireframeToggle.addEventListener('change', () => {
 
 locatorToggle.addEventListener('change', () => {
     if (locatorHelpers) locatorHelpers.visible = locatorToggle.checked;
+    // Hide labels when locators are hidden
+    if (!locatorToggle.checked) {
+        deselectLocator();
+    }
 });
 
 // Store original normal maps so they can be restored
@@ -1111,22 +1589,77 @@ normalToggle.addEventListener('change', () => {
     });
 });
 
-
 // Focus button — reframe camera to fit model (like Maya's F key)
 const focusBtn = document.getElementById('btn-focus');
 focusBtn?.addEventListener('click', () => {
     if (currentModel) fitCameraToModel(currentModel);
 });
 
-// F key shortcut for focus
+// Transform mode buttons (W=translate, E=rotate — no scale for locators)
+function setTransformMode(mode: 'translate' | 'rotate') {
+    transformCtrl.setMode(mode);
+    document.querySelectorAll<HTMLElement>('.tool-mode').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+}
+
+document.getElementById('btn-translate')?.addEventListener('click', () => setTransformMode('translate'));
+document.getElementById('btn-rotate')?.addEventListener('click', () => setTransformMode('rotate'));
+
+// Properties panel buttons
+document.getElementById('btn-apply')?.addEventListener('click', applyPropsToLocator);
+document.getElementById('btn-reset')?.addEventListener('click', () => {
+    if (selectedLocator && selectedLocatorSnapshot) {
+        // Restore original position/rotation
+        selectedLocator.position.set(
+            selectedLocatorSnapshot.px,
+            selectedLocatorSnapshot.py,
+            selectedLocatorSnapshot.pz,
+        );
+        const rx = selectedLocatorSnapshot.rx * Math.PI / 180;
+        const ry = selectedLocatorSnapshot.ry * Math.PI / 180;
+        const rz = selectedLocatorSnapshot.rz * Math.PI / 180;
+        selectedLocator.setRotationFromEuler(new THREE.Euler(rx, ry, rz, 'XYZ'));
+        updatePropsFromLocator(selectedLocator);
+        autoSaveLocator();
+    }
+});
+document.getElementById('btn-props-close')?.addEventListener('click', deselectLocator);
+
+// Keyboard shortcuts: F=focus, W=translate, E=rotate (Maya-style), Escape=deselect, Ctrl+Z=undo
 window.addEventListener('keydown', (e) => {
+    // Forward Ctrl+Z / Ctrl+Shift+Z to extension for undo/redo
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        vscode.postMessage({ command: e.shiftKey ? 'redo' : 'undo' });
+        return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        vscode.postMessage({ command: 'redo' });
+        return;
+    }
+
     // Don't intercept if user is typing in an input
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
-    if (e.key === 'f' || e.key === 'F') {
-        e.preventDefault();
-        if (currentModel) fitCameraToModel(currentModel);
+    switch (e.key.toLowerCase()) {
+        case 'f':
+            e.preventDefault();
+            if (currentModel) fitCameraToModel(currentModel);
+            break;
+        case 'w':
+            e.preventDefault();
+            setTransformMode('translate');
+            break;
+        case 'e':
+            e.preventDefault();
+            setTransformMode('rotate');
+            break;
+        case 'escape':
+            deselectLocator();
+            break;
     }
 });
 
@@ -1147,6 +1680,18 @@ function disposeAll() {
     if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
         animationFrameId = 0;
+    }
+
+    // Deselect and cleanup labels
+    deselectLocator();
+    clearLocatorLabels();
+
+    // Dispose TransformControls
+    if (transformCtrl) {
+        transformCtrl.detach();
+        const helper = transformCtrl.getHelper();
+        scene.remove(helper);
+        transformCtrl.dispose();
     }
 
     // Dispose model

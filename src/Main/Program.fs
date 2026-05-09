@@ -846,6 +846,15 @@ type Server(client: ILanguageClient) =
             | true, Some date ->
                 let text = String.Format(LangResources.rulesUpdated, activeGame, date)
                 logInfo text
+            | false, Some _ ->
+                logInfo "CWTools rules are already up-to-date."
+            | false, None ->
+                let errorMsg = sprintf "Failed to update or load CWTools rules for %A. Please check folder permissions for %s." activeGame cp
+                logError errorMsg
+                client.ShowMessage(
+                    { ``type`` = MessageType.Error // Error
+                      message = errorMsg }
+                )
             | _ -> ()
 
             client.CustomNotification(
@@ -933,9 +942,17 @@ type Server(client: ILanguageClient) =
                                    "enable", JsonValue.Boolean(true) |]
                         )
 
-                        serializeFn vp gameCachePath
-                        let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
-                        client.CustomNotification("forceReload", JsonValue.String(text))
+                        try
+                            serializeFn vp gameCachePath
+                            let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
+                            client.CustomNotification("forceReload", JsonValue.String(text))
+                        with e ->
+                            let errorMsg = sprintf "Failed to generate vanilla cache for %A. Check permissions for %s. Error: %s" activeGame gameCachePath e.Message
+                            logError errorMsg
+                            client.ShowMessage(
+                                { ``type`` = MessageType.Error // Error
+                                  message = errorMsg }
+                            )
                     | None ->
                         client.CustomNotification("promptVanillaPath", JsonValue.String(promptName))
         | _ -> logInfo "No cache path"

@@ -178,12 +178,23 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	const isDevDir = context.extensionMode === vs.ExtensionMode.Development
-	// M4 Fix: context.globalStorageUri is a Uri object, not a string.
-	// Concatenating it with '/' calls toString() which produces "file:///..."— not a valid fs path.
-	// Use .fsPath and path.join() to get a proper filesystem path.
-	const cacheDir = isDevDir
-		? path.join(context.globalStorageUri.fsPath, '.cwtools')
-		: path.join(context.extensionPath, '.cwtools')
+	// Ensure the cache is always generated in the globalStorage path to avoid permission issues and path-encoding issues
+	// common when extensions are installed in Program Files or Chinese User directories.
+	const cacheDir = path.join(context.globalStorageUri.fsPath, '.cwtools');
+
+	// Asynchronously clean up the old .cwtools directory in the extension path if it exists
+	// to reclaim disk space for the user.
+	setTimeout(async () => {
+		try {
+			const oldCacheDir = path.join(context.extensionPath, '.cwtools');
+			if (fs.existsSync(oldCacheDir)) {
+				await fs.promises.rm(oldCacheDir, { recursive: true, force: true });
+				ErrorReporter.debug('Extension', 'Successfully cleaned up legacy .cwtools cache directory.');
+			}
+		} catch (e) {
+			ErrorReporter.debug('Extension', 'Failed to clean up legacy .cwtools directory', e);
+		}
+	}, 5000);
 
 	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
 	const aiService = new AIService(context);

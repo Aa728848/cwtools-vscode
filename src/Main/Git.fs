@@ -42,8 +42,12 @@ let rec initOrUpdateRules repoPath gameCacheDir stable first =
         (newHash <> currentHash) || not isRepo, Some git.Head.Tip.Committer.When
     with ex ->
         logError $"cwtools git error, recovering, error: %A{ex}"
-        use git = new Repository(gameCacheDir)
-        git.Reset(ResetMode.Hard, git.Branches["origin/master"].Tip)
+        try
+            use git = new Repository(gameCacheDir)
+            git.Reset(ResetMode.Hard, git.Branches["origin/master"].Tip)
+        with innerEx ->
+            logError $"cwtools git recovery failed: %A{innerEx}"
+
 
         if first then
             initOrUpdateRules repoPath gameCacheDir stable false

@@ -64,11 +64,13 @@ export interface MeshDefinition {
     file: string;         // relative path like "gfx/models/ships/xxx.mesh"
     scale?: number;
     meshSettings: MeshSettingOverride[];
+    animations?: Record<string, string>;
 }
 
 export interface EntityGraph {
     entities: Map<string, EntityDefinition>;
     meshes: Map<string, MeshDefinition>;
+    animations: Map<string, string>;
 }
 
 // ── Token Stream Helpers ─────────────────────────────────────────────────────
@@ -212,6 +214,35 @@ function parseAttachBlock(ctx: ParseCtx): AttachDefinition[] {
     return attaches;
 }
 
+function parseAnimationBlock(ctx: ParseCtx): { id: string; type: string } {
+    const anim = { id: '', type: '' };
+    expect(ctx, '{');
+    while (peek(ctx) && peek(ctx)!.value !== '}') {
+        const key = advance(ctx)!.value;
+        if (key === '=') continue;
+        const eq = peek(ctx);
+        if (eq?.value !== '=') continue;
+        advance(ctx); // skip '='
+        switch (key) {
+            case 'id':
+            case 'name':
+                anim.id = advance(ctx)!.value.replace(/"/g, '');
+                break;
+            case 'type':
+            case 'file':
+                anim.type = advance(ctx)!.value.replace(/"/g, '');
+                break;
+            default: {
+                const next = peek(ctx);
+                if (next?.value === '{') { advance(ctx); skipBlock(ctx); }
+                else advance(ctx);
+            }
+        }
+    }
+    expect(ctx, '}');
+    return anim;
+}
+
 function parseEntityBlock(ctx: ParseCtx, filePath: string): EntityDefinition {
     const startLine = peek(ctx)?.line ?? 0;
     const entity: EntityDefinition = {
@@ -268,6 +299,14 @@ function parsePdxMeshBlock(ctx: ParseCtx): MeshDefinition {
             case 'file': mesh.file = advance(ctx)!.value.replace(/"/g, ''); break;
             case 'scale': mesh.scale = parseFloat(advance(ctx)!.value); break;
             case 'meshsettings': mesh.meshSettings.push(parseMeshSettingBlock(ctx)); break;
+            case 'animation': {
+                const anim = parseAnimationBlock(ctx);
+                if (anim.id && anim.type) {
+                    if (!mesh.animations) mesh.animations = {};
+                    mesh.animations[anim.id] = anim.type;
+                }
+                break;
+            }
             default: {
                 const next = peek(ctx);
                 if (next?.value === '{') { advance(ctx); skipBlock(ctx); }
@@ -284,10 +323,11 @@ function parsePdxMeshBlock(ctx: ParseCtx): MeshDefinition {
 /**
  * Parse a single .asset file content and extract entity definitions.
  */
-export function parseAssetFile(content: string, filePath: string): EntityDefinition[] {
+export function parseAssetFile(content: string, filePath: string): { entities: EntityDefinition[], animations: Record<string, string> } {
     const tokens = tokenize(content);
     const ctx: ParseCtx = { tokens, pos: 0 };
     const entities: EntityDefinition[] = [];
+    const animations: Record<string, string> = {};
 
     while (ctx.pos < ctx.tokens.length) {
         const t = peek(ctx)!;
@@ -298,12 +338,22 @@ export function parseAssetFile(content: string, filePath: string): EntityDefinit
                 advance(ctx); // skip '='
                 entities.push(parseEntityBlock(ctx, filePath));
             }
+        } else if (t.value === 'animation') {
+            advance(ctx);
+            const eq = peek(ctx);
+            if (eq?.value === '=') {
+                advance(ctx);
+                const anim = parseAnimationBlock(ctx);
+                if (anim.id && anim.type) {
+                    animations[anim.id] = anim.type;
+                }
+            }
         } else {
             advance(ctx);
         }
     }
 
-    return entities;
+    return { entities, animations };
 }
 
 /**
@@ -341,6 +391,7 @@ export function buildEntityGraph(
     const graph: EntityGraph = {
         entities: new Map(),
         meshes: new Map(),
+        animations: new Map(),
     };
 
     // Parse all .gfx files for mesh definitions
@@ -355,12 +406,15 @@ export function buildEntityGraph(
         }
     }
 
-    // Parse all .asset files for entity definitions
+    // Parse all .asset files for entity and animation definitions
     for (const { path, content } of assetFiles) {
         try {
-            const entities = parseAssetFile(content, path);
-            for (const ent of entities) {
+            const parsed = parseAssetFile(content, path);
+            for (const ent of parsed.entities) {
                 if (ent.name) graph.entities.set(ent.name, ent);
+            }
+            for (const [id, file] of Object.entries(parsed.animations)) {
+                graph.animations.set(id, file);
             }
         } catch (e) {
             console.warn(`Failed to parse .asset file ${path}: ${e}`);

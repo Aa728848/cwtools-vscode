@@ -16,11 +16,6 @@ import { parsePdxMesh, parsePdxAnim, type ParsedMeshFile, type ParsedSubMesh, ty
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void; getState(): unknown; setState(s: unknown): void };
 const vscode = acquireVsCodeApi();
 
-/** Send log to extension's Output Channel (visible in VS Code Output panel → "Entity Preview") */
-function webviewLog(text: string, level: 'info' | 'warn' | 'error' = 'info') {
-    console.log(`[Entity] ${text}`);
-    vscode.postMessage({ command: 'log', text, level });
-}
 
 // ── i18n ─────────────────────────────────────────────────────────────────────
 
@@ -820,7 +815,6 @@ function pdxAnimToClip(anim: ParsedAnimation, clipName: string, boneNameMap?: Ma
     }
 
     const clip = new THREE.AnimationClip(clipName, duration > 0 ? duration : 1 / anim.fps, tracks);
-    webviewLog(`[Anim] Clip "${clipName}": ${tracks.length} tracks, duration=${clip.duration.toFixed(2)}s, fps=${anim.fps}`);
     return clip;
 }
 
@@ -853,9 +847,7 @@ function initAnimations(animBuffers: Map<string, ArrayBuffer>) {
     for (let i = 0; i < sceneBones.length; i++) {
         boneNameMap.set(i, sceneBones[i]!.name);
     }
-    if (sceneBones.length > 0) {
-        webviewLog(`[Anim] Scene bones: [${sceneBones.map(b => b.name).join(', ')}]`);
-    }
+
 
     for (const [animName, buffer] of animBuffers) {
         try {
@@ -863,11 +855,9 @@ function initAnimations(animBuffers: Map<string, ArrayBuffer>) {
             const clip = pdxAnimToClip(parsed, animName, boneNameMap);
             animationClips.set(animName, clip);
         } catch (err) {
-            webviewLog(`[Anim] Failed to parse animation "${animName}": ${err}`, 'error');
         }
     }
 
-    webviewLog(`[Anim] Loaded ${animationClips.size} animation clips: [${Array.from(animationClips.keys()).join(', ')}]`);
 
     // Auto-play the first available clip
     const firstClip = animationClips.values().next().value;
@@ -1752,7 +1742,6 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                     return bone;
                 };
                 meshParent = findLeafBone(sharedBoneRoot);
-                webviewLog(`[Skeleton] Mesh parent bone: "${meshParent.name}" (root: "${sharedBoneRoot.name}")`);
             }
         }
 
@@ -1764,7 +1753,6 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
             meshContainer.scale.setScalar(meshScale);
             meshParent.add(meshContainer);
             meshParent = meshContainer;
-            webviewLog(`[Root] Applied meshScale=${meshScale}`);
         }
         // meshScale also applies to mesh-embedded locators below
 
@@ -1863,12 +1851,8 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                 (skeletonHelper.material as THREE.LineBasicMaterial).depthTest = false;
                 skeletonHelper.renderOrder = 999;
                 scene.add(skeletonHelper);
-                webviewLog(`[Skeleton] Helper created for shared bone root "${sharedBoneRoot.name}"`);
-            } else {
-                webviewLog('[Skeleton] No skeleton data in parsed shapes');
             }
         } catch (skelErr) {
-            webviewLog(`[Skeleton] Failed to build skeleton visualization: ${skelErr}`, 'error');
             skeletonHelper = null;
         }
 
@@ -1955,7 +1939,6 @@ async function loadAttachChildren(
             const scale = child.scale ?? 1.0;
             childGroup.scale.setScalar(scale);
 
-            let childLeafBone: THREE.Object3D | null = null;
 
             if (child.meshBase64) {
                 // Decode mesh buffer
@@ -1990,7 +1973,6 @@ async function loadAttachChildren(
                             return bone;
                         };
                         childMeshParent = findLeaf(childBoneRoot);
-                        childLeafBone = childMeshParent;
                     }
                 }
 
@@ -2028,7 +2010,10 @@ async function loadAttachChildren(
                     }
                 }
 
-                // Add mesh-embedded locators to dedicated group
+                // Add mesh-embedded locators — respect parentBone just like root entity.
+                // Locators WITH parentBone attach to their specific bone (follow that bone's animation).
+                // Locators WITHOUT parentBone stay in childLocatorGroup (independent of skeleton).
+                const childBoneRoot = childGroup.children.find(c => c instanceof THREE.Bone) as THREE.Bone | undefined;
                 for (const loc of parsed.locators) {
                     const group = createLocatorGroup(loc.name, 0.3, 'mesh');
                     applyLocatorTransform(group, loc);
@@ -2036,7 +2021,17 @@ async function loadAttachChildren(
                     if (childMeshScale !== 1.0) {
                         group.position.multiplyScalar(childMeshScale);
                     }
-                    childLocatorGroup.add(group);
+                    // Mirror root entity logic: attach to specific parent bone if defined
+                    if (loc.parentBone && childBoneRoot) {
+                        const parentBone = childGroup.getObjectByName(loc.parentBone);
+                        if (parentBone) {
+                            parentBone.add(group);
+                        } else {
+                            childLocatorGroup.add(group);
+                        }
+                    } else {
+                        childLocatorGroup.add(group);
+                    }
                 }
             }
 
@@ -2061,14 +2056,10 @@ async function loadAttachChildren(
                 }
             }
 
-            // Attach locators to the leaf bone (if skeleton exists) so that
-            // bone animations propagate to locators and their grandchildren.
-            // Without this, locators are siblings of bones and don't follow animation.
-            if (childLeafBone) {
-                childLeafBone.add(childLocatorGroup);
-            } else {
-                childGroup.add(childLocatorGroup);
-            }
+            // Attach childLocatorGroup to childGroup (NOT to leaf bone).
+            // Bone-parented locators are already attached to their specific bones above.
+            // This group only contains bone-independent locators.
+            childGroup.add(childLocatorGroup);
 
             // Mount child at the locator position in parent's coordinate space
             locator.add(childGroup);
@@ -2092,7 +2083,6 @@ async function loadAttachChildren(
                         const clip = pdxAnimToClip(parsePdxAnim(buf.buffer), animEntry.animName, childBoneNameMap);
                         clipMap.set(animEntry.stateName, clip);
                     } catch (err) {
-                        webviewLog(`[ChildAnim] Failed "${animEntry.animName}" for "${child.entityName}": ${err}`, 'error');
                     }
                 }
 
@@ -2799,7 +2789,6 @@ window.addEventListener('message', async (event) => {
                         bytes[i] = binary.charCodeAt(i);
                     }
                     animBuffers.set(anim.animName, bytes.buffer);
-                    webviewLog(`[Anim] Decoded "${anim.animName}" for state "${anim.stateName}" (${bytes.length} bytes)`);
                 }
             }
             await loadModel(data.entity, meshBuffer);

@@ -347,7 +347,7 @@ export class EntityPanel {
 
         // Find all entities defined in the current file
         const { parseAssetFile } = await import('./entityAssetParser');
-        const currentEntities = parseAssetFile(content, document.uri.fsPath);
+        const currentEntities = parseAssetFile(content, document.uri.fsPath).entities;
         if (currentEntities.length === 0) {
             await this._panel.webview.postMessage({
                 command: 'error',
@@ -477,19 +477,24 @@ export class EntityPanel {
         for (const state of entity.states) {
             if (state.animation && !seenAnims.has(state.animation)) {
                 seenAnims.add(state.animation);
-                const animFile = this._findAnimFile(state.animation, searchRoots, meshFileDir);
-                if (animFile) {
-                    try {
-                        const animBuffer = fs.readFileSync(animFile);
-                        animations.push({
-                            stateName: state.name,
-                            animName: state.animation,
-                            animBase64: animBuffer.toString('base64'),
-                        });
-                        console.log(`[Entity] Found animation "${state.animation}" → ${animFile}`);
-                    } catch { /* skip unreadable anim files */ }
-                } else {
-                    console.log(`[Entity] Animation "${state.animation}" not found for state "${state.name}"`);
+                const meshDef = entity.pdxmesh ? this._entityGraph?.meshes.get(entity.pdxmesh) : undefined;
+                let mappedAnim = meshDef?.animations?.[state.animation];
+                if (mappedAnim) {
+                    mappedAnim = this._entityGraph?.animations.get(mappedAnim) || mappedAnim;
+                    const animFile = this._findAnimFile(mappedAnim, searchRoots, meshFileDir);
+                    if (animFile) {
+                        try {
+                            const animBuffer = fs.readFileSync(animFile);
+                            animations.push({
+                                stateName: state.name,
+                                animName: state.animation,
+                                animBase64: animBuffer.toString('base64'),
+                            });
+                            console.log(`[Entity] Found animation "${state.animation}" → ${animFile}`);
+                        } catch { /* skip unreadable anim files */ }
+                    } else {
+                        console.log(`[Entity] Animation "${state.animation}" not found for state "${state.name}"`);
+                    }
                 }
             }
         }
@@ -766,12 +771,22 @@ export class EntityPanel {
                         if (!state.animation) continue;
                         let base64 = animCache.get(state.animation);
                         if (base64 === undefined) {
-                            const animFile = this._findAnimFile(state.animation, searchRoots, childMeshFileDir);
-                            if (animFile) {
-                                try {
-                                    base64 = fs.readFileSync(animFile).toString('base64');
-                                    animCache.set(state.animation, base64);
-                                } catch { /* skip */ }
+                            const meshDef = childEntity.pdxmesh ? graph.meshes.get(childEntity.pdxmesh) : undefined;
+                            let mappedAnim = meshDef?.animations?.[state.animation];
+                            if (mappedAnim) {
+                                mappedAnim = graph.animations.get(mappedAnim) || mappedAnim;
+                                const animFile = this._findAnimFile(mappedAnim, searchRoots, childMeshFileDir);
+                                if (animFile) {
+                                    try {
+                                        base64 = fs.readFileSync(animFile).toString('base64');
+                                        animCache.set(state.animation, base64);
+                                        console.log(`[Entity] Found child animation "${state.animation}" for "${childEntity.name}" → ${animFile}`);
+                                    } catch { /* skip */ }
+                                } else {
+                                    console.log(`[Entity] Child animation "${state.animation}" not found for "${childEntity.name}"`);
+                                }
+                            } else {
+                                console.log(`[Entity] Child animation mapping missing in .gfx for "${childEntity.name}" state "${state.name}"`);
                             }
                         }
                         if (base64) {

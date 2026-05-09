@@ -480,7 +480,8 @@ export class EntityPanel {
                 const meshDef = entity.pdxmesh ? this._entityGraph?.meshes.get(entity.pdxmesh) : undefined;
                 let mappedAnim = meshDef?.animations?.[state.animation];
                 if (mappedAnim) {
-                    mappedAnim = this._entityGraph?.animations.get(mappedAnim) || mappedAnim;
+                    const graphAnim = this._entityGraph?.animations.get(mappedAnim);
+                    mappedAnim = graphAnim || mappedAnim;
                     const animFile = this._findAnimFile(mappedAnim, searchRoots, meshFileDir);
                     if (animFile) {
                         try {
@@ -490,16 +491,10 @@ export class EntityPanel {
                                 animName: state.animation,
                                 animBase64: animBuffer.toString('base64'),
                             });
-                            console.log(`[Entity] Found animation "${state.animation}" → ${animFile}`);
                         } catch { /* skip unreadable anim files */ }
-                    } else {
-                        console.log(`[Entity] Animation "${state.animation}" not found for state "${state.name}"`);
                     }
                 }
             }
-        }
-        if (animations.length > 0) {
-            console.log(`[Entity] Total animations: ${animations.length}`);
         }
 
         await this._panel.webview.postMessage({
@@ -780,13 +775,10 @@ export class EntityPanel {
                                     try {
                                         base64 = fs.readFileSync(animFile).toString('base64');
                                         animCache.set(state.animation, base64);
-                                        console.log(`[Entity] Found child animation "${state.animation}" for "${childEntity.name}" → ${animFile}`);
                                     } catch { /* skip */ }
-                                } else {
-                                    console.log(`[Entity] Child animation "${state.animation}" not found for "${childEntity.name}"`);
                                 }
                             } else {
-                                console.log(`[Entity] Child animation mapping missing in .gfx for "${childEntity.name}" state "${state.name}"`);
+                                // No GFX animation mapping for this child state
                             }
                         }
                         if (base64) {

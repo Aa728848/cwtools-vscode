@@ -193,24 +193,23 @@ function initThree() {
     controls.minDistance = 0.5;
     controls.maxDistance = 5000;
 
-    // Lighting — balanced PBR setup
-    // Total intensity ~1.85 to avoid washing out diffuse textures
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
+    // Lighting — bright PBR setup for dark-textured models
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
-    const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x444455, 0.4);
+    const hemiLight = new THREE.HemisphereLight(0xddeeff, 0x556666, 0.6);
     hemiLight.position.set(0, 20, 0);
     scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
     dirLight.position.set(5, 10, 7);
     scene.add(dirLight);
 
-    const fillLight = new THREE.DirectionalLight(0x8899bb, 0.2);
+    const fillLight = new THREE.DirectionalLight(0xaabbdd, 0.45);
     fillLight.position.set(-3, -2, -5);
     scene.add(fillLight);
 
-    const rimLight = new THREE.DirectionalLight(0x556688, 0.1);
+    const rimLight = new THREE.DirectionalLight(0x8899aa, 0.3);
     rimLight.position.set(0, -5, 3);
     scene.add(rimLight);
 
@@ -646,18 +645,14 @@ function highlightTreeItem(name: string | null) {
     });
 }
 
-/**
- * Build a THREE.Bone hierarchy from ParsedBone data.
- * PDX stores 3×4 inverse bind matrices (tx property) as 12 floats.
- *
- * The PDX format stores the matrix in COLUMN-MAJOR order:
- *   [ m00, m10, m20, m01, m11, m21, m02, m12, m22, tx, ty, tz ]
- * This represents a 3×4 matrix where the last 3 values are the translation column.
- */
-function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').ParsedBone[]): THREE.Bone | null {
-    if (parsedBones.length === 0) return null;
+interface SkeletonBuildResult {
+    root: THREE.Bone;
+    orderedBones: THREE.Bone[];
+}
 
-    console.log(`[Skeleton] Building from ${parsedBones.length} bones`);
+/** Build a THREE.Bone hierarchy from PDX parsed bone data. */
+function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').ParsedBone[]): SkeletonBuildResult | null {
+    if (parsedBones.length === 0) return null;
 
     const bones: THREE.Bone[] = [];
     for (const pb of parsedBones) {
@@ -666,7 +661,6 @@ function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').Par
         bones.push(bone);
     }
 
-    // Build hierarchy
     for (let i = 0; i < parsedBones.length; i++) {
         const pb = parsedBones[i]!;
         if (pb.parentIndex >= 0 && pb.parentIndex < bones.length) {
@@ -674,11 +668,8 @@ function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').Par
         }
     }
 
-    // Helper: construct a Matrix4 from PDX's column-major 3×4 layout
     function pdxToMatrix4(m: Float32Array): THREE.Matrix4 {
         const mat = new THREE.Matrix4();
-        // PDX column-major 3×4: [col0.x, col0.y, col0.z, col1.x, col1.y, col1.z, col2.x, col2.y, col2.z, col3.x, col3.y, col3.z]
-        // THREE.Matrix4.elements is column-major 4×4:
         mat.elements[0]  = m[0]!; mat.elements[1]  = m[1]!; mat.elements[2]  = m[2]!; mat.elements[3]  = 0;
         mat.elements[4]  = m[3]!; mat.elements[5]  = m[4]!; mat.elements[6]  = m[5]!; mat.elements[7]  = 0;
         mat.elements[8]  = m[6]!; mat.elements[9]  = m[7]!; mat.elements[10] = m[8]!; mat.elements[11] = 0;
@@ -686,65 +677,37 @@ function buildSkeletonFromParsedBones(parsedBones: import('./pdxMeshParser').Par
         return mat;
     }
 
-    // Compute world-space bind pose matrices for all bones
     const worldMatrices: THREE.Matrix4[] = [];
     for (let i = 0; i < parsedBones.length; i++) {
         const pb = parsedBones[i]!;
         const m = pb.inverseBindMatrix;
-        if (!m || m.length < 12) {
-            worldMatrices.push(new THREE.Matrix4());
-            continue;
-        }
-
+        if (!m || m.length < 12) { worldMatrices.push(new THREE.Matrix4()); continue; }
         const invBind = pdxToMatrix4(m);
-        // Check determinant — skip if matrix is degenerate
-        const det = invBind.determinant();
-        if (Math.abs(det) < 1e-10) {
-            // Use identity matrix (bone at origin in world space)
-            worldMatrices.push(new THREE.Matrix4());
-            continue;
-        }
-
-        const worldMat = invBind.clone().invert();
-        worldMatrices.push(worldMat);
+        if (Math.abs(invBind.determinant()) < 1e-10) { worldMatrices.push(new THREE.Matrix4()); continue; }
+        worldMatrices.push(invBind.clone().invert());
     }
 
-    // Compute local transforms from world transforms
     for (let i = 0; i < parsedBones.length; i++) {
         const pb = parsedBones[i]!;
         const worldMat = worldMatrices[i]!;
-
         let localMat: THREE.Matrix4;
         if (pb.parentIndex >= 0 && pb.parentIndex < parsedBones.length) {
-            // local = parentWorld.inverse * childWorld
-            const parentWorld = worldMatrices[pb.parentIndex]!;
-            const parentWorldInv = parentWorld.clone().invert();
-            localMat = parentWorldInv.multiply(worldMat);
+            localMat = worldMatrices[pb.parentIndex]!.clone().invert().multiply(worldMat);
         } else {
             localMat = worldMat;
         }
-
-        const pos = new THREE.Vector3();
-        const rot = new THREE.Quaternion();
-        const scl = new THREE.Vector3();
+        const pos = new THREE.Vector3(); const rot = new THREE.Quaternion(); const scl = new THREE.Vector3();
         localMat.decompose(pos, rot, scl);
         bones[i]!.position.copy(pos);
         bones[i]!.quaternion.copy(rot);
-        // Avoid degenerate scale
-        if (scl.x > 0.001 && scl.y > 0.001 && scl.z > 0.001) {
-            bones[i]!.scale.copy(scl);
-        }
+        if (scl.x > 0.001 && scl.y > 0.001 && scl.z > 0.001) bones[i]!.scale.copy(scl);
     }
 
-    // Find root bone (no parent)
     const rootIdx = parsedBones.findIndex(b => b.parentIndex < 0);
     const root = rootIdx >= 0 ? bones[rootIdx]! : bones[0]!;
-
-    // Force update world matrices so SkeletonHelper can render
     root.updateWorldMatrix(false, true);
 
-    console.log(`[Skeleton] Built hierarchy: root="${root.name}", total=${bones.length} bones`);
-    return root;
+    return { root, orderedBones: bones };
 }
 
 // ── Animation System ─────────────────────────────────────────────────────────
@@ -1603,6 +1566,53 @@ function buildGeometry(subMesh: ParsedSubMesh): THREE.BufferGeometry {
         geo.setAttribute('uv', new THREE.BufferAttribute(subMesh.uvs[0]!, 2));
     }
 
+    // Skinning attributes
+    if (subMesh.skin) {
+        const boneCount = subMesh.skin.boneCount || 4;
+        const vertexCount = subMesh.positions.length / 3;
+
+        // First pass: find the majority bone index among valid vertices
+        const boneCounts = new Map<number, number>();
+        for (let v = 0; v < vertexCount; v++) {
+            for (let b = 0; b < boneCount; b++) {
+                const idx = subMesh.skin.boneIndices[v * boneCount + b] ?? -1;
+                const wt = subMesh.skin.weights[v * boneCount + b] ?? 0;
+                if (idx >= 0 && wt > 0.001) {
+                    boneCounts.set(idx, (boneCounts.get(idx) || 0) + 1);
+                }
+            }
+        }
+        let defaultBone = 0;
+        let maxCount = 0;
+        for (const [boneIdx, count] of boneCounts) {
+            if (count > maxCount) { maxCount = count; defaultBone = boneIdx; }
+        }
+
+        // Second pass: build skinIndex/skinWeight buffers
+        const skinIndices = new Uint16Array(vertexCount * 4);
+        const skinWeights = new Float32Array(vertexCount * 4);
+        for (let v = 0; v < vertexCount; v++) {
+            let weightSum = 0;
+            for (let b = 0; b < 4; b++) {
+                if (b < boneCount) {
+                    const rawIdx = subMesh.skin.boneIndices[v * boneCount + b] ?? -1;
+                    const rawWt = subMesh.skin.weights[v * boneCount + b] ?? 0;
+                    skinIndices[v * 4 + b] = rawIdx >= 0 ? rawIdx : 0;
+                    skinWeights[v * 4 + b] = rawIdx >= 0 ? rawWt : 0;
+                    weightSum += skinWeights[v * 4 + b]!;
+                }
+            }
+            // Unbound vertices: bind to the majority bone so they move
+            // with the rest of the submesh instead of collapsing to origin.
+            if (weightSum < 0.001) {
+                skinIndices[v * 4] = defaultBone;
+                skinWeights[v * 4] = 1.0;
+            }
+        }
+        geo.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndices, 4));
+        geo.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeights, 4));
+    }
+
     // Index buffer
     geo.setIndex(new THREE.BufferAttribute(subMesh.indices, 1));
 
@@ -1719,43 +1729,39 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         // Maya Z+ forward → Three.js Z- forward: rotate 180° around Y
         modelGroup.rotation.y = Math.PI;
 
-        // Build ONE shared skeleton from the first shape that has bones.
-        // PDX models: all shapes share the same bone structure (same names).
-        // Creating one hierarchy avoids duplicate bone names which confuse AnimationMixer.
+        // Build skeleton + GPU skinning
         let submeshIndex = 0;
         let sharedBoneRoot: THREE.Bone | null = null;
-        let meshParent: THREE.Object3D = modelGroup; // where to attach meshes
+        let sharedSkeleton: THREE.Skeleton | null = null;
         const firstSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
         if (firstSkelShape) {
-            sharedBoneRoot = buildSkeletonFromParsedBones(firstSkelShape.skeleton);
-            if (sharedBoneRoot) {
+            const skelResult = buildSkeletonFromParsedBones(firstSkelShape.skeleton);
+            if (skelResult) {
+                sharedBoneRoot = skelResult.root;
                 sharedBoneRoot.userData.isSkeleton = true;
                 modelGroup.add(sharedBoneRoot);
-                // Find the DEEPEST leaf bone — this is the bone the animation drives.
-                // For PDX 2-bone chains: animaton_rrot → root, animation targets "root".
-                // Meshes must be under the animated bone for transforms to propagate.
-                const findLeafBone = (bone: THREE.Bone): THREE.Bone => {
-                    for (const child of bone.children) {
-                        if (child instanceof THREE.Bone) {
-                            return findLeafBone(child);
-                        }
-                    }
-                    return bone;
-                };
-                meshParent = findLeafBone(sharedBoneRoot);
+                // Let THREE.js compute boneInverses from bone positions
+                sharedSkeleton = new THREE.Skeleton(skelResult.orderedBones);
             }
         }
 
-        // Apply pdxmesh scale (from .gfx definition) — scales mesh geometry to match entity locator space
+        // Apply pdxmesh scale
         const meshScale = entity.meshScale ?? 1.0;
-        if (meshScale !== 1.0) {
-            const meshContainer = new THREE.Group();
-            meshContainer.name = 'meshScaleContainer';
-            meshContainer.scale.setScalar(meshScale);
-            meshParent.add(meshContainer);
-            meshParent = meshContainer;
+
+        // Find leaf bone index (deepest in first chain) for non-skinned meshes
+        let leafBoneIndex = 0;
+        if (sharedSkeleton) {
+            let cur = sharedSkeleton.bones[0];
+            while (cur) {
+                let next: THREE.Bone | null = null;
+                for (const c of cur.children) {
+                    if (c instanceof THREE.Bone) { next = c; break; }
+                }
+                if (!next) break;
+                cur = next;
+            }
+            if (cur) leafBoneIndex = Math.max(0, sharedSkeleton.bones.indexOf(cur));
         }
-        // meshScale also applies to mesh-embedded locators below
 
         for (const shape of parsed.shapes) {
             let meshIndexInShape = 0;
@@ -1770,13 +1776,32 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                 }, entity, meshIndexInShape);
 
                 const material = await createSubmeshMaterial(textures);
-                const mesh = new THREE.Mesh(geo, material);
+                let mesh: THREE.Mesh;
+                if (sharedSkeleton) {
+                    // Non-skinned meshes: bind all verts to leaf bone
+                    if (!subMesh.skin) {
+                        const vc = subMesh.positions.length / 3;
+                        const si = new Uint16Array(vc * 4);
+                        const sw = new Float32Array(vc * 4);
+                        for (let v = 0; v < vc; v++) {
+                            si[v * 4] = leafBoneIndex;
+                            sw[v * 4] = 1.0;
+                        }
+                        geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+                        geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+                    }
+                    const skinned = new THREE.SkinnedMesh(geo, material);
+                    skinned.bind(sharedSkeleton, new THREE.Matrix4());
+                    mesh = skinned;
+                } else {
+                    mesh = new THREE.Mesh(geo, material);
+                }
                 mesh.name = `submesh_${submeshIndex}`;
 
                 totalTriangles += (subMesh.indices.length / 3);
                 totalVertices += (subMesh.positions.length / 3);
 
-                meshParent.add(mesh);
+                modelGroup.add(mesh);
                 submeshIndex++;
                 meshIndexInShape++;
             }
@@ -1964,28 +1989,28 @@ async function loadAttachChildren(
                 let childMeshParent: THREE.Object3D = childGroup;
 
 
-                // Build skeleton for child entity (needed for own animations)
+                // Build skeleton for child entity
+                let childSkeleton: THREE.Skeleton | null = null;
                 const firstChildSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
                 if (firstChildSkelShape) {
-                    const childBoneRoot = buildSkeletonFromParsedBones(firstChildSkelShape.skeleton);
-                    if (childBoneRoot) {
-                        childGroup.add(childBoneRoot);
-                        // Find deepest leaf bone for mesh attachment
-                        const findLeaf = (bone: THREE.Bone): THREE.Bone => {
-                            for (const c of bone.children) { if (c instanceof THREE.Bone) return findLeaf(c); }
-                            return bone;
-                        };
-                        childMeshParent = findLeaf(childBoneRoot);
+                    const childSkelResult = buildSkeletonFromParsedBones(firstChildSkelShape.skeleton);
+                    if (childSkelResult) {
+                        childGroup.add(childSkelResult.root);
+                        childSkeleton = new THREE.Skeleton(childSkelResult.orderedBones);
                     }
                 }
 
-                // Apply meshScale container
-                if (childMeshScale !== 1.0) {
-                    const meshContainer = new THREE.Group();
-                    meshContainer.name = 'meshScaleContainer';
-                    meshContainer.scale.setScalar(childMeshScale);
-                    childMeshParent.add(meshContainer);
-                    childMeshParent = meshContainer;
+                // Find leaf bone for default skin weights
+                let childLeafBone = 0;
+                if (childSkeleton) {
+                    let cur = childSkeleton.bones[0];
+                    while (cur) {
+                        let next: THREE.Bone | null = null;
+                        for (const c of cur.children) { if (c instanceof THREE.Bone) { next = c; break; } }
+                        if (!next) break;
+                        cur = next;
+                    }
+                    if (cur) childLeafBone = Math.max(0, childSkeleton.bones.indexOf(cur));
                 }
 
                 // Build geometry and materials for child
@@ -2003,13 +2028,28 @@ async function loadAttachChildren(
                         }, childEntityData, meshIndexInShape);
 
                         const material = await createSubmeshMaterial(textures);
-                        const mesh = new THREE.Mesh(geo, material);
+                        let mesh: THREE.Mesh;
+                        if (childSkeleton) {
+                            if (!subMesh.skin) {
+                                const vc = subMesh.positions.length / 3;
+                                const si = new Uint16Array(vc * 4);
+                                const sw = new Float32Array(vc * 4);
+                                for (let v = 0; v < vc; v++) { si[v*4] = childLeafBone; sw[v*4] = 1.0; }
+                                geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+                                geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+                            }
+                            const skinned = new THREE.SkinnedMesh(geo, material);
+                            skinned.bind(childSkeleton, new THREE.Matrix4());
+                            mesh = skinned;
+                        } else {
+                            mesh = new THREE.Mesh(geo, material);
+                        }
                         mesh.name = `${child.entityName}_submesh_${submeshIndex}`;
 
                         totalTriangles += (subMesh.indices.length / 3);
                         totalVertices += (subMesh.positions.length / 3);
 
-                        childMeshParent.add(mesh);
+                        childGroup.add(mesh);
                         submeshIndex++;
                         meshIndexInShape++;
                     }

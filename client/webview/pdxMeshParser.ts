@@ -542,23 +542,39 @@ export function parsePdxAnim(buffer: ArrayBuffer): ParsedAnimation {
     const jProp = infoNode.props.get('j');
 
     const fps = fpsProp ? asNumberArray(fpsProp)[0] ?? 15 : 15;
-    const sampleCount = saProp ? asNumberArray(saProp)[0] ?? 1 : 1;
+    let sampleCount = saProp ? asNumberArray(saProp)[0] ?? 1 : 1;
     const boneCount = jProp ? asNumberArray(jProp)[0] ?? 0 : 0;
-
-
 
     // Parse bone info from CHILDREN of 'info' node (not top-level!)
     const boneInfos: Array<{ name: string; sa: string }> = [];
     for (const child of infoNode.children) {
         const saPropBone = child.props.get('sa');
         const sa = saPropBone ? asString(saPropBone) : '';
-
         boneInfos.push({ name: child.name, sa });
-
     }
 
     // Find 'samples' node (child of root, sibling of 'info')
     const samplesNode = tree.children.find(c => c.name === 'samples');
+
+    // If header sampleCount is ≤ 1 but samples node has data,
+    // compute real sample count from data size and animated channel counts.
+    if (samplesNode && sampleCount <= 1) {
+        const sampleT = samplesNode.props.get('t') ? asFloat32(samplesNode.props.get('t')!) : null;
+        const sampleQ = samplesNode.props.get('q') ? asFloat32(samplesNode.props.get('q')!) : null;
+        const sampleS = samplesNode.props.get('s') ? asFloat32(samplesNode.props.get('s')!) : null;
+        // Count bones with each animated channel
+        let tBones = 0, qBones = 0, sBones = 0;
+        for (const bi of boneInfos) {
+            if (bi.sa.includes('t')) tBones++;
+            if (bi.sa.includes('q')) qBones++;
+            if (bi.sa.includes('s')) sBones++;
+        }
+        // Derive frame count from whichever channel has data
+        if (sampleT && tBones > 0) sampleCount = Math.max(sampleCount, sampleT.length / 3 / tBones);
+        if (sampleQ && qBones > 0) sampleCount = Math.max(sampleCount, sampleQ.length / 4 / qBones);
+        if (sampleS && sBones > 0) sampleCount = Math.max(sampleCount, sampleS.length / sBones);
+        sampleCount = Math.floor(sampleCount);
+    }
 
     // Build per-bone keyframe tracks by deinterleaving samples
     const bones: ParsedAnimBone[] = [];

@@ -748,6 +748,28 @@ export class EntityPanel {
                                 });
                             }
                         }
+
+                        // Scan the child's mesh file directory for textures
+                        // (mirrors root entity logic in _loadAndRender — ensures child
+                        //  mesh-embedded material paths resolve even when the parent
+                        //  entity uses a completely different mesh from a different dir)
+                        if (meshFileDir) {
+                            try {
+                                const entries = fs.readdirSync(meshFileDir, { withFileTypes: true });
+                                for (const entry of entries) {
+                                    if (entry.isFile() && /\.(dds|png|tga)$/i.test(entry.name)) {
+                                        const full = path.join(meshFileDir, entry.name);
+                                        childTextureMap[entry.name] = this._panel.webview.asWebviewUri(vscode.Uri.file(full)).toString();
+                                        for (const root of searchRoots) {
+                                            if (full.startsWith(root)) {
+                                                const relPath = path.relative(root, full).replace(/\\/g, '/');
+                                                childTextureMap[relPath] = this._panel.webview.asWebviewUri(vscode.Uri.file(full)).toString();
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch { /* skip inaccessible */ }
+                        }
                     }
                 }
 

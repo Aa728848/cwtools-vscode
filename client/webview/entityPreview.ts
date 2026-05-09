@@ -1251,8 +1251,8 @@ function classifyShader(shaderName: string): ShaderCategory {
     if (!shaderName) return 'pbr'; // default
     const s = shaderName.toLowerCase();
 
-    // Invisible / shadow-only shaders
-    if (s.includes('invisible') || s.includes('shadow')) return 'invisible';
+    // Invisible / shadow-only / collision shaders
+    if (s.includes('invisible') || s.includes('shadow') || s === 'collision') return 'invisible';
 
     // Additive / alpha blend / flow additive / simple / hologram
     if (s.includes('additive') || s.includes('alphablend') ||
@@ -1282,9 +1282,10 @@ function resolveSubmeshTextures(
     submeshName: string,
     meshMaterial: { shader?: string; diffuse?: string; normal?: string; specular?: string },
     entity: EntityData,
+    meshIndexInShape = 0,
 ): ResolvedTextures {
-    // Match by submesh name from binary mesh against GFX meshsettings name, index 0 (base layer)
-    const ms = entity.resolvedMeshSettings?.find(s => s.name === submeshName && s.index === 0)
+    // Match by shape name + mesh index within shape (meshsettings index = material slot within shape)
+    const ms = entity.resolvedMeshSettings?.find(s => s.name === submeshName && s.index === meshIndexInShape)
         ?? entity.resolvedMeshSettings?.find(s => s.name === submeshName);
     const textureMap = entity.textureMap ?? {};
 
@@ -1757,6 +1758,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         // meshScale also applies to mesh-embedded locators below
 
         for (const shape of parsed.shapes) {
+            let meshIndexInShape = 0;
             for (const subMesh of shape.meshes) {
                 const geo = buildGeometry(subMesh);
                 const meshMat = subMesh.material;
@@ -1765,7 +1767,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                     diffuse: meshMat.diffuse,
                     normal: meshMat.normal,
                     specular: meshMat.specular,
-                }, entity);
+                }, entity, meshIndexInShape);
 
                 const material = await createSubmeshMaterial(textures);
                 const mesh = new THREE.Mesh(geo, material);
@@ -1776,6 +1778,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
 
                 meshParent.add(mesh);
                 submeshIndex++;
+                meshIndexInShape++;
             }
         }
 
@@ -1988,6 +1991,7 @@ async function loadAttachChildren(
                 // Build geometry and materials for child
                 let submeshIndex = 0;
                 for (const shape of parsed.shapes) {
+                    let meshIndexInShape = 0;
                     for (const subMesh of shape.meshes) {
                         const geo = buildGeometry(subMesh);
                         const meshMat = subMesh.material;
@@ -1996,7 +2000,7 @@ async function loadAttachChildren(
                             diffuse: meshMat.diffuse,
                             normal: meshMat.normal,
                             specular: meshMat.specular,
-                        }, childEntityData);
+                        }, childEntityData, meshIndexInShape);
 
                         const material = await createSubmeshMaterial(textures);
                         const mesh = new THREE.Mesh(geo, material);
@@ -2007,6 +2011,7 @@ async function loadAttachChildren(
 
                         childMeshParent.add(mesh);
                         submeshIndex++;
+                        meshIndexInShape++;
                     }
                 }
 

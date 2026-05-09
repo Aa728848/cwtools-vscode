@@ -609,7 +609,29 @@ export function parsePdxAnim(buffer: ArrayBuffer): ParsedAnimation {
         }
 
         for (const bi of boneInfos) {
-            bones.push(boneData.get(bi.name)!);
+            const bone = boneData.get(bi.name)!;
+            const child = infoNode.children.find(c => c.name === bi.name);
+
+            // For channels NOT in 'sa' (not animated in samples), use the initial
+            // value from the info node as a constant single-frame track.
+            // This is critical for bones that have a constant transform (e.g. a fixed
+            // tilt angle) that is not animated across frames.
+            if (child) {
+                if (!bi.sa.includes('t')) {
+                    const tProp = child.props.get('t');
+                    if (tProp) bone.translations = asFloat32(tProp);
+                }
+                if (!bi.sa.includes('q')) {
+                    const qProp = child.props.get('q');
+                    if (qProp) bone.rotations = asFloat32(qProp);
+                }
+                if (!bi.sa.includes('s')) {
+                    const sProp = child.props.get('s');
+                    if (sProp) bone.scales = asFloat32(sProp);
+                }
+            }
+
+            bones.push(bone);
         }
     } else {
         // No samples or 1 frame — use initial pose from info bone props

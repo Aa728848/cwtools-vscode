@@ -10,6 +10,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { parsePdxMesh, parsePdxAnim, type ParsedMeshFile, type ParsedSubMesh, type ParsedAnimation, type ParsedLocator } from './pdxMeshParser';
+import { pdxHelperFunctions, pdxNormalFragmentMaps, pdxRoughnessFragment, pdxMetalnessFragment, pdxEmissiveFragment } from './pdxShaders';
+import { Icons } from './svgIcons';
 
 // ── VS Code API ──────────────────────────────────────────────────────────────
 
@@ -410,19 +412,34 @@ function createLocatorLabel(name: string, source: string): HTMLDivElement {
     const el = document.createElement('div');
     el.className = 'locator-label';
     el.textContent = name;
-    // Set color once at creation based on source
-    el.style.borderLeft = source === 'mesh' ? '2px solid #4CAF50' :
-        source === 'override' ? '2px solid #FFC107' : '2px solid #2196F3';
+    // 根据来源类型设置左边框颜色
+    const borderColors: Record<string, string> = {
+        mesh: '#4CAF50',      // 绿色 — mesh 内嵌 locator
+        override: '#FFC107',  // 黄色 — 脚本覆盖 locator
+        script: '#2196F3',    // 蓝色 — 脚本定义 locator
+        bone: '#4fc3f7',      // 青色 — 骨骼点
+    };
+    el.style.borderLeft = `2px solid ${borderColors[source] ?? '#2196F3'}`;
     canvasContainer.appendChild(el);
     return el;
 }
 
+/** 根据 Three.js 对象 id 获取其关联的标签 DOM 元素 */
+function getLabelForObject(obj: THREE.Object3D): HTMLDivElement | undefined {
+    return locatorLabelEls.get(`${obj.id}`);
+}
+
 function updateLocatorLabels() {
-    if (!locatorHelpers || !locatorToggle.checked) {
-        // 定位器隐藏时，确保所有标签也被隐藏
-        for (const el of locatorLabelEls.values()) {
-            el.style.display = 'none';
-        }
+    if (!currentModel) {
+        for (const el of locatorLabelEls.values()) el.style.display = 'none';
+        return;
+    }
+
+    // 两个开关都关闭时隐藏所有标签
+    const showLocators = locatorToggle.checked;
+    const showBones = bonesToggle.checked;
+    if (!showLocators && !showBones) {
+        for (const el of locatorLabelEls.values()) el.style.display = 'none';
         return;
     }
 
@@ -432,21 +449,26 @@ function updateLocatorLabels() {
     const halfW = w / 2;
     const halfH = h / 2;
 
-    for (const child of locatorHelpers.children) {
-        let el = locatorLabelEls.get(child.name);
+    // 追踪本帧活跃的标签 key，帧结束后清理失效标签
+    const activeKeys = new Set<string>();
+
+    // 处理单个标注点：创建/更新 DOM 标签并投影到 2D
+    const processPoint = (obj: THREE.Object3D, displayName: string, source: string) => {
+        const key = `${obj.id}`;
+        activeKeys.add(key);
+
+        let el = locatorLabelEls.get(key);
         if (!el) {
-            const src = (child.userData as { source?: string }).source ?? 'mesh';
-            el = createLocatorLabel(child.name, src);
-            locatorLabelEls.set(child.name, el);
+            el = createLocatorLabel(displayName, source);
+            locatorLabelEls.set(key, el);
         }
 
-        // Project 3D → 2D using pre-allocated vectors
-        child.getWorldPosition(_labelWorldPos);
+        obj.getWorldPosition(_labelWorldPos);
         _labelProjected.copy(_labelWorldPos).project(camera);
 
         if (_labelProjected.z > 1) {
             el.style.display = 'none';
-            continue;
+            return;
         }
 
         const x = (_labelProjected.x * halfW) + halfW;
@@ -454,8 +476,41 @@ function updateLocatorLabels() {
         el.style.display = '';
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
+    };
 
-        // Only update highlight styling when selection changes (handled in selectLocator/deselectLocator)
+    // 判断对象是否属于子实体（attach 的模型内部）— 子实体的点不显示
+    const isInsideChildEntity = (obj: THREE.Object3D): boolean => {
+        let p = obj.parent;
+        while (p) {
+            if (p.name.startsWith('attach_')) return true;
+            if (p === currentModel) return false;
+            p = p.parent;
+        }
+        return false;
+    };
+
+    // 只遍历根实体的定位器和骨骼，跳过子实体的
+    currentModel.traverse(obj => {
+        // 跳过子实体内部的对象
+        if (isInsideChildEntity(obj)) return;
+
+        // 根实体定位器 — 由 locatorToggle 控制
+        if (obj.userData?.isLocator && showLocators) {
+            const src = (obj.userData as { source?: string }).source ?? 'mesh';
+            processPoint(obj, obj.name, src);
+        }
+        // 根实体骨骼点 — 由 bonesToggle 控制
+        if (obj instanceof THREE.Bone && showBones) {
+            processPoint(obj, obj.name, 'bone');
+        }
+    });
+
+    // 清理不再存在的旧标签（模型切换、开关切换时）
+    for (const [key, el] of locatorLabelEls) {
+        if (!activeKeys.has(key)) {
+            el.remove();
+            locatorLabelEls.delete(key);
+        }
     }
 }
 
@@ -594,7 +649,7 @@ function onLocatorPointerDown(event: PointerEvent) {
 function selectLocator(obj: THREE.Object3D, editable = true) {
     // Unhighlight previous
     if (selectedLocator) {
-        const prevLabel = locatorLabelEls.get(selectedLocator.name);
+        const prevLabel = getLabelForObject(selectedLocator);
         if (prevLabel) {
             prevLabel.style.background = 'rgba(0, 0, 0, 0.65)';
             prevLabel.style.fontWeight = 'normal';
@@ -669,7 +724,7 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
     }
 
     // Highlight selected label
-    const label = locatorLabelEls.get(obj.name);
+    const label = getLabelForObject(obj);
     if (label) {
         label.style.background = 'rgba(0, 127, 212, 0.75)';
         label.style.fontWeight = '600';
@@ -682,7 +737,7 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
 function deselectLocator() {
     if (selectedLocator) {
         // Unhighlight label
-        const label = locatorLabelEls.get(selectedLocator.name);
+        const label = getLabelForObject(selectedLocator);
         if (label) {
             label.style.background = 'rgba(0, 0, 0, 0.65)';
             label.style.fontWeight = 'normal';
@@ -1650,89 +1705,27 @@ async function upgradeSubmeshMaterial(mesh: THREE.Mesh | THREE.SkinnedMesh, text
             const hasNormalAtCompile = !!mat.normalMap;
             const hasSpecAtCompile = !!mat.roughnessMap;
 
-            shader.fragmentShader = `
-// PDX RRxG 法线解包辅助函数
-// 参照 standardfuncsgfx.fxh 中的 UnpackRRxGNormal
-vec3 unpackPdxRRxGNormal(sampler2D nmap, vec2 uv) {
-    vec4 pdx = texture2D(nmap, uv);
-    float nx = pdx.g * 2.0 - 1.0;
-    float ny = -(pdx.a * 2.0 - 1.0);
-    float nz = sqrt(max(0.0, 1.0 - nx * nx - ny * ny));
-    return vec3(nx, ny, nz);
-}
-// 从法线贴图 B 通道提取自发光遮罩
-float getPdxEmissive(sampler2D nmap, vec2 uv) {
-    return texture2D(nmap, uv).b;
-}
-` + shader.fragmentShader;
+            // 注入 PDX GLSL 着色器片段（从 pdxShaders.ts 导入）
+            shader.fragmentShader = pdxHelperFunctions + shader.fragmentShader;
 
             if (hasNormalAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
-                    '#include <normal_fragment_maps>',
-                    `
-// PDX 法线贴图解包（替换 Three.js 默认法线贴图处理）
-#ifdef USE_NORMALMAP_OBJECTSPACE
-    normal = unpackPdxRRxGNormal(normalMap, vNormalMapUv);
-    #ifdef FLIP_SIDED
-        normal = -normal;
-    #endif
-    #ifdef DOUBLE_SIDED
-        normal = normal * faceDirection;
-    #endif
-    normal = normalize(normalMatrix * normal);
-#elif defined(USE_NORMALMAP_TANGENTSPACE)
-    vec3 mapN = unpackPdxRRxGNormal(normalMap, vNormalMapUv);
-    mapN.xy *= normalScale;
-    normal = normalize(tbn * mapN);
-#elif defined(USE_BUMPMAP)
-    normal = perturbNormalArb(-vViewPosition, normal, dHdxy_fwd(), faceDirection);
-#endif
-                    `
-                );
+                    '#include <normal_fragment_maps>', pdxNormalFragmentMaps);
             }
 
             if (hasSpecAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
-                    '#include <roughnessmap_fragment>',
-                    `
-float roughnessFactor = roughness;
-#ifdef USE_ROUGHNESSMAP
-    vec4 pdxSpecProps = texture2D(roughnessMap, vRoughnessMapUv);
-    roughnessFactor *= (1.0 - pdxSpecProps.a);
-#endif
-                    `
-                );
+                    '#include <roughnessmap_fragment>', pdxRoughnessFragment);
             }
 
             if (hasSpecAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
-                    '#include <metalnessmap_fragment>',
-                    `
-float metalnessFactor = metalness;
-#ifdef USE_METALNESSMAP
-    vec4 pdxMetalProps = texture2D(metalnessMap, vMetalnessMapUv);
-    float rawMetal = pdxMetalProps.b;
-    float remappedMetal = 1.0 - (1.0 - rawMetal) * (1.0 - rawMetal);
-    metalnessFactor *= remappedMetal;
-#endif
-                    `
-                );
+                    '#include <metalnessmap_fragment>', pdxMetalnessFragment);
             }
 
             if (hasNormalAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
-                    '#include <emissivemap_fragment>',
-                    `
-// PDX 自发光：法线贴图 B 通道作为遮罩
-float pdxEmissiveMask = getPdxEmissive(normalMap, vNormalMapUv);
-#ifdef USE_MAP
-    vec4 pdxDiffuseForEmissive = texture2D(map, vMapUv);
-    totalEmissiveRadiance = pdxDiffuseForEmissive.rgb * pdxEmissiveMask;
-#else
-    totalEmissiveRadiance = vec3(pdxEmissiveMask);
-#endif
-                    `
-                );
+                    '#include <emissivemap_fragment>', pdxEmissiveFragment);
             }
         };
 
@@ -2580,18 +2573,20 @@ function buildEntityTree() {
 }
 
 function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
-    // SVG 图标定义
-    const svgIconEntity = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1L1 4.5V11.5L8 15L15 11.5V4.5L8 1ZM2 5.06L7.5 7.81V13.88L2 11.13V5.06ZM8.5 13.88V7.81L14 5.06V11.13L8.5 13.88ZM13.15 4.19L8 6.76L2.85 4.19L8 1.62L13.15 4.19Z"/></svg>`;
-    const svgIconBone = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M12.63 2H3.37L1 5.37L8 14L15 5.37L12.63 2ZM3.79 3H12.21L13.84 5H2.16L3.79 3ZM8 12.83L2.73 5.99H13.27L8 12.83Z"/></svg>`;
-    const svgIconLocator = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a3.5 3.5 0 0 0-3.5 3.5c0 3.33 3.5 7.5 3.5 7.5s3.5-4.17 3.5-7.5A3.5 3.5 0 0 0 8 1zm0 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>`;
-    const svgIconCollapse = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 4h14v1H1V4zm0 4h14v1H1V8zm0 4h14v1H1v-1z"/></svg>`;
-    const svgIconAdd = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v6H2v2h6v6h2V9h6V7H10V1H8z"/></svg>`;
+    // SVG 图标（从 svgIcons.ts 导入）
+    const svgIconEntity = Icons.entity;
+    const svgIconBone = Icons.bone;
+    const svgIconLocator = Icons.locator;
+    const svgIconCollapse = Icons.collapseAll;
+    const svgIconAdd = Icons.addItem;
 
-    // 保存当前折叠状态（按 data-parent 属性键值）
-    const collapsedSet = new Set<string>();
-    entityTree.querySelectorAll<HTMLElement>('.tree-children.collapsed').forEach(el => {
+    // 保存当前展开状态（按 data-parent 属性键值），默认折叠
+    const expandedSet = new Set<string>();
+    let hasPreviousState = false;
+    entityTree.querySelectorAll<HTMLElement>('.tree-children').forEach(el => {
+        hasPreviousState = true;
         const key = el.dataset.parent;
-        if (key) collapsedSet.add(key);
+        if (key && !el.classList.contains('collapsed')) expandedSet.add(key);
     });
     // 保存过滤器激活状态
     const boneFilterActive = entityTree.classList.contains('filter-bone');
@@ -2672,8 +2667,9 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
         }
         
         if (isNode) {
-            // 恢复之前保存的折叠状态
-            const isCollapsed = collapsedSet.has(label);
+            // 恢复之前保存的展开状态（初次加载时只展开根节点）
+            const isExpanded = hasPreviousState ? expandedSet.has(label) : (obj === currentModel);
+            const isCollapsed = !isExpanded;
             const toggleCls = childrenHtml ? 'tree-toggle' : 'tree-toggle-placeholder';
             const toggleIcon = childrenHtml ? (isCollapsed ? '▶' : '▼') : '';
             nodeHtml += `<div class="tree-item ${nodeClass}" ${dataset} style="padding-left:${pad}px; display:flex; align-items:center;">`;
@@ -2737,6 +2733,20 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
             const uuid = el.dataset.objectUuid!;
             const obj = treeObjects.get(uuid);
             if (obj) {
+                // 判断对象是否属于子实体（attach 的模型内部）
+                let isInsideChild = false;
+                let p = obj.parent;
+                while (p) {
+                    if (p.name.startsWith('attach_')) { isInsideChild = true; break; }
+                    if (p === currentModel) break;
+                    p = p.parent;
+                }
+                
+                // 子模型的点和骨骼不能被选中和编辑
+                if (isInsideChild) {
+                    return;
+                }
+
                 const isBoneParented = obj.parent instanceof THREE.Bone;
                 const isEditable = !isBoneParented && !(obj instanceof THREE.Bone);
                 selectLocator(obj, isEditable);

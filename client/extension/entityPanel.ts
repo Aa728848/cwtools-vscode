@@ -14,6 +14,9 @@ type EntityPanelMessage =
     | { command: 'selectEntity'; index: number }
     | { command: 'openFile' }
     | { command: 'updateLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }
+    | { command: 'addLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; attachEntity?: string }
+    | { command: 'updateAttach'; locatorName: string; entityName: string }
+    | { command: 'requestEntityNames' }
     | { command: 'undo' }
     | { command: 'redo' }
     | { command: 'screenshot'; data: string }
@@ -103,6 +106,18 @@ export class EntityPanel {
                     }
                     case 'updateLocator': {
                         await this._handleUpdateLocator(msg);
+                        break;
+                    }
+                    case 'addLocator': {
+                        await this._handleAddLocator(msg);
+                        break;
+                    }
+                    case 'updateAttach': {
+                        await this._handleUpdateAttach(msg);
+                        break;
+                    }
+                    case 'requestEntityNames': {
+                        await this._handleRequestEntityNames();
                         break;
                     }
                     case 'undo': {
@@ -301,6 +316,245 @@ export class EntityPanel {
         } else {
             console.warn(`[EntityPanel] Cannot find entity block to insert locator "${msg.locatorName}"`);
         }
+    }
+
+    /**
+     * Handle addLocator message: insert a new locator (and optionally attach block)
+     * into the current entity's .asset definition, then refresh the preview.
+     */
+    private async _handleAddLocator(msg: { locatorName: string; position: [number, number, number]; rotation: [number, number, number]; attachEntity?: string }) {
+        if (!this._document) return;
+        const doc = this._document;
+        const text = doc.getText();
+        const lines = text.split('\n');
+        const entityName = this._currentEntityName;
+        if (!entityName) {
+            console.warn('[EntityPanel] No current entity for addLocator');
+            return;
+        }
+
+        // Find the entity block (both start and end)
+        const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
+        let entityBlockStart = -1;
+        let entityBlockEnd = -1;
+
+        for (let i = 0; i < lines.length; i++) {
+            if (/entity\s*=\s*\{/.test(lines[i]!)) {
+                let depth = 0;
+                let blockEnd = i;
+                let hasName = false;
+                for (let j = i; j < lines.length; j++) {
+                    for (const ch of lines[j]!) {
+                        if (ch === '{') depth++;
+                        if (ch === '}') depth--;
+                    }
+                    if (entityNamePat.test(lines[j]!)) hasName = true;
+                    if (depth <= 0) { blockEnd = j; break; }
+                }
+                if (hasName) {
+                    entityBlockStart = i;
+                    entityBlockEnd = blockEnd;
+                    break;
+                }
+            }
+        }
+
+        if (entityBlockEnd < 0) {
+            console.warn(`[EntityPanel] Cannot find entity block "${entityName}" for addLocator`);
+            return;
+        }
+
+        const p = msg.position;
+        const r = msg.rotation;
+        let insertText = `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
+
+        // If attach entity is specified, append a new attach = { } block
+        // (Stellaris format: each attach block holds exactly one locator→entity mapping)
+        if (msg.attachEntity) {
+            insertText += `\tattach = { "${msg.locatorName}" = "${msg.attachEntity}" }\n`;
+        }
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+
+        console.log(`[EntityPanel] Added locator "${msg.locatorName}"${msg.attachEntity ? ` with attach → ${msg.attachEntity}` : ''}`);
+
+        // Resolve and send the attach entity data for incremental loading
+        if (msg.attachEntity) {
+            await this._sendAttachEntityData(msg.locatorName, msg.attachEntity);
+        }
+        this._entityGraph = null;
+    }
+
+    /**
+     * Update the attach entity for an existing locator.
+     * Finds `attach = { "locatorName" = "oldEntity" }` and replaces the entity value,
+     * or creates a new attach block if none exists.
+     */
+    private async _handleUpdateAttach(msg: Extract<EntityPanelMessage, { command: 'updateAttach' }>) {
+        const doc = this._document;
+        if (!doc) return;
+        const text = doc.getText();
+        const lines = text.split('\n');
+        const entityName = this._currentEntityName;
+        if (!entityName) return;
+
+        // Find the entity block bounds
+        const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
+        let entityBlockStart = -1;
+        let entityBlockEnd = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (/entity\s*=\s*\{/.test(lines[i]!)) {
+                let depth = 0;
+                let blockEnd = i;
+                let hasName = false;
+                for (let j = i; j < lines.length; j++) {
+                    for (const ch of lines[j]!) {
+                        if (ch === '{') depth++;
+                        if (ch === '}') depth--;
+                    }
+                    if (entityNamePat.test(lines[j]!)) hasName = true;
+                    if (depth <= 0) { blockEnd = j; break; }
+                }
+                if (hasName) {
+                    entityBlockStart = i;
+                    entityBlockEnd = blockEnd;
+                    break;
+                }
+            }
+        }
+        if (entityBlockEnd < 0) return;
+
+        // Escape the locator name for regex
+        const locNameEsc = msg.locatorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        // Search for existing attach = { "locatorName" = "..." } within the entity
+        const attachPat = new RegExp(`^(\\s*attach\\s*=\\s*\\{\\s*"${locNameEsc}"\\s*=\\s*)"([^"]*)"(\\s*\\}\\s*)$`);
+        let attachLine = -1;
+        for (let i = entityBlockStart; i <= entityBlockEnd; i++) {
+            if (attachPat.test(lines[i]!)) {
+                attachLine = i;
+                break;
+            }
+        }
+
+        const edit = new vscode.WorkspaceEdit();
+        if (msg.entityName) {
+            if (attachLine >= 0) {
+                // Replace the entity name in existing attach block
+                const oldLine = lines[attachLine]!;
+                const newLine = oldLine.replace(attachPat, `$1"${msg.entityName}"$3`);
+                const range = new vscode.Range(attachLine, 0, attachLine, oldLine.length);
+                edit.replace(doc.uri, range, newLine);
+            } else {
+                // No existing attach for this locator → create new block
+                const attachBlock = `\tattach = { "${msg.locatorName}" = "${msg.entityName}" }\n`;
+                edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), attachBlock);
+            }
+        } else {
+            // Empty entity name → remove the attach block
+            if (attachLine >= 0) {
+                const range = new vscode.Range(attachLine, 0, attachLine + 1, 0);
+                edit.delete(doc.uri, range);
+            }
+        }
+
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await doc.save();
+        console.log(`[EntityPanel] Updated attach for "${msg.locatorName}" → "${msg.entityName || '(removed)'}"`);
+
+        // Send resolved data to webview for incremental loading
+        if (msg.entityName) {
+            await this._sendAttachEntityData(msg.locatorName, msg.entityName);
+        } else {
+            // Entity removed — tell webview to remove the attached model
+            await this._panel.webview.postMessage({
+                command: 'removeAttachEntity',
+                locatorName: msg.locatorName,
+            });
+        }
+        this._entityGraph = null;
+    }
+
+    /**
+     * Resolve a single attach entity and send its data to the webview for incremental loading.
+     */
+    private async _sendAttachEntityData(locatorName: string, entityName: string) {
+        try {
+            if (!this._entityGraph) {
+                this._entityGraph = await this._buildEntityGraph(this._searchRoots);
+            }
+            const graph = this._entityGraph;
+            const childEntity = graph.entities.get(entityName);
+            if (!childEntity) {
+                console.warn(`[EntityPanel] Attach entity "${entityName}" not found in graph`);
+                return;
+            }
+
+            // Build a temporary entity definition with a single attach entry
+            // so _resolveAttachData can resolve it
+            const tempEntity: EntityDefinition = {
+                name: '__temp__',
+                pdxmesh: undefined,
+                scale: undefined,
+                locators: [],
+                attaches: [{ locatorName, entityName }],
+                states: [],
+                meshSettings: [],
+                line: 0,
+                endLine: 0,
+                filePath: '',
+            };
+
+            const textureMap: Record<string, string> = {};
+            // Build parent texture map from search roots
+            for (const root of this._searchRoots) {
+                const gfxDir = path.join(root, 'gfx');
+                try { await fs.promises.access(gfxDir); } catch { continue; }
+                this._scanMeshDirTextures(gfxDir, this._searchRoots, textureMap);
+            }
+
+            const attachDataArr = await this._resolveAttachData(tempEntity, graph, this._searchRoots, textureMap, 0, 4);
+            if (attachDataArr.length > 0) {
+                const data = attachDataArr[0]!;
+                // Convert texture URIs to webview URIs
+                const webviewTextureMap: Record<string, string> = {};
+                for (const [key, val] of Object.entries(data.textureMap)) {
+                    if (val && fs.existsSync(val)) {
+                        webviewTextureMap[key] = this._panel.webview.asWebviewUri(vscode.Uri.file(val)).toString();
+                    }
+                }
+                data.textureMap = webviewTextureMap;
+
+                await this._panel.webview.postMessage({
+                    command: 'attachEntityData',
+                    locatorName,
+                    attachData: data,
+                });
+            }
+        } catch (e) {
+            console.warn(`[EntityPanel] Failed to resolve attach entity "${entityName}": ${e}`);
+        }
+    }
+
+    /**
+     * Send all known entity names to the webview for autocomplete.
+     */
+    private async _handleRequestEntityNames() {
+        if (!this._entityGraph) {
+            this._entityGraph = await this._buildEntityGraph(this._searchRoots);
+        }
+        const names = Array.from(this._entityGraph.entities.keys()).sort();
+        await this._panel.webview.postMessage({
+            command: 'entityNames',
+            names,
+        });
     }
 
     private _getGamePath(): string | null {
@@ -979,18 +1233,64 @@ export class EntityPanel {
         <label><input type="checkbox" id="chk-normals"> <span data-i18n="disableNormals">Disable Normals</span></label>
     </div>
 
-    <div id="canvas-container">
-        <div id="loading-overlay">
-            <div class="spinner"></div>
-            <div class="progress-text" data-i18n="loading">Loading...</div>
-            <div class="progress-bar"><div class="progress-bar-fill"></div></div>
+    <div id="main-content">
+        <div id="entity-tree"></div>
+        <div id="sidebar-resize"></div>
+        <div id="canvas-container">
+            <div id="loading-overlay">
+                <div class="spinner"></div>
+                <div class="progress-text" data-i18n="loading">Loading...</div>
+                <div class="progress-bar"><div class="progress-bar-fill"></div></div>
+            </div>
+            <div id="empty-state">
+                <div class="empty-icon">📦</div>
+                <div class="empty-text" data-i18n="noEntity">No entity loaded</div>
+                <div class="empty-hint" data-i18n="openHint">Open a .asset file and click preview</div>
+            </div>
+            <div id="transform-hint" class="hidden"></div>
+
+            <div id="context-menu">
+                <div class="ctx-menu-item" id="ctx-add-locator"><span class="ctx-icon">📌</span><span>${locale.startsWith('zh') ? '新建定位器' : 'Add Locator'}</span></div>
+            </div>
+
+            <div id="properties-panel" class="hidden">
+                <div class="props-header">
+                    <span class="props-title">Properties</span>
+                    <span class="props-name" id="props-locator-name"></span>
+                    <button class="props-close" id="btn-props-close">&times;</button>
+                </div>
+                <div class="props-body">
+                    <div class="props-row"><label>Position X</label><input type="number" step="0.1" id="prop-px"></div>
+                    <div class="props-row"><label>Position Y</label><input type="number" step="0.1" id="prop-py"></div>
+                    <div class="props-row"><label>Position Z</label><input type="number" step="0.1" id="prop-pz"></div>
+                    <div class="props-row"><label>Rotation X</label><input type="number" step="1" id="prop-rx"></div>
+                    <div class="props-row"><label>Rotation Y</label><input type="number" step="1" id="prop-ry"></div>
+                    <div class="props-row"><label>Rotation Z</label><input type="number" step="1" id="prop-rz"></div>
+                    <div class="props-row" style="position:relative"><label>${locale.startsWith('zh') ? '挂载实体' : 'Attach'}</label><input type="text" id="prop-attach-entity" autocomplete="off" placeholder="${locale.startsWith('zh') ? '(无)' : '(none)'}"></div>
+                    <div id="prop-autocomplete-list" class="autocomplete-dropdown"></div>
+                    <div class="props-actions">
+                        <button class="toolbar-btn" id="btn-apply" data-i18n="apply">Apply</button>
+                        <button class="toolbar-btn secondary" id="btn-reset" data-i18n="reset">Reset</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="add-locator-panel" class="hidden">
+                <div class="props-header">
+                    <span class="props-title">${locale.startsWith('zh') ? '新建定位器' : 'Add Locator'}</span>
+                    <button class="props-close" id="btn-add-locator-close">&times;</button>
+                </div>
+                <div class="props-body">
+                    <div class="props-row"><label>${locale.startsWith('zh') ? '名称' : 'Name'}</label><input type="text" id="add-loc-name" placeholder="locator_name"></div>
+                    <div class="props-row" style="position:relative"><label>${locale.startsWith('zh') ? '挂载实体' : 'Attach'}</label><input type="text" id="add-loc-entity" autocomplete="off" placeholder="${locale.startsWith('zh') ? '(可选)' : '(optional)'}"></div>
+                    <div id="autocomplete-list" class="autocomplete-dropdown"></div>
+                    <div class="props-actions">
+                        <button class="toolbar-btn" id="btn-add-loc-confirm">${locale.startsWith('zh') ? '确认' : 'Confirm'}</button>
+                        <button class="toolbar-btn secondary" id="btn-add-loc-cancel">${locale.startsWith('zh') ? '取消' : 'Cancel'}</button>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div id="empty-state">
-            <div class="empty-icon">📦</div>
-            <div class="empty-text" data-i18n="noEntity">No entity loaded</div>
-            <div class="empty-hint" data-i18n="openHint">Open a .asset file and click preview</div>
-        </div>
-        <div id="transform-hint" class="hidden"></div>
     </div>
 
     <div id="timeline" style="display:none">
@@ -1000,27 +1300,6 @@ export class EntityPanel {
         <button id="btn-anim-loop" class="timeline-btn" title="Loop">🔁</button>
         <button id="btn-anim-speed" class="timeline-btn" title="Speed">1x</button>
     </div>
-
-    <div id="properties-panel" class="hidden">
-        <div class="props-header">
-            <span class="props-title">Properties</span>
-            <span class="props-name" id="props-locator-name"></span>
-            <button class="props-close" id="btn-props-close">&times;</button>
-        </div>
-        <div class="props-body">
-            <div class="props-row"><label>Position X</label><input type="number" step="0.1" id="prop-px"></div>
-            <div class="props-row"><label>Position Y</label><input type="number" step="0.1" id="prop-py"></div>
-            <div class="props-row"><label>Position Z</label><input type="number" step="0.1" id="prop-pz"></div>
-            <div class="props-row"><label>Rotation X</label><input type="number" step="1" id="prop-rx"></div>
-            <div class="props-row"><label>Rotation Y</label><input type="number" step="1" id="prop-ry"></div>
-            <div class="props-row"><label>Rotation Z</label><input type="number" step="1" id="prop-rz"></div>
-            <div class="props-actions">
-                <button class="toolbar-btn" id="btn-apply" data-i18n="apply">Apply</button>
-                <button class="toolbar-btn secondary" id="btn-reset" data-i18n="reset">Reset</button>
-            </div>
-        </div>
-    </div>
-    <div id="entity-tree"></div>
     <div id="info-panel"></div>
 
     <script nonce="${nonce}" src="${scriptUri}"></script>

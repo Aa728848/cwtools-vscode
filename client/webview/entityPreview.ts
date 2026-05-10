@@ -134,6 +134,23 @@ const propPz = document.getElementById('prop-pz') as HTMLInputElement;
 const propRx = document.getElementById('prop-rx') as HTMLInputElement;
 const propRy = document.getElementById('prop-ry') as HTMLInputElement;
 const propRz = document.getElementById('prop-rz') as HTMLInputElement;
+const propAttachEntity = document.getElementById('prop-attach-entity') as HTMLInputElement;
+const propAutocompleteList = document.getElementById('prop-autocomplete-list')!;
+
+// Context menu & add-locator panel
+const contextMenu = document.getElementById('context-menu')!;
+const addLocatorPanel = document.getElementById('add-locator-panel')!;
+const addLocName = document.getElementById('add-loc-name') as HTMLInputElement;
+const addLocEntity = document.getElementById('add-loc-entity') as HTMLInputElement;
+const autocompleteList = document.getElementById('autocomplete-list')!;
+const sidebarResize = document.getElementById('sidebar-resize')!;
+
+// Cached entity names for autocomplete
+let cachedEntityNames: string[] = [];
+// Right-click 3D world position for "Add Locator" context menu
+let contextMenuWorldPos: THREE.Vector3 | null = null;
+// Timestamp guard to prevent context menu from being immediately dismissed
+let contextMenuOpenTime = 0;
 
 // ── Three.js Setup ───────────────────────────────────────────────────────────
 
@@ -146,7 +163,9 @@ let currentModel: THREE.Group | null = null;
 let locatorHelpers: THREE.Group | null = null;
 let animationFrameId = 0;
 let selectedLocator: THREE.Object3D | null = null;
+let selectedLocatorEditable = true;
 let currentEntity: EntityData | null = null;
+let lastParsedMeshFile: ParsedMeshFile | null = null;
 let skeletonHelper: THREE.SkeletonHelper | null = null;
 // Animation system
 let mixer: THREE.AnimationMixer | null = null;
@@ -532,6 +551,29 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
     }
 
     selectedLocator = obj;
+    selectedLocatorEditable = editable;
+
+    // Always show properties panel (attach editing is always allowed)
+    updatePropsFromLocator(obj);
+    propsPanel.classList.remove('hidden');
+    propsName.textContent = obj.name;
+
+    // Position/rotation inputs: enabled only for editable locators
+    const posRotInputs = [propPx, propPy, propPz, propRx, propRy, propRz];
+    for (const input of posRotInputs) {
+        input.disabled = !editable;
+        input.style.opacity = editable ? '1' : '0.5';
+    }
+
+    // Apply/Reset buttons: visible only for editable locators
+    const applyBtn = document.getElementById('btn-apply');
+    const resetBtn = document.getElementById('btn-reset');
+    if (applyBtn) applyBtn.style.display = editable ? '' : 'none';
+    if (resetBtn) resetBtn.style.display = editable ? '' : 'none';
+
+    // Attach entity input: always enabled
+    propAttachEntity.disabled = false;
+    propAttachEntity.style.opacity = '1';
 
     if (editable) {
         transformCtrl.attach(obj);
@@ -547,10 +589,6 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
             rz: euler.z * 180 / Math.PI,
         };
 
-        updatePropsFromLocator(obj);
-        propsPanel.classList.remove('hidden');
-        propsName.textContent = obj.name;
-
         // Show hint
         const hintEntry = i18n['transformHint'];
         if (hintEntry) {
@@ -559,9 +597,9 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
         transformHint.classList.remove('hidden');
         transformHint.classList.add('visible');
     } else {
-        // View-only: detach transform controls, hide props panel
+        // View-only position/rotation: detach transform controls
         transformCtrl.detach();
-        propsPanel.classList.add('hidden');
+        selectedLocatorSnapshot = null;
         transformHint.classList.add('hidden');
         transformHint.classList.remove('visible');
         // Focus camera on the locator
@@ -588,10 +626,12 @@ function deselectLocator() {
             label.style.fontWeight = 'normal';
         }
         selectedLocator = null;
+        selectedLocatorEditable = true;
         selectedLocatorSnapshot = null;
         transformCtrl.detach();
         propsPanel.classList.add('hidden');
         transformHint.classList.remove('visible');
+        hidePropAutocomplete();
         highlightTreeItem(null);
     }
 }
@@ -606,6 +646,11 @@ function updatePropsFromLocator(obj: THREE.Object3D) {
     propRx.value = (euler.x * 180 / Math.PI).toFixed(2);
     propRy.value = (euler.y * 180 / Math.PI).toFixed(2);
     propRz.value = (euler.z * 180 / Math.PI).toFixed(2);
+
+    // Populate attach entity from current entity data
+    const attachEntry = currentEntity?.attaches?.find(a => a.locatorName === obj.name);
+    propAttachEntity.value = attachEntry?.entityName ?? '';
+    hidePropAutocomplete();
 }
 
 function applyPropsToLocator() {
@@ -633,6 +678,96 @@ function applyPropsToLocator() {
         scale: 1,
     });
 }
+
+// ── Properties Panel: Attach Entity Editing ──────────────────────────────────
+
+function hidePropAutocomplete() {
+    propAutocompleteList.classList.remove('visible');
+    propAutocompleteList.innerHTML = '';
+}
+
+function showPropAutocomplete(filter: string) {
+    const query = filter.toLowerCase();
+    const matches = cachedEntityNames.filter(n => n.toLowerCase().includes(query)).slice(0, 50);
+    if (matches.length === 0) {
+        hidePropAutocomplete();
+        return;
+    }
+    propAutocompleteList.innerHTML = '';
+    for (const name of matches) {
+        const item = document.createElement('div');
+        item.className = 'ac-item';
+        item.tabIndex = 0;
+        const idx = name.toLowerCase().indexOf(query);
+        if (query && idx >= 0) {
+            item.innerHTML = escapeHtml(name.substring(0, idx))
+                + `<strong>${escapeHtml(name.substring(idx, idx + query.length))}</strong>`
+                + escapeHtml(name.substring(idx + query.length));
+        } else {
+            item.textContent = name;
+        }
+        item.addEventListener('click', () => {
+            propAttachEntity.value = name;
+            hidePropAutocomplete();
+            sendUpdateAttach();
+        });
+        item.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                propAttachEntity.value = name;
+                hidePropAutocomplete();
+                sendUpdateAttach();
+            }
+            if (e.key === 'ArrowDown') { e.preventDefault(); (item.nextElementSibling as HTMLElement)?.focus(); }
+            if (e.key === 'ArrowUp') { e.preventDefault(); const prev = item.previousElementSibling as HTMLElement | null; if (prev) prev.focus(); else propAttachEntity.focus(); }
+            if (e.key === 'Escape') { hidePropAutocomplete(); propAttachEntity.focus(); }
+        });
+        propAutocompleteList.appendChild(item);
+    }
+    propAutocompleteList.classList.add('visible');
+}
+
+function sendUpdateAttach() {
+    if (!selectedLocator) return;
+    vscode.postMessage({
+        command: 'updateAttach',
+        locatorName: selectedLocator.name,
+        entityName: propAttachEntity.value.trim(),
+    });
+}
+
+propAttachEntity.addEventListener('input', () => {
+    if (cachedEntityNames.length === 0) {
+        vscode.postMessage({ command: 'requestEntityNames' });
+    }
+    const val = propAttachEntity.value.trim();
+    if (val.length === 0) {
+        hidePropAutocomplete();
+        return;
+    }
+    showPropAutocomplete(val);
+});
+
+propAttachEntity.addEventListener('focus', () => {
+    if (cachedEntityNames.length === 0) {
+        vscode.postMessage({ command: 'requestEntityNames' });
+    }
+    const val = propAttachEntity.value.trim();
+    if (val.length > 0) showPropAutocomplete(val);
+});
+
+propAttachEntity.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !propAutocompleteList.classList.contains('visible')) {
+        sendUpdateAttach();
+    }
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const first = propAutocompleteList.querySelector('.ac-item') as HTMLElement | null;
+        first?.focus();
+    }
+    if (e.key === 'Escape') {
+        hidePropAutocomplete();
+    }
+});
 
 function highlightTreeItem(name: string | null) {
     const items = entityTree.querySelectorAll('.tree-item');
@@ -1709,6 +1844,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
 
         fitCameraToModel(modelGroup);
         updateInfoPanel(entity);
+        lastParsedMeshFile = null;
         updateEntityTree(entity);
         updateStateSelector(entity);
         showLoading(false);
@@ -1905,6 +2041,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
 
         // Update UI
         updateInfoPanel(entity, parsed);
+        lastParsedMeshFile = parsed;
         updateEntityTree(entity, parsed);
         updateStateSelector(entity);
         showLoading(false);
@@ -2286,6 +2423,54 @@ function updateInfoPanel(entity: EntityData, parsed?: ParsedMeshFile) {
     `;
 }
 
+/**
+ * Remove any attached entity model at the given locator.
+ * Searches for Three.js groups named `attach_{entityName}` that are children of the locator.
+ */
+function removeAttachAtLocator(locatorName: string) {
+    if (!currentModel) return;
+    // The attach child is parented to the locator (or a bone with that name)
+    const targets: THREE.Object3D[] = [];
+    currentModel.traverse(obj => {
+        if (obj.name === locatorName) targets.push(obj);
+    });
+    if (locatorHelpers) {
+        locatorHelpers.traverse(obj => {
+            if (obj.name === locatorName) targets.push(obj);
+        });
+    }
+    for (const target of targets) {
+        const toRemove: THREE.Object3D[] = [];
+        for (const child of target.children) {
+            if (child.name.startsWith('attach_')) {
+                toRemove.push(child);
+            }
+        }
+        for (const obj of toRemove) {
+            obj.traverse(node => {
+                if (node instanceof THREE.Mesh) {
+                    node.geometry?.dispose();
+                    if (Array.isArray(node.material)) {
+                        node.material.forEach(m => m.dispose());
+                    } else {
+                        node.material?.dispose();
+                    }
+                }
+            });
+            target.remove(obj);
+        }
+    }
+}
+
+/**
+ * Rebuild the entity tree sidebar using cached entity + mesh data.
+ */
+function buildEntityTree() {
+    if (currentEntity) {
+        updateEntityTree(currentEntity, lastParsedMeshFile ?? undefined);
+    }
+}
+
 function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
     let html = '<div class="tree-title">Entity Tree</div>';
 
@@ -2343,13 +2528,14 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
         });
     }
 
-    // List locators (top level)
-    if (allLocators.length > 0) {
+    // List locators (top level) — always show section with "+" button
+    {
         html += '<div class="tree-title tree-title-locators" style="margin-top:4px">';
-        html += `<span class="tree-toggle">▼</span>`;
+        html += `<span class="tree-toggle">${allLocators.length > 0 ? '▼' : '▶'}</span>`;
         html += `Locators <span class="tree-sublabel">(${allLocators.length})</span>`;
+        html += `<span class="tree-add-btn" id="btn-add-locator" title="${isChinese ? '新建定位器' : 'Add Locator'}">➕</span>`;
         html += '</div>';
-        html += '<div class="tree-children" data-parent="locators">';
+        html += `<div class="tree-children${allLocators.length === 0 ? ' collapsed' : ''}" data-parent="locators">`;
         for (let i = 0; i < allLocators.length; i++) {
             const child = allLocators[i]!;
             const src = (child.userData as { source?: string }).source ?? 'mesh';
@@ -2436,6 +2622,13 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
                 focusOnObject(loc);
             }
         });
+    });
+
+    // Click "+" button → open add-locator panel
+    document.getElementById('btn-add-locator')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        contextMenuWorldPos = controls.target.clone(); // Default to camera focus
+        showAddLocatorPanel();
     });
 
     // Toggle fold/unfold
@@ -2893,6 +3086,278 @@ function updateEntitySelector(entities: Array<{ name: string; index: number }>, 
     entitySelect.style.display = entities.length > 1 ? 'inline-block' : 'none';
 }
 
+// ── Context Menu (Right-click on canvas) ─────────────────────────────────────
+
+function hideContextMenu() {
+    contextMenu.classList.remove('visible');
+}
+
+canvasContainer.addEventListener('contextmenu', (e) => {
+    // Only show if we have a loaded entity and locators are visible
+    if (!currentEntity || !locatorToggle.checked) return;
+    e.preventDefault();
+
+    // Compute 3D world position at right-click point (project onto
+    // the plane at the camera target depth)
+    const rect = canvasContainer.getBoundingClientRect();
+    const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    const raycasterCtx = new THREE.Raycaster();
+    raycasterCtx.setFromCamera(new THREE.Vector2(nx, ny), camera);
+    const plane = new THREE.Plane();
+    plane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()), controls.target);
+    const intersection = new THREE.Vector3();
+    raycasterCtx.ray.intersectPlane(plane, intersection);
+    contextMenuWorldPos = intersection || controls.target.clone();
+
+    contextMenu.style.left = `${e.clientX - rect.left}px`;
+    contextMenu.style.top = `${e.clientY - rect.top}px`;
+    contextMenu.classList.add('visible');
+    contextMenuOpenTime = Date.now();
+});
+
+// Hide context menu on left-click/pointerdown, but with a timestamp guard
+// to prevent immediate dismissal from the same event cycle
+document.addEventListener('click', (e) => {
+    if (Date.now() - contextMenuOpenTime < 100) return;
+    if (contextMenu.contains(e.target as Node)) return;
+    hideContextMenu();
+});
+document.addEventListener('pointerdown', (e) => {
+    if (Date.now() - contextMenuOpenTime < 100) return;
+    // Only dismiss on left button, not right button (which opens context menu)
+    if ((e as PointerEvent).button !== 0) return;
+    if (contextMenu.contains(e.target as Node)) return;
+    hideContextMenu();
+});
+
+// Context menu: Add Locator
+document.getElementById('ctx-add-locator')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideContextMenu();
+    showAddLocatorPanel();
+});
+
+// ── Add Locator Panel ────────────────────────────────────────────────────────
+
+function showAddLocatorPanel() {
+    // Request fresh entity names from extension for autocomplete
+    vscode.postMessage({ command: 'requestEntityNames' });
+    addLocName.value = '';
+    addLocEntity.value = '';
+    hideAutocomplete();
+    addLocatorPanel.classList.remove('hidden');
+    addLocName.focus();
+}
+
+function hideAddLocatorPanel() {
+    addLocatorPanel.classList.add('hidden');
+    hideAutocomplete();
+}
+
+document.getElementById('btn-add-locator-close')?.addEventListener('click', hideAddLocatorPanel);
+document.getElementById('btn-add-loc-cancel')?.addEventListener('click', hideAddLocatorPanel);
+
+document.getElementById('btn-add-loc-confirm')?.addEventListener('click', () => {
+    const name = addLocName.value.trim();
+    if (!name) {
+        addLocName.style.borderColor = '#be1100';
+        return;
+    }
+    addLocName.style.borderColor = '';
+
+    // Position: use the right-click world position, or camera target
+    const pos = contextMenuWorldPos ? contextMenuWorldPos.clone() : controls.target.clone();
+
+    // Convert world position to model local space
+    if (currentModel) {
+        const invMatrix = new THREE.Matrix4().copy(currentModel.matrixWorld).invert();
+        pos.applyMatrix4(invMatrix);
+    }
+
+    const attachEntity = addLocEntity.value.trim() || undefined;
+    const position: [number, number, number] = [pos.x, pos.y, pos.z];
+    const rotation: [number, number, number] = [0, 0, 0];
+
+    // Immediately create the locator in the 3D scene (no full reload)
+    addLocatorToScene(name, position, rotation);
+
+    // Send to extension for file write-back (no reload)
+    vscode.postMessage({
+        command: 'addLocator',
+        locatorName: name,
+        position,
+        rotation,
+        attachEntity,
+    });
+
+    hideAddLocatorPanel();
+});
+
+/** Incrementally add a locator to the current scene without full reload */
+function addLocatorToScene(name: string, position: [number, number, number], rotation: [number, number, number]) {
+    if (!locatorHelpers || !currentEntity) return;
+
+    const group = createLocatorGroup(name, 0.5, 'script');
+    group.position.set(position[0], position[1], position[2]);
+    group.rotation.copy(pdxScriptEuler(rotation[1], rotation[0], rotation[2]));
+    group.userData = { source: 'script', isLocator: true };
+    locatorHelpers.add(group);
+
+    // Update the entity tree to include the new locator
+    if (lastParsedMeshFile) {
+        updateEntityTree(currentEntity, lastParsedMeshFile);
+    } else {
+        updateEntityTree(currentEntity);
+    }
+
+    // Select the newly created locator
+    selectLocator(group, true);
+}
+
+// Allow Enter key to confirm in add-locator inputs
+addLocName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('btn-add-loc-confirm')?.click();
+    if (e.key === 'Escape') hideAddLocatorPanel();
+});
+addLocEntity.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !autocompleteList.classList.contains('visible')) {
+        document.getElementById('btn-add-loc-confirm')?.click();
+    }
+    if (e.key === 'Escape') {
+        if (autocompleteList.classList.contains('visible')) {
+            hideAutocomplete();
+        } else {
+            hideAddLocatorPanel();
+        }
+    }
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const first = autocompleteList.querySelector('.ac-item') as HTMLElement | null;
+        first?.focus();
+    }
+});
+
+// ── Custom Autocomplete ──────────────────────────────────────────────────────
+
+function hideAutocomplete() {
+    autocompleteList.classList.remove('visible');
+    autocompleteList.innerHTML = '';
+}
+
+function showAutocomplete(filter: string) {
+    const query = filter.toLowerCase();
+    const matches = cachedEntityNames.filter(n => n.toLowerCase().includes(query)).slice(0, 50);
+    if (matches.length === 0) {
+        hideAutocomplete();
+        return;
+    }
+
+    autocompleteList.innerHTML = '';
+    for (const name of matches) {
+        const item = document.createElement('div');
+        item.className = 'ac-item';
+        item.tabIndex = 0;
+
+        // Highlight matched portion
+        const idx = name.toLowerCase().indexOf(query);
+        if (query && idx >= 0) {
+            item.innerHTML = escapeHtml(name.substring(0, idx))
+                + `<strong>${escapeHtml(name.substring(idx, idx + query.length))}</strong>`
+                + escapeHtml(name.substring(idx + query.length));
+        } else {
+            item.textContent = name;
+        }
+
+        item.addEventListener('click', () => {
+            addLocEntity.value = name;
+            hideAutocomplete();
+            addLocEntity.focus();
+        });
+        item.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                addLocEntity.value = name;
+                hideAutocomplete();
+                addLocEntity.focus();
+            }
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                (item.nextElementSibling as HTMLElement)?.focus();
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                const prev = item.previousElementSibling as HTMLElement | null;
+                if (prev) prev.focus(); else addLocEntity.focus();
+            }
+            if (e.key === 'Escape') {
+                hideAutocomplete();
+                addLocEntity.focus();
+            }
+        });
+        autocompleteList.appendChild(item);
+    }
+    autocompleteList.classList.add('visible');
+}
+
+function escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+addLocEntity.addEventListener('input', () => {
+    const val = addLocEntity.value.trim();
+    if (val.length === 0) {
+        hideAutocomplete();
+        return;
+    }
+    showAutocomplete(val);
+});
+
+addLocEntity.addEventListener('focus', () => {
+    const val = addLocEntity.value.trim();
+    if (val.length > 0) showAutocomplete(val);
+});
+
+// Hide autocomplete when clicking outside
+document.addEventListener('click', (e) => {
+    if (!addLocatorPanel.contains(e.target as Node)) {
+        hideAutocomplete();
+    }
+});
+
+function updateEntityNamesList(names: string[]) {
+    cachedEntityNames = names;
+}
+
+// ── Sidebar Resize ───────────────────────────────────────────────────────────
+
+{
+    let isDragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    sidebarResize.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startWidth = entityTree.offsetWidth;
+        sidebarResize.classList.add('dragging');
+        sidebarResize.setPointerCapture(e.pointerId);
+        e.preventDefault();
+    });
+
+    sidebarResize.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+        const delta = e.clientX - startX;
+        const newWidth = Math.max(120, Math.min(500, startWidth + delta));
+        entityTree.style.width = `${newWidth}px`;
+        handleResize();
+    });
+
+    sidebarResize.addEventListener('pointerup', () => {
+        isDragging = false;
+        sidebarResize.classList.remove('dragging');
+    });
+}
+
 // ── Message Handler ──────────────────────────────────────────────────────────
 
 window.addEventListener('message', async (event) => {
@@ -2940,6 +3405,30 @@ window.addEventListener('message', async (event) => {
         }
         case 'dispose': {
             disposeAll();
+            break;
+        }
+        case 'entityNames': {
+            updateEntityNamesList(msg.names ?? []);
+            break;
+        }
+        case 'attachEntityData': {
+            // Incremental attach: load entity model at the specified locator
+            const locName: string = msg.locatorName;
+            const attachData: AttachData = msg.attachData;
+            if (locatorHelpers && currentModel) {
+                // Remove any existing attach at this locator first
+                removeAttachAtLocator(locName);
+                // Load the new attached entity
+                await loadAttachChildren([attachData], locatorHelpers, currentModel, currentEntity?.defaultState);
+                // Rebuild the entity tree in the sidebar
+                buildEntityTree();
+            }
+            break;
+        }
+        case 'removeAttachEntity': {
+            const locName2: string = msg.locatorName;
+            removeAttachAtLocator(locName2);
+            buildEntityTree();
             break;
         }
     }

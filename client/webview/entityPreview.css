@@ -797,3 +797,18 @@ body {
     min-width: 90px;
     text-align: center;
 }
+
+/* Filter button active state */
+.filter-btn.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
+/* Filtering classes — dim non-matching items */
+#entity-tree.filter-bone .tree-item:not(.tree-bone):not(.tree-entity) {
+    opacity: 0.2;
+}
+#entity-tree.filter-locator .tree-item:not(.tree-locator):not(.tree-entity) {
+    opacity: 0.2;
+}

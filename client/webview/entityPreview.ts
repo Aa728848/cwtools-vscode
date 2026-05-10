@@ -211,6 +211,21 @@ function initThree() {
     controls.dampingFactor = 0.08;
     controls.minDistance = 0.5;
     controls.maxDistance = 5000;
+    
+    // 重映射按钮：左键=旋转，中键=平移。右键完全禁用，以支持右键菜单创建定位器。
+    controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.PAN,
+        RIGHT: -1 as any  // 使用 -1 禁用右键（null 可能被某些版本忽略）
+    };
+    controls.enablePan = true;
+
+    // 在 OrbitControls 处理之前拦截右键 pointerdown，防止 OrbitControls 吞掉事件
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+        if (e.button === 2) {
+            e.stopPropagation();  // 阻止 OrbitControls 处理右键
+        }
+    }, true);  // 使用捕获阶段
 
     // Lighting — bright PBR setup for dark-textured models
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -368,8 +383,8 @@ function createLocatorLabel(name: string, source: string): HTMLDivElement {
 }
 
 function updateLocatorLabels() {
-    if (!locatorHelpers || !locatorHelpers.visible) {
-        // Ensure all labels are hidden when locators are not visible
+    if (!locatorHelpers || !locatorToggle.checked) {
+        // 定位器隐藏时，确保所有标签也被隐藏
         for (const el of locatorLabelEls.values()) {
             el.style.display = 'none';
         }
@@ -554,10 +569,22 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
     selectedLocator = obj;
     selectedLocatorEditable = editable;
 
+    // Determine if this locator is inside a submodel structure
+    let ownerEntity = '';
+    let p = obj.parent;
+    while (p) {
+        if (p.name.startsWith('attach_')) {
+            ownerEntity = p.name.replace('attach_', '');
+            break;
+        }
+        p = p.parent;
+    }
+    const isSubmodel = ownerEntity !== '';
+
     // Always show properties panel (attach editing is always allowed)
     updatePropsFromLocator(obj);
     propsPanel.classList.remove('hidden');
-    propsName.textContent = obj.name;
+    propsName.textContent = obj instanceof THREE.Bone ? obj.name.replace(/^.*?__/, '') : obj.name;
 
     // Position/rotation inputs: enabled only for editable locators
     const posRotInputs = [propPx, propPy, propPz, propRx, propRy, propRz];
@@ -572,11 +599,12 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
     if (applyBtn) applyBtn.style.display = editable ? '' : 'none';
     if (resetBtn) resetBtn.style.display = editable ? '' : 'none';
 
-    // Attach entity input: always enabled
+    // Attach entity input: enabled for all, including submodels (cross-file write supported)
     propAttachEntity.disabled = false;
     propAttachEntity.style.opacity = '1';
+    propAttachEntity.placeholder = isSubmodel ? `Attach to ${ownerEntity}` : 'e.g. some_entity_name';
 
-    if (editable) {
+    if (editable && !isSubmodel) {
         transformCtrl.attach(obj);
 
         // Snapshot the original position/rotation for Reset
@@ -646,9 +674,43 @@ function updatePropsFromLocator(obj: THREE.Object3D) {
     propRy.value = (euler.y * 180 / Math.PI).toFixed(2);
     propRz.value = (euler.z * 180 / Math.PI).toFixed(2);
 
-    // Populate attach entity from current entity data
-    const attachEntry = currentEntity?.attaches?.find(a => a.locatorName === obj.name);
-    propAttachEntity.value = attachEntry?.entityName ?? '';
+    let ownerEntity = '';
+    let p = obj.parent;
+    while (p) {
+        if (p.name.startsWith('attach_')) {
+            ownerEntity = p.name.replace('attach_', '');
+            break;
+        }
+        p = p.parent;
+    }
+    const isSubmodel = ownerEntity !== '';
+
+    const rawName = obj instanceof THREE.Bone ? obj.name.replace(/^.*?__/, '') : obj.name;
+    if (isSubmodel) {
+        // Find attachEntry inside the submodel's AttachData structure
+        let foundEntry: any = null;
+        if (currentEntity && currentEntity.attachData) {
+            const searchAttachData = (nodes: AttachData[]) => {
+                for (const node of nodes) {
+                    if (node.entityName === ownerEntity) {
+                        if (node.attachData) {
+                            foundEntry = node.attachData.find(a => a.locatorName === rawName);
+                        }
+                        if (foundEntry) return;
+                    }
+                    if (node.attachData) {
+                        searchAttachData(node.attachData);
+                    }
+                }
+            };
+            searchAttachData(currentEntity.attachData);
+        }
+        propAttachEntity.value = foundEntry?.entityName ?? '';
+    } else {
+        // Populate attach entity from current entity data
+        const attachEntry = currentEntity?.attaches?.find(a => a.locatorName === rawName);
+        propAttachEntity.value = attachEntry?.entityName ?? '';
+    }
     hidePropAutocomplete();
 }
 
@@ -727,10 +789,24 @@ function showPropAutocomplete(filter: string) {
 
 function sendUpdateAttach() {
     if (!selectedLocator) return;
+    
+    // Determine the owner entity for cross-file writing
+    let targetEntity = '';
+    let p = selectedLocator.parent;
+    while (p) {
+        if (p.name.startsWith('attach_')) {
+            targetEntity = p.name.replace('attach_', '');
+            break;
+        }
+        p = p.parent;
+    }
+
+    const rawName = selectedLocator instanceof THREE.Bone ? selectedLocator.name.replace(/^.*?__/, '') : selectedLocator.name;
     vscode.postMessage({
         command: 'updateAttach',
-        locatorName: selectedLocator.name,
+        locatorName: rawName,
         entityName: propAttachEntity.value.trim(),
+        targetEntity: targetEntity || undefined
     });
 }
 
@@ -2039,9 +2115,13 @@ async function loadAttachChildren(
                 }
             }
             if (!locator) {
+                // 搜索骨骼：骨骼名称可能有实体前缀（如 "entityName__root"），
+                // 所以同时匹配精确名称和以 "__locatorName" 结尾的名称
                 parentGroup.traverse(obj => {
-                    if (!locator && obj instanceof THREE.Bone && obj.name === child.locatorName) {
-                        locator = obj;
+                    if (!locator && obj instanceof THREE.Bone) {
+                        if (obj.name === child.locatorName || obj.name.endsWith(`__${child.locatorName}`)) {
+                            locator = obj;
+                        }
                     }
                 });
                 if (locator) {
@@ -2220,6 +2300,20 @@ async function loadAttachChildren(
             childGroup.add(childLocatorGroup);
 
             // Mount child at the locator position in parent's coordinate space
+            // 当挂载到骨骼时，骨骼可能积累了来自骨架动画的非单位缩放。
+            // 需要抵消骨骼的世界缩放，避免子模型被拉伸变形。
+            if (attachType === 'bone' && locator instanceof THREE.Bone) {
+                const worldScale = new THREE.Vector3();
+                locator.getWorldScale(worldScale);
+                // 反向缩放以抵消骨骼链的累积缩放
+                if (worldScale.x !== 0 && worldScale.y !== 0 && worldScale.z !== 0) {
+                    childGroup.scale.set(
+                        childGroup.scale.x / worldScale.x,
+                        childGroup.scale.y / worldScale.y,
+                        childGroup.scale.z / worldScale.z,
+                    );
+                }
+            }
             locator.add(childGroup);
 
 
@@ -2430,121 +2524,127 @@ function buildEntityTree() {
 }
 
 function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
-    let html = `<div class="tree-title" style="display: flex; justify-content: space-between; align-items: center;">
+    // SVG 图标定义
+    const svgIconEntity = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1L1 4.5V11.5L8 15L15 11.5V4.5L8 1ZM2 5.06L7.5 7.81V13.88L2 11.13V5.06ZM8.5 13.88V7.81L14 5.06V11.13L8.5 13.88ZM13.15 4.19L8 6.76L2.85 4.19L8 1.62L13.15 4.19Z"/></svg>`;
+    const svgIconBone = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M12.63 2H3.37L1 5.37L8 14L15 5.37L12.63 2ZM3.79 3H12.21L13.84 5H2.16L3.79 3ZM8 12.83L2.73 5.99H13.27L8 12.83Z"/></svg>`;
+    const svgIconLocator = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a3.5 3.5 0 0 0-3.5 3.5c0 3.33 3.5 7.5 3.5 7.5s3.5-4.17 3.5-7.5A3.5 3.5 0 0 0 8 1zm0 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>`;
+    const svgIconCollapse = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 4h14v1H1V4zm0 4h14v1H1V8zm0 4h14v1H1v-1z"/></svg>`;
+    const svgIconAdd = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v6H2v2h6v6h2V9h6V7H10V1H8z"/></svg>`;
+
+    // 保存当前折叠状态（按 data-parent 属性键值）
+    const collapsedSet = new Set<string>();
+    entityTree.querySelectorAll<HTMLElement>('.tree-children.collapsed').forEach(el => {
+        const key = el.dataset.parent;
+        if (key) collapsedSet.add(key);
+    });
+    // 保存过滤器激活状态
+    const boneFilterActive = entityTree.classList.contains('filter-bone');
+    const locFilterActive = entityTree.classList.contains('filter-locator');
+
+    let html = `<div class="tree-title" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 4px; margin-bottom: 4px;">
         <span>Entity Tree</span>
-        <button id="btn-collapse-all" class="toolbar-btn" style="padding: 0 4px; font-size: 12px; height: 18px; line-height: 18px;" title="${isChinese ? '全部折叠' : 'Collapse All'}">⊟</button>
+        <div style="display:flex; gap: 4px;">
+            <button id="filter-bone" class="toolbar-btn filter-btn${boneFilterActive ? ' active' : ''}" title="${isChinese ? '高亮骨骼' : 'Filter Bones'}" style="width: 20px; height: 20px; display:flex; align-items:center; justify-content:center; padding:0;">${svgIconBone}</button>
+            <button id="filter-locator" class="toolbar-btn filter-btn${locFilterActive ? ' active' : ''}" title="${isChinese ? '高亮定位器' : 'Filter Locators'}" style="width: 20px; height: 20px; display:flex; align-items:center; justify-content:center; padding:0;">${svgIconLocator}</button>
+            <button id="btn-collapse-all" class="toolbar-btn" style="width: 20px; height: 20px; display:flex; align-items:center; justify-content:center; padding:0;" title="${isChinese ? '全部折叠' : 'Collapse All'}">${svgIconCollapse}</button>
+            <button id="btn-add-locator" class="toolbar-btn" style="width: 20px; height: 20px; display:flex; align-items:center; justify-content:center; padding:0;" title="${isChinese ? '新建全局定位器' : 'Add Root Locator'}">${svgIconAdd}</button>
+        </div>
     </div>`;
 
-    // Recursive helper to render entity hierarchy
-    function renderEntityNode(e: EntityData & { pdxmesh?: string }, depth: number) {
+    const treeObjects = new Map<string, THREE.Object3D>();
+
+    function buildTreeHtml(obj: THREE.Object3D, depth: number): string {
+        let nodeHtml = '';
         const pad = 12 + depth * 16;
-        const hasChildren = (e.attachData && e.attachData.length > 0);
-        const toggleCls = hasChildren ? 'tree-toggle' : 'tree-toggle-placeholder';
-        const toggleIcon = hasChildren ? '▼' : '';
-
-        html += `<div class="tree-item tree-entity" data-entity-name="${e.name}" style="padding-left:${pad}px">`;
-        html += `<span class="${toggleCls}">${toggleIcon}</span>`;
-        html += `<span class="tree-icon">📦</span>`;
-        html += `<span class="tree-label">${e.name}</span>`;
-        if (e.pdxmesh) html += `<span class="tree-sublabel">${e.pdxmesh}</span>`;
-        html += `</div>`;
-
-        if (e.attachData) {
-            html += `<div class="tree-children" data-parent="${e.name}">`;
-            for (const child of e.attachData) {
-                const childPad = pad + 16;
-                html += `<div class="tree-item tree-attach" data-attach-locator="${child.locatorName}" style="padding-left:${childPad}px">`;
-                html += `<span class="tree-toggle-placeholder"></span>`;
-                html += `<span class="tree-icon">🔗</span>`;
-                html += `<span class="tree-label">${child.locatorName}</span>`;
-                html += `<span class="tree-sublabel">→ ${child.entityName}</span>`;
-                html += `</div>`;
-                renderEntityNode({
-                    name: child.entityName,
-                    pdxmesh: undefined,
-                    attachData: child.attachData,
-                }, depth + 2);
+        
+        let isNode = false;
+        let nodeClass = '';
+        let icon = '';
+        let label = obj.name;
+        let sublabel = '';
+        let dataset = '';
+        
+        if (obj === currentModel) {
+            isNode = true;
+            nodeClass = 'tree-entity';
+            icon = svgIconEntity;
+            label = currentEntity?.name || 'Root Model';
+            dataset = `data-entity-name="${label}"`;
+        } else if (obj.name.startsWith('attach_')) {
+            isNode = true;
+            nodeClass = 'tree-entity tree-attach';
+            icon = svgIconEntity;
+            label = obj.name.replace('attach_', '');
+            dataset = `data-entity-name="${label}"`;
+        } else if (obj instanceof THREE.Bone) {
+            isNode = true;
+            nodeClass = 'tree-bone';
+            icon = svgIconBone;
+            label = label.replace(/^.*?__/, ''); // 清除碰撞前缀以供显示
+            treeObjects.set(obj.uuid, obj);
+            dataset = `data-object-uuid="${obj.uuid}"`;
+        } else if ((obj.userData as any).isLocator) {
+            isNode = true;
+            nodeClass = 'tree-locator';
+            icon = svgIconLocator;
+            const src = (obj.userData as any).source || 'script';
+            sublabel = src;
+            treeObjects.set(obj.uuid, obj);
+            dataset = `data-object-uuid="${obj.uuid}"`;
+        }
+        
+        let childrenHtml = '';
+        for (const child of obj.children) {
+            if (child.name.endsWith('_axes') || child.name.endsWith('_hit')) continue;
+            childrenHtml += buildTreeHtml(child, isNode ? depth + 1 : depth);
+        }
+        
+        if (isNode) {
+            // 恢复之前保存的折叠状态
+            const isCollapsed = collapsedSet.has(label);
+            const toggleCls = childrenHtml ? 'tree-toggle' : 'tree-toggle-placeholder';
+            const toggleIcon = childrenHtml ? (isCollapsed ? '▶' : '▼') : '';
+            nodeHtml += `<div class="tree-item ${nodeClass}" ${dataset} style="padding-left:${pad}px; display:flex; align-items:center;">`;
+            nodeHtml += `<span class="${toggleCls}" style="width:16px;text-align:center;">${toggleIcon}</span>`;
+            nodeHtml += `<span class="tree-icon" style="margin-right:4px; display:flex;">${icon}</span>`;
+            nodeHtml += `<span class="tree-label">${label}</span>`;
+            if (sublabel) nodeHtml += `<span class="tree-sublabel" style="margin-left:8px;opacity:0.6;font-size:0.9em;">${sublabel}</span>`;
+            nodeHtml += `</div>`;
+            if (childrenHtml) {
+                nodeHtml += `<div class="tree-children${isCollapsed ? ' collapsed' : ''}" data-parent="${label}">`;
+                nodeHtml += childrenHtml;
+                nodeHtml += `</div>`;
             }
-            html += `</div>`;
+        } else {
+            nodeHtml += childrenHtml;
         }
+        return nodeHtml;
     }
 
-    renderEntityNode(entity, 0);
-
-    // Collect ALL locators: locatorHelpers + bone-parented ones
-    const allLocators: THREE.Object3D[] = [];
-    if (locatorHelpers) {
-        for (const child of locatorHelpers.children) {
-            allLocators.push(child);
-        }
-    }
     if (currentModel) {
-        currentModel.traverse(obj => {
-            const src = (obj.userData as { source?: string }).source;
-            if (src && (src === 'mesh' || src === 'script' || src === 'override')) {
-                if (!allLocators.includes(obj)) {
-                    allLocators.push(obj);
-                }
-            }
-        });
-    }
-
-    // List locators (top level) — always show section with "+" button
-    {
-        html += '<div class="tree-title tree-title-locators" style="margin-top:4px">';
-        html += `<span class="tree-toggle">${allLocators.length > 0 ? '▼' : '▶'}</span>`;
-        html += `Locators <span class="tree-sublabel">(${allLocators.length})</span>`;
-        html += `<span class="tree-add-btn" id="btn-add-locator" title="${isChinese ? '新建定位器' : 'Add Locator'}">➕</span>`;
-        html += '</div>';
-        html += `<div class="tree-children${allLocators.length === 0 ? ' collapsed' : ''}" data-parent="locators">`;
-        for (let i = 0; i < allLocators.length; i++) {
-            const child = allLocators[i]!;
-            const src = (child.userData as { source?: string }).source ?? 'mesh';
-            const icon = src === 'mesh' ? '🟢' : src === 'override' ? '🟡' : '🔵';
-            const isBoneParented = child.parent instanceof THREE.Bone;
-            const boneSuffix = isBoneParented ? ` [${child.parent!.name}]` : '';
-            // Find which entity this locator belongs to (walk up to find attach_ group)
-            let ownerEntity = '';
-            let p = child.parent;
-            while (p) {
-                if (p.name.startsWith('attach_')) {
-                    ownerEntity = p.name.replace('attach_', '');
-                    break;
-                }
-                p = p.parent;
-            }
-            const ownerSuffix = ownerEntity ? ` (${ownerEntity})` : '';
-            html += `<div class="tree-item tree-locator" data-locator-idx="${i}" ${isBoneParented ? 'data-bone-parented="true"' : ''} style="padding-left:28px"><span class="tree-toggle-placeholder"></span><span class="tree-icon">${icon}</span><span class="tree-label">${child.name}</span><span class="tree-sublabel">${src}${boneSuffix}${ownerSuffix}</span></div>`;
-        }
-        html += '</div>';
-    }
-
-    // List skeleton bones (top level)
-    if (parsed) {
-        const shapesWithBones = parsed.shapes.filter(s => s.skeleton.length > 0);
-        const totalBones = shapesWithBones.reduce((sum, s) => sum + s.skeleton.length, 0);
-        if (totalBones > 0) {
-            html += '<div class="tree-title" style="margin-top:4px">';
-            html += `<span class="tree-toggle">▶</span>`;
-            html += `Bones <span class="tree-sublabel">(${totalBones} in ${shapesWithBones.length} shapes)</span>`;
-            html += '</div>';
-            html += '<div class="tree-children collapsed" data-parent="bones">';
-            for (let si = 0; si < shapesWithBones.length; si++) {
-                const shape = shapesWithBones[si]!;
-                const shapeName = shape.meshes[0]?.name ?? `Shape ${si}`;
-                html += `<div class="tree-item" style="padding-left:28px"><span class="tree-toggle-placeholder"></span><span class="tree-icon">📦</span><span class="tree-label">${shapeName}</span><span class="tree-sublabel">${shape.skeleton.length} bones</span></div>`;
-                for (const bone of shape.skeleton) {
-                    const parentName = bone.parentIndex >= 0 ? shape.skeleton[bone.parentIndex]?.name ?? '?' : 'root';
-                    html += `<div class="tree-item" style="padding-left:44px"><span class="tree-toggle-placeholder"></span><span class="tree-icon">🦴</span><span class="tree-label">${bone.name}</span><span class="tree-sublabel">${parentName === 'root' ? 'root' : '← ' + parentName}</span></div>`;
-                }
-            }
-            html += '</div>';
-        }
+        html += buildTreeHtml(currentModel, 0);
+    } else {
+        html += `<div class="empty-text">No model loaded</div>`;
     }
 
     entityTree.innerHTML = html;
 
+    // 恢复过滤器激活状态
+    entityTree.classList.toggle('filter-bone', boneFilterActive);
+    entityTree.classList.toggle('filter-locator', locFilterActive);
+
     // ── Click handlers ──
+    document.getElementById('filter-bone')?.addEventListener('click', (e) => {
+        const btn = e.currentTarget as HTMLElement;
+        btn.classList.toggle('active');
+        entityTree.classList.toggle('filter-bone', btn.classList.contains('active'));
+    });
+    
+    document.getElementById('filter-locator')?.addEventListener('click', (e) => {
+        const btn = e.currentTarget as HTMLElement;
+        btn.classList.toggle('active');
+        entityTree.classList.toggle('filter-locator', btn.classList.contains('active'));
+    });
 
     document.getElementById('btn-collapse-all')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -2554,52 +2654,32 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
         });
     });
 
-    // Click locator → select in 3D viewport using direct object reference (avoids name collisions)
-    entityTree.querySelectorAll<HTMLElement>('[data-locator-idx]').forEach(el => {
+    document.getElementById('btn-add-locator')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        contextMenuWorldPos = controls.target.clone();
+        showAddLocatorPanel();
+    });
+
+    entityTree.querySelectorAll<HTMLElement>('[data-object-uuid]').forEach(el => {
         el.addEventListener('click', () => {
-            const idx = parseInt(el.dataset.locatorIdx!, 10);
-            const isBoneParented = el.dataset.boneParented === 'true';
-            const loc = allLocators[idx];
-            if (loc) {
-                selectLocator(loc, !isBoneParented);
+            const uuid = el.dataset.objectUuid!;
+            const obj = treeObjects.get(uuid);
+            if (obj) {
+                const isBoneParented = obj.parent instanceof THREE.Bone;
+                const isEditable = !isBoneParented && !(obj instanceof THREE.Bone);
+                selectLocator(obj, isEditable);
             }
         });
     });
 
-    // Click entity → camera focus on its 3D group
     entityTree.querySelectorAll<HTMLElement>('[data-entity-name]').forEach(el => {
         el.addEventListener('click', (e) => {
-            // Don't focus if they clicked the toggle
             if ((e.target as HTMLElement).classList.contains('tree-toggle')) return;
             const name = el.dataset.entityName!;
             focusOnEntityByName(name);
         });
     });
 
-    // Click attach locator → select the locator in 3D
-    entityTree.querySelectorAll<HTMLElement>('[data-attach-locator]').forEach(el => {
-        el.addEventListener('click', () => {
-            const locName = el.dataset.attachLocator!;
-            // Search locatorHelpers and model for bone-parented
-            let loc = locatorHelpers?.getObjectByName(locName);
-            if (!loc && currentModel) {
-                loc = currentModel.getObjectByName(locName);
-            }
-            if (loc) {
-                const isBoneParented = loc.parent instanceof THREE.Bone;
-                selectLocator(loc, !isBoneParented);
-            }
-        });
-    });
-
-    // Click "+" button → open add-locator panel
-    document.getElementById('btn-add-locator')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        contextMenuWorldPos = controls.target.clone(); // Default to camera focus
-        showAddLocatorPanel();
-    });
-
-    // Toggle fold/unfold
     entityTree.querySelectorAll<HTMLElement>('.tree-toggle').forEach(toggle => {
         toggle.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -2613,6 +2693,7 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
         });
     });
 }
+
 
 /** Focus camera on a named entity group in the scene */
 function focusOnEntityByName(name: string) {
@@ -3069,8 +3150,10 @@ function hideContextMenu() {
     contextMenu.classList.remove('visible');
 }
 
+// 右键拦截在 initThree() 内注册（见 initThree 函数中对 renderer.domElement 的 pointerdown 监听）
+
 canvasContainer.addEventListener('contextmenu', (e) => {
-    // Only show if we have a loaded entity and locators are visible
+    // 仅在已加载实体且定位器可见时才显示
     if (!currentEntity || !locatorToggle.checked) return;
     e.preventDefault();
 

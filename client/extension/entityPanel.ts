@@ -15,7 +15,7 @@ type EntityPanelMessage =
     | { command: 'openFile' }
     | { command: 'updateLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }
     | { command: 'addLocator'; locatorName: string; position: [number, number, number]; rotation: [number, number, number]; attachEntity?: string }
-    | { command: 'updateAttach'; locatorName: string; entityName: string }
+    | { command: 'updateAttach'; locatorName: string; entityName: string; targetEntity?: string }
     | { command: 'requestEntityNames' }
     | { command: 'undo' }
     | { command: 'redo' }
@@ -423,15 +423,49 @@ export class EntityPanel {
      * or creates a new attach block if none exists.
      */
     private async _handleUpdateAttach(msg: Extract<EntityPanelMessage, { command: 'updateAttach' }>) {
-        const doc = this._document;
+        const targetEntityName = msg.targetEntity || this._currentEntityName;
+        if (!targetEntityName) return;
+
+        let doc = this._document;
+        let isCrossFile = false;
+
+        // If a specific target entity is provided and it's different from the root entity
+        if (msg.targetEntity && msg.targetEntity !== this._currentEntityName) {
+            if (!this._entityGraph) {
+                this._entityGraph = await this._buildEntityGraph(this._searchRoots);
+            }
+            const targetDef = this._entityGraph.entities.get(msg.targetEntity);
+            if (!targetDef) {
+                vscode.window.showErrorMessage(`[CWTools] 无法找到实体 "${msg.targetEntity}" 的定义文件。`);
+                return;
+            }
+
+            const targetFsPath = vscode.Uri.file(targetDef.filePath).fsPath;
+            // Security check: Must be inside workspace folders
+            const workspaceFolders = vscode.workspace.workspaceFolders || [];
+            const isInsideWorkspace = workspaceFolders.some(wf => targetFsPath.toLowerCase().startsWith(wf.uri.fsPath.toLowerCase()));
+            
+            if (!isInsideWorkspace) {
+                vscode.window.showErrorMessage(`[CWTools] 跨文件写入被拦截：不允许修改位于当前工作区外部的原版或 Mod 资产文件 (${targetDef.filePath})。`);
+                return;
+            }
+
+            try {
+                doc = await vscode.workspace.openTextDocument(vscode.Uri.file(targetDef.filePath));
+                isCrossFile = true;
+            } catch (e) {
+                vscode.window.showErrorMessage(`[CWTools] 无法打开实体文件: ${e}`);
+                return;
+            }
+        }
+
         if (!doc) return;
+
         const text = doc.getText();
         const lines = text.split('\n');
-        const entityName = this._currentEntityName;
-        if (!entityName) return;
 
         // Find the entity block bounds
-        const entityNameEsc = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const entityNameEsc = targetEntityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const entityNamePat = new RegExp(`name\\s*=\\s*"?${entityNameEsc}"?`);
         let entityBlockStart = -1;
         let entityBlockEnd = -1;
@@ -455,7 +489,10 @@ export class EntityPanel {
                 }
             }
         }
-        if (entityBlockEnd < 0) return;
+        if (entityBlockEnd < 0) {
+            vscode.window.showErrorMessage(`[CWTools] 未能在文件中定位到实体 "${targetEntityName}" 的区块。`);
+            return;
+        }
 
         // Escape the locator name for regex
         const locNameEsc = msg.locatorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -491,10 +528,12 @@ export class EntityPanel {
             }
         }
 
-        this._skipNextReload = true;
+        if (!isCrossFile) {
+            this._skipNextReload = true;
+        }
         await vscode.workspace.applyEdit(edit);
         await doc.save();
-        console.log(`[EntityPanel] Updated attach for "${msg.locatorName}" → "${msg.entityName || '(removed)'}"`);
+        console.log(`[EntityPanel] Updated attach for "${msg.locatorName}" on "${targetEntityName}" → "${msg.entityName || '(removed)'}"`);
 
         // Send resolved data to webview for incremental loading
         if (msg.entityName) {

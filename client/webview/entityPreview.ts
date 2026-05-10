@@ -1494,194 +1494,72 @@ async function createSubmeshMaterial(
         }
 
         if (normTex) {
-            // PDX uses RRxG normal map format:
-            //   X = G * 2 - 1
-            //   Y = -(A * 2 - 1)
-            //   Z = sqrt(1 - X² - Y²)
-            //   B = emissive (NOT normal Z!)
-            // Three.js expects standard tangent-space: R=X, G=Y, B=Z
-            const remappedNorm = remapPdxNormalTexture(normTex);
-            if (remappedNorm) {
-                remappedNorm.colorSpace = THREE.LinearSRGBColorSpace;
-                mat.normalMap = remappedNorm;
-            } else {
-                // Fallback: use original texture even if channels aren't ideal
-                normTex.colorSpace = THREE.LinearSRGBColorSpace;
-                mat.normalMap = normTex;
-            }
+            normTex.colorSpace = THREE.LinearSRGBColorSpace;
+            mat.normalMap = normTex;
         }
 
-        // PDX Specular map channels:
-        //   R = Empire color mask (ignore for now)
-        //   G = Specular intensity (0-1)
-        //   B = Metalness (0-1)
-        //   A = Glossiness (0-1) → Roughness = 1 - Glossiness
-        //
-        // We need to remap these into Three.js expected channels:
-        //   roughnessMap reads G channel → we need to put (1-gloss) there
-        //   metalnessMap reads B channel → metalness is already in B
         if (specTex) {
-            const remapped = remapPdxSpecularTexture(specTex);
-            if (remapped) {
-                remapped.colorSpace = THREE.LinearSRGBColorSpace;
-                mat.roughnessMap = remapped;
-                mat.roughness = 1.0;
-                mat.metalnessMap = remapped;
-                mat.metalness = 1.0;
-            }
+            specTex.colorSpace = THREE.LinearSRGBColorSpace;
+            mat.roughnessMap = specTex;
+            mat.metalnessMap = specTex;
+            mat.roughness = 1.0;
+            mat.metalness = 1.0;
         }
+
+        mat.onBeforeCompile = (shader) => {
+            if (normTex) {
+                shader.fragmentShader = `
+vec4 getPdxNormal(sampler2D map, vec2 uv) {
+    vec4 pdx = texture2D(map, uv);
+    float nx = pdx.g * 2.0 - 1.0;
+    float ny = -(pdx.a * 2.0 - 1.0);
+    float nz = sqrt( max( 0.0, 1.0 - nx*nx - ny*ny ) );
+    return vec4(nx * 0.5 + 0.5, ny * 0.5 + 0.5, nz * 0.5 + 0.5, 1.0);
+}
+` + shader.fragmentShader.replace(
+                    '#include <normal_fragment_maps>',
+                    `
+#ifdef OBJECTSPACE_NORMALMAP
+    normal = getPdxNormal( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+    #ifdef FLIP_SIDED
+        normal = - normal;
+    #endif
+    #ifdef DOUBLE_SIDED
+        normal = normal * faceDirection;
+    #endif
+    normal = normalize( normalMatrix * normal );
+#elif defined( TANGENTSPACE_NORMALMAP )
+    vec3 mapN = getPdxNormal( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+    mapN.xy *= normalScale;
+    #ifdef USE_TANGENT
+        normal = normalize( vTBN * mapN );
+    #else
+        normal = perturbNormal2Arb( - vViewPosition, normal, mapN, faceDirection );
+    #endif
+#elif defined( USE_BUMPMAP )
+    normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd() );
+#endif
+                    `
+                );
+            }
+            if (specTex) {
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <roughnessmap_fragment>',
+                    `
+float roughnessFactor = roughness;
+#ifdef USE_ROUGHNESSMAP
+    vec4 texelRoughness = texture2D( roughnessMap, vRoughnessMapUv );
+    roughnessFactor *= ( 1.0 - texelRoughness.a );
+#endif
+                    `
+                );
+            }
+        };
 
         mat.needsUpdate = true;
     }
 
     return mat;
-}
-
-/**
- * Remap a PDX RRxG normal map to standard Three.js tangent-space format.
- *
- * PDX format (from UnpackRRxGNormal):
- *   X = G_channel * 2 - 1
- *   Y = -(A_channel * 2 - 1)
- *   Z = sqrt(1 - X² - Y²)
- *   B_channel = emissive (NOT used for normals)
- *
- * Three.js expects: R = X*0.5+0.5, G = Y*0.5+0.5, B = Z*0.5+0.5
- */
-function remapPdxNormalTexture(tex: THREE.Texture): THREE.DataTexture | null {
-    try {
-        const image = tex.image;
-        if (!image) return null;
-
-        let width: number, height: number, pixels: Uint8Array;
-
-        if (tex instanceof THREE.DataTexture) {
-            width = tex.image.width;
-            height = tex.image.height;
-            const d = tex.image.data as unknown as Uint8Array;
-            pixels = new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
-        } else if (tex instanceof THREE.CompressedTexture) {
-            // Can't remap compressed textures
-            console.log('[Material] Normal map is compressed, skipping remap');
-            return null;
-        } else if (image instanceof HTMLImageElement || image instanceof HTMLCanvasElement) {
-            const canvas = document.createElement('canvas');
-            width = image.width || (image as HTMLImageElement).naturalWidth;
-            height = image.height || (image as HTMLImageElement).naturalHeight;
-            if (!width || !height) return null;
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d')!;
-            ctx.drawImage(image, 0, 0);
-            const imgData = ctx.getImageData(0, 0, width, height);
-            pixels = new Uint8Array(imgData.data.buffer, imgData.data.byteOffset, imgData.data.byteLength);
-        } else if (image instanceof ImageData) {
-            width = image.width;
-            height = image.height;
-            const d = image.data as unknown as Uint8Array;
-            pixels = new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
-        } else {
-            return null;
-        }
-
-        const outData = new Uint8Array(width * height * 4);
-        for (let i = 0; i < width * height; i++) {
-            const si = i * 4;
-            // PDX channels: R=?, G=normalX, B=emissive, A=normalY
-            const gCh = pixels[si + 1]!; // G channel → normal X
-            const aCh = pixels[si + 3]!; // A channel → normal Y (inverted)
-
-            // Unpack to [-1, 1]
-            const nx = (gCh / 255) * 2 - 1;
-            const ny = -((aCh / 255) * 2 - 1); // Y is negated in PDX
-            const nzSq = 1 - nx * nx - ny * ny;
-            const nz = Math.sqrt(Math.max(0, nzSq));
-
-            // Re-pack to [0, 255] for Three.js standard normal map
-            outData[si] = Math.round((nx * 0.5 + 0.5) * 255);     // R = X
-            outData[si + 1] = Math.round((ny * 0.5 + 0.5) * 255); // G = Y
-            outData[si + 2] = Math.round((nz * 0.5 + 0.5) * 255); // B = Z
-            outData[si + 3] = 255;                                  // A
-        }
-
-        const outTex = new THREE.DataTexture(outData, width, height, THREE.RGBAFormat);
-        outTex.needsUpdate = true;
-        return outTex;
-    } catch (err) {
-        console.warn('[Material] Failed to remap normal texture:', err);
-        return null;
-    }
-}
-
-/**
- * Remap a PDX specular texture into Three.js-compatible channels.
- * Input:  R=empire, G=specular, B=metalness, A=glossiness
- * Output: R=0, G=(1-glossiness)=roughness, B=metalness, A=255
- *
- * Three.js reads roughnessMap.G for roughness and metalnessMap.B for metalness.
- */
-function remapPdxSpecularTexture(tex: THREE.Texture): THREE.DataTexture | null {
-    try {
-        // Get the image data from the texture
-        const image = tex.image;
-        if (!image) return null;
-
-        let width: number, height: number, pixels: Uint8Array;
-
-        if (image instanceof ImageData) {
-            width = image.width;
-            height = image.height;
-            const d = image.data as unknown as Uint8Array;
-            pixels = new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
-        } else if (tex instanceof THREE.DataTexture) {
-            width = tex.image.width;
-            height = tex.image.height;
-            const d = tex.image.data as unknown as Uint8Array;
-            pixels = new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
-        } else if (tex instanceof THREE.CompressedTexture) {
-            // Can't remap compressed textures — use defaults
-            console.log('[Material] Specular is compressed, using defaults');
-            return null;
-        } else if (image instanceof HTMLImageElement || image instanceof HTMLCanvasElement) {
-            // Draw to canvas to read pixel data
-            const canvas = document.createElement('canvas');
-            width = image.width || (image as HTMLImageElement).naturalWidth;
-            height = image.height || (image as HTMLImageElement).naturalHeight;
-            if (!width || !height) return null;
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d')!;
-            ctx.drawImage(image, 0, 0);
-            const imgData = ctx.getImageData(0, 0, width, height);
-            pixels = new Uint8Array(imgData.data);
-        } else {
-            return null;
-        }
-
-        // Remap: for each pixel, create new RGBA where:
-        // R = 0 (unused)
-        // G = 1 - A_original (roughness from glossiness)
-        // B = B_original (metalness stays)
-        // A = 255
-        const outData = new Uint8Array(width * height * 4);
-        for (let i = 0; i < width * height; i++) {
-            const si = i * 4;
-            const glossiness = pixels[si + 3]!; // A channel = glossiness
-            const metalness = pixels[si + 2]!;  // B channel = metalness
-
-            outData[si] = 0;                           // R (unused)
-            outData[si + 1] = 255 - glossiness;        // G = roughness = 1 - glossiness
-            outData[si + 2] = metalness;               // B = metalness
-            outData[si + 3] = 255;                     // A
-        }
-
-        const outTex = new THREE.DataTexture(outData, width, height, THREE.RGBAFormat);
-        outTex.needsUpdate = true;
-        return outTex;
-    } catch (err) {
-        console.warn('[Material] Failed to remap specular texture:', err);
-        return null;
-    }
 }
 
 // ── Mesh → Three.js Geometry ─────────────────────────────────────────────────

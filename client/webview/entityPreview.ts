@@ -1305,8 +1305,39 @@ function decompressBC3(src: Uint8Array, width: number, height: number): Uint8Arr
     }
     return out;
 }
+// 贴图缓存：key = URI, value = { promise, lastUsed }
+const textureCache = new Map<string, { promise: Promise<THREE.Texture | null>; lastUsed: number }>();
+const TEXTURE_CACHE_MAX = 128;
 
 async function fetchTexture(uri: string): Promise<THREE.Texture | null> {
+    if (!uri) return null;
+    const existing = textureCache.get(uri);
+    if (existing) {
+        existing.lastUsed = performance.now();
+        const tex = await existing.promise;
+        return tex ? tex.clone() : null;
+    }
+    const promise = fetchTextureRaw(uri);
+    textureCache.set(uri, { promise, lastUsed: performance.now() });
+    
+    // LRU 淘汰
+    if (textureCache.size > TEXTURE_CACHE_MAX) {
+        let oldestKey = '';
+        let oldestTime = Infinity;
+        for (const [k, v] of textureCache) {
+            if (v.lastUsed < oldestTime) { oldestTime = v.lastUsed; oldestKey = k; }
+        }
+        if (oldestKey) {
+            textureCache.get(oldestKey)?.promise.then(t => t?.dispose());
+            textureCache.delete(oldestKey);
+        }
+    }
+    
+    const tex = await promise;
+    return tex ? tex.clone() : null;
+}
+
+async function fetchTextureRaw(uri: string): Promise<THREE.Texture | null> {
     if (!uri) return null;
     try {
         // Check if it's a data URI (from extension-side DDS decode)
@@ -1438,25 +1469,10 @@ function resolveSubmeshTextures(
 }
 
 /**
- * Create a Three.js material for a submesh based on its shader category.
- *
- * 实现完整的 PDX PBR 材质管线，参照 Stellaris 原始着色器：
- *   - pdxmesh_ship.fxh: 飞船/建筑 PBR 着色
- *   - standardfuncsgfx.fxh: 通用 PBR 光照函数
- *
- * PDX 纹理通道映射：
- *   NormalMap (RRxG 格式):
- *     G → 法线 X | A → 法线 Y (翻转) | B → 自发光遮罩
- *   SpecularMap (材质属性):
- *     R → 帝国颜色遮罩 | G → 高光强度 | B → 金属度 | A → 光滑度
- *
- * Additive / Invisible shaders → always transparent
+ * Create a placeholder material synchronously.
  */
-async function createSubmeshMaterial(
-    textures: ResolvedTextures,
-): Promise<THREE.MeshStandardMaterial> {
-    // 非 PBR 着色器 → 透明
-    if (textures.shaderCategory !== 'pbr') {
+function createPlaceholderMaterial(textures: ResolvedTextures): THREE.MeshStandardMaterial {
+    if (textures.shaderCategory !== 'pbr' || textures.definedCount === 1) {
         return new THREE.MeshStandardMaterial({
             transparent: true,
             opacity: 0,
@@ -1465,34 +1481,36 @@ async function createSubmeshMaterial(
         });
     }
 
-    // PBR 着色器但仅定义 1 张贴图 → 透明（材质不完整）
-    if (textures.definedCount === 1) {
-        return new THREE.MeshStandardMaterial({
-            transparent: true,
-            opacity: 0,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-        });
-    }
-
-    // PBR 着色器：0 或 ≥2 张已定义贴图 → 渲染
-    // 默认参数为无贴图时的后备值；有贴图时将由 shader 注入覆盖
-    const hasSpec = !!textures.specular;
-    const mat = new THREE.MeshStandardMaterial({
-        color: 0x888888,
-        // 当有 specular map 时，金属度/粗糙度由 shader 从贴图通道动态读取
-        metalness: hasSpec ? 1.0 : 0.15,
-        roughness: hasSpec ? 1.0 : 0.65,
+    return new THREE.MeshStandardMaterial({
+        color: 0x666666,
+        metalness: 0.15,
+        roughness: 0.65,
         side: THREE.DoubleSide,
-        envMapIntensity: 0.4,
-        // 自发光始终为黑色；由 shader 注入在 emissivemap_fragment 中写入
-        // 这样即使 shader 替换不执行（如法线贴图加载失败），也不会变白
-        emissive: 0x000000,
-        emissiveIntensity: 0.0,
     });
+}
+
+/**
+ * Fetch textures asynchronously and upgrade the material.
+ */
+async function upgradeSubmeshMaterial(mesh: THREE.Mesh | THREE.SkinnedMesh, textures: ResolvedTextures) {
+    if (textures.shaderCategory !== 'pbr' || textures.definedCount === 1) {
+        return;
+    }
 
     const hasAnyResolved = textures.diffuse || textures.normal || textures.specular;
-    if (hasAnyResolved) {
+    if (!hasAnyResolved) return;
+
+    try {
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0x888888,
+            metalness: textures.specular ? 1.0 : 0.15,
+            roughness: textures.specular ? 1.0 : 0.65,
+            side: THREE.DoubleSide,
+            envMapIntensity: 0.4,
+            emissive: 0x000000,
+            emissiveIntensity: 0.0,
+        });
+
         const [diffTex, normTex, specTex] = await Promise.all([
             fetchTexture(textures.diffuse ?? ''),
             fetchTexture(textures.normal ?? ''),
@@ -1512,8 +1530,6 @@ async function createSubmeshMaterial(
 
         if (specTex) {
             specTex.colorSpace = THREE.LinearSRGBColorSpace;
-            // 同时绑定到 roughnessMap 和 metalnessMap，
-            // shader 中分别从 A 通道（光滑度→粗糙度）和 B 通道（金属度）读取
             mat.roughnessMap = specTex;
             mat.metalnessMap = specTex;
             mat.roughness = 1.0;
@@ -1521,12 +1537,9 @@ async function createSubmeshMaterial(
         }
 
         mat.onBeforeCompile = (shader) => {
-            // 运行时检查材质当前状态，而非闭包变量
-            // 用户切换"禁用法线"时 mat.normalMap 会被设为 null 并触发重编译
             const hasNormalAtCompile = !!mat.normalMap;
             const hasSpecAtCompile = !!mat.roughnessMap;
 
-            // 辅助函数始终注入（定义不依赖 uniform，仅在调用时才需要）
             shader.fragmentShader = `
 // PDX RRxG 法线解包辅助函数
 // 参照 standardfuncsgfx.fxh 中的 UnpackRRxGNormal
@@ -1543,8 +1556,6 @@ float getPdxEmissive(sampler2D nmap, vec2 uv) {
 }
 ` + shader.fragmentShader;
 
-            // ── 法线贴图：PDX RRxG 格式解包 ──
-            // 仅在编译时确实有法线贴图时才替换（否则 normalMap uniform 不存在）
             if (hasNormalAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
                     '#include <normal_fragment_maps>',
@@ -1570,7 +1581,6 @@ float getPdxEmissive(sampler2D nmap, vec2 uv) {
                 );
             }
 
-            // ── 粗糙度：从 Specular Map A 通道（光滑度）映射 ──
             if (hasSpecAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
                     '#include <roughnessmap_fragment>',
@@ -1584,7 +1594,6 @@ float roughnessFactor = roughness;
                 );
             }
 
-            // ── 金属度：从 Specular Map B 通道映射 ──
             if (hasSpecAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
                     '#include <metalnessmap_fragment>',
@@ -1600,8 +1609,6 @@ float metalnessFactor = metalness;
                 );
             }
 
-            // ── 自发光：从法线贴图 B 通道提取 ──
-            // 仅在编译时有法线贴图时注入自发光逻辑，否则使用默认行为
             if (hasNormalAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
                     '#include <emissivemap_fragment>',
@@ -1620,9 +1627,14 @@ float pdxEmissiveMask = getPdxEmissive(normalMap, vNormalMapUv);
         };
 
         mat.needsUpdate = true;
+        
+        if (mesh.material instanceof THREE.Material) {
+            mesh.material.dispose();
+        }
+        mesh.material = mat;
+    } catch (err) {
+        console.error('[Material] Upgrade failed:', err);
     }
-
-    return mat;
 }
 
 // ── Mesh → Three.js Geometry ─────────────────────────────────────────────────
@@ -1847,54 +1859,54 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
             if (cur) leafBoneIndex = Math.max(0, sharedSkeleton.bones.indexOf(cur));
         }
 
-        const rootSubmeshPromises: Promise<void>[] = [];
+        const materialUpgradeTasks: Array<{ mesh: THREE.Mesh | THREE.SkinnedMesh, textures: ResolvedTextures }> = [];
         let rootSubmeshIndexCounter = 0;
         for (const shape of parsed.shapes) {
             let meshIndexInShape = 0;
             for (const subMesh of shape.meshes) {
                 const submeshIndex = rootSubmeshIndexCounter++;
                 const currentMeshIndexInShape = meshIndexInShape++;
-                rootSubmeshPromises.push((async () => {
-                    const geo = buildGeometry(subMesh);
-                    const meshMat = subMesh.material;
-                    const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
-                        shader: meshMat.shader,
-                        diffuse: meshMat.diffuse,
-                        normal: meshMat.normal,
-                        specular: meshMat.specular,
-                    }, entity, currentMeshIndexInShape);
+                
+                const geo = buildGeometry(subMesh);
+                const meshMat = subMesh.material;
+                const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
+                    shader: meshMat.shader,
+                    diffuse: meshMat.diffuse,
+                    normal: meshMat.normal,
+                    specular: meshMat.specular,
+                }, entity, currentMeshIndexInShape);
 
-                    const material = await createSubmeshMaterial(textures);
-                    let mesh: THREE.Mesh;
-                    if (sharedSkeleton) {
-                        // Non-skinned meshes: bind all verts to leaf bone
-                        if (!subMesh.skin) {
-                            const vc = subMesh.positions.length / 3;
-                            const si = new Uint16Array(vc * 4);
-                            const sw = new Float32Array(vc * 4);
-                            for (let v = 0; v < vc; v++) {
-                                si[v * 4] = leafBoneIndex;
-                                sw[v * 4] = 1.0;
-                            }
-                            geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
-                            geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+                const material = createPlaceholderMaterial(textures);
+                let mesh: THREE.Mesh | THREE.SkinnedMesh;
+                if (sharedSkeleton) {
+                    // Non-skinned meshes: bind all verts to leaf bone
+                    if (!subMesh.skin) {
+                        const vc = subMesh.positions.length / 3;
+                        const si = new Uint16Array(vc * 4);
+                        const sw = new Float32Array(vc * 4);
+                        for (let v = 0; v < vc; v++) {
+                            si[v * 4] = leafBoneIndex;
+                            sw[v * 4] = 1.0;
                         }
-                        const skinned = new THREE.SkinnedMesh(geo, material);
-                        skinned.bind(sharedSkeleton, new THREE.Matrix4());
-                        mesh = skinned;
-                    } else {
-                        mesh = new THREE.Mesh(geo, material);
+                        geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+                        geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
                     }
-                    mesh.name = `submesh_${submeshIndex}`;
+                    const skinned = new THREE.SkinnedMesh(geo, material);
+                    skinned.bind(sharedSkeleton, new THREE.Matrix4());
+                    mesh = skinned;
+                } else {
+                    mesh = new THREE.Mesh(geo, material);
+                }
+                mesh.name = `submesh_${submeshIndex}`;
 
-                    totalTriangles += (subMesh.indices.length / 3);
-                    totalVertices += (subMesh.positions.length / 3);
+                totalTriangles += (subMesh.indices.length / 3);
+                totalVertices += (subMesh.positions.length / 3);
 
-                    modelGroup.add(mesh);
-                })());
+                modelGroup.add(mesh);
+                materialUpgradeTasks.push({ mesh, textures });
             }
         }
-        await Promise.all(rootSubmeshPromises);
+        Promise.all(materialUpgradeTasks.map(t => upgradeSubmeshMaterial(t.mesh, t.textures))).catch(e => console.error(e));
 
         // Debug: root mesh bounding box
         const rootBBox = new THREE.Box3();
@@ -2113,50 +2125,50 @@ async function loadAttachChildren(
                 }
 
                 // Build geometry and materials for child
-                const submeshPromises: Promise<void>[] = [];
+                const materialUpgradeTasks: Array<{ mesh: THREE.Mesh | THREE.SkinnedMesh, textures: ResolvedTextures }> = [];
                 let submeshIndexCounter = 0;
                 for (const shape of parsed.shapes) {
                     let meshIndexInShape = 0;
                     for (const subMesh of shape.meshes) {
                         const submeshIndex = submeshIndexCounter++;
                         const currentMeshIndexInShape = meshIndexInShape++;
-                        submeshPromises.push((async () => {
-                            const geo = buildGeometry(subMesh);
-                            const meshMat = subMesh.material;
-                            const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
-                                shader: meshMat.shader,
-                                diffuse: meshMat.diffuse,
-                                normal: meshMat.normal,
-                                specular: meshMat.specular,
-                            }, childEntityData, currentMeshIndexInShape);
+                        
+                        const geo = buildGeometry(subMesh);
+                        const meshMat = subMesh.material;
+                        const textures = resolveSubmeshTextures(submeshIndex, subMesh.name, {
+                            shader: meshMat.shader,
+                            diffuse: meshMat.diffuse,
+                            normal: meshMat.normal,
+                            specular: meshMat.specular,
+                        }, childEntityData, currentMeshIndexInShape);
 
-                            const material = await createSubmeshMaterial(textures);
-                            let mesh: THREE.Mesh;
-                            if (childSkeleton) {
-                                if (!subMesh.skin) {
-                                    const vc = subMesh.positions.length / 3;
-                                    const si = new Uint16Array(vc * 4);
-                                    const sw = new Float32Array(vc * 4);
-                                    for (let v = 0; v < vc; v++) { si[v*4] = childLeafBone; sw[v*4] = 1.0; }
-                                    geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
-                                    geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
-                                }
-                                const skinned = new THREE.SkinnedMesh(geo, material);
-                                skinned.bind(childSkeleton, new THREE.Matrix4());
-                                mesh = skinned;
-                            } else {
-                                mesh = new THREE.Mesh(geo, material);
+                        const material = createPlaceholderMaterial(textures);
+                        let mesh: THREE.Mesh | THREE.SkinnedMesh;
+                        if (childSkeleton) {
+                            if (!subMesh.skin) {
+                                const vc = subMesh.positions.length / 3;
+                                const si = new Uint16Array(vc * 4);
+                                const sw = new Float32Array(vc * 4);
+                                for (let v = 0; v < vc; v++) { si[v*4] = childLeafBone; sw[v*4] = 1.0; }
+                                geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+                                geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
                             }
-                            mesh.name = `${child.entityName}_submesh_${submeshIndex}`;
+                            const skinned = new THREE.SkinnedMesh(geo, material);
+                            skinned.bind(childSkeleton, new THREE.Matrix4());
+                            mesh = skinned;
+                        } else {
+                            mesh = new THREE.Mesh(geo, material);
+                        }
+                        mesh.name = `${child.entityName}_submesh_${submeshIndex}`;
 
-                            totalTriangles += (subMesh.indices.length / 3);
-                            totalVertices += (subMesh.positions.length / 3);
+                        totalTriangles += (subMesh.indices.length / 3);
+                        totalVertices += (subMesh.positions.length / 3);
 
-                            childGroup.add(mesh);
-                        })());
+                        childGroup.add(mesh);
+                        materialUpgradeTasks.push({ mesh, textures });
                     }
                 }
-                await Promise.all(submeshPromises);
+                Promise.all(materialUpgradeTasks.map(t => upgradeSubmeshMaterial(t.mesh, t.textures))).catch(e => console.error(e));
 
                 // Add mesh-embedded locators — respect parentBone just like root entity.
                 // Locators WITH parentBone attach to their specific bone (follow that bone's animation).

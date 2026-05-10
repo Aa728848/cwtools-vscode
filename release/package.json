@@ -265,7 +265,7 @@
 			},
 			{
 				"command": "cwtools.previewEntity",
-				"title": "Preview Entity Model",
+				"title": "%commands.cwtools.previewEntity.title%",
 				"category": "cwtools",
 				"icon": "$(symbol-misc)"
 			}

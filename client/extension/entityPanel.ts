@@ -436,24 +436,11 @@ export class EntityPanel {
                     resolvedMeshSettings.push(ms);
                 }
 
-                // Also scan the mesh file's directory for textures
+                // Also scan the mesh file's directory (and subdirectories like sourceimages/)
+                // for textures. Mesh-embedded materials use bare filenames (e.g. "foo.dds")
+                // which may reside in subdirectories rather than alongside the .mesh file.
                 if (meshFileDir) {
-                    try {
-                        const entries = fs.readdirSync(meshFileDir, { withFileTypes: true });
-                        for (const entry of entries) {
-                            if (entry.isFile() && /\.(dds|png|tga)$/i.test(entry.name)) {
-                                const full = path.join(meshFileDir, entry.name);
-                                textureMap[entry.name] = this._panel.webview.asWebviewUri(vscode.Uri.file(full)).toString();
-                                // Also add with forward-slash relative path from root
-                                for (const root of searchRoots) {
-                                    if (full.startsWith(root)) {
-                                        const relPath = path.relative(root, full).replace(/\\/g, '/');
-                                        textureMap[relPath] = this._panel.webview.asWebviewUri(vscode.Uri.file(full)).toString();
-                                    }
-                                }
-                            }
-                        }
-                    } catch { /* skip */ }
+                    this._scanMeshDirTextures(meshFileDir, searchRoots, textureMap);
                 }
             }
         }
@@ -749,26 +736,11 @@ export class EntityPanel {
                             }
                         }
 
-                        // Scan the child's mesh file directory for textures
-                        // (mirrors root entity logic in _loadAndRender — ensures child
-                        //  mesh-embedded material paths resolve even when the parent
-                        //  entity uses a completely different mesh from a different dir)
+                        // Scan the child's mesh file directory (and subdirectories) for textures
+                        // (mirrors root entity logic — ensures child mesh-embedded material
+                        //  paths resolve even when textures are in subdirectories like sourceimages/)
                         if (meshFileDir) {
-                            try {
-                                const entries = fs.readdirSync(meshFileDir, { withFileTypes: true });
-                                for (const entry of entries) {
-                                    if (entry.isFile() && /\.(dds|png|tga)$/i.test(entry.name)) {
-                                        const full = path.join(meshFileDir, entry.name);
-                                        childTextureMap[entry.name] = this._panel.webview.asWebviewUri(vscode.Uri.file(full)).toString();
-                                        for (const root of searchRoots) {
-                                            if (full.startsWith(root)) {
-                                                const relPath = path.relative(root, full).replace(/\\/g, '/');
-                                                childTextureMap[relPath] = this._panel.webview.asWebviewUri(vscode.Uri.file(full)).toString();
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch { /* skip inaccessible */ }
+                            this._scanMeshDirTextures(meshFileDir, searchRoots, childTextureMap);
                         }
                     }
                 }
@@ -842,13 +814,48 @@ export class EntityPanel {
     }
 
     /**
+     * Recursively scan the mesh file directory and its subdirectories for texture files.
+     * Mesh-embedded materials reference textures by bare filename (e.g. "foo.dds")
+     * but some mods store textures in subdirectories like sourceimages/.
+     * Maps both the bare filename AND the root-relative path for flexible resolution.
+     */
+    private _scanMeshDirTextures(
+        meshFileDir: string,
+        searchRoots: string[],
+        textureMap: Record<string, string>,
+        depth = 0,
+    ) {
+        if (depth > 3) return; // limit recursion depth
+        try {
+            const entries = fs.readdirSync(meshFileDir, { withFileTypes: true });
+            for (const entry of entries) {
+                const full = path.join(meshFileDir, entry.name);
+                if (entry.isDirectory()) {
+                    // Recurse into subdirectories (e.g. sourceimages/)
+                    this._scanMeshDirTextures(full, searchRoots, textureMap, depth + 1);
+                } else if (entry.isFile() && /\.(dds|png|tga)$/i.test(entry.name)) {
+                    // Map by bare filename (for mesh-embedded material resolution)
+                    textureMap[entry.name] = this._panel.webview.asWebviewUri(vscode.Uri.file(full)).toString();
+                    // Also add with forward-slash relative path from each root
+                    for (const root of searchRoots) {
+                        if (full.startsWith(root)) {
+                            const relPath = path.relative(root, full).replace(/\\/g, '/');
+                            textureMap[relPath] = this._panel.webview.asWebviewUri(vscode.Uri.file(full)).toString();
+                        }
+                    }
+                }
+            }
+        } catch { /* skip inaccessible */ }
+    }
+
+    /**
      * Build a textureMap by scanning for .dds files near the mesh file.
      * Maps relative paths (e.g. "gfx/models/ships/x_diffuse.dds") to webview URIs
      * so the webview can resolve mesh-embedded material texture references.
      */
     private async _buildTextureMap(textureMap: Record<string, string>, searchRoots: string[]) {
         // Scan gfx/models directories for .dds textures, limited to avoid perf issues
-        const maxTextures = 500;
+        const maxTextures = 2000;
         let count = 0;
         for (const root of searchRoots) {
             const modelsDir = path.join(root, 'gfx', 'models');

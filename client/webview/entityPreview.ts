@@ -800,12 +800,19 @@ function initAnimations(animBuffers: Map<string, ArrayBuffer>) {
 
     mixer = new THREE.AnimationMixer(currentModel);
 
-    // Build bone name map from scene graph: index → scene bone name
-    // This remaps animation bone indices to actual bone names in the hierarchy
+    // Build bone name map from ROOT ENTITY skeleton only (not child entity bones).
+    // Child bones are prefixed with their entity name to avoid name collisions
+    // (e.g., both parent and child having a bone named "root"), which would cause
+    // AnimationMixer to bind animation tracks to the wrong bone.
     const sceneBones: THREE.Bone[] = [];
-    currentModel.traverse(obj => {
-        if (obj instanceof THREE.Bone) sceneBones.push(obj);
-    });
+    const rootSkelBone = currentModel.children.find(
+        c => c.userData?.isSkeleton,
+    );
+    if (rootSkelBone) {
+        rootSkelBone.traverse(obj => {
+            if (obj instanceof THREE.Bone) sceneBones.push(obj);
+        });
+    }
     const boneNameMap = new Map<number, string>();
     for (let i = 0; i < sceneBones.length; i++) {
         boneNameMap.set(i, sceneBones[i]!.name);
@@ -1989,12 +1996,21 @@ async function loadAttachChildren(
                 let childMeshParent: THREE.Object3D = childGroup;
 
 
-                // Build skeleton for child entity
+                // Build skeleton for child entity.
+                // Prefix child bone names with entity name to avoid collisions
+                // with parent bones (e.g., both having a bone named "root").
+                // This prevents the parent's AnimationMixer from accidentally
+                // binding its animation tracks to child bones.
                 let childSkeleton: THREE.Skeleton | null = null;
+                const childBonePrefix = `${child.entityName}__`;
                 const firstChildSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
                 if (firstChildSkelShape) {
                     const childSkelResult = buildSkeletonFromParsedBones(firstChildSkelShape.skeleton);
                     if (childSkelResult) {
+                        // Prefix all child bone names to avoid name collisions
+                        for (const bone of childSkelResult.orderedBones) {
+                            bone.name = `${childBonePrefix}${bone.name}`;
+                        }
                         childGroup.add(childSkelResult.root);
                         childSkeleton = new THREE.Skeleton(childSkelResult.orderedBones);
                     }
@@ -2067,8 +2083,10 @@ async function loadAttachChildren(
                         group.position.multiplyScalar(childMeshScale);
                     }
                     // Mirror root entity logic: attach to specific parent bone if defined
+                    // Use prefixed bone name since child bones were renamed
                     if (loc.parentBone && childBoneRoot) {
-                        const parentBone = childGroup.getObjectByName(loc.parentBone);
+                        const prefixedBoneName = `${childBonePrefix}${loc.parentBone}`;
+                        const parentBone = childGroup.getObjectByName(prefixedBoneName);
                         if (parentBone) {
                             parentBone.add(group);
                         } else {
@@ -2114,8 +2132,18 @@ async function loadAttachChildren(
             let childActiveState: string | undefined;
             if (child.animations && child.animations.length > 0) {
                 const childMixer = new THREE.AnimationMixer(childGroup);
+                // Only collect THIS child entity's bones (already prefixed with childBonePrefix).
+                // Avoid traversing into grandchild entities which have their own prefixed bones.
                 const childBones: THREE.Bone[] = [];
-                childGroup.traverse(obj => { if (obj instanceof THREE.Bone) childBones.push(obj); });
+                const childSkelBone = childGroup.children.find(c => c instanceof THREE.Bone);
+                if (childSkelBone) {
+                    childSkelBone.traverse(obj => {
+                        if (obj instanceof THREE.Bone) childBones.push(obj);
+                    });
+                }
+                // Build bone name map: animation bone index → prefixed scene bone name.
+                // The animation file uses un-prefixed names, but scene bones are prefixed,
+                // so we map by index order (same as the skeleton construction order).
                 const childBoneNameMap = new Map<number, string>();
                 for (let i = 0; i < childBones.length; i++) childBoneNameMap.set(i, childBones[i]!.name);
 
@@ -2403,7 +2431,8 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
                 loc = currentModel.getObjectByName(locName);
             }
             if (loc) {
-                selectLocator(loc);
+                const isBoneParented = loc.parent instanceof THREE.Bone;
+                selectLocator(loc, !isBoneParented);
                 focusOnObject(loc);
             }
         });
@@ -2463,20 +2492,82 @@ function focusOnObject(obj: THREE.Object3D) {
     controls.update();
 }
 
+/**
+ * Build a map of unique state names → list of animation names for that state.
+ * Stellaris entities can have multiple state definitions with the same name
+ * but different animations (used for random selection via chance weights).
+ */
+function buildStateAnimMap(entity: EntityData): Map<string, string[]> {
+    const map = new Map<string, string[]>();
+    if (!entity.states) return map;
+    for (const s of entity.states) {
+        if (!s.animation) continue;
+        let arr = map.get(s.name);
+        if (!arr) { arr = []; map.set(s.name, arr); }
+        if (!arr.includes(s.animation)) arr.push(s.animation);
+    }
+    return map;
+}
+
+let currentStateAnimMap = new Map<string, string[]>();
+
 function updateStateSelector(entity: EntityData) {
     const sel = document.getElementById('sel-state') as HTMLSelectElement;
     sel.innerHTML = '';
-    if (entity.states && entity.states.length > 0) {
-        for (const s of entity.states) {
+    currentStateAnimMap = buildStateAnimMap(entity);
+    if (currentStateAnimMap.size > 0) {
+        for (const [stateName] of currentStateAnimMap) {
             const opt = document.createElement('option');
-            opt.value = s.name;
-            opt.textContent = s.name;
+            opt.value = stateName;
+            opt.textContent = stateName;
             sel.appendChild(opt);
         }
         sel.style.display = 'inline-block';
+        // Initialize secondary animation selector for the default/first state
+        updateAnimVariantSelector(sel.value);
     } else {
         sel.style.display = 'none';
+        const animSel = document.getElementById('sel-anim-variant') as HTMLSelectElement | null;
+        if (animSel) animSel.style.display = 'none';
     }
+}
+
+/**
+ * Update the secondary animation variant selector for a given state name.
+ * Shows all animation variants available for this state.
+ */
+function updateAnimVariantSelector(stateName: string) {
+    let animSel = document.getElementById('sel-anim-variant') as HTMLSelectElement | null;
+    const anims = currentStateAnimMap.get(stateName);
+    if (!anims || anims.length <= 1) {
+        // Single or no animation — hide variant selector
+        if (animSel) animSel.style.display = 'none';
+        return;
+    }
+    // Create the selector if it doesn't exist yet
+    if (!animSel) {
+        animSel = document.createElement('select');
+        animSel.id = 'sel-anim-variant';
+        animSel.title = 'Animation variant';
+        // Insert after sel-state
+        const stateSel = document.getElementById('sel-state');
+        if (stateSel?.parentElement) {
+            stateSel.parentElement.insertBefore(animSel, stateSel.nextSibling);
+        }
+        animSel.addEventListener('change', () => {
+            const animName = animSel!.value;
+            const clip = animationClips.get(animName);
+            if (clip) switchAnimation(clip);
+        });
+    }
+    animSel.innerHTML = '';
+    for (const anim of anims) {
+        const opt = document.createElement('option');
+        opt.value = anim;
+        opt.textContent = anim;
+        animSel.appendChild(opt);
+    }
+    animSel.style.display = 'inline-block';
 }
 
 // ── Toolbar Event Handlers ───────────────────────────────────────────────────
@@ -2484,9 +2575,13 @@ function updateStateSelector(entity: EntityData) {
 // State selector → switch animation
 document.getElementById('sel-state')?.addEventListener('change', (e) => {
     const stateName = (e.target as HTMLSelectElement).value;
-    // Find animation name for this state from entity data
-    const stateInfo = currentEntity?.states?.find(s => s.name === stateName);
-    const animName = stateInfo?.animation;
+
+    // Update animation variant selector for the new state
+    updateAnimVariantSelector(stateName);
+
+    // Play the first animation for this state
+    const anims = currentStateAnimMap.get(stateName);
+    const animName = anims?.[0];
     const clip = animName ? animationClips.get(animName) : undefined;
     if (clip) {
         switchAnimation(clip);

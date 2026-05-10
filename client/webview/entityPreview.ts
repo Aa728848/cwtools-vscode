@@ -602,8 +602,6 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
         selectedLocatorSnapshot = null;
         transformHint.classList.add('hidden');
         transformHint.classList.remove('visible');
-        // Focus camera on the locator
-        focusOnObject(obj);
     }
 
     // Highlight selected label
@@ -2434,7 +2432,10 @@ function buildEntityTree() {
 }
 
 function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
-    let html = '<div class="tree-title">Entity Tree</div>';
+    let html = `<div class="tree-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>Entity Tree</span>
+        <button id="btn-collapse-all" class="toolbar-btn" style="padding: 0 4px; font-size: 12px; height: 18px; line-height: 18px;" title="${isChinese ? '全部折叠' : 'Collapse All'}">⊟</button>
+    </div>`;
 
     // Recursive helper to render entity hierarchy
     function renderEntityNode(e: EntityData & { pdxmesh?: string }, depth: number) {
@@ -2547,6 +2548,14 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
 
     // ── Click handlers ──
 
+    document.getElementById('btn-collapse-all')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        entityTree.querySelectorAll('.tree-children').forEach(el => el.classList.add('collapsed'));
+        entityTree.querySelectorAll('.tree-toggle').forEach(el => {
+            if (el.textContent === '▼') el.textContent = '▶';
+        });
+    });
+
     // Click locator → select in 3D viewport using direct object reference (avoids name collisions)
     entityTree.querySelectorAll<HTMLElement>('[data-locator-idx]').forEach(el => {
         el.addEventListener('click', () => {
@@ -2581,7 +2590,6 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
             if (loc) {
                 const isBoneParented = loc.parent instanceof THREE.Bone;
                 selectLocator(loc, !isBoneParented);
-                focusOnObject(loc);
             }
         });
     });
@@ -3318,7 +3326,7 @@ function updateEntityNamesList(names: string[]) {
     sidebarResize.addEventListener('pointermove', (e) => {
         if (!isDragging) return;
         const delta = e.clientX - startX;
-        const newWidth = Math.max(120, Math.min(500, startWidth + delta));
+        const newWidth = Math.max(120, Math.min(window.innerWidth - 100, startWidth + delta));
         entityTree.style.width = `${newWidth}px`;
         handleResize();
     });

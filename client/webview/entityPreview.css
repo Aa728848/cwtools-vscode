@@ -134,7 +134,7 @@ body {
 #entity-tree {
     width: var(--ep-sidebar-width);
     min-width: 160px;
-    max-width: 400px;
+    max-width: none;
     overflow-y: auto;
     overflow-x: hidden;
     border-right: 1px solid var(--ep-border);

@@ -954,12 +954,12 @@ export class EntityPanel {
             animations?: Array<{ stateName: string; animName: string; animBase64: string }>;
         }> = [];
 
-        for (const attach of entity.attaches) {
+        const attachPromises = entity.attaches.map(async (attach) => {
             try {
                 const childEntity = graph.entities.get(attach.entityName);
                 if (!childEntity) {
                     console.warn(`[EntityPanel] Attach entity "${attach.entityName}" not found in entity graph (locator: ${attach.locatorName})`);
-                    continue;
+                    return undefined;
                 }
 
                 // Resolve mesh
@@ -1067,7 +1067,7 @@ export class EntityPanel {
                     if (childAnimations.length === 0) childAnimations = undefined;
                 }
 
-                results.push({
+                return {
                     locatorName: attach.locatorName,
                     entityName: attach.entityName,
                     meshBase64,
@@ -1085,11 +1085,15 @@ export class EntityPanel {
                     defaultState: childEntity.defaultState,
                     getStateFromParent: childEntity.getStateFromParent,
                     animations: childAnimations,
-                });
+                };
             } catch (e) {
                 console.warn(`[EntityPanel] Failed to resolve attach "${attach.entityName}": ${e}`);
+                return undefined;
             }
-        }
+        });
+
+        const resolvedAttaches = (await Promise.all(attachPromises)).filter(a => a !== undefined);
+        results.push(...(resolvedAttaches as typeof results));
 
         return results;
     }

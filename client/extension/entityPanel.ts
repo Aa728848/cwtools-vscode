@@ -301,20 +301,9 @@ export class EntityPanel {
             this._skipNextReload = true;
             await vscode.workspace.applyEdit(edit);
             await doc.save();
-        } else if (entityBlockEnd >= 0) {
-            // Insert new locator block into entity definition (before closing brace)
-            const p = msg.position;
-            const r = msg.rotation;
-            const newLine = `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
-            const insertPos = new vscode.Position(entityBlockEnd, 0);
-            const edit = new vscode.WorkspaceEdit();
-            edit.insert(doc.uri, insertPos, newLine);
-            this._skipNextReload = true;
-            await vscode.workspace.applyEdit(edit);
-            await doc.save();
-            console.log(`[EntityPanel] Inserted new locator "${msg.locatorName}" into entity "${entityName}"`);
         } else {
-            console.warn(`[EntityPanel] Cannot find entity block to insert locator "${msg.locatorName}"`);
+            // Locator is not script-defined (mesh/bone locator) — cannot persist position changes
+            console.warn(`[EntityPanel] Locator "${msg.locatorName}" is not script-defined, skipping position update`);
         }
     }
 
@@ -367,7 +356,43 @@ export class EntityPanel {
 
         const p = msg.position;
         const r = msg.rotation;
-        let insertText = `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
+        let insertText = '';
+
+        // Check if the locator already exists in the entity (script-defined or mesh/bone locator)
+        const locNameEsc = msg.locatorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const locExistPat = new RegExp(`locator\\s*=\\s*\\{[^}]*name\\s*=\\s*"?${locNameEsc}"?`);
+        let locatorExists = false;
+        for (let i = entityBlockStart; i <= entityBlockEnd; i++) {
+            if (locExistPat.test(lines[i]!)) {
+                locatorExists = true;
+                break;
+            }
+        }
+        // Also check if the name is a known mesh/bone locator (not in script)
+        if (!locatorExists && this._entityGraph) {
+            const entityDef = this._entityGraph.entities.get(entityName);
+            if (entityDef) {
+                // Check mesh locators
+                const meshDef = entityDef.pdxmesh ? this._entityGraph.meshes.get(entityDef.pdxmesh) : undefined;
+                if (meshDef) {
+                    const meshFilePath = this._resolveFilePath(meshDef.file, this._searchRoots);
+                    if (meshFilePath) {
+                        try {
+                            const data = fs.readFileSync(meshFilePath);
+                            // Quick check: if the locator name appears in the mesh file, it's a mesh/bone locator
+                            if (data.includes(Buffer.from(msg.locatorName, 'utf8'))) {
+                                locatorExists = true;
+                            }
+                        } catch { /* skip */ }
+                    }
+                }
+            }
+        }
+
+        // Only create locator definition if it doesn't already exist
+        if (!locatorExists) {
+            insertText += `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
+        }
 
         // If attach entity is specified, append a new attach = { } block
         // (Stellaris format: each attach block holds exactly one locator→entity mapping)
@@ -375,11 +400,13 @@ export class EntityPanel {
             insertText += `\tattach = { "${msg.locatorName}" = "${msg.attachEntity}" }\n`;
         }
 
-        const edit = new vscode.WorkspaceEdit();
-        edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
-        this._skipNextReload = true;
-        await vscode.workspace.applyEdit(edit);
-        await doc.save();
+        if (insertText.length > 0) {
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
+            this._skipNextReload = true;
+            await vscode.workspace.applyEdit(edit);
+            await doc.save();
+        }
 
         console.log(`[EntityPanel] Added locator "${msg.locatorName}"${msg.attachEntity ? ` with attach → ${msg.attachEntity}` : ''}`);
 

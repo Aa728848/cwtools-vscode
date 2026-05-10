@@ -450,6 +450,7 @@ function createLocatorGroup(name: string, size: number, source: string): THREE.G
     // Visible axes
     const axes = new THREE.AxesHelper(size);
     axes.name = `${name}_axes`;
+    axes.visible = locatorToggle.checked;
     group.add(axes);
 
     return group;
@@ -1773,7 +1774,6 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         // Still set up locator helpers for script-defined locators
         locatorHelpers = new THREE.Group();
         locatorHelpers.name = 'locators';
-        locatorHelpers.visible = locatorToggle.checked;
         if (entity.locators) {
             for (const loc of entity.locators) {
                 const group = createLocatorGroup(loc.name, 0.5, 'script');
@@ -1915,7 +1915,6 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         // ── Locator Visualization ────────────────────────────────────
         locatorHelpers = new THREE.Group();
         locatorHelpers.name = 'locators';
-        locatorHelpers.visible = locatorToggle.checked;
 
         // Track which locators come from mesh vs script
         const meshLocatorNames = new Set<string>();
@@ -2061,7 +2060,6 @@ async function loadAttachChildren(
             // Dedicated locator group to avoid name collisions with bones/meshes
             const childLocatorGroup = new THREE.Group();
             childLocatorGroup.name = 'locators';
-            childLocatorGroup.visible = locatorToggle.checked;
 
             // Apply child entity scale
             const scale = child.scale ?? 1.0;
@@ -2826,12 +2824,21 @@ wireframeToggle.addEventListener('change', () => {
 });
 
 locatorToggle.addEventListener('change', () => {
-    if (locatorHelpers) locatorHelpers.visible = locatorToggle.checked;
+    const visible = locatorToggle.checked;
+    const toggleAxes = (obj: THREE.Object3D) => {
+        if (obj.userData?.isLocator) {
+            const axes = obj.getObjectByName(`${obj.name}_axes`);
+            if (axes) axes.visible = visible;
+        }
+    };
+    if (locatorHelpers) locatorHelpers.traverse(toggleAxes);
+    if (currentModel) currentModel.traverse(toggleAxes);
+
     // Hide/show HTML label overlays
     for (const el of locatorLabelEls.values()) {
-        el.style.display = locatorToggle.checked ? '' : 'none';
+        el.style.display = visible ? '' : 'none';
     }
-    if (!locatorToggle.checked) {
+    if (!visible) {
         deselectLocator();
     }
 });

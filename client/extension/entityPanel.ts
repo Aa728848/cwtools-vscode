@@ -547,7 +547,7 @@ export class EntityPanel {
                 this._scanMeshDirTextures(gfxDir, this._searchRoots, textureMap);
             }
 
-            const attachDataArr = await this._resolveAttachData(tempEntity, graph, this._searchRoots, textureMap, 0, 4);
+            const attachDataArr = await this._resolveAttachData(tempEntity, graph, this._searchRoots, textureMap, 0, 8);
             if (attachDataArr.length > 0) {
                 const data = attachDataArr[0]!;
                 // Convert texture URIs to webview URIs
@@ -1324,7 +1324,7 @@ export class EntityPanel {
         <button id="btn-anim-play" class="timeline-btn" title="Play/Pause">▶</button>
         <input type="range" id="anim-scrub" min="0" max="1000" value="0" class="timeline-scrub">
         <span id="anim-time" class="timeline-time">0.0 / 0.0s</span>
-        <button id="btn-anim-loop" class="timeline-btn" title="Loop">🔁</button>
+        <button id="btn-anim-loop" class="timeline-btn" title="Loop"><svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M2.08 4.79l2.84-2.85.71.71-1.63 1.63h6.64a2.91 2.91 0 0 1 2.9 2.9v4.28h-1V7.18a1.91 1.91 0 0 0-1.9-1.9H4.01l1.62 1.62-.7.7-2.85-2.81zm11.84 6.42l-2.84 2.85-.71-.71 1.63-1.63H5.36a2.91 2.91 0 0 1-2.9-2.9V4.54h1v4.28a1.91 1.91 0 0 0 1.9 1.9h6.63l-1.62-1.62.7-.7 2.85 2.81z"/></svg></button>
         <button id="btn-anim-speed" class="timeline-btn" title="Speed">1x</button>
     </div>
     <div id="info-panel"></div>

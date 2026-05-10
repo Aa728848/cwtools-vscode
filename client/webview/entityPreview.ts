@@ -3204,6 +3204,15 @@ function addLocatorToScene(name: string, position: [number, number, number], rot
     group.userData = { source: 'script', isLocator: true };
     locatorHelpers.add(group);
 
+    // Update currentEntity so the tree knows about the new locator
+    if (!currentEntity.locators) {
+        currentEntity.locators = [];
+    }
+    const existingLoc = currentEntity.locators.find(l => l.name === name);
+    if (!existingLoc) {
+        currentEntity.locators.push({ name, position, rotation });
+    }
+
     // Update the entity tree to include the new locator
     if (lastParsedMeshFile) {
         updateEntityTree(currentEntity, lastParsedMeshFile);
@@ -3415,6 +3424,29 @@ window.addEventListener('message', async (event) => {
             // Incremental attach: load entity model at the specified locator
             const locName: string = msg.locatorName;
             const attachData: AttachData = msg.attachData;
+            
+            if (currentEntity) {
+                if (!currentEntity.attaches) {
+                    currentEntity.attaches = [];
+                }
+                const existingIndex = currentEntity.attaches.findIndex(a => a.locatorName === locName);
+                if (existingIndex >= 0) {
+                    currentEntity.attaches[existingIndex]!.entityName = attachData.entityName || attachData.locatorName; // Fallback
+                } else {
+                    currentEntity.attaches.push({ locatorName: locName, entityName: attachData.entityName || attachData.locatorName });
+                }
+
+                if (!currentEntity.attachData) {
+                    currentEntity.attachData = [];
+                }
+                const existingDataIndex = currentEntity.attachData.findIndex(a => a.locatorName === locName);
+                if (existingDataIndex >= 0) {
+                    currentEntity.attachData[existingDataIndex] = attachData;
+                } else {
+                    currentEntity.attachData.push(attachData);
+                }
+            }
+
             if (locatorHelpers && currentModel) {
                 // Remove any existing attach at this locator first
                 removeAttachAtLocator(locName);
@@ -3427,6 +3459,16 @@ window.addEventListener('message', async (event) => {
         }
         case 'removeAttachEntity': {
             const locName2: string = msg.locatorName;
+            
+            if (currentEntity) {
+                if (currentEntity.attaches) {
+                    currentEntity.attaches = currentEntity.attaches.filter(a => a.locatorName !== locName2);
+                }
+                if (currentEntity.attachData) {
+                    currentEntity.attachData = currentEntity.attachData.filter(a => a.locatorName !== locName2);
+                }
+            }
+            
             removeAttachAtLocator(locName2);
             buildEntityTree();
             break;

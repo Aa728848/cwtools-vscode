@@ -142,8 +142,7 @@ body {
     font-size: 12px;
     flex-shrink: 0;
     background: var(--ep-toolbar-bg);
-    display: flex;
-    flex-direction: column;
+    display: block;
 }
 
 #entity-tree .tree-title {
@@ -226,7 +225,7 @@ body {
 #entity-tree .tree-children {
     overflow: hidden;
     transition: max-height 0.2s ease;
-    max-height: 2000px;
+    max-height: 20000px;
 }
 
 #entity-tree .tree-children.collapsed {
@@ -607,7 +606,7 @@ body {
 /* ── Custom Autocomplete Dropdown ────────────────────────────────────────── */
 
 .autocomplete-dropdown {
-    max-height: 180px;
+    max-height: 360px;
     overflow-y: auto;
     background: var(--ep-input-bg);
     border: 1px solid var(--ep-border);

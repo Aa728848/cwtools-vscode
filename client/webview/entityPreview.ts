@@ -185,6 +185,22 @@ let animLooping = true;
 let selectedLocatorSnapshot: { px: number; py: number; pz: number; rx: number; ry: number; rz: number } | null = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+// 骨骼挂载同步列表：不直接挂到骨骼场景图下，避免 SkinnedMesh 双重变换
+interface BoneAttachment {
+    bone: THREE.Bone;
+    group: THREE.Group;
+    parentGroup: THREE.Group; // 实际挂载的父节点
+    entityScale: number;      // 子模型原始 entity scale，同步时需保留
+}
+const boneAttachments: BoneAttachment[] = [];
+// 预分配向量/四元数/矩阵，避免每帧 GC 压力
+const _baDecompPos = new THREE.Vector3();
+const _baDecompQuat = new THREE.Quaternion();
+const _baDecompScale = new THREE.Vector3();
+const _baParentInverse = new THREE.Matrix4();
+const _baLocalPos = new THREE.Vector3();
+const _baLocalQuat = new THREE.Quaternion();
+const _baLocalScale = new THREE.Vector3();
 
 function initThree() {
     // Renderer
@@ -329,6 +345,25 @@ function animate() {
     for (const cm of childMixers) cm.mixer.update(delta);
 
 
+
+    // 同步骨骼挂载的子模型位置（避免 SkinnedMesh 双重变换）
+    // 骨骼的 matrixWorld 是世界空间变换，但 childGroup 是 parentGroup 的子节点，
+    // 设置 position/quaternion 时必须转换到父节点的局部空间，
+    // 否则 Three.js 计算 matrixWorld 时会再叠加一次父节点变换导致严重变形。
+    for (const ba of boneAttachments) {
+        // 确保骨骼的 matrixWorld 在动画 mixer 更新后是最新的
+        ba.bone.updateWorldMatrix(true, false);
+        // 计算骨骼相对于 parentGroup 的局部变换
+        _baParentInverse.copy(ba.parentGroup.matrixWorld).invert();
+        _baParentInverse.multiply(ba.bone.matrixWorld);
+        _baParentInverse.decompose(_baLocalPos, _baLocalQuat, _baLocalScale);
+        ba.group.position.copy(_baLocalPos);
+        ba.group.quaternion.copy(_baLocalQuat);
+        // 骨骼传递均匀缩放（uniform scale）给子模型，不传递非均匀缩放
+        // 使用 3 轴缩放的几何平均值作为均匀缩放因子
+        const boneUniformScale = Math.cbrt(_baLocalScale.x * _baLocalScale.y * _baLocalScale.z);
+        ba.group.scale.setScalar(boneUniformScale * ba.entityScale);
+    }
 
     renderer.render(scene, camera);
     updateLocatorLabels();
@@ -1830,6 +1865,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
     }
     for (const cm of childMixers) cm.mixer.stopAllAction();
     childMixers.length = 0;
+    boneAttachments.length = 0;
     animationClips.clear();
     currentAction = null;
     showTimeline(false);
@@ -2219,22 +2255,10 @@ async function loadAttachChildren(
                         }, childEntityData, currentMeshIndexInShape);
 
                         const material = createPlaceholderMaterial(textures);
-                        let mesh: THREE.Mesh | THREE.SkinnedMesh;
-                        if (childSkeleton) {
-                            if (!subMesh.skin) {
-                                const vc = subMesh.positions.length / 3;
-                                const si = new Uint16Array(vc * 4);
-                                const sw = new Float32Array(vc * 4);
-                                for (let v = 0; v < vc; v++) { si[v*4] = childLeafBone; sw[v*4] = 1.0; }
-                                geo.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
-                                geo.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
-                            }
-                            const skinned = new THREE.SkinnedMesh(geo, material);
-                            skinned.bind(childSkeleton, new THREE.Matrix4());
-                            mesh = skinned;
-                        } else {
-                            mesh = new THREE.Mesh(geo, material);
-                        }
+                        // attach 吸附的子模型统一作为刚性体（普通 Mesh），
+                        // SkinnedMesh 不通过 attach 传递。
+                        // 子模型只跟随骨骼的位置/旋转/缩放数值变化，不受蒙皮影响。
+                        const mesh = new THREE.Mesh(geo, material);
                         mesh.name = `${child.entityName}_submesh_${submeshIndex}`;
 
                         totalTriangles += (subMesh.indices.length / 3);
@@ -2300,21 +2324,31 @@ async function loadAttachChildren(
             childGroup.add(childLocatorGroup);
 
             // Mount child at the locator position in parent's coordinate space
-            // 当挂载到骨骼时，骨骼可能积累了来自骨架动画的非单位缩放。
-            // 需要抵消骨骼的世界缩放，避免子模型被拉伸变形。
             if (attachType === 'bone' && locator instanceof THREE.Bone) {
-                const worldScale = new THREE.Vector3();
-                locator.getWorldScale(worldScale);
-                // 反向缩放以抵消骨骼链的累积缩放
-                if (worldScale.x !== 0 && worldScale.y !== 0 && worldScale.z !== 0) {
-                    childGroup.scale.set(
-                        childGroup.scale.x / worldScale.x,
-                        childGroup.scale.y / worldScale.y,
-                        childGroup.scale.z / worldScale.z,
-                    );
-                }
+                // 骨骼挂载：不直接加入骨骼的场景图子树，
+                // 否则子模型的 SkinnedMesh 会被骨骼的 matrixWorld 双重变换导致严重变形。
+                // 改为挂载到 parentGroup 并在动画循环中手动同步骨骼的世界位置/旋转。
+                parentGroup.add(childGroup);
+                boneAttachments.push({
+                    bone: locator,
+                    group: childGroup,
+                    parentGroup: parentGroup,
+                    entityScale: scale,  // 保存子模型原始 entity scale
+                });
+                // 立即同步一次位置：将骨骼世界变换转换到 parentGroup 的局部空间
+                locator.updateWorldMatrix(true, false);
+                parentGroup.updateWorldMatrix(true, false);
+                _baParentInverse.copy(parentGroup.matrixWorld).invert();
+                _baParentInverse.multiply(locator.matrixWorld);
+                _baParentInverse.decompose(_baLocalPos, _baLocalQuat, _baLocalScale);
+                childGroup.position.copy(_baLocalPos);
+                childGroup.quaternion.copy(_baLocalQuat);
+                // 骨骼传递均匀缩放（uniform scale）给子模型
+                const boneUniformScale = Math.cbrt(_baLocalScale.x * _baLocalScale.y * _baLocalScale.z);
+                childGroup.scale.setScalar(boneUniformScale * scale);
+            } else {
+                locator.add(childGroup);
             }
-            locator.add(childGroup);
 
 
             // Initialize child entity animations
@@ -2484,7 +2518,9 @@ function removeAttachAtLocator(locatorName: string) {
     // The attach child is parented to the locator (or a bone with that name)
     const targets: THREE.Object3D[] = [];
     currentModel.traverse(obj => {
-        if (obj.name === locatorName) targets.push(obj);
+        if (obj.name === locatorName || (obj instanceof THREE.Bone && obj.name.endsWith(`__${locatorName}`))) {
+            targets.push(obj);
+        }
     });
     if (locatorHelpers) {
         locatorHelpers.traverse(obj => {
@@ -2510,6 +2546,26 @@ function removeAttachAtLocator(locatorName: string) {
                 }
             });
             target.remove(obj);
+        }
+    }
+    // 也清理 boneAttachments 中的对应条目
+    for (let i = boneAttachments.length - 1; i >= 0; i--) {
+        const ba = boneAttachments[i]!;
+        const boneName = ba.bone.name.replace(/^.*?__/, '');
+        if (boneName === locatorName || ba.bone.name === locatorName) {
+            // 清理并从场景中移除
+            ba.group.traverse(node => {
+                if (node instanceof THREE.Mesh) {
+                    node.geometry?.dispose();
+                    if (Array.isArray(node.material)) {
+                        node.material.forEach(m => m.dispose());
+                    } else {
+                        node.material?.dispose();
+                    }
+                }
+            });
+            ba.parentGroup.remove(ba.group);
+            boneAttachments.splice(i, 1);
         }
     }
 }
@@ -2552,6 +2608,11 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
     </div>`;
 
     const treeObjects = new Map<string, THREE.Object3D>();
+    // 标记骨骼挂载的子组，避免在主遍历中重复出现
+    const boneAttachedGroups = new Set<THREE.Object3D>();
+    for (const ba of boneAttachments) {
+        boneAttachedGroups.add(ba.group);
+    }
 
     function buildTreeHtml(obj: THREE.Object3D, depth: number): string {
         let nodeHtml = '';
@@ -2596,7 +2657,18 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
         let childrenHtml = '';
         for (const child of obj.children) {
             if (child.name.endsWith('_axes') || child.name.endsWith('_hit')) continue;
+            // 跳过骨骼挂载的子组（它们会在骨骼节点下被虚拟添加）
+            if (boneAttachedGroups.has(child)) continue;
             childrenHtml += buildTreeHtml(child, isNode ? depth + 1 : depth);
+        }
+        // 骨骼挂载的子模型在场景图中不是骨骼的直接子节点，
+        // 但在大纲中应该显示在该骨骼下面
+        if (obj instanceof THREE.Bone) {
+            for (const ba of boneAttachments) {
+                if (ba.bone === obj) {
+                    childrenHtml += buildTreeHtml(ba.group, isNode ? depth + 1 : depth);
+                }
+            }
         }
         
         if (isNode) {
@@ -3068,6 +3140,7 @@ function disposeAll() {
     }
     for (const cm of childMixers) cm.mixer.stopAllAction();
     childMixers.length = 0;
+    boneAttachments.length = 0;
     animationClips.clear();
     currentAction = null;
     showTimeline(false);

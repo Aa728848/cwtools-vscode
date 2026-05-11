@@ -125,8 +125,6 @@ export class Orchestrator {
                 content: '🔍 触发质量门审查...',
                 timestamp: Date.now(),
             });
-            // 质量门审查的具体 Agent 调度留给后续阶段实现
-            // 目前仅记录需要审查的文件列表
             const allWrittenFiles: string[] = [];
             for (const agentResult of result.agentResults.values()) {
                 allWrittenFiles.push(...agentResult.writtenFiles);
@@ -137,6 +135,42 @@ export class Orchestrator {
                     content: `质量门: ${allWrittenFiles.length} 个文件待审查`,
                     timestamp: Date.now(),
                 });
+
+                // 启动 Reviewer Agent
+                const reviewResult = await this.qualityGate.reviewOutput(
+                    this.agentRunner,
+                    allWrittenFiles,
+                    options
+                );
+
+                if (reviewResult.passed) {
+                    emitStep({ type: 'thinking', content: '✅ 质量门审查通过！', timestamp: Date.now() });
+                } else {
+                    emitStep({ type: 'error', content: `❌ 质量门审查未通过，发现 ${reviewResult.remainingIssues} 个问题。`, timestamp: Date.now() });
+                    const config = this.qualityGate.getConfig();
+                    
+                    if (config.autoFix) {
+                        emitStep({ type: 'thinking', content: '🔧 正在调度自动修复...', timestamp: Date.now() });
+                        
+                        const fixPrompt = this.qualityGate.buildFixPrompt(reviewResult.reviewReport, allWrittenFiles);
+                        const fixResult = await this.agentRunner.run(
+                            fixPrompt,
+                            {}, // context
+                            [], // conversationHistory
+                            {
+                                ...options,
+                                mode: 'build', // 强制使用构建模式进行修复
+                            }
+                        );
+
+                        if (fixResult.isValid) {
+                            emitStep({ type: 'thinking', content: '✅ 自动修复完成。', timestamp: Date.now() });
+                            // 这里可以递归或再次触发审查，但在简单的实现中先只执行一次 autoFix
+                        } else {
+                            emitStep({ type: 'error', content: '❌ 自动修复失败。', timestamp: Date.now() });
+                        }
+                    }
+                }
             }
         }
 
@@ -188,6 +222,7 @@ export class Orchestrator {
         };
 
         const writtenFiles: string[] = [];
+        const fileSnapshots = new Map<string, string | null>();
         let stepCount = 0;
 
         // 监听步骤计数和文件写入
@@ -204,6 +239,13 @@ export class Orchestrator {
         };
 
         runnerOptions.onStep = wrappedOnStep;
+        
+        // 记录文件快照
+        runnerOptions.onBeforeFileWrite = (filePath, prevContent) => {
+            if (!fileSnapshots.has(filePath)) {
+                fileSnapshots.set(filePath, prevContent);
+            }
+        };
 
         try {
             const result: GenerationResult = await this.agentRunner.run(
@@ -212,8 +254,23 @@ export class Orchestrator {
                 [], // 空对话历史 — 子 Agent 从头开始
                 runnerOptions,
             );
+            
+            // 如果执行失败，回滚文件
+            if (!result.isValid || (result as any).success === false) {
+                this.rollbackSnapshots(fileSnapshots, onStep);
+                return {
+                    nodeId: taskNode.id,
+                    success: false,
+                    output: '',
+                    error: `子任务失败: 验证未通过或执行出错，已回滚 ${fileSnapshots.size} 个文件。`,
+                    tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: [],
+                    stepCount,
+                };
+            }
 
             return {
+                nodeId: taskNode.id,
                 success: result.isValid,
                 output: result.explanation || result.code || '',
                 tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
@@ -224,6 +281,7 @@ export class Orchestrator {
             const error = e instanceof Error ? e.message : String(e);
             ErrorReporter.warn(SOURCE.ORCHESTRATOR, `子 Agent ${taskNode.id} 执行异常`, e);
             return {
+                nodeId: taskNode.id,
                 success: false,
                 output: '',
                 error,
@@ -245,6 +303,44 @@ export class Orchestrator {
             }
         }
         return false;
+    }
+
+    /**
+     * 文件写入回滚机制。
+     * 当子 Agent 执行失败时，恢复所有已修改的文件到原始状态。
+     */
+    private async rollbackSnapshots(
+        snapshots: Map<string, string | null>,
+        onStep: (step: AgentStep) => void
+    ): Promise<void> {
+        if (snapshots.size === 0) return;
+
+        try {
+            const fs = await import('fs');
+            for (const [filePath, prevContent] of snapshots.entries()) {
+                if (prevContent === null) {
+                    // 文件原本不存在，说明是新创建的，需要删除
+                    if (fs.existsSync(filePath)) {
+                        fs.unlinkSync(filePath);
+                        onStep({
+                            type: 'thinking',
+                            content: `🔄 回滚: 已删除新建的文件 ${filePath}`,
+                            timestamp: Date.now(),
+                        });
+                    }
+                } else {
+                    // 恢复旧内容（base64 解码）
+                    fs.writeFileSync(filePath, Buffer.from(prevContent, 'base64'));
+                    onStep({
+                        type: 'thinking',
+                        content: `🔄 回滚: 已恢复文件 ${filePath} 到修改前状态`,
+                        timestamp: Date.now(),
+                    });
+                }
+            }
+        } catch (e) {
+            ErrorReporter.warn(SOURCE.ORCHESTRATOR, '执行文件回滚时发生异常', e);
+        }
     }
 
     // ─── 便捷工厂方法 ────────────────────────────────────────────────────────

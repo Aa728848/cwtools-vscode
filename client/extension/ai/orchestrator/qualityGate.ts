@@ -54,29 +54,91 @@ export class QualityGate {
     }
 
     /**
-     * 生成审查 prompt。
-     * 基于 Builder 的执行结果，构建针对性的审查指令。
+     * 生成综合审查 prompt。
+     * 基于所有写入的文件列表构建针对性的审查指令。
+     */
+    buildCombinedReviewPrompt(writtenFiles: string[]): string {
+        const fileList = writtenFiles.length > 0
+            ? writtenFiles.map(f => `- ${f}`).join('\n')
+            : '(No file write records)';
+
+        return [
+            '## Quality Gate Review Task',
+            '',
+            'Please review the code quality of the following files:',
+            fileList,
+            '',
+            'Review Checklist:',
+            '1. Call `get_diagnostics` for each file to check for LSP errors.',
+            '2. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
+            '3. Verify the correctness of the scope chain.',
+            '4. Check file structure integrity (Refer to Rule 3b).',
+            '',
+            'Output Format:',
+            '- If all files have zero errors: Output "PASSED: All files passed quality checks."',
+            '- If there are errors: Output "FAILED: N issues need to be fixed", and list the specific issues and fix suggestions in detail.',
+        ].join('\n');
+    }
+
+    /**
+     * 执行审查。
+     * 拉起 Reviewer Agent 并分析结果。
+     */
+    async reviewOutput(
+        agentRunner: import('../agentRunner').AgentRunner,
+        writtenFiles: string[],
+        options: import('../agentRunner').AgentRunnerOptions,
+    ): Promise<QualityGateResult> {
+        if (writtenFiles.length === 0) {
+            return { passed: true, reviewReport: '无文件修改', fixCycles: 0, remainingIssues: 0 };
+        }
+
+        const prompt = this.buildCombinedReviewPrompt(writtenFiles);
+        
+        // 执行 Reviewer Agent
+        const reviewResult = await agentRunner.run(
+            prompt,
+            {}, // context
+            [], // conversationHistory
+            {
+                ...options,
+                mode: 'review', // 强制使用审查模式
+            }
+        );
+
+        const parsed = this.parseReviewResult(reviewResult.explanation);
+        
+        return {
+            passed: parsed.passed,
+            reviewReport: reviewResult.explanation,
+            fixCycles: 0,
+            remainingIssues: parsed.issueCount,
+        };
+    }
+
+    /**
+     * (保留旧接口兼容) 生成审查 prompt。
      */
     buildReviewPrompt(builderResult: SubAgentResult): string {
         const fileList = builderResult.writtenFiles.length > 0
             ? builderResult.writtenFiles.map(f => `- ${f}`).join('\n')
-            : '（无文件写入记录）';
+            : '(No file write records)';
 
         return [
-            '## 质量门审查任务',
+            '## Quality Gate Review Task',
             '',
-            '请审查以下文件的代码质量：',
+            'Please review the code quality of the following files:',
             fileList,
             '',
-            '审查要点：',
-            '1. 对每个文件调用 `get_diagnostics` 检查 LSP 错误',
-            '2. 检查跨文件引用一致性（事件 ID、修饰符名称、本地化 key）',
-            '3. 验证作用域链的正确性',
-            '4. 检查文件结构完整性（参照 Rule 3b）',
+            'Review Checklist:',
+            '1. Call `get_diagnostics` for each file to check for LSP errors.',
+            '2. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
+            '3. Verify the correctness of the scope chain.',
+            '4. Check file structure integrity (Refer to Rule 3b).',
             '',
-            '输出格式：',
-            '- 如果所有文件零错误：输出 "PASSED: 所有文件通过质量检查"',
-            '- 如果有错误：输出 "FAILED: N 个问题需要修复"，并列出具体问题',
+            'Output Format:',
+            '- If all files have zero errors: Output "PASSED: All files passed quality checks."',
+            '- If there are errors: Output "FAILED: N issues need to be fixed", and list the specific issues.',
         ].join('\n');
     }
 
@@ -86,19 +148,19 @@ export class QualityGate {
      */
     buildFixPrompt(reviewReport: string, writtenFiles: string[]): string {
         return [
-            '## 质量门修复任务',
+            '## Quality Gate Fix Task',
             '',
-            '审查 Agent 发现了以下问题，请修复：',
+            'The Review Agent has found the following issues, please fix them:',
             '',
             reviewReport,
             '',
-            '相关文件：',
+            'Related Files:',
             ...writtenFiles.map(f => `- ${f}`),
             '',
-            '修复要求：',
-            '1. 只修复审查报告中列出的具体问题',
-            '2. 不要删除或简化现有逻辑（遵循 Rule 3b）',
-            '3. 修复后对每个修改的文件调用 `get_diagnostics` 验证',
+            'Fix Requirements:',
+            '1. Only fix the specific issues listed in the review report.',
+            '2. Do not delete or simplify existing logic (Follow Rule 3b).',
+            '3. After fixing, call `get_diagnostics` for each modified file to verify.',
         ].join('\n');
     }
 

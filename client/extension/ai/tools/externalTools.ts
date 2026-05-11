@@ -13,15 +13,6 @@ import type { AgentMode, TodoItem, TodoWriteResult } from '../types';
 /** Structural type for the properties ExternalToolHandler reads from the executor. */
 export interface ExternalToolContext {
     readonly workspaceRoot: string;
-    onPermissionRequest?: (
-        id: string,
-        tool: string,
-        description: string,
-        command?: string
-    ) => Promise<boolean>;
-    onTodoUpdate?: (todos: TodoItem[]) => void;
-    /** Step callback for real-time UI progress (shared with AgentToolExecutor) */
-    onStep?: (step: import('../types').AgentStep) => void;
     parentRunnerOptions?: import('../agentRunner').AgentRunnerOptions;
     parentTokenAccumulator?: import('../types').TokenUsage;
     /** C5: File write hook for sub-agent isolation (mirrors FileToolContext.onBeforeFileWrite) */
@@ -37,9 +28,12 @@ export class ExternalToolHandler {
 
     // ─── todoWrite ───────────────────────────────────────────────────────────
 
-    async todoWrite(args: { todos: TodoItem[] }): Promise<TodoWriteResult> {
+    async todoWrite(args: { todos: TodoItem[] }, context?: import('../types').AgentToolContext): Promise<TodoWriteResult> {
         this.currentTodos = args.todos;
-        this.ctx.onTodoUpdate?.(this.currentTodos);
+        const onTodoUpdate = context?.onTodoUpdate;
+        if (onTodoUpdate) {
+            onTodoUpdate(this.currentTodos);
+        }
         return {
             success: true,
             todoCount: this.currentTodos.length,
@@ -51,13 +45,14 @@ export class ExternalToolHandler {
 
     // ─── ignoreValidationError ───────────────────────────────────────────────
 
-    async ignoreValidationError(args: { errorId: string; reason: string }): Promise<{ success: boolean; message: string }> {
-        if (!this.ctx.onPermissionRequest) {
+    async ignoreValidationError(args: { errorId: string; reason: string }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string }> {
+        const onPermissionRequest = context?.onPermissionRequest;
+        if (!onPermissionRequest) {
             return { success: false, message: 'Permission handler not configured. Cannot ignore validation errors.' };
         }
 
         const permId = `perm_${Date.now()}`;
-        const allowed = await this.ctx.onPermissionRequest(
+        const allowed = await onPermissionRequest(
             permId,
             'ignore_validation_error',
             `AI 请求忽略（IGNORE）此 LSP 验证错误：\n\n【错误详情】：${args.errorId}\n【判断理由】：${args.reason}\n\n您是否同意将此规则永久加入本地白名单 (.cwtools-ai-memory.md) 以免除后续报错？`
@@ -85,7 +80,7 @@ export class ExternalToolHandler {
 
     // ─── removeIgnoredDiagnostic ──────────────────────────────────────────────
 
-    async removeIgnoredDiagnostic(args: { diagnosticKey: string; reason: string }): Promise<{ success: boolean; message: string }> {
+    async removeIgnoredDiagnostic(args: { diagnosticKey: string; reason: string }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string }> {
         const vs = await import('vscode');
         const fileWriteMode = vs.workspace.getConfiguration('cwtools.ai').get<string>('agentFileWriteMode', 'confirm');
 
@@ -94,12 +89,13 @@ export class ExternalToolHandler {
             return { success: false, message: 'Current execution is in Auto Mode. AI is configured to strictly follow the whitelist without prompting for removal.' };
         }
 
-        if (!this.ctx.onPermissionRequest) {
+        const onPermissionRequest = context?.onPermissionRequest;
+        if (!onPermissionRequest) {
             return { success: false, message: 'Permission handler not configured.' };
         }
 
         const permId = `perm_${Date.now()}`;
-        const allowed = await this.ctx.onPermissionRequest(
+        const allowed = await onPermissionRequest(
             permId,
             'remove_ignored_diagnostic',
             `AI 建议从白名单中移除被忽略的报错关键字：\n\n【关键字】：${args.diagnosticKey}\n【判断理由】：${args.reason}\n\n您是否同意将此规则从您的 .vscode 设置中移除，恢复对此关键字的报错提示？`
@@ -204,7 +200,7 @@ export class ExternalToolHandler {
 
     // ─── runCommand ──────────────────────────────────────────────────────────
 
-    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; requestEscalation?: boolean }): Promise<{
+    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; requestEscalation?: boolean }, context?: import('../types').AgentToolContext): Promise<{
         stdout: string;
         stderr: string;
         exitCode: number;
@@ -301,14 +297,15 @@ export class ExternalToolHandler {
         }
 
         const requiresPermission = true;
+        const onPermissionRequest = context?.onPermissionRequest;
 
-        if (requiresPermission && this.ctx.onPermissionRequest) {
+        if (requiresPermission && onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const description = escalationReason 
                 ? `⚠️ AI 申请提权越过安全沙盒执行高危操作 (${escalationReason})：${args.command}`
                 : `AI 请求执行终端命令：${args.command}`;
             
-            const allowed = await this.ctx.onPermissionRequest(
+            const allowed = await onPermissionRequest(
                 permId,
                 'run_command',
                 description,
@@ -350,7 +347,8 @@ export class ExternalToolHandler {
                 const text = chunk.toString();
                 stdoutBuf += text;
                 // Stream chunks to UI in real time
-                this.ctx.onStep?.({
+                const onStep = context?.onStep;
+                onStep?.({
                     type: 'thinking',
                     content: text.substring(0, 200),
                     timestamp: Date.now(),
@@ -541,7 +539,8 @@ export class ExternalToolHandler {
     private async execMmx(
         toolLabel: string,
         command: string,
-        timeoutMs: number = 120000
+        timeoutMs: number = 120000,
+        context?: import('../types').AgentToolContext
     ): Promise<{ success: boolean; stdout: string; stderr: string; message: string }> {
         if (!(await this.ensureMmxAvailable())) {
             return {
@@ -550,10 +549,11 @@ export class ExternalToolHandler {
             };
         }
 
+        const onPermissionRequest = context?.onPermissionRequest;
         // Request user permission
-        if (this.ctx.onPermissionRequest) {
+        if (onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            const allowed = await this.ctx.onPermissionRequest(
+            const allowed = await onPermissionRequest(
                 permId,
                 toolLabel,
                 `AI 请求使用 MiniMax CLI 执行媒体生成：\n\n${command}`,
@@ -564,7 +564,8 @@ export class ExternalToolHandler {
             }
         }
 
-        this.ctx.onStep?.({
+        const onStep = context?.onStep;
+        onStep?.({
             type: 'thinking',
             content: `[MiniMax CLI] Executing: ${command.substring(0, 200)}...`,
             timestamp: Date.now(),
@@ -579,7 +580,7 @@ export class ExternalToolHandler {
                 cwd: this.ctx.workspaceRoot,
             });
 
-            this.ctx.onStep?.({
+            onStep?.({
                 type: 'thinking',
                 content: `[MiniMax CLI] Completed: ${stdout.trim().substring(0, 300)}`,
                 timestamp: Date.now(),
@@ -598,7 +599,7 @@ export class ExternalToolHandler {
         prompt: string;
         aspectRatio?: string;
         count?: number;
-    }): Promise<{ success: boolean; message: string; files?: string[] }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; files?: string[] }> {
         const outDir = await this.getMediaOutputDir();
         const timestamp = Date.now();
         const outPath = path.join(outDir, `image_${timestamp}`);
@@ -607,7 +608,7 @@ export class ExternalToolHandler {
         if (args.aspectRatio) cmd += ` --aspect-ratio ${args.aspectRatio}`;
         if (args.count && args.count > 1) cmd += ` --n ${Math.min(args.count, 4)}`;
 
-        const result = await this.execMmx('mmx_generate_image', cmd, 120000);
+        const result = await this.execMmx('mmx_generate_image', cmd, 120000, context);
         if (!result.success) return { success: false, message: result.message };
 
         // Collect generated files
@@ -630,14 +631,14 @@ export class ExternalToolHandler {
 
     async mmxGenerateVideo(args: {
         prompt: string;
-    }): Promise<{ success: boolean; message: string; file?: string }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; file?: string }> {
         const outDir = await this.getMediaOutputDir();
         const timestamp = Date.now();
         const outFile = path.join(outDir, `video_${timestamp}.mp4`);
 
         const cmd = `mmx video generate --prompt "${args.prompt.replace(/"/g, '\\"')}" --non-interactive --no-color --download "${outFile}"`;
 
-        const result = await this.execMmx('mmx_generate_video', cmd, 300000);
+        const result = await this.execMmx('mmx_generate_video', cmd, 300000, context);
         if (!result.success) return { success: false, message: result.message };
 
         return {
@@ -654,7 +655,7 @@ export class ExternalToolHandler {
         lyrics?: string;
         instrumental?: boolean;
         lyricsOptimizer?: boolean;
-    }): Promise<{ success: boolean; message: string; file?: string }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; file?: string }> {
         const outDir = await this.getMediaOutputDir();
         const timestamp = Date.now();
         const outFile = path.join(outDir, `music_${timestamp}.mp3`);
@@ -664,7 +665,7 @@ export class ExternalToolHandler {
         if (args.instrumental) cmd += ' --instrumental';
         if (args.lyricsOptimizer) cmd += ' --lyrics-optimizer';
 
-        const result = await this.execMmx('mmx_generate_music', cmd, 300000);
+        const result = await this.execMmx('mmx_generate_music', cmd, 300000, context);
         if (!result.success) return { success: false, message: result.message };
 
         return {
@@ -680,7 +681,7 @@ export class ExternalToolHandler {
         text: string;
         voice?: string;
         speed?: number;
-    }): Promise<{ success: boolean; message: string; file?: string }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; file?: string }> {
         const outDir = await this.getMediaOutputDir();
         const timestamp = Date.now();
         const outFile = path.join(outDir, `speech_${timestamp}.mp3`);
@@ -689,7 +690,7 @@ export class ExternalToolHandler {
         if (args.voice) cmd += ` --voice ${args.voice}`;
         if (args.speed && args.speed !== 1.0) cmd += ` --speed ${args.speed}`;
 
-        const result = await this.execMmx('mmx_generate_speech', cmd, 60000);
+        const result = await this.execMmx('mmx_generate_speech', cmd, 60000, context);
         if (!result.success) return { success: false, message: result.message };
 
         return {
@@ -892,7 +893,7 @@ export class ExternalToolHandler {
         sourcePath: string;
         targetRelativePath: string;
         overwrite?: boolean;
-    }): Promise<{ success: boolean; message: string; finalPath?: string }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; finalPath?: string }> {
         if (!fs.existsSync(args.sourcePath)) {
             return { success: false, message: `Source file not found: ${args.sourcePath}` };
         }
@@ -910,9 +911,10 @@ export class ExternalToolHandler {
         }
 
         // Request user permission
-        if (this.ctx.onPermissionRequest) {
+        const onPermissionRequest = context?.onPermissionRequest;
+        if (onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            const allowed = await this.ctx.onPermissionRequest(
+            const allowed = await onPermissionRequest(
                 permId,
                 'deploy_mod_asset',
                 `AI 请求将媒体资产部署到 Mod 工作区：\n\n【源文件】：${args.sourcePath}\n【目标位置】：${args.targetRelativePath}\n【覆盖现有】：${args.overwrite ? '是' : '否'}`,
@@ -937,7 +939,8 @@ export class ExternalToolHandler {
             // Copy the file
             fs.copyFileSync(args.sourcePath, targetPath);
 
-            this.ctx.onStep?.({
+            const onStep = context?.onStep;
+            onStep?.({
                 type: 'thinking',
                 content: `[Deploy] ${path.basename(args.sourcePath)} → ${args.targetRelativePath}`,
                 timestamp: Date.now(),

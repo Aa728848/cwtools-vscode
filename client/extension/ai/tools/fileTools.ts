@@ -52,9 +52,7 @@ export interface FileToolContext {
     onAutoWritten?: (file: string, isNewFile: boolean) => void;
     vfsOverlay?: Map<string, string>;
     vfsLocks?: Map<string, Promise<void>>;
-    /** Parent runner options (for topicId access in blueprint save) */
-    parentRunnerOptions?: { topicId?: string };
-    /** Step callback for real-time UI events */
+    /** Step callback for real-time UI events (Fallback, overwritten by AgentToolContext) */
     onStep?: (step: import('../types').AgentStep) => void;
 }
 
@@ -136,9 +134,10 @@ export class FileToolHandler {
         throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
     }
 
-    private readTextFile(filePath: string): { content: string; hasBom: boolean } {
-        if (this.ctx.vfsOverlay && this.ctx.vfsOverlay.has(filePath)) {
-            let content = this.ctx.vfsOverlay.get(filePath)!;
+    private readTextFile(filePath: string, context?: import('../types').AgentToolContext): { content: string; hasBom: boolean } {
+        const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+        if (vfsOverlay && vfsOverlay.has(filePath)) {
+            let content = vfsOverlay.get(filePath)!;
             const hasBom = content.charCodeAt(0) === 0xFEFF;
             if (hasBom) content = content.slice(1);
             return { content, hasBom };
@@ -150,7 +149,7 @@ export class FileToolHandler {
         return { content, hasBom };
     }
 
-    private writeTextFile(filePath: string, content: string, hasBom: boolean, requestedEncoding?: string): void {
+    private writeTextFile(filePath: string, content: string, hasBom: boolean, requestedEncoding?: string, context?: import('../types').AgentToolContext): void {
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -165,8 +164,9 @@ export class FileToolHandler {
         }
 
         const finalContent = shouldAddBom ? '\uFEFF' + content : content;
-        if (this.ctx.vfsOverlay) {
-            this.ctx.vfsOverlay.set(filePath, finalContent);
+        const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+        if (vfsOverlay) {
+            vfsOverlay.set(filePath, finalContent);
         } else {
             fs.writeFileSync(filePath, finalContent, 'utf-8');
         }
@@ -174,7 +174,7 @@ export class FileToolHandler {
 
     // ─── readFile ────────────────────────────────────────────────────────────
 
-    async readFile(args: { file: string; startLine?: number; endLine?: number }): Promise<import('../types').ReadFileResult> {
+    async readFile(args: { file: string; startLine?: number; endLine?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
             args.file = this.resolveAndAssertInWorkspace(args.file);
 
@@ -313,7 +313,7 @@ export class FileToolHandler {
 
     // ─── writeFile ───────────────────────────────────────────────────────────
 
-    async writeFile(args: { file: string; content: string; encoding?: string }): Promise<import('../types').WriteFileResult> {
+    async writeFile(args: { file: string; content: string; encoding?: string }, context?: import('../types').AgentToolContext): Promise<import('../types').WriteFileResult> {
         return this.executeWithLock(args.file, async () => {
             try {
                 args.file = this.resolveAndAssertInWorkspace(args.file);
@@ -321,23 +321,24 @@ export class FileToolHandler {
                 // 安全阻断已被移除：允许AI直接覆写文件
                 const lowerFile = args.file.toLowerCase();
 
-                const { content: originalContent, hasBom } = this.readTextFile(args.file);
+                const { content: originalContent, hasBom } = this.readTextFile(args.file, context);
                 this.ctx.onBeforeFileWrite?.(args.file, originalContent);
 
                 const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
 
-                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !this.ctx.vfsOverlay) {
+                const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !vfsOverlay) {
                     const messageId = `write_${crypto.randomUUID()}`;
                     const confirmed = await this.ctx.onPendingWrite(args.file, args.content, messageId);
                     if (!confirmed) {
                         return { success: false, message: 'User cancelled the write operation' };
                     }
-                } else if (this.ctx.onAutoWritten && !this.ctx.vfsOverlay) {
+                } else if (this.ctx.onAutoWritten && !vfsOverlay) {
                     const isNewFile = !fs.existsSync(args.file);
                     this.ctx.onAutoWritten(args.file, isNewFile);
                 }
 
-                this.writeTextFile(args.file, args.content, hasBom, args.encoding);
+                this.writeTextFile(args.file, args.content, hasBom, args.encoding, context);
                 return { success: true, message: `File written: ${args.file}` };
             } catch (e) {
                 return { success: false, message: `Write failed: ${String(e)}` };
@@ -353,7 +354,7 @@ export class FileToolHandler {
         newString: string;
         replaceAll?: boolean;
         encoding?: string;
-    }): Promise<import('../types').EditFileResult> {
+    }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return {
                 success: false,
@@ -368,7 +369,7 @@ export class FileToolHandler {
                 return { success: false, message: String(e) };
             }
             const filePath = args.filePath;
-            const { content: originalContent, hasBom } = this.readTextFile(filePath);
+            const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
 
             this.ctx.onBeforeFileWrite?.(filePath, args.oldString === '' ? null : originalContent);
 
@@ -394,17 +395,18 @@ export class FileToolHandler {
 
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
 
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !this.ctx.vfsOverlay) {
+            const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !vfsOverlay) {
                 const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `edit_${Date.now()}`);
                 if (!confirmed) {
                     return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
                 }
-            } else if (this.ctx.onAutoWritten && !this.ctx.vfsOverlay) {
+            } else if (this.ctx.onAutoWritten && !vfsOverlay) {
                 this.ctx.onAutoWritten(filePath, false);
             }
 
             try {
-                this.writeTextFile(filePath, newContent, hasBom, args.encoding);
+                this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
             } catch (e) {
                 return { success: false, message: `Write failed: ${String(e)}` };
             }
@@ -444,7 +446,7 @@ export class FileToolHandler {
 
     // ─── replaceLines (line-range-based replacement) ─────────────────────────
 
-    async replaceLines(args: import('../types').ReplaceLinesArgs): Promise<import('../types').ReplaceLinesResult> {
+    async replaceLines(args: import('../types').ReplaceLinesArgs, context?: import('../types').AgentToolContext): Promise<import('../types').ReplaceLinesResult> {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return { success: false, message: 'Error: missing or invalid "filePath" parameter.' };
         }
@@ -465,7 +467,7 @@ export class FileToolHandler {
                 return { success: false, message: String(e) };
             }
             const filePath = args.filePath;
-            const { content: originalContent, hasBom } = this.readTextFile(filePath);
+            const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
             const ending = originalContent.includes('\r\n') ? '\r\n' as const : '\n' as const;
             // Normalize to LF for consistent line splitting — prevents \r\r\n corruption
             const normalizedContent = originalContent.replace(/\r\n/g, '\n');
@@ -502,17 +504,18 @@ export class FileToolHandler {
 
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
 
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !this.ctx.vfsOverlay) {
+            const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !vfsOverlay) {
                 const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `replace_lines_${Date.now()}`);
                 if (!confirmed) {
                     return { success: false, message: 'User cancelled the replace_lines operation', pendingDiff: diff };
                 }
-            } else if (this.ctx.onAutoWritten && !this.ctx.vfsOverlay) {
+            } else if (this.ctx.onAutoWritten && !vfsOverlay) {
                 this.ctx.onAutoWritten(filePath, false);
             }
 
             try {
-                this.writeTextFile(filePath, newContent, hasBom, args.encoding);
+                this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
             } catch (e) {
                 return { success: false, message: `Write failed: ${String(e)}` };
             }
@@ -546,7 +549,7 @@ export class FileToolHandler {
 
     // ─── astMutate ───────────────────────────────────────────────────────────
 
-    async astMutate(args: import('../types').AstMutateArgs): Promise<import('../types').AstMutateResult> {
+    async astMutate(args: import('../types').AstMutateArgs, context?: import('../types').AgentToolContext): Promise<import('../types').AstMutateResult> {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return {
                 success: false,
@@ -562,7 +565,7 @@ export class FileToolHandler {
             }
 
             const filePath = args.filePath;
-        const { content: originalContent, hasBom } = this.readTextFile(filePath);
+        const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
         this.ctx.onBeforeFileWrite?.(filePath, originalContent);
 
         let nodes: PdxNode[] = [];
@@ -649,7 +652,7 @@ export class FileToolHandler {
         }
 
         try {
-            this.writeTextFile(filePath, newContent, hasBom, args.encoding);
+            this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
         } catch (e) {
             return { success: false, message: `Write failed: ${String(e)}` };
         }
@@ -671,7 +674,7 @@ export class FileToolHandler {
         filePath: string;
         edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }>;
         encoding?: string;
-    }): Promise<import('../types').EditFileResult> {
+    }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
         if (!args.filePath || typeof args.filePath !== 'string') {
             return {
                 success: false,
@@ -685,7 +688,7 @@ export class FileToolHandler {
                 return { success: false, message: String(e) };
             }
             const filePath = args.filePath;
-        const { content: originalContent, hasBom } = this.readTextFile(filePath);
+        const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
         let content = originalContent;
         this.ctx.onBeforeFileWrite?.(filePath, originalContent || null);
 
@@ -728,7 +731,7 @@ export class FileToolHandler {
         }
 
         try {
-            this.writeTextFile(filePath, content, hasBom, args.encoding);
+            this.writeTextFile(filePath, content, hasBom, args.encoding, context);
         } catch (e) {
             return { success: false, message: `Write failed: ${String(e)}` };
         }
@@ -786,7 +789,7 @@ export class FileToolHandler {
 
     // ─── applyPatch ──────────────────────────────────────────────────────────
 
-    async applyPatch(args: { patch: string; cwd?: string }): Promise<{
+    async applyPatch(args: { patch: string; cwd?: string }, context?: import('../types').AgentToolContext): Promise<{
         success: boolean;
         filesChanged: string[];
         errors: string[];
@@ -1066,7 +1069,7 @@ export class FileToolHandler {
         filePath: string;
         language: string;
         entries: Array<{ key: string; value: string; number?: number; comment?: string }>;
-    }): Promise<import('../types').EditFileResult> {
+    }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
         return this.executeWithLock(args.filePath, async () => {
             try {
                 const filePath = this.resolveAndAssertInWorkspace(args.filePath);
@@ -1081,8 +1084,15 @@ export class FileToolHandler {
                 let lines: string[];
                 let hasBom = true;
                 let originalContent = '';
+                const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
 
-                if (fs.existsSync(filePath)) {
+                if (vfsOverlay && vfsOverlay.has(filePath)) {
+                    const raw = vfsOverlay.get(filePath)!;
+                    originalContent = raw;
+                    hasBom = raw.charCodeAt(0) === 0xFEFF;
+                    const clean = hasBom ? raw.slice(1) : raw;
+                    lines = clean.split(/\r?\n/);
+                } else if (fs.existsSync(filePath)) {
                     // Read existing file
                     const raw = await fs.promises.readFile(filePath, 'utf-8');
                     originalContent = raw;
@@ -1159,7 +1169,7 @@ export class FileToolHandler {
                 }
 
                 // Confirm mode
-                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.ctx.vfsOverlay) {
+                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !vfsOverlay) {
                     const messageId = `writeloc_${crypto.randomUUID()}`;
                     const confirmed = await this.ctx.onPendingWrite(filePath, withBom, messageId);
                     if (!confirmed) {
@@ -1168,8 +1178,8 @@ export class FileToolHandler {
                 }
 
                 // Write
-                if (this.ctx.vfsOverlay) {
-                    this.ctx.vfsOverlay.set(filePath, withBom);
+                if (vfsOverlay) {
+                    vfsOverlay.set(filePath, withBom);
                 } else {
                     const dir = path.dirname(filePath);
                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -1195,10 +1205,10 @@ export class FileToolHandler {
 
     // ─── writeDesignBlueprint ────────────────────────────────────────────────
 
-    async writeDesignBlueprint(args: import('../types').WriteDesignBlueprintArgs): Promise<import('../types').WriteDesignBlueprintResult> {
+    async writeDesignBlueprint(args: import('../types').WriteDesignBlueprintArgs, context?: import('../types').AgentToolContext): Promise<import('../types').WriteDesignBlueprintResult> {
         try {
             // Save to topic-scoped folder (same as Implementation_Plan.md)
-            const topicId = this.ctx.parentRunnerOptions?.topicId || 'default';
+            const topicId = context?.runnerOptions?.topicId || 'default';
             const blueprintDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai', topicId);
             if (!fs.existsSync(blueprintDir)) fs.mkdirSync(blueprintDir, { recursive: true });
             const blueprintPath = path.join(blueprintDir, 'design_blueprint.md');
@@ -1308,7 +1318,8 @@ export class FileToolHandler {
             fs.writeFileSync(blueprintPath, content, 'utf-8');
 
             // Emit step event so chatPanel can display the blueprint in the UI
-            this.ctx.onStep?.({
+            const onStep = context?.onStep ?? this.ctx.onStep;
+            onStep?.({
                 type: 'blueprint_card',
                 content: blueprintPath,
                 timestamp: Date.now(),

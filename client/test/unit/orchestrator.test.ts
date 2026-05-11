@@ -341,6 +341,7 @@ describe('QualityGate', () => {
     it('buildReviewPrompt: 生成包含文件列表的审查提示', () => {
         const qg = new QualityGate();
         const mockResult = {
+            nodeId: 'mock_node',
             success: true,
             output: 'built everything',
             tokenUsage: { input: 100, output: 50, total: 150, estimatedCostCny: 0.01 },

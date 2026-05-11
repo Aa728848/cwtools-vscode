@@ -260,6 +260,7 @@ export class ParallelExecutor {
             } catch (e) {
                 const error = e instanceof Error ? e.message : String(e);
                 const failResult: SubAgentResult = {
+                    nodeId: node.id,
                     success: false,
                     output: '',
                     error,

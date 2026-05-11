@@ -213,7 +213,7 @@ export class AgentToolExecutor {
      * Each tool execution is wrapped in a Promise.race with a category-specific timeout
      * to prevent hangs on network filesystems, LSP deadlocks, or unresponsive external services.
      */
-    async execute(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+    async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         let timeout = TOOL_TIMEOUTS[toolName];
         if (timeout === undefined) {
             if (toolName.startsWith('mcp_') || toolName === 'mcp_call') {
@@ -224,7 +224,7 @@ export class AgentToolExecutor {
         }
         try {
             const result = await Promise.race([
-                this.executeInternal(toolName, args),
+                this.executeInternal(toolName, args, context),
                 new Promise<never>((_, reject) =>
                     setTimeout(() => reject(new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`)), timeout)
                 ),
@@ -239,7 +239,7 @@ export class AgentToolExecutor {
     }
 
     /** Internal tool dispatch — the actual switch statement, called within a timeout wrapper. */
-    private async executeInternal(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+    private async executeInternal(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         let result: unknown;
         switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'codesearch' | 'apply_patch' | 'multiedit' | 'task' | 'analyze_diagnostic_error') {
             // ── LSP / CWTools query tools ─────────────────────────────────
@@ -288,55 +288,55 @@ export class AgentToolExecutor {
 
             // ── File tools ────────────────────────────────────────────────
             case 'read_file':
-                result = await this.fileHandler.readFile(args as any); break;
+                result = await this.fileHandler.readFile(args as any, context); break;
             case 'write_file':
-                result = await this.fileHandler.writeFile(args as any); break;
+                result = await this.fileHandler.writeFile(args as any, context); break;
             case 'edit_file':
-                result = await this.fileHandler.editFile(args as any); break;
+                result = await this.fileHandler.editFile(args as any, context); break;
             case 'multiedit':
-                result = await this.fileHandler.multiEdit(args as any); break;
+                result = await this.fileHandler.multiEdit(args as any, context); break;
             case 'apply_patch':
-                result = await this.fileHandler.applyPatch(args as any); break;
+                result = await this.fileHandler.applyPatch(args as any, context); break;
             case 'list_directory':
                 result = await this.fileHandler.listDirectory(args as any); break;
             case 'glob_files':
                 result = await this.fileHandler.globFiles(args as any); break;
             case 'write_localisation':
-                result = await this.fileHandler.writeLocalisation(args as any); break;
+                result = await this.fileHandler.writeLocalisation(args as any, context); break;
             case 'write_design_blueprint':
-                result = await this.fileHandler.writeDesignBlueprint(args as any); break;
+                result = await this.fileHandler.writeDesignBlueprint(args as any, context); break;
             case 'git_ops':
-                result = await this.fileHandler.gitOps(args as any); break;
+                result = await this.fileHandler.gitOps(args as any); break; // git ops uses workspace wide state mostly
             case 'replace_lines':
-                result = await this.fileHandler.replaceLines(args as any); break;
+                result = await this.fileHandler.replaceLines(args as any, context); break;
 
             // ── External / agent tools ────────────────────────────────────
             case 'web_fetch':
                 result = await this.externalHandler.webFetch(args as any); break;
             case 'run_command':
-                result = await this.externalHandler.runCommand(args as any); break;
+                result = await this.externalHandler.runCommand(args as any, context); break;
             case 'search_web':
                 result = await this.externalHandler.searchWeb(args as any); break;
             case 'codesearch':
                 result = await this.externalHandler.searchCode(args as any); break;
             case 'todo_write':
-                result = await this.externalHandler.todoWrite(args as any); break;
+                result = await this.externalHandler.todoWrite(args as any, context); break;
             // spawn_sub_agents — REMOVED: sub-agent system not suitable for current architecture
             // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
             case 'remove_ignored_diagnostic':
-                result = await this.externalHandler.removeIgnoredDiagnostic(args as any); break;
+                result = await this.externalHandler.removeIgnoredDiagnostic(args as any, context); break;
             case 'get_ignored_diagnostics':
                 result = await this.externalHandler.getIgnoredDiagnostics(); break;
 
             // ── MiniMax CLI Media tools ────────────────────────────────
             case 'mmx_generate_image':
-                result = await this.externalHandler.mmxGenerateImage(args as any); break;
+                result = await this.externalHandler.mmxGenerateImage(args as any, context); break;
             case 'mmx_generate_video':
-                result = await this.externalHandler.mmxGenerateVideo(args as any); break;
+                result = await this.externalHandler.mmxGenerateVideo(args as any, context); break;
             case 'mmx_generate_music':
-                result = await this.externalHandler.mmxGenerateMusic(args as any); break;
+                result = await this.externalHandler.mmxGenerateMusic(args as any, context); break;
             case 'mmx_generate_speech':
-                result = await this.externalHandler.mmxGenerateSpeech(args as any); break;
+                result = await this.externalHandler.mmxGenerateSpeech(args as any, context); break;
 
             // ── Media Asset Conversion tools ──────────────────────────
             case 'convert_image_to_dds':

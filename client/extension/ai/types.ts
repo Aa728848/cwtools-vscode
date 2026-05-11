@@ -405,6 +405,21 @@ export interface GetMemoryResult {
     value?: string;
 }
 
+// ─── Agent Tool Context ────────────────────────────────────────────────────────
+
+/**
+ * 传递给工具执行器的每次运行上下文（线程安全/并发隔离）
+ */
+export interface AgentToolContext {
+    runnerOptions?: import('./agentRunner').AgentRunnerOptions;
+    agentRunner?: import('./agentRunner').AgentRunner;
+    tokenAccumulator?: TokenUsage;
+    onStep?: (step: AgentStep) => void;
+    onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
+    onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
+    onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
+}
+
 // Union type for all tool args/results
 export type ToolArgs =
     | QueryScopeArgs

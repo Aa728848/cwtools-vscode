@@ -135,6 +135,8 @@ export interface AgentInstance {
 
 /** 子 Agent 执行结果 */
 export interface SubAgentResult {
+    /** 对应的任务节点 ID */
+    nodeId: string;
     /** 是否成功 */
     success: boolean;
     /** Agent 最终输出文本 */

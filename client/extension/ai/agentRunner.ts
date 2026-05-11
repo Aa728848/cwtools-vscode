@@ -324,6 +324,10 @@ export interface AgentRunnerOptions {
     vfsOverlay?: Map<string, string>;
     /** Topic ID for checkpoint persistence — threaded from run() context */
     topicId?: string;
+    /** Hook called before a file is written, allowing the caller to take a snapshot for rollback */
+    onBeforeFileWrite?: (filePath: string, prevContent: string | null) => void;
+    /** Callback when a sub-agent creates or modifies a todo list plan */
+    onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
 }
 
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
@@ -611,16 +615,14 @@ export class AgentRunner {
         // (declared here so compaction call and sub-agent dispatch can also contribute to the total)
         const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
 
-        // Propagate runner options + accumulator to tool executor for sub-agent dispatch
-        this.toolExecutor.parentRunnerOptions = options;
-        // Wire up AgentRunner reference for Orchestrator (dispatch_agents tool)
-        this.toolExecutor.parentAgentRunner = this;
-        // P0 Fix: wire up permission callback so run_command can prompt user approval
-        this.toolExecutor.onPermissionRequest = options?.onPermissionRequest;
-        // L8 Fix: wire up the parent accumulator so dispatchSubTask can merge sub-agent costs
-        this.toolExecutor.parentTokenAccumulator = tokenAccumulator;
-        // Wire up onStep for sub-task progress visualization
-        this.toolExecutor.onStep = emitStep;
+        // Context object to be passed to tool executor (replaces old global assignment)
+        const agentToolContext: import('./types').AgentToolContext = {
+            runnerOptions: options,
+            agentRunner: this,
+            tokenAccumulator: tokenAccumulator,
+            onStep: emitStep,
+            onPermissionRequest: options?.onPermissionRequest
+        };
 
         // Context compaction: if history is too long, summarize it
         const compactedHistory = await this.maybeCompactHistory(
@@ -1097,6 +1099,16 @@ export class AgentRunner {
         onFileWrite?: (filePath: string, prevContent: string | null) => void
     ): Promise<string> {
         let iteration = 0;
+        
+        const agentToolContext: import('./types').AgentToolContext = {
+            runnerOptions: options,
+            agentRunner: this,
+            tokenAccumulator: tokenAccumulator,
+            onStep: emitStep,
+            onPermissionRequest: options?.onPermissionRequest,
+            onBeforeFileWrite: onFileWrite
+        };
+
         // Two-phase doom-loop detection:
         // phase1: track (prevSig → currSig) pair frequency
         // phase2: compare normalized result hashes for same-name calls
@@ -1524,7 +1536,7 @@ export class AgentRunner {
                     await Promise.all(batchIndices.map(async idx => {
                         try {
                             const callInfo = parsedCalls[idx]!;
-                            toolResults[idx] = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs);
+                            toolResults[idx] = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs, agentToolContext);
                         } catch (e) {
                             toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
                         }
@@ -1568,14 +1580,14 @@ export class AgentRunner {
                                     toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). This almost ALWAYS means your code output was truncated due to API length limits. DO NOT retry write_file with the same massive file! Instead, split your task using todo_write, or use edit_file / multiedit to apply the changes incrementally.` };
                                 } else {
                                     const args = (confirmedWrittenFiles.has(filePath)) ? { ...toolArgs, _autoApply: true } : toolArgs;
-                                    toolResults[i] = await this.toolExecutor.execute(toolName, args);
+                                    toolResults[i] = await this.toolExecutor.execute(toolName, args, agentToolContext);
                                     const r = toolResults[i] as Record<string, unknown>;
                                     if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
                                 }
                             } else if (WRITE_TOOLS.has(toolName) && filePath && confirmedWrittenFiles.has(filePath)) {
-                                toolResults[i] = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true });
+                                toolResults[i] = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true }, agentToolContext);
                             } else {
-                                toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs);
+                                toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
                                 if (WRITE_TOOLS.has(toolName) && filePath) {
                                     const r = toolResults[i] as Record<string, unknown>;
                                     if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
@@ -1765,6 +1777,13 @@ export class AgentRunner {
         let retryCount = 0;
         let lastErrors: ValidationError[] = [];
 
+        const agentToolContext: import('./types').AgentToolContext = {
+            runnerOptions: options,
+            agentRunner: this,
+            onStep: emitStep,
+            onPermissionRequest: options?.onPermissionRequest,
+        };
+
         while (retryCount <= MAX_VALIDATION_RETRIES) {
             options?.abortSignal?.throwIfAborted();
 
@@ -1782,7 +1801,7 @@ export class AgentRunner {
                 const rawResult = await this.toolExecutor.execute('validate_code', {
                     code: currentCode,
                     targetFile,
-                }) as any;
+                }, agentToolContext) as any;
                 
                 // If the tool timed out or was truncated, it might return an object
                 // without the 'errors' array (e.g. { error: "timeout" }).

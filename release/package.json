@@ -7,20 +7,6 @@
 	"license": "MIT",
 	"version": "2.0.1",
 	"preview": true,
-	"activationEvents": [
-		"onLanguage:stellaris",
-		"onLanguage:hoi4",
-		"onLanguage:eu4",
-		"onLanguage:ck2",
-		"onLanguage:imperator",
-		"onLanguage:vic2",
-		"onLanguage:vic3",
-		"onLanguage:ck3",
-		"onLanguage:eu5",
-		"onLanguage:paradox",
-		"onLanguage:yaml",
-		"onCommand:cwtools.ai.configure"
-	],
 	"publisher": "Eddy",
 	"icon": "docs/stellaris.png",
 	"repository": {

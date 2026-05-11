@@ -288,7 +288,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
                 if (!modBlock) return;
 
-                const relPath = vs.workspace.asRelativePath(uri);
+                const relPath = vs.workspace.asRelativePath(uri, false);
                 const relDir = path.dirname(relPath);
 
                 // Build vanilla block index for the directory
@@ -349,7 +349,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
 
                 const idKeys = getEventLikeKeys(langId);
-                const relPath = vs.workspace.asRelativePath(doc.uri);
+                const relPath = vs.workspace.asRelativePath(doc.uri, false);
                 const relDir = path.dirname(relPath);
                 const modBlocks = findTopLevelBlocks(doc.getText(), idKeys);
 

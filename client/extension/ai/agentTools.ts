@@ -79,7 +79,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     deploy_mod_asset: 30_000,
     // Git
     git_ops: 30_000,
-    // Orchestrator — 子 Agent 调度需要较长时间
+    // Orchestrator — 子 Agent 调度需要较长时间，多个串行/深思任务极易超过10分钟
     dispatch_agents: 600_000,
     merge_results: 30_000,
 };
@@ -671,13 +671,14 @@ export class AgentToolExecutor {
                 '__orchestrator__',
             );
 
-            // 构建返回结果摘要
-            const agentSummaries: Array<{ id: string; success: boolean; filesWritten: number; tokenUsed: number }> = [];
+            // 构建轻量返回结果（只含状态和文件列表，不含完整输出）
+            // 减少主 Agent context 大小，缓解总结阶段 thinking 卡顿
+            const agentSummaries: Array<{ id: string; success: boolean; filesWritten: string[]; tokenUsed: number }> = [];
             for (const [id, agentResult] of result.agentResults) {
                 agentSummaries.push({
                     id,
                     success: agentResult.success,
-                    filesWritten: agentResult.writtenFiles.length,
+                    filesWritten: agentResult.writtenFiles,
                     tokenUsed: agentResult.tokenUsage.total,
                 });
             }
@@ -690,6 +691,7 @@ export class AgentToolExecutor {
                 agents: agentSummaries,
                 failedNodes: result.failedNodes,
                 cancelledNodes: result.cancelledNodes,
+                hint: 'To view the detailed output of each sub-agent, use the merge_results tool.',
             };
         } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
@@ -709,23 +711,31 @@ export class AgentToolExecutor {
                     const parsed = JSON.parse(stored);
                     return { success: true, ...parsed, source: 'blackboard' };
                 } catch {
-                    return { success: false, message: '未找到最近的协调器执行结果。请先使用 dispatch_agents 发起多 Agent 任务。' };
+                    return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
                 }
             }
-            return { success: false, message: '未找到最近的协调器执行结果。请先使用 dispatch_agents 发起多 Agent 任务。' };
+            return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
         }
 
         const r = this._lastOrchestratorResult;
         const allWrittenFiles: string[] = [];
         const agentOutputs: Array<{ id: string; output: string; files: string[] }> = [];
 
+        // 智能截断：单 Agent 上限 2000 字符，总量预算 8000 字符
+        const MAX_PER_AGENT = 2000;
+        const MAX_TOTAL = 8000;
+        let totalOutputLen = 0;
+
         for (const [id, agentResult] of r.agentResults) {
             allWrittenFiles.push(...agentResult.writtenFiles);
-            agentOutputs.push({
-                id,
-                output: agentResult.output.length > 500 ? agentResult.output.substring(0, 500) + '...' : agentResult.output,
-                files: agentResult.writtenFiles,
-            });
+            const remaining = Math.max(0, MAX_TOTAL - totalOutputLen);
+            const limit = Math.min(MAX_PER_AGENT, remaining);
+            let output = agentResult.output;
+            if (output.length > limit) {
+                output = output.substring(0, limit) + `...(truncated, full length: ${agentResult.output.length})`;
+            }
+            totalOutputLen += output.length;
+            agentOutputs.push({ id, output, files: agentResult.writtenFiles });
         }
 
         return {

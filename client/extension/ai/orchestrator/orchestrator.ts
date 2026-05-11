@@ -217,8 +217,9 @@ export class Orchestrator {
             mode: profile.mode,
             onStep,
             abortSignal,
-            streaming: false, // 子 Agent 不需要流式输出
+            streaming: true, // 启用流式输出，使得深思进度可视化
             topicId: orchestratorOptions.topicId,
+            onTodoUpdate: orchestratorOptions.onTodoUpdate,
         };
 
         const writtenFiles: string[] = [];
@@ -228,6 +229,7 @@ export class Orchestrator {
         // 监听步骤计数和文件写入
         const wrappedOnStep = (step: AgentStep) => {
             stepCount++;
+            step.agentId = taskNode.id; // 添加子代理 ID 标识
             // 从 tool_result 中提取写入的文件路径
             if (step.type === 'tool_result' && step.toolResult) {
                 const result = step.toolResult as Record<string, unknown>;

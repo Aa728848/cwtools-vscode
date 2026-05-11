@@ -205,7 +205,6 @@ export class ParallelExecutor {
                     options.onStep?.({
                         ...step,
                         agentId: node.id,
-                        content: `[${node.id}] ${step.content}`,
                     });
                 };
 
@@ -271,11 +270,15 @@ export class ParallelExecutor {
                 };
                 results.set(node.id, failResult);
 
-                // 重试或级联失败
-                if (node.retryCount < node.maxRetries) {
+                // Check if this was a user cancellation
+                if (options.abortSignal?.aborted) {
+                    node.status = 'cancelled';
+                } else if (node.retryCount < node.maxRetries) {
+                    // 重试
                     node.retryCount++;
                     node.status = 'pending';
                 } else {
+                    // 级联失败
                     this.graphEngine.markFailed(graph, node.id, error);
                 }
 

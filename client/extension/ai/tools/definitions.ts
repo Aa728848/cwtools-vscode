@@ -594,12 +594,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'set_memory',
-            description: 'Store a string in the shared Agent Blackboard memory. Extremely useful for storing parsed ASTs, file manifests, or data maps that would otherwise overwhelm the prompt context. The data is available to all sub-agents running in the current session. Max length: 50,000 characters per value.',
+            description: 'Store a string in the shared Agent Blackboard memory. Extremely useful for storing parsed ASTs, file manifests, or data maps that would otherwise overwhelm the prompt context. The data is available to all sub-agents running in the current session. Max length: 500 characters per value. If the value exceeds 500 characters, it will be automatically saved to a file and the Blackboard will only store the file path.',
             parameters: {
                 type: 'object',
                 properties: {
                     key: { type: 'string', description: 'Unique string identifier for this data.' },
-                    value: { type: 'string', description: 'The string data to store.' },
+                    value: { type: 'string', description: 'The string data to store. Keep it short (<= 500 chars).' },
                 },
                 required: ['key', 'value'],
             },

@@ -578,7 +578,27 @@ export function buildAssistantMessageHtml(
     // 递归渲染所有的子 Agent 独立框
     for (const [agentId, groupClassified] of subAgentGroups.entries()) {
         const innerHtml = buildAssistantMessageHtml('', groupClassified, msgTime);
-        html += `<details class="subagent-block" open><summary>${svgIconNoMargin('bot')} 子 Agent: ${escapeHtml(agentId)}</summary><div class="subagent-body">${innerHtml}</div></details>`;
+        const uniqueId = `subview-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        
+        // Card representation in the main timeline
+        html += `<div class="orch-lane subagent-card" data-target-id="${uniqueId}">
+                    <div class="lane-header">
+                        <span class="lane-icon">${svgIconNoMargin('bot')}</span>
+                        <span class="lane-role">子任务: ${escapeHtml(agentId)}</span>
+                        <span class="lane-status" style="margin-left:auto;">›</span>
+                    </div>
+                 </div>`;
+                 
+        // Hidden fullscreen container
+        html += `<div id="${uniqueId}" class="subagent-fullscreen-view">
+                    <div class="subagent-header">
+                        <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ 返回</button>
+                        <span class="subagent-title">子代理: ${escapeHtml(agentId)}</span>
+                    </div>
+                    <div class="subagent-body">
+                        ${innerHtml}
+                    </div>
+                 </div>`;
     }
 
     return html;

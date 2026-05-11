@@ -357,8 +357,17 @@ export class AgentToolExecutor {
                 const { key, value } = args as unknown as import('./types').SetMemoryArgs;
                 if (!key || typeof value !== 'string') {
                     result = { success: false, message: 'Invalid arguments' };
-                } else if (value.length > 50000) {
-                    result = { success: false, message: 'Value too large max 50000 characters' };
+                } else if (value.length > 500) {
+                    const topicId = context?.runnerOptions?.topicId ?? this.parentRunnerOptions?.topicId ?? 'session';
+                    const fs = await import('fs');
+                    const path = await import('path');
+                    const blackboardDir = path.join(this.workspaceRoot, '.cwtools-ai', topicId, 'blackboard');
+                    fs.mkdirSync(blackboardDir, { recursive: true });
+                    const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const filePath = path.join(blackboardDir, `${safeKey}.txt`);
+                    fs.writeFileSync(filePath, value, 'utf-8');
+                    this.blackboard.legacySet(key, `file://${filePath}`);
+                    result = { success: true, message: `Successfully saved large payload (${value.length} chars) to high-capacity storage. Reference stored in blackboard. You MUST now output your final text response to complete your sub-task.` };
                 } else {
                     this.blackboard.legacySet(key, value);
                     result = { success: true, message: `Stored value in memory under key '${key}'.` };
@@ -370,7 +379,22 @@ export class AgentToolExecutor {
                 if (!key) {
                     result = { found: false };
                 } else {
-                    result = this.blackboard.legacyGet(key);
+                    const mem = this.blackboard.legacyGet(key);
+                    if (mem && typeof mem.value === 'string' && mem.value.startsWith('file://')) {
+                        const filePath = mem.value.slice(7);
+                        try {
+                            const fs = await import('fs');
+                            const content = fs.readFileSync(filePath, 'utf-8');
+                            const truncated = content.length > 3000 
+                                ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
+                                : content;
+                            result = { found: true, value: truncated, _sourceFile: filePath, _fullLength: content.length };
+                        } catch (e) {
+                            result = { found: false, error: `File not found: ${filePath}` };
+                        }
+                    } else {
+                        result = mem;
+                    }
                 }
                 break;
             }
@@ -408,15 +432,34 @@ export class AgentToolExecutor {
             }
             case 'query_blackboard': {
                 const { key: qbKey, prefix, type: qbType } = args as { key?: string; prefix?: string; type?: string };
+                const resolveFileRef = async (entry: any) => {
+                    if (entry && typeof entry.value === 'string' && entry.value.startsWith('file://')) {
+                        const filePath = entry.value.slice(7);
+                        try {
+                            const fs = await import('fs');
+                            const content = fs.readFileSync(filePath, 'utf-8');
+                            const truncated = content.length > 3000 
+                                ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
+                                : content;
+                            return { ...entry, value: truncated, _sourceFile: filePath, _fullLength: content.length };
+                        } catch (e) {
+                            return entry;
+                        }
+                    }
+                    return entry;
+                };
+
                 if (qbKey) {
                     const entry = this.blackboard.read(qbKey);
-                    result = entry ? { found: true, entry } : { found: false };
+                    result = entry ? { found: true, entry: await resolveFileRef(entry) } : { found: false };
                 } else if (prefix) {
                     const entries = this.blackboard.queryByPrefix(prefix);
-                    result = { found: entries.length > 0, count: entries.length, entries: entries.slice(0, 50) };
+                    const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
+                    result = { found: resolved.length > 0, count: entries.length, entries: resolved };
                 } else if (qbType) {
                     const entries = this.blackboard.queryByType(qbType as any);
-                    result = { found: entries.length > 0, count: entries.length, entries: entries.slice(0, 50) };
+                    const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
+                    result = { found: resolved.length > 0, count: entries.length, entries: resolved };
                 } else {
                     result = { success: false, message: '请提供 key、prefix 或 type 参数' };
                 }
@@ -642,6 +685,7 @@ export class AgentToolExecutor {
                 topicId: runnerOpts?.topicId,
                 onStep: context?.onStep,
                 onBeforeFileWrite: runnerOpts?.onBeforeFileWrite,
+                onTodoUpdate: context?.onTodoUpdate || runnerOpts?.onTodoUpdate,
             };
 
             // 推送初始进度

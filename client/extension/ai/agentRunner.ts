@@ -427,7 +427,9 @@ const READ_ONLY_TOOLS = new Set<string>([
     // Newly added Deep API tools for parallel execution
     'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_static_modifiers', 'query_variables', 'glob_files', 'codesearch'
+    'get_entity_info', 'query_static_modifiers', 'query_variables', 'glob_files', 'codesearch',
+    // Orchestrator and memory tools (safe for concurrent execution)
+    'set_memory', 'get_memory', 'search_memory', 'query_blackboard', 'dispatch_agents', 'merge_results'
     // validate_code is intentionally omitted: it modifies the LSP game state temporarily
 ]);
 
@@ -623,7 +625,8 @@ export class AgentRunner {
             agentRunner: this,
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
-            onPermissionRequest: options?.onPermissionRequest
+            onPermissionRequest: options?.onPermissionRequest,
+            onTodoUpdate: options?.onTodoUpdate
         };
 
         // Context compaction: if history is too long, summarize it
@@ -1108,7 +1111,8 @@ export class AgentRunner {
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
-            onBeforeFileWrite: onFileWrite
+            onBeforeFileWrite: onFileWrite,
+            onTodoUpdate: options?.onTodoUpdate
         };
 
         // Two-phase doom-loop detection:
@@ -1784,6 +1788,7 @@ export class AgentRunner {
             agentRunner: this,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
+            onTodoUpdate: options?.onTodoUpdate
         };
 
         while (retryCount <= MAX_VALIDATION_RETRIES) {

@@ -447,6 +447,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     // Permission callback for run_command tool (OpenCode strategy)
                     onPermissionRequest: (id, tool, description, command) =>
                         this.requestPermission(id, tool, description, command),
+                    onTodoUpdate: (todos) => this.sendTodoUpdate(todos),
                 },
                 images  // pass images to build ContentPart[] user turn
             );

@@ -737,3 +737,64 @@ body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* ── 下钻视图 (Drill-Down View) ── */
+.subagent-fullscreen-view {
+    display: none;
+    position: absolute; /* Relative to .chat-area */
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--vscode-editor-background);
+    z-index: 100;
+    overflow-y: auto;
+    padding: 14px;
+}
+.subagent-fullscreen-view.active {
+    display: block;
+    animation: slideInRight 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+.subagent-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    margin-bottom: 16px;
+    position: sticky;
+    top: 0;
+    background: var(--vscode-editor-background);
+    z-index: 101;
+}
+.subagent-back-btn {
+    background: transparent;
+    border: 1px solid var(--vscode-button-secondaryBorder, transparent);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    background-color: var(--vscode-button-secondaryBackground, rgba(130, 130, 130, 0.1));
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+.subagent-back-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, rgba(130, 130, 130, 0.2));
+}
+.subagent-title {
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.subagent-card {
+    cursor: pointer;
+}
+.subagent-card:hover {
+    border-color: var(--vscode-focusBorder);
+    background: rgba(255, 255, 255, 0.05);
+}

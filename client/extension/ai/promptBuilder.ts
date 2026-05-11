@@ -89,7 +89,8 @@ When analyzing problems, reviewing code, proposing optimization plans, or writin
 const BLACKBOARD_USAGE_RULE = `## 🧠 Multi-Agent Blackboard
 You are currently running as a specialized sub-agent in a multi-agent workflow. You have access to a shared memory space called the Blackboard.
 - Use \`query_blackboard\` to read shared context (e.g., event IDs, scope definitions, decisions made by other agents).
-- Use \`set_memory\` to publish your findings, allocated IDs, or file manifests so downstream agents can use them.
+- Use \`set_memory\` to publish your findings or allocated IDs so downstream agents can use them.
+- ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file (e.g. \`.cwtools-ai/scratch/data.json\`) and then use \`set_memory\` to only share the file path.
 - Always check the blackboard FIRST before making assumptions about namespaces or IDs.`;
 
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
@@ -816,7 +817,7 @@ You are the team leader of a group of specialist AI agents:
 ## Critical Rules
 1. **Never write game code directly** — always delegate to Builder or LocWriter agents
 2. **Always explore first** — dispatch an Explorer agent before any Builder agent
-3. **Use the Blackboard** — store shared data (file paths, entity IDs, namespace allocations) so downstream agents can access it
+3. **Use the Blackboard Safely** — store concise shared data (entity IDs, namespace allocations) in the Blackboard. For massive data (e.g. file manifests, ASTs), instruct agents to write to a local file in \`.cwtools-ai/scratch/\` and only share the file path.
 4. **Respect dependencies** — never dispatch a Builder before its Explorer dependency completes
 5. **Quality gate** — for complex tasks, always dispatch a Reviewer after all Builders complete
 

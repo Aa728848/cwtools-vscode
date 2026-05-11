@@ -901,4 +901,72 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // ── Orchestrator Tools (多 Agent 协调器) ────────────────────────────
+    {
+        type: 'function',
+        function: {
+            name: 'dispatch_agents',
+            description: '🎯 [Orchestrator-only] Decompose the current task into multiple sub-tasks and dispatch them to specialist agents for parallel execution. Available only in Orchestrator mode. Sub-agents include Explorer (read-only exploration), Builder (code generation), LocWriter (localisation), Reviewer (code review), etc. Agents exchange data via the shared Blackboard and execution order is guaranteed by a DAG.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    tasks: {
+                        type: 'array',
+                        description: 'List of sub-tasks. Ordered by dependencies; tasks without dependencies will execute in parallel.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string', description: 'Unique sub-task ID (e.g. "explore_structure", "build_events")' },
+                                agentType: { type: 'string', enum: ['explore', 'plan', 'build', 'review', 'loc_writer'], description: 'Agent type to execute this task' },
+                                prompt: { type: 'string', description: 'Sub-task description (sent as the agent\'s user message)' },
+                                dependencies: {
+                                    type: 'array',
+                                    items: { type: 'string' },
+                                    description: 'List of prerequisite task IDs — this task executes only after all dependencies complete',
+                                },
+                                priority: { type: 'string', enum: ['critical', 'normal', 'low'], description: 'Task priority (default: normal)' },
+                            },
+                            required: ['id', 'agentType', 'prompt'],
+                        },
+                    },
+                },
+                required: ['tasks'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'query_blackboard',
+            description: '📋 Query data from the shared Blackboard. The Blackboard is a cross-agent knowledge store supporting exact key lookup, prefix-based range queries, and type filtering. Types include: file_snapshot, scope_info, diag_result, entity_registry, write_intent, free_text.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    key: { type: 'string', description: 'Exact key to look up (mutually exclusive with prefix/type)' },
+                    prefix: { type: 'string', description: 'Key prefix for range queries (e.g. "entity:" matches all entries starting with "entity:")' },
+                    type: { type: 'string', enum: ['file_snapshot', 'scope_info', 'diag_result', 'entity_registry', 'write_intent', 'free_text'], description: 'Filter by data type' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'merge_results',
+            description: '🔗 [Orchestrator-only] Merge execution results from multiple sub-agents into a final deliverable. Call after all sub-agents complete to consolidate code generation, localisation, and review report outputs. Available only in Orchestrator mode.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    nodeIds: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'List of task node IDs whose results should be merged',
+                    },
+                    strategy: { type: 'string', enum: ['concatenate', 'structured', 'summary'], description: 'Merge strategy: "concatenate" (raw join), "structured" (group by file), "summary" (generate summary). Default: structured.' },
+                },
+                required: ['nodeIds'],
+            },
+        },
+    },
 ];

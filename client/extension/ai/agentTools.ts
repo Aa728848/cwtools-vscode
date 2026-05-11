@@ -79,6 +79,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     deploy_mod_asset: 30_000,
     // Git
     git_ops: 30_000,
+    // Orchestrator — 子 Agent 调度需要较长时间
+    dispatch_agents: 600_000,
+    merge_results: 30_000,
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 
@@ -106,6 +109,8 @@ export class AgentToolExecutor {
 
     /** Parent AgentRunner options (used for sub-agent dispatch to inherit provider/model/abort) */
     public parentRunnerOptions?: import('./agentRunner').AgentRunnerOptions;
+    /** Parent AgentRunner instance (used for Orchestrator to spawn sub-agents) */
+    public parentAgentRunner?: import('./agentRunner').AgentRunner;
     /** Parent token accumulator (used for sub-agent dispatch to merge costs) */
     public parentTokenAccumulator?: import('./types').TokenUsage;
     /** Permission request callback for run_command */
@@ -140,6 +145,11 @@ export class AgentToolExecutor {
         this.fileHandler = new FileToolHandler(this);
         this.lspHandler = new LspToolHandler(this, this.clientGetter, findFiles);
         this.externalHandler = new ExternalToolHandler(this);
+
+        // 初始化增强版黑板（替代旧版 sharedMemory）
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { Blackboard } = require('./orchestrator/blackboard') as typeof import('./orchestrator/blackboard');
+        this.blackboard = new Blackboard();
 
         // Listen for LSP server-ready notification
         vs.commands.executeCommand('setContext', 'cwtools.lspReady', false);
@@ -178,28 +188,10 @@ export class AgentToolExecutor {
         try { this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
     }
 
-    /** Blackboard memory store shared by all agents branching from this executor.
-     * O(1) LRU: entries are evicted oldest-first when size exceeds 200.
-     * Map insertion order is used — on access, delete+set moves entry to the end (most-recent). */
-    public sharedMemory = new Map<string, { value: string }>();
-    private static readonly SHARED_MEMORY_MAX = 200;
-
-    /** Move a key to the end of the Map (most-recently-used). O(1). */
-    private touchMemory(key: string): void {
-        const entry = this.sharedMemory.get(key);
-        if (entry !== undefined) {
-            this.sharedMemory.delete(key);
-            this.sharedMemory.set(key, entry);
-        }
-    }
-
-    /** Evict the oldest entry when over capacity. Called after set_memory. */
-    private evictMemoryIfNeeded(): void {
-        while (this.sharedMemory.size > AgentToolExecutor.SHARED_MEMORY_MAX) {
-            const oldestKey = this.sharedMemory.keys().next().value as string;
-            this.sharedMemory.delete(oldestKey);
-        }
-    }
+    /** 增强版黑板——多 Agent 间的共享知识存储。
+     * 替代旧版 sharedMemory Map，提供类型化条目、CAS 乐观锁、前缀订阅。
+     * 兼容层 legacySet/Get/Search 确保现有 set_memory/get_memory/search_memory 工具无缝工作。 */
+    public blackboard!: import('./orchestrator/blackboard').Blackboard;
 
     /** Forward LSP read-cache invalidation to the lspHandler. */
     invalidateCacheForFile(filePath: string): void {
@@ -368,9 +360,7 @@ export class AgentToolExecutor {
                 } else if (value.length > 50000) {
                     result = { success: false, message: 'Value too large max 50000 characters' };
                 } else {
-                    this.touchMemory(key); // move to end if exists
-                    this.sharedMemory.set(key, { value });
-                    this.evictMemoryIfNeeded();
+                    this.blackboard.legacySet(key, value);
                     result = { success: true, message: `Stored value in memory under key '${key}'.` };
                 }
                 break;
@@ -380,9 +370,7 @@ export class AgentToolExecutor {
                 if (!key) {
                     result = { found: false };
                 } else {
-                    this.touchMemory(key);
-                    const entry = this.sharedMemory.get(key);
-                    result = entry === undefined ? { found: false } : { found: true, value: entry.value };
+                    result = this.blackboard.legacyGet(key);
                 }
                 break;
             }
@@ -391,26 +379,7 @@ export class AgentToolExecutor {
                 if (!query) {
                     result = { success: false, message: 'Missing query argument' };
                 } else {
-                    const qLower = query.toLowerCase();
-                    const matches: Array<{ key: string, preview: string }> = [];
-                    for (const [mKey, entry] of this.sharedMemory.entries()) {
-                        const mValue = entry.value;
-                        if (mKey.toLowerCase().includes(qLower) || mValue.toLowerCase().includes(qLower)) {
-                            // Provide up to 150 chars of context around the match
-                            const valLower = mValue.toLowerCase();
-                            const idx = valLower.indexOf(qLower);
-                            let preview = mValue;
-                            if (idx !== -1 && mValue.length > 150) {
-                                const start = Math.max(0, idx - 50);
-                                const end = Math.min(mValue.length, idx + 100);
-                                preview = (start > 0 ? "..." : "") + mValue.substring(start, end) + (end < mValue.length ? "..." : "");
-                            } else if (mValue.length > 150) {
-                                preview = mValue.substring(0, 150) + "...";
-                            }
-                            matches.push({ key: mKey, preview });
-                        }
-                    }
-                    result = { found: matches.length > 0, count: matches.length, matches: matches.slice(0, 50) };
+                    result = this.blackboard.legacySearch(query);
                 }
                 break;
             }
@@ -428,9 +397,35 @@ export class AgentToolExecutor {
                 break;
             }
 
-            // ── MCP tool call ────────────────────────────────────────────
+            // ── MCP tool call ────────────────────────────────────────────────────
             case 'mcp_call':
                 result = await this.executeMcpTool(args as any); break;
+
+            // ── Orchestrator tools ───────────────────────────────────────────────
+            case 'dispatch_agents': {
+                result = await this.executeDispatchAgents(args);
+                break;
+            }
+            case 'query_blackboard': {
+                const { key: qbKey, prefix, type: qbType } = args as { key?: string; prefix?: string; type?: string };
+                if (qbKey) {
+                    const entry = this.blackboard.read(qbKey);
+                    result = entry ? { found: true, entry } : { found: false };
+                } else if (prefix) {
+                    const entries = this.blackboard.queryByPrefix(prefix);
+                    result = { found: entries.length > 0, count: entries.length, entries: entries.slice(0, 50) };
+                } else if (qbType) {
+                    const entries = this.blackboard.queryByType(qbType as any);
+                    result = { found: entries.length > 0, count: entries.length, entries: entries.slice(0, 50) };
+                } else {
+                    result = { success: false, message: '请提供 key、prefix 或 type 参数' };
+                }
+                break;
+            }
+            case 'merge_results': {
+                result = this.executeMergeResults();
+                break;
+            }
 
             default:
                 // Check if this is a dynamically registered MCP tool (mcp_<server>_<tool>)
@@ -572,6 +567,177 @@ export class AgentToolExecutor {
             };
         }
         return result;
+    }
+
+    // ── Orchestrator 调度实现 ─────────────────────────────────────────────────
+
+    /** 最近一次协调器执行结果（供 merge_results 读取） */
+    private _lastOrchestratorResult?: import('./orchestrator/types').OrchestratorResult;
+
+    /**
+     * 执行 dispatch_agents 工具：将 AI 构建的任务数组转换为 TaskGraph，
+     * 然后通过 Orchestrator.execute() 触发真正的多 Agent 并行执行。
+     */
+    private async executeDispatchAgents(args: Record<string, unknown>): Promise<unknown> {
+        const tasks = args.tasks as Array<{
+            id: string;
+            agentType: string;
+            prompt: string;
+            dependencies?: string[];
+            modelOverride?: string;
+            providerOverride?: string;
+        }> | undefined;
+
+        if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+            return { success: false, error: '请提供 tasks 数组，每个 task 需包含 id、agentType、prompt 字段' };
+        }
+
+        // 确保有 parentAgentRunner（Orchestrator 需要它来调度子 Agent）
+        if (!this.parentAgentRunner) {
+            return { success: false, error: 'Orchestrator 未就绪：缺少 AgentRunner 实例引用。请确保在协调模式下运行。' };
+        }
+
+        try {
+            // 动态导入避免循环依赖
+            const { Orchestrator } = await import('./orchestrator/orchestrator');
+            const { TaskGraphEngine } = await import('./orchestrator/taskGraphEngine');
+            const { applyUserModelOverrides } = await import('./orchestrator/agentRegistry');
+            const { ErrorReporter } = await import('./errorReporter');
+            const { SOURCE } = await import('./messages');
+
+            // 应用用户的子 Agent 模型配置（从 VS Code 设置中读取）
+            const cfg = vs.workspace.getConfiguration('cwtools.ai');
+            const agentModels = cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels');
+            if (agentModels) {
+                applyUserModelOverrides(agentModels);
+            }
+
+            // 构建 TaskGraph
+            const userPrompt = (args.userPrompt as string) || '多 Agent 协作任务';
+            const graph = TaskGraphEngine.createGraph(userPrompt);
+
+            for (const task of tasks) {
+                TaskGraphEngine.addNode(
+                    graph,
+                    task.id,
+                    task.agentType as import('./types').AgentMode,
+                    task.prompt,
+                    {
+                        dependencies: task.dependencies || [],
+                        modelOverride: task.modelOverride,
+                        providerOverride: task.providerOverride,
+                    },
+                );
+            }
+
+            // 实例化 Orchestrator
+            const orchestrator = new Orchestrator(this.parentAgentRunner);
+
+            // 构建执行选项
+            const options: import('./orchestrator/types').OrchestratorOptions = {
+                providerId: this.parentRunnerOptions?.providerId,
+                model: this.parentRunnerOptions?.model,
+                abortSignal: this.parentRunnerOptions?.abortSignal,
+                topicId: this.parentRunnerOptions?.topicId,
+                onStep: this.onStep,
+            };
+
+            // 推送初始进度
+            this.onStep?.({
+                type: 'thinking',
+                content: `🎯 协调器启动: 分派 ${tasks.length} 个子 Agent 任务`,
+                timestamp: Date.now(),
+            });
+
+            // 执行
+            const result = await orchestrator.execute(graph, options);
+
+            // 缓存结果供 merge_results 使用
+            this._lastOrchestratorResult = result;
+
+            // 将执行结果写入 Blackboard 供后续查询
+            this.blackboard.write(
+                'orchestrator:lastResult',
+                JSON.stringify({
+                    success: result.success,
+                    summary: result.summary,
+                    totalTokenUsage: result.totalTokenUsage,
+                    failedNodes: result.failedNodes,
+                    cancelledNodes: result.cancelledNodes,
+                }),
+                'free_text',
+                '__orchestrator__',
+            );
+
+            // 构建返回结果摘要
+            const agentSummaries: Array<{ id: string; success: boolean; filesWritten: number; tokenUsed: number }> = [];
+            for (const [id, agentResult] of result.agentResults) {
+                agentSummaries.push({
+                    id,
+                    success: agentResult.success,
+                    filesWritten: agentResult.writtenFiles.length,
+                    tokenUsed: agentResult.tokenUsage.total,
+                });
+            }
+
+            return {
+                success: result.success,
+                summary: result.summary,
+                totalTokens: result.totalTokenUsage.total,
+                estimatedCostCny: result.totalTokenUsage.estimatedCostCny,
+                agents: agentSummaries,
+                failedNodes: result.failedNodes,
+                cancelledNodes: result.cancelledNodes,
+            };
+        } catch (e) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            return { success: false, error: `协调器执行异常: ${errMsg}` };
+        }
+    }
+
+    /**
+     * 执行 merge_results 工具：从最近一次协调器执行结果中提取摘要。
+     */
+    private executeMergeResults(): unknown {
+        if (!this._lastOrchestratorResult) {
+            // 尝试从 Blackboard 读取
+            const stored = this.blackboard.readValue('orchestrator:lastResult');
+            if (stored) {
+                try {
+                    const parsed = JSON.parse(stored);
+                    return { success: true, ...parsed, source: 'blackboard' };
+                } catch {
+                    return { success: false, message: '未找到最近的协调器执行结果。请先使用 dispatch_agents 发起多 Agent 任务。' };
+                }
+            }
+            return { success: false, message: '未找到最近的协调器执行结果。请先使用 dispatch_agents 发起多 Agent 任务。' };
+        }
+
+        const r = this._lastOrchestratorResult;
+        const allWrittenFiles: string[] = [];
+        const agentOutputs: Array<{ id: string; output: string; files: string[] }> = [];
+
+        for (const [id, agentResult] of r.agentResults) {
+            allWrittenFiles.push(...agentResult.writtenFiles);
+            agentOutputs.push({
+                id,
+                output: agentResult.output.length > 500 ? agentResult.output.substring(0, 500) + '...' : agentResult.output,
+                files: agentResult.writtenFiles,
+            });
+        }
+
+        return {
+            success: true,
+            overallSuccess: r.success,
+            summary: r.summary,
+            totalTokens: r.totalTokenUsage.total,
+            estimatedCostCny: r.totalTokenUsage.estimatedCostCny,
+            totalFilesWritten: allWrittenFiles.length,
+            writtenFiles: allWrittenFiles,
+            agentOutputs,
+            failedNodes: r.failedNodes,
+            cancelledNodes: r.cancelledNodes,
+        };
     }
 
     // ── Public accessors for external consumers ─────────────────────────────

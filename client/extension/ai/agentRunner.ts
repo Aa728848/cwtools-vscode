@@ -394,6 +394,24 @@ const LOC_WRITER_TOOLS: AgentToolName[] = [
     'write_localisation', 'git_ops',
 ];
 
+/** Orchestrator mode: 只读工具 + 协调器专用工具（dispatch_agents, query_blackboard, merge_results） */
+const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
+    // 只读信息收集
+    'query_scope', 'query_types', 'query_rules', 'query_references',
+    'get_file_context', 'search_mod_files', 'get_completion_at',
+    'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
+    'get_diagnostics', 'web_fetch', 'search_web', 'glob_files', 'codesearch',
+    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
+    'get_entity_info', 'query_static_modifiers', 'query_variables',
+    'query_definition', 'query_definition_by_name',
+    // 黑板和任务管理
+    'set_memory', 'get_memory', 'search_memory', 'todo_write',
+    // 协调器专用
+    'dispatch_agents', 'query_blackboard', 'merge_results',
+    // Git
+    'git_ops',
+];
+
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation', 'git_ops', 'replace_lines']);
@@ -595,6 +613,8 @@ export class AgentRunner {
 
         // Propagate runner options + accumulator to tool executor for sub-agent dispatch
         this.toolExecutor.parentRunnerOptions = options;
+        // Wire up AgentRunner reference for Orchestrator (dispatch_agents tool)
+        this.toolExecutor.parentAgentRunner = this;
         // P0 Fix: wire up permission callback so run_command can prompt user approval
         this.toolExecutor.onPermissionRequest = options?.onPermissionRequest;
         // L8 Fix: wire up the parent accumulator so dispatchSubTask can merge sub-agent costs
@@ -734,6 +754,7 @@ export class AgentRunner {
             explore: AGENT.MODE_EXPLORE,
             general: AGENT.MODE_GENERAL,
             review: AGENT.MODE_REVIEW,
+            orchestrator: AGENT.MODE_ORCHESTRATOR,
         };
         emitStep({
             type: 'thinking',
@@ -757,8 +778,8 @@ export class AgentRunner {
             // Phase 2: Extract code from the response
             const code = this.extractCode(finalMessage);
 
-            // Plan / Explore / General / Review mode — or no code generated — just an explanation
-            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'review') {
+            // Plan / Explore / General / Review / Orchestrator mode — or no code generated — just an explanation
+            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'review' || mode === 'orchestrator') {
                 return {
                     code: '',
                     explanation: finalMessage,
@@ -801,6 +822,32 @@ export class AgentRunner {
                 tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
             };
         }
+    }
+
+    /**
+     * 子 Agent 执行入口 — 供 Orchestrator 调度使用。
+     *
+     * 与 run() 的区别：
+     * 1. 不需要对话历史（子 Agent 从空上下文开始）
+     * 2. 不需要图片/视觉输入
+     * 3. 使用 buildSlimSystemPromptForMode（更轻量的系统提示词）
+     * 4. 返回 GenerationResult，由 Orchestrator 转换为 SubAgentResult
+     *
+     * @param prompt 子任务描述
+     * @param mode Agent 模式
+     * @param options 运行选项（模型/供应商由 Orchestrator 根据角色配置传入）
+     */
+    async runAsSubAgent(
+        prompt: string,
+        mode: AgentMode,
+        options?: AgentRunnerOptions,
+    ): Promise<GenerationResult> {
+        return this.run(
+            prompt,
+            { topicId: options?.topicId },
+            [], // 空对话历史
+            { ...options, mode },
+        );
     }
 
     /**
@@ -1075,6 +1122,8 @@ export class AgentRunner {
             availableTools = TOOL_DEFINITIONS.filter(t => LOC_TRANSLATOR_TOOLS.includes(t.function.name as AgentToolName));
         } else if (mode === 'loc_writer') {
             availableTools = TOOL_DEFINITIONS.filter(t => LOC_WRITER_TOOLS.includes(t.function.name as AgentToolName));
+        } else if (mode === 'orchestrator') {
+            availableTools = TOOL_DEFINITIONS.filter(t => ORCHESTRATOR_MODE_TOOLS.includes(t.function.name as AgentToolName));
         } else {
             availableTools = TOOL_DEFINITIONS;
         }

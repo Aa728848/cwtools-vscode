@@ -18,6 +18,7 @@ export const AGENT = {
     MODE_EXPLORE: '探索代码库中（Explore 模式）...',
     MODE_GENERAL: '处理请求中（General 模式）...',
     MODE_REVIEW: '代码审查中（Review 模式）...',
+    MODE_ORCHESTRATOR: '多 Agent 协调中（Orchestrator 模式）...',
     MODE_FALLBACK: '分析中...',
 
     CANCELLED: '已取消生成',
@@ -95,4 +96,5 @@ export const SOURCE = {
     CHAT_PANEL: 'ChatPanel',
     AI_SERVICE: 'AIService',
     UPDATE_CHECKER: 'UpdateChecker',
+    ORCHESTRATOR: 'Orchestrator',
 } as const;

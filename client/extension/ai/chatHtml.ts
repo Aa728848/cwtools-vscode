@@ -102,6 +102,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <option value="explore">分析模式</option>
                     <option value="general">问答模式</option>
                     <option value="review">审查模式</option>
+                    <option value="orchestrator">协调模式</option>
                 </select>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
                 <button class="img-pick-btn" id="imgPickBtn" title="上传图片">${svgIconNoMargin('plus')}</button>
@@ -247,6 +248,25 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                         <button class="settings-test-btn" id="installSkillBtn" style="width: auto; padding: 0 12px;">安装/导入</button>
                     </div>
                     <div id="installedSkillsList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
+                </div>
+                <div class="settings-group" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; margin-top: 10px;">
+                    <label class="settings-label">${svgIcon('bot')} 协调模式 — 子 Agent 模型配置</label>
+                    <div class="settings-hint" style="margin-bottom:8px;">为每个子 Agent 角色单独指定供应商/模型。留为"继承主设置"则使用上方配置的主模型。</div>
+                    <div id="agentModelRows" style="display:flex;flex-direction:column;gap:8px;">
+                        ${['explorer|探索者 (Explorer)', 'architect|架构师 (Architect)', 'builder|构建者 (Builder)', 'locWriter|本地化 (LocWriter)', 'reviewer|审查者 (Reviewer)', 'assetGen|资产 (AssetGen)']
+                            .map(item => {
+                                const [role, label] = item.split('|');
+                                return `<div class="agent-model-row" data-role="${role}" style="display:flex;align-items:center;gap:6px;">
+                                    <span style="font-size:11px;opacity:0.75;min-width:120px;flex-shrink:0;">${label}</span>
+                                    <select class="settings-select agent-model-provider" data-role="${role}" style="flex:1;max-width:120px;font-size:11px;padding:3px 5px;">
+                                        <option value="__inherit__">继承主设置</option>
+                                    </select>
+                                    <select class="settings-select agent-model-model" data-role="${role}" style="flex:1;max-width:160px;font-size:11px;padding:3px 5px;">
+                                        <option value="__inherit__">继承主设置</option>
+                                    </select>
+                                </div>`;
+                            }).join('\n')}
+                    </div>
                 </div>
             </div>
         </div>

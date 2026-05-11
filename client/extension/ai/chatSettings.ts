@@ -76,7 +76,10 @@ export class ChatSettingsManager {
             },
             mcp: {
                 servers: config.mcp.servers
-            }
+            },
+            orchestrator: {
+                agentModels: vs.workspace.getConfiguration('cwtools.ai').get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels') || undefined,
+            },
         };
 
         let ollamaModels: Array<{ name: string; size: string; parameterSize?: string }> | undefined;
@@ -182,6 +185,14 @@ export class ChatSettingsManager {
 
         if (settings.mcp?.servers) {
             await cfg.update('mcp.servers', settings.mcp.servers, vs.ConfigurationTarget.Global);
+        }
+
+        // 协调模式子 Agent 模型配置持久化
+        if (settings.orchestrator?.agentModels) {
+            await cfg.update('orchestrator.agentModels', settings.orchestrator.agentModels, vs.ConfigurationTarget.Global);
+        } else {
+            // 清除已有配置（用户恢复为全部继承）
+            await cfg.update('orchestrator.agentModels', undefined, vs.ConfigurationTarget.Global);
         }
 
         lastAISettingsWriteTime = Date.now();

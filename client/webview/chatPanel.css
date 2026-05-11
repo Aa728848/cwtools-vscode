@@ -580,3 +580,150 @@ body.review-mode .mode-indicator { color: #f48771; }
 .aw-mod { background: rgba(100,149,237,0.2); color: cornflowerblue; }
 .aw-file { font-family: var(--vscode-editor-font-family, monospace); font-weight: 500; }
 
+/* ── Orchestrator 协调模式样式 ── */
+
+/* 模式指示器 */
+body.orchestrator-mode .mode-indicator { display: block; color: #e8a838; }
+body.orchestrator-mode .input-container { border-color: #e8a838; box-shadow: 0 0 0 1px rgba(232,168,56,0.3); }
+body.orchestrator-mode .input-container:focus-within { border-color: #e8a838; box-shadow: 0 0 0 1px #e8a838, 0 0 8px rgba(232,168,56,0.2); }
+body.orchestrator-mode .send-btn { background: #e8a838; }
+body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
+
+/* Agent Lane 面板 */
+.orchestrator-lane-panel {
+    border: 1px solid rgba(232,168,56,0.25);
+    border-radius: 10px;
+    padding: 14px;
+    margin: 8px 0;
+    background: rgba(232,168,56,0.04);
+    animation: fadeIn 0.3s ease;
+}
+
+/* 进度头 */
+.orch-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.orch-phase {
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.orch-phase.phase-active { color: #e8a838; }
+.orch-phase.phase-complete { color: var(--success); }
+.orch-phase.phase-failed { color: var(--error); }
+.orch-progress-text {
+    font-size: 12px;
+    opacity: 0.7;
+    font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* 进度条 */
+.orch-progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+.orch-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #e8a838, #f0c040);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+
+/* 最新事件 */
+.orch-event {
+    font-size: 11px;
+    opacity: 0.6;
+    padding: 4px 0;
+    border-bottom: 1px dashed rgba(255,255,255,0.06);
+    margin-bottom: 10px;
+}
+
+/* Agent 泳道容器 */
+.orch-lanes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+}
+
+/* 单个 Agent 泳道 */
+.orch-lane {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    background: rgba(255,255,255,0.02);
+    transition: border-color 0.2s, background 0.2s, transform 0.15s;
+}
+.orch-lane:hover { transform: translateY(-1px); }
+
+/* 泳道状态颜色 */
+.orch-lane.lane-pending { border-color: rgba(255,255,255,0.1); opacity: 0.55; }
+.orch-lane.lane-running {
+    border-color: rgba(232,168,56,0.5);
+    background: rgba(232,168,56,0.06);
+    animation: lanePulse 2s ease-in-out infinite;
+}
+.orch-lane.lane-done { border-color: rgba(76,175,80,0.4); background: rgba(76,175,80,0.04); }
+.orch-lane.lane-failed { border-color: rgba(244,67,54,0.4); background: rgba(244,67,54,0.04); }
+.orch-lane.lane-cancelled { border-color: rgba(255,255,255,0.08); opacity: 0.35; }
+
+@keyframes lanePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(232,168,56,0); }
+    50% { box-shadow: 0 0 0 3px rgba(232,168,56,0.12); }
+}
+
+/* 泳道头 */
+.lane-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+.lane-icon { font-size: 16px; flex-shrink: 0; }
+.lane-role {
+    font-size: 12px;
+    font-weight: 600;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lane-status { font-size: 14px; flex-shrink: 0; }
+
+/* 泳道 ID */
+.lane-id {
+    font-size: 10px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    opacity: 0.45;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 泳道元数据 */
+.lane-meta {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 10px;
+    opacity: 0.55;
+    font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* 泳道状态文本 */
+.lane-status-text {
+    font-size: 10px;
+    opacity: 0.6;
+    margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

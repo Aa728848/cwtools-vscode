@@ -220,7 +220,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             if (!isGenerating) sendMessage();
         } else if (e.key === 'Tab') {
             e.preventDefault();
-            const modes = ['build', 'plan', 'explore', 'general', 'review'];
+            const modes = ['build', 'plan', 'explore', 'general', 'review', 'orchestrator'];
             const idx = modes.indexOf(currentMode);
             const cycleDir = e.shiftKey ? -1 : 1;
             const nextMode = modes[(idx + cycleDir + modes.length) % modes.length]!;
@@ -614,6 +614,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         review: { label: '审查模式 — 代码审查', bodyClass: 'review-mode' },
         loc_translator: { label: '翻译模式 — 本地化文件翻译（子代理专用）', bodyClass: 'build-mode' },
         loc_writer: { label: '写作模式 — 本地化内容创作（子代理专用）', bodyClass: 'build-mode' },
+        orchestrator: { label: '协调模式 — 多 Agent 协作执行', bodyClass: 'orchestrator-mode' },
     };
 
     /**
@@ -630,7 +631,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         // Only post to backend when user initiated (avoids ping-pong)
         if (fromUI) vscode.postMessage({ type: 'switchMode', mode });
         // Remove all mode body classes, add correct one
-        document.body.classList.remove('build-mode', 'plan-mode', 'explore-mode', 'general-mode', 'review-mode');
+        document.body.classList.remove('build-mode', 'plan-mode', 'explore-mode', 'general-mode', 'review-mode', 'orchestrator-mode');
         const meta = MODE_META[mode as keyof typeof MODE_META];
         if (meta && meta.bodyClass) document.body.classList.add(meta.bodyClass);
         // Update inline mode indicator text
@@ -2282,6 +2283,87 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 break;
             }
 
+            case 'orchestratorProgress': {
+                const p = msg.progress;
+                // 确保 Agent Lane 面板存在
+                let lanePanel = document.getElementById('orchestratorLanePanel');
+                if (!lanePanel) {
+                    lanePanel = document.createElement('div');
+                    lanePanel.id = 'orchestratorLanePanel';
+                    lanePanel.className = 'orchestrator-lane-panel';
+                    // 插入到 chatArea 末尾
+                    chatArea.appendChild(lanePanel);
+                }
+                // 构建进度摘要头（使用 SVG 图标替代 emoji）
+                const phaseLabels: Record<string, string> = {
+                    planning: `${svgIconNoMargin('clipboard')} 规划中`,
+                    executing: `${svgIconNoMargin('zap')} 执行中`,
+                    reviewing: `${svgIconNoMargin('search')} 审查中`,
+                    complete: `${svgIconNoMargin('check')} 已完成`,
+                    failed: `${svgIconNoMargin('x')} 失败`,
+                };
+                const phaseCls = p.phase === 'complete' ? 'phase-complete' : p.phase === 'failed' ? 'phase-failed' : 'phase-active';
+                const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
+
+                let html = `<div class="orch-header">
+                    <span class="orch-phase ${phaseCls}">${phaseLabels[p.phase] || p.phase}</span>
+                    <span class="orch-progress-text">${p.done}/${p.total} 完成</span>
+                </div>
+                <div class="orch-progress-bar">
+                    <div class="orch-progress-fill" style="width:${pct}%"></div>
+                </div>`;
+
+                if (p.latestEvent) {
+                    html += `<div class="orch-event">${escapeHtml(p.latestEvent)}</div>`;
+                }
+
+                // 构建 Agent Lanes（使用 SVG 图标替代 emoji）
+                if (p.lanes && p.lanes.length > 0) {
+                    html += '<div class="orch-lanes">';
+                    const roleIcons: Record<string, string> = {
+                        explorer: svgIconNoMargin('search'),
+                        architect: svgIconNoMargin('ruler'),
+                        builder: svgIconNoMargin('edit'),
+                        locWriter: svgIconNoMargin('pencil'),
+                        reviewer: svgIconNoMargin('shield'),
+                        assetGen: svgIconNoMargin('sparkles'),
+                    };
+                    const statusIcons: Record<string, string> = {
+                        pending: svgIconNoMargin('gear'),
+                        running: svgIconNoMargin('refresh'),
+                        done: svgIconNoMargin('check'),
+                        failed: svgIconNoMargin('x'),
+                        cancelled: svgIconNoMargin('eyeOff'),
+                    };
+                    for (const lane of p.lanes) {
+                        const icon = roleIcons[lane.role] || svgIconNoMargin('bot');
+                        const sIcon = statusIcons[lane.status] || svgIconNoMargin('question');
+                        const durationText = lane.duration ? `${(lane.duration / 1000).toFixed(1)}s` : '';
+                        const tokenText = lane.tokenUsed > 0 ? `${formatNum(lane.tokenUsed)} tok` : '';
+                        const statusClass = `lane-${lane.status}`;
+                        html += `<div class="orch-lane ${statusClass}">
+                            <div class="lane-header">
+                                <span class="lane-icon">${icon}</span>
+                                <span class="lane-role">${escapeHtml(lane.role)}</span>
+                                <span class="lane-status">${sIcon}</span>
+                            </div>
+                            <div class="lane-id">${escapeHtml(lane.taskNodeId)}</div>
+                            <div class="lane-meta">
+                                ${durationText ? `<span>${durationText}</span>` : ''}
+                                ${tokenText ? `<span>${tokenText}</span>` : ''}
+                                ${lane.stepCount > 0 ? `<span>${lane.stepCount} steps</span>` : ''}
+                            </div>
+                            ${lane.statusText ? `<div class="lane-status-text">${escapeHtml(lane.statusText)}</div>` : ''}
+                        </div>`;
+                    }
+                    html += '</div>';
+                }
+
+                lanePanel.innerHTML = html;
+                scrollBottom();
+                break;
+            }
+
             case 'planFileSaved': {
                 // Compact card — just "open file" button; annotation is handled by renderPlan below
                 const card = document.createElement('div');
@@ -3016,6 +3098,51 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             current.mcp.servers.forEach((s: any) => addMcpServerBlock(s));
         }
 
+        // ── 子 Agent 模型配置：动态填充供应商/模型下拉 ─────────────────────
+        const savedAgentModels = current.orchestrator?.agentModels || {};
+        document.querySelectorAll('.agent-model-row').forEach(row => {
+            const role = (row as HTMLElement).dataset.role;
+            if (!role) return;
+            const provSel = row.querySelector('.agent-model-provider') as HTMLSelectElement;
+            const modSel = row.querySelector('.agent-model-model') as HTMLSelectElement;
+            if (!provSel || !modSel) return;
+
+            // 填充供应商下拉
+            provSel.innerHTML = '<option value="__inherit__">继承主设置</option>'
+                + providers.map((p: any) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+
+            const saved = savedAgentModels[role];
+            if (saved?.provider && saved.provider !== '__inherit__') {
+                provSel.value = saved.provider;
+            }
+
+            // 填充模型下拉（根据选中的供应商）
+            const fillModels = (pid: string) => {
+                const provDef = providers.find((p: any) => p.id === pid);
+                const models: string[] = pid === 'ollama'
+                    ? (ollamaModels || []).map((m: any) => m.name)
+                    : (provDef ? provDef.models : []);
+                modSel.innerHTML = '<option value="__inherit__">继承主设置</option>'
+                    + models.map(m => `<option value="${m}">${escapeHtml(m)}</option>`).join('');
+            };
+
+            if (saved?.provider && saved.provider !== '__inherit__') {
+                fillModels(saved.provider);
+                if (saved.model && saved.model !== '__inherit__') {
+                    modSel.value = saved.model;
+                }
+            }
+
+            // 供应商变化时联动更新模型下拉
+            provSel.addEventListener('change', () => {
+                if (provSel.value === '__inherit__') {
+                    modSel.innerHTML = '<option value="__inherit__">继承主设置</option>';
+                } else {
+                    fillModels(provSel.value);
+                }
+            });
+        });
+
         function updateInlineProviderSelect() {
             const currentPid = inlineSel.value;
             // Only FIM-capable providers can be used for inline completion
@@ -3369,7 +3496,23 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     debounceMs: parseInt((document.getElementById('inlineDebounce') as HTMLInputElement).value) || 500,
                     overlapStripping: (document.getElementById('inlineOverlapStripping') as HTMLInputElement | null)?.checked ?? true,
                 },
-                mcp: { servers: mcpServers }
+                mcp: { servers: mcpServers },
+                orchestrator: {
+                    agentModels: (() => {
+                        const models: Record<string, { provider: string; model: string }> = {};
+                        document.querySelectorAll('.agent-model-row').forEach(row => {
+                            const role = (row as HTMLElement).dataset.role;
+                            if (!role) return;
+                            const prov = (row.querySelector('.agent-model-provider') as HTMLSelectElement)?.value || '__inherit__';
+                            const mod = (row.querySelector('.agent-model-model') as HTMLSelectElement)?.value || '__inherit__';
+                            // 只收集非继承的配置
+                            if (prov !== '__inherit__' || mod !== '__inherit__') {
+                                models[role] = { provider: prov, model: mod };
+                            }
+                        });
+                        return Object.keys(models).length > 0 ? models : undefined;
+                    })(),
+                },
             }
         });
     }

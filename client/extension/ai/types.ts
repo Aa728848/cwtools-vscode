@@ -13,8 +13,9 @@
  * - review:  Read-only mode focused on code review, finding issues, and providing feedback.
  * - loc_translator: Specialized for translating YML localisation files between languages.
  * - loc_writer: Specialized for writing new YML localisation entries from scratch.
+ * - orchestrator: Multi-Agent coordinator mode — decomposes tasks and dispatches sub-agents.
  */
-export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer';
+export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator';
 
 // ─── MCP Settings ────────────────────────────────────────────────────────────
 
@@ -512,7 +513,11 @@ export type AgentToolName =
     // ── Git tools ──
     | 'git_ops'
     // ── MCP tools ──
-    | 'mcp_call';
+    | 'mcp_call'
+    // ── Orchestrator tools ──
+    | 'dispatch_agents'
+    | 'query_blackboard'
+    | 'merge_results';
 
 // ─── File Tool Types ─────────────────────────────────────────────────────────
 
@@ -911,7 +916,9 @@ export type HostMessage =
     | { type: 'topicImported'; topicId: string; title: string }
     | { type: 'skillsList'; skills: string[] }
     | { type: 'skillInstallComplete'; success: boolean }
-    | { type: 'usageStats'; stats: any };
+    | { type: 'usageStats'; stats: any }
+    /** 多 Agent 协调器进度推送 — Agent Lane UI */
+    | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {
@@ -956,6 +963,11 @@ export interface PanelSettings {
     mcp?: {
         servers: MCPServerConfig[];
     };
+    /** 协调模式子 Agent 模型覆盖配置 */
+    orchestrator?: {
+        /** 角色 → { provider, model } 映射（'__inherit__' 表示继承主设置） */
+        agentModels?: Record<string, { provider: string; model: string }>;
+    };
 }
 
 // ─── Shared Utilities ────────────────────────────────────────────────────────
@@ -970,4 +982,48 @@ export function contentToString(content: string | ContentPart[] | null | undefin
     return content.filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text')
         .map(p => p.text)
         .join('');
+}
+
+// ─── Orchestrator 进度推送载荷 ──────────────────────────────────────────────
+
+/** 单个 Agent 泳道的实时状态 */
+export interface AgentLaneInfo {
+    /** Agent 实例 ID */
+    id: string;
+    /** 角色标签 (explorer / builder / reviewer...) */
+    role: string;
+    /** 对应任务节点 ID */
+    taskNodeId: string;
+    /** 当前状态 */
+    status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+    /** 已用步骤数 */
+    stepCount: number;
+    /** 消耗 token 数 */
+    tokenUsed: number;
+    /** 开始时间 */
+    startedAt?: number;
+    /** 耗时 (ms) */
+    duration?: number;
+    /** 最新状态文本 */
+    statusText?: string;
+}
+
+/** Orchestrator 推送到 WebView 的进度数据 */
+export interface OrchestratorProgressPayload {
+    /** 阶段标签 */
+    phase: 'planning' | 'executing' | 'reviewing' | 'complete' | 'failed';
+    /** 总节点数 */
+    total: number;
+    /** 已完成节点数 */
+    done: number;
+    /** 运行中节点数 */
+    running: number;
+    /** 失败节点数 */
+    failed: number;
+    /** 被取消节点数 */
+    cancelled: number;
+    /** 各 Agent 泳道信息 */
+    lanes: AgentLaneInfo[];
+    /** 最新事件描述 */
+    latestEvent?: string;
 }

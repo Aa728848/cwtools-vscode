@@ -789,6 +789,8 @@ export interface AgentStep {
     durationMs?: number;
     /** Iteration context string, e.g. "Iteration 3/10" */
     iterationInfo?: string;
+    /** 子 Agent 节点 ID，用于 UI 分组显示 */
+    agentId?: string;
 }
 
 export interface GenerationResult {

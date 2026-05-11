@@ -204,6 +204,7 @@ export class ParallelExecutor {
                 const taggedStep = (step: AgentStep) => {
                     options.onStep?.({
                         ...step,
+                        agentId: node.id,
                         content: `[${node.id}] ${step.content}`,
                     });
                 };

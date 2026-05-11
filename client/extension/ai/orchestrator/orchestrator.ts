@@ -259,7 +259,7 @@ export class Orchestrator {
             
             // 如果执行失败，回滚文件
             if (!result.isValid || (result as any).success === false) {
-                this.rollbackSnapshots(fileSnapshots, onStep);
+                await this.rollbackSnapshots(fileSnapshots, onStep);
                 return {
                     nodeId: taskNode.id,
                     success: false,

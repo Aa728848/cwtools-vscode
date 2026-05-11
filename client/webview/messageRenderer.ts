@@ -23,8 +23,8 @@ export interface RendererStep {
     timestamp: number;
     stepIndex?: number;
     durationMs?: number;
-    iterationInfo?: string;
     permissionId?: string;
+    agentId?: string;
 }
 
 export interface ClassifiedSteps {
@@ -428,17 +428,49 @@ export function buildAssistantMessageHtml(
     classified: ClassifiedSteps,
     msgTime?: number
 ): string {
-    // Recombine all steps in chronological order from the classified groups
+    // 拦截并分组带有 agentId 的步骤
+    const mainClassified: ClassifiedSteps = {
+        thinkingSteps: [], textDeltaSteps: [], toolCalls: [], toolResults: [], specialSteps: []
+    };
+    const subAgentGroups = new Map<string, ClassifiedSteps>();
+
+    function distributeStep(step: RendererStep, category: keyof ClassifiedSteps) {
+        if (step.agentId) {
+            let group = subAgentGroups.get(step.agentId);
+            if (!group) {
+                group = { thinkingSteps: [], textDeltaSteps: [], toolCalls: [], toolResults: [], specialSteps: [] };
+                subAgentGroups.set(step.agentId, group);
+            }
+            // 浅拷贝并移除 agentId，防止后续递归调用时陷入死循环
+            const stepCopy = { ...step };
+            delete stepCopy.agentId;
+            // 过滤掉 content 中的 [node.id] 前缀，因为已经在框的标题上显示了
+            if (stepCopy.content && stepCopy.content.startsWith(`[${step.agentId}] `)) {
+                stepCopy.content = stepCopy.content.substring(step.agentId.length + 3);
+            }
+            group[category].push(stepCopy);
+        } else {
+            mainClassified[category].push(step);
+        }
+    }
+
+    classified.thinkingSteps.forEach(s => distributeStep(s, 'thinkingSteps'));
+    classified.textDeltaSteps.forEach(s => distributeStep(s, 'textDeltaSteps'));
+    classified.toolCalls.forEach(s => distributeStep(s, 'toolCalls'));
+    classified.toolResults.forEach(s => distributeStep(s, 'toolResults'));
+    classified.specialSteps.forEach(s => distributeStep(s, 'specialSteps'));
+
+    // Recombine all MAIN steps in chronological order
     const allSteps = [
-        ...classified.thinkingSteps,
-        ...classified.textDeltaSteps,
-        ...classified.toolCalls,
-        ...classified.toolResults,
-        ...classified.specialSteps,
+        ...mainClassified.thinkingSteps,
+        ...mainClassified.textDeltaSteps,
+        ...mainClassified.toolCalls,
+        ...mainClassified.toolResults,
+        ...mainClassified.specialSteps,
     ].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-    // If no steps, just render content
-    if (allSteps.length === 0) {
+    // 如果没有任何步骤（既没有主线也没有子任务），直接渲染文本
+    if (allSteps.length === 0 && subAgentGroups.size === 0) {
         if (!content?.trim()) return '';
         return `<div class="msg-bubble" data-raw-content="${escapeHtml(content)}">${escapeHtml(content)}</div>`;
     }
@@ -541,6 +573,12 @@ export function buildAssistantMessageHtml(
     // Append any explicit content (from the message body, not from steps)
     if (content?.trim()) {
         html += `<div class="msg-bubble" data-raw-content="${escapeHtml(content)}">${escapeHtml(content)}</div>`;
+    }
+
+    // 递归渲染所有的子 Agent 独立框
+    for (const [agentId, groupClassified] of subAgentGroups.entries()) {
+        const innerHtml = buildAssistantMessageHtml('', groupClassified, msgTime);
+        html += `<details class="subagent-block" open><summary>${svgIconNoMargin('bot')} 子 Agent: ${escapeHtml(agentId)}</summary><div class="subagent-body">${innerHtml}</div></details>`;
     }
 
     return html;

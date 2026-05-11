@@ -86,15 +86,21 @@ When analyzing problems, reviewing code, proposing optimization plans, or writin
 - If you are writing an Implementation Plan that contains proposed code snippets, you MUST verify that the syntax, properties, triggers, and effects you plan to write are 100% legal BEFORE you put them in the plan. Do not hallucinate code in your plan!
 - Do NOT judge code or propose standard programming patterns (e.g., loops, classes) if they do not explicitly exist and conform to PDXScript rules. Ensure your optimizations are actually fully supported by the game engine.`;
 
+const BLACKBOARD_USAGE_RULE = `## 🧠 Multi-Agent Blackboard
+You are currently running as a specialized sub-agent in a multi-agent workflow. You have access to a shared memory space called the Blackboard.
+- Use \`query_blackboard\` to read shared context (e.g., event IDs, scope definitions, decisions made by other agents).
+- Use \`set_memory\` to publish your findings, allocated IDs, or file manifests so downstream agents can use them.
+- Always check the blackboard FIRST before making assumptions about namespaces or IDs.`;
 
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
 
-function buildBuildSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
+    const rules = isSlim 
+        ? `${CODE_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}` 
+        : `${LANGUAGE_MIRRORING_RULE}\n${INTENT_VERIFICATION_RULE}\n${BUILD_CLARIFICATION_RULE}\n${CODE_COMPLIANCE_RULE}`;
+
     return `You are Eddy CWTool Code, an expert AI coding agent for ${gameName} PDXScript mod development.
-${LANGUAGE_MIRRORING_RULE}
-${INTENT_VERIFICATION_RULE}
-${BUILD_CLARIFICATION_RULE}
-${CODE_COMPLIANCE_RULE}
+${rules}
 
 ## Step 1 — Classify the Request
 
@@ -392,13 +398,13 @@ ${gameKnowledge}`;
 
 // ─── Plan Mode System Prompt Template ────────────────────────────────────────
 
-function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
+    const rules = isSlim 
+        ? `${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}` 
+        : `${LANGUAGE_MIRRORING_RULE}\n${INTENT_VERIFICATION_RULE}\n${PLAN_CLARIFICATION_RULE}\n${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
+
     return `You are Eddy CWTool Code in **Plan Mode** — a read-only analysis and planning agent for ${gameName} PDXScript modding.
-${LANGUAGE_MIRRORING_RULE}
-${INTENT_VERIFICATION_RULE}
-${PLAN_CLARIFICATION_RULE}
-${CODE_COMPLIANCE_RULE}
-${ANALYSIS_COMPLIANCE_RULE}
+${rules}
 
 <system-reminder>
 Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`, or use any write tools (\`write_file\`, \`edit_file\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. This supersedes all other instructions.
@@ -504,11 +510,13 @@ ${gameKnowledge}`;
 
 // ─── Explore Mode System Prompt Template ─────────────────────────────────────
 
-function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
+    const rules = isSlim
+        ? `${ANALYSIS_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}`
+        : `${LANGUAGE_MIRRORING_RULE}\n${BUILD_CLARIFICATION_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
+
     return `You are Eddy CWTool Code in **Explore Mode** — a codebase exploration agent for ${gameName} mods.
-${LANGUAGE_MIRRORING_RULE}
-${BUILD_CLARIFICATION_RULE}
-${ANALYSIS_COMPLIANCE_RULE}
+${rules}
 
 <system-reminder>
 Explore mode is active. You MUST NOT write or modify any files. Focus on understanding and explaining the codebase.
@@ -568,11 +576,13 @@ ${gameKnowledge}`;
 
 // ─── Review Mode System Prompt Template ──────────────────────────────────────
 
-function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
+    const rules = isSlim
+        ? `${ANALYSIS_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}`
+        : `${LANGUAGE_MIRRORING_RULE}\n${BUILD_CLARIFICATION_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
+
     return `You are Eddy CWTool Code in **Review Mode** — an expert code reviewer for ${gameName} mods.
-${LANGUAGE_MIRRORING_RULE}
-${BUILD_CLARIFICATION_RULE}
-${ANALYSIS_COMPLIANCE_RULE}
+${rules}
 
 <system-reminder>
 Review mode is active. You MUST NOT write or modify any files. Your goal is to review existing code, identify bugs, suggest improvements, and ensure best practices.
@@ -709,9 +719,13 @@ You are a localisation translator. Your job is to translate YML localisation ent
 ${gameKnowledge}`;
 }
 
-function buildLocWriterSystemPrompt(gameKnowledge: string, gameName: string): string {
+function buildLocWriterSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
+    const rules = isSlim 
+        ? `${BLACKBOARD_USAGE_RULE}`
+        : `${LANGUAGE_MIRRORING_RULE}`;
+
     return `You are Eddy CWTool Code in **Localisation Writer Mode** — a specialized agent for creating new ${gameName} YML localisation entries from scratch.
-${LANGUAGE_MIRRORING_RULE}
+${rules}
 
 <system-reminder>
 You are a localisation writer. Your job is to create high-quality, contextually appropriate localisation text for game entities (events, effects, triggers, technologies, etc.). You MUST use LSP tools to understand the game context before writing.
@@ -933,7 +947,7 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         const gameId = languageId ?? this.detectGameLanguageId();
         const gameKnowledge = getGameKnowledge(gameId);
         const gameName = getGameDisplayName(gameId);
-        const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName);
+        const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName, true);
         const supplement = this.getModelSupplement(providerId);
         const slimRules = this.getSlimProjectRulesPrompt();
         
@@ -1102,18 +1116,18 @@ ${trimmed}
         }
     }
 
-    private getModePrompt(mode: AgentMode, gameKnowledge: string, gameName: string): string {
+    private getModePrompt(mode: AgentMode, gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
         switch (mode) {
-            case 'plan': return buildPlanModeSystemPrompt(gameKnowledge, gameName);
-            case 'explore': return buildExploreModeSystemPrompt(gameKnowledge, gameName);
-            case 'general': return buildGeneralModeSystemPrompt(gameKnowledge, gameName);
-            case 'review': return buildReviewModeSystemPrompt(gameKnowledge, gameName);
+            case 'plan': return buildPlanModeSystemPrompt(gameKnowledge, gameName, isSlim);
+            case 'explore': return buildExploreModeSystemPrompt(gameKnowledge, gameName, isSlim);
+            case 'general': return buildGeneralModeSystemPrompt(gameKnowledge, gameName); // general never slim
+            case 'review': return buildReviewModeSystemPrompt(gameKnowledge, gameName, isSlim);
             case 'gui_expert': return buildGuiExpertSystemPrompt(gameKnowledge, gameName);
             case 'script_reviewer': return buildScriptReviewerSystemPrompt(gameKnowledge, gameName);
             case 'loc_translator': return buildLocTranslatorSystemPrompt(gameKnowledge, gameName);
-            case 'loc_writer': return buildLocWriterSystemPrompt(gameKnowledge, gameName);
+            case 'loc_writer': return buildLocWriterSystemPrompt(gameKnowledge, gameName, isSlim);
             case 'orchestrator': return buildOrchestratorSystemPrompt(gameKnowledge, gameName);
-            default: return buildBuildSystemPrompt(gameKnowledge, gameName);
+            default: return buildBuildSystemPrompt(gameKnowledge, gameName, isSlim);
         }
     }
 

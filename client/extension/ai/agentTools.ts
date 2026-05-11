@@ -403,7 +403,7 @@ export class AgentToolExecutor {
 
             // ── Orchestrator tools ───────────────────────────────────────────────
             case 'dispatch_agents': {
-                result = await this.executeDispatchAgents(args);
+                result = await this.executeDispatchAgents(args, context);
                 break;
             }
             case 'query_blackboard': {
@@ -578,7 +578,7 @@ export class AgentToolExecutor {
      * 执行 dispatch_agents 工具：将 AI 构建的任务数组转换为 TaskGraph，
      * 然后通过 Orchestrator.execute() 触发真正的多 Agent 并行执行。
      */
-    private async executeDispatchAgents(args: Record<string, unknown>): Promise<unknown> {
+    private async executeDispatchAgents(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         const tasks = args.tasks as Array<{
             id: string;
             agentType: string;
@@ -633,17 +633,19 @@ export class AgentToolExecutor {
             // 实例化 Orchestrator
             const orchestrator = new Orchestrator(this.parentAgentRunner);
 
-            // 构建执行选项
+            // 构建执行选项（优先从 AgentToolContext 读取，回退到旧的实例字段）
+            const runnerOpts = context?.runnerOptions ?? this.parentRunnerOptions;
             const options: import('./orchestrator/types').OrchestratorOptions = {
-                providerId: this.parentRunnerOptions?.providerId,
-                model: this.parentRunnerOptions?.model,
-                abortSignal: this.parentRunnerOptions?.abortSignal,
-                topicId: this.parentRunnerOptions?.topicId,
-                onStep: this.onStep,
+                providerId: runnerOpts?.providerId,
+                model: runnerOpts?.model,
+                abortSignal: runnerOpts?.abortSignal,
+                topicId: runnerOpts?.topicId,
+                onStep: context?.onStep,
+                onBeforeFileWrite: runnerOpts?.onBeforeFileWrite,
             };
 
             // 推送初始进度
-            this.onStep?.({
+            options.onStep?.({
                 type: 'thinking',
                 content: `🎯 协调器启动: 分派 ${tasks.length} 个子 Agent 任务`,
                 timestamp: Date.now(),

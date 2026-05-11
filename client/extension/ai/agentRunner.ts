@@ -439,7 +439,9 @@ export class AgentRunner {
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
         private promptBuilder: PromptBuilder
-    ) { }
+    ) {
+        this.toolExecutor.parentAgentRunner = this;
+    }
 
     // ─── Transaction Management ────────────────────────────────────────────────
     public pendingTransactions = new Map<string, Map<string, string>>();
@@ -1235,13 +1237,13 @@ export class AgentRunner {
                     providerId: options?.providerId,
                     model: options?.model,
                     // Stream thinking tokens to UI in real-time (OpenCode-style)
-                    onThinking: (text) => {
+                    onThinking: options?.streaming ? (text) => {
                         emitStep({
                             type: 'thinking_content',
                             content: text,
                             timestamp: Date.now(),
                         });
-                    },
+                    } : undefined,
                     // Stream text content tokens for typewriter effect
                     onTextDelta: options?.streaming ? (text) => {
                         if (text.includes('<tool_call>')) isInsideDsml = true;

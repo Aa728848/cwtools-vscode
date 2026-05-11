@@ -218,4 +218,6 @@ export interface OrchestratorOptions {
     topicId?: string;
     /** 步骤回调 */
     onStep?: (step: AgentStep) => void;
+    /** 文件写入前的快照回调，用于向上传递给撤回系统 */
+    onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
 }

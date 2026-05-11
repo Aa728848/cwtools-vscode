@@ -322,7 +322,7 @@ export class FileToolHandler {
                 const lowerFile = args.file.toLowerCase();
 
                 const { content: originalContent, hasBom } = this.readTextFile(args.file, context);
-                this.ctx.onBeforeFileWrite?.(args.file, originalContent);
+                (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(args.file, originalContent);
 
                 const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
 
@@ -371,7 +371,7 @@ export class FileToolHandler {
             const filePath = args.filePath;
             const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
 
-            this.ctx.onBeforeFileWrite?.(filePath, args.oldString === '' ? null : originalContent);
+            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, args.oldString === '' ? null : originalContent);
 
             let newContent: string;
             if (args.oldString === '') {
@@ -486,7 +486,7 @@ export class FileToolHandler {
             const endIdx = args.endLine - 1;
             const targetLines = lines.slice(startIdx, endIdx + 1);
 
-            this.ctx.onBeforeFileWrite?.(filePath, originalContent);
+            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent);
 
             // Build new content by replacing the line range
             // Normalize newContent to LF too so everything is consistent
@@ -566,7 +566,7 @@ export class FileToolHandler {
 
             const filePath = args.filePath;
         const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
-        this.ctx.onBeforeFileWrite?.(filePath, originalContent);
+        (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent);
 
         let nodes: PdxNode[] = [];
         try {
@@ -690,7 +690,7 @@ export class FileToolHandler {
             const filePath = args.filePath;
         const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
         let content = originalContent;
-        this.ctx.onBeforeFileWrite?.(filePath, originalContent || null);
+        (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent || null);
 
         const ending = this.detectLineEnding(content);
         const errors: string[] = [];
@@ -925,7 +925,7 @@ export class FileToolHandler {
             }
         }
         for (const { filePath, newContent, hasBom } of pendingWrites) {
-            this.ctx.onBeforeFileWrite?.(filePath, originalContents.get(filePath) ?? null);
+            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContents.get(filePath) ?? null);
             try {
                 this.writeTextFile(filePath, newContent, hasBom);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
@@ -1103,7 +1103,7 @@ export class FileToolHandler {
                     // Create new file with header
                     const lang = args.language || 'l_english';
                     lines = [`${lang}:`];
-                    this.ctx.onBeforeFileWrite?.(filePath, null);
+                    (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, null);
                 }
 
                 // Build a map of existing keys → line index for O(1) lookup
@@ -1165,7 +1165,7 @@ export class FileToolHandler {
                 const withBom = (hasBom ? BOM : '') + finalContent;
 
                 if (fs.existsSync(filePath)) {
-                    this.ctx.onBeforeFileWrite?.(filePath, originalContent);
+                    (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent);
                 }
 
                 // Confirm mode

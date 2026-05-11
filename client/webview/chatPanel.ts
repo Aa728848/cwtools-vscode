@@ -1516,9 +1516,21 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
         } else if (target === 'special') {
             const el = document.createElement('div');
-            el.className = 'special-step';
-            const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : svgIconNoMargin('gear');
-            el.innerHTML = icon + ' ' + escapeHtml(s.content || '');
+            // 添加步骤类型作为额外 CSS 类名（与 finalized renderer 一致）
+            el.className = `special-step ${s.type}`;
+            const icon = s.type === 'error' ? svgIconNoMargin('x')
+                : s.type === 'validation' ? svgIconNoMargin('check')
+                : s.type === 'orchestrator_progress' ? svgIconNoMargin('chart')
+                : svgIconNoMargin('gear');
+            // 替换 $(iconName) codicon 占位符为 SVG 图标
+            let safeContent = escapeHtml(s.content || '');
+            safeContent = safeContent.replace(/\$\(([\w-]+)\)/g, (_match: string, iconName: string) => {
+                if (iconName in Icons) {
+                    return svgIconNoMargin(iconName as keyof typeof Icons);
+                }
+                return _match;
+            });
+            el.innerHTML = icon + ' ' + safeContent;
             currentAssistantDiv.appendChild(el);
         }
         scrollBottom();

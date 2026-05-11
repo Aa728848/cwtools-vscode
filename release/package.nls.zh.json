@@ -102,6 +102,7 @@
   "configuration.cwtools.ai.braveSearchApiKey.description": "Brave Search API 密钥，用于 web_search 工具。获取地址：https://brave.com/search/api/",
   "configuration.cwtools.ai.exaApiKey.description": "Exa API 密钥，用于 codesearch 工具。获取地址：https://exa.ai",
   "configuration.cwtools.ai.mcp.servers.description": "MCP（模型上下文协议）服务器配置，用于扩展 AI 工具能力。",
+  "configuration.cwtools.ai.orchestrator.agentModels.description": "协调模式子 Agent 的自定义模型配置（如 explorer, reviewer）。",
   "commands.cwtools.vanillaCompare.diff.title": "与原版对比代码块",
   "commands.cwtools.vanillaCompare.fileDiff.title": "与原版对比文件",
   "commands.cwtools.previewEntity.title": "预览模型资产",

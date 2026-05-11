@@ -707,6 +707,19 @@
 						"required": ["name", "type"]
 					}
 				},
+				"cwtools.ai.orchestrator.agentModels": {
+					"scope": "window",
+					"type": "object",
+					"default": {},
+					"description": "%configuration.cwtools.ai.orchestrator.agentModels.description%",
+					"additionalProperties": {
+						"type": "object",
+						"properties": {
+							"provider": { "type": "string" },
+							"model": { "type": "string" }
+						}
+					}
+				},
 				"cwtools.vanillaCompare.showGutterDecorations": {
 					"scope": "window",
 					"type": "boolean",

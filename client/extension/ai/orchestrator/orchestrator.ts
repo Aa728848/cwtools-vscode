@@ -121,8 +121,8 @@ export class Orchestrator {
         // 质量门：对所有成功的 Builder 节点触发审查
         if (result.success && this.shouldRunQualityGate(taskGraph)) {
             emitStep({
-                type: 'thinking',
-                content: '🔍 触发质量门审查...',
+                type: 'orchestrator_progress',
+                content: '$(search) 触发质量门审查...',
                 timestamp: Date.now(),
             });
             const allWrittenFiles: string[] = [];
@@ -144,13 +144,13 @@ export class Orchestrator {
                 );
 
                 if (reviewResult.passed) {
-                    emitStep({ type: 'thinking', content: '✅ 质量门审查通过！', timestamp: Date.now() });
+                    emitStep({ type: 'orchestrator_progress', content: '$(check) 质量门审查通过！', timestamp: Date.now() });
                 } else {
-                    emitStep({ type: 'error', content: `❌ 质量门审查未通过，发现 ${reviewResult.remainingIssues} 个问题。`, timestamp: Date.now() });
+                    emitStep({ type: 'error', content: `$(x) 质量门审查未通过，发现 ${reviewResult.remainingIssues} 个问题。`, timestamp: Date.now() });
                     const config = this.qualityGate.getConfig();
                     
                     if (config.autoFix) {
-                        emitStep({ type: 'thinking', content: '🔧 正在调度自动修复...', timestamp: Date.now() });
+                        emitStep({ type: 'orchestrator_progress', content: '$(gear) 正在调度自动修复...', timestamp: Date.now() });
                         
                         const fixPrompt = this.qualityGate.buildFixPrompt(reviewResult.reviewReport, allWrittenFiles);
                         const fixResult = await this.agentRunner.run(
@@ -164,10 +164,10 @@ export class Orchestrator {
                         );
 
                         if (fixResult.isValid) {
-                            emitStep({ type: 'thinking', content: '✅ 自动修复完成。', timestamp: Date.now() });
+                            emitStep({ type: 'orchestrator_progress', content: '$(check) 自动修复完成。', timestamp: Date.now() });
                             // 这里可以递归或再次触发审查，但在简单的实现中先只执行一次 autoFix
                         } else {
-                            emitStep({ type: 'error', content: '❌ 自动修复失败。', timestamp: Date.now() });
+                            emitStep({ type: 'error', content: '$(x) 自动修复失败。', timestamp: Date.now() });
                         }
                     }
                 }
@@ -176,7 +176,7 @@ export class Orchestrator {
 
         // 最终报告
         emitStep({
-            type: 'thinking',
+            type: 'orchestrator_progress',
             content: result.summary,
             timestamp: Date.now(),
         });
@@ -245,6 +245,8 @@ export class Orchestrator {
             if (!fileSnapshots.has(filePath)) {
                 fileSnapshots.set(filePath, prevContent);
             }
+            // 向上传递给父级 UI 撤回系统
+            orchestratorOptions.onBeforeFileWrite?.(filePath, prevContent);
         };
 
         try {
@@ -329,8 +331,8 @@ export class Orchestrator {
                         });
                     }
                 } else {
-                    // 恢复旧内容（base64 解码）
-                    fs.writeFileSync(filePath, Buffer.from(prevContent, 'base64'));
+                    // 恢复旧内容（prevContent 是 UTF-8 原始文本）
+                    fs.writeFileSync(filePath, prevContent, 'utf-8');
                     onStep({
                         type: 'thinking',
                         content: `🔄 回滚: 已恢复文件 ${filePath} 到修改前状态`,

@@ -125,6 +125,7 @@ body.plan-mode .plan-indicator { display: block; }
 .tp-result.skip { opacity: 0.35; }
 /* Special steps (errors, compaction) */
 .special-step { font-size: 11px; padding: 3px 0; opacity: 0.65; }
+.special-step.orchestrator_progress { opacity: 0.9; color: var(--vscode-charts-blue); font-weight: 500; margin: 4px 0; background: rgba(0, 122, 204, 0.1); padding: 4px 8px; border-radius: 4px; display: inline-block; }
 
 /* ── Code block ── */
 .code-block { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; margin: 6px 0; overflow: hidden; }

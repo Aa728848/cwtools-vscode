@@ -99,8 +99,8 @@ export class ParallelExecutor {
         }
 
         emitStep({
-            type: 'thinking',
-            content: `📊 任务图调度开始: ${graph.nodes.size} 个节点, 最大并发 ${this.maxConcurrency}`,
+            type: 'orchestrator_progress',
+            content: `$(chart) 任务图调度开始: ${graph.nodes.size} 个节点, 最大并发 ${this.maxConcurrency}`,
             timestamp: Date.now(),
         });
 
@@ -131,8 +131,8 @@ export class ParallelExecutor {
             const batch = readyNodes.slice(0, this.maxConcurrency);
 
             emitStep({
-                type: 'thinking',
-                content: `🚀 执行批次: ${batch.map(n => `${n.id}(${n.agentType})`).join(', ')}`,
+                type: 'orchestrator_progress',
+                content: `$(zap) 执行批次: ${batch.map(n => `${n.id}(${n.agentType})`).join(', ')}`,
                 timestamp: Date.now(),
             });
 

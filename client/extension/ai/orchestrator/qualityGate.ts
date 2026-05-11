@@ -87,7 +87,7 @@ export class QualityGate {
     async reviewOutput(
         agentRunner: import('../agentRunner').AgentRunner,
         writtenFiles: string[],
-        options: import('../agentRunner').AgentRunnerOptions,
+        options: Partial<import('../agentRunner').AgentRunnerOptions>,
     ): Promise<QualityGateResult> {
         if (writtenFiles.length === 0) {
             return { passed: true, reviewReport: '无文件修改', fixCycles: 0, remainingIssues: 0 };

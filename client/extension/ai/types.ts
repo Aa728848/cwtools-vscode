@@ -768,7 +768,7 @@ export interface AgentStep {
     | 'code_generated' | 'validation' | 'error' | 'compaction'
     | 'todo_update' | 'permission_request'
     | 'subtask_start' | 'subtask_complete' | 'diff_summary'
-    | 'plan_card' | 'walkthrough_card' | 'transaction_card';
+    | 'plan_card' | 'walkthrough_card' | 'transaction_card' | 'orchestrator_progress';
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;

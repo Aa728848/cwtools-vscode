@@ -8,6 +8,9 @@
  * @module messageRenderer
  */
 
+// ── Imports ──────────────────────────────────────────────────────────────────
+import { Icons, svgIconNoMargin } from './svgIcons';
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /** Minimal step shape matching AgentStep (avoids importing vscode-dependent types) */
@@ -74,6 +77,8 @@ const TOOL_ICON_LABELS: Record<string, string> = {
     glob_files: '📁', delete_file: '🗑️', apply_patch: '🩹',
     spawn_sub_agents: '🤖', web_fetch: '🌐',
     permission_request: '🔑',
+    // 协调器工具
+    dispatch_agents: '🎯', query_blackboard: '📋', merge_results: '🔗',
 };
 
 const DEFAULT_MAX_DIFF_LINES = 20;
@@ -495,8 +500,20 @@ export function buildAssistantMessageHtml(
 
         if (phase === 'special') {
             // Special steps render inline without breaking flow
-            const icon = s.type === 'error' ? '✗' : s.type === 'validation' ? '✓' : '⚙';
-            html += `<div class="special-step"><span class="ss-icon">${icon}</span> ${escapeHtml(s.content || '')}</div>`;
+            let icon = '⚙';
+            if (s.type === 'error') icon = '✗';
+            else if (s.type === 'validation') icon = '✓';
+            else if (s.type === 'orchestrator_progress') icon = '📊';
+
+            let safeContent = escapeHtml(s.content || '');
+            safeContent = safeContent.replace(/\$\(([\w-]+)\)/g, (match, iconName) => {
+                if (iconName in Icons) {
+                    return svgIconNoMargin(iconName as keyof typeof Icons);
+                }
+                return match;
+            });
+
+            html += `<div class="special-step ${s.type}"><span class="ss-icon">${icon}</span> ${safeContent}</div>`;
             continue;
         }
 

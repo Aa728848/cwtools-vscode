@@ -102,6 +102,7 @@
   "configuration.cwtools.ai.braveSearchApiKey.description": "Brave Search API key for web_search tool. Get one at https://brave.com/search/api/",
   "configuration.cwtools.ai.exaApiKey.description": "Exa API key for codesearch tool. Get one at https://exa.ai",
   "configuration.cwtools.ai.mcp.servers.description": "MCP (Model Context Protocol) server configurations for extending AI tool capabilities.",
+  "configuration.cwtools.ai.orchestrator.agentModels.description": "Custom model configuration for Orchestrator sub-agents (e.g. explorer, reviewer)",
   "commands.cwtools.vanillaCompare.diff.title": "Compare Block with Vanilla",
   "commands.cwtools.vanillaCompare.fileDiff.title": "Compare File with Vanilla",
   "commands.cwtools.previewEntity.title": "Preview Entity Model",

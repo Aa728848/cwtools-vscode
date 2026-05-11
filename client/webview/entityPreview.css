@@ -119,6 +119,71 @@ body {
     opacity: 0.7;
 }
 
+.toolbar-icon-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--ep-fg);
+    border-radius: 4px;
+    padding: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    transition: background 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+
+.toolbar-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.toolbar-icon-btn:active {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.toolbar-icon-btn.active {
+    background: var(--ep-accent);
+    border-color: var(--ep-accent);
+    color: #fff;
+}
+
+.toolbar-checkbox-btn {
+    display: inline-flex;
+    cursor: pointer;
+    align-items: center;
+}
+
+.toolbar-checkbox-btn input[type="checkbox"] {
+    display: none;
+}
+
+.toolbar-checkbox-btn .icon-btn-content {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--ep-fg);
+    border-radius: 4px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.toolbar-checkbox-btn:hover .icon-btn-content {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.toolbar-checkbox-btn input[type="checkbox"]:checked + .icon-btn-content {
+    background: var(--ep-accent);
+    border-color: var(--ep-accent);
+    color: #fff;
+}
+
 /* ── Main Content Area (Sidebar + Canvas) ────────────────────────────────── */
 
 #main-content {

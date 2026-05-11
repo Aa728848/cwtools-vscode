@@ -37,6 +37,8 @@ const i18n: Record<string, { en: string; zh: string }> = {
     apply:          { en: 'Apply',                         zh: '应用' },
     reset:          { en: 'Reset',                         zh: '重置' },
     transformHint:  { en: 'Click locator to select · W Translate · E Rotate', zh: '点击定位器选中 · W 移动 · E 旋转' },
+    translateBtn:   { en: 'Translate (W)',                 zh: '移动 (W)' },
+    rotateBtn:      { en: 'Rotate (E)',                    zh: '旋转 (E)' },
 };
 
 function applyI18n() {
@@ -45,6 +47,13 @@ function applyI18n() {
         const entry = i18n[key];
         if (entry) {
             el.textContent = isChinese ? entry.zh : entry.en;
+        }
+    });
+    document.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach(el => {
+        const key = el.dataset.i18nTitle!;
+        const entry = i18n[key];
+        if (entry) {
+            el.title = isChinese ? entry.zh : entry.en;
         }
     });
 }
@@ -2595,10 +2604,10 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
     let html = `<div class="tree-title" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 4px; margin-bottom: 4px;">
         <span>Entity Tree</span>
         <div style="display:flex; gap: 4px;">
-            <button id="filter-bone" class="toolbar-btn filter-btn${boneFilterActive ? ' active' : ''}" title="${isChinese ? '高亮骨骼' : 'Filter Bones'}" style="width: 20px; height: 20px; display:flex; align-items:center; justify-content:center; padding:0;">${svgIconBone}</button>
-            <button id="filter-locator" class="toolbar-btn filter-btn${locFilterActive ? ' active' : ''}" title="${isChinese ? '高亮定位器' : 'Filter Locators'}" style="width: 20px; height: 20px; display:flex; align-items:center; justify-content:center; padding:0;">${svgIconLocator}</button>
-            <button id="btn-collapse-all" class="toolbar-btn" style="width: 20px; height: 20px; display:flex; align-items:center; justify-content:center; padding:0;" title="${isChinese ? '全部折叠' : 'Collapse All'}">${svgIconCollapse}</button>
-            <button id="btn-add-locator" class="toolbar-btn" style="width: 20px; height: 20px; display:flex; align-items:center; justify-content:center; padding:0;" title="${isChinese ? '新建全局定位器' : 'Add Root Locator'}">${svgIconAdd}</button>
+            <button id="filter-bone" class="toolbar-icon-btn filter-btn${boneFilterActive ? ' active' : ''}" title="${isChinese ? '高亮骨骼' : 'Filter Bones'}" style="width: 24px; height: 24px;">${svgIconBone}</button>
+            <button id="filter-locator" class="toolbar-icon-btn filter-btn${locFilterActive ? ' active' : ''}" title="${isChinese ? '高亮定位器' : 'Filter Locators'}" style="width: 24px; height: 24px;">${svgIconLocator}</button>
+            <button id="btn-collapse-all" class="toolbar-icon-btn" title="${isChinese ? '全部折叠' : 'Collapse All'}" style="width: 24px; height: 24px;">${svgIconCollapse}</button>
+            <button id="btn-add-locator" class="toolbar-icon-btn" title="${isChinese ? '新建全局定位器' : 'Add Root Locator'}" style="width: 24px; height: 24px;">${svgIconAdd}</button>
         </div>
     </div>`;
 

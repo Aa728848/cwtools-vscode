@@ -61,6 +61,48 @@ export async function activate(context: ExtensionContext) {
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
 	registerLocalizationFeatures(context);
 
+	// Register completion provider for @ constants in .gui, .asset, .gfx files
+	context.subscriptions.push(
+		vs.languages.registerCompletionItemProvider(
+			[
+				{ scheme: 'file', pattern: '**/*.gui' },
+				{ scheme: 'file', pattern: '**/*.asset' },
+				{ scheme: 'file', pattern: '**/*.gfx' }
+			],
+			{
+				provideCompletionItems(document: vs.TextDocument, position: vs.Position) {
+					const linePrefix = document.lineAt(position).text.substring(0, position.character);
+					const matchPrefix = linePrefix.match(/@([A-Za-z0-9_]*)$/);
+					if (!matchPrefix) return undefined;
+
+					const text = document.getText();
+					const regex = /@([A-Za-z0-9_]+)\s*=/g;
+					const completions: vs.CompletionItem[] = [];
+					const seen = new Set<string>();
+
+					let match;
+					while ((match = regex.exec(text)) !== null) {
+						const varName = match[1];
+						if (!varName) continue;
+						if (!seen.has(varName)) {
+							seen.add(varName);
+							const item = new vs.CompletionItem('@' + varName, vs.CompletionItemKind.Constant);
+							// 替换掉触发时已经输入的 @ 以及后续字符
+							item.range = new vs.Range(
+								position.line, position.character - matchPrefix[0].length,
+								position.line, position.character
+							);
+							item.detail = 'Local Constant';
+							completions.push(item);
+						}
+					}
+					return completions;
+				}
+			},
+			'@'
+		)
+	);
+
 	// Client-side Rename Provider — uses VSCode's built-in reference finding
 	// Fix #8: shared game language list (was duplicated as gameLanguages and gameLanguages2)
 	const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];

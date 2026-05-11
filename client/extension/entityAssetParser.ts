@@ -82,6 +82,22 @@ export interface EntityGraph {
 interface ParseCtx {
     tokens: Token[];
     pos: number;
+    constants: Record<string, number>;
+}
+
+function extractConstants(tokens: Token[]): Record<string, number> {
+    const constants: Record<string, number> = {};
+    for (let i = 0; i < tokens.length - 2; i++) {
+        const t = tokens[i]!;
+        if (t.value.startsWith('@')) {
+            const eq = tokens[i + 1]!;
+            if (eq.value === '=') {
+                const val = tokens[i + 2]!;
+                constants[t.value] = parseFloat(val.value);
+            }
+        }
+    }
+    return constants;
 }
 
 function peek(ctx: ParseCtx): Token | undefined {
@@ -108,11 +124,20 @@ function skipBlock(ctx: ParseCtx): void {
     }
 }
 
+function parseNumber(ctx: ParseCtx): number {
+    const t = advance(ctx);
+    if (!t) return 0;
+    if (t.value.startsWith('@')) {
+        return ctx.constants[t.value] ?? 1.0;
+    }
+    return parseFloat(t.value);
+}
+
 function parseFloat3(ctx: ParseCtx): [number, number, number] {
     expect(ctx, '{');
-    const x = parseFloat(advance(ctx)?.value ?? '0');
-    const y = parseFloat(advance(ctx)?.value ?? '0');
-    const z = parseFloat(advance(ctx)?.value ?? '0');
+    const x = parseNumber(ctx);
+    const y = parseNumber(ctx);
+    const z = parseNumber(ctx);
     expect(ctx, '}');
     return [x, y, z];
 }
@@ -134,7 +159,7 @@ function parseLocatorBlock(ctx: ParseCtx, stateName?: string): LocatorOverride {
             case 'position': loc.position = parseFloat3(ctx); break;
             case 'rotation': loc.rotation = parseFloat3(ctx); break;
             case 'parent_joint': loc.parentJoint = advance(ctx)!.value.replace(/"/g, ''); break;
-            case 'scale': loc.scale = parseFloat(advance(ctx)!.value); break;
+            case 'scale': loc.scale = parseNumber(ctx); break;
             default: {
                 const next = peek(ctx);
                 if (next?.value === '{') { advance(ctx); skipBlock(ctx); }
@@ -260,7 +285,7 @@ function parseEntityBlock(ctx: ParseCtx, filePath: string): EntityDefinition {
             case 'name': entity.name = advance(ctx)!.value.replace(/"/g, ''); break;
             case 'pdxmesh': entity.pdxmesh = advance(ctx)!.value.replace(/"/g, ''); break;
             case 'clone': entity.clone = advance(ctx)!.value.replace(/"/g, ''); break;
-            case 'scale': entity.scale = parseFloat(advance(ctx)!.value); break;
+            case 'scale': entity.scale = parseNumber(ctx); break;
             case 'default_state': entity.defaultState = advance(ctx)!.value.replace(/"/g, ''); break;
             case 'locator': entity.locators.push(parseLocatorBlock(ctx)); break;
             case 'state': entity.states.push(parseStateBlock(ctx)); break;
@@ -297,7 +322,7 @@ function parsePdxMeshBlock(ctx: ParseCtx): MeshDefinition {
         switch (key) {
             case 'name': mesh.name = advance(ctx)!.value.replace(/"/g, ''); break;
             case 'file': mesh.file = advance(ctx)!.value.replace(/"/g, ''); break;
-            case 'scale': mesh.scale = parseFloat(advance(ctx)!.value); break;
+            case 'scale': mesh.scale = parseNumber(ctx); break;
             case 'meshsettings': mesh.meshSettings.push(parseMeshSettingBlock(ctx)); break;
             case 'animation': {
                 const anim = parseAnimationBlock(ctx);
@@ -325,7 +350,8 @@ function parsePdxMeshBlock(ctx: ParseCtx): MeshDefinition {
  */
 export function parseAssetFile(content: string, filePath: string): { entities: EntityDefinition[], animations: Record<string, string> } {
     const tokens = tokenize(content);
-    const ctx: ParseCtx = { tokens, pos: 0 };
+    const constants = extractConstants(tokens);
+    const ctx: ParseCtx = { tokens, pos: 0, constants };
     const entities: EntityDefinition[] = [];
     const animations: Record<string, string> = {};
 
@@ -361,7 +387,8 @@ export function parseAssetFile(content: string, filePath: string): { entities: E
  */
 export function parseGfxFile(content: string): MeshDefinition[] {
     const tokens = tokenize(content);
-    const ctx: ParseCtx = { tokens, pos: 0 };
+    const constants = extractConstants(tokens);
+    const ctx: ParseCtx = { tokens, pos: 0, constants };
     const meshes: MeshDefinition[] = [];
 
     while (ctx.pos < ctx.tokens.length) {

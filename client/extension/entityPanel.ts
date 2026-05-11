@@ -1300,15 +1300,27 @@ export class EntityPanel {
         <select id="sel-entity" style="display:none"></select>
         <select id="sel-state" style="display:none"></select>
         <span class="toolbar-separator"></span>
-        <button id="btn-focus" class="toolbar-btn" title="F"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="3"/></svg> <span data-i18n="focus">Focus (F)</span></button>
+        <button id="btn-focus" class="toolbar-icon-btn" data-i18n-title="focus"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><circle cx="12" cy="12" r="3"/></svg></button>
         <span class="toolbar-separator"></span>
-        <button id="btn-translate" class="toolbar-btn tool-mode active" title="W" data-mode="translate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="14,7 19,12 14,17"/><line x1="12" y1="5" x2="12" y2="19"/><polyline points="7,14 12,19 17,14"/></svg> <span>W</span></button>
-        <button id="btn-rotate" class="toolbar-btn tool-mode" title="E" data-mode="rotate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><polyline points="21,3 21,9 15,9"/></svg> <span>E</span></button>
+        <button id="btn-translate" class="toolbar-icon-btn tool-mode active" data-i18n-title="translateBtn" data-mode="translate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="14,7 19,12 14,17"/><line x1="12" y1="5" x2="12" y2="19"/><polyline points="7,14 12,19 17,14"/></svg></button>
+        <button id="btn-rotate" class="toolbar-icon-btn tool-mode" data-i18n-title="rotateBtn" data-mode="rotate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><polyline points="21,3 21,9 15,9"/></svg></button>
         <span class="toolbar-separator"></span>
-        <label><input type="checkbox" id="chk-wireframe"> <span data-i18n="wireframe">Wireframe</span></label>
-        <label><input type="checkbox" id="chk-locators" checked> <span data-i18n="locators">Locators</span></label>
-        <label><input type="checkbox" id="chk-bones"> <span data-i18n="bones">Bones</span></label>
-        <label><input type="checkbox" id="chk-normals"> <span data-i18n="disableNormals">Disable Normals</span></label>
+        <label class="toolbar-checkbox-btn" data-i18n-title="wireframe">
+            <input type="checkbox" id="chk-wireframe">
+            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/><line x1="12" y1="22" x2="12" y2="12"/></svg></div>
+        </label>
+        <label class="toolbar-checkbox-btn" data-i18n-title="locators">
+            <input type="checkbox" id="chk-locators" checked>
+            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
+        </label>
+        <label class="toolbar-checkbox-btn" data-i18n-title="bones">
+            <input type="checkbox" id="chk-bones">
+            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg></div>
+        </label>
+        <label class="toolbar-checkbox-btn" data-i18n-title="disableNormals">
+            <input type="checkbox" id="chk-normals">
+            <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
+        </label>
     </div>
 
     <div id="main-content">

@@ -161,9 +161,17 @@ export class ExternalToolHandler {
         }
 
         try {
-            const response = await fetch(args.url, {
-                headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            let response: Response;
+            try {
+                response = await fetch(args.url, {
+                    headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
+                    signal: controller.signal as any
+                });
+            } finally {
+                clearTimeout(timeoutId);
+            }
             if (!response.ok) {
                 return { content: `HTTP ${response.status}: ${response.statusText}`, url: args.url, truncated: false };
             }
@@ -396,13 +404,21 @@ export class ExternalToolHandler {
         if (braveKey) {
             try {
                 const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
-                const resp = await fetch(url, {
-                    headers: {
-                        'Accept': 'application/json',
-                        'Accept-Encoding': 'gzip',
-                        'X-Subscription-Token': braveKey,
-                    },
-                });
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
+                let resp: Response;
+                try {
+                    resp = await fetch(url, {
+                        headers: {
+                            'Accept': 'application/json',
+                            'Accept-Encoding': 'gzip',
+                            'X-Subscription-Token': braveKey,
+                        },
+                        signal: controller.signal as any
+                    });
+                } finally {
+                    clearTimeout(timeoutId);
+                }
                 if (resp.ok) {
                     const data = await resp.json() as {
                         web?: { results?: Array<{ title: string; url: string; description?: string }> }
@@ -420,9 +436,17 @@ export class ExternalToolHandler {
         // Fallback: DuckDuckGo HTML scraping
         try {
             const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-            const resp = await fetch(ddgUrl, {
-                headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            let resp: Response;
+            try {
+                resp = await fetch(ddgUrl, {
+                    headers: { 'User-Agent': 'CWTools-AI/1.0 (Stellaris Mod Assistant)' },
+                    signal: controller.signal as any
+                });
+            } finally {
+                clearTimeout(timeoutId);
+            }
             const html = await resp.text();
 
             const results: Array<{ title: string; url: string; description: string }> = [];
@@ -474,19 +498,27 @@ export class ExternalToolHandler {
         const exaKey = vs.workspace.getConfiguration('cwtools.ai').get<string>('exaApiKey') ?? '';
         if (exaKey) {
             try {
-                const resp = await fetch('https://api.exa.ai/search', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': exaKey,
-                    },
-                    body: JSON.stringify({
-                        query,
-                        numResults: maxResults,
-                        type: 'auto',
-                        contents: { text: { maxCharacters: 300 } },
-                    }),
-                });
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
+                let resp: Response;
+                try {
+                    resp = await fetch('https://api.exa.ai/search', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': exaKey,
+                        },
+                        body: JSON.stringify({
+                            query,
+                            numResults: maxResults,
+                            type: 'auto',
+                            contents: { text: { maxCharacters: 300 } },
+                        }),
+                        signal: controller.signal as any
+                    });
+                } finally {
+                    clearTimeout(timeoutId);
+                }
                 if (resp.ok) {
                     const data = await resp.json() as {
                         results?: Array<{ title?: string; url?: string; text?: string }>;

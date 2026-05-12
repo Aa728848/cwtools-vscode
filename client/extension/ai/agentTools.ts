@@ -82,8 +82,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     git_ops: 30_000,
     // Todo — 纯内存操作，极短超时即可
     todo_write: 5_000,
-    // Orchestrator — 子 Agent 调度需要较长时间，多个串行/深思任务极易超过10分钟
-    dispatch_agents: 600_000,
+    // Orchestrator — 子 Agent 调度需要较长时间，由协调器自身生命周期和外部 AbortSignal 管理
+    // 超时放宽至 1 小时，防止因为大语言模型响应慢导致意外超时和僵尸重试
+    dispatch_agents: 3600_000,
     merge_results: 30_000,
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
@@ -669,6 +670,9 @@ export class AgentToolExecutor {
 
     // ── Orchestrator 调度实现 ─────────────────────────────────────────────────
 
+    /** 正在执行的 Orchestrator 中止控制器（防重入保护） */
+    private _activeDispatchAbortController?: AbortController;
+
     /** 最近一次协调器执行结果（供 merge_results 读取） */
     private _lastOrchestratorResult?: import('./orchestrator/types').OrchestratorResult;
 
@@ -677,6 +681,15 @@ export class AgentToolExecutor {
      * 然后通过 Orchestrator.execute() 触发真正的多 Agent 并行执行。
      */
     private async executeDispatchAgents(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
+        // 防重入：如果已经有正在运行的调度（由于超时重试或用户强制中断），先中止旧的以清理僵尸进程
+        if (this._activeDispatchAbortController) {
+            this._activeDispatchAbortController.abort('New dispatch_agents call replaced the previous one.');
+            this._activeDispatchAbortController = undefined;
+        }
+
+        const localAbort = new AbortController();
+        this._activeDispatchAbortController = localAbort;
+
         const tasks = args.tasks as Array<{
             id: string;
             agentType: string;
@@ -742,10 +755,16 @@ export class AgentToolExecutor {
 
             // 构建执行选项（优先从 AgentToolContext 读取，回退到旧的实例字段）
             const runnerOpts = context?.runnerOptions ?? this.parentRunnerOptions;
+            const globalSignal = runnerOpts?.abortSignal;
+            const onGlobalAbort = () => localAbort.abort(globalSignal?.reason);
+            if (globalSignal) {
+                globalSignal.addEventListener('abort', onGlobalAbort);
+            }
+
             const options: import('./orchestrator/types').OrchestratorOptions = {
                 providerId: runnerOpts?.providerId,
                 model: runnerOpts?.model,
-                abortSignal: runnerOpts?.abortSignal,
+                abortSignal: localAbort.signal,
                 topicId: runnerOpts?.topicId,
                 onStep: context?.onStep,
                 onBeforeFileWrite: runnerOpts?.onBeforeFileWrite,
@@ -759,8 +778,18 @@ export class AgentToolExecutor {
                 timestamp: Date.now(),
             });
 
-            // 执行
-            const result = await orchestrator.execute(graph, options);
+            let result;
+            try {
+                // 执行
+                result = await orchestrator.execute(graph, options);
+            } finally {
+                if (globalSignal) {
+                    globalSignal.removeEventListener('abort', onGlobalAbort);
+                }
+                if (this._activeDispatchAbortController === localAbort) {
+                    this._activeDispatchAbortController = undefined;
+                }
+            }
 
             // 缓存结果供 merge_results 使用
             this._lastOrchestratorResult = result;

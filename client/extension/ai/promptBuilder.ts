@@ -81,8 +81,12 @@ When editing files, writing new code, or proposing plans in ANY mode, your absol
 - Emitting code that is not supported by ANY of these sources and immediately triggers obvious LSP errors is considered a severe failure.`;
 
 const ANALYSIS_COMPLIANCE_RULE = `## 🛑 CRITICAL: Analytical & Suggestion Legality
-When analyzing problems, reviewing code, proposing optimization plans, or writing implementation plans, your reasoning and any proposed code snippets MUST be grounded in PDXScript legality.
-- Your entire understanding of the issue and any recommendations must be evaluated against the 3 authoritative sources (LSP Rules, Vanilla Files, Project Codebase).
+When analyzing problems, diagnosing errors, reviewing code, proposing optimization plans, or writing implementation plans, your reasoning and any proposed code snippets MUST be grounded in PDXScript legality.
+- **Diagnostic Workflow**: When diagnosing an error or analyzing unknown code, you MUST follow this strict order:
+  1. **Check Local Rules FIRST**: Use \`query_rules\`, \`query_types\`, or \`query_scripted_effects\` to check the CWTools syntax definitions.
+  2. **Check Vanilla Implementation**: Use \`workspace_symbols\` or \`query_definition_by_name\` to see how the original game implements it.
+  3. **Web Search as LAST RESORT**: Only use \`web_fetch\`, \`search_web\`, or \`codesearch\` if the local rules and vanilla cache yield no results. Web information for Paradox modding is often outdated or hallucinated by AI tools.
+- Your entire understanding of the issue and any recommendations must be evaluated against these 3 authoritative sources (LSP Rules, Vanilla Files, Project Codebase).
 - If you are writing an Implementation Plan that contains proposed code snippets, you MUST verify that the syntax, properties, triggers, and effects you plan to write are 100% legal BEFORE you put them in the plan. Do not hallucinate code in your plan!
 - Do NOT judge code or propose standard programming patterns (e.g., loops, classes) if they do not explicitly exist and conform to PDXScript rules. Ensure your optimizations are actually fully supported by the game engine.`;
 
@@ -90,7 +94,7 @@ const BLACKBOARD_USAGE_RULE = `## 🧠 Multi-Agent Blackboard
 You are currently running as a specialized sub-agent in a multi-agent workflow. You have access to a shared memory space called the Blackboard.
 - Use \`query_blackboard\` to read shared context (e.g., event IDs, scope definitions, decisions made by other agents).
 - Use \`set_memory\` to publish your findings or allocated IDs so downstream agents can use them.
-- ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file (e.g. \`.cwtools-ai/scratch/data.json\`) and then use \`set_memory\` to only share the file path.
+- ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file (e.g. \`.cwtools-ai/scratch/data.md\`) and then use \`set_memory\` to only share the file path.
 - Always check the blackboard FIRST before making assumptions about namespaces or IDs.`;
 
 // ─── Build Mode System Prompt Template ───────────────────────────────────────

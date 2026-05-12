@@ -359,7 +359,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'analyze_diagnostic_error',
-            description: 'MANDATORY on file modification errors. Perform deep reflection before retrying: explain root cause, trace context, outline fix plan. Forces a thinking step.',
+            description: 'MANDATORY on file modification errors. Perform deep reflection before retrying: explain root cause, trace context, outline fix plan. Forces a thinking step. ⚠️ Prioritize checking local rules (query_rules) and vanilla examples (workspace_symbols) before using web searches.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -408,7 +408,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'web_fetch',
-            description: 'Fetch the text content of a public URL (e.g. Stellaris wiki pages, GitHub raw files). Converts HTML to plain text. Use for looking up game mechanics, modding documentation, or locating vanilla definitions online.',
+            description: 'Fetch the text content of a public URL (e.g. Stellaris wiki pages, GitHub raw files). Converts HTML to plain text. Use for looking up game mechanics, modding documentation, or locating vanilla definitions online. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -440,7 +440,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_web',
-            description: 'Search the web for information about Stellaris modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (cwtools.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs.',
+            description: 'Search the web for information about Stellaris modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (cwtools.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -455,7 +455,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'codesearch',
-            description: 'Search code repositories and developer documentation semantically (powered by Exa API if configured). Use for finding examples of PDXScript patterns, mod implementation references, or any code-level search. Falls back to Brave Search with code-specific query modifiers if no Exa key configured.',
+            description: 'Search code repositories and developer documentation semantically (powered by Exa API if configured). Use for finding examples of PDXScript patterns, mod implementation references, or any code-level search. Falls back to Brave Search with code-specific query modifiers if no Exa key configured. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {

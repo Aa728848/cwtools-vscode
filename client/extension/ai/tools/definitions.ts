@@ -156,7 +156,30 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     directory: { type: 'string', description: 'Optional subdirectory to restrict search, e.g. "common/scripted_triggers" or "events"' },
                     fileExtension: { type: 'string', description: 'File extension filter, default ".txt". Use ".yml" for localisation.' },
                     exactMatch: { type: 'boolean', description: 'If true, searches exactly matching complete words using RegEx boundaries. Default: false (wide .includes match)' },
-                    searchContext: { type: 'string', enum: ['mod', 'vanilla', 'both'], description: 'Context to search. "mod" searches workspace. "vanilla" searches the base game directory cached by CWTools. Default "mod".' }
+                    searchContext: { type: 'string', enum: ['mod', 'vanilla', 'both'], description: 'Context to search. "mod" searches workspace. "vanilla" searches the base game directory cached by CWTools. Default "mod".' },
+                    isRegex: { type: 'boolean', description: 'If true, will treat query as a regular expression. Default: false.' },
+                    caseSensitive: { type: 'boolean', description: 'Case sensitive search. Default: false.' },
+                    limit: { type: 'number', description: 'Maximum number of files to return (default 30, max 50). Lower values are recommended for exact searches.' },
+                    fileExtensions: { type: 'array', items: { type: 'string' }, description: 'Multiple file extensions to filter by, e.g. [".txt", ".gui"]. If provided, overrides the fileExtension parameter.' }
+                },
+                required: ['query'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'grep',
+            description: 'Searches for files matching the specified text/regular expression within the specified path. Returns matching lines and line numbers. Suitable for searching any text pattern within the workspace. To search for vanilla game files, use `search_mod_files(searchContext="vanilla")`.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'The search pattern or regex to look for.' },
+                    path: { type: 'string', description: 'The path to search within (directory or file), relative to the workspace or absolute.' },
+                    isRegex: { type: 'boolean', description: 'If true, the query will be treated as a regular expression. Default: false.' },
+                    caseSensitive: { type: 'boolean', description: 'Perform a case-sensitive search. Default: false.' },
+                    include: { type: 'string', description: 'Glob pattern to filter files, e.g., "*.txt" or "**/*.{txt,gui}".' },
+                    limit: { type: 'number', description: 'Maximum number of matching lines to return (default 50, max 200).' },
                 },
                 required: ['query'],
             },
@@ -239,7 +262,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'read_file',
-            description: 'Read file content with optional line range. Always returns line numbers. **For large files (>150 lines), you MUST use startLine+endLine to read only the section you need.** Recommended workflow for unknown files: (1) call document_symbols to get structure and line ranges, (2) call read_file with the specific startLine/endLine for the symbol you want. Never read the entire file just to find one function. Max output is ~12000 chars; if truncated, the response includes totalLines and a hint telling you how to read the next section.',
+            description: 'Read file content with optional line range. Always returns line numbers. **For large files (>150 lines), you MUST use startLine+endLine to read only the section you need.** Recommended workflow for unknown files: (1) call document_symbols to get structure and line ranges, (2) call read_file with the specific startLine/endLine for the symbol you want. Never read the entire file just to find one function. Max output is dynamically bounded; if truncated, the response includes totalLines and a hint telling you how to read the next section. If target file is an image (.dds/.tga/.png/.jpg), returns its metadata (width, height, format, etc).',
             parameters: {
                 type: 'object',
                 properties: {

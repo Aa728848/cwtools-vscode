@@ -13,6 +13,7 @@ import * as readline from 'readline';
 import { parsePdx, PdxNode } from '../../guiParser';
 import type { ValidationError } from '../types';
 import { getCachedFile, setCachedFile } from '../fileCache';
+import { getToolResultBudget } from '../contextBudget';
 import { fuzzyReplace } from './replacerSuite';
 
 // ─── Shared file-system helpers ──────────────────────────────────────────────
@@ -178,6 +179,12 @@ export class FileToolHandler {
         try {
             args.file = this.resolveAndAssertInWorkspace(args.file);
 
+            const ext = path.extname(args.file).toLowerCase();
+            const IMAGE_EXTS = ['.dds', '.tga', '.png', '.jpg', '.jpeg', '.bmp'];
+            if (IMAGE_EXTS.includes(ext)) {
+                return await this.readImageMetadata(args.file);
+            }
+
             // ── Cache: serve full-file reads from memory ───────────────────
             if (!args.startLine && !args.endLine) {
                 const cached = getCachedFile(args.file);
@@ -189,11 +196,17 @@ export class FileToolHandler {
                         threshold = 500;
                     }
                     if (totalLines > threshold) {
+                        const headLines = lines.slice(0, 80);
+                        const tailLines = lines.slice(-20);
+                        const headContent = headLines.map((l, i) => `${1 + i} | ${l}`).join('\n');
+                        const tailContent = tailLines.map((l, i) => `${totalLines - 19 + i} | ${l}`).join('\n');
+                        const gapInfo = `\n... [${totalLines - 100} lines omitted — use document_symbols to locate, then read_file for specifics] ...\n`;
+
                         return {
-                            content: '',
+                            content: headContent + gapInfo + tailContent,
                             totalLines,
                             truncated: true,
-                            _hint: `File has ${totalLines} lines — too long to read in full. Suggestion: call document_symbols("${args.file}") to locate the section you need, then re-invoke read_file with startLine and endLine parameters (max ${threshold} lines per call).`,
+                            _hint: `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`,
                         };
                     }
                     return { content: cached, totalLines, truncated: false };
@@ -253,13 +266,17 @@ export class FileToolHandler {
             const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
 
             if (totalLines > threshold && !args.startLine && !args.endLine) {
+                const headLines = slice.slice(0, 80);
+                const tailLines = slice.slice(-20);
+                const headContent = headLines.map((l, i) => `${1 + i} | ${l}`).join('\n');
+                const tailContent = tailLines.map((l, i) => `${totalLines - 19 + i} | ${l}`).join('\n');
+                const gapInfo = `\n... [${totalLines - 100} lines omitted — use document_symbols to locate, then read_file for specifics (max ${threshold} lines at a time)] ...\n`;
+
                 return {
-                    content: '',
+                    content: headContent + gapInfo + tailContent,
                     totalLines,
                     truncated: true,
-                    _hint: `File has ${totalLines} lines — too long to read in full. ` +
-                        `Suggestion: call document_symbols("${args.file}") to locate the section you need, ` +
-                        `then re-invoke read_file with startLine and endLine parameters (max ${threshold} lines per call).`,
+                    _hint: `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`,
                 };
             }
 
@@ -272,7 +289,7 @@ export class FileToolHandler {
             // Format with succinct line prefix (saves ~1 token per line vs "1234: ")
             const numbered = slice.map((l, i) => `${start + i} | ${l}`).join('\n');
 
-            const MAX_READ_CHARS = 12000;
+            const MAX_READ_CHARS = getToolResultBudget(context?.runnerOptions?.maxContextTokens);
             const truncated = numbered.length > MAX_READ_CHARS;
             let resultContent: string;
             if (truncated) {
@@ -308,6 +325,64 @@ export class FileToolHandler {
             };
         } catch (e) {
             return { content: `Error reading file:${String(e)}`, totalLines: 0, truncated: false };
+        }
+    }
+
+    private async readImageMetadata(filePath: string): Promise<any> {
+        try {
+            const ext = path.extname(filePath).toLowerCase();
+            const stat = await fs.promises.stat(filePath);
+            const fileSize = stat.size;
+
+            let metadata: any = { type: 'image_metadata', ext, fileSize };
+
+            if (ext === '.dds') {
+                const fd = await fs.promises.open(filePath, 'r');
+                try {
+                    const buf = Buffer.alloc(128);
+                    await fd.read(buf, 0, 128, 0);
+                    // DDS magic is 'DDS '
+                    if (buf.toString('utf8', 0, 4) === 'DDS ') {
+                        metadata.height = buf.readUInt32LE(12);
+                        metadata.width = buf.readUInt32LE(16);
+                        metadata.mipmaps = buf.readUInt32LE(28);
+                        
+                        // Pixel format starts at 76
+                        const flags = buf.readUInt32LE(80);
+                        const fourCC = buf.toString('utf8', 84, 88);
+                        if (flags & 0x4) {
+                            metadata.format = fourCC; // e.g. DXT1, DXT5, DX10
+                        } else {
+                            metadata.format = 'Uncompressed/RGB';
+                        }
+                    }
+                } finally {
+                    await fd.close();
+                }
+            } else if (ext === '.tga') {
+                const fd = await fs.promises.open(filePath, 'r');
+                try {
+                    const buf = Buffer.alloc(18);
+                    await fd.read(buf, 0, 18, 0);
+                    metadata.width = buf.readUInt16LE(12);
+                    metadata.height = buf.readUInt16LE(14);
+                    const bpp = buf.readUInt8(16);
+                    metadata.format = `TGA ${bpp}bpp`;
+                } finally {
+                    await fd.close();
+                }
+            } else {
+                metadata.format = ext.replace('.', '').toUpperCase();
+                metadata.hint = 'To view exact dimensions of png/jpg, use an image preview or node image-size library. Standard read gives only basic metadata.';
+            }
+
+            return {
+                content: JSON.stringify(metadata, null, 2),
+                totalLines: 1,
+                truncated: false,
+            };
+        } catch (e: any) {
+            return { content: `Error reading image metadata: ${e.message}`, totalLines: 0, truncated: false };
         }
     }
 

@@ -1398,6 +1398,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         liveTextContent: string;
         liveThinkContent: string;
         container: HTMLElement | null;
+        /** 存储 fullscreen 容器的 uniqueId，用于 subtask_complete 时查找对应卡片 */
+        fullscreenId: string | null;
     }
     const streamStates = new Map<string, AgentStreamState>();
 
@@ -1414,10 +1416,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 liveTextBubble: null,
                 liveTextContent: '',
                 liveThinkContent: '',
-                container: currentAssistantDiv
+                container: currentAssistantDiv,
+                fullscreenId: null,
             };
             if (agentId && currentAssistantDiv) {
                 const uniqueId = `live-subview-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                state.fullscreenId = uniqueId;
 
                 // Card representation in the main timeline
                 const card = document.createElement('div');
@@ -1490,8 +1494,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const state = getStreamState(s.agentId);
 
         if (s.type === 'subtask_complete') {
-            if (state.container && state.container.id) {
-                const card = document.querySelector(`.subagent-card[data-target-id="${state.container.id}"]`);
+            // 使用显式存储的 fullscreenId 查找卡片（修复：state.container 指向 .subagent-body，没有 id）
+            if (state.fullscreenId) {
+                const card = document.querySelector(`.subagent-card[data-target-id="${state.fullscreenId}"]`);
                 if (card) {
                     card.classList.remove('lane-running');
                     const statusText = card.querySelector('.lane-status-text');

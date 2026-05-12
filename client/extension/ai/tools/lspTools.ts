@@ -726,33 +726,46 @@ export class LspToolHandler {
     // ─── queryReferences ─────────────────────────────────────────────────────
 
     async queryReferences(args: { identifier: string; file?: string }): Promise<QueryReferencesResult> {
-        const references: Array<{ file: string; line: number; context: string }> = [];
-
         try {
-            const searchRoot = args.file ? path.dirname(args.file) : this.ctx.workspaceRoot;
-            const files = this.findFilesFn(searchRoot, '.txt');
-
-            for (const file of files) {
-                try {
-                    const content = fs.readFileSync(file, 'utf-8');
-                    const lines = content.split('\n');
-                    for (let i = 0; i < lines.length; i++) {
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                        if (lines[i]!.includes(args.identifier)) {
-                            references.push({
-                                file: path.relative(this.ctx.workspaceRoot, file),
-                                line: i,
-                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                                context: lines[i]!.trim().substring(0, 120),
-                            });
-                        }
-                    }
-                } catch { /* skip */ }
-                if (references.length >= 30) break;
+            // Strategy 1: LSP via workspace_symbols + executeReferenceProvider
+            const symbols = await this.vsCommand<vs.SymbolInformation[]>(
+                'vscode.executeWorkspaceSymbolProvider', [args.identifier]
+            );
+            if (symbols && symbols.length > 0) {
+                const sym = symbols.find(s => s.name === args.identifier) || symbols[0]!;
+                const refs = await this.vsCommand<vs.Location[]>(
+                    'vscode.executeReferenceProvider',
+                    [sym.location.uri, sym.location.range.start]
+                );
+                if (refs && refs.length > 0) {
+                    return {
+                        references: refs.slice(0, 50).map(r => ({
+                            file: path.relative(this.ctx.workspaceRoot, r.uri.fsPath).replace(/\\/g, '/'),
+                            line: r.range.start.line,
+                            context: '', // LSP doesn't provide line content natively without opening the document
+                        })),
+                    };
+                }
             }
-        } catch { /* skip */ }
+        } catch { /* fallback to text search */ }
 
-        return { references };
+        // Strategy 2: Text search using findTextInFiles via grep
+        try {
+            const grepRes = await this.grep({
+                query: args.identifier,
+                path: args.file ? path.relative(this.ctx.workspaceRoot, path.dirname(args.file)) : undefined,
+                limit: 50
+            });
+            return {
+                references: grepRes.matches.map(m => ({
+                    file: m.file,
+                    line: m.line,
+                    context: m.content.substring(0, 120)
+                }))
+            };
+        } catch {
+            return { references: [] };
+        }
     }
 
     // ─── validateCode ────────────────────────────────────────────────────────
@@ -1124,135 +1137,251 @@ export class LspToolHandler {
         }
     }
 
-    async searchModFiles(args: { query: string; directory?: string; fileExtension?: string; exactMatch?: boolean; searchContext?: 'mod' | 'vanilla' | 'both' }): Promise<SearchModFilesResult> {
-        const results: SearchModFilesResult['files'] = [];
-
-        const workspaceFolders = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [this.ctx.workspaceRoot];
-
-        const searchRoots: string[] = [];
+    async searchModFiles(args: import('../types').SearchModFilesArgs): Promise<import('../types').SearchModFilesResult> {
+        const limit = Math.min(args.limit ?? 30, 50);
+        const results: import('../types').SearchModFilesResult['files'] = [];
         const ctxStr = args.searchContext || 'mod';
+        const workspaceFolders = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [this.ctx.workspaceRoot];
+        const searchedRoots: string[] = [];
+        let limitReached = false;
 
-        // Add Mod roots
+        const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
         if (ctxStr === 'mod' || ctxStr === 'both') {
-            if (args.directory) {
-                for (const wsRoot of workspaceFolders) {
-                    const candidate = path.join(wsRoot, args.directory);
-                    if (fs.existsSync(candidate)) searchRoots.push(candidate);
-                }
-                if (searchRoots.length === 0 && fs.existsSync(args.directory)) {
-                    const resolvedDir = path.resolve(args.directory);
-                    const isWindows = process.platform === 'win32';
-                    const checkDir = isWindows ? resolvedDir.toLowerCase() : resolvedDir;
-                    const isWithinWorkspace = workspaceFolders.some(ws => {
-                        const wsResolved = path.resolve(ws);
-                        const checkWs = isWindows ? wsResolved.toLowerCase() : wsResolved;
-                        return checkDir.startsWith(checkWs + path.sep) || checkDir === checkWs;
-                    });
-                    if (isWithinWorkspace) {
-                        searchRoots.push(resolvedDir);
-                    }
-                }
-            } else {
-                searchRoots.push(...workspaceFolders);
+            searchedRoots.push(...workspaceFolders);
+            const pattern = args.isRegex ? args.query : escapeRegex(args.query);
+            let finalPattern = pattern;
+            if (args.exactMatch) {
+                finalPattern = `\\b${pattern}\\b`;
             }
+
+            const query: any = {
+                pattern: finalPattern,
+                isRegExp: true,
+                isCaseSensitive: args.caseSensitive ?? false,
+                isWordMatch: false, // handled by regex boundary
+            };
+
+            let includeGlob = '';
+            if (args.fileExtensions && args.fileExtensions.length > 0) {
+                const exts = args.fileExtensions.map(e => e.replace(/^\./, '')).join(',');
+                includeGlob = `**/*.{${exts}}`;
+            } else {
+                includeGlob = `**/*${args.fileExtension || '.txt'}`;
+            }
+
+            if (args.directory) {
+                includeGlob = `${args.directory}/${includeGlob}`;
+            }
+
+            const options: any = {
+                include: new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob),
+                maxResults: limit * 10,
+                previewOptions: { matchLines: 1, charsPerLine: 120 },
+            };
+
+            const fileMatches = new Map<string, Array<{ line: number; content: string }>>();
+            
+            try {
+                await (vs.workspace as any).findTextInFiles(query, options, (result: any) => {
+                    if (fileMatches.size >= limit && !fileMatches.has(result.uri.fsPath)) {
+                        limitReached = true;
+                        return;
+                    }
+                    if (!fileMatches.has(result.uri.fsPath)) {
+                        fileMatches.set(result.uri.fsPath, []);
+                    }
+                    const arr = fileMatches.get(result.uri.fsPath)!;
+                    if (arr.length < 10) {
+                        if ('preview' in result) {
+                            arr.push({
+                                line: result.ranges[0]!.startLineNumber,
+                                content: result.preview.text.trim()
+                            });
+                        } else {
+                            // TextSearchMatch
+                            arr.push({
+                                line: result.ranges instanceof vs.Range ? result.ranges.start.line : result.ranges[0]!.start.line,
+                                content: result.preview.text.trim()
+                            });
+                        }
+                    }
+                });
+
+                for (const [fsPath, matchingLines] of fileMatches.entries()) {
+                    results.push({
+                        logicalPath: path.relative(this.ctx.workspaceRoot, fsPath).replace(/\\/g, '/'),
+                        matchingLines
+                    });
+                }
+            } catch { /* skip */ }
         }
 
-        // Add Vanilla root
         if (ctxStr === 'vanilla' || ctxStr === 'both') {
             const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
-            // Check Stellaris cache, fall back to language specific paths if added later
             const vanillaStellaris = cwtoolsConfig.get<string>('cache.stellaris');
-            // Assuming we also check cache.hoi4 etc. if needed
             const vanillaMods = [vanillaStellaris].filter(Boolean) as string[];
+            
+            const vanillaRoots: string[] = [];
             for (const vMod of vanillaMods) {
                 if (args.directory) {
                     const candidate = path.join(vMod, args.directory);
-                    if (fs.existsSync(candidate)) searchRoots.push(candidate);
+                    if (fs.existsSync(candidate)) vanillaRoots.push(candidate);
                 } else if (fs.existsSync(vMod)) {
-                    searchRoots.push(vMod);
+                    vanillaRoots.push(vMod);
                 }
             }
-        }
+            searchedRoots.push(...vanillaRoots);
 
-        const ext = args.fileExtension ?? '.txt';
-        const queryLower = args.query.toLowerCase();
-        
-        let exactRegex: RegExp | null = null;
-        if (args.exactMatch) {
-            // Escape query and wrap in boundaries.
-            const escapedQuery = args.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const exts = args.fileExtensions ?? [args.fileExtension ?? '.txt'];
+            const queryLower = args.query.toLowerCase();
+            let exactRegex: RegExp | null = null;
+            
+            const pattern = args.isRegex ? args.query : escapeRegex(args.query);
+            let finalPattern = pattern;
+            if (args.exactMatch) {
+                finalPattern = `\\b${pattern}\\b`;
+            }
             try {
-                exactRegex = new RegExp('\\b' + escapedQuery + '\\b', 'i');
+                exactRegex = new RegExp(finalPattern, args.caseSensitive ? '' : 'i');
             } catch (e) {
-                exactRegex = new RegExp(escapedQuery, 'i');
+                exactRegex = new RegExp(escapeRegex(args.query), 'i');
             }
-        }
 
-        const MAX_SEARCH_RESULTS = 15;
-        let limitReached = false;
-
-        for (const searchRoot of searchRoots) {
-            try {
-                const files = this.findFilesFn(searchRoot, ext, 1000);
-                
-                // Process in chunks of 50 to avoid running out of file descriptors or memory
-                const CHUNK_SIZE = 50;
-                for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-                    if (results.length >= MAX_SEARCH_RESULTS) { limitReached = true; break; }
+            for (const searchRoot of vanillaRoots) {
+                try {
+                    const files: string[] = [];
+                    for (const ext of exts) {
+                        files.push(...this.findFilesFn(searchRoot, ext, 1000));
+                    }
                     
-                    const chunk = files.slice(i, i + CHUNK_SIZE);
-                    await Promise.all(chunk.map(async (file) => {
-                        if (results.length >= MAX_SEARCH_RESULTS) { limitReached = true; return; }
-                        try {
-                            const content = await fs.promises.readFile(file, 'utf-8');
-                            // Early rejection based on loose text search
-                            const contentLower = content.toLowerCase();
-                            if (!contentLower.includes(queryLower)) return;
-                            
-                            // If exact match is required, perform regex test
-                            if (args.exactMatch && exactRegex && !exactRegex.test(content)) {
-                                return;
-                            }
-
-                            const lines = content.split('\n');
-                            const matchingLines: Array<{ line: number; content: string }> = [];
-                            for (let j = 0; j < lines.length; j++) {
-                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                                const lineStr = lines[j]!;
-                                if (args.exactMatch && exactRegex) {
-                                    if (exactRegex.test(lineStr)) {
-                                        matchingLines.push({ line: j, content: lineStr.trim().substring(0, 120) });
-                                    }
-                                } else if (lineStr.toLowerCase().includes(queryLower)) {
-                                    matchingLines.push({ line: j, content: lineStr.trim().substring(0, 120) });
+                    const CHUNK_SIZE = 50;
+                    for (let i = 0; i < files.length; i += CHUNK_SIZE) {
+                        if (results.length >= limit) { limitReached = true; break; }
+                        
+                        const chunk = files.slice(i, i + CHUNK_SIZE);
+                        await Promise.all(chunk.map(async (file) => {
+                            if (results.length >= limit) { limitReached = true; return; }
+                            try {
+                                const content = await fs.promises.readFile(file, 'utf-8');
+                                if (!args.isRegex && !args.caseSensitive && !args.exactMatch) {
+                                    if (!content.toLowerCase().includes(queryLower)) return;
+                                } else {
+                                    if (exactRegex && !exactRegex.test(content)) return;
                                 }
-                                if (matchingLines.length >= 10) break;
-                            }
-                            
-                            // Because we're in parallel, check one last time before pushing
-                            if (results.length < MAX_SEARCH_RESULTS) {
-                                results.push({
-                                    logicalPath: path.relative(searchRoot, file).replace(/\\/g, '/'),
-                                    matchingLines,
-                                });
-                            } else {
-                                limitReached = true;
-                            }
-                        } catch { /* skip unreadable */ }
-                    }));
-                }
-            } catch { /* skip inaccessible dirs */ }
+
+                                const lines = content.split('\n');
+                                const matchingLines: Array<{ line: number; content: string }> = [];
+                                for (let j = 0; j < lines.length; j++) {
+                                    const lineStr = lines[j]!;
+                                    if (!args.isRegex && !args.caseSensitive && !args.exactMatch) {
+                                        if (lineStr.toLowerCase().includes(queryLower)) {
+                                            matchingLines.push({ line: j, content: lineStr.trim().substring(0, 120) });
+                                        }
+                                    } else if (exactRegex) {
+                                        if (exactRegex.test(lineStr)) {
+                                            matchingLines.push({ line: j, content: lineStr.trim().substring(0, 120) });
+                                        }
+                                    }
+                                    if (matchingLines.length >= 10) break;
+                                }
+                                
+                                if (results.length < limit) {
+                                    results.push({
+                                        logicalPath: path.relative(searchRoot, file).replace(/\\/g, '/'),
+                                        matchingLines,
+                                    });
+                                } else {
+                                    limitReached = true;
+                                }
+                            } catch { /* skip unreadable */ }
+                        }));
+                    }
+                } catch { /* skip inaccessible dirs */ }
+            }
         }
 
         const returnObj: any = {
             files: results,
-            searchedRoot: searchRoots.join(', '),
+            searchedRoot: searchedRoots.join(', '),
             totalFound: results.length,
         };
         if (limitReached) {
-            returnObj._warning = `[CRITICAL TRUNCATION] 截断：已达到 ${MAX_SEARCH_RESULTS} 个文件的输出上限，剩余匹配项文件（可能包含几百个）已被强制抛弃以保护大模型上下文！请使用更精确的 \`query\` 或 \`directory\` 参数缩小搜索范围。`;
+            returnObj._warning = `[CRITICAL TRUNCATION] Truncation: The output limit of ${limit} files has been reached. The remaining matching files (which may contain hundreds) have been forcibly discarded to protect the large model context! Please narrow your search using the more precise \`query\` or \`directory\` parameters.`;
         }
-        return returnObj as SearchModFilesResult;
+        return returnObj as import('../types').SearchModFilesResult;
+    }
+
+    async grep(args: import('../types').GrepArgs): Promise<import('../types').GrepResult> {
+        const limit = Math.min(args.limit ?? 50, 200);
+        const matches: Array<{ file: string; line: number; content: string }> = [];
+        let totalMatches = 0;
+        let truncated = false;
+
+        const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = args.isRegex ? args.query : escapeRegex(args.query);
+
+        const query: any = {
+            pattern,
+            isRegExp: true,
+            isCaseSensitive: args.caseSensitive ?? false,
+        };
+
+        const searchPath = args.path ? path.resolve(this.ctx.workspaceRoot, args.path) : this.ctx.workspaceRoot;
+        let includePattern = args.include ?? '**/*';
+        
+        // Ensure path stays within workspace boundaries to use findTextInFiles
+        const isWindows = process.platform === 'win32';
+        const checkDir = isWindows ? searchPath.toLowerCase() : searchPath;
+        const checkWs = isWindows ? this.ctx.workspaceRoot.toLowerCase() : this.ctx.workspaceRoot;
+        let relativePath = '';
+        if (checkDir.startsWith(checkWs)) {
+            relativePath = path.relative(this.ctx.workspaceRoot, searchPath).replace(/\\/g, '/');
+            if (relativePath) {
+                includePattern = `${relativePath}/${includePattern}`;
+            }
+        } else {
+             // Fallback for paths outside workspace: not natively supported by VSCode findTextInFiles
+             includePattern = `**/*`; // just a fallback
+        }
+
+        const options: any = {
+            include: new vs.RelativePattern(this.ctx.workspaceRoot, includePattern),
+            maxResults: limit,
+            previewOptions: { matchLines: 1, charsPerLine: 150 },
+        };
+
+        try {
+            await (vs.workspace as any).findTextInFiles(query, options, (result: any) => {
+                if (matches.length >= limit) {
+                    truncated = true;
+                    return;
+                }
+                let lineStr = '';
+                let lineNumber = 0;
+
+                if ('preview' in result) {
+                    lineStr = result.preview.text.trim();
+                    lineNumber = result.ranges[0]?.startLineNumber ?? 0;
+                } else {
+                    lineStr = result.preview.text.trim();
+                    lineNumber = result.ranges instanceof vs.Range ? result.ranges.start.line : result.ranges[0]?.start.line ?? 0;
+                }
+
+                matches.push({
+                    file: path.relative(this.ctx.workspaceRoot, result.uri.fsPath).replace(/\\/g, '/'),
+                    line: lineNumber,
+                    content: lineStr,
+                });
+                totalMatches++;
+            });
+        } catch { /* skip */ }
+
+        return {
+            matches,
+            totalMatches,
+            truncated
+        };
     }
 
     // ─── getCompletionAt ─────────────────────────────────────────────────────

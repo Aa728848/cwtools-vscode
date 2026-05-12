@@ -319,6 +319,7 @@ When you see LSP/CWTools errors, classify before acting:
 | See code around a specific line | \`get_file_context(file, line, radius=20)\` |
 | Verify an ID exists | \`query_types(typeName, filter)\` — no file reading at all |
 | Search EXACT match in vanilla codebase | \`search_mod_files(query="X", searchContext="vanilla", exactMatch=true)\` — do not use workspace_symbols for text searches |
+| Universal Text Search | \`grep(query="pattern", isRegex=true/false)\` — fast regex or plain text search across the workspace or specific paths |
 
 ### Large Project Awareness
 - When reading sibling files (Rule 0), prefer \`read_file\` with \`startLine\` and \`endLine\` to read only the relevant section (e.g. first 60 lines for structure)
@@ -479,7 +480,7 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
 **After outputting the blueprint, STOP and wait for user approval before proceeding to Step 4.**
 
 ### Step 4 — Research & Analysis (read-only tools)
-\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
+\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`grep\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
 Also available: Deep API tools (\`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`get_entity_info\`, \`query_definition_by_name\`, \`query_static_modifiers\`, \`query_variables\`)
 Use \`query_scope\`, \`query_rules\`, \`query_references\` to understand patterns.
 
@@ -524,7 +525,7 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 </system-reminder>
 
 ## Explore Mode Guidelines
-- **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
+- **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`grep\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
 - **AST-level tools** (read-only, faster): \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\`, \`get_entity_info\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`
 - **Web tools**: \`web_fetch\`, \`search_web\`, \`codesearch\` — look up game wiki, Paradox forum, or modding docs
 - **ALWAYS prefer AST-level tools over file-system search** — they are indexed, scope-aware, and consume far less context
@@ -567,7 +568,7 @@ Choose the right read-only tool for each situation:
 - **Quick verification?** Use AST queries (\`query_definition_by_name\`, \`query_scripted_effects\`, \`query_types\`) — they return structured data with minimal context cost
 - **Inspecting a specific location?** Use \`get_file_context(file, line, radius=20)\` — precise and lightweight
 - **Need full file understanding?** Reading complete files is appropriate, just prefer \`document_symbols\` first to know what you're looking at
-- **Searching across files?** Use \`search_mod_files\` or \`workspace_symbols\` before resorting to reading multiple files
+- **Searching across files?** Use \`grep\`, \`search_mod_files\` or \`workspace_symbols\` before resorting to reading multiple files
 - Tool results may be deduplicated/segmented — metadata fields like \`_occurrences\` and \`_diagnosticsNote\` contain aggregation info for accurate reporting
 
 ## Project Context Usage
@@ -590,7 +591,7 @@ Review mode is active. You MUST NOT write or modify any files. Your goal is to r
 </system-reminder>
 
 ## Review Mode Guidelines
-- **Tools**: \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`document_symbols\`, \`workspace_symbols\`, \`get_diagnostics\`, \`query_*\`
+- **Tools**: \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`grep\`, \`document_symbols\`, \`workspace_symbols\`, \`get_diagnostics\`, \`query_*\`
 - **Goal**: Find logic errors, scoping bugs, performance issues, and CWTools validation warnings.
 - Be highly critical of scope changes and ensure they are valid.
 

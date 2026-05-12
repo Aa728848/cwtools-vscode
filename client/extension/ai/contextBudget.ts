@@ -12,6 +12,12 @@ import { BUDGET } from './messages';
 
 // P1-7: contentToString moved to types.ts — single shared definition
 
+export function getToolResultBudget(maxContextTokens?: number): number {
+    if (!maxContextTokens) return 15000;
+    const dynamic = Math.floor(maxContextTokens * 3.5 * 0.06);
+    return Math.max(10000, Math.min(60000, dynamic));
+}
+
 /** Default budget per tool result (characters). */
 export const TOOL_RESULT_BUDGET_BASE = 15000;
 

@@ -307,6 +307,8 @@ export interface AgentRunnerOptions {
     providerId?: string;
     /** Override model for this run */
     model?: string;
+    /** Dynamic maximum context tokens for this run */
+    maxContextTokens?: number;
     /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
     mode?: AgentMode;
     /** Callback for real-time step updates (for UI) */
@@ -333,7 +335,7 @@ export interface AgentRunnerOptions {
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
 const PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_file_context', 'search_mod_files', 'get_completion_at',
+    'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'todo_write',
     'read_file', 'list_directory', 'get_diagnostics', 'web_fetch', 'search_web',
     'glob_files', 'codesearch',
@@ -352,7 +354,7 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
 const EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_file_context', 'search_mod_files', 'get_completion_at',
+    'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
     'get_diagnostics', 'web_fetch', 'search_web', 'glob_files',
     // CWTools Deep API tools (read-only, advertised in Explore mode prompt)
@@ -369,7 +371,7 @@ const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
 /** Review mode: same as explore, plus query_definition — NO validate_code (it creates temp files, violating read-only contract) */
 const REVIEW_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_file_context', 'search_mod_files', 'get_completion_at',
+    'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
     'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -382,7 +384,7 @@ const REVIEW_MODE_TOOLS: AgentToolName[] = [
 /** Loc Translator mode: read localisation files, write translated output */
 const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch', 'replace_lines',
-    'list_directory', 'glob_files', 'search_mod_files', 'workspace_symbols',
+    'list_directory', 'glob_files', 'search_mod_files', 'grep', 'workspace_symbols',
     'document_symbols', 'get_file_context', 'get_diagnostics',
     'todo_write', 'web_fetch', 'search_web', 'codesearch',
     'write_localisation', 'git_ops',
@@ -391,7 +393,7 @@ const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
 /** Loc Writer mode: create new localisation entries from scratch */
 const LOC_WRITER_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch', 'replace_lines',
-    'list_directory', 'glob_files', 'search_mod_files', 'workspace_symbols',
+    'list_directory', 'glob_files', 'search_mod_files', 'grep', 'workspace_symbols',
     'document_symbols', 'get_file_context', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references',
     'todo_write', 'web_fetch', 'search_web', 'codesearch',
@@ -402,7 +404,7 @@ const LOC_WRITER_TOOLS: AgentToolName[] = [
 const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     // 只读信息收集
     'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_file_context', 'search_mod_files', 'get_completion_at',
+    'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
     'get_diagnostics', 'web_fetch', 'search_web', 'glob_files', 'codesearch',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -420,7 +422,7 @@ const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
 // Fix #9: module-level constants — no need to recreate on every loop iteration
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation', 'git_ops', 'replace_lines']);
 const READ_ONLY_TOOLS = new Set<string>([
-    'read_file', 'list_directory', 'search_mod_files',
+    'read_file', 'list_directory', 'search_mod_files', 'grep',
     'get_file_context', 'document_symbols', 'workspace_symbols',
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_diagnostics', 'get_completion_at',
@@ -428,8 +430,11 @@ const READ_ONLY_TOOLS = new Set<string>([
     'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'glob_files', 'codesearch',
-    // Orchestrator and memory tools (safe for concurrent execution)
-    'set_memory', 'get_memory', 'search_memory', 'query_blackboard', 'dispatch_agents', 'merge_results'
+    // 黑板和记忆工具（安全并发执行）
+    'set_memory', 'get_memory', 'search_memory', 'query_blackboard'
+    // 注意：dispatch_agents 和 merge_results 已从此处移除——
+    // dispatch_agents 会启动完整的子 Agent 推理循环（长耗时），必须走串行路径防止竞态；
+    // merge_results 依赖 dispatch_agents 的结果，也必须顺序执行。
     // validate_code is intentionally omitted: it modifies the LSP game state temporarily
 ]);
 

@@ -302,6 +302,10 @@ export interface SearchModFilesArgs {
     fileExtension?: string;
     exactMatch?: boolean;
     searchContext?: 'mod' | 'vanilla' | 'both';
+    isRegex?: boolean;
+    caseSensitive?: boolean;
+    limit?: number;
+    fileExtensions?: string[];
 }
 
 export interface SearchModFilesResult {
@@ -315,6 +319,21 @@ export interface SearchModFilesResult {
     }>;
     searchedRoot?: string;
     totalFound?: number;
+}
+
+export interface GrepArgs {
+    query: string;
+    path?: string;
+    isRegex?: boolean;
+    caseSensitive?: boolean;
+    include?: string;
+    limit?: number;
+}
+
+export interface GrepResult {
+    matches: Array<{ file: string; line: number; content: string }>;
+    totalMatches: number;
+    truncated: boolean;
 }
 
 export interface GetCompletionAtArgs {
@@ -442,7 +461,8 @@ export type ToolArgs =
     | AnalyzeDiagnosticErrorArgs
     | SetMemoryArgs
     | GetMemoryArgs
-    | WriteDesignBlueprintArgs;
+    | WriteDesignBlueprintArgs
+    | GrepArgs;
 
 export type ToolResult =
     | QueryScopeResult
@@ -464,7 +484,8 @@ export type ToolResult =
     | AnalyzeDiagnosticErrorResult
     | SetMemoryResult
     | GetMemoryResult
-    | WriteDesignBlueprintResult;
+    | WriteDesignBlueprintResult
+    | GrepResult;
 
 export type AgentToolName =
     | 'query_scope'
@@ -488,6 +509,7 @@ export type AgentToolName =
     | 'web_fetch'
     | 'search_web'
     | 'codesearch'
+    | 'grep'
     | 'run_command'
     | 'apply_patch'
     | 'multiedit'

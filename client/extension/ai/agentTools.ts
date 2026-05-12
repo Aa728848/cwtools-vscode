@@ -62,6 +62,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     apply_patch: 30_000,
     list_directory: 30_000,
     glob_files: 30_000,
+    grep: 30_000,
     // Network/External — 20s
     web_fetch: 20_000,
     search_web: 20_000,
@@ -259,6 +260,8 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.getFileContext(args as any); break;
             case 'search_mod_files':
                 result = await this.lspHandler.searchModFiles(args as any); break;
+            case 'grep':
+                result = await this.lspHandler.grep(args as any); break;
             case 'get_completion_at':
                 result = await this.lspHandler.getCompletionAt(args as any); break;
             case 'document_symbols':

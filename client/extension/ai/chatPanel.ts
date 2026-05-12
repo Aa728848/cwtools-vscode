@@ -1015,40 +1015,49 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) with debouncing */
     sendTodoUpdate(todos: import('./types').TodoItem[]): void {
-        this._pendingTodos = todos;
-        
-        if (this._todoUpdateTimeout) {
-            return;
-        }
-
-        // Throttle updates to prevent UI lockups and I/O congestion during multi-agent concurrent execution
-        this._todoUpdateTimeout = setTimeout(() => {
-            this._todoUpdateTimeout = null;
-            const currentTodos = this._pendingTodos;
-            if (!currentTodos) return;
-
-            this.postMessage({ type: 'todoUpdate', todos: currentTodos });
-
-            // Natively save task.md in the topic folder
-            const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (wsRoot && currentTodos.length > 0) {
-                const topicId = this.topicManager.currentTopic?.id || 'default';
-                const taskPath = path.join(wsRoot, '.cwtools-ai', topicId, 'task.md');
-
-                const lines: string[] = ['# Task List\n'];
-                for (const t of currentTodos) {
-                    const mark = t.status === 'done' ? '[x]' : (t.status === 'in_progress' ? '[/]' : '[ ]');
-                    lines.push(`- ${mark} ${t.content}`);
-                }
-
-                // Register task.md in the current message snapshot so retract can delete/restore it
-                this._recordFileSnapshot(taskPath);
-
-                void fs.promises.mkdir(path.dirname(taskPath), { recursive: true }).then(() => {
-                    fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch((e: any) => console.debug('[cwtools] task.md write failed:', e?.message ?? e));
-                });
+        // 防御性 try-catch：多 Agent 并发场景中，此回调由子 Agent 的 todoWrite 同步调用，
+        // 任何未捕获的异常都会导致子 Agent 的 Promise reject 进而卡死协调器。
+        try {
+            this._pendingTodos = todos;
+            
+            if (this._todoUpdateTimeout) {
+                return;
             }
-        }, 500);
+
+            // Throttle updates to prevent UI lockups and I/O congestion during multi-agent concurrent execution
+            this._todoUpdateTimeout = setTimeout(() => {
+                this._todoUpdateTimeout = null;
+                const currentTodos = this._pendingTodos;
+                if (!currentTodos) return;
+
+                try {
+                    this.postMessage({ type: 'todoUpdate', todos: currentTodos });
+                } catch { /* 防止 postMessage 异常影响 task.md 写入 */ }
+
+                // Natively save task.md in the topic folder
+                const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                if (wsRoot && currentTodos.length > 0) {
+                    const topicId = this.topicManager.currentTopic?.id || 'default';
+                    const taskPath = path.join(wsRoot, '.cwtools-ai', topicId, 'task.md');
+
+                    const lines: string[] = ['# Task List\n'];
+                    for (const t of currentTodos) {
+                        const mark = t.status === 'done' ? '[x]' : (t.status === 'in_progress' ? '[/]' : '[ ]');
+                        lines.push(`- ${mark} ${t.content}`);
+                    }
+
+                    // Register task.md in the current message snapshot so retract can delete/restore it
+                    this._recordFileSnapshot(taskPath);
+
+                    void fs.promises.mkdir(path.dirname(taskPath), { recursive: true }).then(() => {
+                        fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch((e: any) => console.debug('[cwtools] task.md write failed:', e?.message ?? e));
+                    });
+                }
+            }, 500);
+        } catch (e) {
+            // 静默吞下异常，确保调用方（子 Agent todoWrite）不受影响
+            ErrorReporter.debug(SOURCE.CHAT_PANEL, 'sendTodoUpdate: 回调异常已捕获', e);
+        }
     }
 
     // ─── Code Insertion ──────────────────────────────────────────────────────

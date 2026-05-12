@@ -437,7 +437,11 @@ const READ_ONLY_TOOLS = new Set<string>([
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'glob_files', 'codesearch',
     // 黑板和记忆工具（安全并发执行）
-    'set_memory', 'get_memory', 'search_memory', 'query_blackboard'
+    'set_memory', 'get_memory', 'search_memory', 'query_blackboard',
+    // todo_write 是纯内存操作（更新 currentTodos 数组 + 触发 UI 回调），
+    // 不涉及任何文件 IO，不应走 PartitionedWriteQueue 的 __global__ 锁路径，
+    // 否则在多 Agent 并发场景中会与其他写操作竞争全局锁导致死锁。
+    'todo_write'
     // 注意：dispatch_agents 和 merge_results 已从此处移除——
     // dispatch_agents 会启动完整的子 Agent 推理循环（长耗时），必须走串行路径防止竞态；
     // merge_results 依赖 dispatch_agents 的结果，也必须顺序执行。

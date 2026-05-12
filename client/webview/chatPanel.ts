@@ -431,7 +431,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             area = document.createElement('div');
             area.id = 'fileBadgeArea';
             area.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 0;';
-            inputWrapper?.insertBefore(area, inputWrapper.firstChild);
+            // 插入到 input-container 内部 input-row 之前，确保附件区域在输入框圆角框内
+            const container = document.querySelector('.input-container');
+            const inputRow = container?.querySelector('.input-row');
+            if (container && inputRow) container.insertBefore(area, inputRow);
+            else inputWrapper?.prepend(area);
         }
         const badge = document.createElement('span');
         badge.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:rgba(100,120,255,0.15);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:11px;';
@@ -558,7 +562,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             area = document.createElement('div');
             area.id = 'imagePreviewArea';
             area.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px 0;';
-            inputWrapper?.insertBefore(area, inputWrapper.firstChild);
+            // 插入到 input-container 内部 input-row 之前，确保图片预览在输入框圆角框内
+            const container = document.querySelector('.input-container');
+            const inputRow = container?.querySelector('.input-row');
+            if (container && inputRow) container.insertBefore(area, inputRow);
+            else inputWrapper?.prepend(area);
         }
         const wrap = document.createElement('div');
         wrap.style.cssText = 'position:relative;';
@@ -3090,7 +3098,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     area = document.createElement('div');
                     area.id = 'referenceChipArea';
                     area.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 0;';
-                    inputWrapper?.insertBefore(area, inputWrapper.firstChild);
+                    // 插入到 input-container 内部 input-row 之前，确保引用芯片在输入框圆角框内
+                    const container = document.querySelector('.input-container');
+                    const inputRow = container?.querySelector('.input-row');
+                    if (container && inputRow) container.insertBefore(area, inputRow);
+                    else inputWrapper?.prepend(area);
                 }
                 
                 const fileName = msg.relPath.split('/').pop() || msg.relPath;

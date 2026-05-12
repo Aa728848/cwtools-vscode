@@ -80,6 +80,8 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     deploy_mod_asset: 30_000,
     // Git
     git_ops: 30_000,
+    // Todo — 纯内存操作，极短超时即可
+    todo_write: 5_000,
     // Orchestrator — 子 Agent 调度需要较长时间，多个串行/深思任务极易超过10分钟
     dispatch_agents: 600_000,
     merge_results: 30_000,

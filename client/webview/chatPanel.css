@@ -216,7 +216,9 @@ body.plan-mode .plan-indicator { display: block; }
 .model-selector option { background: var(--input-bg); color: var(--fg); }
 
 .input-wrapper { padding: 10px 12px 12px; flex-shrink: 0; }
-.input-container { background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; overflow: hidden; transition: all 0.15s; }
+.input-container { background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; overflow: hidden; transition: all 0.15s; display: flex; flex-direction: column; max-height: 50vh; }
+/* ── 附件/引用区域高度约束：防止大量附件导致输入框无限增长 ── */
+#fileBadgeArea, #imagePreviewArea, #referenceChipArea { max-height: 72px; overflow-y: auto; flex-shrink: 0; }
 
 body.build-mode .input-container { border-color: rgba(255,255,255,0.15); }
 body.build-mode .input-container:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(217,90,67,0.2); }

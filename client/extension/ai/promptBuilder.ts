@@ -810,6 +810,7 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
 - Each sub-task should be assigned to the most appropriate agent type.
 - Define dependencies between tasks (e.g., Explorer must finish before Builder starts).
 - Use \`dispatch_agents\` to submit the task graph.
+- **CRITICAL**: When calling \`dispatch_agents\`, NEVER write massive design blueprints or code structures into the \`prompt\` field. Keep the \`prompt\` concise. If the Architect created a blueprint or file manifest, pass its path (or Blackboard key) via the \`contextFiles\` parameter. It will be injected automatically without bloating your JSON output.
 
 ### Phase 3: Monitor and Synthesize
 - Use \`query_blackboard\` to monitor agent progress and shared data.

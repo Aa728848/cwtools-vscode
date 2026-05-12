@@ -257,6 +257,7 @@ export class TaskGraphEngine {
         agentType: TaskNode['agentType'],
         prompt: string,
         options?: {
+            contextFiles?: string[];
             dependencies?: string[];
             priority?: TaskPriority;
             maxIterations?: number;
@@ -269,6 +270,7 @@ export class TaskGraphEngine {
             id,
             agentType,
             prompt,
+            contextFiles: options?.contextFiles,
             dependencies: options?.dependencies ?? [],
             priority: options?.priority ?? 'normal',
             status: 'pending',

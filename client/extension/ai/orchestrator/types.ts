@@ -65,6 +65,8 @@ export interface TaskNode {
     agentType: AgentMode;
     /** 子任务描述（作为 Agent 的用户消息） */
     prompt: string;
+    /** 注入上下文的文件路径或 Blackboard Key 列表 */
+    contextFiles?: string[];
     /** 前置依赖任务 ID 列表 — 全部完成后本节点才可执行 */
     dependencies: string[];
     /** 任务优先级 */

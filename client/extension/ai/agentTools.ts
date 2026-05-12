@@ -631,6 +631,7 @@ export class AgentToolExecutor {
             id: string;
             agentType: string;
             prompt: string;
+            contextFiles?: string[];
             dependencies?: string[];
             modelOverride?: string;
             providerOverride?: string;
@@ -678,6 +679,7 @@ export class AgentToolExecutor {
                     task.agentType as import('./types').AgentMode,
                     task.prompt,
                     {
+                        contextFiles: task.contextFiles,
                         dependencies: task.dependencies || [],
                         modelOverride: task.modelOverride,
                         providerOverride: task.providerOverride,

@@ -8,6 +8,8 @@
  * 模型选择策略：默认继承用户在设置面板配置的供应商/模型。
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type {
     TaskGraph,
     TaskNode,
@@ -255,9 +257,47 @@ export class Orchestrator {
             orchestratorOptions.onBeforeFileWrite?.(filePath, prevContent);
         };
 
+        // 预读并注入 contextFiles
+        let effectivePrompt = taskNode.prompt;
+        if (taskNode.contextFiles && taskNode.contextFiles.length > 0) {
+            let injectedContext = '';
+            for (const contextRef of taskNode.contextFiles) {
+                try {
+                    // 1. 尝试从 Blackboard 读取
+                    const bbValue = _blackboard.read(contextRef);
+                    if (bbValue) {
+                        injectedContext += `\n--- Context from Blackboard: ${contextRef} ---\n${bbValue.value}\n`;
+                        continue;
+                    }
+
+                    // 2. 尝试作为物理文件读取
+                    let targetPath = contextRef;
+                    if (!path.isAbsolute(targetPath)) {
+                        const vs = require('vscode');
+                        const workspaceFolders = vs.workspace.workspaceFolders;
+                        if (workspaceFolders && workspaceFolders.length > 0) {
+                            targetPath = path.join(workspaceFolders[0].uri.fsPath, targetPath);
+                        }
+                    }
+
+                    if (fs.existsSync(targetPath)) {
+                        const content = fs.readFileSync(targetPath, 'utf8');
+                        injectedContext += `\n--- Context from File: ${contextRef} ---\n${content}\n`;
+                    } else {
+                        ErrorReporter.warn(SOURCE.ORCHESTRATOR, `Context injection warning: could not find blackboard key or file '${contextRef}'`);
+                    }
+                } catch (e) {
+                    ErrorReporter.warn(SOURCE.ORCHESTRATOR, `Context injection failed for '${contextRef}'`, e);
+                }
+            }
+            if (injectedContext) {
+                effectivePrompt = `<system-injected-context>\n${injectedContext}\n</system-injected-context>\n\n${effectivePrompt}`;
+            }
+        }
+
         try {
             const result: GenerationResult = await this.agentRunner.run(
-                taskNode.prompt,
+                effectivePrompt,
                 { topicId: orchestratorOptions.topicId },
                 [], // 空对话历史 — 子 Agent 从头开始
                 runnerOptions,
@@ -273,11 +313,12 @@ export class Orchestrator {
             // 如果执行失败，回滚文件
             if (!result.isValid || (result as any).success === false) {
                 await this.rollbackSnapshots(fileSnapshots, onStep);
+                const actualError = result.explanation || '';
                 return {
                     nodeId: taskNode.id,
                     success: false,
                     output: '',
-                    error: `子任务失败: 验证未通过或执行出错，已回滚 ${fileSnapshots.size} 个文件。`,
+                    error: `子任务失败: 验证未通过或执行出错，已回滚 ${fileSnapshots.size} 个文件。${actualError ? ' 原因: ' + actualError : ''}`,
                     tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                     writtenFiles: [],
                     stepCount,

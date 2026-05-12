@@ -851,7 +851,7 @@ export class AgentRunner {
 
             return {
                 code: '',
-                explanation: '',
+                explanation: `[执行异常] ${errorMsg}`,
                 validationErrors: [],
                 isValid: false,
                 retryCount: 0,

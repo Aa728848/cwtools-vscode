@@ -29,11 +29,13 @@ export class ExternalToolHandler {
     // ─── todoWrite ───────────────────────────────────────────────────────────
 
     async todoWrite(args: { todos: TodoItem[] }, context?: import('../types').AgentToolContext): Promise<TodoWriteResult> {
+        console.time('todoWrite_exec');
         this.currentTodos = args.todos;
         const onTodoUpdate = context?.onTodoUpdate;
         if (onTodoUpdate) {
             onTodoUpdate(this.currentTodos);
         }
+        console.timeEnd('todoWrite_exec');
         return {
             success: true,
             todoCount: this.currentTodos.length,

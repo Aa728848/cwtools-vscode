@@ -83,6 +83,7 @@
   "commands.cwtools.ai.selectModel.title": "Select AI Model from Provider...",
   "commands.cwtools.ai.reviewFile.title": "AI: Review Current File",
   "commands.cwtools.ai.explainSelection.title": "AI: Explain Selected Code",
+  "commands.cwtools.ai.sendSelectionToChat.title": "AI: Send Selection to Chat",
   "commands.cwtools.ai.fixDiagnostics.title": "AI: Fix All Diagnostics",
   "configuration.cwtools.showInlineText.description": "Show localisation and references directly above the code instead of hovering.",
   "configuration.cwtools.rulesProxy.description": "Proxy URL to prepend when pulling GitHub configurations, e.g. https://ghproxy.net/ (Empty for disable, auto-enabled in CN timezone)",

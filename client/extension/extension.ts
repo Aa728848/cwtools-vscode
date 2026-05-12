@@ -565,6 +565,20 @@ export async function activate(context: ExtensionContext) {
 		['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox']
 	);
 
+	// ── AI Chat: Send selection to chat ──────────────────────────────────────
+	safeRegisterCommand(context, "cwtools.ai.sendSelectionToChat", async () => {
+		const editor = vs.window.activeTextEditor;
+		if (!editor || editor.selection.isEmpty) {
+			vs.window.showWarningMessage(UI.SELECT_CODE_FIRST);
+			return;
+		}
+		const relPath = vs.workspace.asRelativePath(editor.document.uri);
+		const startLine = editor.selection.start.line + 1;
+		const endLine = editor.selection.end.line + 1;
+		const selectedText = editor.document.getText(editor.selection);
+		await chatPanelProvider.sendSelectionReference(relPath, startLine, endLine, selectedText);
+	});
+
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
 	registerGraphicsFeatures(context);
 

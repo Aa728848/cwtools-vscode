@@ -62,10 +62,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     let contextLimit = 128000;
     /** Pending images (base64 data URLs) to attach to next sent message */
     let pendingImages: string[] = [];
-    /** Pending @-mentioned file paths to attach */
+    /** Pending files to attach */
     let pendingFiles: string[] = [];
     /** Available workspace files received from host for @ popup */
     let workspaceFiles: string[] = [];
+    /** Pending code selection reference */
+    let pendingReference: { relPath: string; startLine: number; endLine: number; selectedText: string } | null = null;
 
     // Notify host that WebView JS has fully loaded and is ready to receive messages
     vscode.postMessage({ type: 'ready' });
@@ -586,13 +588,27 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
     function sendMessage() {
         const text = input.value.trim();
-        if (!text && pendingImages.length === 0) return;
-        vscode.postMessage({
-            type: 'sendMessage',
-            text,
-            images: pendingImages.length > 0 ? [...pendingImages] : undefined,
-            attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
-        });
+        if (!text && pendingImages.length === 0 && !pendingReference) return;
+        
+        if (pendingReference) {
+            vscode.postMessage({
+                type: 'sendMessageWithReference',
+                text,
+                reference: pendingReference,
+                images: pendingImages.length > 0 ? [...pendingImages] : undefined,
+            });
+            pendingReference = null;
+            const refChip = document.getElementById('referenceChipArea');
+            if (refChip) refChip.innerHTML = '';
+        } else {
+            vscode.postMessage({
+                type: 'sendMessage',
+                text,
+                images: pendingImages.length > 0 ? [...pendingImages] : undefined,
+                attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
+            });
+        }
+        
         input.value = '';
         input.style.height = 'auto';
         stopPlaceholderRotation();
@@ -1503,7 +1519,21 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     if (statusText) statusText.textContent = s.content || '完成';
                 }
             }
-            if (state.livePhase === 'text' && state.liveTextBubble) flushLiveText(state);
+            // 终结所有活跃的流式状态——子Agent已完成，不会再有新步骤
+            // 1. 终结 Thinking 块：停止旋转指示器
+            if (state.liveThinkBlock) {
+                const pulse = state.liveThinkBlock.querySelector('.think-pulse');
+                if (pulse) pulse.classList.remove('spinning');
+                state.liveThinkBlock = null;
+                state.liveThinkBody = null;
+                state.liveThinkSum = null;
+                state.liveThinkContent = '';
+            }
+            // 2. 终结文本气泡
+            if (state.liveTextBubble) flushLiveText(state);
+            // 3. 清理工具时间线引用
+            state.liveToolTimeline = null;
+            state.livePhase = null;
             return;
         }
 
@@ -1755,7 +1785,29 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble user-bubble';
-        bubble.textContent = text;
+        
+        // 解析带有代码引用的 Prompt 模板，转换为 UI 芯片
+        const refRegex = /^文件 `([^`]+)` 第 (\d+-\d+) 行的选中代码：\n```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```\n([\s\S]*)$/;
+        const match = text.match(refRegex);
+        if (match && match[1] && match[2]) {
+            const file = match[1];
+            const lines = match[2];
+            const userText = match[4] || '';
+            const fileName = file.split(/[\\/]/).pop() || file;
+            const chip = document.createElement('div');
+            chip.className = 'reference-chip';
+            chip.style.marginBottom = '6px';
+            chip.style.background = 'rgba(100, 120, 255, 0.08)';
+            chip.innerHTML = `<span class="ref-text" title="${escapeHtml(file)}">${escapeHtml(fileName)} #L${lines}</span>`;
+            bubble.appendChild(chip);
+
+            const textNode = document.createElement('div');
+            textNode.style.whiteSpace = 'pre-wrap';
+            textNode.textContent = userText;
+            bubble.appendChild(textNode);
+        } else {
+            bubble.textContent = text;
+        }
 
         // M6 fix: display image thumbnails from the actual images array
         const imgRow = buildImageRow(images || []);
@@ -2021,6 +2073,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'generationComplete': {
                 setGenerating(false);
+                // 清除所有流式状态，防止残留的 liveThinkBlock 等引用干扰最终消息重建
+                streamStates.clear();
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 
                 // Clear any unresolved interactive cards (permission, diff)
@@ -3020,6 +3074,40 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 wrap.appendChild(sectionsWrap);
                 chatArea.appendChild(wrap);
                 scrollBottom();
+                break;
+            }
+
+            case 'insertSelectionReference': {
+                pendingReference = {
+                    relPath: msg.relPath,
+                    startLine: msg.startLine,
+                    endLine: msg.endLine,
+                    selectedText: msg.selectedText
+                };
+                
+                let area = document.getElementById('referenceChipArea');
+                if (!area) {
+                    area = document.createElement('div');
+                    area.id = 'referenceChipArea';
+                    area.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 0;';
+                    inputWrapper?.insertBefore(area, inputWrapper.firstChild);
+                }
+                
+                const fileName = msg.relPath.split('/').pop() || msg.relPath;
+                area.innerHTML = `
+                    <span class="reference-chip">
+                        ${svgIconNoMargin('file')}
+                        <span class="ref-text" title="${escapeHtml(msg.relPath)}">${escapeHtml(fileName)} #L${msg.startLine}-${msg.endLine}</span>
+                        <button id="removeReferenceBtn">✕</button>
+                    </span>
+                `;
+                
+                document.getElementById('removeReferenceBtn')?.addEventListener('click', () => {
+                    pendingReference = null;
+                    area!.innerHTML = '';
+                });
+                
+                input.focus();
                 break;
             }
 

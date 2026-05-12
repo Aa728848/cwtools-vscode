@@ -859,6 +859,7 @@ export interface ChatHistoryMessage {
 
 export type WebViewMessage =
     | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
+    | { type: 'sendMessageWithReference'; text: string; reference: { relPath: string; startLine: number; endLine: number; selectedText: string }; images?: string[] }
     | { type: 'insertCode'; code: string }
     | { type: 'copyCode'; code: string }
     | { type: 'regenerate' }
@@ -915,6 +916,7 @@ export type HostMessage =
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string }
+    | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number; selectedText: string }
     | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; archived?: boolean }> }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[] }
     | { type: 'streamToken'; token: string }

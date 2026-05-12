@@ -181,6 +181,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'sendMessage':
                 await this.handleUserMessage(msg.text, msg.images, msg.attachedFiles);
                 break;
+            case 'sendMessageWithReference': {
+                const { reference, text, images } = msg;
+                const refPrompt = [
+                    `文件 \`${reference.relPath}\` 第 ${reference.startLine}-${reference.endLine} 行的选中代码：`,
+                    '```pdx',
+                    reference.selectedText,
+                    '```',
+                    text || '请解释以上选中的代码块',
+                ].join('\n');
+                await this.handleUserMessage(refPrompt, images);
+                break;
+            }
             case 'insertCode':
                 await this.insertCodeWithDiff(msg.code);
                 break;
@@ -991,29 +1003,45 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) */
+    private _todoUpdateTimeout: NodeJS.Timeout | null = null;
+    private _pendingTodos: import('./types').TodoItem[] | null = null;
+
+    /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) with debouncing */
     sendTodoUpdate(todos: import('./types').TodoItem[]): void {
-        this.postMessage({ type: 'todoUpdate', todos });
-
-        // Natively save task.md in the topic folder
-        const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (wsRoot && todos.length > 0) {
-            const topicId = this.topicManager.currentTopic?.id || 'default';
-            const taskPath = path.join(wsRoot, '.cwtools-ai', topicId, 'task.md');
-
-            const lines: string[] = ['# Task List\n'];
-            for (const t of todos) {
-                const mark = t.status === 'done' ? '[x]' : (t.status === 'in_progress' ? '[/]' : '[ ]');
-                lines.push(`- ${mark} ${t.content}`);
-            }
-
-            // Register task.md in the current message snapshot so retract can delete/restore it
-            this._recordFileSnapshot(taskPath);
-
-            void fs.promises.mkdir(path.dirname(taskPath), { recursive: true }).then(() => {
-                fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch((e: any) => console.debug('[cwtools] task.md write failed:', e?.message ?? e));
-            });
+        this._pendingTodos = todos;
+        
+        if (this._todoUpdateTimeout) {
+            return;
         }
+
+        // Throttle updates to prevent UI lockups and I/O congestion during multi-agent concurrent execution
+        this._todoUpdateTimeout = setTimeout(() => {
+            this._todoUpdateTimeout = null;
+            const currentTodos = this._pendingTodos;
+            if (!currentTodos) return;
+
+            this.postMessage({ type: 'todoUpdate', todos: currentTodos });
+
+            // Natively save task.md in the topic folder
+            const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (wsRoot && currentTodos.length > 0) {
+                const topicId = this.topicManager.currentTopic?.id || 'default';
+                const taskPath = path.join(wsRoot, '.cwtools-ai', topicId, 'task.md');
+
+                const lines: string[] = ['# Task List\n'];
+                for (const t of currentTodos) {
+                    const mark = t.status === 'done' ? '[x]' : (t.status === 'in_progress' ? '[/]' : '[ ]');
+                    lines.push(`- ${mark} ${t.content}`);
+                }
+
+                // Register task.md in the current message snapshot so retract can delete/restore it
+                this._recordFileSnapshot(taskPath);
+
+                void fs.promises.mkdir(path.dirname(taskPath), { recursive: true }).then(() => {
+                    fs.promises.writeFile(taskPath, lines.join('\n'), 'utf-8').catch((e: any) => console.debug('[cwtools] task.md write failed:', e?.message ?? e));
+                });
+            }
+        }, 500);
     }
 
     // ─── Code Insertion ──────────────────────────────────────────────────────
@@ -1325,5 +1353,31 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private getHtmlContent(webview: vs.Webview): string {
         return getChatPanelHtml(webview, this.extensionUri);
+    }
+
+    /**
+     * 将选区引用发送到 Webview 输入框
+     */
+    public async sendSelectionReference(
+        relPath: string,
+        startLine: number,
+        endLine: number,
+        selectedText: string
+    ): Promise<void> {
+        // 聚焦 AI 面板
+        await vs.commands.executeCommand('cwtools.aiChat.focus');
+        let attempts = 0;
+        while ((!this.view || !this.view.visible) && attempts < 50) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
+        }
+        
+        this.postMessage({
+            type: 'insertSelectionReference',
+            relPath,
+            startLine,
+            endLine,
+            selectedText
+        });
     }
 }

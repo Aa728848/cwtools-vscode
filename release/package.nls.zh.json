@@ -83,6 +83,7 @@
   "commands.cwtools.ai.selectModel.title": "从提供商选择 AI 模型...",
   "commands.cwtools.ai.reviewFile.title": "AI: 审查当前文件",
   "commands.cwtools.ai.explainSelection.title": "AI: 解释选中代码",
+  "commands.cwtools.ai.sendSelectionToChat.title": "AI: 发送选中内容到对话面板",
   "commands.cwtools.ai.fixDiagnostics.title": "AI: 修复所有诊断问题",
   "configuration.cwtools.showInlineText.description": "将本地化文本和引用直接显示在代码上方",
   "configuration.cwtools.rulesProxy.description": "从 GitHub 拉取规则配置时的代理访问地址，例如 https://ghproxy.net/（留空则不使用，国内时区自动尝试使用镜像）",

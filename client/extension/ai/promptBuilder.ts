@@ -240,6 +240,7 @@ If your entity has significantly fewer blocks (e.g., archetype has 15 blocks, yo
 
 #### Rule 4 — Task Tracking
 Start with \`todo_write\` listing all files in dependency order. Mark \`in_progress\` when writing, \`done\` when complete.
+**CRITICAL**: Do NOT call \`todo_write\` excessively. Only use it when breaking down a new large task or when a major milestone is completed. Do not update it repeatedly for every single micro-step, as this causes UI lag and context bloat.
 
 #### Rule 5 — MANDATORY Task Walkthrough (CRITICAL)
 Before you conclude any conversation where you have executed file modifications, you **MUST** write a detailed completion report named \`walkthrough.md\` inside the Agent Workspace Dir (provided in the Current Editor Context).

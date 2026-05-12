@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Eddy",
 	"license": "MIT",
-	"version": "2.1.3",
+	"version": "2.1.5",
 	"preview": true,
 	"publisher": "Eddy",
 	"icon": "docs/stellaris.png",
@@ -107,6 +107,11 @@
 					"command": "cwtools.vanillaCompare.diff",
 					"when": "resourceExtname == .txt",
 					"group": "cwtools@1"
+				},
+				{
+					"command": "cwtools.ai.sendSelectionToChat",
+					"when": "editorHasSelection",
+					"group": "cwtools@0"
 				}
 			]
 		},
@@ -254,6 +259,12 @@
 				"title": "%commands.cwtools.previewEntity.title%",
 				"category": "cwtools",
 				"icon": "$(symbol-misc)"
+			},
+			{
+				"command": "cwtools.ai.sendSelectionToChat",
+				"title": "%commands.cwtools.ai.sendSelectionToChat.title%",
+				"category": "CWTools AI",
+				"icon": "$(comment-discussion)"
 			}
 		],
 		"keybindings": [
@@ -280,6 +291,12 @@
 				"key": "ctrl+shift+i",
 				"mac": "cmd+shift+i",
 				"when": "editorTextFocus"
+			},
+			{
+				"command": "cwtools.ai.sendSelectionToChat",
+				"key": "ctrl+l",
+				"mac": "cmd+l",
+				"when": "editorHasSelection"
 			}
 		],
 		"configuration": {

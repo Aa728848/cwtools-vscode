@@ -265,6 +265,39 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .msg-time.settings-hint a { color: var(--accent); opacity: 0.8; text-decoration: none; transition: opacity 0.15s; }
 .settings-hint a:hover { opacity: 1; text-decoration: underline; }
 
+/* ── Code Selection Reference Chip ── */
+.reference-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(100, 120, 255, 0.12);
+    color: var(--accent);
+    border: 1px solid rgba(100, 120, 255, 0.25);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11.5px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    line-height: 1.4;
+    max-width: 100%;
+}
+.reference-chip .ref-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.reference-chip button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    padding: 0 2px;
+    font-size: 10px;
+    opacity: 0.6;
+}
+.reference-chip button:hover {
+    opacity: 1;
+}
+
 /* MCP specific CSS */
 .mcp-server-block { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .mcp-row { display: flex; gap: 6px; align-items: start; }

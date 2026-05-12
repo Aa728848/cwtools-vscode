@@ -330,6 +330,12 @@ export interface AgentRunnerOptions {
     onBeforeFileWrite?: (filePath: string, prevContent: string | null) => void;
     /** Callback when a sub-agent creates or modifies a todo list plan */
     onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
+    /**
+     * 跳过内置 validation loop（Phase 3）。
+     * Orchestrator 子代理使用此标志，因为 Orchestrator 有自己的 QualityGate 机制，
+     * 子代理不需要重复验证，且 validation loop 会在推理结束后继续产生步骤导致 UI 状态不一致。
+     */
+    skipValidation?: boolean;
 }
 
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
@@ -804,6 +810,21 @@ export class AgentRunner {
             }
 
             // Phase 3: Validation loop
+            // Orchestrator 子代理通过 skipValidation 跳过此阶段——
+            // Orchestrator 有独立的 QualityGate 机制，子代理不需要重复验证。
+            // 此外，validation loop 会在推理结束后继续产生步骤，导致外部判断卡片与内部状态不一致。
+            if (options?.skipValidation) {
+                return {
+                    code,
+                    explanation: this.extractExplanation(finalMessage),
+                    validationErrors: [],
+                    isValid: true,
+                    retryCount: 0,
+                    steps,
+                    tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
+                };
+            }
+
             const targetFile = context.activeFile ?? '';
             const validationResult = await this.validationLoop(
                 code, targetFile, messages, emitStep, options
@@ -1360,13 +1381,9 @@ export class AgentRunner {
                 }
                 thinkContent = thinkMatches.join('\n\n');
             }
-            if (thinkContent.trim()) {
-                emitStep({
-                    type: 'thinking_content',
-                    content: thinkContent.trim(),
-                    timestamp: Date.now(),
-                });
-            }
+            // 注意：thinking_content 的 emit 被延迟到确认有 tool_calls 后执行。
+            // 对于最终回答（无 tool_calls），不单独 emit thinking 块——
+            // 否则最终回答后会出现一个多余的 Thinking 块显示在结果下方。
 
             // Try OpenAI-style tool_calls first, then fall back to DSML/XML parsing
             // (must happen before stripping, since strip removes the DSML tags we need)
@@ -1420,9 +1437,19 @@ export class AgentRunner {
                 continue;
             }
 
-            // If no tool calls (either format), we're done
+            // If no tool calls (either format), we're done — 最终回答不 emit thinking 块
             if (!toolCalls || toolCalls.length === 0) {
                 return this.cleanFinalContent(contentToString(assistantMessage.content));
+            }
+
+            // ── 延迟 emit thinking_content：仅在确认还有后续 tool_calls 时才 emit ──
+            // 这避免了最终回答后出现多余的 Thinking 块。
+            if (thinkContent.trim()) {
+                emitStep({
+                    type: 'thinking_content',
+                    content: thinkContent.trim(),
+                    timestamp: Date.now(),
+                });
             }
 
             // ── Question Card Halt: stop loop when AI asks user questions ──
@@ -1532,6 +1559,8 @@ export class AgentRunner {
                         errMsg += '\n\n⚠️ Your entries array was truncated by the output length limit. Split into SMALLER batches: call write_localisation multiple times with at most 15 entries each.';
                     } else if (toolName === 'multiedit') {
                         errMsg += '\n\n⚠️ Your edits array was truncated. Split into SMALLER batches: call multiedit with fewer edits, or use multiple edit_file calls.';
+                    } else if (toolName === 'dispatch_agents') {
+                        errMsg += '\n\n⚠️ Your tasks array was truncated or malformed because the prompt strings were too long. KEEP PROMPTS CONCISE. Do NOT embed massive file contents or long paths directly in the prompt. If you need to pass large data, use `set_memory` first and pass the memory key. Also, try dispatching fewer tasks at once.';
                     }
                     toolResults[i] = { ok: false, error: errMsg };
                     continue;

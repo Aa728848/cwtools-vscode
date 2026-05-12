@@ -79,7 +79,7 @@ export const UI = {
     NO_ACTIVE_EDITOR: '没有打开的编辑器',
     NO_WORKSPACE: '没有打开的工作区',
     NO_WORKSPACE_INIT: 'Eddy CWTool Code /init: 当前没有打开的工作区',
-    SELECT_CODE_FIRST: '请先选中要解释的代码',
+    SELECT_CODE_FIRST: '请先选中要发送的代码。',
     INSERT_CANCELLED: '已取消插入',
     SUGGEST_REVIEW: '分析当前文件并列出潜在的语法和逻辑问题',
     SUGGEST_REVIEW_LABEL: '代码审查',

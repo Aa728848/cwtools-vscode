@@ -942,7 +942,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                             properties: {
                                 id: { type: 'string', description: 'Unique sub-task ID (e.g. "explore_structure", "build_events")' },
                                 agentType: { type: 'string', enum: ['explore', 'plan', 'build', 'review', 'loc_writer'], description: 'Agent type to execute this task' },
-                                prompt: { type: 'string', description: 'Sub-task description (sent as the agent\'s user message)' },
+                                prompt: { type: 'string', description: 'Sub-task description (sent as the agent\'s user message). ⚠️ CRITICAL: KEEP THIS CONCISE to prevent JSON truncation errors. Do NOT embed large file contents or massive path lists here. If you need to pass large data, use `set_memory` first and just pass the memory key in this prompt.' },
                                 dependencies: {
                                     type: 'array',
                                     items: { type: 'string' },

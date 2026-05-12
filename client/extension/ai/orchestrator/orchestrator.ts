@@ -259,6 +259,13 @@ export class Orchestrator {
                 runnerOptions,
             );
             
+            // 任务结束，通知前端更新状态
+            wrappedOnStep({
+                type: 'subtask_complete',
+                content: result.isValid ? '完成' : '未通过',
+                timestamp: Date.now(),
+            });
+
             // 如果执行失败，回滚文件
             if (!result.isValid || (result as any).success === false) {
                 await this.rollbackSnapshots(fileSnapshots, onStep);
@@ -283,6 +290,11 @@ export class Orchestrator {
             };
         } catch (e) {
             const error = e instanceof Error ? e.message : String(e);
+            wrappedOnStep({
+                type: 'subtask_complete',
+                content: '异常终止',
+                timestamp: Date.now(),
+            });
             ErrorReporter.warn(SOURCE.ORCHESTRATOR, `子 Agent ${taskNode.id} 执行异常`, e);
             return {
                 nodeId: taskNode.id,

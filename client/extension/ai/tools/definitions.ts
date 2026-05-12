@@ -912,7 +912,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                 properties: {
                     tasks: {
                         type: 'array',
-                        description: 'List of sub-tasks. Ordered by dependencies; tasks without dependencies will execute in parallel.',
+                        maxItems: 4,
+                        description: 'List of sub-tasks. Ordered by dependencies. ⚠️ CRITICAL: Maximum 4 tasks allowed per dispatch to prevent API timeouts! If you have more work, dispatch them in sequential batches across multiple turns.',
                         items: {
                             type: 'object',
                             properties: {

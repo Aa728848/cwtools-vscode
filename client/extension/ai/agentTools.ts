@@ -635,6 +635,13 @@ export class AgentToolExecutor {
             return { success: false, error: '请提供 tasks 数组，每个 task 需包含 id、agentType、prompt 字段' };
         }
 
+        if (tasks.length > 4) {
+            return {
+                success: false,
+                error: `并发上限保护: 您尝试一次性分派 ${tasks.length} 个任务，超过了最大允许的 4 个上限。过长的任务列表会导致大模型生成超时或被截断。请将任务拆分为多批次分步执行。`
+            };
+        }
+
         // 确保有 parentAgentRunner（Orchestrator 需要它来调度子 Agent）
         if (!this.parentAgentRunner) {
             return { success: false, error: 'Orchestrator 未就绪：缺少 AgentRunner 实例引用。请确保在协调模式下运行。' };

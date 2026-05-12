@@ -1216,7 +1216,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     const det = document.createElement('details');
                     det.className = 'thinking-block';
                     const sum = document.createElement('summary');
-                    sum.innerHTML = '<span class="think-pulse"></span>Thinking · ' +
+                    sum.innerHTML = '<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--vscode-charts-blue); margin-right:8px; opacity:0.8;"></span>Thinking · ' +
                         thinkBuf.length + ' block(s) &nbsp;<span class="think-tokens">~' + formatNum(estTokens) + ' tokens</span>';
                     det.appendChild(sum);
                     const body = document.createElement('div');
@@ -1488,6 +1488,20 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (!currentAssistantDiv) return;
 
         const state = getStreamState(s.agentId);
+
+        if (s.type === 'subtask_complete') {
+            if (state.container && state.container.id) {
+                const card = document.querySelector(`.subagent-card[data-target-id="${state.container.id}"]`);
+                if (card) {
+                    card.classList.remove('lane-running');
+                    const statusText = card.querySelector('.lane-status-text');
+                    if (statusText) statusText.textContent = s.content || '完成';
+                }
+            }
+            if (state.livePhase === 'text' && state.liveTextBubble) flushLiveText(state);
+            return;
+        }
+
         const target = routeLiveStep(s);
 
         // Determine the new phase

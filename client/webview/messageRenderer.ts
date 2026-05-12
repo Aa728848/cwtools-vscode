@@ -405,7 +405,7 @@ export function buildThinkingBlockHtml(steps: RendererStep[]): string {
 
     // Note: the content is escaped here. The WebView consumer may re-render
     // through its own markdown pipeline if desired.
-    return `<details class="thinking-block"><summary><span class="think-pulse"></span>Thinking · ${steps.length} block(s) &nbsp;<span class="think-tokens">~${formattedTokens} tokens</span></summary><div class="thinking-body">${escapeHtml(thinkText)}</div></details>`;
+    return `<details class="thinking-block"><summary><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--vscode-charts-blue); margin-right:8px; opacity:0.8;"></span>Thinking · ${steps.length} block(s) &nbsp;<span class="think-tokens">~${formattedTokens} tokens</span></summary><div class="thinking-body">${escapeHtml(thinkText)}</div></details>`;
 }
 
 /**

@@ -57,26 +57,31 @@ export class QualityGate {
      * 生成综合审查 prompt。
      * 基于所有写入的文件列表构建针对性的审查指令。
      */
-    buildCombinedReviewPrompt(writtenFiles: string[]): string {
+    buildCombinedReviewPrompt(writtenFiles: string[], preFetchedDiagnostics?: string): string {
         const fileList = writtenFiles.length > 0
             ? writtenFiles.map(f => `- ${f}`).join('\n')
             : '(No file write records)';
+
+        const diagnosticsSection = preFetchedDiagnostics 
+            ? `\n## Pre-fetched LSP Diagnostics:\n${preFetchedDiagnostics}\n` 
+            : '';
 
         return [
             '## Quality Gate Review Task',
             '',
             'Please review the code quality of the following files:',
             fileList,
-            '',
+            diagnosticsSection,
             'Review Checklist:',
-            '1. Call `get_diagnostics` for each file to check for LSP errors.',
-            '2. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
-            '3. Verify the correctness of the scope chain.',
-            '4. Check file structure integrity (Refer to Rule 3b).',
+            '1. Call `get_diagnostics` for each file to check for LSP errors (or review the pre-fetched diagnostics above). You MUST resolve ALL LSP red errors!',
+            '2. Check for logic conflict issues (e.g., an event has `option` but uses `hide_window = yes`, which is a contradiction). Such conflicts MUST be reported and fixed.',
+            '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
+            '4. Verify the correctness of the scope chain.',
+            '5. Check file structure integrity (Refer to Rule 3b).',
             '',
             'Output Format:',
-            '- If all files have zero errors: Output "PASSED: All files passed quality checks."',
-            '- If there are errors: Output "FAILED: N issues need to be fixed", and list the specific issues and fix suggestions in detail.',
+            '- If all files have zero errors and no logic conflicts: Output "PASSED: All files passed quality checks."',
+            '- If there are errors or logic conflicts: Output "FAILED: N issues need to be fixed", and list the specific issues and fix suggestions in detail.',
         ].join('\n');
     }
 
@@ -93,7 +98,24 @@ export class QualityGate {
             return { passed: true, reviewReport: '无文件修改', fixCycles: 0, remainingIssues: 0 };
         }
 
-        const prompt = this.buildCombinedReviewPrompt(writtenFiles);
+        let preFetchedDiagnostics = '';
+        try {
+            const diagResults: string[] = [];
+            for (const file of writtenFiles) {
+                if (!file.endsWith('.txt') && !file.endsWith('.gui')) continue;
+                const res = await agentRunner.toolExecutor.execute('get_diagnostics', { file, severity: 'error' });
+                if (res && typeof res === 'object' && (res as any).totalDiagnosticCount > 0) {
+                    diagResults.push(`File: ${file}\n${JSON.stringify((res as any).diagnostics, null, 2)}`);
+                }
+            }
+            if (diagResults.length > 0) {
+                preFetchedDiagnostics = diagResults.join('\n\n');
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        const prompt = this.buildCombinedReviewPrompt(writtenFiles, preFetchedDiagnostics);
         
         // 执行 Reviewer Agent
         const reviewResult = await agentRunner.run(
@@ -119,26 +141,31 @@ export class QualityGate {
     /**
      * (保留旧接口兼容) 生成审查 prompt。
      */
-    buildReviewPrompt(builderResult: SubAgentResult): string {
+    buildReviewPrompt(builderResult: SubAgentResult, preFetchedDiagnostics?: string): string {
         const fileList = builderResult.writtenFiles.length > 0
             ? builderResult.writtenFiles.map(f => `- ${f}`).join('\n')
             : '(No file write records)';
+
+        const diagnosticsSection = preFetchedDiagnostics 
+            ? `\n## Pre-fetched LSP Diagnostics:\n${preFetchedDiagnostics}\n` 
+            : '';
 
         return [
             '## Quality Gate Review Task',
             '',
             'Please review the code quality of the following files:',
             fileList,
-            '',
+            diagnosticsSection,
             'Review Checklist:',
-            '1. Call `get_diagnostics` for each file to check for LSP errors.',
-            '2. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
-            '3. Verify the correctness of the scope chain.',
-            '4. Check file structure integrity (Refer to Rule 3b).',
+            '1. Call `get_diagnostics` for each file to check for LSP errors (or review the pre-fetched diagnostics above). You MUST resolve ALL LSP red errors!',
+            '2. Check for logic conflict issues (e.g., an event has `option` but uses `hide_window = yes`, which is a contradiction). Such conflicts MUST be reported and fixed.',
+            '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
+            '4. Verify the correctness of the scope chain.',
+            '5. Check file structure integrity (Refer to Rule 3b).',
             '',
             'Output Format:',
-            '- If all files have zero errors: Output "PASSED: All files passed quality checks."',
-            '- If there are errors: Output "FAILED: N issues need to be fixed", and list the specific issues.',
+            '- If all files have zero errors and no logic conflicts: Output "PASSED: All files passed quality checks."',
+            '- If there are errors or logic conflicts: Output "FAILED: N issues need to be fixed", and list the specific issues.',
         ].join('\n');
     }
 
@@ -158,9 +185,9 @@ export class QualityGate {
             ...writtenFiles.map(f => `- ${f}`),
             '',
             'Fix Requirements:',
-            '1. Only fix the specific issues listed in the review report.',
+            '1. Only fix the specific issues listed in the review report. You MUST fix ALL LSP red errors and logic conflicts (e.g., `hide_window = yes` used with `option`).',
             '2. Do not delete or simplify existing logic (Follow Rule 3b).',
-            '3. After fixing, call `get_diagnostics` for each modified file to verify.',
+            '3. After fixing, call `get_diagnostics` for each modified file to verify that the errors are resolved.',
         ].join('\n');
     }
 

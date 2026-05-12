@@ -283,15 +283,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 vs.commands.executeCommand('markdown.showPreview', vs.Uri.file(msg.filePath));
                 break;
             case 'submitPlanAnnotations': {
-                // Auto-switch to build mode on plan approval and send execution command
-                this.switchMode('build');
-                // The annotations array gives context on what the user wants changed
                 let contextStr = '';
                 if (msg.annotations && msg.annotations.length > 0) {
                     contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
                 }
-                const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
-                await this.handleUserMessage(prompt, undefined, undefined, true, true);
+
+                if (this.currentMode === 'orchestrator') {
+                    // 协调模式下：保持模式不变，指示 AI 开始分发任务
+                    const prompt = '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。' + contextStr;
+                    await this.handleUserMessage(prompt, undefined, undefined, true, true);
+                } else {
+                    // 普通计划模式：自动切换到 build 模式
+                    this.switchMode('build');
+                    const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
+                    await this.handleUserMessage(prompt, undefined, undefined, true, true);
+                }
                 break;
             }
             case 'revisePlanWithAnnotations': {
@@ -482,12 +488,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 { role: 'assistant', content: assistantContent }
             );
 
-            // ── Plan mode: suppress explanation in chat, auto-open annotation panel ──
+            // ── Plan/Orchestrator mode: suppress explanation in chat, auto-open annotation panel ──
             // If the AI is just asking clarification questions (indicated by :::question syntax),
             // it shouldn't lock into an Implementation Plan yet. Treat it as a conversational turn.
             const isJustAskingQuestions = result.explanation && result.explanation.includes(':::question');
+            const usedDispatchAgents = result.steps.some(s => s.toolName === 'dispatch_agents');
 
-            if (this.currentMode === 'plan' && result.explanation && !isJustAskingQuestions) {
+            if ((this.currentMode === 'plan' || (this.currentMode === 'orchestrator' && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
                 // Chat shows only tool-call steps (no full plan text)
                 this.postMessage({ type: 'generationComplete', result: { ...result, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({

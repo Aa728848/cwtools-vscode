@@ -192,21 +192,32 @@ export class FileToolHandler {
                     const lines = cached.split('\n');
                     const totalLines = lines.length;
                     let threshold = 150;
-                    if (args.file.endsWith('.gui') || args.file.endsWith('.gfx') || args.file.endsWith('.txt') || args.file.endsWith('.yml')) {
-                        threshold = 500;
+                    if (args.file.endsWith('.yml')) {
+                        threshold = 50;
                     }
+
                     if (totalLines > threshold) {
                         const headLines = lines.slice(0, 80);
                         const tailLines = lines.slice(-20);
                         const headContent = headLines.map((l, i) => `${1 + i} | ${l}`).join('\n');
                         const tailContent = tailLines.map((l, i) => `${totalLines - 19 + i} | ${l}`).join('\n');
-                        const gapInfo = `\n... [${totalLines - 100} lines omitted — use document_symbols to locate, then read_file for specifics] ...\n`;
+                        
+                        let gapInfo = `\n... [${totalLines - 100} lines omitted — use document_symbols to locate, then read_file for specifics] ...\n`;
+                        let hint = `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`;
+
+                        if (args.file.endsWith('.txt')) {
+                            gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
+                            hint = `🚨 FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
+                        } else if (args.file.endsWith('.yml')) {
+                            gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
+                            hint = `🚨 YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
+                        }
 
                         return {
                             content: headContent + gapInfo + tailContent,
                             totalLines,
                             truncated: true,
-                            _hint: `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`,
+                            _hint: hint,
                         };
                     }
                     return { content: cached, totalLines, truncated: false };
@@ -215,8 +226,8 @@ export class FileToolHandler {
             // ────────────────────────────────────────────────────────────────
 
             let threshold = 150;
-            if (args.file.endsWith('.gui') || args.file.endsWith('.gfx') || args.file.endsWith('.txt') || args.file.endsWith('.yml')) {
-                threshold = 500;
+            if (args.file.endsWith('.yml')) {
+                threshold = 50;
             }
 
             // Single-pass streaming: count total lines AND extract the requested slice simultaneously.
@@ -270,13 +281,22 @@ export class FileToolHandler {
                 const tailLines = slice.slice(-20);
                 const headContent = headLines.map((l, i) => `${1 + i} | ${l}`).join('\n');
                 const tailContent = tailLines.map((l, i) => `${totalLines - 19 + i} | ${l}`).join('\n');
-                const gapInfo = `\n... [${totalLines - 100} lines omitted — use document_symbols to locate, then read_file for specifics (max ${threshold} lines at a time)] ...\n`;
+                let gapInfo = `\n... [${totalLines - 100} lines omitted — use document_symbols to locate, then read_file for specifics (max ${threshold} lines at a time)] ...\n`;
+                let hint = `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`;
+
+                if (args.file.endsWith('.txt')) {
+                    gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
+                    hint = `🚨 FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
+                } else if (args.file.endsWith('.yml')) {
+                    gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
+                    hint = `🚨 YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
+                }
 
                 return {
                     content: headContent + gapInfo + tailContent,
                     totalLines,
                     truncated: true,
-                    _hint: `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`,
+                    _hint: hint,
                 };
             }
 

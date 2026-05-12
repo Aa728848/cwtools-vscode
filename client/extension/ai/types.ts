@@ -462,6 +462,7 @@ export type ToolArgs =
     | SetMemoryArgs
     | GetMemoryArgs
     | WriteDesignBlueprintArgs
+    | EditPdxBlockArgs
     | GrepArgs;
 
 export type ToolResult =
@@ -485,6 +486,7 @@ export type ToolResult =
     | SetMemoryResult
     | GetMemoryResult
     | WriteDesignBlueprintResult
+    | ReplaceLinesResult
     | GrepResult;
 
 export type AgentToolName =
@@ -534,6 +536,7 @@ export type AgentToolName =
     | 'remove_ignored_diagnostic'
     | 'get_ignored_diagnostics'
     | 'get_pdx_block'
+    | 'edit_pdx_block'
     // ── MiniMax CLI Media tools ──
     | 'mmx_generate_image'
     | 'mmx_generate_video'
@@ -618,6 +621,15 @@ export interface ReplaceLinesArgs {
     /** The replacement content for the specified line range */
     newContent: string;
     encoding?: 'utf8' | 'utf8bom';
+}
+
+export interface EditPdxBlockArgs {
+    /** Absolute path to the file to modify */
+    file: string;
+    /** Name of the top-level block/identifier to replace */
+    symbol: string;
+    /** The replacement content for the specified block */
+    newContent: string;
 }
 
 export interface ReplaceLinesResult {

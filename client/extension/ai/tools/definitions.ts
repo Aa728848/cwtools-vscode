@@ -26,7 +26,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_types',
-            description: '\u26a0\ufe0f MANDATORY before using any game ID for the first time. Query defined instances of a specific Stellaris type. Searches BOTH the current mod AND the vanilla game cache loaded by the CWTools language server. PDXscript IDs are routinely hallucinated by LLMs — always verify through this tool before using any technology, building, trait, scripted_trigger, scripted_effect, event, or archaeological_site ID in generated code. Set filter to narrow results and avoid token waste. Never call read_file on vanilla game files — this cache is faster and more complete.',
+            description: '⚠️ MANDATORY before using any game ID. Query defined instances of a Stellaris type from mod + vanilla cache. PDXscript IDs are routinely hallucinated — always verify through this tool. Set filter to narrow results.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -43,7 +43,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_rules',
-            description: 'Query the syntax rules for triggers, effects, scope changes, or modifiers. Returns the valid syntax, required parameters, and supported scopes for each rule. If a specific name is not found, it returns intelligent fuzzy suggestions. Use this to understand the correct syntax before generating code.',
+            description: 'Query syntax rules for triggers, effects, scope changes, or modifiers. Returns valid syntax, parameters, and scopes. Fuzzy-matches if exact name not found.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -60,7 +60,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'remove_ignored_diagnostic',
-            description: "Propose to remove a previously ignored diagnostic key from the user's workspace whitelist. Use this if you are debugging a silent failure and strongly suspect that a key in the ignored list is actually a genuine typo. This will prompt the human user for Permission. If granted, the key is removed from their whitelist and the LSP will flag it again.",
+            description: "Remove a previously ignored diagnostic key from the user's whitelist. Prompts user for permission. Use when debugging silent failures caused by whitelisted typos.",
             parameters: {
                 type: 'object',
                 properties: {
@@ -75,7 +75,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_ignored_diagnostics',
-            description: 'Get the complete list of all currently ignored diagnostic keys from the user\'s workspace whitelist. Use this tool to audit or review the whitelist instead of reading the large .vscode/settings.json file directly, which consumes too many tokens.',
+            description: 'List all currently ignored diagnostic keys from the workspace whitelist. More efficient than reading .vscode/settings.json directly.',
             parameters: {
                 type: 'object',
                 properties: {},
@@ -87,14 +87,30 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_pdx_block',
-            description: 'Extract exactly one complete AST block (including all its nested {...} brackets) instead of blindly guessing line numbers. Useful when trying to read long vanilla files without exhausting context. Provide the exact symbol name if available.',
+            description: 'Extract exactly one complete AST block by symbol name. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). If the symbol is not found, the error response includes a full list of available symbols with line ranges so you can retry with the correct name.',
             parameters: {
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
-                    symbol: { type: 'string', description: 'Name of the top-level block/identifier to extract (e.g. event id "anomaly.1" or "ship_size_corvette")' },
+                    symbol: { type: 'string', description: 'Symbol name varies by file type: events → "namespace.id" (e.g. "anomaly.1"); common/scripted_triggers/effects/technology/buildings/ship_sizes/static_modifiers → top-level identifier (e.g. "tech_kuat_reactor", "kuat_is_crisis_faction"); section_templates → key value (e.g. "X308_Titan_MID1"); on_actions → action name (e.g. "on_entering_battle", but may have duplicates!); .gui → containerWindowType name (e.g. "kuat_bossbar"); .gfx → pdxmesh name (e.g. "sws_turbolaser_red_mesh"). When unsure, call document_symbols first or just try — the error response lists all available symbols.' },
                 },
                 required: ['file', 'symbol'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'edit_pdx_block',
+            description: '🌟 ZERO-READ EDIT: Replace a specific PDX AST block entirely by its symbol name, without needing to read the file first. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Uses LSP to find block boundaries automatically. If the symbol is not found, the error response includes a full list of available symbols so you can retry immediately. ⚠️ WARNING: on_actions files may have DUPLICATE top-level names (e.g. multiple "on_entering_battle") — only the FIRST match will be edited. For duplicates, use replaceLines with explicit line ranges instead.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    file: { type: 'string', description: 'Absolute file path' },
+                    symbol: { type: 'string', description: 'Symbol name varies by file type: events → "namespace.id" (e.g. "anomaly.1"); common types → top-level identifier (e.g. "tech_kuat_reactor"); section_templates → key value; .gui → containerWindowType name; .gfx → pdxmesh name. If unsure, just try — the error lists all available symbols.' },
+                    newContent: { type: 'string', description: 'The completely new code block to replace the old one. Must include the outer block definition (e.g. "my_trigger = { ... }", not just the inner content).' },
+                },
+                required: ['file', 'symbol', 'newContent'],
             },
         },
     },
@@ -132,7 +148,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_file_context',
-            description: 'Get code context around a specific line in a file, including symbol information. Use this to understand the surrounding code structure.',
+            description: 'Get code context around a specific line, including symbol info. Use when you already know a line number from grep/search results. For extracting entire blocks by name, prefer get_pdx_block instead.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -148,7 +164,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_mod_files',
-            description: 'Search for files containing specific text patterns. By default, searches the mod workspace. To search vanilla code precisely, change searchContext to "vanilla" and set exactMatch to true.',
+            description: 'Search for files containing text patterns. Default: mod workspace. For vanilla: set searchContext="vanilla" + exactMatch=true. 💡 After finding a target, use get_pdx_block or edit_pdx_block — NOT read_file.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -206,7 +222,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'document_symbols',
-            description: 'Get all symbols (events, triggers, effects, buildings, etc.) defined in a specific file. Returns a hierarchical tree of symbol names and their line ranges. Useful for understanding file structure without reading the entire file.',
+            description: 'Get all symbols defined in a file as a hierarchical tree with line ranges. Use this FIRST to understand file structure without reading content. Combine with get_pdx_block/edit_pdx_block for zero-read workflows.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -220,7 +236,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'workspace_symbols',
-            description: 'Search for symbol definitions by name, across the ENTIRE workspace including the vanilla game cache loaded by CWTools. Use this to locate where any vanilla event, decision, starbase module, ship section, etc. is defined. For token efficiency, always use a specific query (e.g. "tech_energy_grid" not "tech"). Results include the origin file path — vanilla files will show their game install path.',
+            description: 'Search symbol definitions by name across workspace + vanilla cache. Use specific queries (e.g. "tech_energy_grid" not "tech") to avoid large result sets.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -262,7 +278,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'read_file',
-            description: 'Read file content with optional line range. Always returns line numbers. **For large files (>150 lines), you MUST use startLine+endLine to read only the section you need.** Recommended workflow for unknown files: (1) call document_symbols to get structure and line ranges, (2) call read_file with the specific startLine/endLine for the symbol you want. Never read the entire file just to find one function. Max output is dynamically bounded; if truncated, the response includes totalLines and a hint telling you how to read the next section. If target file is an image (.dds/.tga/.png/.jpg), returns its metadata (width, height, format, etc).',
+            description: 'Read file content with optional line range. ⚠️ Large files are auto-truncated with guidance hints. For .txt: prefer get_pdx_block(symbol) over full reads. For .yml: NEVER read full files — use grep/search_mod_files to find keys. Workflow: document_symbols → read_file(startLine, endLine). Images (.dds/.tga/.png/.jpg) return metadata only.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -278,7 +294,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_file',
-            description: 'Write content to a file. You can use this tool to: (1) create BRAND-NEW files, (2) overwrite Markdown (.md) documents/plans, or (3) fully rewrite files YOU created earlier in this conversation. If you try to overwrite a pre-existing file you did NOT create in this session, it will be blocked — use `edit_file` or `multiedit` for those. For complete file rewrites of your own code, this is PREFERRED over edit_file when the majority of content changes.',
+            description: 'Write/create a file. For new files or full rewrites of files YOU created this session. Pre-existing files not created by you are blocked — use edit_file/multiedit/edit_pdx_block for those.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -294,7 +310,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'edit_file',
-            description: 'Make precise string substitutions in files. **To create a new file, set oldString to empty string ""** — this writes newString as the entire file content directly (no temp files). To edit existing files, provide exact oldString to replace. After writing, returns real-time LSP diagnostics. Subject to agentFileWriteMode.',
+            description: 'String substitution in files. Set oldString="" to create new file. Returns LSP diagnostics after write. For PDX scripts, prefer edit_pdx_block (zero-read, no string matching needed).',
             parameters: {
                 type: 'object',
                 properties: {
@@ -343,7 +359,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'analyze_diagnostic_error',
-            description: 'MANDATORY when an error occurs during file modification. Use this tool to perform a deep reflection on the error before attempting another fix. Explain what the error means, trace its root cause in the context of the current file or workspace, and outline a planned solution. The tool will simply acknowledge the reflection, forcing the engine into a thinking step.',
+            description: 'MANDATORY on file modification errors. Perform deep reflection before retrying: explain root cause, trace context, outline fix plan. Forces a thinking step.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -469,7 +485,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'multiedit',
-            description: 'Apply multiple edits to a SINGLE file in one atomic operation. All edits applied in sequence; only written to disk if ALL succeed. More efficient than multiple edit_file calls. Uses same fuzzy-matching as edit_file. **IMPORTANT**: if oldString appears multiple times in the file, either (a) add more surrounding context lines to make it unique, or (b) set `replaceAll=true` on that edit item.',
+            description: 'Apply multiple edits to a SINGLE file atomically. All edits applied in sequence; only written if ALL succeed. If oldString has multiple matches, add context lines or set replaceAll=true. For PDX scripts, prefer edit_pdx_block (no string matching needed).',
             parameters: {
                 type: 'object',
                 properties: {
@@ -498,7 +514,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_definition',
-            description: 'Jump to the definition of the symbol under a position (GoToType), or find all references if no definition exists (FindAllRefs). This uses the CWTools AST directly — far faster and more accurate than file-system grep. Use it to locate where any scripted_trigger, scripted_effect, event, or type is defined before reading or editing it.',
+            description: 'GoToDefinition at a position, or FindAllRefs if no definition exists. Uses CWTools AST — faster than grep. If you know the symbol name, prefer query_definition_by_name instead.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -514,7 +530,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_definition_by_name',
-            description: 'Find where a named symbol is defined by searching the CWTools AST — no file/position needed, just the symbol name. Works for: scripted_trigger, scripted_effect, event IDs, character names, and any other top-level PDXScript key. Much easier than query_definition when you know the name but not the location. Returns file path and line number of the definition.',
+            description: 'Find where a named symbol is defined — no file/position needed. Returns file path and line number. Works for any top-level PDXScript key (events, triggers, effects, etc.).',
             parameters: {
                 type: 'object',
                 properties: {
@@ -528,7 +544,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_scripted_effects',
-            description: '\u26a0\ufe0f MANDATORY before calling any scripted_effect. List all scripted effects in the current game/mod with their name, valid scope constraints, and effect type. PDXscript training data for LLMs is extremely sparse — scripted_effect names are frequently hallucinated. You MUST call this before using any scripted_effect to verify the exact name and that the call is valid in the current scope. Prevents hallucinated effect names that would cause silent failures.',
+            description: '⚠️ MANDATORY before using any scripted_effect. Lists all scripted effects with name, scope constraints, and type. PDXscript effect names are frequently hallucinated — always verify here first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -543,7 +559,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_scripted_triggers',
-            description: '\u26a0\ufe0f MANDATORY before using any scripted_trigger. List all scripted triggers in the current game/mod with their name, valid scope constraints, and trigger type. PDXscript training data for LLMs is extremely sparse — scripted_trigger names are frequently hallucinated. You MUST call this before using any scripted_trigger to verify the exact name and scope validity. Prevents hallucinated trigger names that would cause silent failures.',
+            description: '⚠️ MANDATORY before using any scripted_trigger. Lists all scripted triggers with name, scope constraints, and type. Trigger names are frequently hallucinated — always verify here first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -558,7 +574,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_enums',
-            description: '\u26a0\ufe0f MANDATORY before using any enum field value. Query enum values from the CWTools rule engine. Call with no enumName (or empty string) to list all available enum names. Then query a specific enum to get all valid values. PDXscript enum values are domain-specific and not reliably known to LLMs — always verify before using an enum field to prevent hallucinated values that silently break scripts.',
+            description: '⚠️ MANDATORY before using any enum field. Query enum values from CWTools rules. Call with no enumName to list all enums, then query specific enum for values. Always verify — enum values are domain-specific.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -573,7 +589,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_entity_info',
-            description: 'Get deep structural info for a file from the CWTools ComputedData cache: referenced types, defined scripted variables, effect blocks, trigger blocks, and saved event_targets. Use this when you need to understand what a file references before deciding how to modify it, or to get a list of event_targets saved in a scripted_effect.',
+            description: 'Get deep structural info from CWTools cache: referenced types, scripted variables, effect/trigger blocks, and saved event_targets. Use to understand file dependencies before modification.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -587,7 +603,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_static_modifiers',
-            description: '\u26a0\ufe0f MANDATORY before using any modifier tag in add_modifier. List all static modifiers (from static_modifiers/*.txt files) with their modifier categories. PDXscript modifier tag names are domain-specific and frequently hallucinated by LLMs — always verify that a modifier tag exists. Note: Dynamic or engine-hardcoded modifiers (e.g. planet_storm_*) do NOT appear in static modifiers. If not found here, ALWAYS verify them using `query_rules` with category="modifier" before concluding they are invalid.',
+            description: '⚠️ MANDATORY before using add_modifier. Lists static modifiers with categories. Modifier names are domain-specific — always verify. Dynamic/engine modifiers may not appear here — use query_rules(category="modifier") as fallback.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -910,7 +926,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'replace_lines',
-            description: 'Replace a range of lines in a file with new content. Use this when edit_file fails repeatedly (e.g., "Content not found") because the file has been modified since you last read it. Requires exact line numbers from a RECENT read_file call. The tool verifies that the line range content is reasonably similar to what you expect before replacing. This is safer than write_file for targeted repairs and does not require string matching.',
+            description: 'Replace a line range with new content. Use when edit_file fails due to stale content, or when you have exact line numbers from document_symbols/read_file. No string matching needed — safer for targeted repairs.',
             parameters: {
                 type: 'object',
                 properties: {

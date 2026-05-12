@@ -272,6 +272,56 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.workspaceSymbols(args as any); break;
             case 'get_pdx_block':
                 result = await this.lspHandler.getPdxBlock(args as any); break;
+            case 'edit_pdx_block': {
+                const argsBlock = args as unknown as import('./types').EditPdxBlockArgs;
+                const symbols = await this.lspHandler.documentSymbols({ file: argsBlock.file });
+                if (symbols.symbols.length === 0) {
+                    result = { success: false, message: 'Could not parse symbols in file. File might be invalid or empty.' };
+                    break;
+                }
+                const findSymbol = (syms: import('./types').DocumentSymbolInfo[]): import('./types').DocumentSymbolInfo | null => {
+                    for (const sym of syms) {
+                        if (sym.name === argsBlock.symbol) {
+                            return sym;
+                        }
+                        if (sym.children && sym.children.length > 0) {
+                            const found = findSymbol(sym.children);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                };
+                const targetSymbol = findSymbol(symbols.symbols);
+                if (!targetSymbol) {
+                    // 直接附带可用符号列表，避免 AI 再调 document_symbols
+                    const collectNames = (syms: import('./types').DocumentSymbolInfo[], depth = 0): string[] => {
+                        const names: string[] = [];
+                        for (const s of syms) {
+                            const prefix = depth > 0 ? '  '.repeat(depth) + '└ ' : '';
+                            names.push(`${prefix}${s.name} (L${s.range.startLine}-${s.range.endLine})`);
+                            if (s.children && s.children.length > 0 && depth < 1) {
+                                names.push(...collectNames(s.children, depth + 1));
+                            }
+                        }
+                        return names;
+                    };
+                    const allNames = collectNames(symbols.symbols);
+                    const preview = allNames.slice(0, 20).join('\n');
+                    const suffix = allNames.length > 20 ? `\n... and ${allNames.length - 20} more` : '';
+                    result = { success: false, message: `Symbol '${argsBlock.symbol}' not found in file.\n\nAvailable symbols:\n${preview}${suffix}\n\nUse one of these exact names.` };
+                    break;
+                }
+                // documentSymbols is 0-indexed, replaceLines is 1-indexed
+                const startLine = targetSymbol.range.startLine + 1;
+                const endLine = targetSymbol.range.endLine + 1;
+                result = await this.fileHandler.replaceLines({
+                    filePath: argsBlock.file,
+                    startLine,
+                    endLine,
+                    newContent: argsBlock.newContent
+                }, context);
+                break;
+            }
             case 'lsp_operation':
                 result = await this.lspHandler.lspOperation(args as any); break;
             case 'query_definition':

@@ -561,7 +561,22 @@ export class LspToolHandler {
             findSymbol(symbols.symbols);
 
             if (!targetSymbol) {
-                return { content: `Error: Symbol '${args.symbol}' not found in file. Check spelling or use document_symbols first.`, truncated: false };
+                // 将所有可用符号名称（含子级）扁平化后附带在错误消息中，帮助 AI 自助定位
+                const collectNames = (syms: DocumentSymbolInfo[], depth = 0): string[] => {
+                    const names: string[] = [];
+                    for (const s of syms) {
+                        const prefix = depth > 0 ? '  '.repeat(depth) + '└ ' : '';
+                        names.push(`${prefix}${s.name} (${s.kind}, L${s.range.startLine}-${s.range.endLine})`);
+                        if (s.children && s.children.length > 0 && depth < 2) {
+                            names.push(...collectNames(s.children, depth + 1));
+                        }
+                    }
+                    return names;
+                };
+                const allNames = collectNames(symbols.symbols);
+                const preview = allNames.slice(0, 30).join('\n');
+                const suffix = allNames.length > 30 ? `\n... and ${allNames.length - 30} more` : '';
+                return { content: `Error: Symbol '${args.symbol}' not found in file.\n\nAvailable symbols in this file:\n${preview}${suffix}\n\nTry using one of these exact names.`, truncated: false };
             }
 
             const tsym = targetSymbol as DocumentSymbolInfo;
@@ -1309,6 +1324,7 @@ export class LspToolHandler {
         if (limitReached) {
             returnObj._warning = `[CRITICAL TRUNCATION] Truncation: The output limit of ${limit} files has been reached. The remaining matching files (which may contain hundreds) have been forcibly discarded to protect the large model context! Please narrow your search using the more precise \`query\` or \`directory\` parameters.`;
         }
+        returnObj._hint = "💡 Found what you need? If the match is in a PDX Script (.txt), DO NOT use read_file! Use document_symbols to find its boundaries, then get_pdx_block to read it, or edit_pdx_block to instantly replace it without reading.";
         return returnObj as import('../types').SearchModFilesResult;
     }
 
@@ -1377,11 +1393,13 @@ export class LspToolHandler {
             });
         } catch { /* skip */ }
 
-        return {
+        const returnObj: any = {
             matches,
             totalMatches,
-            truncated
+            truncated,
+            _hint: "💡 If you found your target in a PDX Script (.txt), DO NOT use read_file! Use document_symbols + get_pdx_block to read, or edit_pdx_block to directly replace the node."
         };
+        return returnObj as import('../types').GrepResult;
     }
 
     // ─── getCompletionAt ─────────────────────────────────────────────────────

@@ -313,8 +313,12 @@ export class AIService {
         const controller = new AbortController();
         // Also link any external abort signal so the caller can cancel this specific call.
         const externalSignal = (options as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
-        const linkAbort = () => controller.abort();
-        externalSignal?.addEventListener('abort', linkAbort);
+        const linkAbort = () => controller.abort(externalSignal?.reason);
+        if (externalSignal?.aborted) {
+            controller.abort(externalSignal.reason);
+        } else {
+            externalSignal?.addEventListener('abort', linkAbort);
+        }
         this.activeControllers.add(controller);
 
         try {
@@ -374,8 +378,12 @@ export class AIService {
 
         const controller = new AbortController();
         const externalSignal = options?.abortSignal;
-        const linkAbort = () => controller.abort();
-        externalSignal?.addEventListener('abort', linkAbort);
+        const linkAbort = () => controller.abort(externalSignal?.reason);
+        if (externalSignal?.aborted) {
+            controller.abort(externalSignal.reason);
+        } else {
+            externalSignal?.addEventListener('abort', linkAbort);
+        }
         this.activeControllers.add(controller);
 
         try {
@@ -587,18 +595,88 @@ export class AIService {
         const delays = [2000, 4000, 8000];
 
         while (true) {
-            const response = await fetch(url, init);
-
-            // Check for 429 (Rate Limit / Too Many Requests)
-            if (response.status === 429 && retries < maxRetries) {
-                const jitter = Math.floor(Math.random() * delays[retries]! * 0.25);
-                const delay = delays[retries]! + jitter;
-                ErrorReporter.debug(SOURCE.AI_SERVICE, `429 Rate Limit hit for ${providerId}. Retrying in ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
-                retries++;
-                continue;
+            let fetchTimeoutId: NodeJS.Timeout | undefined;
+            const originalSignal = init.signal;
+            const fetchController = new AbortController();
+            
+            const linkAbort = () => fetchController.abort(originalSignal?.reason);
+            if (originalSignal) {
+                if (originalSignal.aborted) throw new Error('Aborted');
+                originalSignal.addEventListener('abort', linkAbort);
             }
-            return response;
+
+            // Hard timeout for the connection/headers phase (60s)
+            fetchTimeoutId = setTimeout(() => {
+                const err = new Error('Fetch connection timeout');
+                err.name = 'TimeoutError';
+                fetchController.abort(err);
+            }, 60000);
+
+            try {
+                const response = await fetch(url, { ...init, signal: fetchController.signal });
+                
+                if (fetchTimeoutId) {
+                    clearTimeout(fetchTimeoutId);
+                    fetchTimeoutId = undefined;
+                }
+
+                // Check for 429 (Rate Limit / Too Many Requests)
+                if (response.status === 429 && retries < maxRetries) {
+                    const jitter = Math.floor(Math.random() * delays[retries]! * 0.25);
+                    const delay = delays[retries]! + jitter;
+                    ErrorReporter.debug(SOURCE.AI_SERVICE, `429 Rate Limit hit for ${providerId}. Retrying in ${delay}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    retries++;
+                    continue;
+                }
+                
+                // Do NOT remove the linkAbort listener here. The originalSignal must 
+                // continue to be able to abort the fetchController if the caller is reading the stream.
+                return response;
+            } catch (err: any) {
+                if (fetchTimeoutId) clearTimeout(fetchTimeoutId);
+                
+                // If the user explicitly aborted, do not retry
+                if (originalSignal?.aborted) {
+                    throw err;
+                }
+
+                // Retry on timeout or network errors
+                if ((err.name === 'TimeoutError' || err.message?.includes('timeout') || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT') && retries < maxRetries) {
+                    const delay = delays[retries]! + 1000;
+                    ErrorReporter.warn(SOURCE.AI_SERVICE, `Network error/timeout for ${providerId}: ${err.message}. Retrying in ${delay}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    retries++;
+                    continue;
+                }
+                throw err;
+            }
+        }
+    }
+
+    /**
+     * Reads from a ReadableStream with an idle timeout.
+     * If the reader doesn't yield a chunk within the timeout, it aborts the controller to prevent silent hangs.
+     */
+    private async readWithTimeout<T>(
+        reader: ReadableStreamDefaultReader<T>,
+        controller: AbortController,
+        timeoutMs: number
+    ): Promise<ReadableStreamReadResult<T>> {
+        let timeoutId: NodeJS.Timeout | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+                const err = new Error(`Stream idle timeout: no data received for ${timeoutMs}ms`);
+                err.name = 'TimeoutError';
+                controller.abort(err);
+                reject(err);
+            }, timeoutMs);
+        });
+
+        try {
+            return await Promise.race([reader.read(), timeoutPromise]);
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
         }
     }
 
@@ -689,7 +767,7 @@ export class AIService {
         const toolCallMap: Record<number, { id: string; type: string; function: { name: string; arguments: string } }> = {};
 
         while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await this.readWithTimeout(reader, controller, 120000); // 120s idle timeout
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
@@ -834,7 +912,7 @@ export class AIService {
         let currentBlockType = '';
 
         while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await this.readWithTimeout(reader, controller, 120000); // 120s idle timeout
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');

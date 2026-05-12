@@ -174,10 +174,11 @@ This replaces Rule 0 for multi-entity tasks. Simple single-file entities still u
 strictly. If no blueprint exists and the task matches the criteria above, you MUST use the
 \`write_design_blueprint\` tool to create one and have the user approve it BEFORE writing any code files.
 
-#### Rule 1 — Output Limits & Chunking (CRITICAL)
-- **NEVER attempt to rewrite a file larger than 150 lines in a single \`write_file\`.** You will hit token limits and crash.
-- Instead, use \`multiedit\` or \`apply_patch\` to perform targeted changes.
-- If you must rewrite a large file, use \`todo_write\` to break it down into multiple steps (e.g., "rebuild top", "rebuild bottom"), and execute ONE \`multiedit\` per response.
+#### Rule 1 — Output Limits & Zero-Read Editing (CRITICAL)
+- **NEVER attempt to read or rewrite a file larger than 150 lines in a single \`read_file\` / \`write_file\`.** You will hit token limits and crash.
+- **ZERO-READ EDITING**: For existing files, DO NOT read the entire file just to edit a single event/node. Use \`document_symbols\` to find the target symbol's boundaries, then use \`edit_pdx_block(file, symbol, newContent)\` to replace it directly.
+- If you only need to read a specific node to understand it, use \`get_pdx_block(file, symbol)\`.
+- If you must rewrite a large file manually, use \`multiedit\` to perform targeted string replacements.
 - Create new file: \`edit_file(path, oldString="", newString=content)\`
 - Replace small file (<150 lines): \`write_file(path, content)\`
 - NEVER use \`validate_code\` to create files.
@@ -211,6 +212,7 @@ This tool handles BOM encoding, key formatting, insertion/update, and line endin
 - **Smart quotes**: Automatically converted to ASCII — you don't need to worry about quote types
 - **Batch size limit**: Write at most **15 entries per call**. For large batches, split into multiple \`write_localisation\` calls. This prevents output truncation.
 - **Multi-language pattern**: Write English entries first, then Chinese entries in a separate call to a separate file.
+- **NEVER READ LARGE YML FILES**: Localisation files often contain thousands of lines. Reading them will instantly exhaust your context window. Use \`search_mod_files\` to check if a key exists. If you just want to update a key, call \`write_localisation\` directly—it automatically overwrites existing keys without needing to read the file first.
 
 #### Rule 3 — Complete Dependency Chains
 When content references an ID that does not yet exist, **create it**. Do not leave dangling references.
@@ -318,15 +320,17 @@ When you see LSP/CWTools errors, classify before acting:
 | Find a specific event/trigger in a large file | \`workspace_symbols("event_id")\` → get file + line, then \`get_file_context\` |
 | Understand a file's structure | \`document_symbols(file)\` only — do not read content |
 | Isolate a large code block | \`get_pdx_block(file, symbol)\` — grabs entire AST sub-tree perfectly |
+| **Modify a specific block without reading** | \`edit_pdx_block(file, symbol, newContent)\` — **ZERO-READ EDIT**, the fastest and safest way to modify PDX scripts |
 | See code around a specific line | \`get_file_context(file, line, radius=20)\` |
 | Verify an ID exists | \`query_types(typeName, filter)\` — no file reading at all |
 | Search EXACT match in vanilla codebase | \`search_mod_files(query="X", searchContext="vanilla", exactMatch=true)\` — do not use workspace_symbols for text searches |
 | Universal Text Search | \`grep(query="pattern", isRegex=true/false)\` — fast regex or plain text search across the workspace or specific paths |
 
 ### Large Project Awareness
-- When reading sibling files (Rule 0), prefer \`read_file\` with \`startLine\` and \`endLine\` to read only the relevant section (e.g. first 60 lines for structure)
+- **BAN ON MINDLESS READING**: NEVER call \`read_file\` on an unknown file without checking its size or structure first. Files over 150 lines will cause network hangs.
+- When reading sibling files (Rule 0), prefer \`get_pdx_block\` to extract exactly one event/node, or use \`read_file\` with \`startLine\` and \`endLine\` to read only the first 60 lines for structure.
 - For MANDATORY FINAL CHECK, if \`get_diagnostics\` returns results with \`_occurrences\` or \`_diagnosticsNote\` fields, the results have been automatically deduplicated — use these metadata fields for accurate counts
-- Before reading a large file in full, consider: can \`document_symbols\` + \`get_file_context\` answer my question with less context cost?
+- Before reading a large file in full, consider: can \`document_symbols\` + \`edit_pdx_block\` solve my problem with zero reading?
 
 ---
 

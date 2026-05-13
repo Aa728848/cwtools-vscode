@@ -257,14 +257,6 @@ export interface QueryReferencesResult {
     }>;
 }
 
-export interface ValidateCodeArgs {
-    code: string;
-    targetFile: string;
-    insertPosition?: {
-        line: number;
-        column: number;
-    };
-}
 
 export interface ValidationError {
     code: string;
@@ -274,10 +266,6 @@ export interface ValidationError {
     column: number;
 }
 
-export interface ValidateCodeResult {
-    isValid: boolean;
-    errors: ValidationError[];
-}
 
 export interface GetFileContextArgs {
     file: string;
@@ -445,7 +433,6 @@ export type ToolArgs =
     | QueryTypesArgs
     | QueryRulesArgs
     | QueryReferencesArgs
-    | ValidateCodeArgs
     | GetFileContextArgs
     | SearchModFilesArgs
     | GetCompletionAtArgs
@@ -470,7 +457,6 @@ export type ToolResult =
     | QueryTypesResult
     | QueryRulesResult
     | QueryReferencesResult
-    | ValidateCodeResult
     | GetFileContextResult
     | SearchModFilesResult
     | GetCompletionAtResult
@@ -494,7 +480,7 @@ export type AgentToolName =
     | 'query_types'
     | 'query_rules'
     | 'query_references'
-    | 'validate_code'
+    // validate_code — REMOVED: 由 get_diagnostics + edit_file 内联诊断替代
     | 'get_diagnostics'
     | 'get_file_context'
     | 'search_mod_files'
@@ -777,6 +763,19 @@ export interface AgentCheckpoint {
     topicId?: string;
 }
 
+/**
+ * Agent resume state — fully serializable state of an interrupted agent task.
+ * Allows the agent to resume execution from the exact point of interruption
+ * with the complete tool call context and reasoning history.
+ */
+export interface AgentResumeState {
+    timestamp: number;
+    mode: AgentMode;
+    messages: ChatMessage[];
+    todos: TodoItem[];
+    topicId: string;
+}
+
 // ─── Agent Execution ─────────────────────────────────────────────────────────
 
 export interface AgentStep {
@@ -875,6 +874,7 @@ export type WebViewMessage =
     | { type: 'insertCode'; code: string }
     | { type: 'copyCode'; code: string }
     | { type: 'regenerate' }
+    | { type: 'resumeGeneration' }
     | { type: 'newTopic' }
     | { type: 'loadTopic'; topicId: string }
     | { type: 'deleteTopic'; topicId: string }
@@ -927,7 +927,7 @@ export type HostMessage =
     | { type: 'startBackgroundGeneration' }
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
-    | { type: 'generationError'; error: string }
+    | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number; selectedText: string }
     | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; archived?: boolean }> }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[] }

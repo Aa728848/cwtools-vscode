@@ -1,4 +1,4 @@
-module LSP.LanguageServer
+﻿module LSP.LanguageServer
 
 open LSP.Log
 open System
@@ -311,7 +311,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | SemanticTokensFullDelta(p) -> server.SemanticTokensFullDelta(p) |> thenMap serializeSemanticTokensOrDeltaOption |> thenMap (Option.defaultValue "[[CANCEL]]") |> thenSome, true
         // CodeActions reads game state but result doesn't mutate; treat as read-only
         | CodeActions(p)        -> server.CodeActions(p)         |> thenMap serializeCommandList |> thenSome,            true
-        // ExecuteCommand: split into read-only (query/info) and write (validateCode, etc.)
+        // ExecuteCommand: split into read-only (query/info) and write (etc.)
         | ExecuteCommand(p) ->
             let isReadCmd =
                 match p.command with

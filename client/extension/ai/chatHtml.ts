@@ -253,7 +253,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <label class="settings-label">${svgIcon('bot')} 协调模式 — 子 Agent 模型配置</label>
                     <div class="settings-hint" style="margin-bottom:8px;">为每个子 Agent 角色单独指定供应商/模型。留为"继承主设置"则使用上方配置的主模型。</div>
                     <div id="agentModelRows" style="display:flex;flex-direction:column;gap:8px;">
-                        ${['explorer|探索者 (Explorer)', 'architect|架构师 (Architect)', 'builder|构建者 (Builder)', 'locWriter|本地化 (LocWriter)', 'reviewer|审查者 (Reviewer)', 'assetGen|资产 (AssetGen)']
+                        ${['explorer|探索者 (Explorer)', 'architect|架构师 (Architect)', 'builder|构建者 (Builder)', 'locWriter|本地化 (LocWriter)', 'locTranslator|翻译 (LocTranslator)', 'reviewer|审查者 (Reviewer)', 'assetGen|资产 (AssetGen)', 'guiExpert|GUI专家 (GuiExpert)']
                             .map(item => {
                                 const [role, label] = item.split('|');
                                 return `<div class="agent-model-row" data-role="${role}" style="display:flex;align-items:center;gap:6px;">

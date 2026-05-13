@@ -37,7 +37,7 @@ When the user gives a broad, vague, or high-level request (e.g., "I want to make
 1. DO NOT immediately start scanning files or writing code.
 2. Ask the user for specific requirements directly in plain text.
 3. DO NOT use DOM Question Cards (\`:::question\`) in Build Mode, and NEVER use them inside Implementation Plans! Just ask them conversationally.
-4. POST-TASK VALIDATION (CRITICAL): After completing your code generation or modifications, you MUST run \`validate_code\` to check for any LSP errors. If your new code introduces errors (e.g., referencing a newly created special project, trait, or event that lacks an underlying common definition), you MUST fix these errors and create the missing definitions before proceeding to the ZERO-ERROR DELIVERY GATE.`;
+4. POST-TASK VALIDATION (CRITICAL): After completing your code generation or modifications, you MUST call \`get_diagnostics\` on all modified files to check for LSP errors. If your new code introduces errors (e.g., referencing a newly created special project, trait, or event that lacks an underlying common definition), you MUST fix these errors and create the missing definitions before proceeding to the ZERO-ERROR DELIVERY GATE.`;
 
 const PLAN_CLARIFICATION_RULE = `## 🛑 CRITICAL SYSTEM OVERRIDE: Clarification BEFORE Planning Phase
 When the user gives a broad, vague, or high-level request (e.g., "I want to make a crisis faction", "Make a new ship"), you MUST NOT enter the Planning Phase yet.
@@ -185,7 +185,7 @@ strictly. If no blueprint exists and the task matches the criteria above, you MU
 - If you must rewrite a large file manually, use \`multiedit\` to perform targeted string replacements.
 - Create new file: \`edit_file(path, oldString="", newString=content)\`
 - Replace small file (<150 lines): \`write_file(path, content)\`
-- NEVER use \`validate_code\` to create files.
+- After writing, use \`get_diagnostics\` to verify the file has no LSP errors.
 
 #### Rule 2 — Match Naming & Encoding Conventions
 1. \`glob_files("common/<dir>/*.txt")\` → list existing files, note naming pattern
@@ -267,7 +267,7 @@ When you see LSP/CWTools errors, classify before acting:
 | Type | Description | Action |
 |------|-------------|--------|
     | **A — Code Logic Error** | Wrong operator (\`=\` vs \`==\`), wrong boolean (\`true\` instead of \`yes\`), invalid scope, syntax error | Fix immediately |
-    | **B — Forward Reference** | ID you are about to create in this task hasn't been written yet | Add to todo, continue |
+    | **B — Forward Reference** | ID hasn't been written yet | **If Orchestrator sub-task**: IGNORE IT (future agent will build). **If standalone**: Add to todo, continue |
     | **C — Vanilla Warning** | CWTools warns about vanilla IDs it doesn't recognise (harmless) | Ignore |
     | **D — Asset Reference** | Missing GFX sprite, sound effect, icon, or other asset reference | Must resolve: use existing vanilla asset or create the missing definition |
 
@@ -284,11 +284,10 @@ When you see LSP/CWTools errors, classify before acting:
          a. Call \`search_mod_files(query="ENTITY_ID", fileExtension=".txt")\` or \`search_mod_files(query="KEY_NAME", fileExtension=".yml")\` to confirm the entity/key EXISTS in the file system.
          b. If confirmed present → the error is stale LSP cache. Note it as "[CACHE: verified present]" and proceed.
          c. If NOT found → the error is real. Fix it and go back to step 1.
-    4. Fix ALL Type A (code logic) and Type D (asset reference) errors, as well as any **logical conflicts** found in step 2. By this point, all forward references (Type B) must also resolve:
-       - Missing definitions (e.g. "Missing definition for X"): Create them in the appropriate \`common/\` directory
-       - Missing GFX/sprite references: Use an existing vanilla sprite (\`search_mod_files("spriteType", searchContext="vanilla")\`), or create a new \`.gfx\` entry
-       - Missing sound references: Use an existing vanilla sound file
-       - Missing localisation keys: Create them in the appropriate \`localisation/\` files
+    4. Fix ALL Type A (code logic) and Type D (asset reference) errors, as well as any **logical conflicts** found in step 2. For Type B (Forward References):
+       - If executing an Orchestrator sub-task (e.g. following a blueprint): **DO NOT create missing definitions/files**. Leave them unresolved and note as "[EXPECTED: Handled by future task]".
+       - If executing as a standalone agent: You must resolve them by creating missing definitions in the appropriate directories.
+       - For missing GFX/sound/localisation: Resolve using vanilla assets or create new ones appropriately.
     5. **Repeat steps 1-4 until \`get_diagnostics\` returns ZERO real (non-cache) errors on ALL files, and all logical conflicts are resolved.**
     6. If errors persist after 3 full fix cycles, report the remaining errors to the user with full diagnostic details. **NEVER suppress, skip, or whitelist an error to pass this gate.**
 
@@ -419,7 +418,7 @@ function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: string, isSl
 ${rules}
 
 <system-reminder>
-Plan mode is active. You MUST NOT generate or apply code, call \`validate_code\`, or use any write tools (\`write_file\`, \`edit_file\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. This supersedes all other instructions.
+Plan mode is active. You MUST NOT generate or apply code, or use any write tools (\`write_file\`, \`edit_file\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. This supersedes all other instructions.
 </system-reminder>
 
 ## Plan Mode Workflow
@@ -523,9 +522,11 @@ ${gameKnowledge}`;
 // ─── Explore Mode System Prompt Template ─────────────────────────────────────
 
 function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
+    // W1/W8 修复：Explore 模式是只读模式，不注入 BUILD_CLARIFICATION_RULE（包含写入验证指令）。
+    // Slim 模式也不注入 BLACKBOARD_USAGE_RULE（Explore 工具集没有黑板工具）。
     const rules = isSlim
-        ? `${ANALYSIS_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${BUILD_CLARIFICATION_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
+        ? ANALYSIS_COMPLIANCE_RULE
+        : `${LANGUAGE_MIRRORING_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
 
     return `You are Eddy CWTool Code in **Explore Mode** — a codebase exploration agent for ${gameName} mods.
 ${rules}
@@ -559,9 +560,9 @@ ${gameKnowledge}`;
 // ─── General Mode System Prompt Template ─────────────────────────────────────
 
 function buildGeneralModeSystemPrompt(gameKnowledge: string, gameName: string): string {
+    // W2 修复：General 模式是纯 Q&A 模式，不注入 BUILD_CLARIFICATION_RULE（包含 validate_code 等写入指令）。
     return `You are Eddy CWTool Code — a versatile AI assistant for ${gameName} mod development.
 ${LANGUAGE_MIRRORING_RULE}
-${BUILD_CLARIFICATION_RULE}
 
 <system-reminder>
 General mode is a simple Q&A and guidance mode. You MUST NOT modify any files, execute write actions, or run destructive commands. Your primary purpose is to answer user questions, explain code, and provide guidance.
@@ -589,9 +590,11 @@ ${gameKnowledge}`;
 // ─── Review Mode System Prompt Template ──────────────────────────────────────
 
 function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
+    // W1/W8 修复：Review 模式是只读模式，不注入 BUILD_CLARIFICATION_RULE（包含写入验证指令）。
+    // Slim 模式也不注入 BLACKBOARD_USAGE_RULE（Review 工具集没有黑板工具）。
     const rules = isSlim
-        ? `${ANALYSIS_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${BUILD_CLARIFICATION_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
+        ? ANALYSIS_COMPLIANCE_RULE
+        : `${LANGUAGE_MIRRORING_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
 
     return `You are Eddy CWTool Code in **Review Mode** — an expert code reviewer for ${gameName} mods.
 ${rules}
@@ -659,14 +662,20 @@ function buildGuiExpertSystemPrompt(gameKnowledge: string, gameName: string): st
 ${LANGUAGE_MIRRORING_RULE}
 
 <system-reminder>
-You are dealing exclusively with .gui files. You must use the \`validate_code\` tool specifically tailored for GUI files if available, and focus heavily on Paradox GUI systems such as gridboxes, scrollbars, orientation, originated bounds, and container sizes.
+You are dealing exclusively with .gui files. After modifying GUI files, use \`get_diagnostics\` to verify there are no errors. Focus heavily on Paradox GUI systems such as gridboxes, scrollbars, orientation, originated bounds, and container sizes.
 </system-reminder>
 
-## GUI Modding Guidelines
-- **Always read the entire containerWindowType** structure using \`get_pdx_block\` before modifying elements.
-- **Orientation and Origo** are critical. Do not arbitrarily change them without understanding the parent window anchor.
-- **Textures**: You can use \`workspace_symbols\` to look up defined \`spriteType\` bindings if an image is missing.
-- **Do NOT guess properties**: The syntax for GUI files is stricter than scripts.
+## CRITICAL GUI Modding Guidelines
+- **NEVER Delete Vanilla Elements**: Deleting original hardcoded UI components usually causes Game Crashes (CTD) or breaks engine logic. To "remove" a vanilla element, you MUST move it far off-screen (e.g., \`position = { x = -9999 y = -9999 }\` or using local constants like \`@invisible_position = 23333\`) or hide it, rather than deleting the code block.
+- **Template Reference Methodology**: BEFORE creating or modifying a GUI, use \`glob_files\` or \`list_directory\` to find existing \`.gui\` and \`.gfx\` files in the mod's \`interface/\` folder. Read these templates to learn:
+  1. What graphical asset types (\`spriteType\`, \`corneredTileSpriteType\`) are used for specific buttons/backgrounds.
+  2. The local mod's variable conventions (e.g., \`@invisible_position\`, scaled height definitions).
+  3. Which vanilla components the modder typically hides vs. keeps.
+  4. The standard formatting and file naming conventions of the current mod.
+- **Button Effect & Scripted GUI Tracing**: UI buttons are often tied to backend scripts. Before modifying or overriding a button's \`name\`, you MUST use \`grep\` or \`workspace_symbols\` to check if it is tied to a \`button_effect\` or \`scripted_gui\` in the \`common/\` folder.
+- **Read Full Hierarchy**: Always read the entire parent \`containerWindowType\` structure using \`get_pdx_block\` before modifying elements. Elements inherit coordinates from parents.
+- **Orientation and Origo**: Do not arbitrarily change them without understanding the parent window anchor.
+- **Textures**: Use \`workspace_symbols\` to look up defined \`spriteType\` bindings if an image is missing.
 ${gameKnowledge}`;
 }
 
@@ -799,8 +808,10 @@ You are the team leader of a group of specialist AI agents:
 - **Explorer** (explore): Read-only scanning — project structure, file discovery, dependency graphs
 - **Architect** (plan): Design blueprints, event chain topology, scope chain planning
 - **Builder** (build): Code generation, file writing, error fixing — the main workhorse
-- **LocWriter** (loc_writer): YML localisation file creation and translation
+- **LocWriter** (loc_writer): YML localisation file creation and authoring
+- **LocTranslator** (loc_translator): Cross-language YML translation. **CRITICAL: ONLY dispatch to this agent if the user EXPLICITLY asks to TRANSLATE existing text.**
 - **Reviewer** (review): Code quality audit, diagnostic verification, cross-file consistency checks
+- **GuiExpert** (gui_expert): Specialist for editing .gui layout files, UI coordinates, and complex container calculations
 
 ## Workflow
 
@@ -1379,14 +1390,13 @@ ${trimmed}
 
 
 
-    /**
-     * Build a validation error context message for retry.
-     */
+    // W6 修复：不再重复注入完整代码块（AI 已经在上一轮看过自己生成的代码了）。
+    // 仅列出错误行，指导 AI 使用 edit_file 定向修复，避免大文件时数千 tokens 的浪费。
     buildValidationRetryMessage(code: string, errors: Array<{ message: string; line: number }>): ChatMessage {
         const errorList = errors.map(e => `  - Line ${e.line}: ${e.message}`).join('\n');
         return {
             role: 'user',
-            content: `The code you generated has validation errors. Please fix them:\n\n**Errors:**\n${errorList}\n\n**Code that failed:**\n\`\`\`pdx\n${code}\n\`\`\`\n\nPlease output the corrected code. Use the \`validate_code\` tool again after fixing.`,
+            content: `The code you generated has validation errors. Please fix ONLY the specific error lines listed below using \`edit_file\` — do NOT rewrite the entire file.\n\n**Errors:**\n${errorList}\n\nFix each error individually. After fixing, call \`get_diagnostics\` to verify.`,
         };
     }
 }

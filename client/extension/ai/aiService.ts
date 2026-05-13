@@ -605,12 +605,12 @@ export class AIService {
                 originalSignal.addEventListener('abort', linkAbort);
             }
 
-            // Hard timeout for the connection/headers phase (60s)
+            // Hard timeout for the connection/headers phase (300s)
             fetchTimeoutId = setTimeout(() => {
                 const err = new Error('Fetch connection timeout');
                 err.name = 'TimeoutError';
                 fetchController.abort(err);
-            }, 60000);
+            }, 300000);
 
             try {
                 const response = await fetch(url, { ...init, signal: fetchController.signal });

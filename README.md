@@ -56,7 +56,7 @@ Stellaris 模组开发辅助工具，基于 [CWTools](https://github.com/cwtools
 - **[修复] Tokenizer CRLF 安全性**：`readLine` 现在在消费 `\r` 前 peek 下一字节；单独的 `\r` 不再吞噬后续内容字节 (`Tokenizer.fs`)
 - **[修复] Tokenizer Content-Length 守卫**：`tokenize` 只在实际解析到有效 `Content-Length` 头时才调用 `readLength`；畸形空行静默跳过 (`Tokenizer.fs`)
 - **[修复] LanguageServer 进程队列无界化**：将 `BlockingCollection(10)` 改为无界 `BlockingCollection`，消除 AI 高频指令下读/处理线程的交叉死锁 (`LanguageServer.fs`)
-- **[修复] LanguageServer ReaderWriterLockSlim 并发**：只读 LSP 请求（Hover、Completion、GoToDefinition 等）在线程池中并发执行，持共享读锁；写操作（DidChange、validateCode 等）持独占写锁串行执行，消除慢查询阻塞快查询 (`LanguageServer.fs`)
+- **[修复] LanguageServer ReaderWriterLockSlim 并发**：只读 LSP 请求（Hover、Completion、GoToDefinition 等）在线程池中并发执行，持共享读锁；写操作（DidChange 等）持独占写锁串行执行，消除慢查询阻塞快查询 (`LanguageServer.fs`)
 - **[修复] LanguageServer 请求 ID 原子递增**：请求 ID 改用 `Interlocked.Increment` 原子自增，原 `ref` 写法非线程安全 (`LanguageServer.fs`)
 - **[修复] LanguageServer 响应通道泄漏**：`responseAgent` 对每个挂起请求调度 30 秒 `Expire` 消息，防止客户端超时后 Map 无限增长 (`LanguageServer.fs`)
 - **[修复] Program.fs UNC/符号链接路径**：`checkOrSetGameCache` 改用 `Directory.GetParent().FullName` 取代 `cp + "/../"` 字符串拼接，修复 UNC 路径和符号链接兼容性 (`Program.fs`)

@@ -132,6 +132,80 @@ export class Orchestrator {
                 allWrittenFiles.push(...agentResult.writtenFiles);
             }
             if (allWrittenFiles.length > 0) {
+                // --- 本地化收尾清扫阶段 (Loc Sweep Phase) ---
+                emitStep({
+                    type: 'orchestrator_progress',
+                    content: '$(globe) 正在执行本地化遗漏清扫 (Loc Sweep Phase)...',
+                    timestamp: Date.now(),
+                });
+
+                const txtFiles = allWrittenFiles
+                    .filter(f => f.endsWith('.txt') || f.endsWith('.gui'))
+                    .map(f => `   - ${f}`)
+                    .join('\n');
+
+                const sweepPrompt = [
+                    '## Localization Sweep Phase (Diagnostic-Driven ONLY)',
+                    '',
+                    '### STRICT RULES:',
+                    '- You MUST ONLY fix keys that appear as "Missing localisation key" in `get_diagnostics` output.',
+                    '- DO NOT use `search_mod_files` to look for existing localisation keys. That wastes time and finds keys that already exist.',
+                    '- Your ONLY data source is the diagnostic error list from `get_diagnostics`.',
+                    '',
+                    '### Workflow:',
+                    '1. Call `get_diagnostics` on EACH of these files (only .txt and .gui files):',
+                    txtFiles,
+                    '2. From the diagnostics output, extract ONLY errors/warnings containing "Missing localisation" or "missing loc key".',
+                    '3. For each missing key found in step 2, call `write_localisation` to create it with appropriate text.',
+                    '4. If `get_diagnostics` returns zero localisation-related errors, output "No missing localisation keys found." and STOP immediately.',
+                    '',
+                    '### IMPORTANT:',
+                    '- Write Chinese text for simp_chinese localisation files.',
+                    '- Write English text for english localisation files.',
+                    '- Do NOT invent keys that are not reported by diagnostics.',
+                ].join('\n');
+
+                const sweepNode: TaskNode = {
+                    id: 'loc_sweep',
+                    agentType: 'loc_writer',
+                    prompt: sweepPrompt,
+                    dependencies: [],
+                    priority: 'critical',
+                    status: 'pending',
+                    retryCount: 0,
+                    maxRetries: 1
+                };
+                
+                const sweepController = new AbortController();
+                const sweepAccumulator = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
+                
+                try {
+                    const sweepResult = await this.executeSubAgent(
+                        sweepNode,
+                        this.blackboard,
+                        sweepAccumulator,
+                        sweepController.signal,
+                        emitStep,
+                        options
+                    );
+                    
+                    if (sweepResult.writtenFiles && sweepResult.writtenFiles.length > 0) {
+                        allWrittenFiles.push(...sweepResult.writtenFiles);
+                        emitStep({
+                            type: 'orchestrator_progress',
+                            content: `$(check) 本地化清扫完成，补全了 ${sweepResult.writtenFiles.length} 个文件。`,
+                            timestamp: Date.now(),
+                        });
+                    }
+                } catch (e) {
+                    emitStep({
+                        type: 'error',
+                        content: `$(warning) 本地化清扫遇到异常，已跳过: ${e instanceof Error ? e.message : String(e)}`,
+                        timestamp: Date.now(),
+                    });
+                }
+                // ----------------------------------------------
+
                 emitStep({
                     type: 'validation',
                     content: `质量门: ${allWrittenFiles.length} 个文件待审查`,
@@ -229,10 +303,7 @@ export class Orchestrator {
             // 🔴 子 Agent 禁用特定工具：
             // 1. 网络搜索容易导致无意义的重复搜索循环（doom loop）
             // 2. 如果子任务需要网络信息，应由 Orchestrator 在分派前搜索并通过 contextFiles 注入
-            // 3. validate_code 仅应由审查类 Agent 调用，Builder 调用容易引发死锁假死
-            excludeTools: profile.mode === 'review' 
-                ? ['web_fetch', 'search_web', 'codesearch'] 
-                : ['web_fetch', 'search_web', 'codesearch', 'validate_code'],
+            excludeTools: ['web_fetch', 'search_web', 'codesearch'],
         };
 
         const writtenFiles: string[] = [];
@@ -315,12 +386,12 @@ export class Orchestrator {
             abortSignal.addEventListener('abort', parentAbortHandler);
         }
 
-        // 设定绝对超时：15 分钟 (900,000 ms)
+        // 设定绝对超时：20 分钟 (1,200,000 ms)
         subAgentTimeoutId = setTimeout(() => {
-            const err = new Error('Sub-Agent execution absolute timeout exceeded (15 minutes).');
+            const err = new Error('Sub-Agent execution absolute timeout exceeded (20 minutes).');
             err.name = 'TimeoutError';
             subAgentController.abort(err);
-        }, 15 * 60 * 1000);
+        }, 20 * 60 * 1000);  // W7 修复：实际值与注释/错误消息保持一致（20 分钟）
 
         runnerOptions.abortSignal = subAgentController.signal;
 

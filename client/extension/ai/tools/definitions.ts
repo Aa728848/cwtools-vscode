@@ -129,21 +129,9 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    {
-        type: 'function',
-        function: {
-            name: 'validate_code',
-            description: 'Validate a piece of PDXScript code against the CWTools rule engine. Returns validation errors and warnings. ALWAYS validate generated code before presenting it to the user.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    code: { type: 'string', description: 'The PDXScript code to validate' },
-                    targetFile: { type: 'string', description: 'The file path where this code would be placed (determines validation context)' },
-                },
-                required: ['code', 'targetFile'],
-            },
-        },
-    },
+    // validate_code — REMOVED: 由 get_diagnostics（零副作用）+ edit_file 内联诊断替代。
+    // validate_code 创建临时文件让 LSP 解析，有 3-10s 延迟且可能污染 LSP 状态。
+    // get_diagnostics 直接读取诊断面板（~50ms），edit_file 写入后自动返回诊断。
     {
         type: 'function',
         function: {

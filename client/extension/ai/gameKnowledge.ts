@@ -52,7 +52,7 @@ You can chain scopes using dot notation (e.g. \`owner.capital.owner\`) or nested
 - A leader can absolutely transition to \`owner\`, \`planet\`, \`fleet\`, or \`army\`.
 - A pop can transition to \`planet\`, \`owner\`, \`faction\`.
 - \`from\` / \`root\` / \`prev\` are used for context-relative references.
-Assume logical scope transitions are VALID unless the LSP explicitly throws an error during \`validate_code\`. Do NOT proactively declare them "illegal" in your plans or reviews based on your own assumptions.
+Assume logical scope transitions are VALID unless the LSP explicitly throws an error via \`get_diagnostics\`. Do NOT proactively declare them "illegal" in your plans or reviews based on your own assumptions.
 
 ## Vanilla Game Cache — Query Strategy
 The CWTools language server has already indexed the entire vanilla game.
@@ -225,7 +225,7 @@ You can chain scopes using dot notation or nested blocks. Assume logical native 
 - \`capital\` → Country to State
 - \`controller\` → State to Country
 - \`tag\` → Country identifier
-Assume logical scope transitions are VALID unless the LSP explicitly throws an error during \`validate_code\`.
+Assume logical scope transitions are VALID unless the LSP explicitly throws an error via \`get_diagnostics\`.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
@@ -280,7 +280,7 @@ You can chain scopes using dot notation or nested blocks. Assume logical transit
 - \`owner\` → Province to Country
 - \`capital_scope\` → Country to Province
 - \`controller\` → Province to Country
-Assume logical scope transitions are VALID unless the LSP explicitly throws an error during \`validate_code\`.
+Assume logical scope transitions are VALID unless the LSP explicitly throws an error via \`get_diagnostics\`.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
@@ -363,7 +363,7 @@ CK3 scopes: Character, Title, Province, County, Duchy, Kingdom, Empire, Culture,
 - \`capital_province\` → Title to Province
 - \`holder\` → Title to Character
 - \`faith\`, \`culture\` → Character to Faith/Culture
-Assume logical scope transitions are VALID unless the LSP explicitly throws an error during \`validate_code\`.
+Assume logical scope transitions are VALID unless the LSP explicitly throws an error via \`get_diagnostics\`.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.

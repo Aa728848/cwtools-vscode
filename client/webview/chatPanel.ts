@@ -2150,7 +2150,27 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 isShowingFloatingCard = false;
                 document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
-                chatArea.appendChild(buildAssistantMessage(svgIcon('x') + ' ' + msg.error, [], Date.now()));
+                const errNode = buildAssistantMessage(svgIcon('x') + ' ' + msg.error, [], Date.now());
+                if (msg.canResume) {
+                    const resumeBtn = document.createElement('button');
+                    resumeBtn.className = 'resume-btn';
+                    resumeBtn.style.cssText = 'margin-top: 10px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px;';
+                    resumeBtn.innerHTML = svgIcon('refresh') + ' 恢复执行 (Resume)';
+                    resumeBtn.addEventListener('click', () => {
+                        resumeBtn.disabled = true;
+                        resumeBtn.innerHTML = svgIcon('refresh') + ' 恢复中...';
+                        vscode.postMessage({ type: 'resumeGeneration' });
+                    });
+                    
+                    const msgBubble = errNode.querySelector('.msg-bubble');
+                    if (msgBubble) {
+                        msgBubble.appendChild(document.createElement('br'));
+                        msgBubble.appendChild(resumeBtn);
+                    } else {
+                        errNode.appendChild(resumeBtn);
+                    }
+                }
+                chatArea.appendChild(errNode);
                 scrollBottom(true);
                 break;
 

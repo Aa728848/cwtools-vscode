@@ -1,4 +1,4 @@
-module Main.Program
+﻿module Main.Program
 
 open LSP
 open LSP.Types
@@ -1434,7 +1434,6 @@ type Server(client: ILanguageClient) =
                                           // A2 Fix: declare ALL implemented AI commands so
                                           // strict LSP clients don't reject them.
                                           "cwtools.ai.getScopeAtPosition"
-                                          "cwtools.ai.validateCode"
                                           "cwtools.ai.queryTypes"
                                           "cwtools.ai.queryDefinition"
                                           "cwtools.ai.queryDefinitionByName"
@@ -2787,88 +2786,6 @@ type Server(client: ILanguageClient) =
                                         [| "ok", JsonValue.Boolean false
                                            "error", JsonValue.String "LSP server not ready" |]
                             Some scopeResult
-
-                        | { command = "cwtools.ai.validateCode"
-                            arguments = codeArg :: targetFileArg :: _ } ->
-                            // In-memory code validation no temp files, no 3s wait
-                            // NOTE: This handler runs inside runWriteRequest which already
-                            // holds gameStateLock in Write mode. Do NOT re-acquire the lock
-                            // here ReaderWriterLockSlim(NoRecursion) would throw LockRecursionException.
-                            let code       = codeArg.AsString()
-                            let targetFile = targetFileArg.AsString()
-                            let errorsJson =
-                                match gameObj with
-                                | Some g ->
-                                        // Save original content so we can restore after temp validation
-                                        let originalContent =
-                                            match docs.GetText(FileInfo(targetFile)) with
-                                            | Some t -> Some t
-                                            | None   -> try Some(File.ReadAllText targetFile) with _ -> None
-
-                                        // Build validation content: append AI code to existing file
-                                        let validationContent =
-                                            match originalContent with
-                                            | Some orig -> orig + "\n\n" + code
-                                            | None      -> code
-                                        // M3 Fix: count lines using bare \n split to match
-                                        // the validationContent separator ("\n\n").
-                                        let originalLineCount =
-                                            match originalContent with
-                                            | Some orig ->
-                                                orig.Split([|'\n'|], StringSplitOptions.None).Length + 2 // +2 for \n\n separator
-                                            | None      -> 0
-
-                                        // M6 Fix: use a mutable to hold errors so the restore
-                                        // always executes regardless of whether Update throws.
-                                        let mutable rawErrors: CWError list = []
-                                        try
-                                            rawErrors <- g.UpdateFile true targetFile (Some validationContent)
-                                        with e ->
-                                            logDiag $"validateCode UpdateFile error: {e.Message}"
-                                            rawErrors <- []
-
-                                        // Restore original content unconditionally
-                                        match originalContent with
-                                        | Some orig ->
-                                            try g.UpdateFile true targetFile (Some orig) |> ignore
-                                            with ex ->
-                                                // Restoration failed log the error so it doesn't silently corrupt state
-                                                eprintfn "validateCode: failed to restore original content for %s: %A" targetFile ex
-                                        | None -> ()
-
-                                        // Filter and adjust line numbers
-                                        let adjustedErrors =
-                                            rawErrors
-                                            |> List.choose (fun e ->
-                                                let adjustedLine = int e.range.StartLine - 1 - originalLineCount
-                                                if adjustedLine < 0 then None
-                                                else
-                                                    let sevStr =
-                                                        match e.severity with
-                                                        | Severity.Error       -> "error"
-                                                        | Severity.Warning     -> "warning"
-                                                        | Severity.Information -> "info"
-                                                        | _                    -> "hint"
-                                                    Some (JsonValue.Record
-                                                        [| "code",     JsonValue.String e.code
-                                                           "severity", JsonValue.String sevStr
-                                                           "message",  JsonValue.String e.message
-                                                           "line",     JsonValue.Number(decimal adjustedLine)
-                                                           "column",   JsonValue.Number(decimal (int e.range.StartColumn)) |]))
-
-                                        let hasErrors =
-                                            adjustedErrors |> List.exists (fun e ->
-                                                match e.["severity"] with JsonValue.String "error" -> true | _ -> false)
-
-                                        JsonValue.Record
-                                            [| "isValid", JsonValue.Boolean(not hasErrors)
-                                               "errors",  JsonValue.Array(adjustedErrors |> Array.ofList)
-                                               "ok",      JsonValue.Boolean true |]
-                                | None ->
-                                    JsonValue.Record
-                                        [| "ok",    JsonValue.Boolean false
-                                           "error", JsonValue.String "LSP server not ready" |]
-                            Some errorsJson
 
 
 

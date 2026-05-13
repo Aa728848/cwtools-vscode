@@ -62,9 +62,15 @@ export class QualityGate {
             ? writtenFiles.map(f => `- ${f}`).join('\n')
             : '(No file write records)';
 
+        // W3 修复：预取诊断存在时，明确禁止 Reviewer 重复调用 get_diagnostics
         const diagnosticsSection = preFetchedDiagnostics 
-            ? `\n## Pre-fetched LSP Diagnostics:\n${preFetchedDiagnostics}\n` 
+            ? `\n## Pre-fetched LSP Diagnostics (ALREADY RETRIEVED — DO NOT call get_diagnostics again):\n${preFetchedDiagnostics}\n` 
             : '';
+
+        // W3 修复：根据是否有预取诊断，动态生成审查步骤
+        const step1 = preFetchedDiagnostics
+            ? '1. Review the pre-fetched diagnostics above. DO NOT call `get_diagnostics` again — the diagnostics have already been fetched and are provided above. You MUST resolve ALL LSP red errors!'
+            : '1. Call `get_diagnostics` for each file to check for LSP errors. You MUST resolve ALL LSP red errors!';
 
         return [
             '## Quality Gate Review Task',
@@ -73,7 +79,7 @@ export class QualityGate {
             fileList,
             diagnosticsSection,
             'Review Checklist:',
-            '1. Call `get_diagnostics` for each file to check for LSP errors (or review the pre-fetched diagnostics above). You MUST resolve ALL LSP red errors!',
+            step1,
             '2. Check for logic conflict issues (e.g., an event has `option` but uses `hide_window = yes`, which is a contradiction). Such conflicts MUST be reported and fixed.',
             '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
             '4. Verify the correctness of the scope chain.',
@@ -138,35 +144,12 @@ export class QualityGate {
         };
     }
 
-    /**
-     * (保留旧接口兼容) 生成审查 prompt。
-     */
+    // W11 修复：删除与 buildCombinedReviewPrompt 功能完全重复的旧接口。
+    // 旧方法仅因参数类型不同（SubAgentResult vs string[]）而存在，
+    // 现在统一使用 buildCombinedReviewPrompt(writtenFiles: string[])。
+    /** @deprecated 使用 buildCombinedReviewPrompt 代替 */
     buildReviewPrompt(builderResult: SubAgentResult, preFetchedDiagnostics?: string): string {
-        const fileList = builderResult.writtenFiles.length > 0
-            ? builderResult.writtenFiles.map(f => `- ${f}`).join('\n')
-            : '(No file write records)';
-
-        const diagnosticsSection = preFetchedDiagnostics 
-            ? `\n## Pre-fetched LSP Diagnostics:\n${preFetchedDiagnostics}\n` 
-            : '';
-
-        return [
-            '## Quality Gate Review Task',
-            '',
-            'Please review the code quality of the following files:',
-            fileList,
-            diagnosticsSection,
-            'Review Checklist:',
-            '1. Call `get_diagnostics` for each file to check for LSP errors (or review the pre-fetched diagnostics above). You MUST resolve ALL LSP red errors!',
-            '2. Check for logic conflict issues (e.g., an event has `option` but uses `hide_window = yes`, which is a contradiction). Such conflicts MUST be reported and fixed.',
-            '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
-            '4. Verify the correctness of the scope chain.',
-            '5. Check file structure integrity (Refer to Rule 3b).',
-            '',
-            'Output Format:',
-            '- If all files have zero errors and no logic conflicts: Output "PASSED: All files passed quality checks."',
-            '- If there are errors or logic conflicts: Output "FAILED: N issues need to be fixed", and list the specific issues.',
-        ].join('\n');
+        return this.buildCombinedReviewPrompt(builderResult.writtenFiles, preFetchedDiagnostics);
     }
 
     /**

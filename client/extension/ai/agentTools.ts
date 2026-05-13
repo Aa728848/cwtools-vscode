@@ -36,7 +36,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_types: 45_000,
     query_rules: 45_000,
     query_references: 45_000,
-    validate_code: 60_000, // Validation is the heaviest operation, give it 60s
+    // validate_code — REMOVED: 由 get_diagnostics + edit_file 内联诊断替代
     get_diagnostics: 45_000,
     get_file_context: 45_000,
     search_mod_files: 45_000,
@@ -283,8 +283,7 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_references':
                 result = await this.lspHandler.queryReferences(args as any); break;
-            case 'validate_code':
-                result = await this.lspHandler.validateCode(args as any); break;
+            // validate_code — REMOVED: 由 get_diagnostics + edit_file 内联诊断替代
             case 'get_diagnostics':
                 result = await this.lspHandler.getDiagnostics(args as any); break;
             case 'get_file_context':

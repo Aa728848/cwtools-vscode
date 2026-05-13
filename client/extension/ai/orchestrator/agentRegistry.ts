@@ -86,14 +86,53 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
         toolBudget: 'media_only',
         description: '生成图标、音效等媒体资产，进行 DDS/OGG 格式转换，部署到 mod 目录。',
     },
+
+    /**
+     * GUI 专家 — 处理 Stellaris 或其他 P 社游戏的复杂 UI 界面排版计算。
+     * 需要极强的像素计算和图层推演能力。
+     */
+    guiExpert: {
+        mode: 'gui_expert',
+        maxIterations: 30,
+        toolBudget: 'full',
+        description: '编辑 .gui 界面文件，处理复杂的 UI 坐标、锚点与容器排版。',
+    },
+
+    /**
+     * 本地化翻译者 — 专注于跨语言的严格格式翻译。
+     * 仅在明确指示为【翻译】任务时使用，区别于从零创作的 locWriter。
+     */
+    locTranslator: {
+        mode: 'loc_translator',
+        maxIterations: 20,
+        toolBudget: 'loc',
+        description: '将现有的 YML 本地化条目翻译为其他语言。必须且仅能在用户明确要求【翻译】已有文本时使用，严禁自行创作。',
+    },
+};
+
+// W10 修复：AgentMode 与注册表 key 的别名映射。
+// Orchestrator 使用 AgentMode 值（如 'explore', 'build'）查询配置，
+// 但注册表 key 使用的是角色名（如 'explorer', 'builder'）。
+// 此映射确保两套命名体系正确对接。
+const MODE_TO_ROLE_ALIAS: Record<string, string> = {
+    'explore': 'explorer',
+    'build': 'builder',
+    'plan': 'architect',
+    'review': 'reviewer',
+    'loc_writer': 'locWriter',
+    'loc_translator': 'locTranslator',
+    'gui_expert': 'guiExpert',
 };
 
 /**
  * 获取 Agent 角色配置。
- * 如果 role 不存在于注册表中，返回默认的 builder 配置。
+ * 支持通过角色名（explorer）或模式名（explore）查询。
+ * 如果都不存在于注册表中，返回默认的 builder 配置。
  */
 export function getAgentProfile(role: string): AgentProfile {
-    return AGENT_REGISTRY[role] ?? AGENT_REGISTRY['builder']!;
+    return AGENT_REGISTRY[role]
+        ?? AGENT_REGISTRY[MODE_TO_ROLE_ALIAS[role] ?? '']
+        ?? AGENT_REGISTRY['builder']!;
 }
 
 /**

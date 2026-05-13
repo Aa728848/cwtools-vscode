@@ -75,11 +75,9 @@ function normalizeToolResultHash(toolName: string, result: unknown): string {
     if (toolName === 'query_scope') {
         return `scope:${JSON.stringify(obj.currentScope ?? '')}:${JSON.stringify(obj.thisScope ?? '')}`;
     }
-    // validate_code → hash error code+message set (exclude line/col)
-    if (toolName === 'validate_code' && Array.isArray(obj.errors)) {
-        const sigs = (obj.errors as Array<Record<string, unknown>>)
-            .map(e => `${e.code ?? ''}:${e.message ?? ''}`).sort().join('|');
-        return `validate:${sigs}`;
+    // get_diagnostics → hash summary counts
+    if (toolName === 'get_diagnostics' && obj.summary) {
+        return `diag:${JSON.stringify(obj.summary)}`;
     }
     // lsp_operation → hash the returned structure (exclude positions)
     if (toolName === 'lsp_operation') {
@@ -342,6 +340,10 @@ export interface AgentRunnerOptions {
      * 防止子 Agent 陷入无意义的搜索循环。
      */
     excludeTools?: string[];
+    /**
+     * 是否从上一次异常退出的断点快照中恢复状态 (断点续传)
+     */
+    resumeFromState?: boolean;
 }
 
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
@@ -380,7 +382,7 @@ const EXPLORE_MODE_TOOLS: AgentToolName[] = [
 /** General mode: all tools EXCEPT todo_write (research without task tracking) */
 const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
 
-/** Review mode: same as explore, plus query_definition — NO validate_code (it creates temp files, violating read-only contract) */
+/** Review mode: same as explore, plus query_definition — read-only tools only */
 const REVIEW_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
@@ -398,7 +400,8 @@ const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch', 'replace_lines',
     'list_directory', 'glob_files', 'search_mod_files', 'grep', 'workspace_symbols',
     'document_symbols', 'get_file_context', 'get_diagnostics',
-    'todo_write', 'web_fetch', 'search_web', 'codesearch',
+    // W9 修复：移除 web_fetch/search_web/codesearch，本地化 Agent 不需要网络搜索能力
+    'todo_write',
     'write_localisation', 'git_ops',
 ];
 
@@ -408,7 +411,8 @@ const LOC_WRITER_TOOLS: AgentToolName[] = [
     'list_directory', 'glob_files', 'search_mod_files', 'grep', 'workspace_symbols',
     'document_symbols', 'get_file_context', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references',
-    'todo_write', 'web_fetch', 'search_web', 'codesearch',
+    // W9 修复：移除 web_fetch/search_web/codesearch，本地化 Agent 不需要网络搜索能力
+    'todo_write',
     'write_localisation', 'git_ops',
 ];
 
@@ -448,10 +452,9 @@ const READ_ONLY_TOOLS = new Set<string>([
     // 不涉及任何文件 IO，不应走 PartitionedWriteQueue 的 __global__ 锁路径，
     // 否则在多 Agent 并发场景中会与其他写操作竞争全局锁导致死锁。
     'todo_write'
-    // 注意：dispatch_agents 和 merge_results 已从此处移除——
+    // Note: dispatch_agents 和 merge_results 已从此处移除——
     // dispatch_agents 会启动完整的子 Agent 推理循环（长耗时），必须走串行路径防止竞态；
     // merge_results 依赖 dispatch_agents 的结果，也必须顺序执行。
-    // validate_code is intentionally omitted: it modifies the LSP game state temporarily
 ]);
 
 const globalPartitionedWriteQueue = new PartitionedWriteQueue();
@@ -560,6 +563,101 @@ export class AgentRunner {
             return raw as import('./types').AgentCheckpoint;
         } catch {
             return null;
+        }
+    }
+
+    /**
+     * 保存当前 Agent 的完整状态（供断点续传使用）。
+     * 与 Checkpoint 不同，这会保存完整的消息队列、工具返回结果，
+     * 能够在超时或被取消后恢复并继续上次的上下文。
+     */
+    private async saveResumeState(
+        topicId: string,
+        messages: ChatMessage[],
+        mode: AgentMode
+    ): Promise<void> {
+        try {
+            const fs = await import('fs');
+            const pathModule = await import('path');
+            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!wsRoot || !topicId) return;
+
+            const resumeDir = pathModule.join(wsRoot, '.cwtools-ai', topicId);
+            if (!fs.existsSync(resumeDir)) fs.mkdirSync(resumeDir, { recursive: true });
+
+            const resumeState: import('./types').AgentResumeState = {
+                timestamp: Date.now(),
+                mode,
+                messages,
+                todos: this.toolExecutor.getTodos(),
+                topicId,
+            };
+
+            fs.writeFileSync(
+                pathModule.join(resumeDir, 'resume_state.json'),
+                JSON.stringify(resumeState),
+                'utf-8'
+            );
+        } catch {
+            // Non-critical — silently ignore save failures
+        }
+    }
+
+    /**
+     * 读取指定 topicId 下的断点续传状态。
+     */
+    public async loadResumeState(topicId: string): Promise<import('./types').AgentResumeState | null> {
+        try {
+            const fs = await import('fs');
+            const pathModule = await import('path');
+            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!wsRoot) return null;
+
+            const resumePath = pathModule.join(wsRoot, '.cwtools-ai', topicId, 'resume_state.json');
+            if (!fs.existsSync(resumePath)) return null;
+
+            const raw = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
+            if (!raw || !raw.messages || !Array.isArray(raw.messages)) return null;
+
+            return raw as import('./types').AgentResumeState;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * 判断是否存在断点续传状态。
+     */
+    public async hasResumeState(topicId: string): Promise<boolean> {
+        if (!topicId) return false;
+        try {
+            const fs = await import('fs');
+            const pathModule = await import('path');
+            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!wsRoot) return false;
+            const resumePath = pathModule.join(wsRoot, '.cwtools-ai', topicId, 'resume_state.json');
+            return fs.existsSync(resumePath);
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * 清理断点续传状态（当新任务开始时）。
+     */
+    public async clearResumeState(topicId: string): Promise<void> {
+        if (!topicId) return;
+        try {
+            const fs = await import('fs');
+            const pathModule = await import('path');
+            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!wsRoot) return;
+            const resumePath = pathModule.join(wsRoot, '.cwtools-ai', topicId, 'resume_state.json');
+            if (fs.existsSync(resumePath)) {
+                fs.unlinkSync(resumePath);
+            }
+        } catch {
+            // Ignore deletion errors
         }
     }
 
@@ -769,12 +867,36 @@ export class AgentRunner {
                 : effectiveUserMessage;
 
         // Build the message array
-        const messages: ChatMessage[] = [
-            { role: 'system', content: this.promptBuilder.buildSystemPromptForMode(mode, this.aiService.getConfig().provider) },
-            ...this.promptBuilder.buildContextMessages(context),
-            ...compactedHistory,
-            { role: 'user', content: userContent },
-        ];
+        let messages: ChatMessage[];
+        
+        if (options?.resumeFromState && context.topicId) {
+            const resumeState = await this.loadResumeState(context.topicId);
+            if (resumeState) {
+                messages = resumeState.messages;
+                if (resumeState.todos && resumeState.todos.length > 0) {
+                    this.toolExecutor.getExternalToolHandler().todoWrite({ todos: resumeState.todos });
+                }
+                emitStep({
+                    type: 'thinking',
+                    content: '已从断点快照中恢复上下文并继续执行...',
+                    timestamp: Date.now(),
+                });
+            } else {
+                messages = [
+                    { role: 'system', content: this.promptBuilder.buildSystemPromptForMode(mode, this.aiService.getConfig().provider) },
+                    ...this.promptBuilder.buildContextMessages(context),
+                    ...compactedHistory,
+                    { role: 'user', content: userContent },
+                ];
+            }
+        } else {
+            messages = [
+                { role: 'system', content: this.promptBuilder.buildSystemPromptForMode(mode, this.aiService.getConfig().provider) },
+                ...this.promptBuilder.buildContextMessages(context),
+                ...compactedHistory,
+                { role: 'user', content: userContent },
+            ];
+        }
 
         const modeLabel: Record<string, string> = {
             build: AGENT.MODE_BUILD,
@@ -853,6 +975,10 @@ export class AgentRunner {
                 emitStep({ type: 'error', content: AGENT.CANCELLED, timestamp: Date.now() });
             } else {
                 emitStep({ type: 'error', content: `${AGENT.ERROR_PREFIX}: ${errorMsg}`, timestamp: Date.now() });
+            }
+
+            if (context.topicId) {
+                await this.saveResumeState(context.topicId, messages, mode);
             }
 
             return {
@@ -1179,7 +1305,8 @@ export class AgentRunner {
         } else if (mode === 'orchestrator') {
             availableTools = TOOL_DEFINITIONS.filter(t => ORCHESTRATOR_MODE_TOOLS.includes(t.function.name as AgentToolName));
         } else {
-            availableTools = TOOL_DEFINITIONS;
+            // W10 修复：兜底分支（涵盖 build, gui_expert 等）必须源头切断，严禁任何子代理越权调用 Orchestrator 专属工具
+            availableTools = TOOL_DEFINITIONS.filter(t => !['dispatch_agents', 'query_blackboard', 'merge_results'].includes(t.function.name));
         }
 
         // 子 Agent 工具排除：根据 excludeTools 过滤掉不适合子 Agent 自主使用的工具
@@ -1830,7 +1957,8 @@ export class AgentRunner {
         _compactMessagesInPlace(messages, toolResultBudget);
     }
     /**
-     * Validation loop: validate code → if errors → retry with AI → repeat (max 3 retries)
+     * 验证循环：在推理结束后检查目标文件的 LSP 诊断，如有错误则交给 AI 修复。
+     * 使用 get_diagnostics 直接读取诊断面板（零副作用），替代旧版 validate_code（临时文件方式）。
      */
     private async validationLoop(
         initialCode: string,
@@ -1862,23 +1990,33 @@ export class AgentRunner {
                 timestamp: Date.now(),
             });
 
-            // Validate
+            // 使用 get_diagnostics 直接从诊断面板读取（零副作用，~50ms）
             let result: { isValid: boolean; errors: ValidationError[] };
             try {
-                const rawResult = await this.toolExecutor.execute('validate_code', {
-                    code: currentCode,
-                    targetFile,
+                const rawResult = await this.toolExecutor.execute('get_diagnostics', {
+                    file: targetFile,
+                    severity: 'error',
                 }, agentToolContext) as any;
-                
-                // If the tool timed out or was truncated, it might return an object
-                // without the 'errors' array (e.g. { error: "timeout" }).
-                // In such cases, we fall back to treating the code as valid.
+
+                const diagnostics: ValidationError[] = [];
+                if (rawResult?.diagnostics && Array.isArray(rawResult.diagnostics)) {
+                    for (const d of rawResult.diagnostics) {
+                        diagnostics.push({
+                            code: String(d.code ?? ''),
+                            severity: d.severity ?? 'error',
+                            message: String(d.message ?? ''),
+                            line: Number(d.line ?? 0),
+                            column: Number(d.column ?? 0),
+                        });
+                    }
+                }
+
                 result = {
-                    isValid: rawResult?.isValid !== false,
-                    errors: Array.isArray(rawResult?.errors) ? rawResult.errors : []
+                    isValid: diagnostics.length === 0,
+                    errors: diagnostics,
                 };
             } catch {
-                // Validation mechanism itself failed — assume code is OK
+                // 诊断机制本身失败 — 视为通过
                 result = { isValid: true, errors: [] };
             }
 
@@ -1887,7 +2025,7 @@ export class AgentRunner {
             if (result.isValid) {
                 emitStep({
                     type: 'validation',
-                    content: `✓ 验证通过 (${result.errors.length} 警告)`,
+                    content: `✓ 验证通过`,
                     timestamp: Date.now(),
                 });
 
@@ -1899,7 +2037,7 @@ export class AgentRunner {
                 };
             }
 
-            // Check if we've exhausted retries
+            // 已耗尽重试次数
             if (retryCount >= MAX_VALIDATION_RETRIES) {
                 emitStep({
                     type: 'validation',
@@ -1909,7 +2047,7 @@ export class AgentRunner {
                 break;
             }
 
-            // Retry: send errors back to AI for fixing
+            // 重试：将错误列表发回 AI 修正
             retryCount++;
             const errorSummary = result.errors
                 .filter(e => e.severity === 'error')
@@ -1953,7 +2091,7 @@ export class AgentRunner {
                         timestamp: Date.now(),
                     });
                 } else {
-                    // AI couldn't fix it
+                    // AI 无法修复
                     break;
                 }
             } catch {

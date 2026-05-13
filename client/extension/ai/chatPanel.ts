@@ -200,6 +200,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await vs.env.clipboard.writeText(msg.code);
                 vs.window.showInformationMessage('代码已复制到剪贴板');
                 break;
+            case 'resumeGeneration':
             case 'regenerate':
                 await this.regenerateLastResponse();
                 break;
@@ -376,7 +377,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(text);
     }
 
-    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], skipAutoModeSwitch = false, isBackground = false): Promise<void> {
+    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], skipAutoModeSwitch = false, isBackground = false, resumeFromState = false): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
         if (text.trim().startsWith('/')) {
@@ -404,14 +405,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const messageIndex = this.topicManager.currentTopic!.messages.length;
 
         // Add user message to UI — pass images array directly (not just a bool flag)
-        if (!isBackground) {
-            this.postMessage({ type: 'addUserMessage', text, messageIndex, images: images?.length ? images : undefined });
-        } else {
-            this.postMessage({ type: 'startBackgroundGeneration' });
-        }
+        if (!resumeFromState) {
+            if (!isBackground) {
+                this.postMessage({ type: 'addUserMessage', text, messageIndex, images: images?.length ? images : undefined });
+            } else {
+                this.postMessage({ type: 'startBackgroundGeneration' });
+            }
 
-        // Add to history — store images for topic persistence
-        this.topicManager.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
+            // Add to history — store images for topic persistence
+            this.topicManager.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
+            
+            // 新任务开始，清理旧的断点快照，防止上下文污染
+            if (this.topicManager.currentTopic?.id) {
+                void this.agentRunner.clearResumeState(this.topicManager.currentTopic.id);
+            }
+        }
 
         // Get current editor context
         const editor = vs.window.activeTextEditor;
@@ -466,6 +474,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     onPermissionRequest: (id, tool, description, command) =>
                         this.requestPermission(id, tool, description, command),
                     onTodoUpdate: (todos) => this.sendTodoUpdate(todos),
+                    resumeFromState,
                 },
                 images  // pass images to build ContentPart[] user turn
             );
@@ -574,7 +583,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
-            this.postMessage({ type: 'generationError', error: errorMsg });
+            let canResume = false;
+            if (this.topicManager.currentTopic?.id) {
+                canResume = await this.agentRunner.hasResumeState(this.topicManager.currentTopic.id);
+            }
+            this.postMessage({ type: 'generationError', error: errorMsg, canResume });
         } finally {
             // Store file snapshots for this message (keyed by the message index)
             // Also record the conversationMessages length so retractMessage can use the
@@ -1153,8 +1166,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this._currentMessageSnapshots = null;
     }
 
-    private loadTopic(topicId: string): void {
+    private async loadTopic(topicId: string): Promise<void> {
         this.conversationMessages = this.topicManager.loadTopic(topicId);
+        const hasResume = await this.agentRunner.hasResumeState(topicId);
+        if (hasResume) {
+            this.postMessage({ type: 'generationError', error: '当前会话包含未完成的任务快照。', canResume: true });
+        }
     }
 
     private deleteTopic(topicId: string): void {
@@ -1186,10 +1203,22 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
 
     private async regenerateLastResponse(): Promise<void> {
-        if (!this.topicManager.currentTopic || this.topicManager.currentTopic.messages.length < 2) return;
+        if (!this.topicManager.currentTopic || this.topicManager.currentTopic.messages.length < 1) return;
 
-        // Remove last assistant message
         const lastMsg = this.topicManager.currentTopic.messages[this.topicManager.currentTopic.messages.length - 1];
+        const isInterrupted = lastMsg?.role === 'user';
+
+        if (isInterrupted) {
+            const topicId = this.topicManager.currentTopic.id;
+            const resumeState = await this.agentRunner.loadResumeState(topicId);
+            if (resumeState) {
+                await this.handleUserMessage(lastMsg.content, lastMsg.images, undefined, false, false, true);
+                return;
+            }
+        }
+
+        // Normal regenerate
+        // Remove last assistant message
         if (lastMsg?.role === 'assistant') {
             this.topicManager.currentTopic.messages.pop();
             this.conversationMessages.pop();

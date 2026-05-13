@@ -237,8 +237,12 @@ export class ParallelExecutor {
                     // 写入成功后清除写入意图
                     this.conflictDetector.clearIntent(agentId, blackboard);
                 } else {
+                    // 检查是否是被用户手动取消
+                    if (options.abortSignal?.aborted || result.error === 'User cancelled') {
+                        node.status = 'cancelled';
+                    }
                     // 检查是否可重试
-                    if (node.retryCount < node.maxRetries) {
+                    else if (node.retryCount < node.maxRetries) {
                         node.retryCount++;
                         node.status = 'pending'; // 重置为待执行
                         ErrorReporter.debug(SOURCE.ORCHESTRATOR, `节点 ${node.id} 执行失败，重试 ${node.retryCount}/${node.maxRetries}`);

@@ -218,7 +218,7 @@ export class Orchestrator {
             model,
             mode: profile.mode,
             onStep,
-            abortSignal,
+            abortSignal, // 稍后会被带有超时的 child controller 覆盖
             streaming: true, // 启用流式输出，使得深思进度可视化
             topicId: orchestratorOptions.topicId,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
@@ -226,6 +226,13 @@ export class Orchestrator {
             // 不需要子代理重复验证。同时避免推理结束后 validation loop 继续产生步骤，
             // 导致外部判断卡片已标记完成但内部仍在运行的 UI 状态不一致。
             skipValidation: true,
+            // 🔴 子 Agent 禁用特定工具：
+            // 1. 网络搜索容易导致无意义的重复搜索循环（doom loop）
+            // 2. 如果子任务需要网络信息，应由 Orchestrator 在分派前搜索并通过 contextFiles 注入
+            // 3. validate_code 仅应由审查类 Agent 调用，Builder 调用容易引发死锁假死
+            excludeTools: profile.mode === 'review' 
+                ? ['web_fetch', 'search_web', 'codesearch'] 
+                : ['web_fetch', 'search_web', 'codesearch', 'validate_code'],
         };
 
         const writtenFiles: string[] = [];
@@ -281,7 +288,11 @@ export class Orchestrator {
                     }
 
                     if (fs.existsSync(targetPath)) {
-                        const content = fs.readFileSync(targetPath, 'utf8');
+                        let content = fs.readFileSync(targetPath, 'utf8');
+                        const MAX_CONTEXT_LENGTH = 50000;
+                        if (content.length > MAX_CONTEXT_LENGTH) {
+                            content = content.substring(0, MAX_CONTEXT_LENGTH) + '\n\n... [内容超长已截断。如果需要查看完整内容，请使用 read_file 工具自行分块读取]';
+                        }
                         injectedContext += `\n--- Context from File: ${contextRef} ---\n${content}\n`;
                     } else {
                         ErrorReporter.warn(SOURCE.ORCHESTRATOR, `Context injection warning: could not find blackboard key or file '${contextRef}'`);
@@ -295,6 +306,24 @@ export class Orchestrator {
             }
         }
 
+        let subAgentTimeoutId: NodeJS.Timeout | undefined;
+        const subAgentController = new AbortController();
+        const parentAbortHandler = () => subAgentController.abort(abortSignal.reason);
+        if (abortSignal.aborted) {
+            subAgentController.abort(abortSignal.reason);
+        } else {
+            abortSignal.addEventListener('abort', parentAbortHandler);
+        }
+
+        // 设定绝对超时：15 分钟 (900,000 ms)
+        subAgentTimeoutId = setTimeout(() => {
+            const err = new Error('Sub-Agent execution absolute timeout exceeded (15 minutes).');
+            err.name = 'TimeoutError';
+            subAgentController.abort(err);
+        }, 15 * 60 * 1000);
+
+        runnerOptions.abortSignal = subAgentController.signal;
+
         try {
             const result: GenerationResult = await this.agentRunner.run(
                 effectivePrompt,
@@ -303,6 +332,9 @@ export class Orchestrator {
                 runnerOptions,
             );
             
+            if (subAgentTimeoutId) clearTimeout(subAgentTimeoutId);
+            abortSignal.removeEventListener('abort', parentAbortHandler);
+
             // 任务结束，通知前端更新状态
             wrappedOnStep({
                 type: 'subtask_complete',
@@ -334,20 +366,24 @@ export class Orchestrator {
                 stepCount,
             };
         } catch (e) {
+            if (subAgentTimeoutId) clearTimeout(subAgentTimeoutId);
+            abortSignal.removeEventListener('abort', parentAbortHandler);
+
             const error = e instanceof Error ? e.message : String(e);
             wrappedOnStep({
                 type: 'subtask_complete',
-                content: '异常终止',
+                content: error.includes('timeout') ? '超时终止' : '异常终止',
                 timestamp: Date.now(),
             });
             ErrorReporter.warn(SOURCE.ORCHESTRATOR, `子 Agent ${taskNode.id} 执行异常`, e);
+            await this.rollbackSnapshots(fileSnapshots, onStep);
             return {
                 nodeId: taskNode.id,
                 success: false,
                 output: '',
-                error,
+                error: `子任务异常中止: ${error}，已回滚 ${fileSnapshots.size} 个文件。`,
                 tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
-                writtenFiles,
+                writtenFiles: [],
                 stepCount,
             };
         }

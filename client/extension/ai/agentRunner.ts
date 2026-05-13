@@ -336,6 +336,12 @@ export interface AgentRunnerOptions {
      * 子代理不需要重复验证，且 validation loop 会在推理结束后继续产生步骤导致 UI 状态不一致。
      */
     skipValidation?: boolean;
+    /**
+     * 从可用工具集中排除的工具名称列表。
+     * 用于子 Agent 场景：禁用不适合子 Agent 自主使用的工具（如网络搜索），
+     * 防止子 Agent 陷入无意义的搜索循环。
+     */
+    excludeTools?: string[];
 }
 
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
@@ -1176,6 +1182,12 @@ export class AgentRunner {
             availableTools = TOOL_DEFINITIONS;
         }
 
+        // 子 Agent 工具排除：根据 excludeTools 过滤掉不适合子 Agent 自主使用的工具
+        if (options?.excludeTools && options.excludeTools.length > 0) {
+            const excluded = new Set(options.excludeTools);
+            availableTools = availableTools.filter(t => !excluded.has(t.function.name));
+        }
+
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
         // imported at the top of this file; dynamic import added latency for nothing.
         const _config0 = this.aiService.getConfig();
@@ -1270,6 +1282,10 @@ export class AgentRunner {
                     tools: availableTools,
                     providerId: options?.providerId,
                     model: options?.model,
+                    // 🔴 关键修复：将 abort 信号传播到 HTTP 请求层
+                    // 缺少此参数会导致子 Agent 在等待 LLM 流式响应时
+                    // 完全无法被父级的 cancelGeneration/abort 中断
+                    abortSignal: options?.abortSignal,
                     // Stream thinking tokens to UI in real-time (OpenCode-style)
                     onThinking: options?.streaming ? (text) => {
                         emitStep({
@@ -1553,6 +1569,7 @@ export class AgentRunner {
             let fsModule: typeof import('fs') | undefined;
 
             for (let i = 0; i < parsedCalls.length; i++) {
+                options?.abortSignal?.throwIfAborted();
                 const ci = parsedCalls[i]!;
                 const { toolName, toolArgs, toolCall } = ci;
 
@@ -1579,9 +1596,11 @@ export class AgentRunner {
                     }
                     await Promise.all(batchIndices.map(async idx => {
                         try {
+                            options?.abortSignal?.throwIfAborted();
                             const callInfo = parsedCalls[idx]!;
                             toolResults[idx] = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs, agentToolContext);
-                        } catch (e) {
+                        } catch (e: any) {
+                            if (e?.name === 'AbortError') throw e;
                             toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
                         }
                     }));
@@ -1604,6 +1623,8 @@ export class AgentRunner {
 
                     await this.writeQueue.enqueue(lockPaths.length > 0 ? lockPaths : ['__global__'], async () => {
                         try {
+                            options?.abortSignal?.throwIfAborted();
+                            
                             // Sub-agent snapshot isolate hook
                             if (onFileWrite && filePath) {
                                 if (!fsModule) fsModule = await import('fs');
@@ -1637,7 +1658,8 @@ export class AgentRunner {
                                     if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
                                 }
                             }
-                        } catch (e) {
+                        } catch (e: any) {
+                            if (e?.name === 'AbortError') throw e;
                             toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
                         }
                     });

@@ -227,13 +227,41 @@ export class AgentToolExecutor {
             }
         }
         try {
-            const result = await Promise.race([
+            const abortSignal = context?.runnerOptions?.abortSignal;
+            if (abortSignal?.aborted) {
+                const err = new Error('AbortError');
+                err.name = 'AbortError';
+                throw err;
+            }
+
+            let abortListener: (() => void) | undefined;
+            const abortPromise = abortSignal ? new Promise<never>((_, reject) => {
+                abortListener = () => {
+                    const err = new Error('AbortError');
+                    err.name = 'AbortError';
+                    reject(err);
+                };
+                abortSignal.addEventListener('abort', abortListener);
+            }) : null;
+
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`)), timeout)
+            );
+
+            const racePromises = [
                 this.executeInternal(toolName, args, context),
-                new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`)), timeout)
-                ),
-            ]);
-            return this.truncateResult(result);
+                timeoutPromise
+            ];
+            if (abortPromise) racePromises.push(abortPromise);
+
+            try {
+                const result = await Promise.race(racePromises);
+                return this.truncateResult(result);
+            } finally {
+                if (abortSignal && abortListener) {
+                    abortSignal.removeEventListener('abort', abortListener);
+                }
+            }
         } catch (e) {
             if (e instanceof Error && e.message.includes('执行超时')) {
                 return { error: e.message, hint: '请重试或使用更小范围的操作' };
@@ -368,13 +396,13 @@ export class AgentToolExecutor {
 
             // ── External / agent tools ────────────────────────────────────
             case 'web_fetch':
-                result = await this.externalHandler.webFetch(args as any); break;
+                result = await this.externalHandler.webFetch(args as any, context); break;
             case 'run_command':
                 result = await this.externalHandler.runCommand(args as any, context); break;
             case 'search_web':
-                result = await this.externalHandler.searchWeb(args as any); break;
+                result = await this.externalHandler.searchWeb(args as any, context); break;
             case 'codesearch':
-                result = await this.externalHandler.searchCode(args as any); break;
+                result = await this.externalHandler.searchCode(args as any, context); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any, context); break;
             // spawn_sub_agents — REMOVED: sub-agent system not suitable for current architecture

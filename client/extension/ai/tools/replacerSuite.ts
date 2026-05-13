@@ -78,9 +78,11 @@ function* blockAnchorReplacer(content: string, find: string): Generator<string> 
     if (sL[sL.length - 1] === '') sL.pop();
     const first = sL[0]!.trim(), last = sL[sL.length - 1]!.trim();
     const cands: { s: number; e: number }[] = [];
+    const maxLookahead = sL.length + 100;
     for (let i = 0; i < oL.length; i++) {
         if (oL[i]!.trim() !== first) continue;
-        for (let j = i + 2; j < oL.length; j++) { if (oL[j]!.trim() === last) { cands.push({ s: i, e: j }); break; } }
+        const maxJ = Math.min(oL.length, i + maxLookahead);
+        for (let j = i + 2; j < maxJ; j++) { if (oL[j]!.trim() === last) { cands.push({ s: i, e: j }); break; } }
     }
     if (!cands.length) return;
     const score = (s: number, e: number) => {
@@ -108,8 +110,12 @@ function* whitespaceNormalizedReplacer(content: string, find: string): Generator
     const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
     const nF = norm(find), lns = content.split('\n'), fL = find.split('\n');
     if (fL.length === 1) { for (const l of lns) { if (norm(l) === nF) yield l; } return; }
-    for (let i = 0; i <= lns.length - fL.length; i++)
+    const firstF = norm(fL[0]!);
+    for (let i = 0; i <= lns.length - fL.length; i++) {
+        // Fast skip if the first line doesn't match roughly
+        if (norm(lns[i]!) !== firstF && !firstF.startsWith(norm(lns[i]!))) continue;
         if (norm(lns.slice(i, i + fL.length).join('\n')) === nF) yield lns.slice(i, i + fL.length).join('\n');
+    }
 }
 
 function* indentationFlexibleReplacer(content: string, find: string): Generator<string> {
@@ -120,7 +126,10 @@ function* indentationFlexibleReplacer(content: string, find: string): Generator<
         return lns.map(l => l.trim().length === 0 ? l : l.slice(min)).join('\n');
     };
     const nF = strip(find), lns = content.split('\n'), fL = find.split('\n');
+    const firstF = strip(fL[0]!);
     for (let i = 0; i <= lns.length - fL.length; i++) {
+        // Fast skip
+        if (strip(lns[i]!) !== firstF) continue;
         const b = lns.slice(i, i + fL.length).join('\n');
         if (strip(b) === nF) yield b;
     }
@@ -132,7 +141,9 @@ function* escapeNormalizedReplacer(content: string, find: string): Generator<str
     const uF = un(find);
     if (content.includes(uF)) { yield uF; return; }
     const lns = content.split('\n'), fL = uF.split('\n');
+    const firstF = un(fL[0]!);
     if (fL.length > 1) for (let i = 0; i <= lns.length - fL.length; i++) {
+        if (!un(lns[i]!).includes(firstF)) continue;
         const b = lns.slice(i, i + fL.length).join('\n');
         if (un(b) === uF) yield b;
     }
@@ -197,9 +208,13 @@ function* similarityReplacer(content: string, find: string): Generator<string> {
     const minWin = Math.max(1, fL.length - WINDOW_TOLERANCE);
     const maxWin = fL.length + WINDOW_TOLERANCE;
 
+    let iterations = 0;
+    const MAX_ITERATIONS = 50000;
+
     for (let winSize = fL.length; winSize >= minWin; winSize--) {
         if (winSize > maxWin) continue;
         for (let i = 0; i <= cL.length - winSize; i++) {
+            if (iterations++ > MAX_ITERATIONS) break; // Prevent event loop blocking
             const windowNormed = new Set<string>();
             for (let k = i; k < i + winSize; k++) {
                 const n = normLine(cL[k]!);
@@ -219,6 +234,7 @@ function* similarityReplacer(content: string, find: string): Generator<string> {
                 bestEnd = i + winSize - 1;
             }
         }
+        if (iterations > MAX_ITERATIONS) break;
         // If exact window size already found a good match, no need for smaller windows
         if (bestScore >= SIMILARITY_THRESHOLD) break;
     }
@@ -252,7 +268,11 @@ export function findNearestMatch(content: string, find: string): {
     let bestEnd = 0;
     const winSize = fL.length;
 
+    let iterations = 0;
+    const MAX_ITERATIONS = 50000;
+
     for (let i = 0; i <= cL.length - Math.min(winSize, cL.length); i++) {
+        if (iterations++ > MAX_ITERATIONS) break; // Prevent event loop blocking
         const end = Math.min(i + winSize, cL.length);
         const windowNormed = new Set<string>();
         for (let k = i; k < end; k++) {

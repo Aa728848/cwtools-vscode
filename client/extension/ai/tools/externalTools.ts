@@ -136,7 +136,7 @@ export class ExternalToolHandler {
 
     // ─── webFetch ────────────────────────────────────────────────────────────
 
-    async webFetch(args: { url: string; maxChars?: number }): Promise<{ content: string; url: string; truncated: boolean }> {
+    async webFetch(args: { url: string; maxChars?: number }, context?: import('../types').AgentToolContext): Promise<{ content: string; url: string; truncated: boolean }> {
         const maxChars = Math.min(args.maxChars ?? 8000, 16000);
 
         if (!args.url.startsWith('http://') && !args.url.startsWith('https://')) {
@@ -163,6 +163,14 @@ export class ExternalToolHandler {
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
+            
+            const abortSignal = context?.runnerOptions?.abortSignal;
+            const onParentAbort = () => controller.abort(abortSignal?.reason);
+            if (abortSignal) {
+                if (abortSignal.aborted) throw new Error('Aborted by user');
+                abortSignal.addEventListener('abort', onParentAbort);
+            }
+
             let response: Response;
             try {
                 response = await fetch(args.url, {
@@ -171,6 +179,7 @@ export class ExternalToolHandler {
                 });
             } finally {
                 clearTimeout(timeoutId);
+                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
             }
             if (!response.ok) {
                 return { content: `HTTP ${response.status}: ${response.statusText}`, url: args.url, truncated: false };
@@ -368,6 +377,24 @@ export class ExternalToolHandler {
                 });
             }, timeoutMs);
 
+            const abortSignal = context?.runnerOptions?.abortSignal;
+            const onParentAbort = () => {
+                proc.kill();
+                resolve({
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + '\n[... 被用户中止]',
+                    stderr: stderrBuf.substring(0, 2000),
+                    exitCode: -1,
+                    timedOut: false,
+                });
+            };
+            if (abortSignal) {
+                if (abortSignal.aborted) {
+                    onParentAbort();
+                    return;
+                }
+                abortSignal.addEventListener('abort', onParentAbort);
+            }
+
             proc.stdout?.on('data', (chunk: Buffer) => {
                 const text = chunk.toString();
                 stdoutBuf += text;
@@ -386,6 +413,7 @@ export class ExternalToolHandler {
 
             proc.on('close', code => {
                 clearTimeout(timer);
+                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
                 resolve({
                     stdout: stdoutBuf.substring(0, MAX_OUTPUT),
                     stderr: stderrBuf.substring(0, 2000),
@@ -395,6 +423,7 @@ export class ExternalToolHandler {
 
             proc.on('error', err => {
                 clearTimeout(timer);
+                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
                 resolve({
                     stdout: stdoutBuf.substring(0, MAX_OUTPUT),
                     stderr: `spawn error: ${err.message}`,
@@ -406,7 +435,7 @@ export class ExternalToolHandler {
 
     // ─── searchWeb ───────────────────────────────────────────────────────────
 
-    async searchWeb(args: { query: string; maxResults?: number }): Promise<{
+    async searchWeb(args: { query: string; maxResults?: number }, context?: import('../types').AgentToolContext): Promise<{
         results: Array<{ title: string; url: string; description: string }>;
         source: 'brave' | 'duckduckgo';
         query: string;
@@ -421,6 +450,14 @@ export class ExternalToolHandler {
                 const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+                const abortSignal = context?.runnerOptions?.abortSignal;
+                const onParentAbort = () => controller.abort(abortSignal?.reason);
+                if (abortSignal) {
+                    if (abortSignal.aborted) throw new Error('Aborted by user');
+                    abortSignal.addEventListener('abort', onParentAbort);
+                }
+
                 let resp: Response;
                 try {
                     resp = await fetch(url, {
@@ -433,6 +470,7 @@ export class ExternalToolHandler {
                     });
                 } finally {
                     clearTimeout(timeoutId);
+                    if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
                 }
                 if (resp.ok) {
                     const data = await resp.json() as {
@@ -453,6 +491,14 @@ export class ExternalToolHandler {
             const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            const abortSignal = context?.runnerOptions?.abortSignal;
+            const onParentAbort = () => controller.abort(abortSignal?.reason);
+            if (abortSignal) {
+                if (abortSignal.aborted) throw new Error('Aborted by user');
+                abortSignal.addEventListener('abort', onParentAbort);
+            }
+
             let resp: Response;
             try {
                 resp = await fetch(ddgUrl, {
@@ -461,6 +507,7 @@ export class ExternalToolHandler {
                 });
             } finally {
                 clearTimeout(timeoutId);
+                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
             }
             let html = await resp.text();
             // 🔒 防事件循环阻塞：限制 DuckDuckGo 响应体大小
@@ -506,7 +553,7 @@ export class ExternalToolHandler {
 
     // ─── searchCode ────────────────────────────────────────────────────────────
 
-    async searchCode(args: { query: string; maxResults?: number }): Promise<{
+    async searchCode(args: { query: string; maxResults?: number }, context?: import('../types').AgentToolContext): Promise<{
         results: Array<{ title: string; url: string; description: string }>;
         source: 'exa' | 'brave';
         query: string;
@@ -520,6 +567,14 @@ export class ExternalToolHandler {
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+                const abortSignal = context?.runnerOptions?.abortSignal;
+                const onParentAbort = () => controller.abort(abortSignal?.reason);
+                if (abortSignal) {
+                    if (abortSignal.aborted) throw new Error('Aborted by user');
+                    abortSignal.addEventListener('abort', onParentAbort);
+                }
+
                 let resp: Response;
                 try {
                     resp = await fetch('https://api.exa.ai/search', {
@@ -538,6 +593,7 @@ export class ExternalToolHandler {
                     });
                 } finally {
                     clearTimeout(timeoutId);
+                    if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
                 }
                 if (resp.ok) {
                     const data = await resp.json() as {
@@ -555,7 +611,7 @@ export class ExternalToolHandler {
 
         // Fallback: use Brave Search (or DuckDuckGo) with code-oriented query modifiers
         const codeQuery = `site:github.com OR site:stackoverflow.com OR site:stellaris.paradoxwikis.com ${query}`;
-        const webResult = await this.searchWeb({ query: codeQuery, maxResults });
+        const webResult = await this.searchWeb({ query: codeQuery, maxResults }, context);
         return { ...webResult, source: 'brave' as const, query };
     }
 

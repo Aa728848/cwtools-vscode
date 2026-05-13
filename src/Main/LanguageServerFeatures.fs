@@ -89,6 +89,7 @@ module LanguageServerFeatures =
         (docs: DocumentStore)
         (doc: Uri)
         (pos: Position)
+        (locMap: (string * Entry) list)
         =
         async {
             let unescapedWord = docs.GetTextAtPosition(doc, pos)
@@ -146,7 +147,7 @@ module LanguageServerFeatures =
                             sprintf "`%s` = `%s`" displayName value)
 
                 let lochover =
-                    lochoverFromInfo (game.References().Localisation) symbolInfo unescapedWord
+                    lochoverFromInfo locMap symbolInfo unescapedWord
 
                 let scopesExtra =
                     match scopeContext with

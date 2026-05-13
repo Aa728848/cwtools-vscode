@@ -1,4 +1,4 @@
-﻿module Main.Program
+module Main.Program
 
 open LSP
 open LSP.Types
@@ -23,6 +23,7 @@ open Main.Lang.GameLoader
 open Main.Lang.LanguageServerFeatures
 open Main.Completion
 open CWTools.Utilities.Utils
+open CWTools.Localisation
 open LSP.LanguageServer   // brings gameStateLock into scope
 
 // 预编译正则，避免 InlayHint / precache 热路径上每次分配
@@ -316,6 +317,18 @@ type Server(client: ILanguageClient) =
     let mutable dontLoadPatterns: string array = [||]
     /// key: FileName (使用 ConcurrentDictionary 替代不可变的 Map 以减少 GC 压力)
     let locCache = System.Collections.Concurrent.ConcurrentDictionary<string, CWError list>()
+
+    /// Cached References().Localisation result — invalidated on RefreshLocalisationCaches.
+    /// Avoids repeated materialization of ALL loc entries on every InlayHint/Hover request.
+    let mutable cachedLocMap: (string * Entry) list option = None
+
+    let getOrBuildLocMap (game: IGame<_>) =
+        match cachedLocMap with
+        | Some m -> m
+        | None ->
+            let m = game.References().Localisation
+            cachedLocMap <- Some m
+            m
 
     /// SemanticTokens cache: filePath -> (contentHash, encodedDataArray, resultId)
     /// Avoids full AST re-traversal when file content hasn't changed.
@@ -645,6 +658,7 @@ type Server(client: ILanguageClient) =
                 if delayedLocUpdate then
                     logDiag "delayedLocUpdate true"
                     game.RefreshLocalisationCaches()
+                    cachedLocMap <- None  // invalidate cached loc entries
                     delayedLocUpdate <- false
 
                     // 使用 Dictionary: 清空后重新填
@@ -657,6 +671,7 @@ type Server(client: ILanguageClient) =
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
+                evictIfNeeded locCache
                 let allocAfterLoc = GC.GetTotalAllocatedBytes(false)
                 logInfo $"[MemDiag:LocErrors] +{(allocAfterLoc - allocBeforeLoc) / 1048576L}MB"
 
@@ -998,7 +1013,7 @@ type Server(client: ILanguageClient) =
                 let precacheVisitor =
                     { new IGameVisitor<bool> with
                         member this.Visit (gameT: IGame<_>) =
-                            let globalLocMap = gameT.References().Localisation |> Map.ofList
+                            let globalLocMap = getOrBuildLocMap gameT |> Map.ofList
                             let globalVars = gameT.ScriptedVariables()
                             let localVarPattern = inlayLocalVarPattern
 
@@ -1737,12 +1752,25 @@ type Server(client: ILanguageClient) =
 
         member this.Hover(p: TextDocumentPositionParams) =
             async {
+                // Build or reuse cached locMap for hover
+                let locMapForHover =
+                    match cachedLocMap with
+                    | Some m -> m
+                    | None ->
+                        let mutable result = []
+                        let builder = { new IGameVisitor<int> with
+                            member _.Visit(game: IGame<_>) =
+                                result <- getOrBuildLocMap game
+                                0 }
+                        gameDispatcher.Dispatch builder |> ignore
+                        result
                 let! hover =
                     hoverDocument
                         gameDispatcher
                         docs
                         p.textDocument.uri
                         p.position
+                        locMapForHover
                 return Some hover
             }
             |> catchError None
@@ -2175,7 +2203,7 @@ type Server(client: ILanguageClient) =
                             match entityOpt with
                             | None -> []
                             | Some entity ->
-                                let locMap = game.References().Localisation |> Map.ofList
+                                let locMap = getOrBuildLocMap game |> Map.ofList
                                 let hints = ResizeArray<InlayHint>()
                                 let targetPath = entity.filepath
         

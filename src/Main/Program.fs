@@ -631,6 +631,10 @@ type Server(client: ILanguageClient) =
                     game.RefreshCaches()
                     let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
                     logInfo $"[MemDiag:RefreshCaches] +{(allocAfterRefresh - allocBefore) / 1048576L}MB (forced={not needsTypeRefresh})"
+                    // Force blocking Gen2 GC after RefreshCaches: old RuleValidationService/InfoService
+                    // instances are dead, reclaim their large memoization dictionaries immediately.
+                    GC.Collect(2, GCCollectionMode.Default, true, true)
+                    GC.WaitForPendingFinalizers()
                     needsTypeRefresh <- false
                     refreshSkipCount <- 0
                 else
@@ -662,6 +666,7 @@ type Server(client: ILanguageClient) =
                 // when the entity is not yet rebuilt, then VSCode re-requests once the
                 // AST is ready. We clear codeLens because it's cheaper to recompute.
                 codeLensCache.Clear()
+                inlayHintCache.Clear()
                 clearTypeIndexCache ()
             finally
                 gameStateLock.ExitWriteLock()
@@ -1715,6 +1720,7 @@ type Server(client: ILanguageClient) =
             (locCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
             cacheWriteTimes.TryRemove(localPath) |> ignore
             cacheWriteTimes.TryRemove(fullPath) |> ignore
+            clearRangeCache ()
         }
 
         member this.DidChangeWatchedFiles(p: DidChangeWatchedFilesParams) =
@@ -2254,6 +2260,7 @@ type Server(client: ILanguageClient) =
                         
                         let generatedHints = gameDispatcher.Dispatch visitor |> Option.defaultValue []
                         cachePut inlayHintCache filePath (hash, generatedHints)
+                        evictIfNeeded inlayHintCache
                         return generatedHints
             }
             |> catchError []

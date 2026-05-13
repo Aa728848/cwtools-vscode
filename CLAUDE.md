@@ -16,10 +16,12 @@ The extension architecture consists of three main components:
 ### 1. 🤖 AI Agent Integration
 A sophisticated AI assistant deeply integrated into the editor.
 - **Agent Orchestration**: `client/extension/ai/` contains the core AI logic (27+ files), including execution loops (Build/Plan/Explore/General/Review/LocTranslator/LocWriter modes), context compression, doom-loop detection, and tool routing.
-- **Provider Support**: 16+ built-in providers — OpenAI, Claude (Anthropic), Google Gemini, DeepSeek, MiniMax (pay-as-you-go + Token Plan), GLM (Zhipu), Qwen (Tongyi), MiMo (Xiaomi), Ollama, SiliconFlow, OpenRouter, GitHub Models, Together AI, DeepInfra, OpenCode Zen. Includes Anthropic Messages API adapter and GLM JWT auth.
+- **Provider Support**: 16+ built-in providers — OpenAI (GPT-5.5+), Claude (Anthropic), Google Gemini, DeepSeek, MiniMax (pay-as-you-go + Token Plan), GLM (Zhipu, GLM-4.7+), Qwen (Tongyi), MiMo (Xiaomi), Ollama, SiliconFlow, OpenRouter, GitHub Models, Together AI, DeepInfra, OpenCode Zen. Includes Anthropic Messages API adapter and GLM JWT auth. Network tools have strict timeout and abort mechanisms to prevent hangs.
 - **MCP Support**: Model Context Protocol clients with stdio/SSE transports (`mcpClient.ts`).
 - **Tools**: 40+ agent tools including `read_file`, `write_file`, `edit_file` (8-strategy fuzzy replacer), `multiedit`, `apply_patch`, `ast_mutate`, `codesearch`, `glob_files`, `spawn_sub_agents`, CWTools Deep API tools (`query_definition`, `query_scripted_effects`, `query_enums`, `get_entity_info`, etc.), media tools (`mmx_generate_image`, `convert_image_to_dds`), and memory tools.
-- **Write Safety**: Partitioned write queue (`PartitionedWriteQueue`) serializes per-file writes while allowing parallel writes to different files. Multi-file operations acquire locks in sorted order to prevent deadlocks.
+- **Write Safety**: Partitioned write queue (`PartitionedWriteQueue`) serializes per-file writes while allowing parallel writes to different files. Multi-file operations acquire locks in sorted order to prevent deadlocks. Note: `todo_write` tool execution is isolated from this global file-write lock to prevent deadlocks in multi-agent environments.
+- **Context Injection**: Uses Pass-by-Reference Context Injection via `contextFiles` in `TaskNode` and Blackboard-based context loading to replace bloated, hard-coded prompts.
+- **Walkthroughs**: AI-generated `walkthrough.md` reports are saved within the specific session's `Agent Workspace Dir` and trigger interactive annotation UI cards in the chat panel.
 - **Sub-Agent Parallelism**: `spawn_sub_agents` tool supports DAG-based dependency scheduling, per-task deadlines, and 8+ sub-agent types.
 - **Vision Fallback**: For non-vision providers, automatically detects MiniMax CLI (`mmx`) and uses its VLM to analyze user-attached images, injecting text descriptions into context.
 
@@ -33,28 +35,32 @@ A real-time Canvas-based visualizer for Paradox `.gui` styling files.
 3D interactive preview for `solar_system_initializers/`.
 - **Rendering & Editing**: Plots stars, planets, moons, and ring worlds. Supports click-and-drag mechanics to modify celestial orbit radii and positional angles interactively.
 
-### 4. 🔗 Event Chain Visualizer (`client/webview/eventChainPreview.ts` & `client/extension/eventChainPanel.ts`)
+### 4. 🦖 3D Entity Model Visualizer (`client/webview/entityPreview.ts` & `client/extension/entityPreviewPanel.ts`)
+Three.js based renderer for Paradox 3D entity models and animations.
+- **Rendering & Animation**: Renders meshes and plays animations using `AnimationMixer`. Supports nested model animation synchronization where child entities inherit state from parents (`get_state_from_parent = yes`).
+
+### 5. 🔗 Event Chain Visualizer (`client/webview/eventChainPreview.ts` & `client/extension/eventChainPanel.ts`)
 Directed graph visualization of event trigger chains using Cytoscape.js.
 - **Full Workspace Scan**: Scans ALL `events/` files AND 20+ `common/` subdirectories (on_actions, decisions, scripted_effects, technologies, etc.) to build a complete event reference graph.
 - **BFS Subgraph**: Seeds from the active file's events and BFS-expands (depth 2) to show only the connected subgraph, preventing visual overload.
 - **Localization Resolution**: Resolves event titles via YML localisation files, with configurable language priority (Chinese preferred when available).
 - **Interactive**: Namespace filtering, event ID search, click-to-navigate to source file/line, zoom controls.
 
-### 5. 🔬 Tech Tree Visualizer (`client/webview/techTreePreview.ts` & `client/extension/techTreePanel.ts`)
+### 6. 🔬 Tech Tree Visualizer (`client/webview/techTreePreview.ts` & `client/extension/techTreePanel.ts`)
 Directed graph visualization of technology prerequisite chains using Cytoscape.js.
 - **Full Scan**: Scans ALL `common/technology/**/*.txt` files in the workspace.
 - **Filtering**: Filter by research area (Physics/Society/Engineering), tier, rare/dangerous tech flags.
 - **Localization**: Resolves tech names via YML localisation files.
 - **Seed Mode**: When a tech file is active, seeds the graph from its techs (BFS-expand depth 10); otherwise shows the full tech tree.
 
-### 6. ⚡ Code Actions (`client/extension/codeActions.ts`)
+### 7. ⚡ Code Actions (`client/extension/codeActions.ts`)
 CodeActionProvider that surfaces AI-powered quick fixes on CWTools diagnostics:
 - "AI: Fix this error" — sends diagnostic context to AI chat for automated repair
 - "AI: Explain this error" — sends diagnostic for explanation
 - "AI: Fix all errors in file" — bulk repair mode
 - Bilingual (Chinese/English) based on VS Code locale
 
-### 7. 🧠 Language Services (F# Backend)
+### 8. 🧠 Language Services (F# Backend)
 - **Language Server Protocol**: Core syntax validation, auto-complete, go-to-definition, and semantic analysis built in F# (.NET 9.0).
 - **CWTools Engine Integration**: The F# parser engine is included via Git Submodule (`submodules/cwtools`).
 - **Performance Focused**: Utilizes asynchronous DocumentStore O(1) searches, `FileSystemWatcher` for global workspace localizations text indexing, and bounds GC STW pauses.
@@ -62,11 +68,11 @@ CodeActionProvider that surfaces AI-powered quick fixes on CWTools diagnostics:
 ## 🛠️ Build & Development Guide
 
 ### Build Scripts (`package.json`)
-- `npm run compile`: Compiles extension TypeScript (via `tsc`) and bundles 5 Webview scripts (via `rollup`).
+- `npm run compile`: Compiles extension TypeScript (via `tsc`) and bundles 6 Webview scripts (via `rollup`).
 - `npm run test`: Executes the test suites.
 - `npm run test:unit`: Runs 7 unit test files via `ts-mocha` (covers contextBudget, diffEngine, editFileReplacer, jsonRepair, pricing, providers, toolCallParser).
 - `npm run lint`: ESLint 9 flat config with critical async safety rules (`no-floating-promises`, `no-misused-promises`).
-- **Important Notes**: Webview scripts (`chatPanel.ts`, `guiPreview.ts`, `solarSystemPreview.ts`, `eventChainPreview.ts`, `techTreePreview.ts`) are compiled using `rollup` into `release/bin/client/webview/`. Extension context scripts are handled purely by `tsc`.
+- **Important Notes**: Webview scripts (`chatPanel.ts`, `guiPreview.ts`, `solarSystemPreview.ts`, `eventChainPreview.ts`, `techTreePreview.ts`, `entityPreview.ts`) are compiled using `rollup` into `release/bin/client/webview/`. Extension context scripts are handled purely by `tsc`.
 
 ### Backend Compilation
 - The F# components are built using .NET 9.0 SDK. Use `dotnet build src/LSP/`.
@@ -76,9 +82,9 @@ CodeActionProvider that surfaces AI-powered quick fixes on CWTools diagnostics:
 
 1. **Webview vs Extension Context**: Be extremely careful about context isolation. Webviews (GUI Preview, Solar Preview, Event Chain, Tech Tree, Chat Panel) run in restricted sandbox environments and CANNOT access the VS Code API or Node.js directly. Communication must be strictly handled via `postMessage`.
 
-2. **AI Tool Concurrency Risk**: When adding/modifying tools that mutate files, add them to `WRITE_TOOLS` set in `agentRunner.ts`. The `PartitionedWriteQueue` serializes writes per-file-path to prevent race-condition corruption. Multi-file writes acquire locks in sorted lexicographic order to prevent AB/BA deadlocks.
+2. **AI Tool Concurrency Risk**: When adding/modifying tools that mutate files, add them to `WRITE_TOOLS` set in `agentRunner.ts`. The `PartitionedWriteQueue` serializes writes per-file-path to prevent race-condition corruption. Multi-file writes acquire locks in sorted lexicographic order to prevent AB/BA deadlocks. **Note:** `todo_write` must be excluded from this lock to avoid planning phase deadlocks.
 
-3. **Data Volume Limits**: The extension deals with massive configurations (hundreds of megabytes of text/images). Memory leaks hit hard here—always utilize limited-size LRU caches for things like textures, handle background operations asynchronously, and clear listeners manually on Webview disposals.
+3. **Data Volume Limits & Memory Leaks**: The extension deals with massive configurations. Always utilize limited-size LRU caches for language services (e.g., F# `inlayHintCache`). For Webviews, particularly 3D/WebGL ones like `entityPreview`, you MUST manually clear event listeners and invoke `dispose()` on Three.js resources (materials, geometries) during Webview teardown.
 
 4. **Tool Registration Triad**: When adding a new tool, you must update THREE files simultaneously:
    - `tools/definitions.ts` — JSON Schema definition
@@ -123,6 +129,7 @@ cwtools-vscode/
 │   │   ├── solarSystemPanel.ts       # Solar System host
 │   │   ├── eventChainPanel.ts        # Event Chain Visualizer host
 │   │   ├── techTreePanel.ts          # Tech Tree Visualizer host
+│   │   ├── entityPreviewPanel.ts     # 3D Entity Visualizer host
 │   │   ├── codeActions.ts            # AI Quick Fix CodeActions
 │   │   ├── pdxTokenizer.ts           # Shared PDX script tokenizer
 │   │   └── exprEval.ts               # Safe math expression evaluator
@@ -131,7 +138,8 @@ cwtools-vscode/
 │   │   ├── guiPreview.ts       # GUI canvas renderer (118KB)
 │   │   ├── solarSystemPreview.ts  # Solar system visualizer (81KB)
 │   │   ├── eventChainPreview.ts   # Event chain graph (Cytoscape.js)
-│   │   └── techTreePreview.ts     # Tech tree graph (Cytoscape.js)
+│   │   ├── techTreePreview.ts     # Tech tree graph (Cytoscape.js)
+│   │   └── entityPreview.ts       # 3D Entity Model WebGL Renderer
 │   └── test/
 │       ├── unit/               # Unit tests (7 files)
 │       └── suite/              # Integration tests
@@ -140,7 +148,7 @@ cwtools-vscode/
 ├── .agents/
 │   ├── rules/cwtools-guider.md # AI coding guidelines
 │   └── workflows/package.md   # Packaging workflow
-├── rollup.config.mjs          # Webview bundler (5 entry points)
+├── rollup.config.mjs          # Webview bundler (6 entry points)
 ├── eslint.config.mjs          # ESLint 9 flat config
 └── global.json                # .NET SDK 9.0 configuration
 ```

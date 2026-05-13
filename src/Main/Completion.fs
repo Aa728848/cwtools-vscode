@@ -61,7 +61,6 @@ let addToCache completionItem =
     completionCache.[key] <- completionItem
     key
 
-let mutable completionCacheCount = 0
 
 let mutable private completionPartialCache: (CompletionParams * CompletionItem seq) option =
     None
@@ -283,15 +282,21 @@ let computeCompletionRanges (filetext: string) (line: int) (character: int) =
 
         (insertRange, replaceRange)
 
+let clearRangeCache () =
+    lock rangeCacheLock (fun () -> rangeCache <- None)
+
+let private completionCacheMaxEntries = 2048
+
 let optimiseCompletion (completionList: CompletionItem seq) =
-    if completionCacheCount > 2 then
+    // Evict completionCache when it exceeds capacity
+    if completionCache.Count > completionCacheMaxEntries then
         completionCache.Clear()
-        completionCacheCount <- 0
-    else
-        completionCacheCount <- completionCacheCount + 1
+        completionCacheKey <- 0
 
     // 优化：使用 Array 替代 Seq 避免多次遍历
     let arr = completionList |> Seq.toArray
+
+    logInfo $"[CompletionCache] items={arr.Length} cacheEntries={completionCache.Count}"
 
     if arr.Length > 1000 then
         Array.sortInPlaceBy (fun (c: CompletionItem) -> c.sortText) arr
@@ -522,7 +527,7 @@ let completion
         let items =
             checkPartialCompletionCache p (fun () ->
                 completionCallLSP game p docs debugMode supportsInsertReplaceEdit filetext position)
-            |> Seq.cache
+            |> Seq.toArray :> seq<_>
 
         logInfo $"completion items time %i{stopwatch.ElapsedMilliseconds}ms"
         let targetLine = getLineAt filetext (position.Line - 1)

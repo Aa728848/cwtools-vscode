@@ -59,7 +59,7 @@ npm run compile
 
 包含两步：
 1. `tsc -p ./tsconfig.extension.json` — 编译扩展上下文代码到 `release/bin/`
-2. `rollup -c` — 打包 5 个 Webview 脚本（`chatPanel`, `guiPreview`, `solarSystemPreview`, `eventChainPreview`, `techTreePreview`）到 `release/bin/client/webview/`
+2. `rollup -c` — 打包 6 个 Webview 脚本（`chatPanel`, `guiPreview`, `solarSystemPreview`, `eventChainPreview`, `techTreePreview`, `entityPreview`）到 `release/bin/client/webview/`
 
 ### 5. 使用本地 CWTools F# 仓库
 
@@ -89,7 +89,7 @@ npm run compile
 
 ### Webview 调试
 
-Webview 脚本（聊天面板、GUI 预览、星系预览、事件链、科技树）在隔离浏览器沙盒中运行。调试方法：
+Webview 脚本（聊天面板、GUI 预览、星系预览、事件链、科技树、实体模型预览）在隔离浏览器沙盒中运行。调试方法：
 
 1. 在扩展开发主机窗口中，打开命令面板（`Ctrl+Shift+P`）
 2. 执行：**Developer: Open Webview Developer Tools**
@@ -114,7 +114,7 @@ npx rollup -c --watch
 
 | 命令 | 描述 |
 |------|------|
-| `npm run compile` | 完整构建（扩展 + 5 个 Webview） |
+| `npm run compile` | 完整构建（扩展 + 6 个 Webview） |
 | `npm run lint` | ESLint 检查 `client/` |
 | `npm run test` | 编译 + VS Code 集成测试 |
 | `npm run test:unit` | 通过 `ts-mocha` 运行单元测试 |
@@ -141,13 +141,15 @@ client/
 │   ├── solarSystemPanel.ts # 星系可视化器宿主
 │   ├── eventChainPanel.ts  # 事件链可视化器宿主
 │   ├── techTreePanel.ts    # 科技树可视化器宿主
+│   ├── entityPreviewPanel.ts # 3D 实体可视化器宿主
 │   └── codeActions.ts      # AI Quick Fix
 ├── webview/                # Webview 脚本 (浏览器沙盒)
 │   ├── chatPanel.ts        # 聊天 UI + Markdown 渲染器
 │   ├── guiPreview.ts       # GUI Canvas 渲染器
 │   ├── solarSystemPreview.ts
 │   ├── eventChainPreview.ts    # Cytoscape.js 事件链图
-│   └── techTreePreview.ts      # Cytoscape.js 科技树图
+│   ├── techTreePreview.ts      # Cytoscape.js 科技树图
+│   └── entityPreview.ts        # Three.js 实体模型渲染器
 └── test/                   # 测试
     ├── unit/               # 单元测试 (7 个文件)
     └── suite/              # 集成测试
@@ -174,9 +176,9 @@ submodules/cwtools/         # CWTools F# 库 (Git 子模块)
 
 ### AI 模块特定规范
 
-- **工具安全**：添加修改文件的新工具时，必须将其加入 `agentRunner.ts` 中的 `WRITE_TOOLS` 集合，确保并行子代理执行时的串行写入
+- **工具安全**：添加修改文件的新工具时，必须将其加入 `agentRunner.ts` 中的 `WRITE_TOOLS` 集合，确保并行子代理执行时的串行写入。特例：`todo_write` 必须排除在外以防规划期死锁。
 - **上下文隔离**：永远不要在 Webview 脚本中导入 `vscode`。永远不要在 Webview 代码中使用 `require()`
-- **内存安全**：对任何随使用增长的数据使用有界缓存（LRU）。`lspTools.ts` 中的 LSP 缓存是参考模式（128 条目 + TTL）
+- **内存安全**：对任何随使用增长的数据使用有界缓存（如 F# 端的 `inlayHintCache` 必须用 LRU，`lspTools.ts` 缓存也需设定 TTL）。对 Webview，尤其像 `entityPreview` 这样使用 WebGL / Three.js 的组件，必须在销毁时显式调用 `dispose()` 清理材质、几何体及事件监听器。
 - **Token 估算**：使用 `agentRunner.ts` 中的 `estimateTokenCount()` 进行所有 token 计算。自动选择快速 vs. 精确路径
 - **工具分发**：新增工具时需同步更新 `agentTools.ts`（路由）、`tools/definitions.ts`（Schema）和 `types.ts`（类型）
 

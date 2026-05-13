@@ -381,7 +381,7 @@ function animate() {
 }
 
 // Pause render loop when webview is not visible to save resources
-document.addEventListener('visibilitychange', () => {
+function handleVisibilityChange() {
     if (document.hidden) {
         isWebviewVisible = false;
         if (animationFrameId) {
@@ -395,7 +395,8 @@ document.addEventListener('visibilitychange', () => {
             animate();
         }
     }
-});
+}
+document.addEventListener('visibilitychange', handleVisibilityChange);
 
 function handleResize() {
     const w = canvasContainer.clientWidth;
@@ -3087,7 +3088,7 @@ document.getElementById('btn-props-close')?.addEventListener('click', deselectLo
 document.getElementById('btn-screenshot')?.addEventListener('click', takeScreenshot);
 
 // Keyboard shortcuts: F=focus, W=translate, E=rotate (Maya-style), Escape=deselect, Ctrl+Z=undo
-window.addEventListener('keydown', (e) => {
+function handleWindowKeydown(e: KeyboardEvent) {
     // Ctrl+Shift+S → screenshot
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
@@ -3127,12 +3128,14 @@ window.addEventListener('keydown', (e) => {
             deselectLocator();
             break;
     }
-});
+}
+window.addEventListener('keydown', handleWindowKeydown);
 
 // ── Window Events ────────────────────────────────────────────────────────────
 
 window.addEventListener('resize', handleResize);
-new ResizeObserver(handleResize).observe(canvasContainer);
+const resizeObserver = new ResizeObserver(handleResize);
+resizeObserver.observe(canvasContainer);
 
 // ── Cleanup ──────────────────────────────────────────────────────────────────
 
@@ -3141,6 +3144,21 @@ let isDisposed = false;
 function disposeAll() {
     if (isDisposed) return;
     isDisposed = true;
+
+    // Remove event listeners
+    window.removeEventListener('resize', handleResize);
+    window.removeEventListener('keydown', handleWindowKeydown);
+    window.removeEventListener('message', handleWindowMessage);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    document.removeEventListener('click', handleDocumentClick);
+    document.removeEventListener('pointerdown', handleDocumentPointerDown as EventListener);
+    document.removeEventListener('click', handleAutocompleteClickOutside);
+    resizeObserver.disconnect();
+
+    for (const [k, v] of textureCache) {
+        v.promise.then(t => t?.dispose());
+    }
+    textureCache.clear();
 
     // Stop render loop
     if (animationFrameId) {
@@ -3270,18 +3288,21 @@ canvasContainer.addEventListener('contextmenu', (e) => {
 
 // Hide context menu on left-click/pointerdown, but with a timestamp guard
 // to prevent immediate dismissal from the same event cycle
-document.addEventListener('click', (e) => {
+function handleDocumentClick(e: MouseEvent) {
     if (Date.now() - contextMenuOpenTime < 100) return;
     if (contextMenu.contains(e.target as Node)) return;
     hideContextMenu();
-});
-document.addEventListener('pointerdown', (e) => {
+}
+document.addEventListener('click', handleDocumentClick);
+
+function handleDocumentPointerDown(e: PointerEvent) {
     if (Date.now() - contextMenuOpenTime < 100) return;
     // Only dismiss on left button, not right button (which opens context menu)
-    if ((e as PointerEvent).button !== 0) return;
+    if (e.button !== 0) return;
     if (contextMenu.contains(e.target as Node)) return;
     hideContextMenu();
-});
+}
+document.addEventListener('pointerdown', handleDocumentPointerDown as EventListener);
 
 // Context menu: Add Locator
 document.getElementById('ctx-add-locator')?.addEventListener('click', (e) => {
@@ -3479,11 +3500,12 @@ addLocEntity.addEventListener('focus', () => {
 });
 
 // Hide autocomplete when clicking outside
-document.addEventListener('click', (e) => {
+function handleAutocompleteClickOutside(e: MouseEvent) {
     if (!addLocatorPanel.contains(e.target as Node)) {
         hideAutocomplete();
     }
-});
+}
+document.addEventListener('click', handleAutocompleteClickOutside);
 
 function updateEntityNamesList(names: string[]) {
     cachedEntityNames = names;
@@ -3521,7 +3543,7 @@ function updateEntityNamesList(names: string[]) {
 
 // ── Message Handler ──────────────────────────────────────────────────────────
 
-window.addEventListener('message', async (event) => {
+async function handleWindowMessage(event: MessageEvent) {
     const msg = event.data;
     if (!msg?.command) return;
 
@@ -3626,7 +3648,8 @@ window.addEventListener('message', async (event) => {
             break;
         }
     }
-});
+}
+window.addEventListener('message', handleWindowMessage);
 
 // ── Initialize ───────────────────────────────────────────────────────────────
 

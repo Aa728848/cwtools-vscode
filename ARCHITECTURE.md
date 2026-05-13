@@ -20,6 +20,7 @@
 │  │ (extension.ts)│  │  (ai/)       │  │  solarSystemPanel.ts   │  │
 │  │              │  │              │  │  eventChainPanel.ts    │  │
 │  │              │  │              │  │  techTreePanel.ts      │  │
+│  │              │  │              │  │  entityPreviewPanel.ts │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬─────────────────┘  │
 │         │                 │                  │                    │
 │         │    ┌────────────┴────────────┐     │                    │
@@ -30,6 +31,7 @@
 │  ┌──────┴─────────────────┴──────────────────┴─────────────────┐  │
 │  │                     Webview Sandbox                          │  │
 │  │ chatPanel │ guiPreview │ solarPreview │ eventChain │ techTree│  │
+│  │                                          entityPreview       │  │
 │  └─────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────┬───────────────────────────────────┘
                                │ LSP (JSON-RPC over stdio)
@@ -57,6 +59,8 @@
 | `eventChainParser.ts` | 事件链图解析器 — 解析事件/on_action/decision 引用关系 |
 | `techTreePanel.ts` | 科技树可视化器宿主 — 按领域/层级筛选、前置科技关系图 |
 | `techTreeParser.ts` | 科技树解析器 — 解析前置条件边和科技属性 |
+| `entityPreviewPanel.ts`| 3D 实体模型可视化器宿主 — 处理 Three.js 通信 |
+| `entityParser.ts` | 实体文件解析器 — 解析 Paradox 3D 实体树和状态继承 |
 | `codeActions.ts` | CodeActionProvider — 提供 "AI: 修复"、"AI: 解释" 快速操作 |
 | `ddsDecoder.ts` | DDS 纹理解码器 (BC1/BC3/BC7) |
 | `pdxTokenizer.ts` | 共享 PDX 脚本分词器 — 供 guiParser 和 solarParser 使用 |
@@ -142,6 +146,7 @@ chatPanel ← postMessage ← steps/results ← 工具执行
 | `solarSystemPreview.ts` + `solarSystemPreview.css` | 3D 星系可视化器 — 轨道编辑、天体放置 |
 | `eventChainPreview.ts` + `eventChainPreview.css` | 事件链可视化器 — Cytoscape.js 图渲染、ELK 自动布局、命名空间筛选、事件搜索 |
 | `techTreePreview.ts` + `techTreePreview.css` | 科技树可视化器 — Cytoscape.js 图、领域/层级筛选、稀有科技标记 |
+| `entityPreview.ts` + `entityPreview.css` | 3D 实体模型渲染器 — Three.js WebGL、动画网格与 `get_state_from_parent` 同步 |
 | `svgIcons.ts` | 共享 SVG 图标库 |
 | `canvas.ts` | Canvas 工具函数 |
 
@@ -162,7 +167,7 @@ chatPanel ← postMessage ← steps/results ← 工具执行
 
 | 命令 | 描述 |
 |------|------|
-| `npm run compile` | `tsc` 编译扩展 TS → `release/bin/`，`rollup` 打包 5 个 Webview 脚本 |
+| `npm run compile` | `tsc` 编译扩展 TS → `release/bin/`，`rollup` 打包 6 个 Webview 脚本 |
 | `npm run test` | 编译 + VS Code 集成测试 |
 | `npm run test:unit` | 通过 `ts-mocha` 运行单元测试 |
 | `npm run test:coverage` | 带覆盖率报告的单元测试 |
@@ -285,10 +290,10 @@ LSP 工具使用 128 条目 LRU 缓存 + 30s TTL。防止长 Agent 会话中无�
 Agent 检查点以 `void`（无 await）保存，防止给推理循环增加延迟。磁盘 I/O 失败时静默跳过。
 
 ### 4. 提供商回退路由
-主 AI 提供商 5xx/超时错误时，Agent 自动使用 `PROVIDER_FALLBACK` 映射中的备用提供商重试。对用户透明。
+主 AI 提供商 5xx/超时错误时，Agent 自动使用 `PROVIDER_FALLBACK` 映射中的备用提供商重试。对用户透明。外部工具请求强制施加网络超时和中止 (Abort) 机制防挂起。
 
 ### 5. 分区写队列 (PartitionedWriteQueue)
-替换全局单写队列。允许不同文件的并行写入，同时保持单文件内的顺序。多文件操作按路径字典序获取锁，防止 AB/BA 死锁。空闲队列 30s 后自动清理。
+替换全局单写队列。允许不同文件的并行写入，同时保持单文件内的顺序。多文件操作按路径字典序获取锁，防止 AB/BA 死锁。空闲队列 30s 后自动清理。**注意**：`todo_write` 工具被隔离在此写锁之外，以消除多智能体并发规划时的死锁。
 
 ### 6. 虚拟滚动 + IntersectionObserver
 聊天消息使用 `content-visibility: auto` + IntersectionObserver 跳过屏幕外 DOM 子树的布局/绘制。保持 100+ 消息会话流畅。
@@ -305,7 +310,13 @@ Agent 检查点以 `void`（无 await）保存，防止给推理循环增加延�
 当提供商不支持视觉输入时，自动检测 MiniMax CLI (`mmx`) 并使用其 VLM 能力分析图片，将文本描述注入上下文。
 
 ### 10. 事务管理
-写操作可以在虚拟文件系统覆盖层中暂存，通过 `commitTransaction` / `discardTransaction` 控制是否实际写入磁盘。
+写操作可以在虚拟文件系统覆盖层中暂存，通过两阶段提交 (`commitTransaction` / `discardTransaction`) 控制是否实际写入磁盘。
+
+### 11. 按引用传递上下文注入 (Pass-by-Reference Context Injection)
+多智能体间通信不再依赖臃肿的硬编码提示词。而是通过 `TaskNode` 中的 `contextFiles` 引用和黑板 (Blackboard-based) 数据结构，实现精准按需的上下文加载，节约 token 预算并降低出错率。
+
+### 12. Walkthrough 持久化与交互 UI
+代理生成的 `walkthrough.md` 报告会被定向保存至当前会话特有的 `Agent Workspace Dir` 内，而不会污染全局工作区。此外，保存会触发聊天面板内的可交互标注卡片 (Interactive Annotation UI)，方便用户审核代码执行路径。
 
 ---
 
@@ -353,6 +364,7 @@ cwtools-vscode/
 │   │   ├── solarSystemPreview.ts  # 星系可视化器 (81KB)
 │   │   ├── eventChainPreview.ts   # 事件链可视化器
 │   │   ├── techTreePreview.ts     # 科技树可视化器
+│   │   ├── entityPreview.ts       # 3D 实体模型渲染器 (Three.js)
 │   │   └── svgIcons.ts         # 共享图标库
 │   └── test/                   # 测试
 │       ├── unit/               # 单元测试 (7 个测试文件)
@@ -366,7 +378,7 @@ cwtools-vscode/
 │   └── workflows/              # 自动化工作流
 ├── release/
 │   └── bin/                    # 编译输出
-├── rollup.config.mjs           # Webview 打包配置 (5 个入口)
+├── rollup.config.mjs           # Webview 打包配置 (6 个入口)
 ├── tsconfig.extension.json     # 扩展 TypeScript 配置
 ├── tsconfig.webview-*.json     # 各 Webview 的 TypeScript 配置
 ├── eslint.config.mjs           # ESLint 平面配置 (异步安全规则)
@@ -379,13 +391,13 @@ cwtools-vscode/
 
 | 提供商 | API 兼容性 | 视觉支持 | FIM | 备注 |
 |--------|-----------|---------|-----|------|
-| OpenAI | OpenAI 原生 | ✅ | ❌ | gpt-5.x 系列 |
+| OpenAI | OpenAI 原生 | ✅ | ❌ | gpt-5.5 系列 |
 | Claude (Anthropic) | Anthropic Messages → 适配器 | ✅ | ❌ | 100 万 token 上下文 |
 | Google Gemini | OpenAI 兼容 | ✅ | ❌ | 104 万 token 上下文 |
 | DeepSeek | OpenAI 兼容 | ❌ | ✅ | V4 系列，支持 thinking |
 | MiniMax (按量) | OpenAI 兼容 | ❌ | ❌ | M2.7 系列 |
 | MiniMax (Token Plan) | Anthropic 兼容 | ❌ | ❌ | Token 套餐计费 |
-| GLM (智谱) | OpenAI 兼容 + JWT | 部分 | ❌ | 仅 -v 后缀模型支持视觉 |
+| GLM (智谱) | OpenAI 兼容 + JWT | 部分 | ❌ | 仅 -v 后缀模型支持视觉，支持 GLM-4.7+ |
 | Qwen (通义) | OpenAI 兼容 | 部分 | ❌ | 仅 VL 模型支持视觉 |
 | MiMo (小米) | OpenAI 兼容 | ✅ | ❌ | 100 万 token 上下文 |
 | MiMo Token Plan | OpenAI 兼容 | ✅ | ❌ | Token 套餐 |

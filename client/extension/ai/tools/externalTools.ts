@@ -179,7 +179,22 @@ export class ExternalToolHandler {
             const contentType = response.headers.get('content-type') ?? '';
             let text = await response.text();
 
+            // 🔒 防事件循环阻塞：限制原始响应体大小
+            // response.text() 本身是异步的不会阻塞，但后续的同步正则处理
+            // 在超大文本上会独占 JS 主线程，导致 Extension Host 完全假死，
+            // 连 AbortController 和 Promise.race 超时都无法触发。
+            const MAX_RAW_BODY = 512_000; // 512KB — 任何有意义的网页内容都在此范围内
+            if (text.length > MAX_RAW_BODY) {
+                text = text.substring(0, MAX_RAW_BODY);
+            }
+
             if (contentType.includes('html')) {
+                // 🔒 HTML 正则安全上限：6 次全量 .replace() 在 100KB 上约 1-3ms，
+                // 但在 5MB 上可能需要 30s+，彻底冻结事件循环。
+                const SAFE_REGEX_LIMIT = 100_000;
+                if (text.length > SAFE_REGEX_LIMIT) {
+                    text = text.substring(0, SAFE_REGEX_LIMIT);
+                }
                 text = text
                     .replace(/<script[\s\S]*?<\/script>/gi, '')
                     .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -447,7 +462,12 @@ export class ExternalToolHandler {
             } finally {
                 clearTimeout(timeoutId);
             }
-            const html = await resp.text();
+            let html = await resp.text();
+            // 🔒 防事件循环阻塞：限制 DuckDuckGo 响应体大小
+            // 正常搜索结果页 < 100KB，但异常页面（验证码/错误）可能更大
+            if (html.length > 200_000) {
+                html = html.substring(0, 200_000);
+            }
 
             const results: Array<{ title: string; url: string; description: string }> = [];
             const linkRe = /<a class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/gi;

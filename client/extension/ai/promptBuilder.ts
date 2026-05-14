@@ -518,7 +518,7 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
    - Event ID allocation ranges
    - File dependency order
    - Branching logic and convergence points (if any)
-   - Media/graphic asset requirements (icons, event pictures, etc.)\r
+   - Media/graphic asset requirements (icons, event pictures, etc.)
    - Cleanup/closure plan for all spawned entities (flags, modifiers, systems)
 
 **After outputting the blueprint, STOP and wait for user approval before proceeding to Step 4.**

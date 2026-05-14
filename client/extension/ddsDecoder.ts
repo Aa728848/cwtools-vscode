@@ -780,7 +780,7 @@ export function decodeTga(filePath: string): DdsResult | null {
         // Downscale large textures
         let outW = width, outH = height;
         let outRgba: Uint8Array = rgba;
-        const MAX_DIM = 4096;
+        const MAX_DIM = 2048;
         if (width > MAX_DIM || height > MAX_DIM) {
             const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
             outW = Math.max(1, Math.round(width * ratio));

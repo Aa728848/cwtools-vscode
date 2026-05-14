@@ -152,11 +152,23 @@ const PLANET_COLORS: Record<string, { fill: string; name: string }> = {
 };
 
 function getStarColor(starClass: string): { fill: string; glow: string; name: string } {
-    return STAR_COLORS[starClass] ?? { fill: '#FFD800', glow: 'rgba(255,216,0,0.3)', name: starClass };
+    const hardcoded = STAR_COLORS[starClass];
+    if (hardcoded) return hardcoded;
+    const dynamic = dynamicClasses.find(c => c.name === starClass);
+    if (dynamic) {
+        return { fill: dynamic.color || '#FFD800', glow: 'rgba(255,255,255,0.3)', name: dynamic.name };
+    }
+    return { fill: '#FFD800', glow: 'rgba(255,216,0,0.3)', name: starClass };
 }
 
 function getPlanetColor(planetClass: string): { fill: string; name: string } {
-    return PLANET_COLORS[planetClass] ?? { fill: '#808080', name: planetClass || '未知' };
+    const hardcoded = PLANET_COLORS[planetClass];
+    if (hardcoded) return hardcoded;
+    const dynamic = dynamicClasses.find(c => c.name === planetClass);
+    if (dynamic) {
+        return { fill: dynamic.color || '#808080', name: dynamic.name };
+    }
+    return { fill: '#808080', name: planetClass || '未知' };
 }
 
 function getBodyColor(body: CelestialBody, systemClass: string): string {
@@ -191,10 +203,21 @@ let showOrbits = true;
 let editMode = false;
 
 // Data
+interface CelestialClass {
+    name: string;
+    color: string;
+    isRingWorld: boolean;
+    picture: string;
+    icon: string;
+    iconLarge?: string;
+}
 let allSystems: SolarSystem[] = [];
 let currentSystemIndex = 0;
 let selectedBody: CelestialBody | null = null;
 let hoveredBody: CelestialBody | null = null;
+let dynamicClasses: CelestialClass[] = [];
+let portraits: Record<string, string[]> = {};
+let planetIcons: Record<string, { uri: string, frame?: number, noOfFrames?: number }> = {};
 
 // Drag editing
 let isDragEditing = false;
@@ -306,17 +329,21 @@ function resizeCanvas() {
     canvas.height = rect.height * dpr;
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
-    canvasW = canvas.width;
-    canvasH = canvas.height;
+    canvasW = rect.width;
+    canvasH = rect.height;
 }
 
 function render() {
     const r = getCanvas();
     if (!r) return;
-    const { ctx } = r;
+    const { canvas, ctx } = r;
 
-    // Clear
-    ctx.clearRect(0, 0, canvasW, canvasH);
+    // Clear using physical size, then set transform to logical
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const system = allSystems[currentSystemIndex];
     if (!system) return;
@@ -631,7 +658,7 @@ function drawBody(
     }
 
     // Special rendering for black holes
-    if (body.planetClass === 'pc_black_hole' || systemClass === 'sc_black_hole') {
+    if (body.planetClass === 'pc_black_hole' || body.planetClass === 'sc_black_hole' || (body.bodyType === 'star' && systemClass === 'sc_black_hole')) {
         // Accretion disk
         const diskRadius = screenRadius * 2.5;
         const diskGrad = ctx.createRadialGradient(p.x, p.y, screenRadius, p.x, p.y, diskRadius);
@@ -656,16 +683,56 @@ function drawBody(
         ctx.arc(p.x, p.y, screenRadius, 0, Math.PI * 2);
         ctx.stroke();
     } else {
-        // Draw planet/star body — flat uniform color (no shadow)
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, screenRadius, 0, Math.PI * 2);
-        ctx.fill();
+        const dynamic = dynamicClasses.find(c => c.name === body.planetClass);
+        let iconName = dynamic?.iconLarge;
+        if (!iconName || !planetIcons[iconName]) {
+            iconName = dynamic?.icon;
+        }
+        if (body.planetClass === 'ideal_planet_class') {
+            iconName = planetIcons['GFX_planet_type_gaia_big'] ? 'GFX_planet_type_gaia_big' : 'GFX_planet_type_gaia';
+        }
+        const iconInfo = iconName ? planetIcons[iconName] : undefined;
 
-        // Thin outline for definition
-        ctx.strokeStyle = lightenColor(color, 30);
-        ctx.lineWidth = 0.5;
-        ctx.stroke();
+        if (iconInfo && iconInfo.uri) {
+            const img = getCachedIcon(iconInfo.uri);
+            if (img.complete && img.naturalWidth > 0) {
+                // Scale the icon to exactly match the hit circle with a slight padding
+                const drawSize = screenRadius * 2.1;
+                
+                // Keep image smoothing enabled for these soft UI icons, but ensure high quality
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = "high";
+                
+                if (iconInfo.noOfFrames && iconInfo.frame) {
+                    const fw = img.naturalWidth / iconInfo.noOfFrames;
+                    const fh = img.naturalHeight;
+                    const sx = (iconInfo.frame - 1) * fw;
+                    ctx.drawImage(img, sx, 0, fw, fh, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
+                } else {
+                    ctx.drawImage(img, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
+                }
+            } else {
+                if (!img.onload) {
+                    img.onload = () => requestAnimationFrame(render);
+                }
+                // Fallback while loading
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, screenRadius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        } else {
+            // Draw planet/star body — flat uniform color (no shadow)
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, screenRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Thin outline for definition
+            ctx.strokeStyle = lightenColor(color, 30);
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+        }
     }
 
     // Draw ring if has_ring
@@ -954,95 +1021,98 @@ function setupControls() {
         showCtxMenu(e);
     });
 
-    // Context menu button clicks
-    ctxMenu?.querySelectorAll<HTMLButtonElement>('button[data-action]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const action = btn.dataset.action ?? '';
-            hideCtxMenu();
+    // Context menu button clicks (Event Delegation)
+    ctxMenu?.addEventListener('click', (e: MouseEvent) => {
+        const btn = (e.target as HTMLElement).closest('button');
+        if (!btn) return;
+        
+        const action = btn.dataset.action;
+        const planetClass = btn.dataset.class;
+        if (!action) return;
 
-            const system = allSystems[currentSystemIndex];
-            if (!system) return;
+        hideCtxMenu();
 
-            // ── Planet/Star creation (system level) ──
-            if (action.startsWith('add-') && action !== 'add-ringworld') {
-                const planetClass = 'pc_' + action.slice(4);
+        const system = allSystems[currentSystemIndex];
+        if (!system) return;
 
-                const dpr = window.devicePixelRatio || 1;
-                const rect = canvas.getBoundingClientRect();
-                const clickScreenX = (ctxClickX - rect.left) * dpr;
-                const clickScreenY = (ctxClickY - rect.top) * dpr;
-                const world = screenToWorld(clickScreenX, clickScreenY);
-                const dist = Math.round(Math.sqrt(world.x * world.x + world.y * world.y));
-                const angle = Math.round(Math.atan2(world.y, world.x) * 180 / Math.PI);
-
-                const sizeMap: Record<string, number> = {
-                    'pc_gas_giant': 25,
-                    'pc_black_hole': 20, 'pc_neutron_star': 15, 'pc_pulsar': 15,
-                    'pc_g_star': 30, 'pc_b_star': 30, 'pc_a_star': 30,
-                    'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
-                };
-
-                vscode.postMessage({
-                    command: 'addPlanet',
-                    systemEndLine: system.endLine,
-                    orbitDistance: Math.max(20, dist),
-                    orbitAngle: ((angle % 360) + 360) % 360,
-                    planetClass: planetClass,
-                    size: sizeMap[planetClass] || 15,
-                });
+        // ── Ring world creation ──
+        if (action === 'add-ringworld') {
+            const ringMsg: any = {
+                command: 'addRingWorld',
+                systemEndLine: system.endLine,
+                orbitDistance: 30,
+                segmentCount: 12,
+                segmentAngle: 30,
+            };
+            if (ctxTargetBody && (ctxTargetBody.bodyType === 'planet' || ctxTargetBody.bodyType === 'moon')) {
+                ringMsg.parentLine = ctxTargetBody.line;
+                ringMsg.parentEndLine = ctxTargetBody.endLine;
             }
-            // ── Ring world creation ──
-            else if (action === 'add-ringworld') {
-                const ringMsg: any = {
-                    command: 'addRingWorld',
-                    systemEndLine: system.endLine,
-                    orbitDistance: 30,
-                    segmentCount: 12,
-                    segmentAngle: 30,
-                };
-                // If right-clicked on a planet, create ring world as moons inside it
-                if (ctxTargetBody && (ctxTargetBody.bodyType === 'planet' || ctxTargetBody.bodyType === 'moon')) {
-                    ringMsg.parentLine = ctxTargetBody.line;
-                    ringMsg.parentEndLine = ctxTargetBody.endLine;
-                }
-                vscode.postMessage(ringMsg);
-            }
-            // ── Moon creation (nested inside planet) ──
-            else if (action.startsWith('moon-')) {
-                if (!ctxTargetBody) return;
-                const moonClass = 'pc_' + action.slice(5);
-                const moonCount = ctxTargetBody.moons.length;
-                vscode.postMessage({
-                    command: 'addMoon',
-                    parentLine: ctxTargetBody.line,
-                    parentEndLine: ctxTargetBody.endLine,
-                    planetClass: moonClass,
-                    size: 5,
-                    orbitDistance: 10 + moonCount * 5,
-                    orbitAngle: Math.round(Math.random() * 360),
-                });
-            }
-            // ── Same-orbit sibling creation ──
-            else if (action.startsWith('sib-')) {
-                if (!ctxTargetBody) return;
-                const sibClass = 'pc_' + action.slice(4);
-                const sibSizeMap: Record<string, number> = {
-                    'pc_gas_giant': 25,
-                    'pc_black_hole': 20, 'pc_neutron_star': 15, 'pc_pulsar': 15,
-                    'pc_g_star': 30, 'pc_b_star': 30, 'pc_a_star': 30,
-                    'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
-                };
-                vscode.postMessage({
-                    command: 'addSibling',
-                    siblingLine: ctxTargetBody.line,
-                    siblingEndLine: ctxTargetBody.endLine,
-                    bodyType: ctxTargetBody.bodyType,
-                    planetClass: sibClass,
-                    size: sibSizeMap[sibClass] || (ctxTargetBody.bodyType === 'moon' ? 5 : 15),
-                    orbitAngle: Math.round(Math.random() * 360),
-                });
-            }
-        });
+            vscode.postMessage(ringMsg);
+            return;
+        }
+
+        if (!planetClass) return;
+
+        // ── Planet/Star creation (system level) ──
+        if (action === 'add') {
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            const clickScreenX = (ctxClickX - rect.left) * dpr;
+            const clickScreenY = (ctxClickY - rect.top) * dpr;
+            const world = screenToWorld(clickScreenX, clickScreenY);
+            const dist = Math.round(Math.sqrt(world.x * world.x + world.y * world.y));
+            const angle = Math.round(Math.atan2(world.y, world.x) * 180 / Math.PI);
+
+            const sizeMap: Record<string, number> = {
+                'pc_gas_giant': 25,
+                'pc_black_hole': 20, 'pc_neutron_star': 15, 'pc_pulsar': 15,
+                'pc_g_star': 30, 'pc_b_star': 30, 'pc_a_star': 30,
+                'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
+            };
+
+            vscode.postMessage({
+                command: 'addPlanet',
+                systemEndLine: system.endLine,
+                orbitDistance: Math.max(20, dist),
+                orbitAngle: ((angle % 360) + 360) % 360,
+                planetClass: planetClass,
+                size: sizeMap[planetClass] || 15,
+            });
+        }
+        // ── Moon creation (nested inside planet) ──
+        else if (action === 'moon') {
+            if (!ctxTargetBody) return;
+            const moonCount = ctxTargetBody.moons.length;
+            vscode.postMessage({
+                command: 'addMoon',
+                parentLine: ctxTargetBody.line,
+                parentEndLine: ctxTargetBody.endLine,
+                planetClass: planetClass,
+                size: 5,
+                orbitDistance: 10 + moonCount * 5,
+                orbitAngle: Math.round(Math.random() * 360),
+            });
+        }
+        // ── Same-orbit sibling creation ──
+        else if (action === 'sib') {
+            if (!ctxTargetBody) return;
+            const sibSizeMap: Record<string, number> = {
+                'pc_gas_giant': 25,
+                'pc_black_hole': 20, 'pc_neutron_star': 15, 'pc_pulsar': 15,
+                'pc_g_star': 30, 'pc_b_star': 30, 'pc_a_star': 30,
+                'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
+            };
+            vscode.postMessage({
+                command: 'addSibling',
+                siblingLine: ctxTargetBody.line,
+                siblingEndLine: ctxTargetBody.endLine,
+                bodyType: ctxTargetBody.bodyType,
+                planetClass: planetClass,
+                size: sibSizeMap[planetClass] || (ctxTargetBody.bodyType === 'moon' ? 5 : 15),
+                orbitAngle: Math.round(Math.random() * 360),
+            });
+        }
     });
 
     // Close context menu on click outside or Escape
@@ -1137,9 +1207,8 @@ function setupControls() {
     canvas.addEventListener('pointermove', (e: PointerEvent) => {
         // Pan (middle-click or Alt+left-click)
         if (isPanning) {
-            const dpr = window.devicePixelRatio || 1;
-            panX += (e.clientX - lastMX) * dpr / scale;
-            panY += (e.clientY - lastMY) * dpr / scale;
+            panX += (e.clientX - lastMX) / scale;
+            panY += (e.clientY - lastMY) / scale;
             lastMX = e.clientX;
             lastMY = e.clientY;
             e.preventDefault();
@@ -1170,10 +1239,9 @@ function setupControls() {
                 }
             }
 
-            const dpr = window.devicePixelRatio || 1;
             const rect = canvas.getBoundingClientRect();
-            const mouseScreenX = (e.clientX - rect.left) * dpr;
-            const mouseScreenY = (e.clientY - rect.top) * dpr;
+            const mouseScreenX = e.clientX - rect.left;
+            const mouseScreenY = e.clientY - rect.top;
 
             // Convert both mouse and parent to world coordinates using full inverse
             const mouseWorld = screenToWorld(mouseScreenX, mouseScreenY);
@@ -1369,9 +1437,8 @@ function setupControls() {
 function hitTest(clientX: number, clientY: number): RenderedBody | null {
     const canvas = document.getElementById('solar-canvas') as HTMLCanvasElement;
     const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    const mx = (clientX - rect.left) * dpr;
-    const my = (clientY - rect.top) * dpr;
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
 
     // Check in reverse order (top-most first)
     for (let i = renderedBodies.length - 1; i >= 0; i--) {
@@ -1448,7 +1515,22 @@ function showTooltip(body: CelestialBody, clientX: number, clientY: number) {
     const pc = getPlanetColor(body.planetClass);
     const typeNames: Record<string, string> = { star: '恒星', planet: '行星', moon: '卫星' };
 
-    let html = `<div class="tip-type" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}">${typeNames[body.bodyType] || body.bodyType}</div>`;
+    let html = '';
+
+    const dynamic = dynamicClasses.find(c => c.name === body.planetClass);
+    if (dynamic) {
+        const pic = dynamic.picture || dynamic.name;
+        const layers = portraits[pic];
+        if (layers && layers.length > 0) {
+            html += `<div style="position:relative; width:160px; height:60px; margin-bottom:8px; border-radius:4px; overflow:hidden; background:#000;">`;
+            for (const layer of layers) {
+                html += `<img src="${layer}" style="position:absolute; top:0; left:0; width:100%; height:100%;" />`;
+            }
+            html += `</div>`;
+        }
+    }
+
+    html += `<div class="tip-type" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}">${typeNames[body.bodyType] || body.bodyType}</div>`;
     html += `<div class="tip-name">${body.name || pc.name || '(未命名)'}</div>`;
     html += `<table>`;
     html += `<tr><td>类型</td><td>${pc.name}</td></tr>`;
@@ -1713,7 +1795,9 @@ function updatePropertiesPanel() {
     // Planet class autocomplete
     const classInput = panel.querySelector<HTMLInputElement>('#class-search');
     if (classInput) {
-        const allClasses = Object.keys(PLANET_COLORS);
+        const hardcoded = Object.keys(PLANET_COLORS);
+        const dynamic = dynamicClasses.map(c => c.name).filter(n => !hardcoded.includes(n));
+        const allClasses = [...hardcoded, ...dynamic].filter(c => !c.startsWith('sc_'));
         setupClassAutocomplete(classInput, allClasses);
     }
 }
@@ -1752,22 +1836,64 @@ function setupClassAutocomplete(inputEl: HTMLInputElement, dataSource: string[])
     const showDropdown = (query: string) => {
         const q = query.toLowerCase();
         const matches = q
-            ? dataSource.filter(s => s.toLowerCase().includes(q)).slice(0, 30)
-            : dataSource.slice(0, 30);
+            ? dataSource.filter(s => s.toLowerCase().includes(q)).slice(0, 50)
+            : dataSource.slice(0, 50);
         if (matches.length === 0) { hideDD(); return; }
+        
+        // Grouping
+        const groups: Record<string, string[]> = {
+            '恒星 (Stars)': [],
+            '宜居星球 (Habitable)': [],
+            '环世界 (Ringworld)': [],
+            '其他 (Other)': []
+        };
+        for (const cls of matches) {
+            if (STAR_COLORS[cls] || cls.includes('star')) groups['恒星 (Stars)']!.push(cls);
+            else if (cls.includes('ringworld') || dynamicClasses.find(c => c.name === cls)?.isRingWorld) groups['环世界 (Ringworld)']!.push(cls);
+            else if (['ideal_planet_class', 'pc_continental', 'pc_ocean', 'pc_tropical', 'pc_arid', 'pc_desert', 'pc_savannah', 'pc_alpine', 'pc_arctic', 'pc_tundra', 'pc_gaia', 'pc_relic'].includes(cls)) groups['宜居星球 (Habitable)']!.push(cls);
+            else groups['其他 (Other)']!.push(cls);
+        }
+
         ddIndex = -1;
-        dropdown.innerHTML = matches.map(s => {
-            const pc = PLANET_COLORS[s];
-            const colorDot = pc ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pc.fill};margin-right:6px"></span>` : '';
-            const label = pc ? `${colorDot}${s} <span style="color:var(--text-muted,#888);font-size:10px">${pc.name}</span>` : s;
-            return `<div class="class-option" style="padding:4px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>`;
-        }).join('');
-        positionDropdown();
-        dropdown.style.display = 'block';
-        dropdown.querySelectorAll('.class-option').forEach((opt, i) => {
-            (opt as HTMLElement).addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                inputEl.value = matches[i]!;
+        let html = '';
+        const flatMatches: string[] = [];
+            for (const [gName, gItems] of Object.entries(groups)) {
+                if (gItems.length === 0) continue;
+                html += `<div style="padding:4px 8px;font-size:11px;font-weight:bold;color:var(--text-muted,#888);background:var(--vscode-editor-inactiveSelectionBackground,rgba(100,100,100,0.2))">${gName}</div>`;
+                for (const s of gItems) {
+                    flatMatches.push(s);
+                    const pc = getPlanetColor(s);
+                    const dynamic = dynamicClasses.find(c => c.name === s);
+                    let iconName = dynamic?.iconLarge;
+                    if (!iconName || !planetIcons[iconName]) {
+                        iconName = dynamic?.icon;
+                    }
+                    if (s === 'ideal_planet_class') {
+                        iconName = planetIcons['GFX_planet_type_gaia_big'] ? 'GFX_planet_type_gaia_big' : 'GFX_planet_type_gaia';
+                    }
+                    const iconInfo = iconName ? planetIcons[iconName] : undefined;
+                    
+                    let iconHtml = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${pc.fill};margin-right:6px;vertical-align:middle"></span>`;
+                    if (iconInfo && iconInfo.uri) {
+                        if (iconInfo.noOfFrames && iconInfo.frame && iconInfo.noOfFrames > 1) {
+                            const fwPercent = 100 * iconInfo.noOfFrames;
+                            const bgPosX = (iconInfo.frame - 1) * (100 / (iconInfo.noOfFrames - 1));
+                            iconHtml = `<div style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:6px;background-image:url('${iconInfo.uri}');background-size:${fwPercent}% 100%;background-position:${bgPosX}% 0"></div>`;
+                        } else {
+                            iconHtml = `<img src="${iconInfo.uri}" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:6px">`;
+                        }
+                    }
+                    const label = `${iconHtml}<span style="vertical-align:middle;font-size:13px">${s}</span> <span style="color:var(--text-muted,#888);font-size:11px;vertical-align:middle;margin-left:4px">${pc.name}</span>`;
+                    html += `<div class="class-option" data-value="${s}" style="padding:6px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>`;
+                }
+            }
+            dropdown.innerHTML = html;
+            positionDropdown();
+            dropdown.style.display = 'block';
+            dropdown.querySelectorAll('.class-option').forEach((opt, i) => {
+                (opt as HTMLElement).addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    inputEl.value = flatMatches[i]!;
                 hideDD();
                 inputEl.dispatchEvent(new Event('change'));
             });
@@ -1800,7 +1926,7 @@ function setupClassAutocomplete(inputEl: HTMLInputElement, dataSource: string[])
             e.preventDefault(); ddIndex = Math.max(ddIndex - 1, 0);
         } else if (e.key === 'Enter' && ddIndex >= 0) {
             e.preventDefault();
-            inputEl.value = (items[ddIndex]! as HTMLElement).textContent!.split(' ')[0]!.trim();
+            inputEl.value = (items[ddIndex]! as HTMLElement).getAttribute('data-value')!;
             hideDD();
             inputEl.dispatchEvent(new Event('change'));
             return;
@@ -1842,6 +1968,11 @@ window.addEventListener('message', (event) => {
     if (msg.command === 'render') {
         const isFirstRender = allSystems.length === 0;
         allSystems = msg.data;
+        dynamicClasses = msg.dynamicClasses || [];
+        portraits = msg.portraits || {};
+        planetIcons = msg.planetIcons || {};
+        buildContextMenu();
+        
         document.getElementById('title')!.textContent = `星系预览: ${msg.fileName}`;
 
         // Update system selector
@@ -1894,6 +2025,88 @@ window.addEventListener('message', (event) => {
         // Subsequent renders: data is already updated, render loop will pick it up
     }
 });
+
+// ─── Context Menu Builder ──────────────────────────────────────────────────
+
+function buildContextMenu() {
+    const hardcoded = Object.keys(PLANET_COLORS);
+    const dynamic = dynamicClasses.map(c => c.name).filter(n => !hardcoded.includes(n));
+    const allClasses = [...hardcoded, ...dynamic].filter(c => !c.startsWith('sc_'));
+
+    // Group classes
+    const groups: Record<string, string[]> = {
+        '恒星 (Stars)': [],
+        '宜居星球 (Habitable)': [],
+        '其他 (Other)': []
+    };
+
+    for (const cls of allClasses) {
+        // Skip ringworld from standard groups, they have their own direct button
+        if (cls.includes('ringworld') || dynamicClasses.find(c => c.name === cls)?.isRingWorld) continue;
+
+        if (STAR_COLORS[cls] || cls.includes('star')) groups['恒星 (Stars)']!.push(cls);
+        else if (['ideal_planet_class', 'pc_continental', 'pc_ocean', 'pc_tropical', 'pc_arid', 'pc_desert', 'pc_savannah', 'pc_alpine', 'pc_arctic', 'pc_tundra', 'pc_gaia', 'pc_relic'].includes(cls)) groups['宜居星球 (Habitable)']!.push(cls);
+        else groups['其他 (Other)']!.push(cls);
+    }
+
+    const buildHTML = (actionPrefix: string) => {
+        let html = '';
+        for (const [gName, gItems] of Object.entries(groups)) {
+            if (gItems.length === 0) continue;
+            // Use details for expandable groups to save space
+            html += `<details open style="margin-bottom: 6px; padding-left: 8px;">`;
+            html += `<summary style="cursor:pointer;font-size:11px;color:var(--text-muted);padding:4px 2px;user-select:none;outline:none;"><b>${gName}</b></summary>`;
+            for (const cls of gItems) {
+                const pc = getPlanetColor(cls);
+                const dynamic = dynamicClasses.find(c => c.name === cls);
+                let iconName = dynamic?.iconLarge;
+                if (!iconName || !planetIcons[iconName]) {
+                    iconName = dynamic?.icon;
+                }
+                if (cls === 'ideal_planet_class') {
+                    iconName = planetIcons['GFX_planet_type_gaia_big'] ? 'GFX_planet_type_gaia_big' : 'GFX_planet_type_gaia';
+                }
+                const iconInfo = iconName ? planetIcons[iconName] : undefined;
+                
+                let iconHtml = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${pc.fill};margin-right:6px;vertical-align:middle"></span>`;
+                if (iconInfo && iconInfo.uri) {
+                    if (iconInfo.noOfFrames && iconInfo.frame && iconInfo.noOfFrames > 1) {
+                        const fwPercent = 100 * iconInfo.noOfFrames;
+                        const bgPosX = (iconInfo.frame - 1) * (100 / (iconInfo.noOfFrames - 1));
+                        iconHtml = `<div style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:6px;background-image:url('${iconInfo.uri}');background-size:${fwPercent}% 100%;background-position:${bgPosX}% 0"></div>`;
+                    } else {
+                        iconHtml = `<img src="${iconInfo.uri}" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:6px">`;
+                    }
+                }
+                html += `<button data-action="${actionPrefix}" data-class="${cls}" style="display:block;width:100%;text-align:left;padding:6px 4px;background:transparent;border:none;color:inherit;cursor:pointer;">`;
+                html += `${iconHtml}<span style="vertical-align:middle;font-size:13px">${pc.name || cls}</span> <span style="color:var(--text-muted,#888);font-size:11px;vertical-align:middle;margin-left:4px">${cls}</span>`;
+                html += `</button>`;
+            }
+            html += `</details>`;
+        }
+        return html;
+    };
+
+    const ctxPlanets = document.querySelector('#ctx-planets .ctx-content');
+    if (ctxPlanets) ctxPlanets.innerHTML = buildHTML('add');
+
+    const ctxMoons = document.querySelector('#ctx-moons .ctx-content');
+    if (ctxMoons) ctxMoons.innerHTML = buildHTML('moon');
+
+    const ctxSibling = document.querySelector('#ctx-sibling .ctx-content');
+    if (ctxSibling) ctxSibling.innerHTML = buildHTML('sib');
+}
+
+// ─── Image Cache ─────────────────────────────────────────────────────────────
+
+const iconImageCache = new Map<string, HTMLImageElement>();
+function getCachedIcon(uri: string): HTMLImageElement {
+    if (iconImageCache.has(uri)) return iconImageCache.get(uri)!;
+    const img = new Image();
+    img.src = uri;
+    iconImageCache.set(uri, img);
+    return img;
+}
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 

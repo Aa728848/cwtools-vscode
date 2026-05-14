@@ -382,18 +382,18 @@ function resolveMoonsRecursive(parent: CelestialBody): void {
 /**
  * Recursively detect and group ring world segments inside moons at any depth.
  */
-function groupRingWorldsRecursive(bodies: CelestialBody[]): void {
+function groupRingWorldsRecursive(bodies: CelestialBody[], ringWorlds?: Set<string>): void {
     for (const body of bodies) {
         if (body.moons.length >= 2) {
             const moonChangeOrbitMap = body.moons.map((m, i) => ({
                 line: body.moonChangeOrbitLines[i] ?? m.line,
                 value: body.moonChangeOrbitOffsets[i] ?? m.changeOrbit,
             }));
-            groupRingWorlds(body.moons, moonChangeOrbitMap);
+            groupRingWorlds(body.moons, moonChangeOrbitMap, ringWorlds);
         }
         // Recurse into moons (for sub-moons that might be ring worlds)
         if (body.moons.length > 0) {
-            groupRingWorldsRecursive(body.moons);
+            groupRingWorldsRecursive(body.moons, ringWorlds);
         }
         // Recurse into sub-planets
         for (const sub of body.subPlanets) {
@@ -402,10 +402,10 @@ function groupRingWorldsRecursive(bodies: CelestialBody[]): void {
                     line: sub.moonChangeOrbitLines[i] ?? m.line,
                     value: sub.moonChangeOrbitOffsets[i] ?? m.changeOrbit,
                 }));
-                groupRingWorlds(sub.moons, subMoonMap);
+                groupRingWorlds(sub.moons, subMoonMap, ringWorlds);
             }
             if (sub.moons.length > 0) {
-                groupRingWorldsRecursive(sub.moons);
+                groupRingWorldsRecursive(sub.moons, ringWorlds);
             }
         }
     }
@@ -413,7 +413,7 @@ function groupRingWorldsRecursive(bodies: CelestialBody[]): void {
 
 // ─── Build Solar System ─────────────────────────────────────────────────────
 
-function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: number): SolarSystem {
+function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: number, ringWorlds?: Set<string>): SolarSystem {
     const displayName = strProp(nodes, 'name');
     const starClass = strProp(nodes, 'class') ?? '';
     const usage = strProp(nodes, 'usage');
@@ -489,8 +489,8 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
     }
 
     // ── Post-process: detect ring world groups at all levels ──────────────
-    groupRingWorlds(bodies, bodyChangeOrbitMap);
-    groupRingWorldsRecursive(bodies);
+    groupRingWorlds(bodies, bodyChangeOrbitMap, ringWorlds);
+    groupRingWorldsRecursive(bodies, ringWorlds);
 
     return {
         key,
@@ -517,7 +517,8 @@ const RING_CLASS_COLORS: Record<string, string> = {
     'pc_ringworld_shielded':         '#6080C0',
 };
 
-function isRingWorldClass(cls: string): boolean {
+function isRingWorldClass(cls: string, ringWorlds?: Set<string>): boolean {
+    if (ringWorlds && ringWorlds.has(cls)) return true;
     return cls.startsWith('pc_ringworld');
 }
 
@@ -529,12 +530,12 @@ function getRingColor(cls: string): string {
  * Detect consecutive ring world segments at the same orbit and group them.
  * Ring segments: consecutive planets with pc_ringworld_* class at the same resolvedOrbitRadius.
  */
-function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: number; value: number }[]): void {
+function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: number; value: number }[], ringWorlds?: Set<string>): void {
     let i = 0;
     while (i < bodies.length) {
         // Skip non-ring bodies
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        if (!isRingWorldClass(bodies[i]!.planetClass)) { i++; continue; }
+        if (!isRingWorldClass(bodies[i]!.planetClass, ringWorlds)) { i++; continue; }
 
         // Start a potential ring group
         const groupStart = i;
@@ -544,7 +545,7 @@ function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: nu
         // Collect consecutive ring segments at same orbit radius
         while (i < bodies.length
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            && isRingWorldClass(bodies[i]!.planetClass)
+            && isRingWorldClass(bodies[i]!.planetClass, ringWorlds)
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             && bodies[i]!.resolvedOrbitRadius === orbitRadius) {
             i++;
@@ -617,7 +618,7 @@ function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: nu
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
-export function parseSolarSystemFile(content: string): SolarSystem[] {
+export function parseSolarSystemFile(content: string, ringWorlds?: Set<string>): SolarSystem[] {
     const tokens = tokenize(content);
     const parser = new Parser(tokens);
     const rootNodes = parser.parse();
@@ -630,7 +631,7 @@ export function parseSolarSystemFile(content: string): SolarSystem[] {
             const hasClass = node.children.some(c => c.key === 'class');
             const hasPlanet = node.children.some(c => c.key === 'planet');
             if (hasClass || hasPlanet) {
-                systems.push(buildSolarSystem(node.key, node.children, node.line, node.endLine ?? node.line));
+                systems.push(buildSolarSystem(node.key, node.children, node.line, node.endLine ?? node.line, ringWorlds));
             }
         }
     }

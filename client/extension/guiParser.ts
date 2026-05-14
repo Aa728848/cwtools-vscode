@@ -55,6 +55,8 @@ export interface SpriteInfo {
     noOfFrames?: number;
     spriteDefType?: string;
     borderSize?: { x: number; y: number };
+    sprite_sheet_sprite_type?: string;
+    default_frame?: number;
 }
 
 import { TokenType, Token, tokenize, isIdentStart, isIdentCont } from './pdxTokenizer';
@@ -592,7 +594,9 @@ export function parseGfxFile(content: string): SpriteInfo[] {
                         const by = numProp(bsNode.children, 'y') ?? 0;
                         if (bx > 0 || by > 0) borderSize = { x: bx, y: by };
                     }
-                    sprites.push({ name, texturefile: texturefile ?? '', noOfFrames: numProp(node.children, 'noOfFrames'), spriteDefType: node.key, borderSize });
+                    const sprite_sheet_sprite_type = strProp(node.children, 'sprite_sheet_sprite_type');
+                    const default_frame = numProp(node.children, 'default_frame');
+                    sprites.push({ name, texturefile: texturefile ?? '', noOfFrames: numProp(node.children, 'noOfFrames'), spriteDefType: node.key, borderSize, sprite_sheet_sprite_type, default_frame });
                 }
             }
             if (node.children) findSprites(node.children);

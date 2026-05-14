@@ -3,7 +3,10 @@
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { parseSolarSystemFile, resolveValue, type SolarSystem, type CelestialBody, type ValueOrRange } from './solarSystemParser';
+import { decodeDds, decodeTga } from './ddsDecoder';
+import { buildSpriteIndex, type SpriteInfo } from './guiParser';
 
 // ── WebView message types ──────────────────────────────────────────────────────
 type SolarPanelMessage =
@@ -37,6 +40,14 @@ export class SolarSystemPanel {
     private _contentSnapshots: string[] = [];
     private _lastSnapshotTime = 0;
     private static readonly MAX_SNAPSHOTS = 20;
+    private _searchRoots: string[] = [];
+    private _spriteIndexCache: Map<string, SpriteInfo> | null = null;
+    private _celestialClassesCache: Array<{ name: string, color: string, isRingWorld: boolean, picture: string, icon: string, iconLarge: string }> | null = null;
+    private _portraitsCache: Record<string, string[]> | null = null;
+    private _planetIconsCache: Record<string, { uri: string, frame?: number, noOfFrames?: number }> | null = null;
+    private _textureCache: Map<string, string> = new Map();
+    private _textureCacheSize = 0;
+    private static readonly MAX_CACHE_BYTES = 50 * 1024 * 1024;
     private _saveSnapshot(doc: vscode.TextDocument) {
         const now = Date.now();
         if (now - this._lastSnapshotTime < 500) return;
@@ -69,6 +80,33 @@ export class SolarSystemPanel {
             column,
             { enableScripts: true, retainContextWhenHidden: true, localResourceRoots },
         );
+
+        // Setup FileSystemWatchers for caching
+        const invalidateSpriteCache = (uri: vscode.Uri) => {
+            if (!this._spriteIndexCache) return;
+            const key = uri.fsPath.replace(/\\/g, '/').toLowerCase();
+            if (key.endsWith('.gfx')) {
+                this._spriteIndexCache = null;
+            }
+        };
+        const gfxWatcher = vscode.workspace.createFileSystemWatcher('**/*.gfx');
+        gfxWatcher.onDidChange(invalidateSpriteCache);
+        gfxWatcher.onDidCreate(invalidateSpriteCache);
+        gfxWatcher.onDidDelete(invalidateSpriteCache);
+        this._disposables.push(gfxWatcher);
+
+        const invalidateClassesCache = () => {
+            this._celestialClassesCache = null;
+            this._portraitsCache = null;
+            this._planetIconsCache = null;
+            this._textureCache.clear();
+            this._textureCacheSize = 0;
+        };
+        const txtWatcher = vscode.workspace.createFileSystemWatcher('**/{planet_classes,star_classes}/**/*.txt');
+        txtWatcher.onDidChange(invalidateClassesCache);
+        txtWatcher.onDidCreate(invalidateClassesCache);
+        txtWatcher.onDidDelete(invalidateClassesCache);
+        this._disposables.push(txtWatcher);
 
         this._panel.webview.html = this._getHtml();
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -131,14 +169,312 @@ export class SolarSystemPanel {
         );
     }
 
+    private _getGamePath(): string | null {
+        const config = vscode.workspace.getConfiguration('cwtools');
+        const configPath = config.get<string>('cache.stellaris');
+        if (configPath && fs.existsSync(configPath)) return configPath;
+        return null;
+    }
+
+    private _findModRoot(dir: string): string | null {
+        let current = dir;
+        for (let i = 0; i < 5; i++) {
+            if (fs.existsSync(path.join(current, 'descriptor.mod')) ||
+                fs.existsSync(path.join(current, 'common')) ||
+                (fs.existsSync(path.join(current, 'interface')) && fs.existsSync(path.join(current, 'gfx')))) {
+                return current;
+            }
+            const parent = path.dirname(current);
+            if (parent === current) break;
+            current = parent;
+        }
+        return dir;
+    }
+
+    private async _buildSpriteIndex(searchRoots: string[]): Promise<Map<string, SpriteInfo>> {
+        const gfxContents: Array<{ path: string; content: string }> = [];
+        const maxGfxFiles = 2000;
+
+        for (const root of searchRoots) {
+            if (gfxContents.length >= maxGfxFiles) break;
+            const searchDirs = [
+                path.join(root, 'interface'),
+                path.join(root, 'gfx'),
+            ];
+
+            for (const dir of searchDirs) {
+                if (gfxContents.length >= maxGfxFiles) break;
+                try { await fs.promises.access(dir); } catch { continue; }
+                await this._findGfxFiles(dir, gfxContents, maxGfxFiles);
+            }
+        }
+        return buildSpriteIndex(gfxContents);
+    }
+
+    private async _findGfxFiles(dir: string, result: Array<{ path: string; content: string }>, maxFiles: number) {
+        try {
+            if (result.length >= maxFiles) return;
+            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+            await Promise.all(entries.map(async (entry) => {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    await this._findGfxFiles(full, result, maxFiles);
+                } else if (entry.name.endsWith('.gfx')) {
+                    try {
+                        const content = await fs.promises.readFile(full, 'utf-8');
+                        result.push({ path: full, content });
+                    } catch { /* skip unreadable */ }
+                }
+            }));
+        } catch { /* skip inaccessible dirs */ }
+    }
+
+    private async _collectCelestialClasses(searchRoots: string[]) {
+        if (this._celestialClassesCache) return this._celestialClassesCache;
+        const classes: Array<{ name: string, color: string, isRingWorld: boolean, picture: string, icon: string, iconLarge: string }> = [];
+
+        for (const root of searchRoots) {
+            for (const folder of ['planet_classes', 'star_classes']) {
+                const dir = path.join(root, 'common', folder);
+                try {
+                    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+                    await Promise.all(entries.map(async (entry) => {
+                        if (!entry.isFile() || !entry.name.endsWith('.txt')) return;
+                        try {
+                            const content = await fs.promises.readFile(path.join(dir, entry.name), 'utf-8');
+                            const rootRegex = /(?:^|\n)([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{/g;
+                            let m;
+                            while ((m = rootRegex.exec(content)) !== null) {
+                                const name = m[1]!;
+                                if (name === 'random_list') continue;
+
+                                const startIdx = m.index + m[0].length;
+                                let braces = 1;
+                                let endIdx = startIdx;
+                                while (braces > 0 && endIdx < content.length) {
+                                    if (content[endIdx] === '{') braces++;
+                                    else if (content[endIdx] === '}') braces--;
+                                    endIdx++;
+                                }
+                                const block = content.substring(startIdx, endIdx - 1);
+
+                                let hexColor = '';
+                                const colorMatch = block.match(/(?:icon_color|color)\s*=\s*(?:hsv\s*)?\{\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\}/);
+                                if (colorMatch) {
+                                    const isHsv = block.match(/(?:icon_color|color)\s*=\s*hsv/);
+                                    let r = 0, g = 0, b = 0;
+                                    if (isHsv) {
+                                        const h = parseFloat(colorMatch[1]!);
+                                        const s = parseFloat(colorMatch[2]!);
+                                        const v = parseFloat(colorMatch[3]!);
+                                        const i = Math.floor(h * 6);
+                                        const f = h * 6 - i;
+                                        const p = v * (1 - s);
+                                        const q = v * (1 - f * s);
+                                        const t = v * (1 - (1 - f) * s);
+                                        switch (i % 6) {
+                                            case 0: r = v, g = t, b = p; break;
+                                            case 1: r = q, g = v, b = p; break;
+                                            case 2: r = p, g = v, b = t; break;
+                                            case 3: r = p, g = q, b = v; break;
+                                            case 4: r = t, g = p, b = v; break;
+                                            case 5: r = v, g = p, b = q; break;
+                                            default: r = v, g = v, b = v; break;
+                                        }
+                                        r *= 255; g *= 255; b *= 255;
+                                    } else {
+                                        r = parseFloat(colorMatch[1]!);
+                                        g = parseFloat(colorMatch[2]!);
+                                        b = parseFloat(colorMatch[3]!);
+                                        if (r <= 1 && g <= 1 && b <= 1 && (r > 0 || g > 0 || b > 0)) {
+                                            r *= 255; g *= 255; b *= 255;
+                                        }
+                                    }
+                                    const toHex = (c: number) => Math.max(0, Math.min(255, Math.round(c))).toString(16).padStart(2, '0');
+                                    hexColor = `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+                                }
+
+                                const isRingWorld = /ringworld\s*=\s*yes/.test(block);
+                                const pictureMatch = block.match(/picture\s*=\s*"?([a-zA-Z0-9_]+)"?/);
+                                const picture = pictureMatch ? pictureMatch[1]! : name;
+                                const iconMatch = block.match(/icon\s*=\s*"?([a-zA-Z0-9_]+)"?/);
+                                let icon = iconMatch ? iconMatch[1]! : '';
+                                const iconLargeMatch = block.match(/icon_large\s*=\s*"?([a-zA-Z0-9_]+)"?/);
+                                let iconLarge = iconLargeMatch ? iconLargeMatch[1]! : '';
+                                if (!icon && folder === 'planet_classes') {
+                                    icon = `GFX_planet_type_${picture}`;
+                                }
+                                if (!iconLarge && icon) {
+                                    iconLarge = `${icon}_big`;
+                                }
+                                
+                                classes.push({ name, color: hexColor, isRingWorld, picture, icon, iconLarge });
+                            }
+                        } catch {}
+                    }));
+                } catch {}
+            }
+        }
+        
+        const unique = new Map<string, typeof classes[0]>();
+        for (const cls of classes) {
+            if (!unique.has(cls.name)) unique.set(cls.name, cls);
+        }
+        this._celestialClassesCache = Array.from(unique.values());
+        return this._celestialClassesCache;
+    }
+
+    private async _decodeTexture(filePath: string) {
+        if (this._textureCache.has(filePath)) return this._textureCache.get(filePath)!;
+        const ext = path.extname(filePath).toLowerCase();
+        let result: import('./ddsDecoder').DdsResult | null = null;
+        if (ext === '.dds') result = decodeDds(filePath);
+        else if (ext === '.tga') result = decodeTga(filePath);
+        else if (ext === '.png') {
+            const buffer = await fs.promises.readFile(filePath);
+            result = { width: 0, height: 0, dataUri: `data:image/png;base64,${buffer.toString('base64')}` };
+        }
+
+        if (result && result.dataUri) {
+            const entrySize = result.dataUri.length;
+            while (this._textureCacheSize + entrySize > SolarSystemPanel.MAX_CACHE_BYTES && this._textureCache.size > 0) {
+                const oldestKey = this._textureCache.keys().next().value;
+                if (oldestKey) {
+                    const old = this._textureCache.get(oldestKey);
+                    this._textureCacheSize -= old?.length ?? 0;
+                    this._textureCache.delete(oldestKey);
+                }
+            }
+            this._textureCache.set(filePath, result.dataUri);
+            this._textureCacheSize += entrySize;
+            return result.dataUri;
+        }
+        return null;
+    }
+
+    private async _resolveEnvironmentPortraits(searchRoots: string[], classes: Array<{ picture: string }>) {
+        if (this._portraitsCache) return this._portraitsCache;
+        const portraits: Record<string, string[]> = {};
+        const picNames = new Set(classes.map(c => c.picture));
+        
+        for (const pic of picNames) {
+            let foundLayers = false;
+            const layerGroups: Record<string, string[]> = {};
+            
+            for (const root of searchRoots) {
+                const envDir = path.join(root, 'gfx', 'portraits', 'environments');
+                try {
+                    const entries = await fs.promises.readdir(envDir, { withFileTypes: true });
+                    for (const e of entries) {
+                        if (e.isFile() && e.name.toLowerCase().startsWith(pic.toLowerCase() + '_') && (e.name.endsWith('.dds') || e.name.endsWith('.png') || e.name.endsWith('.tga'))) {
+                            const match = e.name.substring(pic.length + 1).match(/^(sky|l0[0-9])/i);
+                            if (match) {
+                                const group = match[1]!.toLowerCase();
+                                if (!layerGroups[group]) layerGroups[group] = [];
+                                layerGroups[group]!.push(path.join(envDir, e.name));
+                                foundLayers = true;
+                            }
+                        }
+                    }
+                } catch {}
+                if (foundLayers) break;
+            }
+            
+            if (foundLayers) {
+                const groups = Object.keys(layerGroups).sort();
+                const uris: string[] = [];
+                for (const g of groups) {
+                    const paths = layerGroups[g]!;
+                    const chosen = paths[Math.floor(Math.random() * paths.length)]!;
+                    const uri = await this._decodeTexture(chosen);
+                    if (uri) uris.push(uri);
+                }
+                if (uris.length > 0) portraits[pic] = uris;
+            }
+        }
+        this._portraitsCache = portraits;
+        return portraits;
+    }
+
+    private async _resolvePlanetIcons(searchRoots: string[], classes: Array<{ icon: string, iconLarge?: string }>) {
+        if (this._planetIconsCache) return this._planetIconsCache;
+        const planetIcons: Record<string, { uri: string, frame?: number, noOfFrames?: number }> = {};
+        
+        if (!this._spriteIndexCache) {
+            this._spriteIndexCache = await this._buildSpriteIndex(searchRoots);
+        }
+        const spriteIndex = this._spriteIndexCache;
+
+        const iconNames = new Set<string>();
+        for (const cls of classes) {
+            if (cls.icon) iconNames.add(cls.icon);
+            if (cls.iconLarge) iconNames.add(cls.iconLarge);
+        }
+
+        for (const icon of iconNames) {
+            const spriteInfo = spriteIndex.get(icon);
+            if (!spriteInfo) continue;
+
+            let actualSprite = spriteInfo;
+            if (spriteInfo.sprite_sheet_sprite_type) {
+                const sheet = spriteIndex.get(spriteInfo.sprite_sheet_sprite_type);
+                if (sheet) actualSprite = sheet;
+            }
+
+            if (!actualSprite.texturefile) continue;
+
+            const relPath = actualSprite.texturefile.replace(/\//g, path.sep);
+            for (const root of searchRoots) {
+                const fullDds = path.join(root, relPath);
+                const fullPng = fullDds.replace(/\.dds$/i, '.png');
+                let targetFile = '';
+                if (fs.existsSync(fullPng)) targetFile = fullPng;
+                else if (fs.existsSync(fullDds)) targetFile = fullDds;
+                
+                if (targetFile) {
+                    const uri = await this._decodeTexture(targetFile);
+                    if (uri) {
+                        planetIcons[icon] = {
+                            uri,
+                            frame: spriteInfo.default_frame,
+                            noOfFrames: actualSprite.noOfFrames
+                        };
+                    }
+                    break;
+                }
+            }
+        }
+        this._planetIconsCache = planetIcons;
+        return planetIcons;
+    }
+
     private async _loadAndRender(document: vscode.TextDocument) {
+        const docDir = path.dirname(document.uri.fsPath);
+        const modRoot = this._findModRoot(docDir);
+        const searchRoots: string[] = [];
+        if (modRoot) searchRoots.push(modRoot);
+        for (const wf of vscode.workspace.workspaceFolders ?? []) {
+            if (!searchRoots.includes(wf.uri.fsPath)) searchRoots.push(wf.uri.fsPath);
+        }
+        const gamePath = this._getGamePath();
+        if (gamePath && !searchRoots.includes(gamePath)) searchRoots.push(gamePath);
+
+        const celestialClasses = await this._collectCelestialClasses(searchRoots);
+        const ringWorlds = new Set(celestialClasses.filter(c => c.isRingWorld).map(c => c.name));
+
         const content = document.getText();
-        const systems = parseSolarSystemFile(content);
+        const systems = parseSolarSystemFile(content, ringWorlds);
+
+        const portraits = await this._resolveEnvironmentPortraits(searchRoots, celestialClasses);
+        const planetIcons = await this._resolvePlanetIcons(searchRoots, celestialClasses);
 
         this._panel.webview.postMessage({
             command: 'render',
             data: systems,
             fileName: path.basename(document.fileName),
+            dynamicClasses: celestialClasses,
+            portraits,
+            planetIcons
         });
     }
 
@@ -1145,7 +1481,7 @@ export class SolarSystemPanel {
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${this._panel.webview.cspSource} 'unsafe-inline';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${this._panel.webview.cspSource} data: https: blob:; script-src 'nonce-${nonce}'; style-src ${this._panel.webview.cspSource} 'unsafe-inline';" />
     <link href="${styleUri}" rel="stylesheet" />
     <title>星系预览</title>
 </head>
@@ -1186,72 +1522,22 @@ export class SolarSystemPanel {
         </div>
     </div>
     <div id="tooltip" class="hidden"></div>
-    <div id="context-menu" class="hidden">
+    <div id="context-menu" class="hidden" style="max-height: 400px; overflow-y: auto; overflow-x: hidden;">
         <div id="ctx-planets">
             <div class="ctx-title">添加天体</div>
-            <button data-action="add-continental"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#4caf50"/></svg> 大陆星球</button>
-            <button data-action="add-ocean"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#2196f3"/></svg> 海洋星球</button>
-            <button data-action="add-tropical"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#8bc34a"/></svg> 热带星球</button>
-            <button data-action="add-desert"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> 沙漠星球</button>
-            <button data-action="add-arctic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#b3e5fc"/></svg> 极地星球</button>
-            <button data-action="add-arid"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ffc107"/></svg> 干旱星球</button>
-            <button data-action="add-gas_giant"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ce93d8"/></svg> 气态巨行星</button>
-            <button data-action="add-barren"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#9e9e9e"/></svg> 贫瘠星球</button>
-            <button data-action="add-frozen"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#80deea"/></svg> 冰冻星球</button>
-            <button data-action="add-molten"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff5722"/></svg> 熔融星球</button>
-            <button data-action="add-toxic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#76ff03"/></svg> 剧毒星球</button>
-            <button data-action="add-asteroid"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#bdbdbd"/></svg> 小行星</button>
-            <button data-action="add-g_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ffeb3b"/></svg> G型星 (黄)</button>
-            <button data-action="add-b_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#64b5f6"/></svg> B型星 (蓝白)</button>
-            <button data-action="add-a_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#e3f2fd"/></svg> A型星 (白)</button>
-            <button data-action="add-f_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#fff9c4"/></svg> F型星 (黄白)</button>
-            <button data-action="add-k_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> K型星 (橙)</button>
-            <button data-action="add-m_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#f44336"/></svg> M型星 (红)</button>
-            <button data-action="add-t_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#795548"/></svg> T型星 (褐)</button>
-            <button data-action="add-black_hole"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#212121"/></svg> 黑洞</button>
-            <button data-action="add-neutron_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#e0e0e0"/></svg> 中子星</button>
-            <button data-action="add-pulsar"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ba68c8"/></svg> 脉冲星</button>
+            <div class="ctx-content"></div>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0" id="ctx-ring-sep"></div>
         <div id="ctx-ringworld"><button data-action="add-ringworld"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="none" stroke="#ffd700" stroke-width="2"/></svg> 环形世界</button></div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-moon-sep"></div>
         <div id="ctx-moons" style="display:none">
             <div class="ctx-title" id="ctx-moon-title">添加卫星</div>
-            <button data-action="moon-barren"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#9e9e9e"/></svg> 贫瘠卫星</button>
-            <button data-action="moon-barren_cold"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#616161"/></svg> 寒冷贫瘠卫星</button>
-            <button data-action="moon-frozen"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#80deea"/></svg> 冰冻卫星</button>
-            <button data-action="moon-continental"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#4caf50"/></svg> 大陆卫星</button>
-            <button data-action="moon-ocean"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#2196f3"/></svg> 海洋卫星</button>
-            <button data-action="moon-tropical"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#8bc34a"/></svg> 热带卫星</button>
-            <button data-action="moon-desert"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> 沙漠卫星</button>
-            <button data-action="moon-toxic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#76ff03"/></svg> 剧毒卫星</button>
+            <div class="ctx-content"></div>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);margin:4px 0;display:none" id="ctx-sibling-sep"></div>
         <div id="ctx-sibling" style="display:none">
             <div class="ctx-title" id="ctx-sibling-title">在同轨道创建</div>
-            <button data-action="sib-continental"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#4caf50"/></svg> 大陆</button>
-            <button data-action="sib-ocean"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#2196f3"/></svg> 海洋</button>
-            <button data-action="sib-tropical"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#8bc34a"/></svg> 热带</button>
-            <button data-action="sib-desert"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> 沙漠</button>
-            <button data-action="sib-arctic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#b3e5fc"/></svg> 极地</button>
-            <button data-action="sib-arid"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ffc107"/></svg> 干旱</button>
-            <button data-action="sib-gas_giant"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ce93d8"/></svg> 气态巨行星</button>
-            <button data-action="sib-barren"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#9e9e9e"/></svg> 贫瘠</button>
-            <button data-action="sib-frozen"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#80deea"/></svg> 冰冻</button>
-            <button data-action="sib-molten"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff5722"/></svg> 熔融</button>
-            <button data-action="sib-toxic"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#76ff03"/></svg> 剧毒</button>
-            <button data-action="sib-barren_cold"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#616161"/></svg> 寒冷贫瘠</button>
-            <button data-action="sib-ice_asteroid"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#b3e5fc"/></svg> 冰晶小行星</button>
-            <button data-action="sib-g_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ffeb3b"/></svg> G型星</button>
-            <button data-action="sib-b_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#64b5f6"/></svg> B型星</button>
-            <button data-action="sib-a_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#e3f2fd"/></svg> A型星</button>
-            <button data-action="sib-f_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#fff9c4"/></svg> F型星</button>
-            <button data-action="sib-k_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ff9800"/></svg> K型星</button>
-            <button data-action="sib-m_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#f44336"/></svg> M型星</button>
-            <button data-action="sib-t_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#795548"/></svg> T型星</button>
-            <button data-action="sib-black_hole"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#212121"/></svg> 黑洞</button>
-            <button data-action="sib-neutron_star"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#e0e0e0"/></svg> 中子星</button>
-            <button data-action="sib-pulsar"><svg width="10" height="10"><circle cx="5" cy="5" r="5" fill="#ba68c8"/></svg> 脉冲星</button>
+            <div class="ctx-content"></div>
         </div>
     </div>
     <script nonce="${nonce}" src="${scriptUri}"></script>

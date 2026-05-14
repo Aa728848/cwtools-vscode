@@ -26,7 +26,7 @@ const DXGI_FORMAT_BC7_UNORM = 98;
 const DXGI_FORMAT_BC7_UNORM_SRGB = 99;
 
 // Max texture size for preview (larger textures are downscaled)
-const MAX_TEX_DIM = 512;
+const MAX_TEX_DIM = 2048;
 
 export interface DdsResult {
     dataUri: string;
@@ -780,7 +780,7 @@ export function decodeTga(filePath: string): DdsResult | null {
         // Downscale large textures
         let outW = width, outH = height;
         let outRgba: Uint8Array = rgba;
-        const MAX_DIM = 512;
+        const MAX_DIM = 4096;
         if (width > MAX_DIM || height > MAX_DIM) {
             const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
             outW = Math.max(1, Math.round(width * ratio));

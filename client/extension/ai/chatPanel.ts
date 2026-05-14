@@ -176,21 +176,67 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     // ─── Message Handling ────────────────────────────────────────────────────
 
+    /**
+     * 活体抓取工厂：优先从 VSCode 活动缓冲区获取带脏缓存的最新代码
+     */
+    private async resolveLiveCodeContext(uriStr: string, startLine: number, endLine: number): Promise<string> {
+        try {
+            const rootPath = vs.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+            const targetUri = vs.Uri.file(require('path').resolve(rootPath, uriStr));
+            
+            // 优先尝试从活动文档缓冲区获取（含脏缓存）
+            const openDocs = vs.workspace.textDocuments;
+            const activeDoc = openDocs.find(d => d.uri.fsPath.toLowerCase() === targetUri.fsPath.toLowerCase());
+            
+            if (activeDoc) {
+                let text = '';
+                const start = Math.max(0, startLine - 1);
+                const end = Math.min(activeDoc.lineCount - 1, endLine - 1);
+                for (let i = start; i <= end; i++) {
+                    text += activeDoc.lineAt(i).text + '\n';
+                }
+                return text.trimEnd();
+            }
+            
+            // 缓冲区未命中，回退到磁盘读取
+            const data = await vs.workspace.fs.readFile(targetUri);
+            const content = new TextDecoder('utf-8').decode(data);
+            const lines = content.split(/\r?\n/);
+            const start = Math.max(0, startLine - 1);
+            const end = Math.min(lines.length - 1, endLine - 1);
+            return lines.slice(start, end + 1).join('\n').trimEnd();
+        } catch (e) {
+            console.error('[LiveContext] Error resolving context:', e);
+            return `// [Failed to read context]`;
+        }
+    }
+
     private async handleWebViewMessage(msg: WebViewMessage): Promise<void> {
         switch (msg.type) {
             case 'sendMessage':
                 await this.handleUserMessage(msg.text, msg.images, msg.attachedFiles);
                 break;
             case 'sendMessageWithReference': {
-                const { reference, text, images } = msg;
+                const { contexts, text, images } = msg as any; // Cast as any because TypeScript hasn't recognized the new union variation yet in some strict checks
+                let contextPrompt = '';
+                const attachedFiles: string[] = [];
+                for (const ctx of contexts) {
+                    if (ctx.type === 'code_selection') {
+                        const liveContent = await this.resolveLiveCodeContext(ctx.uri, ctx.startLine, ctx.endLine);
+                        contextPrompt += `文件 \`${ctx.uri}\` 第 ${ctx.startLine}-${ctx.endLine} 行：\n\`\`\`pdx\n${liveContent}\n\`\`\`\n\n`;
+                    } else if (ctx.type === 'file') {
+                        if (!attachedFiles.includes(ctx.uri)) {
+                            attachedFiles.push(ctx.uri);
+                        }
+                    }
+                }
                 const refPrompt = [
-                    `文件 \`${reference.relPath}\` 第 ${reference.startLine}-${reference.endLine} 行的选中代码：`,
-                    '```pdx',
-                    reference.selectedText,
-                    '```',
-                    text || '请解释以上选中的代码块',
-                ].join('\n');
-                await this.handleUserMessage(refPrompt, images);
+                    contextPrompt.trim(),
+                    '',
+                    text || (contextPrompt ? '请解释以上引用的上下文内容' : '')
+                ].join('\n').trim();
+                
+                await this.handleUserMessage(refPrompt || (attachedFiles.length > 0 ? '请查阅附带的文件。' : ''), images, attachedFiles);
                 break;
             }
             case 'insertCode':
@@ -340,6 +386,48 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'requestFileList':
                 this.sendWorkspaceFileList();
                 break;
+            case 'requestMentionSearch': {
+                const query = msg.query;
+                if (!query) {
+                    this.postMessage({ type: 'mentionSearchResults', results: [] });
+                    break;
+                }
+                
+                // Limit results to 30 for performance
+                const globPattern = `**/*${query}*.*`;
+                const maxResults = 30;
+                
+                try {
+                    const files = await vs.workspace.findFiles(globPattern, '**/node_modules/**', maxResults);
+                    
+                    // Priority sorting: basename match first
+                    files.sort((a, b) => {
+                        const baseA = require('path').basename(a.fsPath).toLowerCase();
+                        const baseB = require('path').basename(b.fsPath).toLowerCase();
+                        const q = query.toLowerCase();
+                        const idxA = baseA.indexOf(q);
+                        const idxB = baseB.indexOf(q);
+                        if (idxA !== idxB) {
+                            if (idxA === -1) return 1;
+                            if (idxB === -1) return -1;
+                            return idxA - idxB;
+                        }
+                        return a.fsPath.length - b.fsPath.length;
+                    });
+                    
+                    const results = files.map(f => ({
+                        uri: f.fsPath,
+                        label: require('path').basename(f.fsPath),
+                        desc: vs.workspace.asRelativePath(f)
+                    }));
+                    
+                    this.postMessage({ type: 'mentionSearchResults', results });
+                } catch (e) {
+                    console.error('[MentionSearch] Error searching files:', e);
+                    this.postMessage({ type: 'mentionSearchResults', results: [] });
+                }
+                break;
+            }
             case 'requestUsageStats':
                 this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
                 break;
@@ -1389,8 +1477,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async sendSelectionReference(
         relPath: string,
         startLine: number,
-        endLine: number,
-        selectedText: string
+        endLine: number
     ): Promise<void> {
         // 聚焦 AI 面板
         await vs.commands.executeCommand('cwtools.aiChat.focus');
@@ -1404,8 +1491,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             type: 'insertSelectionReference',
             relPath,
             startLine,
-            endLine,
-            selectedText
+            endLine
         });
     }
 }

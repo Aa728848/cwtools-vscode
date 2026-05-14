@@ -67,9 +67,9 @@ function normalizeToolResultHash(toolName: string, result: unknown): string {
     if (toolName === 'read_file' && typeof obj.content === 'string') {
         return `read_file:${obj.file ?? ''}:${obj.content.length}`;
     }
-    // edit_file / write_file → hash written content
-    if ((toolName === 'edit_file' || toolName === 'write_file') && typeof obj.content === 'string') {
-        return `write:${obj.filePath ?? obj.file ?? ''}:${obj.content.length}`;
+    // multi_replace_file_content / write_file → hash written content
+    if ((toolName === 'multi_replace_file_content' || toolName === 'write_file') && typeof obj.content === 'string') {
+        return `write:${obj.filePath ?? obj.file ?? obj.TargetFile ?? ''}:${obj.content.length}`;
     }
     // query_scope → hash scope chain
     if (toolName === 'query_scope') {
@@ -397,7 +397,7 @@ const REVIEW_MODE_TOOLS: AgentToolName[] = [
 
 /** Loc Translator mode: read localisation files, write translated output */
 const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
-    'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch', 'replace_lines',
+    'read_file', 'write_file', 'multi_replace_file_content', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'grep', 'workspace_symbols',
     'document_symbols', 'get_file_context', 'get_diagnostics',
     // W9 修复：移除 web_fetch/search_web/codesearch，本地化 Agent 不需要网络搜索能力
@@ -407,7 +407,7 @@ const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
 
 /** Loc Writer mode: create new localisation entries from scratch */
 const LOC_WRITER_TOOLS: AgentToolName[] = [
-    'read_file', 'write_file', 'edit_file', 'multiedit', 'apply_patch', 'replace_lines',
+    'read_file', 'write_file', 'multi_replace_file_content', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'grep', 'workspace_symbols',
     'document_symbols', 'get_file_context', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references',
@@ -436,7 +436,7 @@ const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
 
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'multiedit', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation', 'git_ops', 'replace_lines', 'edit_pdx_block']);
+const WRITE_TOOLS = new Set(['write_file', 'multi_replace_file_content', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation', 'git_ops', 'edit_pdx_block']);
 const READ_ONLY_TOOLS = new Set<string>([
     'read_file', 'list_directory', 'search_mod_files', 'grep',
     'get_file_context', 'document_symbols', 'workspace_symbols',
@@ -1127,7 +1127,7 @@ export class AgentRunner {
             const seenFiles = new Set<string>();
             for (const m of olderMessages) {
                 const text = contentToString(m.content);
-                // Extract file paths from tool calls (read_file, write_file, edit_file)
+                // Extract file paths from tool calls (read_file, write_file, multi_replace_file_content)
                 const fileMatches = text.match(/(?:filePath|file|path)["']?\s*[:=]\s*["']([^"'\n]+)/gi);
                 if (fileMatches) {
                     for (const fm of fileMatches) {
@@ -1457,7 +1457,7 @@ export class AgentRunner {
                     });
                     messages.push({
                         role: 'user',
-                        content: `[SYSTEM] Your previous response was forcefully terminated by the API server (likely due to hard length limits or timeout). Please DO NOT output massive text blocks, and DO NOT use write_file for files over 150 lines. Break your task into small steps using multiedit.`
+                        content: `[SYSTEM] Your previous response was forcefully terminated by the API server (likely due to hard length limits or timeout). Please DO NOT output massive text blocks, and DO NOT use write_file for files over 150 lines. Break your task into small steps using multi_replace_file_content.`
                     });
                     continue;
                 }
@@ -1579,7 +1579,7 @@ export class AgentRunner {
                 });
                 messages.push({
                     role: 'user',
-                    content: `[SYSTEM] Your previous response was truncated by the API max_tokens length limit. Please DO NOT output massive blocks of text. Break down your modifications into smaller steps. Use todo_write to plan them, and execute a single multiedit/apply_patch per response.`
+                    content: `[SYSTEM] Your previous response was truncated by the API max_tokens length limit. Please DO NOT output massive blocks of text. Break down your modifications into smaller steps. Use todo_write to plan them, and execute a single multi_replace_file_content/apply_patch per response.`
                 });
                 continue;
             }
@@ -1633,8 +1633,8 @@ export class AgentRunner {
                 if (!WRITE_TOOLS.has(toolCalls[i]!.function.name)) continue;  
                 try {
                     const a = JSON.parse(toolCalls[i]!.function.arguments);  
-                    // edit_file uses filePath, write_file uses file
-                    const filePath: string = a.filePath ?? a.file ?? '';
+                    // multi_replace_file_content uses TargetFile, write_file uses file
+                    const filePath: string = a.TargetFile ?? a.file ?? '';
                     if (filePath) lastWriteIndexByFile.set(filePath, i);
                 } catch { /* ignore */ }
             }
@@ -1705,8 +1705,8 @@ export class AgentRunner {
                     // Add tool-specific truncation recovery guidance
                     if (toolName === 'write_localisation') {
                         errMsg += '\n\n⚠️ Your entries array was truncated by the output length limit. Split into SMALLER batches: call write_localisation multiple times with at most 15 entries each.';
-                    } else if (toolName === 'multiedit') {
-                        errMsg += '\n\n⚠️ Your edits array was truncated. Split into SMALLER batches: call multiedit with fewer edits, or use multiple edit_file calls.';
+                    } else if (toolName === 'multi_replace_file_content') {
+                        errMsg += '\n\n⚠️ Your ReplacementChunks array was truncated. Split into SMALLER batches: call multi_replace_file_content with fewer chunks.';
                     } else if (toolName === 'dispatch_agents') {
                         errMsg += '\n\n⚠️ Your tasks array was truncated or malformed because the prompt strings were too long. KEEP PROMPTS CONCISE. Do NOT embed massive file contents or long paths directly in the prompt. If you need to pass large data, use `set_memory` first and pass the memory key. Also, try dispatching fewer tasks at once.';
                     }
@@ -1740,13 +1740,7 @@ export class AgentRunner {
                     // Collect all file paths that this tool touches for partitioned locking
                     const lockPaths: string[] = [];
                     if (filePath) lockPaths.push(filePath);
-                    // multiedit may touch multiple files
-                    if (toolName === 'multiedit' && Array.isArray(toolArgs['edits'])) {
-                        for (const edit of toolArgs['edits'] as Array<Record<string, unknown>>) {
-                            const ep = (edit.filePath ?? edit.file ?? '') as string;
-                            if (ep && !lockPaths.includes(ep)) lockPaths.push(ep);
-                        }
-                    }
+
 
                     await this.writeQueue.enqueue(lockPaths.length > 0 ? lockPaths : ['__global__'], async () => {
                         try {
@@ -1769,7 +1763,7 @@ export class AgentRunner {
                                     if (content[c] === '}') closeCount++;
                                 }
                                 if (openCount !== closeCount) {
-                                    toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). This almost ALWAYS means your code output was truncated due to API length limits. DO NOT retry write_file with the same massive file! Instead, split your task using todo_write, or use edit_file / multiedit to apply the changes incrementally.` };
+                                    toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). This almost ALWAYS means your code output was truncated due to API length limits. DO NOT retry write_file with the same massive file! Instead, split your task using todo_write, or use multi_replace_file_content to apply the changes incrementally.` };
                                 } else {
                                     const args = (confirmedWrittenFiles.has(filePath)) ? { ...toolArgs, _autoApply: true } : toolArgs;
                                     toolResults[i] = await this.toolExecutor.execute(toolName, args, agentToolContext);

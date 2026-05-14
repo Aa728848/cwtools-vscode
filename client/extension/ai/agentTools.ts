@@ -9,6 +9,7 @@
  */
 
 import * as vs from 'vscode';
+import * as fs from 'fs';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import type { AgentToolName, TodoItem } from './types';
 
@@ -56,9 +57,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     // File tools — 30s
     read_file: 30_000,
     write_file: 30_000,
-    edit_file: 30_000,
-    multiedit: 30_000,
-    replace_lines: 30_000,
+    multi_replace_file_content: 30_000,
     apply_patch: 30_000,
     list_directory: 30_000,
     glob_files: 30_000,
@@ -279,7 +278,7 @@ export class AgentToolExecutor {
     /** Internal tool dispatch — the actual switch statement, called within a timeout wrapper. */
     private async executeInternal(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         let result: unknown;
-        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'codesearch' | 'apply_patch' | 'multiedit' | 'task' | 'analyze_diagnostic_error') {
+        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'codesearch' | 'apply_patch' | 'multi_replace_file_content' | 'task' | 'analyze_diagnostic_error') {
             // ── LSP / CWTools query tools ─────────────────────────────────
             case 'query_scope':
                 result = await this.lspHandler.queryScope(args as any); break;
@@ -348,11 +347,24 @@ export class AgentToolExecutor {
                 // documentSymbols is 0-indexed, replaceLines is 1-indexed
                 const startLine = targetSymbol.range.startLine + 1;
                 const endLine = targetSymbol.range.endLine + 1;
-                result = await this.fileHandler.replaceLines({
-                    filePath: argsBlock.file,
-                    startLine,
-                    endLine,
-                    newContent: argsBlock.newContent
+                
+                const rawContent = fs.readFileSync(argsBlock.file, 'utf-8');
+                const hasBom = rawContent.charCodeAt(0) === 0xFEFF;
+                const content = hasBom ? rawContent.slice(1) : rawContent;
+
+                const isCRLF = content.includes('\r\n');
+                // The split needs to preserve the exact string to be a precise match
+                const targetContent = content.split(isCRLF ? '\r\n' : '\n').slice(startLine - 1, endLine).join(isCRLF ? '\r\n' : '\n');
+
+                result = await this.fileHandler.multiReplaceFileContent({
+                    TargetFile: argsBlock.file,
+                    Instruction: `Update PDX block: ${argsBlock.symbol}`,
+                    ReplacementChunks: [{
+                        StartLine: startLine,
+                        EndLine: endLine,
+                        TargetContent: targetContent,
+                        ReplacementContent: argsBlock.newContent
+                    }]
                 }, context);
                 break;
             }
@@ -380,10 +392,8 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.readFile(args as any, context); break;
             case 'write_file':
                 result = await this.fileHandler.writeFile(args as any, context); break;
-            case 'edit_file':
-                result = await this.fileHandler.editFile(args as any, context); break;
-            case 'multiedit':
-                result = await this.fileHandler.multiEdit(args as any, context); break;
+            case 'multi_replace_file_content':
+                result = await this.fileHandler.multiReplaceFileContent(args as any, context); break;
             case 'apply_patch':
                 result = await this.fileHandler.applyPatch(args as any, context); break;
             case 'list_directory':
@@ -396,8 +406,6 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.writeDesignBlueprint(args as any, context); break;
             case 'git_ops':
                 result = await this.fileHandler.gitOps(args as any); break; // git ops uses workspace wide state mostly
-            case 'replace_lines':
-                result = await this.fileHandler.replaceLines(args as any, context); break;
 
             // ── External / agent tools ────────────────────────────────────
             case 'web_fetch':

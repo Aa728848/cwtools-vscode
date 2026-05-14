@@ -480,7 +480,7 @@ export type AgentToolName =
     | 'query_types'
     | 'query_rules'
     | 'query_references'
-    // validate_code — REMOVED: 由 get_diagnostics + edit_file 内联诊断替代
+    // validate_code — REMOVED: 由 get_diagnostics + multi_replace_file_content 内联诊断替代
     | 'get_diagnostics'
     | 'get_file_context'
     | 'search_mod_files'
@@ -490,7 +490,7 @@ export type AgentToolName =
     | 'todo_write'
     | 'read_file'
     | 'write_file'
-    | 'edit_file'
+    | 'multi_replace_file_content'
     | 'list_directory'
     | 'glob_files'
     | 'lsp_operation'
@@ -500,8 +500,6 @@ export type AgentToolName =
     | 'grep'
     | 'run_command'
     | 'apply_patch'
-    | 'multiedit'
-    | 'replace_lines'
     | 'ast_mutate'
     | 'analyze_diagnostic_error'
     | 'set_memory'
@@ -866,11 +864,36 @@ export interface ChatHistoryMessage {
     isHidden?: boolean;
 }
 
+// ─── Context Tray Types ──────────────────────────────────────────────────────
+
+export type ContextItemType = 'code_selection' | 'image' | 'file';
+
+export interface BaseContextItem {
+    id: string;
+    type: ContextItemType;
+    label: string;
+    description?: string;
+}
+
+export interface CodeSelectionContext extends BaseContextItem {
+    type: 'code_selection';
+    uri: string;
+    startLine: number;
+    endLine: number;
+}
+
+export interface FileContext extends BaseContextItem {
+    type: 'file';
+    uri: string;
+}
+
+export type ContextItem = CodeSelectionContext | FileContext | BaseContextItem;
+
 // ─── WebView Communication ───────────────────────────────────────────────────
 
 export type WebViewMessage =
     | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
-    | { type: 'sendMessageWithReference'; text: string; reference: { relPath: string; startLine: number; endLine: number; selectedText: string }; images?: string[] }
+    | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[] }
     | { type: 'insertCode'; code: string }
     | { type: 'copyCode'; code: string }
     | { type: 'regenerate' }
@@ -920,7 +943,8 @@ export type WebViewMessage =
     | { type: 'promptClearUsageStats' }
     | { type: 'approveTransaction'; txId: string }
     | { type: 'rejectTransaction'; txId: string }
-    | { type: 'clearUsageStats' };
+    | { type: 'clearUsageStats' }
+    | { type: 'requestMentionSearch'; query: string };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[] }
@@ -928,7 +952,7 @@ export type HostMessage =
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string; canResume?: boolean }
-    | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number; selectedText: string }
+    | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }
     | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; archived?: boolean }> }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[] }
     | { type: 'streamToken'; token: string }
@@ -971,7 +995,8 @@ export type HostMessage =
     | { type: 'skillInstallComplete'; success: boolean }
     | { type: 'usageStats'; stats: any }
     /** 多 Agent 协调器进度推送 — Agent Lane UI */
-    | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload };
+    | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
+    | { type: 'mentionSearchResults'; results: Array<{ uri: string; label: string; desc: string }> };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

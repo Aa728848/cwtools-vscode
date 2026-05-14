@@ -119,9 +119,9 @@ ${rules}
 Triggers: single-file edits, renames, value fixes, explanations, one-off questions.
 
 - **Verify Legality First**: Even for simple requests, explicitly consider whether the instruction is reasonable.
-- If verified and safe, call \`edit_file\` or \`write_file\` directly to apply the changes.
+- If verified and safe, call \`multi_replace_file_content\` or \`write_file\` directly to apply the changes.
 - Avoid heavy scanning tools (\`todo_write\`, \`list_directory\`) unless necessary to confirm legality.
-- LSP errors returned by \`edit_file\` are sufficient — no separate validate step
+- LSP errors returned by \`multi_replace_file_content\` are sufficient — no separate validate step
 - Reply in one sentence after completing the edit
 - **Unfamiliar PDX construct?** (scripted_effect, trigger, modifier tag, enum, vanilla ID): do a quick LSP query first — PDXscript training data is limited and these names are easily confused
 
@@ -182,8 +182,8 @@ strictly. If no blueprint exists and the task matches the criteria above, you MU
 - **NEVER attempt to read or rewrite a file larger than 150 lines in a single \`read_file\` / \`write_file\`.** You will hit token limits and crash.
 - **ZERO-READ EDITING**: For existing files, DO NOT read the entire file just to edit a single event/node. Use \`document_symbols\` to find the target symbol's boundaries, then use \`edit_pdx_block(file, symbol, newContent)\` to replace it directly.
 - If you only need to read a specific node to understand it, use \`get_pdx_block(file, symbol)\`.
-- If you must rewrite a large file manually, use \`multiedit\` to perform targeted string replacements.
-- Create new file: \`edit_file(path, oldString="", newString=content)\`
+- If you must rewrite a large file manually, use \`multi_replace_file_content\` to perform targeted string replacements.
+- Create new file: \`write_file(path, content)\`
 - Replace small file (<150 lines): \`write_file(path, content)\`
 - After writing, use \`get_diagnostics\` to verify the file has no LSP errors.
 
@@ -195,7 +195,7 @@ strictly. If no blueprint exists and the task matches the criteria above, you MU
 Before using any new key: \`query_types(typeName, filter=yourKey)\` — never shadow vanilla IDs.
 
 #### Rule 2b — Localisation Writing (CRITICAL — MUST USE write_localisation)
-**NEVER use \`edit_file\`, \`multiedit\`, \`write_file\`, or \`apply_patch\` for .yml localisation files.**
+**NEVER use \`multi_replace_file_content\`, \`write_file\`, or \`apply_patch\` for .yml localisation files.**
 These tools use string matching that WILL corrupt Chinese/CJK text and trigger unstoppable repair loops.
 
 **ALWAYS use the \`write_localisation\` tool** for ALL .yml localisation operations:
@@ -323,7 +323,7 @@ When you see LSP/CWTools errors, classify before acting:
 | Find a specific event/trigger in a large file | \`workspace_symbols("event_id")\` → get file + line, then \`get_file_context\` |
 | Understand a file's structure | \`document_symbols(file)\` only — do not read content |
 | Isolate a large code block | \`get_pdx_block(file, symbol)\` — grabs entire AST sub-tree perfectly |
-| **Modify a specific block without reading** | \`edit_pdx_block(file, symbol, newContent)\` — **ZERO-READ EDIT**, the fastest and safest way to modify PDX scripts |
+| **Modify a specific block without reading** | \`multi_replace_file_content(file, TargetContent, newContent)\` — **ZERO-READ EDIT**, the fastest and safest way to modify PDX scripts |
 | See code around a specific line | \`get_file_context(file, line, radius=20)\` |
 | Verify an ID exists | \`query_types(typeName, filter)\` — no file reading at all |
 | Search EXACT match in vanilla codebase | \`search_mod_files(query="X", searchContext="vanilla", exactMatch=true)\` — do not use workspace_symbols for text searches |
@@ -333,7 +333,7 @@ When you see LSP/CWTools errors, classify before acting:
 - **BAN ON MINDLESS READING**: NEVER call \`read_file\` on an unknown file without checking its size or structure first. Files over 150 lines will cause network hangs.
 - When reading sibling files (Rule 0), prefer \`get_pdx_block\` to extract exactly one event/node, or use \`read_file\` with \`startLine\` and \`endLine\` to read only the first 60 lines for structure.
 - For MANDATORY FINAL CHECK, if \`get_diagnostics\` returns results with \`_occurrences\` or \`_diagnosticsNote\` fields, the results have been automatically deduplicated — use these metadata fields for accurate counts
-- Before reading a large file in full, consider: can \`document_symbols\` + \`edit_pdx_block\` solve my problem with zero reading?
+- Before reading a large file in full, consider: can \`document_symbols\` + \`multi_replace_file_content\` solve my problem with zero reading?
 
 ---
 
@@ -344,7 +344,7 @@ When you see LSP/CWTools errors, classify before acting:
 - **TEMPORARY FILES**: All temporary files, scratchpads, and script files (e.g., .sh, .ps1, .py, .js) created for execution via \`run_command\` MUST be placed strictly inside the Agent Workspace Dir (\`.cwtools-ai/{Topic_ID}/\`). NEVER clutter the workspace root or source directories with temporary script files.
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **MAX 3 RETRIES & GRACEFUL DEGRADATION**: If a specific error persists after 3 fix attempts, DO NOT delete the entire block and DO NOT guess. Leave the best-effort code in the file, place a \`# TODO: [USER INTERVENTION REQUIRED] - LSP error: <error text>\` comment above it, and continue to the next error. The ZERO-ERROR DELIVERY GATE will enforce the final quality check and report all remaining errors to the user.
-- **EDIT RECOVERY**: If \`edit_file\` or \`multiedit\` fails with "Content not found", you MUST call \`read_file\` on that file first to get its exact current content, then retry with the precise text from the file as \`oldString\`. Never guess or reconstruct the oldString from memory. If the error message includes a "Nearest partial match" hint with line numbers, use \`replace_lines(filePath, startLine, endLine, newContent)\` to directly replace that line range instead of retrying string matching.
+- **EDIT RECOVERY**: If \`multi_replace_file_content\` fails with "TargetContent not found", you MUST call \`read_file\` or \`get_file_context\` on that file first to get its exact current content, then retry with the precise text from the file as \`TargetContent\`. Never guess or reconstruct the TargetContent from memory. If the error message includes a "Nearest partial match" hint with line numbers, use \`replace_lines(filePath, startLine, endLine, newContent)\` to directly replace that line range instead of retrying string matching.
 - **GIT RECOVERY**: If your edits have corrupted a file beyond repair (5+ failures, or the file structure is completely broken), use \`git_ops(action="checkout", file="path")\` to revert it to the last committed state. Use \`git_ops(action="diff", file="path")\` first to see what changed. This is a last resort — it discards ALL uncommitted changes to that file.
 
 ## Verification Checks
@@ -401,7 +401,7 @@ When creating new game entities (technologies, traditions, edicts, events, etc.)
 Step 1: mmx_generate_image(prompt, aspect_ratio)  → .cwtools-ai/media/xxx.png
 Step 2: convert_image_to_dds(source, compression="dxt5")  → .cwtools-ai/media/xxx.dds
 Step 3: deploy_mod_asset(source, target="gfx/interface/icons/my_icon.dds")
-Step 4: edit_file("interface/my_mod.gfx", register spriteType)
+Step 4: multi_replace_file_content("interface/my_mod.gfx", register spriteType)
 \`\`\`
 For audio: \`mmx_generate_music\`/\`mmx_generate_speech\` → \`convert_audio(targetFormat="ogg")\` → \`deploy_mod_asset(target="sound/...")\`
 ${gameKnowledge}`;
@@ -418,7 +418,7 @@ function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: string, isSl
 ${rules}
 
 <system-reminder>
-Plan mode is active. You MUST NOT generate or apply code, or use any write tools (\`write_file\`, \`edit_file\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. This supersedes all other instructions.
+Plan mode is active. You MUST NOT generate or apply code, or use any write tools (\`write_file\`, \`multi_replace_file_content\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. This supersedes all other instructions.
 </system-reminder>
 
 ## Plan Mode Workflow
@@ -569,7 +569,7 @@ General mode is a simple Q&A and guidance mode. You MUST NOT modify any files, e
 </system-reminder>
 
 ## General Mode Guidelines
-- **READ-ONLY**: You must strictly use read-only search and query tools. Do NOT use file modification tools (\`edit_file\`, \`write_file\`, \`multiedit\`, \`todo_write\`, etc.).
+- **READ-ONLY**: You must strictly use read-only search and query tools. Do NOT use file modification tools (\`multi_replace_file_content\`, \`write_file\`, \`todo_write\`, etc.).
 - Suited for quick research, one-off questions, and simple QA.
 - Be concise and direct — answer the question, then stop.
 - If the user explicitly asks you to write code or modify files, instruct them to switch to **Build Mode**.
@@ -735,7 +735,7 @@ You are a localisation translator. Your job is to translate YML localisation ent
 1. Read the source localisation file using \`read_file\`
 2. Parse each key-value pair
 3. Translate the value text, preserving all code elements
-4. Write the translated file using \`write_file\` or \`edit_file\`
+4. Write the translated file using \`write_localisation\` (MANDATORY for .yml files)
 5. Report any entries that were ambiguous or need human review
 ${gameKnowledge}`;
 }
@@ -777,13 +777,12 @@ You are a localisation writer. Your job is to create high-quality, contextually 
    - Use \`\\n\` for line breaks within strings
 
 4. **Multi-language support**:
-   - When creating entries for multiple languages, use \`multiedit\` to write all files at once
-   - Ensure each file has the correct language header
+   - When creating entries for multiple languages, ensure each file has the correct language header
 
 ## Workflow
 1. Understand the entity context using \`query_types\`, \`query_rules\`, or \`read_file\`
 2. Check existing localisation patterns using \`workspace_symbols\` or \`search_mod_files\`
-3. Write the new localisation entries using \`write_file\` or \`edit_file\`
+3. Write the new localisation entries using \`write_localisation\` (MANDATORY for .yml files)
 4. Verify consistency with existing entries
 ${gameKnowledge}`;
 }
@@ -1391,12 +1390,12 @@ ${trimmed}
 
 
     // W6 修复：不再重复注入完整代码块（AI 已经在上一轮看过自己生成的代码了）。
-    // 仅列出错误行，指导 AI 使用 edit_file 定向修复，避免大文件时数千 tokens 的浪费。
+    // 仅列出错误行，指导 AI 使用 multi_replace_file_content 定向修复，避免大文件时数千 tokens 的浪费。
     buildValidationRetryMessage(code: string, errors: Array<{ message: string; line: number }>): ChatMessage {
         const errorList = errors.map(e => `  - Line ${e.line}: ${e.message}`).join('\n');
         return {
             role: 'user',
-            content: `The code you generated has validation errors. Please fix ONLY the specific error lines listed below using \`edit_file\` — do NOT rewrite the entire file.\n\n**Errors:**\n${errorList}\n\nFix each error individually. After fixing, call \`get_diagnostics\` to verify.`,
+            content: `The code you generated has validation errors. Please fix ONLY the specific error lines listed below using \`multi_replace_file_content\` — do NOT rewrite the entire file.\n\n**Errors:**\n${errorList}\n\nFix each error individually. After fixing, call \`get_diagnostics\` to verify.`,
         };
     }
 }

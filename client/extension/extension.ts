@@ -576,7 +576,7 @@ export async function activate(context: ExtensionContext) {
 		const startLine = editor.selection.start.line + 1;
 		const endLine = editor.selection.end.line + 1;
 		const selectedText = editor.document.getText(editor.selection);
-		await chatPanelProvider.sendSelectionReference(relPath, startLine, endLine, selectedText);
+		await chatPanelProvider.sendSelectionReference(relPath, startLine, endLine);
 	});
 
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──

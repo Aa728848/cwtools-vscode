@@ -129,9 +129,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // validate_code — REMOVED: 由 get_diagnostics（零副作用）+ edit_file 内联诊断替代。
-    // validate_code 创建临时文件让 LSP 解析，有 3-10s 延迟且可能污染 LSP 状态。
-    // get_diagnostics 直接读取诊断面板（~50ms），edit_file 写入后自动返回诊断。
+    // validate_code — REMOVED: 由 get_diagnostics（零副作用）+ multi_replace_file_content 内联诊断替代。
+    // get_diagnostics 直接读取诊断面板（~50ms），multi_replace_file_content 写入后自动返回诊断。
     {
         type: 'function',
         function: {
@@ -282,7 +281,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_file',
-            description: 'Write/create a file. For new files or full rewrites of files YOU created this session. Pre-existing files not created by you are blocked — use edit_file/multiedit/edit_pdx_block for those.',
+            description: 'Write/create a file. For new files or full rewrites of files YOU created this session. Pre-existing files not created by you are blocked — use multi_replace_file_content/edit_pdx_block for those.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -294,24 +293,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    {
-        type: 'function',
-        function: {
-            name: 'edit_file',
-            description: 'String substitution in files. Set oldString="" to create new file. Returns LSP diagnostics after write. For PDX scripts, prefer edit_pdx_block (zero-read, no string matching needed).',
-            parameters: {
-                type: 'object',
-                properties: {
-                    filePath: { type: 'string', description: 'Absolute path to the file to modify' },
-                    oldString: { type: 'string', description: 'The exact text to replace. **Use empty string "" to create a new file.**' },
-                    newString: { type: 'string', description: 'The replacement text (must differ from oldString)' },
-                    replaceAll: { type: 'boolean', description: 'If true, replace all occurrences. Default: false.' },
-                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding for new files. Localisation (.yml) MUST be utf8bom, other code MUST be utf8. Omit to let the system auto-detect.' },
-                },
-                required: ['filePath', 'oldString', 'newString'],
-            },
-        },
-    },
+
     {
         type: 'function',
         function: {
@@ -458,7 +440,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'apply_patch',
-            description: 'Apply a unified diff patch to one or more files atomically. Use this instead of multiple edit_file calls when you have a git-style patch. All hunks must succeed or none are written.',
+            description: 'Apply a unified diff patch to one or more files atomically. Use this instead of multiple multi_replace_file_content calls when you have a git-style patch. All hunks must succeed or none are written.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -469,31 +451,32 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+
     {
         type: 'function',
         function: {
-            name: 'multiedit',
-            description: 'Apply multiple edits to a SINGLE file atomically. All edits applied in sequence; only written if ALL succeed. If oldString has multiple matches, add context lines or set replaceAll=true. For PDX scripts, prefer edit_pdx_block (no string matching needed).',
+            name: 'multi_replace_file_content',
+            description: 'Used to perform multiple independent, non-contiguous replacements or edits within an existing file. This provides high precision while maintaining the integrity of surrounding code.',
             parameters: {
                 type: 'object',
                 properties: {
-                    filePath: { type: 'string', description: 'Absolute path to the file to modify' },
-                    edits: {
+                    TargetFile: { type: 'string', description: 'Absolute path of the target file to modify.' },
+                    Instruction: { type: 'string', description: 'Explanation of why this edit is being made and the reasoning behind it.' },
+                    ReplacementChunks: {
                         type: 'array',
-                        description: 'List of edits to apply in order',
                         items: {
                             type: 'object',
                             properties: {
-                                oldString: { type: 'string', description: 'The exact text to replace. Must be unique in the file, OR set replaceAll=true.' },
-                                newString: { type: 'string', description: 'The replacement text' },
-                                replaceAll: { type: 'boolean', description: 'If true, replace ALL occurrences of oldString. Use when the same pattern appears multiple times and you want to change all of them. Default: false.' },
+                                StartLine: { type: 'number', description: 'The starting line number of the chunk (1-indexed).' },
+                                EndLine: { type: 'number', description: 'The ending line number of the chunk (1-indexed).' },
+                                TargetContent: { type: 'string', description: 'The exact old code sequence to be replaced, which must strictly match the local file content.' },
+                                ReplacementContent: { type: 'string', description: 'The new code content to replace it with.' },
                             },
-                            required: ['oldString', 'newString'],
+                            required: ['StartLine', 'EndLine', 'TargetContent', 'ReplacementContent'],
                         },
                     },
-                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Localisation (.yml) MUST be utf8bom, other code MUST be utf8. Omit to auto-detect.' },
                 },
-                required: ['filePath', 'edits'],
+                required: ['TargetFile', 'Instruction', 'ReplacementChunks'],
             },
         },
     },
@@ -818,7 +801,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_localisation',
-            description: '🌐 MANDATORY for all .yml localisation file operations. Safely write localisation entries to Stellaris .yml files. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, multiedit, or write_file for .yml localisation files — ALWAYS use this tool instead.',
+            description: '🌐 MANDATORY for all .yml localisation file operations. Safely write localisation entries to Stellaris .yml files. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use multi_replace_file_content, or write_file for .yml localisation files — ALWAYS use this tool instead.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -910,24 +893,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         },
     },
     // ── Line-Range Replacement tool ──────────────────────────────────────
-    {
-        type: 'function',
-        function: {
-            name: 'replace_lines',
-            description: 'Replace a line range with new content. Use when edit_file fails due to stale content, or when you have exact line numbers from document_symbols/read_file. No string matching needed — safer for targeted repairs.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    filePath: { type: 'string', description: 'Absolute path to the file to modify' },
-                    startLine: { type: 'number', description: 'Start line number (1-based, inclusive)' },
-                    endLine: { type: 'number', description: 'End line number (1-based, inclusive). Must be >= startLine.' },
-                    newContent: { type: 'string', description: 'The replacement content for the specified line range' },
-                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Omit to auto-detect.' },
-                },
-                required: ['filePath', 'startLine', 'endLine', 'newContent'],
-            },
-        },
-    },
+
     // ── Orchestrator Tools (多 Agent 协调器) ────────────────────────────
     {
         type: 'function',

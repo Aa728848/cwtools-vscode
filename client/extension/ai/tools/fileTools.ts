@@ -73,7 +73,7 @@ export class FileToolHandler {
     private buildEditEscalationHint(filePath: string, failCount: number): string {
         const basename = path.basename(filePath);
         if (filePath.endsWith('.yml')) {
-            return `\n\n🚨 YML BLOCKED (failure #${failCount}): You MUST NOT use edit_file/multiedit for .yml files. Use write_localisation(filePath, language, entries) instead — it handles encoding, formatting, and insertion correctly.`;
+            return `\n\n🚨 YML BLOCKED (failure #${failCount}): You MUST NOT use multi_replace_file_content for .yml files. Use write_localisation(filePath, language, entries) instead — it handles encoding, formatting, and insertion correctly.`;
         }
         if (failCount >= 5) {
             return `\n\n🛑 EDIT BUDGET EXHAUSTED for ${basename} (${failCount} failures). STOP editing this file. Add \`# TODO\` comments for remaining issues and move on to other files.`;
@@ -441,206 +441,7 @@ export class FileToolHandler {
         });
     }
 
-    // ─── editFile (OpenCode-style) ───────────────────────────────────────────
 
-    async editFile(args: {
-        filePath: string;
-        oldString: string;
-        newString: string;
-        replaceAll?: boolean;
-        encoding?: string;
-    }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
-        if (!args.filePath || typeof args.filePath !== 'string') {
-            return {
-                success: false,
-                message: 'Error: missing or invalid "filePath" parameter. Must provide an absolute file path. Example: edit_file({ "filePath": "/path/to/file.txt", "oldString": "...", "newString": "..." })',
-            } as any;
-        }
-
-        return this.executeWithLock(args.filePath, async () => {
-            try {
-                args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
-            } catch (e) {
-                return { success: false, message: String(e) };
-            }
-            const filePath = args.filePath;
-            const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
-
-            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, args.oldString === '' ? null : originalContent);
-
-            let newContent: string;
-            if (args.oldString === '') {
-                newContent = args.newString;
-            } else {
-                if (args.oldString === args.newString) {
-                    return { success: false, message: 'oldString and newString are identical — no change needed' };
-                }
-                const ending = this.detectLineEnding(originalContent);
-                const old = this.convertLineEnding(this.normalizeLineEndings(args.oldString), ending);
-                const next = this.convertLineEnding(this.normalizeLineEndings(args.newString), ending);
-                try {
-                    newContent = this.replace(originalContent, old, next, args.replaceAll ?? false);
-                } catch (e) {
-                    const errMsg = String(e);
-                    const failCount = (this.editFailCount.get(filePath) || 0) + 1;
-                    this.editFailCount.set(filePath, failCount);
-                    return { success: false, message: errMsg + this.buildEditEscalationHint(filePath, failCount) };
-                }
-            }
-
-            const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
-
-            const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !vfsOverlay) {
-                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `edit_${Date.now()}`);
-                if (!confirmed) {
-                    return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
-                }
-            } else if (this.ctx.onAutoWritten && !vfsOverlay) {
-                this.ctx.onAutoWritten(filePath, false);
-            }
-
-            try {
-                this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
-            } catch (e) {
-                return { success: false, message: `Write failed: ${String(e)}` };
-            }
-            // Reset failure counter on successful edit
-            this.editFailCount.delete(filePath);
-
-            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
-            const editedLines = new Set<number>();
-            const newLines = args.newString.split('\n');
-            const newContentLines = newContent.split('\n');
-            for (let li = 0; li < newContentLines.length; li++) {
-                if (newLines.some(nl => {
-                    const trimmed = nl.trim();
-                    return trimmed.length > 8 && newContentLines[li]!.includes(trimmed);
-                })) {
-                    for (let r = -10; r <= 10; r++) {
-                        const idx = li + r;
-                        if (idx >= 0 && idx < newContentLines.length) editedLines.add(idx);
-                    }
-                }
-            }
-            const nearbyDiags = editedLines.size > 0
-                ? diagnostics.filter(d => editedLines.has(d.line))
-                : diagnostics;
-            let message = `File updated: ${path.basename(filePath)}`;
-            const errors = nearbyDiags.filter(d => d.severity === 'error');
-            if (errors.length > 0) {
-                message += `\n\nLSP detected ${errors.length} error(s) — please fix:\n` +
-                    errors.slice(0, 5).map(e => `  Line ${e.line + 1}: ${e.message}`).join('\n');
-            }
-            return {
-                success: true, message, diff, diagnostics: nearbyDiags,
-                ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
-            } as any;
-        });
-    }
-
-    // ─── replaceLines (line-range-based replacement) ─────────────────────────
-
-    async replaceLines(args: import('../types').ReplaceLinesArgs, context?: import('../types').AgentToolContext): Promise<import('../types').ReplaceLinesResult> {
-        if (!args.filePath || typeof args.filePath !== 'string') {
-            return { success: false, message: 'Error: missing or invalid "filePath" parameter.' };
-        }
-        if (typeof args.startLine !== 'number' || typeof args.endLine !== 'number') {
-            return { success: false, message: 'Error: startLine and endLine must be numbers (1-based).' };
-        }
-        if (args.startLine < 1 || args.endLine < args.startLine) {
-            return { success: false, message: `Error: invalid line range [${args.startLine}, ${args.endLine}]. startLine must be ≥ 1 and endLine ≥ startLine.` };
-        }
-        if (typeof args.newContent !== 'string') {
-            return { success: false, message: 'Error: newContent must be a string.' };
-        }
-
-        return this.executeWithLock(args.filePath, async () => {
-            try {
-                args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
-            } catch (e) {
-                return { success: false, message: String(e) };
-            }
-            const filePath = args.filePath;
-            const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
-            const ending = originalContent.includes('\r\n') ? '\r\n' as const : '\n' as const;
-            // Normalize to LF for consistent line splitting — prevents \r\r\n corruption
-            const normalizedContent = originalContent.replace(/\r\n/g, '\n');
-            const lines = normalizedContent.split('\n');
-
-            // Validate line numbers against file
-            if (args.startLine > lines.length) {
-                return { success: false, message: `Error: startLine ${args.startLine} exceeds file length (${lines.length} lines).` };
-            }
-            if (args.endLine > lines.length) {
-                return { success: false, message: `Error: endLine ${args.endLine} exceeds file length (${lines.length} lines). File has ${lines.length} lines.` };
-            }
-
-            // Extract the target range (convert 1-based to 0-based)
-            const startIdx = args.startLine - 1;
-            const endIdx = args.endLine - 1;
-            const targetLines = lines.slice(startIdx, endIdx + 1);
-
-            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent);
-
-            // Build new content by replacing the line range
-            // Normalize newContent to LF too so everything is consistent
-            const newContentLines = args.newContent.replace(/\r\n/g, '\n').split('\n');
-            const before = lines.slice(0, startIdx);
-            const after = lines.slice(endIdx + 1);
-            const newLines = [...before, ...newContentLines, ...after];
-            // Join with LF, then convert back to original line ending
-            const joined = newLines.join('\n');
-            const newContent = ending === '\r\n' ? joined.replace(/\n/g, '\r\n') : joined;
-
-            if (newContent === originalContent) {
-                return { success: false, message: 'No change: the replacement content is identical to the existing content at the specified line range.' };
-            }
-
-            const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
-
-            const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !vfsOverlay) {
-                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `replace_lines_${Date.now()}`);
-                if (!confirmed) {
-                    return { success: false, message: 'User cancelled the replace_lines operation', pendingDiff: diff };
-                }
-            } else if (this.ctx.onAutoWritten && !vfsOverlay) {
-                this.ctx.onAutoWritten(filePath, false);
-            }
-
-            try {
-                this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
-            } catch (e) {
-                return { success: false, message: `Write failed: ${String(e)}` };
-            }
-
-            // Reset edit failure counter on successful line replacement
-            this.editFailCount.delete(filePath);
-
-            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
-            // Filter to nearby diagnostics (within the replaced range ± 10 lines)
-            const editedLines = new Set<number>();
-            for (let i = startIdx - 10; i <= startIdx + newContentLines.length + 10; i++) {
-                if (i >= 0 && i < newLines.length) editedLines.add(i);
-            }
-            const nearbyDiags = editedLines.size > 0
-                ? diagnostics.filter(d => editedLines.has(d.line))
-                : diagnostics;
-
-            let message = `Lines ${args.startLine}-${args.endLine} replaced in ${path.basename(filePath)} (${targetLines.length} lines → ${newContentLines.length} lines)`;
-            const errors = nearbyDiags.filter(d => d.severity === 'error');
-            if (errors.length > 0) {
-                message += `\n\nLSP detected ${errors.length} error(s) — please fix:\n` +
-                    errors.slice(0, 5).map(e => `  Line ${e.line + 1}: ${e.message}`).join('\n');
-            }
-
-            return {
-                success: true, message, diff, diagnostics: nearbyDiags,
-                ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
-            } as any;
-        });
-    }
 
     // ─── astMutate ───────────────────────────────────────────────────────────
 
@@ -763,122 +564,116 @@ export class FileToolHandler {
         });
     }
 
-    // ─── multiEdit ───────────────────────────────────────────────────────────
 
-    async multiEdit(args: {
-        filePath: string;
-        edits: Array<{ oldString: string; newString: string; replaceAll?: boolean }>;
+
+    // ─── multiReplaceFileContent ─────────────────────────────────────────────
+
+    async multiReplaceFileContent(args: {
+        TargetFile: string;
+        Instruction: string;
+        ReplacementChunks: Array<{
+            StartLine: number;
+            EndLine: number;
+            TargetContent: string;
+            ReplacementContent: string;
+        }>;
         encoding?: string;
     }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
-        if (!args.filePath || typeof args.filePath !== 'string') {
-            return {
-                success: false,
-                message: 'Error: missing or invalid "filePath" parameter. Must provide an absolute file path.',
-            } as any;
+        if (!args.TargetFile || typeof args.TargetFile !== 'string') {
+            return { success: false, message: 'Error: missing or invalid "TargetFile".' } as any;
         }
-        return this.executeWithLock(args.filePath, async () => {
+
+        return this.executeWithLock(args.TargetFile, async () => {
             try {
-                args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
+                args.TargetFile = this.resolveAndAssertInWorkspace(args.TargetFile);
             } catch (e) {
                 return { success: false, message: String(e) };
             }
-            const filePath = args.filePath;
-        const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
-        let content = originalContent;
-        (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent || null);
+            const filePath = args.TargetFile;
+            const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
+            let content = originalContent;
+            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent || null);
 
-        const ending = this.detectLineEnding(content);
-        const errors: string[] = [];
+            const ending = this.detectLineEnding(content);
+            const lines = content.split(/\r?\n/);
 
-        for (let i = 0; i < args.edits.length; i++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            const edit = args.edits[i]!;
-            if (edit.oldString === edit.newString) continue;
-            const old = this.convertLineEnding(this.normalizeLineEndings(edit.oldString), ending);
-            const next = this.convertLineEnding(this.normalizeLineEndings(edit.newString), ending);
-            try {
-                content = this.replace(content, old, next, edit.replaceAll ?? false);
-            } catch (e) {
-                // P1 Fix: fail-fast — stop on first error to avoid misleading messages
-                // from subsequent edits operating on an inconsistent intermediate state
-                errors.push(`Edit block #${i + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
-                break;
-            }
-        }
+            const errors: string[] = [];
 
-        if (errors.length > 0) {
-            const failCount = (this.editFailCount.get(filePath) || 0) + 1;
-            this.editFailCount.set(filePath, failCount);
-            let msg = `${errors.length} edit block(s) failed — file was not modified:\n${errors.join('\n')}`;
-            msg += this.buildEditEscalationHint(filePath, failCount);
-            return { success: false, message: msg };
-        }
+            // Sort chunks by StartLine descending to avoid offset issues when mutating line by line
+            const chunks = [...args.ReplacementChunks].sort((a, b) => b.StartLine - a.StartLine);
 
-        const diff = this.buildUnifiedDiff(filePath, originalContent, content);
-        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
-            const messageId = `multiedit_${crypto.randomUUID()}`;
-            const confirmed = await this.ctx.onPendingWrite(filePath, content, messageId);
-            if (!confirmed) {
-                return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
-            }
-        } else if (this.ctx.onAutoWritten) {
-            this.ctx.onAutoWritten(filePath, false);
-        }
-
-        try {
-            this.writeTextFile(filePath, content, hasBom, args.encoding, context);
-        } catch (e) {
-            return { success: false, message: `Write failed: ${String(e)}` };
-        }
-        // Reset failure counter on successful multiedit
-        this.editFailCount.delete(filePath);
-
-        const diagnostics = await this.getLspDiagnosticsForFile(filePath);
-        // P0-1 Fix: use in-memory `content` directly instead of re-reading the file
-        // (eliminates redundant I/O and TOCTOU risk — `content` is exactly what was just written)
-        // P2 Fix: stricter matching (min 8 chars) to reduce false positives
-        const editedRegionLines = new Set<number>();
-        const finalLines = content.split('\n');
-        for (const edit of args.edits) {
-            const editLines = edit.newString.split('\n');
-            for (let li = 0; li < finalLines.length; li++) {
-                if (editLines.some(el => {
-                    const trimmed = el.trim();
-                    return trimmed.length > 8 && finalLines[li]!.includes(trimmed);
-                })) {
-                    for (let r = -10; r <= 10; r++) {
-                        const idx = li + r;
-                        if (idx >= 0 && idx < finalLines.length) editedRegionLines.add(idx);
-                    }
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i]!;
+                const startIdx = chunk.StartLine - 1;
+                const endIdx = chunk.EndLine - 1;
+                
+                if (startIdx < 0 || endIdx >= lines.length || startIdx > endIdx) {
+                    errors.push(`Chunk ${i+1}: Invalid line range [${chunk.StartLine}, ${chunk.EndLine}] for file with ${lines.length} lines.`);
+                    continue;
                 }
-            }
-        }
-        let nearbyDiags = editedRegionLines.size > 0
-            ? diagnostics.filter(d => editedRegionLines.has(d.line))
-            : diagnostics;
-        
-        // Cap diagnostics output to prevent LLM doom-loop from spammy vanilla rules
-        if (nearbyDiags.length > 20) {
-             const errorDiags = nearbyDiags.filter(d => d.severity === 'error');
-             if (errorDiags.length >= 20) {
-                 nearbyDiags = errorDiags.slice(0, 20);
-             } else if (errorDiags.length > 0) {
-                 nearbyDiags = [...errorDiags, ...nearbyDiags.filter(d => d.severity !== 'error').slice(0, 20 - errorDiags.length)];
-             } else {
-                 nearbyDiags = nearbyDiags.slice(0, 20);
-             }
-        }
 
-        let message = `multiedit: ${args.edits.length} edit(s) applied to ${path.basename(filePath)}`;
-        const errorDiags = nearbyDiags.filter(d => d.severity === 'error');
-        if (errorDiags.length > 0) {
-            message += `\n\nLSP detected ${errorDiags.length} error(s):\n` +
-                errorDiags.slice(0, 5).map(e => `  Line ${e.line + 1}: ${e.message}`).join('\n');
-        }
-        return {
-            success: true, message, diff, diagnostics: nearbyDiags,
-            ...(diagnostics.length > nearbyDiags.length ? { totalDiagnostics: diagnostics.length } : {}),
-        } as any;
+                // Get target section
+                const section = lines.slice(startIdx, endIdx + 1).join('\n');
+                
+                // Process strings for replacement
+                const oldText = this.convertLineEnding(this.normalizeLineEndings(chunk.TargetContent), '\n');
+                const nextText = this.convertLineEnding(this.normalizeLineEndings(chunk.ReplacementContent), '\n');
+                
+                if (oldText === nextText) {
+                    // No change
+                    continue;
+                }
+
+                if (!section.includes(oldText)) {
+                    errors.push(`Chunk ${i+1}: TargetContent not found in the specified line range [${chunk.StartLine}, ${chunk.EndLine}]. Check your string matching.`);
+                    continue;
+                }
+                
+                const newSection = section.replace(oldText, nextText);
+                const newSectionLines = newSection.split('\n');
+                
+                // Replace lines in array
+                lines.splice(startIdx, endIdx - startIdx + 1, ...newSectionLines);
+            }
+
+            if (errors.length > 0) {
+                const failCount = (this.editFailCount.get(filePath) || 0) + 1;
+                this.editFailCount.set(filePath, failCount);
+                return { success: false, message: `Multi-replace failed with ${errors.length} error(s):\\n- ${errors.join('\\n- ')}` + this.buildEditEscalationHint(filePath, failCount) } as any;
+            }
+
+            content = lines.join(ending);
+            const diff = this.buildUnifiedDiff(filePath, originalContent, content);
+
+            const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !vfsOverlay) {
+                const confirmed = await this.ctx.onPendingWrite(filePath, content, `multireplace_${Date.now()}`);
+                if (!confirmed) {
+                    return { success: false, message: 'User cancelled the multi_replace operation', pendingDiff: diff };
+                }
+            } else if (this.ctx.onAutoWritten && !vfsOverlay) {
+                this.ctx.onAutoWritten(filePath, false);
+            }
+
+            try {
+                this.writeTextFile(filePath, content, hasBom, args.encoding, context);
+            } catch (e) {
+                return { success: false, message: `Write failed: ${String(e)}` };
+            }
+
+            this.editFailCount.delete(filePath);
+            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+            
+            let message = `multi_replace_file_content: ${chunks.length} replacement(s) applied to ${path.basename(filePath)}`;
+            const errorsDiags = diagnostics.filter((d: any) => d.severity === 'error');
+            if (errorsDiags.length > 0) {
+                message += `\\n\\nLSP detected ${errorsDiags.length} error(s) — please fix:\\n` +
+                    errorsDiags.slice(0, 5).map((e: any) => `  Line ${e.line + 1}: ${e.message}`).join('\\n');
+            }
+
+            return {
+                success: true, message, diff, diagnostics: diagnostics,
+            } as any;
         });
     }
 

@@ -928,9 +928,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private pendingWriteResolvers = new Map<string, (confirmed: boolean) => void>();
     /** Maps messageId → temp file path used for the diff view (for cleanup) */
     private pendingDiffTempFiles = new Map<string, string>();
-    /** Auto-deny on timeout (120 s) — prevents hangs if WebView is hidden or user missed the prompt */
-    private static readonly WRITE_CONFIRM_TIMEOUT_MS = 120_000;
-
     handleAutoWritten(file: string, isNewFile: boolean) {
         this.postMessage({
             type: 'autoWriteFile',
@@ -941,19 +938,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     handlePendingWrite(file: string, newContent: string, messageId: string): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
-            // ── Timeout guard: auto-deny after 120 s ───────────────────────
-            // Prevents the agent reasoning loop from hanging indefinitely if the
-            // WebView is hidden or the user ignores the confirmation card.
-            const timeout = setTimeout(() => {
-                if (this.pendingWriteResolvers.has(messageId)) {
-                    ErrorReporter.warn(SOURCE.CHAT_PANEL, `Write confirm timeout for ${file} — auto-denying (safety default)`);
-                    void this.resolveWriteConfirmation(messageId, false);
-                }
-            }, AIChatPanelProvider.WRITE_CONFIRM_TIMEOUT_MS);
-
-            // Wrap resolver to clear timeout on response
             this.pendingWriteResolvers.set(messageId, (confirmed: boolean) => {
-                clearTimeout(timeout);
                 resolve(confirmed);
             });
 
@@ -1239,6 +1224,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.abortController = null;
         }
         this.aiService.cancel();
+
+        // 清理所有挂起的权限审批 resolver，防止孤立的 Promise 和 UI 残留卡片
+        for (const [id, resolver] of this.pendingPermissionResolvers.entries()) {
+            resolver(false);
+        }
+        this.pendingPermissionResolvers.clear();
+
+        // 清理所有挂起的文件写入确认 resolver
+        for (const [id, resolver] of this.pendingWriteResolvers.entries()) {
+            resolver(false);
+        }
+        this.pendingWriteResolvers.clear();
     }
 
     /**
@@ -1286,8 +1283,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     /**
      * Request permission from the user (for run_command tool).
-     * Shows a WebView permission card and suspends until user responds.
-     * Includes a 60-second timeout that auto-denies.
+     * Shows a WebView permission card and suspends indefinitely until user responds.
      */
     private requestPermission(
         id: string,
@@ -1301,20 +1297,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         return new Promise<boolean>((resolve) => {
-            let resolved = false;
-            // Auto-deny after 60s to prevent hangs
-            const timeout = setTimeout(() => {
-                if (!resolved && this.pendingPermissionResolvers.has(id)) {
-                    resolved = true;
-                    this.pendingPermissionResolvers.delete(id);
-                    resolve(false);
-                }
-            }, 60_000);
-
             this.pendingPermissionResolvers.set(id, (allowed: boolean) => {
-                if (resolved) return; // Guard: timeout already fired
-                resolved = true;
-                clearTimeout(timeout);
                 resolve(allowed);
             });
 

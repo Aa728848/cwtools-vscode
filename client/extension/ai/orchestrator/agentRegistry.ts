@@ -77,14 +77,14 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
     },
 
     /**
-     * 资产生成者 — 图标、音效等媒体资产生成和转换。
-     * 受限的 build 模式，仅有媒体相关工具。
+     * 资产选择者 — 从原版游戏和项目文件中搜索、选择合适的媒体资产。
+     * 受限的 build 模式，不使用生成/转换/部署工具，仅通过搜索和文件引用完成资产选择。
      */
     assetGen: {
         mode: 'build',
         maxIterations: 10,
         toolBudget: 'media_only',
-        description: '生成图标、音效等媒体资产，进行 DDS/OGG 格式转换，部署到 mod 目录。',
+        description: '从原版游戏文件和项目已有资源中搜索、选择合适的图标/音效等媒体资产，通过文件引用或复制完成资产配置。不生成新资产，不调用外部工具。',
     },
 
     /**

@@ -2216,24 +2216,93 @@ type Server(client: ILanguageClient) =
                                         m.Groups.[1].Value.Trim(), m.Groups.[2].Value.Trim() ]
                                 let varMap = (localVars @ globalVars) |> Map.ofList
                                 
+                                let rec resolveLocRefs (text: string) (depth: int) =
+                                    if depth > 3 then text
+                                    else
+                                        let pattern = System.Text.RegularExpressions.Regex(@"\$([a-zA-Z0-9_.]+)(?:\|[a-zA-Z0-9_.]+)?\$")
+                                        let matches = pattern.Matches(text)
+                                        if matches.Count = 0 then text
+                                        else
+                                            let mutable result = text
+                                            let mutable changed = false
+                                            for m in matches do
+                                                let key = m.Groups.[1].Value
+                                                match Map.tryFind key locMap with
+                                                | Some tr -> 
+                                                    let cleanTr = if tr.desc.StartsWith("\"") && tr.desc.EndsWith("\"") then tr.desc.Substring(1, tr.desc.Length - 2) else tr.desc
+                                                    result <- result.Replace(m.Value, cleanTr)
+                                                    changed <- true
+                                                | None -> ()
+                                            if changed then resolveLocRefs result (depth + 1) else result
+
                                 let formatHintLabel (desc: string) =
                                     let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
                                     let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
+                                    let clean = resolveLocRefs clean 0
                                     // Strip Paradox color codes
                                     let clean = paradoxColorPattern.Replace(clean, "")
                                     let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
                                     sprintf "💬 %s" truncated
         
+                                let fileLines = fileText.Split([|"\r\n"; "\n"|], StringSplitOptions.None)
+                                let getRealEndPos (startPos: LSP.Types.Position) (endPos: LSP.Types.Position) =
+                                    let mutable l = min endPos.line (fileLines.Length - 1)
+                                    let mutable c = endPos.character
+                                    if l >= 0 && c >= fileLines.[l].Length then
+                                        c <- fileLines.[l].Length
+                                    let mutable found = false
+                                    while l >= startPos.line && not found do
+                                        if c > 0 && not (Char.IsWhiteSpace(fileLines.[l].[c - 1])) then
+                                            found <- true
+                                        else if c > 0 then
+                                            c <- c - 1
+                                        else if l > startPos.line then
+                                            l <- l - 1
+                                            if l >= 0 then c <- fileLines.[l].Length else found <- true
+                                        else
+                                            found <- true
+                                    let fixedPos : LSP.Types.Position = { line = l; character = c }
+                                    fixedPos
+
                                 let tryAddVarHint (rawVal: string) (position: CWTools.Utilities.Position.range) =
-                                    if rawVal.StartsWith("@") && not (rawVal.StartsWith("@[")) then
+                                    if rawVal.StartsWith("@[") && rawVal.EndsWith("]") then
+                                        let expr = rawVal.Substring(2, rawVal.Length - 3)
+                                        let varPattern = System.Text.RegularExpressions.Regex(@"[a-zA-Z_][a-zA-Z0-9_]*")
+                                        let mutable finalExpr = expr
+                                        let mutable allFound = true
+                                        for m in varPattern.Matches(expr) do
+                                            let varName = m.Value
+                                            let key = if varName.StartsWith("@") then varName else "@" + varName
+                                            match Map.tryFind key varMap with
+                                            | Some v -> 
+                                                // Only replace whole word matches to prevent partial replacements
+                                                let wordPattern = System.Text.RegularExpressions.Regex(@"\b" + System.Text.RegularExpressions.Regex.Escape(varName) + @"\b")
+                                                finalExpr <- wordPattern.Replace(finalExpr, v)
+                                            | None ->
+                                                allFound <- false
+                                                
+                                        if allFound then
+                                            try
+                                                use table = new System.Data.DataTable()
+                                                let result = table.Compute(finalExpr, null)
+                                                let range = convRangeToLSPRange position
+                                                hints.Add {
+                                                    position = getRealEndPos range.start range.``end``
+                                                    label = sprintf "= %O" result
+                                                    paddingLeft = true
+                                                    paddingRight = true
+                                                }
+                                            with _ -> ()
+                                            
+                                    elif rawVal.StartsWith("@") then
                                         match Map.tryFind rawVal varMap with
                                         | Some value ->
                                             let range = convRangeToLSPRange position
                                             hints.Add {
-                                                position = range.``end``
+                                                position = getRealEndPos range.start range.``end``
                                                 label = sprintf "= %s" value
                                                 paddingLeft = true
-                                                paddingRight = false
+                                                paddingRight = true
                                             }
                                         | None -> ()
         
@@ -2244,14 +2313,12 @@ type Server(client: ILanguageClient) =
                                             // Localization hint
                                             match Map.tryFind rawVal locMap with
                                             | Some tr ->
-                                                // Wait, tr might be obj if called from here, but formatHintLabel tr.desc was previously used.
-                                                // Actually let's assume `tr.desc` resolves because it was in original code.
                                                 let range = convRangeToLSPRange l.Position
                                                 hints.Add {
-                                                    position = range.``end``
+                                                    position = getRealEndPos range.start range.``end``
                                                     label = formatHintLabel tr.desc
                                                     paddingLeft = true
-                                                    paddingRight = false
+                                                    paddingRight = true
                                                 }
                                             | None -> ()
                                             // Scripted variable hint
@@ -2264,10 +2331,10 @@ type Server(client: ILanguageClient) =
                                             | Some tr ->
                                                 let range = convRangeToLSPRange lv.Position
                                                 hints.Add {
-                                                    position = range.``end``
+                                                    position = getRealEndPos range.start range.``end``
                                                     label = formatHintLabel tr.desc
                                                     paddingLeft = true
-                                                    paddingRight = false
+                                                    paddingRight = true
                                                 }
                                             | None -> ()
                                             tryAddVarHint rawVal lv.Position

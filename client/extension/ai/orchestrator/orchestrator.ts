@@ -296,14 +296,23 @@ export class Orchestrator {
             streaming: true, // 启用流式输出，使得深思进度可视化
             topicId: orchestratorOptions.topicId,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
+            // 透传权限审批回调，使子 Agent 能向用户弹出权限卡片
+            onPermissionRequest: orchestratorOptions.onPermissionRequest,
             // 子代理跳过内置 validation loop —— Orchestrator 有独立的 QualityGate 机制，
             // 不需要子代理重复验证。同时避免推理结束后 validation loop 继续产生步骤，
             // 导致外部判断卡片已标记完成但内部仍在运行的 UI 状态不一致。
             skipValidation: true,
             // 🔴 子 Agent 禁用特定工具：
             // 1. 网络搜索容易导致无意义的重复搜索循环（doom loop）
-            // 2. 如果子任务需要网络信息，应由 Orchestrator 在分派前搜索并通过 contextFiles 注入
-            excludeTools: ['web_fetch', 'search_web', 'codesearch'],
+            // 2. run_command / mmx_* / convert_* / deploy_mod_asset 需要用户权限审批或涉及外部创建，
+            //    子 Agent 不应向用户弹出交互卡片，资产应从原版游戏文件和项目文件中选择
+            // 3. 如果子任务需要网络信息，应由 Orchestrator 在分派前搜索并通过 contextFiles 注入
+            excludeTools: [
+                'web_fetch', 'search_web', 'codesearch', 
+                'run_command', 
+                'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech', 
+                'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
+            ],
         };
 
         const writtenFiles: string[] = [];

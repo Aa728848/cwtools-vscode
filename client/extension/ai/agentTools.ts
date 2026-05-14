@@ -67,17 +67,19 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     web_fetch: 20_000,
     search_web: 20_000,
     codesearch: 20_000,
-    // Shell — 30s
-    run_command: 120_000,
-    // MiniMax CLI Media
-    mmx_generate_image: 120_000,
-    mmx_generate_video: 300_000,
-    mmx_generate_music: 300_000,
-    mmx_generate_speech: 60_000,
+    // Shell — 需要用户权限审批（无限等待），命令执行有独立的内部 timeoutMs 保护，
+    // 外层超时设为 0 = 禁用，改由 AbortSignal 负责全局中断
+    run_command: 0,
+    // MiniMax CLI Media — 同样需要权限审批，内部有独立的 spawn 超时
+    mmx_generate_image: 0,
+    mmx_generate_video: 0,
+    mmx_generate_music: 0,
+    mmx_generate_speech: 0,
     // Media Asset Conversion
     convert_image_to_dds: 60_000,
     convert_audio: 60_000,
-    deploy_mod_asset: 30_000,
+    // 媒体资产部署 — 需要权限审批，同样禁用外层超时
+    deploy_mod_asset: 0,
     // Git
     git_ops: 30_000,
     // Todo — 纯内存操作，极短超时即可
@@ -244,14 +246,18 @@ export class AgentToolExecutor {
                 abortSignal.addEventListener('abort', abortListener);
             }) : null;
 
-            const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`)), timeout)
-            );
+            // timeout === 0 表示禁用工具级超时（用于需要用户权限审批的工具），
+            // 这些工具有独立的内部超时保护，外层仅依赖 AbortSignal 中断
+            const timeoutPromise = timeout > 0
+                ? new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`)), timeout)
+                )
+                : null;
 
-            const racePromises = [
+            const racePromises: Promise<unknown>[] = [
                 this.executeInternal(toolName, args, context),
-                timeoutPromise
             ];
+            if (timeoutPromise) racePromises.push(timeoutPromise);
             if (abortPromise) racePromises.push(abortPromise);
 
             try {
@@ -796,6 +802,8 @@ export class AgentToolExecutor {
                 onStep: context?.onStep,
                 onBeforeFileWrite: runnerOpts?.onBeforeFileWrite,
                 onTodoUpdate: context?.onTodoUpdate || runnerOpts?.onTodoUpdate,
+                // 透传权限审批回调，使协调器子 Agent 的 run_command 等敏感操作能弹出审批卡片
+                onPermissionRequest: context?.onPermissionRequest || runnerOpts?.onPermissionRequest,
             };
 
             // 推送初始进度

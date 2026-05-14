@@ -224,4 +224,6 @@ export interface OrchestratorOptions {
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     /** Todo 列表更新回调 */
     onTodoUpdate?: (todos: import('../types').TodoItem[]) => void;
+    /** 权限审批回调，子 Agent 通过此回调向用户请求执行敏感操作的权限 */
+    onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
 }

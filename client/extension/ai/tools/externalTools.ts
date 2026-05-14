@@ -26,6 +26,28 @@ export class ExternalToolHandler {
 
     constructor(private ctx: ExternalToolContext) {}
 
+    // ─── 权限请求辅助：与 AbortSignal 竞争，abort 时自动 deny ────────────────
+
+    private async requestPermissionWithAbort(
+        onPermissionRequest: (id: string, tool: string, description: string, command?: string) => Promise<boolean>,
+        id: string, tool: string, description: string,
+        context?: import('../types').AgentToolContext,
+        command?: string
+    ): Promise<boolean> {
+        const abortSignal = context?.runnerOptions?.abortSignal;
+        if (abortSignal?.aborted) return false;
+        if (!abortSignal) {
+            return onPermissionRequest(id, tool, description, command);
+        }
+        const abortDeny = new Promise<boolean>((resolve) => {
+            abortSignal.addEventListener('abort', () => resolve(false), { once: true });
+        });
+        return Promise.race([
+            onPermissionRequest(id, tool, description, command),
+            abortDeny,
+        ]);
+    }
+
     // ─── todoWrite ───────────────────────────────────────────────────────────
 
     async todoWrite(args: { todos: TodoItem[] }, context?: import('../types').AgentToolContext): Promise<TodoWriteResult> {
@@ -54,10 +76,11 @@ export class ExternalToolHandler {
         }
 
         const permId = `perm_${Date.now()}`;
-        const allowed = await onPermissionRequest(
-            permId,
+        const allowed = await this.requestPermissionWithAbort(
+            onPermissionRequest, permId,
             'ignore_validation_error',
-            `AI 请求忽略（IGNORE）此 LSP 验证错误：\n\n【错误详情】：${args.errorId}\n【判断理由】：${args.reason}\n\n您是否同意将此规则永久加入本地白名单 (.cwtools-ai-memory.md) 以免除后续报错？`
+            `AI 请求忽略（IGNORE）此 LSP 验证错误：\n\n【错误详情】：${args.errorId}\n【判断理由】：${args.reason}\n\n您是否同意将此规则永久加入本地白名单 (.cwtools-ai-memory.md) 以免除后续报错？`,
+            context
         );
 
         if (!allowed) {
@@ -97,10 +120,11 @@ export class ExternalToolHandler {
         }
 
         const permId = `perm_${Date.now()}`;
-        const allowed = await onPermissionRequest(
-            permId,
+        const allowed = await this.requestPermissionWithAbort(
+            onPermissionRequest, permId,
             'remove_ignored_diagnostic',
-            `AI 建议从白名单中移除被忽略的报错关键字：\n\n【关键字】：${args.diagnosticKey}\n【判断理由】：${args.reason}\n\n您是否同意将此规则从您的 .vscode 设置中移除，恢复对此关键字的报错提示？`
+            `AI 建议从白名单中移除被忽略的报错关键字：\n\n【关键字】：${args.diagnosticKey}\n【判断理由】：${args.reason}\n\n您是否同意将此规则从您的 .vscode 设置中移除，恢复对此关键字的报错提示？`,
+            context
         );
 
         if (!allowed) {
@@ -339,11 +363,8 @@ export class ExternalToolHandler {
                 ? `⚠️ AI 申请提权越过安全沙盒执行高危操作 (${escalationReason})：${args.command}`
                 : `AI 请求执行终端命令：${args.command}`;
             
-            const allowed = await onPermissionRequest(
-                permId,
-                'run_command',
-                description,
-                args.command
+            const allowed = await this.requestPermissionWithAbort(
+                onPermissionRequest, permId, 'run_command', description, context, args.command
             );
             if (!allowed) {
                 return { stdout: '', stderr: '用户拒绝了此命令的执行权限', exitCode: 1 };
@@ -663,11 +684,10 @@ export class ExternalToolHandler {
         // Request user permission
         if (onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            const allowed = await onPermissionRequest(
-                permId,
-                toolLabel,
+            const allowed = await this.requestPermissionWithAbort(
+                onPermissionRequest, permId, toolLabel,
                 `AI 请求使用 MiniMax CLI 执行媒体生成：\n\n${command}`,
-                command
+                context, command
             );
             if (!allowed) {
                 return { success: false, stdout: '', stderr: '', message: '用户拒绝了此媒体生成请求。' };
@@ -700,6 +720,35 @@ export class ExternalToolHandler {
         } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
             return { success: false, stdout: '', stderr: errMsg, message: `MiniMax CLI execution failed: ${errMsg}` };
+        }
+    }
+
+    /** 纯净的本地命令执行器（无权限拦截、无 MMX 检查），用于安全的格式转换工具 (ImageMagick/ffmpeg) */
+    private async execLocalCommand(
+        command: string,
+        timeoutMs: number = 60000,
+        context?: import('../types').AgentToolContext
+    ): Promise<{ success: boolean; stdout: string; stderr: string; message: string }> {
+        const onStep = context?.onStep;
+        onStep?.({
+            type: 'thinking',
+            content: `[Local Convert] Executing: ${command.substring(0, 200)}...`,
+            timestamp: Date.now(),
+        });
+
+        try {
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+            const { stdout, stderr } = await execAsync(command, {
+                timeout: timeoutMs,
+                cwd: this.ctx.workspaceRoot,
+            });
+
+            return { success: true, stdout: stdout.trim(), stderr: stderr.trim(), message: 'OK' };
+        } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            return { success: false, stdout: '', stderr: errMsg, message: `Execution failed: ${errMsg}` };
         }
     }
 
@@ -864,7 +913,7 @@ export class ExternalToolHandler {
         outputDir?: string;
         compression?: 'dxt5' | 'dxt1' | 'none';
         generateMipmaps?: boolean;
-    }): Promise<{ success: boolean; message: string; outputFile?: string }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; outputFile?: string }> {
         if (!(await this.ensureImageMagickAvailable())) {
             return {
                 success: false,
@@ -910,7 +959,7 @@ export class ExternalToolHandler {
 
         const cmd = `${magickBin} convert "${args.sourcePath}" ${ddsDefines} "${outFile}"`;
 
-        const result = await this.execMmx('convert_image_to_dds', cmd, 60000);
+        const result = await this.execLocalCommand(cmd, 60000, context);
         if (!result.success) {
             return { success: false, message: `ImageMagick conversion failed: ${result.stderr || result.message}` };
         }
@@ -934,7 +983,7 @@ export class ExternalToolHandler {
         targetFormat: 'ogg' | 'wav';
         sampleRate?: number;
         channels?: number;
-    }): Promise<{ success: boolean; message: string; outputFile?: string }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; outputFile?: string }> {
         if (!(await this.ensureFfmpegAvailable())) {
             return {
                 success: false,
@@ -981,7 +1030,7 @@ export class ExternalToolHandler {
 
         cmd += ` "${outFile}"`;
 
-        const result = await this.execMmx('convert_audio', cmd, 60000);
+        const result = await this.execLocalCommand(cmd, 60000, context);
         if (!result.success) {
             return { success: false, message: `ffmpeg conversion failed: ${result.stderr || result.message}` };
         }
@@ -1024,10 +1073,10 @@ export class ExternalToolHandler {
         const onPermissionRequest = context?.onPermissionRequest;
         if (onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            const allowed = await onPermissionRequest(
-                permId,
-                'deploy_mod_asset',
+            const allowed = await this.requestPermissionWithAbort(
+                onPermissionRequest, permId, 'deploy_mod_asset',
                 `AI 请求将媒体资产部署到 Mod 工作区：\n\n【源文件】：${args.sourcePath}\n【目标位置】：${args.targetRelativePath}\n【覆盖现有】：${args.overwrite ? '是' : '否'}`,
+                context
             );
             if (!allowed) {
                 return { success: false, message: '用户拒绝了此资产部署请求。' };

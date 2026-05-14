@@ -126,7 +126,7 @@ scope boundaries. ALL scope data below is verified against CWTools .cwt rules.
 \`\`\`
 1. Entry trigger (on_action / MTTH / situation / anomaly / planet_event)
 2. Branch events (player choices create diverging paths via options)
-3. Delayed follow-ups (country_event { days = X } or planet_event { days = X })
+3. Follow-ups via on_actions (physical triggers), MTTH (probabilistic), or days = X (hard delay)
 4. Resolution event (grants rewards, clears flags/variables)
 \`\`\`
 - Use \`set_country_flag\` / \`set_global_flag\` to track chain state
@@ -192,6 +192,44 @@ scope boundaries. ALL scope data below is verified against CWTools .cwt rules.
 - \`on_arch_stage_finished\` — excavation stage done (this=fleet, from=archaeological_site)
 - \`on_arch_site_finished\` — excavation complete (this=fleet, from=archaeological_site)
 - \`on_relic_activated\` — relic activated (this=country, root=country)
+
+## Deep Coupling Subsystem Reference (Engine-First Design)
+When designing complex features spanning multiple game subsystems, think in terms of
+**engine entities, not text-only event chains**. The following layers are available for
+cross-system coupling and should be considered during blueprint planning:
+
+### Layer 1 — Spatial & Map (physical presence on the star map)
+- \`solar_system_initializers\`: Generate dedicated physical star systems
+- \`ambient_objects\` / \`dust_clouds\`: Environmental entities within systems
+- \`megastructures\`: Repairable or constructible mega-scale structures
+
+### Layer 2 — Dynamic Progression (time-spanning mechanics with player participation)
+- \`situations\`: Long-term crises/celebrations with staged progression, monthly ticks, and dedicated UI
+- \`archaeological_site_types\`: Multi-stage excavation with randomized branching
+- \`special_projects\` / \`astral_rifts\`: Tasks requiring physical ship/leader dispatch
+
+### Layer 3 — Player Agency & Economy (interactive tools for the player)
+- \`decisions\`: Planet-scoped player actions
+- \`edicts\` / \`policies\`: Empire-wide resource allocation and modifiers
+- \`relics\`: Permanent passive bonuses with activatable effects (\`active_effect\`)
+- \`buildings\` / \`pop_jobs\` / \`districts\`: Micro-economic entity rewards
+
+### Layer 4 — Listeners, Hooks & Delays (seamless event flow triggers)
+- \`on_actions\`: Native hooks (\`on_entering_system_fleet\`, \`on_planet_surveyed\`, \`on_arch_site_finished\`, etc.)
+- \`MTTH (mean_time_to_happen)\`: Probabilistic time-based triggers for organic pacing
+- \`days = X\` delays can be **combined** with the above as fallback triggers
+
+### Golden Architecture A: Immersive Exploration Loop
+\\\`\\\`\\\`
+Entry (anomaly/tech) → spawn_system (initializer) → on_entering_system_fleet (on_action)
+  → archaeological_site / special_project (progression) → relic + technology + decisions (resolution)
+\\\`\\\`\\\`
+
+### Golden Architecture B: Empire Crisis Mechanism
+\\\`\\\`\\\`
+Entry (MTTH/on_yearly_pulse/tech) → situation (staged progression with static_modifiers)
+  → edicts + decisions (player agency) → on_fail/on_success (multi-ending resolution)
+\\\`\\\`\\\`
 `;
 
 // ─── HOI4 Knowledge ──────────────────────────────────────────────────────────

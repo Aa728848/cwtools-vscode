@@ -993,31 +993,8 @@ export class AgentRunner {
         }
     }
 
-    /**
-     * 子 Agent 执行入口 — 供 Orchestrator 调度使用。
-     *
-     * 与 run() 的区别：
-     * 1. 不需要对话历史（子 Agent 从空上下文开始）
-     * 2. 不需要图片/视觉输入
-     * 3. 使用 buildSlimSystemPromptForMode（更轻量的系统提示词）
-     * 4. 返回 GenerationResult，由 Orchestrator 转换为 SubAgentResult
-     *
-     * @param prompt 子任务描述
-     * @param mode Agent 模式
-     * @param options 运行选项（模型/供应商由 Orchestrator 根据角色配置传入）
-     */
-    async runAsSubAgent(
-        prompt: string,
-        mode: AgentMode,
-        options?: AgentRunnerOptions,
-    ): Promise<GenerationResult> {
-        return this.run(
-            prompt,
-            { topicId: options?.topicId },
-            [], // 空对话历史
-            { ...options, mode },
-        );
-    }
+
+
 
     /**
      * Auto-mark remaining in-progress todos as done when the run completes successfully.

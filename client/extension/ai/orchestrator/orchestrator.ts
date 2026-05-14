@@ -236,6 +236,13 @@ export class Orchestrator {
                             {
                                 ...options,
                                 mode: 'build', // 强制使用构建模式进行修复
+                                skipValidation: true, // Orchestrator 已有独立的 QualityGate，无需重复验证
+                                excludeTools: [ // 与正常子代理保持一致的安全约束
+                                    'web_fetch', 'search_web', 'codesearch',
+                                    'run_command',
+                                    'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
+                                    'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
+                                ],
                             }
                         );
 

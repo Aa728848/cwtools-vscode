@@ -106,11 +106,22 @@ You are an **execution node** in a multi-agent workflow. Your ONLY job is to pre
 3. **Follow the Orchestrator's blueprint verbatim.** Semantic or structural over-engineering beyond the task scope is strictly forbidden.
 4. If you believe additional subsystems are needed, note it in your output summary — but DO NOT create them. The Orchestrator will decide.`;
 
+const SUB_AGENT_NON_INTERACTIVE_RULE = `## 🛑 CRITICAL: Sub-Agent Non-Interactive Mode
+You are running under Orchestrator as a sub-agent. You CANNOT ask the user questions directly.
+- NEVER output \`:::question\` blocks, question cards, permission cards, or "wait for user approval" instructions.
+- If critical ambiguity prevents safe progress, STOP and return exactly:
+\`\`\`
+BLOCKED_FOR_ORCHESTRATOR:
+- <specific decision or missing information>
+\`\`\`
+- Otherwise make the most conservative assumption that fits the assigned sub-task, state that assumption briefly in your final output, and continue.
+- This rule supersedes Plan Mode clarification steps and any instruction that tells you to ask the user or wait for approval.`;
+
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
 
 function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim 
-        ? `${CODE_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}` 
+        ? `${CODE_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${INTENT_VERIFICATION_RULE}\n${BUILD_CLARIFICATION_RULE}\n${CODE_COMPLIANCE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}`;
 
     return `You are Eddy CWTool Code, an expert AI coding agent for ${gameName} PDXScript mod development.
@@ -420,7 +431,7 @@ ${gameKnowledge}`;
 
 function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim 
-        ? `${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}` 
+        ? `${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${INTENT_VERIFICATION_RULE}\n${PLAN_CLARIFICATION_RULE}\n${CODE_COMPLIANCE_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
 
     return `You are Eddy CWTool Code in **Plan Mode** — a read-only analysis and planning agent for ${gameName} PDXScript modding.
@@ -429,6 +440,11 @@ ${rules}
 <system-reminder>
 Plan mode is active. You MUST NOT generate or apply code, or use any write tools (\`write_file\`, \`multi_replace_file_content\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. This supersedes all other instructions.
 </system-reminder>
+${isSlim ? `
+<sub-agent-reminder>
+Sub-agent mode is active. Skip direct user clarification and do not wait for approval. If a design choice is genuinely blocked, return BLOCKED_FOR_ORCHESTRATOR instead of using question cards.
+</sub-agent-reminder>
+` : ''}
 
 ## Plan Mode Workflow
 
@@ -560,7 +576,7 @@ function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string, i
     // W1/W8 修复：Explore 模式是只读模式，不注入 BUILD_CLARIFICATION_RULE（包含写入验证指令）。
     // Slim 模式也不注入 BLACKBOARD_USAGE_RULE（Explore 工具集没有黑板工具）。
     const rules = isSlim
-        ? ANALYSIS_COMPLIANCE_RULE
+        ? `${ANALYSIS_COMPLIANCE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
 
     return `You are Eddy CWTool Code in **Explore Mode** — a codebase exploration agent for ${gameName} mods.
@@ -628,7 +644,7 @@ function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string, is
     // W1/W8 修复：Review 模式是只读模式，不注入 BUILD_CLARIFICATION_RULE（包含写入验证指令）。
     // Slim 模式也不注入 BLACKBOARD_USAGE_RULE（Review 工具集没有黑板工具）。
     const rules = isSlim
-        ? ANALYSIS_COMPLIANCE_RULE
+        ? `${ANALYSIS_COMPLIANCE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
 
     return `You are Eddy CWTool Code in **Review Mode** — an expert code reviewer for ${gameName} mods.
@@ -777,7 +793,7 @@ ${gameKnowledge}`;
 
 function buildLocWriterSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim 
-        ? `${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}`
+        ? `${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}`;
 
     return `You are Eddy CWTool Code in **Localisation Writer Mode** — a specialized agent for creating new ${gameName} YML localisation entries from scratch.
@@ -869,6 +885,7 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
 - Use \`query_blackboard\` to monitor agent progress and shared data.
 - Use \`set_memory\` to store coordination data (e.g., allocated event IDs, file manifests).
 - Use \`merge_results\` to combine sub-agent outputs and present a unified summary to the user.
+- If \`dispatch_agents\` returns \`clarifications\` or an agent with \`needsClarification: true\`, do NOT retry the same sub-task. Ask those questions in the main chat, wait for the user's answer, then dispatch a follow-up batch with the clarified requirements.
 
 ## Critical Rules
 1. **Never write game code directly** — always delegate to Builder or LocWriter agents
@@ -884,6 +901,7 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
    include the Anti-Overreach Discipline rule. NEVER instruct sub-agents to "design" or "architect".
    Always pass exact file paths, exact IDs, and exact scope chains. Ambiguous instructions lead to
    sub-agent over-engineering or fragmented implementations.
+8. **Clarification Handoff** — sub-agents are non-interactive. If a sub-agent reports \`BLOCKED_FOR_ORCHESTRATOR\` or \`needsClarification\`, you are responsible for presenting the question to the user in the main chat and resuming only after the user answers.
 
 ## Task Decomposition Patterns
 
@@ -1018,6 +1036,10 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         
         let finalPrompt = '';
         if (slimRules) finalPrompt += slimRules + '\n';
+        if (mode === 'build') {
+            const blueprintPrompt = this.getDesignBlueprintPrompt();
+            if (blueprintPrompt) finalPrompt += blueprintPrompt + '\n';
+        }
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
         

@@ -241,6 +241,19 @@ export class ParallelExecutor {
                     if (options.abortSignal?.aborted || result.error === 'User cancelled') {
                         node.status = 'cancelled';
                     }
+                    // 子 Agent 需要主 Agent 澄清时不要重试；重试只会再次生成同一个问题。
+                    else if (result.needsClarification) {
+                        const cancelled = this.graphEngine.markFailed(
+                            graph,
+                            node.id,
+                            result.error ?? result.clarification ?? '子任务需要主 Agent 澄清'
+                        );
+                        options.onStep?.({
+                            type: 'error',
+                            content: `节点 ${node.id} 需要主 Agent 澄清，已暂停下游节点${cancelled.length ? `: ${cancelled.join(', ')}` : ''}`,
+                            timestamp: Date.now(),
+                        });
+                    }
                     // 检查是否可重试
                     else if (node.retryCount < node.maxRetries) {
                         node.retryCount++;

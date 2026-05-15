@@ -151,6 +151,10 @@ export interface SubAgentResult {
     writtenFiles: string[];
     /** 执行步骤数 */
     stepCount: number;
+    /** 子 Agent 是否因为需要主 Agent/用户澄清而提前停止 */
+    needsClarification?: boolean;
+    /** 需要主 Agent 处理的澄清内容 */
+    clarification?: string;
 }
 
 // ─── Agent 注册表类型 ─────────────────────────────────────────────────────────

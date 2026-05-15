@@ -35,6 +35,28 @@ import { SOURCE } from '../messages';
 // AgentRunner 和 AgentToolExecutor 的类型引用（避免循环依赖，使用 import type）
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
 
+const SUB_AGENT_ABSOLUTE_TIMEOUT_MS = 20 * 60 * 1000;
+const SUB_AGENT_IDLE_WARNING_MS = 2 * 60 * 1000;
+const SUB_AGENT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const SUB_AGENT_IDLE_CHECK_MS = 30 * 1000;
+const SUB_AGENT_IDLE_NOTICE_INTERVAL_MS = 60 * 1000;
+const CLARIFICATION_PREFIX = 'BLOCKED_FOR_ORCHESTRATOR';
+
+function formatDurationMs(ms: number): string {
+    if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.round((ms % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
+}
+
+function normalizeClarificationText(text: string): string {
+    return text
+        .replace(/```[\w-]*\n?/g, '')
+        .replace(/```/g, '')
+        .trim();
+}
+
 /**
  * 协调器 — 多 Agent 团队的指挥中心。
  *
@@ -267,6 +289,22 @@ export class Orchestrator {
         return result;
     }
 
+    private extractSubAgentClarification(output: string): string | undefined {
+        const text = output.trim();
+        if (!text) return undefined;
+
+        if (text.includes(':::question')) {
+            return normalizeClarificationText(text);
+        }
+
+        const markerIndex = text.toUpperCase().indexOf(CLARIFICATION_PREFIX);
+        if (markerIndex >= 0) {
+            return normalizeClarificationText(text.slice(markerIndex + CLARIFICATION_PREFIX.length).replace(/^[:：]\s*/, ''));
+        }
+
+        return undefined;
+    }
+
     /**
      * 执行单个子 Agent。
      *
@@ -303,8 +341,7 @@ export class Orchestrator {
             streaming: true, // 启用流式输出，使得深思进度可视化
             topicId: orchestratorOptions.topicId,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
-            // 透传权限审批回调，使子 Agent 能向用户弹出权限卡片
-            onPermissionRequest: orchestratorOptions.onPermissionRequest,
+            useSlimPrompt: true,
             // 子代理跳过内置 validation loop —— Orchestrator 有独立的 QualityGate 机制，
             // 不需要子代理重复验证。同时避免推理结束后 validation loop 继续产生步骤，
             // 导致外部判断卡片已标记完成但内部仍在运行的 UI 状态不一致。
@@ -325,10 +362,15 @@ export class Orchestrator {
         const writtenFiles: string[] = [];
         const fileSnapshots = new Map<string, string | null>();
         let stepCount = 0;
+        let lastActivityAt = Date.now();
+        let lastIdleNoticeAt = 0;
 
         // 监听步骤计数和文件写入
-        const wrappedOnStep = (step: AgentStep) => {
+        const forwardStep = (step: AgentStep, marksActivity = true) => {
             stepCount++;
+            if (marksActivity) {
+                lastActivityAt = Date.now();
+            }
             step.agentId = taskNode.id; // 添加子代理 ID 标识
             // 从 tool_result 中提取写入的文件路径
             if (step.type === 'tool_result' && step.toolResult) {
@@ -339,8 +381,17 @@ export class Orchestrator {
             }
             onStep(step);
         };
+        const wrappedOnStep = (step: AgentStep) => forwardStep(step, true);
 
         runnerOptions.onStep = wrappedOnStep;
+        runnerOptions.onPermissionRequest = async (_id, tool, description) => {
+            forwardStep({
+                type: 'validation',
+                content: `子 Agent 已阻止交互式权限请求: ${tool}${description ? ` — ${description}` : ''}`,
+                timestamp: Date.now(),
+            }, false);
+            return false;
+        };
         
         // 记录文件快照
         runnerOptions.onBeforeFileWrite = (filePath, prevContent) => {
@@ -394,6 +445,7 @@ export class Orchestrator {
         }
 
         let subAgentTimeoutId: NodeJS.Timeout | undefined;
+        let subAgentIdleIntervalId: NodeJS.Timeout | undefined;
         const subAgentController = new AbortController();
         const parentAbortHandler = () => subAgentController.abort(abortSignal.reason);
         if (abortSignal.aborted) {
@@ -402,16 +454,59 @@ export class Orchestrator {
             abortSignal.addEventListener('abort', parentAbortHandler);
         }
 
+        const clearSubAgentTimers = () => {
+            if (subAgentTimeoutId) {
+                clearTimeout(subAgentTimeoutId);
+                subAgentTimeoutId = undefined;
+            }
+            if (subAgentIdleIntervalId) {
+                clearInterval(subAgentIdleIntervalId);
+                subAgentIdleIntervalId = undefined;
+            }
+        };
+
         // 设定绝对超时：20 分钟 (1,200,000 ms)
         subAgentTimeoutId = setTimeout(() => {
             const err = new Error('Sub-Agent execution absolute timeout exceeded (20 minutes).');
             err.name = 'TimeoutError';
             subAgentController.abort(err);
-        }, 20 * 60 * 1000);  // W7 修复：实际值与注释/错误消息保持一致（20 分钟）
+        }, SUB_AGENT_ABSOLUTE_TIMEOUT_MS);  // W7 修复：实际值与注释/错误消息保持一致（20 分钟）
+
+        subAgentIdleIntervalId = setInterval(() => {
+            if (subAgentController.signal.aborted) return;
+            const now = Date.now();
+            const idleMs = now - lastActivityAt;
+            if (idleMs >= SUB_AGENT_IDLE_TIMEOUT_MS) {
+                const err = new Error(`Sub-Agent idle timeout exceeded (${formatDurationMs(idleMs)} without progress).`);
+                err.name = 'TimeoutError';
+                forwardStep({
+                    type: 'error',
+                    content: `子任务 ${taskNode.id} 长时间无新输出，已自动中止以避免假死 (${formatDurationMs(idleMs)})`,
+                    timestamp: now,
+                }, false);
+                subAgentController.abort(err);
+                return;
+            }
+            if (idleMs >= SUB_AGENT_IDLE_WARNING_MS && now - lastIdleNoticeAt >= SUB_AGENT_IDLE_NOTICE_INTERVAL_MS) {
+                lastIdleNoticeAt = now;
+                forwardStep({
+                    type: 'orchestrator_progress',
+                    content: `$(warning) 子任务 ${taskNode.id} 已 ${formatDurationMs(idleMs)} 没有新输出，仍在等待模型或工具返回。`,
+                    timestamp: now,
+                }, false);
+            }
+        }, SUB_AGENT_IDLE_CHECK_MS);
 
         runnerOptions.abortSignal = subAgentController.signal;
 
         try {
+            wrappedOnStep({
+                type: 'subtask_start',
+                content: `启动 ${profile.mode} 子任务`,
+                subagentType: profile.mode,
+                timestamp: Date.now(),
+            });
+
             const result: GenerationResult = await this.agentRunner.run(
                 effectivePrompt,
                 { topicId: orchestratorOptions.topicId },
@@ -419,8 +514,41 @@ export class Orchestrator {
                 runnerOptions,
             );
             
-            if (subAgentTimeoutId) clearTimeout(subAgentTimeoutId);
+            clearSubAgentTimers();
             abortSignal.removeEventListener('abort', parentAbortHandler);
+
+            const output = result.explanation || result.code || '';
+            const clarification = this.extractSubAgentClarification(output);
+            if (clarification) {
+                _blackboard.write(
+                    `orchestrator:clarification:${taskNode.id}`,
+                    clarification.slice(0, 8000),
+                    'free_text',
+                    taskNode.id,
+                );
+                wrappedOnStep({
+                    type: 'validation',
+                    content: `子任务需要主 Agent 澄清: ${clarification.slice(0, 220)}${clarification.length > 220 ? '...' : ''}`,
+                    timestamp: Date.now(),
+                });
+                await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
+                wrappedOnStep({
+                    type: 'subtask_complete',
+                    content: '需要主 Agent 澄清',
+                    timestamp: Date.now(),
+                });
+                return {
+                    nodeId: taskNode.id,
+                    success: false,
+                    output: clarification,
+                    error: `SUB_AGENT_NEEDS_CLARIFICATION: ${clarification}`,
+                    tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: [],
+                    stepCount,
+                    needsClarification: true,
+                    clarification,
+                };
+            }
 
             // 任务结束，通知前端更新状态
             wrappedOnStep({
@@ -431,7 +559,7 @@ export class Orchestrator {
 
             // 如果执行失败，回滚文件
             if (!result.isValid || (result as any).success === false) {
-                await this.rollbackSnapshots(fileSnapshots, onStep);
+                await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
                 const actualError = result.explanation || '';
                 return {
                     nodeId: taskNode.id,
@@ -453,7 +581,7 @@ export class Orchestrator {
                 stepCount,
             };
         } catch (e) {
-            if (subAgentTimeoutId) clearTimeout(subAgentTimeoutId);
+            clearSubAgentTimers();
             abortSignal.removeEventListener('abort', parentAbortHandler);
 
             const error = e instanceof Error ? e.message : String(e);
@@ -463,7 +591,7 @@ export class Orchestrator {
                 timestamp: Date.now(),
             });
             ErrorReporter.warn(SOURCE.ORCHESTRATOR, `子 Agent ${taskNode.id} 执行异常`, e);
-            await this.rollbackSnapshots(fileSnapshots, onStep);
+            await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
             return {
                 nodeId: taskNode.id,
                 success: false,

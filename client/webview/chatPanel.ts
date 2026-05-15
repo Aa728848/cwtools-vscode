@@ -1,5 +1,5 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
-import { classifySteps, routeLiveStep, buildToolPairHtml, buildThinkingBlockHtml, buildAssistantMessageHtml, escapeHtml as mrEscapeHtml, type RendererStep, type ToolPairOptions } from './messageRenderer';
+import { routeLiveStep, buildToolPairHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 
 /** Type-safe getElementById with generic cast */
 function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -136,7 +136,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (!area) {
             area = document.createElement('div');
             area.id = 'referenceChipArea';
-            area.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 0;';
             const container = document.querySelector('.input-container');
             const inputRow = container?.querySelector('.input-row');
             if (container && inputRow) container.insertBefore(area, inputRow);
@@ -149,6 +148,22 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             return;
         }
         area.style.display = 'flex';
+        area.className = 'reference-chip-area';
+        const tokenTotal = activeContexts.reduce((sum, ctx) => sum + (ctx.tokenEstimate || 0), 0);
+        const summary = document.createElement('div');
+        summary.className = 'reference-tray-summary';
+        summary.innerHTML = `
+            <span>${svgIconNoMargin('layers')} ${activeContexts.length} 个引用</span>
+            ${tokenTotal > 0 ? `<span class="reference-token-total">~${formatNum(tokenTotal)} tok</span>` : ''}
+            <button class="reference-clear-btn" type="button">清空</button>
+        `;
+        area.appendChild(summary);
+        const clearBtn = summary.querySelector('.reference-clear-btn') as HTMLButtonElement | null;
+        clearBtn?.addEventListener('click', () => {
+            activeContexts = [];
+            renderContextTray();
+            input.focus();
+        });
         
         activeContexts.forEach(ctx => {
             const meta = CONTEXT_TYPE_META[ctx.type] || CONTEXT_TYPE_META.file;
@@ -578,13 +593,30 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             return;
         }
 
-        atPopup.innerHTML = results.map((res, index) => {
+        const groups = new Map<string, Array<{ res: MentionResult; index: number }>>();
+        results.forEach((res, index) => {
             const type = res.type || 'file';
-            const meta = CONTEXT_TYPE_META[type] || CONTEXT_TYPE_META.file;
-            return `<div class="slash-popup-item ${index === _mentionSelectedIndex ? 'selected' : ''}" data-index="${index}" tabindex="${index}">` +
-                `<span class="slash-popup-cmd">${svgIconNoMargin(meta.icon)} @${escapeHtml(res.label)}</span>` +
-                `<span class="slash-popup-desc" style="opacity:0.5;font-size:10px">${escapeHtml(res.desc)}</span>` +
-            `</div>`
+            const label = CONTEXT_TYPE_META[type]?.label || 'file';
+            const items = groups.get(label) || [];
+            items.push({ res, index });
+            groups.set(label, items);
+        });
+
+        atPopup.innerHTML = Array.from(groups.entries()).map(([groupLabel, items]) => {
+            const itemsHtml = items.map(({ res, index }) => {
+                const type = res.type || 'file';
+                const meta = CONTEXT_TYPE_META[type] || CONTEXT_TYPE_META.file;
+                const detailBits = [
+                    res.tokenEstimate ? `~${formatNum(res.tokenEstimate)} tok` : '',
+                    res.cacheStatus || '',
+                ].filter(Boolean).join(' · ');
+                return `<div class="slash-popup-item ${index === _mentionSelectedIndex ? 'selected' : ''}" data-index="${index}" tabindex="${index}">` +
+                    `<span class="slash-popup-cmd">${svgIconNoMargin(meta.icon)} @${escapeHtml(res.label)}</span>` +
+                    `<span class="slash-popup-desc">${escapeHtml(res.desc)}</span>` +
+                    (detailBits ? `<span class="slash-popup-meta">${escapeHtml(detailBits)}</span>` : '') +
+                `</div>`;
+            }).join('');
+            return `<div class="mention-group"><div class="mention-group-title">${escapeHtml(groupLabel)}</div>${itemsHtml}</div>`;
         }).join('');
 
         atPopup.querySelectorAll('.slash-popup-item').forEach(el => {
@@ -1415,14 +1447,25 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     let isUserScrolledUp = false;
+    const jumpLatestBtn = document.createElement('button');
+    jumpLatestBtn.className = 'jump-latest-btn';
+    jumpLatestBtn.type = 'button';
+    jumpLatestBtn.innerHTML = `${svgIconNoMargin('pointer')} 最新消息`;
+    jumpLatestBtn.addEventListener('click', () => {
+        scrollBottom(true);
+        jumpLatestBtn.classList.remove('show');
+    });
+    document.body.appendChild(jumpLatestBtn);
     chatArea.addEventListener('scroll', () => {
         isUserScrolledUp = chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight > 65;
+        jumpLatestBtn.classList.toggle('show', isUserScrolledUp);
     });
 
     function scrollBottom(force = false) {
         if (force || !isUserScrolledUp) {
             chatArea.scrollTop = chatArea.scrollHeight;
             isUserScrolledUp = false;
+            jumpLatestBtn.classList.remove('show');
         }
     }
 
@@ -1514,7 +1557,284 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         document_symbols: Icons.bookmark, workspace_symbols: Icons.bookmark, query_scope: Icons.telescope,
         query_types: Icons.ruler, query_rules: Icons.ruler, query_references: Icons.link, todo_write: Icons.clipboard,
     };
-    const WRITE_TOOL_NAMES = new Set(['edit_file', 'write_file', 'read_file', 'delete_file']);
+    const WRITE_TOOL_NAMES = new Set(['edit_file', 'write_file', 'multiedit', 'apply_patch', 'delete_file']);
+    const READ_TOOL_NAMES = new Set(['read_file', 'list_directory', 'glob_files', 'codesearch', 'search_mod_files', 'get_file_context', 'document_symbols', 'workspace_symbols']);
+    const VALIDATION_TOOL_NAMES = new Set(['validate_code', 'get_diagnostics']);
+    const ORCHESTRATOR_TOOL_NAMES = new Set(['dispatch_agents', 'query_blackboard', 'merge_results']);
+
+    type RunSummary = {
+        startedAt: number | null;
+        endedAt: number | null;
+        durationMs: number;
+        totalSteps: number;
+        thinkingCount: number;
+        toolCallCount: number;
+        toolResultCount: number;
+        writeCount: number;
+        readCount: number;
+        validationCount: number;
+        orchestratorCount: number;
+        errorCount: number;
+        failedToolCount: number;
+        changedFiles: string[];
+        topTools: Array<{ name: string; count: number }>;
+        latestStatus: string;
+        hasOrchestrator: boolean;
+        alerts: string[];
+        validations: string[];
+    };
+
+    function extractStepFile(step: any): string {
+        const args = step?.toolArgs || {};
+        const raw = args.filePath || args.file || args.path || args.directory || '';
+        if (!raw) return '';
+        return String(raw).split(/[\\/]/).pop() || String(raw);
+    }
+
+    function makeRunSummary(steps: any[] | undefined, fallbackContent?: string): RunSummary {
+        const all = steps || [];
+        const timestamps = all.map(s => Number(s.timestamp || 0)).filter(Boolean);
+        const startedAt = timestamps.length ? Math.min(...timestamps) : null;
+        const endedAt = timestamps.length ? Math.max(...timestamps) : null;
+        const toolCounts = new Map<string, number>();
+        const files = new Set<string>();
+        let thinkingCount = 0;
+        let toolCallCount = 0;
+        let toolResultCount = 0;
+        let writeCount = 0;
+        let readCount = 0;
+        let validationCount = 0;
+        let orchestratorCount = 0;
+        let errorCount = 0;
+        let failedToolCount = 0;
+        let latestStatus = fallbackContent?.trim() ? fallbackContent.trim() : '已完成';
+        const alerts: string[] = [];
+        const validations: string[] = [];
+
+        for (const step of all) {
+            const type = step?.type || '';
+            if (type === 'thinking' || type === 'thinking_content') thinkingCount++;
+            if (type === 'tool_call') {
+                const toolName = String(step.toolName || 'tool');
+                const file = extractStepFile(step);
+                toolCallCount++;
+                toolCounts.set(toolName, (toolCounts.get(toolName) || 0) + 1);
+                if (WRITE_TOOL_NAMES.has(toolName)) {
+                    writeCount++;
+                    if (file) files.add(file);
+                } else if (READ_TOOL_NAMES.has(toolName)) {
+                    readCount++;
+                } else if (VALIDATION_TOOL_NAMES.has(toolName)) {
+                    validationCount++;
+                } else if (ORCHESTRATOR_TOOL_NAMES.has(toolName)) {
+                    orchestratorCount++;
+                }
+                latestStatus = file ? `正在调用 ${toolName}: ${file}` : `正在调用 ${toolName}`;
+            } else if (type === 'tool_result') {
+                toolResultCount++;
+                const result = step.toolResult as any;
+                if (result?.success === false || result?.error) {
+                    failedToolCount++;
+                    const msg = String(result?.message || result?.error || `${step.toolName || '工具'} 执行失败`);
+                    alerts.push(msg);
+                }
+                latestStatus = result?.success === false || result?.error
+                    ? `${step.toolName || '工具'} 返回问题`
+                    : `${step.toolName || '工具'} 已返回`;
+            } else if (type === 'validation') {
+                validationCount++;
+                if (step.content) validations.push(String(step.content));
+            } else if (type === 'error') {
+                errorCount++;
+                if (step.content) alerts.push(String(step.content));
+            } else if (type === 'orchestrator_progress' || type === 'subtask_start' || type === 'subtask_complete') {
+                orchestratorCount++;
+            }
+            if (step?.content && ['error', 'validation', 'orchestrator_progress', 'subtask_complete'].includes(type)) {
+                latestStatus = String(step.content).replace(/\$\(([\w-]+)\)/g, '').trim() || latestStatus;
+            }
+        }
+
+        return {
+            startedAt,
+            endedAt,
+            durationMs: startedAt && endedAt ? Math.max(0, endedAt - startedAt) : 0,
+            totalSteps: all.length,
+            thinkingCount,
+            toolCallCount,
+            toolResultCount,
+            writeCount,
+            readCount,
+            validationCount,
+            orchestratorCount,
+            errorCount,
+            failedToolCount,
+            changedFiles: Array.from(files).slice(0, 8),
+            topTools: Array.from(toolCounts.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 4)
+                .map(([name, count]) => ({ name, count })),
+            latestStatus,
+            hasOrchestrator: orchestratorCount > 0 || all.some(s => !!s.agentId),
+            alerts: alerts.slice(0, 3),
+            validations: validations.slice(0, 3),
+        };
+    }
+
+    function renderRunSummaryHtml(summary: RunSummary, live = false): string {
+        const severity = summary.errorCount > 0 || summary.failedToolCount > 0 ? 'error'
+            : summary.validationCount > 0 ? 'ok'
+            : summary.hasOrchestrator ? 'orch'
+            : 'normal';
+        const title = live ? '正在执行' : severity === 'error' ? '执行完成，有问题需要查看' : '执行完成';
+        const duration = summary.durationMs > 0 ? formatDuration(summary.durationMs) : (live ? '进行中' : '短任务');
+        const fileText = summary.changedFiles.length > 0 ? summary.changedFiles.join(', ') : '无文件改动';
+        const toolText = summary.topTools.length > 0
+            ? summary.topTools.map(t => `${t.name} ${t.count}×`).join(' · ')
+            : '未调用工具';
+        const status = summary.latestStatus.length > 110 ? summary.latestStatus.slice(0, 110) + '...' : summary.latestStatus;
+        const alertHtml = summary.alerts.length > 0
+            ? `<div class="run-summary-alerts">${summary.alerts.map(a => `<div>${svgIconNoMargin('warning')} ${escapeHtml(a.length > 160 ? a.slice(0, 160) + '...' : a)}</div>`).join('')}</div>`
+            : summary.validations.length > 0
+                ? `<div class="run-summary-alerts run-summary-validations">${summary.validations.slice(0, 2).map(v => `<div>${svgIconNoMargin('check')} ${escapeHtml(v.length > 160 ? v.slice(0, 160) + '...' : v)}</div>`).join('')}</div>`
+                : '';
+        return `
+            <section class="run-summary run-summary-${severity} ${live ? 'run-summary-live' : ''}">
+                <div class="run-summary-head">
+                    <span class="run-summary-icon">${live ? svgIconNoMargin('refresh') : svgIconNoMargin(severity === 'error' ? 'warning' : severity === 'orch' ? 'bot' : 'check')}</span>
+                    <div class="run-summary-title-wrap">
+                        <div class="run-summary-title">${escapeHtml(title)}</div>
+                        <div class="run-summary-status">${escapeHtml(status)}</div>
+                    </div>
+                    <span class="run-summary-duration">${escapeHtml(duration)}</span>
+                </div>
+                <div class="run-summary-metrics">
+                    <span>${svgIconNoMargin('gear')} ${summary.toolCallCount} 工具</span>
+                    <span>${svgIconNoMargin('edit')} ${summary.writeCount} 写入</span>
+                    <span>${svgIconNoMargin('search')} ${summary.readCount} 读取</span>
+                    <span>${svgIconNoMargin('stethoscope')} ${summary.validationCount} 验证</span>
+                    ${summary.errorCount + summary.failedToolCount > 0 ? `<span class="run-summary-danger">${svgIconNoMargin('x')} ${summary.errorCount + summary.failedToolCount} 问题</span>` : ''}
+                </div>
+                <div class="run-summary-foot">
+                    <span class="run-summary-files" title="${escapeHtml(fileText)}">${escapeHtml(fileText)}</span>
+                    <span class="run-summary-tools" title="${escapeHtml(toolText)}">${escapeHtml(toolText)}</span>
+                </div>
+                ${alertHtml}
+            </section>
+        `;
+    }
+
+    function formatDuration(ms: number): string {
+        if (ms <= 0) return '0ms';
+        if (ms < 1000) return `${Math.round(ms)}ms`;
+        if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+        const minutes = Math.floor(ms / 60000);
+        const seconds = Math.round((ms % 60000) / 1000);
+        return `${minutes}m ${seconds}s`;
+    }
+
+    function buildProcessPanel(sortedSteps: any[]) {
+        const thinkingSteps = sortedSteps.filter((s: any) => s.type === 'thinking' || s.type === 'thinking_content');
+        const textDeltas = sortedSteps.filter((s: any) => s.type === 'text_delta');
+        const specialSteps = sortedSteps.filter((s: any) => !['thinking', 'thinking_content', 'tool_call', 'tool_result', 'text_delta'].includes(s.type));
+        const toolCalls = sortedSteps.filter((s: any) => s.type === 'tool_call');
+        const toolResults = sortedSteps.filter((s: any) => s.type === 'tool_result');
+        const hasFailedTool = toolResults.some((s: any) => {
+            const r = s.toolResult as any;
+            return r?.success === false || !!r?.error;
+        });
+        const hasUsefulContent = thinkingSteps.length > 0 || toolCalls.length > 0 || specialSteps.length > 0 || textDeltas.length > 0;
+        if (!hasUsefulContent) return null;
+
+        const panel = document.createElement('details');
+        panel.className = 'agent-process-panel';
+        panel.open = hasFailedTool;
+        const summary = document.createElement('summary');
+        summary.innerHTML = `
+            ${svgIconNoMargin('layers')}
+            <span class="process-title">探索过程</span>
+            <span class="process-meta">${thinkingSteps.length} 思考 · ${toolCalls.length} 工具 · ${textDeltas.length} 文本</span>
+        `;
+        panel.appendChild(summary);
+
+        const body = document.createElement('div');
+        body.className = 'process-body';
+
+        if (thinkingSteps.length > 0) {
+            let thinkText = '';
+            for (const s of thinkingSteps) {
+                if (s.type === 'thinking' && thinkText) thinkText += '\n\n---\n\n' + (s.content || '');
+                else thinkText += (s.content || '');
+            }
+            thinkText = thinkText.trim();
+            if (thinkText) {
+                const estTokens = Math.ceil(thinkText.length / 4);
+                const thinking = document.createElement('details');
+                thinking.className = 'process-section process-thinking';
+                thinking.innerHTML = `<summary>${svgIconNoMargin('messageSquare')} 思考详情 <span>~${formatNum(estTokens)} tokens</span></summary>`;
+                const thinkingBody = document.createElement('div');
+                thinkingBody.className = 'thinking-body markdown-body';
+                thinkingBody.innerHTML = renderMarkdown(thinkText);
+                thinking.appendChild(thinkingBody);
+                body.appendChild(thinking);
+            }
+        }
+
+        if (textDeltas.length > 0) {
+            const text = textDeltas.map((s: any) => s.content || '').join('').trim();
+            if (text) {
+                const textBlock = document.createElement('details');
+                textBlock.className = 'process-section process-text';
+                textBlock.innerHTML = `<summary>${svgIconNoMargin('file')} 过程文本 <span>${textDeltas.length} chunks</span></summary>`;
+                const textBody = document.createElement('div');
+                textBody.className = 'process-text-body markdown-body';
+                textBody.innerHTML = renderMarkdown(text);
+                textBlock.appendChild(textBody);
+                body.appendChild(textBlock);
+            }
+        }
+
+        if (toolCalls.length > 0) {
+            const tools = document.createElement('details');
+            tools.className = 'process-section process-tools';
+            tools.open = hasFailedTool;
+            tools.innerHTML = `<summary>${svgIconNoMargin('gear')} 工具详情 <span>${toolCalls.length} 次调用${hasFailedTool ? ' · 有失败' : ''}</span></summary>`;
+            const timelineDiv = document.createElement('div');
+            timelineDiv.className = 'tool-timeline';
+            const resultsCopy = [...toolResults];
+            toolCalls.forEach((call: any, idx: number) => {
+                const resultIdx = resultsCopy.findIndex((r: any) => r.toolName === call.toolName);
+                let result: RendererStep | undefined;
+                if (resultIdx >= 0) result = resultsCopy.splice(resultIdx, 1)[0];
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = buildToolPairHtml(call, result, {
+                    stepIndex: call.stepIndex || idx + 1,
+                    showDuration: true,
+                    showParams: true,
+                    showDiff: true,
+                });
+                if (wrapper.firstElementChild) timelineDiv.appendChild(wrapper.firstElementChild);
+            });
+            tools.appendChild(timelineDiv);
+            body.appendChild(tools);
+        }
+
+        if (specialSteps.length > 0) {
+            const special = document.createElement('div');
+            special.className = 'process-specials';
+            specialSteps.forEach((s: any) => {
+                const el = document.createElement('div');
+                const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : s.type === 'compaction' ? svgIconNoMargin('gear') : '·';
+                el.className = `special-step ${s.type}`;
+                el.innerHTML = icon + ' ' + escapeHtml(s.content || '');
+                special.appendChild(el);
+            });
+            body.appendChild(special);
+        }
+
+        panel.appendChild(body);
+        return panel;
+    }
 
     /**
      * Build ONE tool-pair <div class="tool-pair"> that shows:
@@ -1580,6 +1900,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             '<span class="msg-role">CWTools AI</span>' +
             '<span class="msg-time">' + (msgTime || '') + '</span>';
         div.appendChild(hdr);
+        if (steps && steps.length > 0) {
+            const summaryWrap = document.createElement('div');
+            summaryWrap.innerHTML = renderRunSummaryHtml(makeRunSummary(steps, content), false);
+            div.appendChild(summaryWrap.firstElementChild || summaryWrap);
+        }
 
         let hadTextDelta = false;
         const subAgentGroups = new Map<string, any[]>();
@@ -1605,141 +1930,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 }
             }
 
-            // Phase 7: Chronological rendering — steps appear in timestamp order,
-            // creating new sections when the phase transitions (thinking → tool → text → ...).
             const sorted = [...mainSteps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
-            let currentPhase: string | null = null;
-            let thinkBuf: any[] = [];
-            let textBuf: string[] = [];
-            let toolCallBuf: any[] = [];
-            let toolResultBuf: any[] = [];
-            let globalToolIdx = 0;
-
-            const phaseOf = (type: string) => {
-                if (type === 'thinking' || type === 'thinking_content') return 'thinking';
-                if (type === 'tool_call' || type === 'tool_result') return 'tool';
-                if (type === 'text_delta') return 'text';
-                return 'special';
-            };
-
-            const flushThinking = () => {
-                if (thinkBuf.length === 0) return;
-                let thinkText = '';
-                for (const s of thinkBuf) {
-                    if (s.type === 'thinking' && thinkText) thinkText += '\n\n---\n\n' + (s.content || '');
-                    else thinkText += (s.content || '');
-                }
-                thinkText = thinkText.trim();
-                if (thinkText) {
-                    const estTokens = Math.ceil(thinkText.length / 4);
-                    const det = document.createElement('details');
-                    det.className = 'thinking-block';
-                    const sum = document.createElement('summary');
-                    sum.innerHTML = '<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--vscode-charts-blue); margin-right:8px; opacity:0.8;"></span>Thinking · ' +
-                        thinkBuf.length + ' block(s) &nbsp;<span class="think-tokens">~' + formatNum(estTokens) + ' tokens</span>';
-                    det.appendChild(sum);
-                    const body = document.createElement('div');
-                    body.className = 'thinking-body markdown-body';
-                    body.innerHTML = renderMarkdown(thinkText);
-                    det.appendChild(body);
-                    div.appendChild(det);
-                }
-                thinkBuf = [];
-            };
-
-            const flushText = () => {
-                if (textBuf.length === 0) return;
-                const text = textBuf.join('').trim();
-                if (text) {
-                    const b = document.createElement('div');
-                    b.className = 'msg-bubble';
-                    b.innerHTML = renderMarkdown(text);
-                    div.appendChild(b);
-                }
-                textBuf = [];
-            };
-
-            const flushTools = () => {
-                if (toolCallBuf.length === 0) return;
-                const timelineDiv = document.createElement('div');
-                timelineDiv.className = 'tool-timeline';
-                const resultsCopy = [...toolResultBuf];
-                const toolPairs: HTMLElement[] = [];
-                for (const call of toolCallBuf) {
-                    globalToolIdx++;
-                    const resultIdx = resultsCopy.findIndex((r: any) => r.toolName === call.toolName);
-                    let result: RendererStep | undefined;
-                    if (resultIdx >= 0) {
-                        result = resultsCopy.splice(resultIdx, 1)[0];
-                    }
-                    const pairHtml = buildToolPairHtml(call, result, {
-                        stepIndex: call.stepIndex || globalToolIdx,
-                        showDuration: true,
-                        showParams: true,
-                        showDiff: true,
-                    });
-                    const wrapper = document.createElement('div');
-                    wrapper.innerHTML = pairHtml;
-                    toolPairs.push((wrapper.firstElementChild || wrapper) as HTMLElement);
-                }
-
-                const COLLAPSE_THRESHOLD = 1;
-                if (toolPairs.length > COLLAPSE_THRESHOLD) {
-                    // Show first 1 directly, collapse the rest
-                    timelineDiv.appendChild(toolPairs[0]!);
-                    const det = document.createElement('details');
-                    det.className = 'tool-collapse';
-                    const sum = document.createElement('summary');
-                    sum.textContent = `+${toolPairs.length - 1} more tool calls`;
-                    det.appendChild(sum);
-                    for (let ti = 1; ti < toolPairs.length; ti++) det.appendChild(toolPairs[ti]!);
-                    timelineDiv.appendChild(det);
-                } else {
-                    for (const tp of toolPairs) timelineDiv.appendChild(tp);
-                }
-
-                div.appendChild(timelineDiv);
-                toolCallBuf = [];
-                toolResultBuf = [];
-            };
-
-            const flushCurrent = () => {
-                if (currentPhase === 'thinking') flushThinking();
-                else if (currentPhase === 'text') flushText();
-                else if (currentPhase === 'tool') flushTools();
-            };
-
-            for (const s of sorted) {
-                const phase = phaseOf(s.type);
-
-                if (phase === 'special') {
-                    const el = document.createElement('div');
-                    const icon = s.type === 'error' ? svgIconNoMargin('x') : s.type === 'validation' ? svgIconNoMargin('check') : s.type === 'compaction' ? svgIconNoMargin('gear') : '·';
-                    el.className = 'special-step';
-                    el.innerHTML = icon + ' ' + escapeHtml(s.content || '');
-                    div.appendChild(el);
-                    continue;
-                }
-
-                // tool_result pairs with tool_call — don't change phase
-                if (s.type === 'tool_result') {
-                    toolResultBuf.push(s);
-                    continue;
-                }
-
-                // Phase transition: flush previous group
-                if (phase !== currentPhase) {
-                    flushCurrent();
-                    currentPhase = phase;
-                }
-
-                if (phase === 'thinking') thinkBuf.push(s);
-                else if (phase === 'text') { textBuf.push(s.content || ''); hadTextDelta = true; }
-                else if (phase === 'tool') toolCallBuf.push(s);
-            }
-
-            // Flush last group
-            flushCurrent();
+            const processPanel = buildProcessPanel(sorted);
+            if (processPanel) div.appendChild(processPanel);
+            hadTextDelta = sorted.some((s: any) => s.type === 'text_delta');
         }
 
         // Final text response — only render if no text_delta steps were rendered inline
@@ -1755,15 +1949,27 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         for (const [agentId, groupSteps] of subAgentGroups.entries()) {
             // 使用固定的 uniqueId 防止重渲染时丢失 active 状态
             const uniqueId = `subview-${agentId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${msgTime || 'sub'}`;
+            const agentSummary = makeRunSummary(groupSteps);
+            const agentStatusClass = agentSummary.errorCount + agentSummary.failedToolCount > 0 ? 'lane-failed' : 'lane-done';
+            const agentFiles = agentSummary.changedFiles.length > 0 ? ` · ${agentSummary.changedFiles.length} 文件` : '';
+            const agentDuration = agentSummary.durationMs > 0 ? formatDuration(agentSummary.durationMs) : '短任务';
+            const agentTopTool = agentSummary.topTools[0]?.name || '无工具';
             
             const card = document.createElement('div');
-            card.className = 'orch-lane subagent-card';
+            card.className = `orch-lane ${agentStatusClass} subagent-card`;
             card.dataset.targetId = uniqueId;
             card.innerHTML = `
                 <div class="lane-header">
                     <span class="lane-icon">${svgIconNoMargin('bot')}</span>
                     <span class="lane-role">子任务: ${escapeHtml(agentId)}</span>
                     <span class="lane-status" style="margin-left:auto;">›</span>
+                </div>
+                <div class="lane-status-text">${agentSummary.toolCallCount} 工具${agentFiles}${agentSummary.failedToolCount ? ` · ${agentSummary.failedToolCount} 失败` : ''}</div>
+                <div class="lane-meta">
+                    <span>${escapeHtml(agentDuration)}</span>
+                    <span>${escapeHtml(agentTopTool)}</span>
+                    ${agentSummary.readCount ? `<span>${agentSummary.readCount} 读取</span>` : ''}
+                    ${agentSummary.writeCount ? `<span>${agentSummary.writeCount} 写入</span>` : ''}
                 </div>
             `;
             div.appendChild(card);
@@ -1774,7 +1980,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             fullscreen.innerHTML = `
                 <div class="subagent-header">
                     <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ 返回</button>
-                    <span class="subagent-title">子代理: ${escapeHtml(agentId)}</span>
+                    <div class="subagent-title-wrap">
+                        <span class="subagent-title">子代理: ${escapeHtml(agentId)}</span>
+                        <span class="subagent-subtitle">${escapeHtml(agentSummary.latestStatus)}</span>
+                    </div>
+                    <div class="subagent-header-metrics">
+                        <span>${escapeHtml(agentDuration)}</span>
+                        <span>${agentSummary.toolCallCount} 工具</span>
+                    </div>
                 </div>
                 <div class="subagent-body"></div>
             `;
@@ -1809,6 +2022,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     // We maintain a structured state for the live (streaming) assistant message.
     interface AgentStreamState {
         livePhase: string | null;
+        liveSummary: HTMLElement | null;
+        liveProcessPanel: HTMLDetailsElement | null;
+        liveProcessBody: HTMLElement | null;
+        liveTextProcessBody: HTMLElement | null;
         liveThinkBlock: HTMLElement | null;
         liveThinkBody: HTMLElement | null;
         liveThinkSum: HTMLElement | null;
@@ -1816,11 +2033,17 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         liveTextBubble: HTMLDivElement | null;
         liveTextContent: string;
         liveThinkContent: string;
+        liveSteps: any[];
         container: HTMLElement | null;
         /** 存储 fullscreen 容器的 uniqueId，用于 subtask_complete 时查找对应卡片 */
         fullscreenId: string | null;
+        startedAt: number;
+        lastStepAt: number;
+        completedAt: number | null;
+        isComplete: boolean;
     }
     const streamStates = new Map<string, AgentStreamState>();
+    let subagentTicker: ReturnType<typeof setInterval> | null = null;
 
     function getStreamState(agentId: string | undefined): AgentStreamState {
         const key = agentId || '__main__';
@@ -1828,6 +2051,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (!state) {
             state = {
                 livePhase: null,
+                liveSummary: !agentId && currentAssistantDiv ? currentAssistantDiv.querySelector(':scope > .live-run-summary-anchor') as HTMLElement | null : null,
+                liveProcessPanel: null,
+                liveProcessBody: null,
+                liveTextProcessBody: null,
                 liveThinkBlock: null,
                 liveThinkBody: null,
                 liveThinkSum: null,
@@ -1835,8 +2062,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 liveTextBubble: null,
                 liveTextContent: '',
                 liveThinkContent: '',
+                liveSteps: [],
                 container: currentAssistantDiv,
                 fullscreenId: null,
+                startedAt: Date.now(),
+                lastStepAt: Date.now(),
+                completedAt: null,
+                isComplete: false,
             };
             if (agentId && currentAssistantDiv) {
                 const uniqueId = `live-subview-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -1851,7 +2083,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         <span class="lane-role">子任务: ${escapeHtml(agentId)}</span>
                         <span class="lane-status" style="margin-left:auto;">›</span>
                     </div>
-                    <div class="lane-status-text">正在运行...</div>
+                    <div class="lane-status-text">正在启动...</div>
+                    <div class="lane-meta lane-live-meta">
+                        <span data-lane-elapsed>0s</span>
+                        <span data-lane-tool>等待输出</span>
+                    </div>
                 `;
                 card.dataset.targetId = uniqueId;
                 currentAssistantDiv.appendChild(card);
@@ -1863,17 +2099,140 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 fullscreen.innerHTML = `
                     <div class="subagent-header">
                         <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ 返回</button>
-                        <span class="subagent-title">子代理: ${escapeHtml(agentId)}</span>
+                        <div class="subagent-title-wrap">
+                            <span class="subagent-title">子代理: ${escapeHtml(agentId)}</span>
+                            <span class="subagent-subtitle">实时过程集中显示</span>
+                        </div>
+                        <div class="subagent-header-metrics">
+                            <span>0s</span>
+                            <span>0 工具</span>
+                        </div>
                     </div>
                     <div class="subagent-body"></div>
                 `;
                 currentAssistantDiv.appendChild(fullscreen);
                 
                 state.container = fullscreen.querySelector('.subagent-body') as HTMLElement;
+                ensureSubagentTicker();
             }
             streamStates.set(key, state);
         }
         return state;
+    }
+
+    function latestToolName(steps: any[]): string {
+        for (let i = steps.length - 1; i >= 0; i--) {
+            const step = steps[i];
+            if (step?.type === 'tool_call' && step.toolName) return String(step.toolName);
+            if (step?.type === 'tool_result' && step.toolName) return String(step.toolName);
+        }
+        return '等待输出';
+    }
+
+    function updateSubagentCard(state: AgentStreamState, finalText?: string) {
+        if (!state.fullscreenId) return;
+        const card = document.querySelector(`.subagent-card[data-target-id="${state.fullscreenId}"]`) as HTMLElement | null;
+        if (!card) return;
+
+        const now = Date.now();
+        const summary = makeRunSummary(state.liveSteps, finalText);
+        const elapsedMs = (state.completedAt || now) - state.startedAt;
+        const idleMs = state.isComplete ? 0 : now - state.lastStepAt;
+        const toolName = latestToolName(state.liveSteps);
+        const isBlocked = /澄清|clarification|blocked/i.test(finalText || summary.latestStatus || '');
+        const hasProblem = isBlocked || summary.errorCount > 0 || summary.failedToolCount > 0 || /失败|错误|超时|中止|fail|error|timeout/i.test(finalText || '');
+
+        card.classList.remove('lane-running', 'lane-done', 'lane-failed', 'lane-stalled', 'lane-blocked');
+        if (!state.isComplete) {
+            card.classList.add('lane-running');
+            if (idleMs >= 2 * 60 * 1000) card.classList.add('lane-stalled');
+        } else if (isBlocked) {
+            card.classList.add('lane-blocked');
+        } else {
+            card.classList.add(hasProblem ? 'lane-failed' : 'lane-done');
+        }
+
+        const statusText = card.querySelector('.lane-status-text') as HTMLElement | null;
+        if (statusText) {
+            const livePrefix = state.isComplete
+                ? (finalText || summary.latestStatus || '完成')
+                : idleMs >= 2 * 60 * 1000
+                    ? `等待 ${formatDuration(idleMs)} · ${summary.latestStatus}`
+                    : summary.latestStatus;
+            statusText.textContent = livePrefix.length > 100 ? livePrefix.slice(0, 100) + '...' : livePrefix;
+        }
+
+        const meta = card.querySelector('.lane-live-meta') as HTMLElement | null;
+        if (meta) {
+            meta.innerHTML = `
+                <span data-lane-elapsed>${escapeHtml(formatDuration(Math.max(0, elapsedMs)))}</span>
+                <span data-lane-tool>${escapeHtml(toolName)}</span>
+                <span>${summary.toolCallCount} 工具</span>
+                ${summary.readCount ? `<span>${summary.readCount} 读取</span>` : ''}
+                ${summary.writeCount ? `<span>${summary.writeCount} 写入</span>` : ''}
+            `;
+        }
+
+        const fullscreen = document.getElementById(state.fullscreenId);
+        if (fullscreen) {
+            const subtitle = fullscreen.querySelector('.subagent-subtitle') as HTMLElement | null;
+            if (subtitle) subtitle.textContent = summary.latestStatus;
+            const metrics = fullscreen.querySelector('.subagent-header-metrics') as HTMLElement | null;
+            if (metrics) {
+                metrics.innerHTML = `
+                    <span>${escapeHtml(formatDuration(Math.max(0, elapsedMs)))}</span>
+                    <span>${summary.toolCallCount} 工具</span>
+                    <span>${summary.readCount} 读</span>
+                    <span>${summary.writeCount} 写</span>
+                `;
+            }
+        }
+    }
+
+    function ensureSubagentTicker() {
+        if (subagentTicker) return;
+        subagentTicker = setInterval(() => {
+            for (const [key, state] of streamStates.entries()) {
+                if (key !== '__main__' && !state.isComplete) updateSubagentCard(state);
+            }
+        }, 5000);
+    }
+
+    function ensureLiveProcessPanel(state: AgentStreamState) {
+        if (!state.container) return null;
+        if (!state.liveProcessPanel) {
+            state.liveProcessPanel = document.createElement('details');
+            state.liveProcessPanel.className = 'agent-process-panel live-process-panel';
+            state.liveProcessPanel.open = true;
+            const summary = document.createElement('summary');
+            summary.innerHTML = `${svgIconNoMargin('layers')} <span class="process-title">探索过程</span><span class="process-meta">实时更新</span>`;
+            state.liveProcessPanel.appendChild(summary);
+            state.liveProcessBody = document.createElement('div');
+            state.liveProcessBody.className = 'process-body';
+            state.liveProcessPanel.appendChild(state.liveProcessBody);
+            if (state.liveSummary && state.liveSummary.nextSibling) {
+                state.container.insertBefore(state.liveProcessPanel, state.liveSummary.nextSibling);
+            } else {
+                state.container.appendChild(state.liveProcessPanel);
+            }
+        }
+        const toolCount = state.liveSteps.filter(s => s.type === 'tool_call').length;
+        const thinkingCount = state.liveSteps.filter(s => s.type === 'thinking' || s.type === 'thinking_content').length;
+        const textCount = state.liveSteps.filter(s => s.type === 'text_delta').length;
+        const meta = state.liveProcessPanel.querySelector('.process-meta');
+        if (meta) meta.textContent = `${thinkingCount} 思考 · ${toolCount} 工具 · ${textCount} 文本`;
+        return state.liveProcessBody;
+    }
+
+    function ensureLiveSummary(state: AgentStreamState, step?: any) {
+        if (!state.container) return;
+        if (step) state.liveSteps.push(step);
+        if (!state.liveSummary) {
+            state.liveSummary = document.createElement('div');
+            state.liveSummary.className = 'live-run-summary-anchor';
+            state.container.prepend(state.liveSummary);
+        }
+        state.liveSummary.innerHTML = renderRunSummaryHtml(makeRunSummary(state.liveSteps), true);
     }
 
     function initLiveAssistantDiv() {
@@ -1884,6 +2243,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         hdr.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" class="ai-star"><path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/><circle fill="#e8c840" cx="13" cy="3" r="1"/></svg>' +
             '<span class="msg-role">CWTools AI</span>';
         div.appendChild(hdr);
+        const summary = document.createElement('div');
+        summary.className = 'live-run-summary-anchor';
+        summary.innerHTML = renderRunSummaryHtml(makeRunSummary([], '准备中'), true);
+        div.appendChild(summary);
 
         return div;
     }
@@ -1903,7 +2266,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             state.liveTextBubble.classList.remove('stream-cursor');
             state.liveTextBubble.innerHTML = renderMarkdown(state.liveTextContent);
         }
+        if (state.liveTextProcessBody) {
+            state.liveTextProcessBody.classList.remove('stream-cursor');
+            state.liveTextProcessBody.innerHTML = renderMarkdown(state.liveTextContent);
+        }
         state.liveTextBubble = null;
+        state.liveTextProcessBody = null;
         state.liveTextContent = '';
     }
 
@@ -1911,17 +2279,29 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (!currentAssistantDiv) return;
 
         const state = getStreamState(s.agentId);
+        ensureLiveSummary(state, s);
+        state.lastStepAt = Date.now();
+        updateSubagentCard(state);
 
         if (s.type === 'subtask_complete') {
+            state.isComplete = true;
+            state.completedAt = Date.now();
+            if (state.liveSummary) {
+                state.liveSummary.innerHTML = renderRunSummaryHtml(makeRunSummary(state.liveSteps, s.content), false);
+            }
             // 使用显式存储的 fullscreenId 查找卡片（修复：state.container 指向 .subagent-body，没有 id）
             if (state.fullscreenId) {
                 const card = document.querySelector(`.subagent-card[data-target-id="${state.fullscreenId}"]`);
                 if (card) {
                     card.classList.remove('lane-running');
+                    const blocked = /澄清|clarification|blocked/i.test(s.content || '');
+                    const failed = blocked || /fail|error|失败|错误|超时|中止/i.test(s.content || '');
+                    card.classList.add(blocked ? 'lane-blocked' : failed ? 'lane-failed' : 'lane-done');
                     const statusText = card.querySelector('.lane-status-text');
                     if (statusText) statusText.textContent = s.content || '完成';
                 }
             }
+            updateSubagentCard(state, s.content || '完成');
             // 终结所有活跃的流式状态——子Agent已完成，不会再有新步骤
             // 1. 终结 Thinking 块：停止旋转指示器
             if (state.liveThinkBlock) {
@@ -1968,16 +2348,17 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         // ── Thinking: create or reuse a thinking block at current position ──
         if (target === 'thinking') {
+            const processBody = ensureLiveProcessPanel(state);
             if (!state.liveThinkBlock) {
                 state.liveThinkBlock = document.createElement('details');
-                state.liveThinkBlock.className = 'thinking-block'; (state.liveThinkBlock as HTMLDetailsElement).open = false;
+                state.liveThinkBlock.className = 'process-section process-thinking live-thinking-block'; (state.liveThinkBlock as HTMLDetailsElement).open = false;
                 state.liveThinkSum = document.createElement('summary');
-                state.liveThinkSum.innerHTML = '<span class="think-pulse spinning"></span>Thinking...';
+                state.liveThinkSum.innerHTML = '<span class="think-pulse spinning"></span>思考详情...';
                 state.liveThinkBlock.appendChild(state.liveThinkSum);
                 state.liveThinkBody = document.createElement('div');
                 state.liveThinkBody.className = 'thinking-body markdown-body';
                 state.liveThinkBlock.appendChild(state.liveThinkBody);
-                state.container?.appendChild(state.liveThinkBlock);
+                processBody?.appendChild(state.liveThinkBlock);
             }
             if (state.liveThinkBody) {
                 if (s.type === 'thinking' && state.liveThinkContent) {
@@ -1988,7 +2369,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 state.liveThinkBody.innerHTML = renderMarkdown(state.liveThinkContent);
                 if (state.liveThinkSum) {
                     const est = Math.ceil(state.liveThinkContent.length / 4);
-                    state.liveThinkSum.innerHTML = '<span class="think-pulse spinning"></span>Thinking &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
+                    state.liveThinkSum.innerHTML = '<span class="think-pulse spinning"></span>思考详情 &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
                 }
             }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
@@ -2000,10 +2381,20 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         // ── text_delta: create or reuse a text bubble at current position ──
         if (target === 'text_bubble') {
-            const bubble = ensureLiveTextBubble(state);
-            if (bubble) {
+            const processBody = ensureLiveProcessPanel(state);
+            if (!state.liveTextProcessBody && processBody) {
+                const section = document.createElement('details');
+                section.className = 'process-section process-text live-process-text';
+                section.open = false;
+                section.innerHTML = `${'<summary>'}${svgIconNoMargin('file')} 过程文本 <span>streaming</span></summary>`;
+                state.liveTextProcessBody = document.createElement('div');
+                state.liveTextProcessBody.className = 'process-text-body markdown-body stream-cursor';
+                section.appendChild(state.liveTextProcessBody);
+                processBody.appendChild(section);
+            }
+            if (state.liveTextProcessBody) {
                 state.liveTextContent += (s.content || '');
-                bubble.innerHTML = renderMarkdown(state.liveTextContent);
+                state.liveTextProcessBody.innerHTML = renderMarkdown(state.liveTextContent);
             }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
                 showTransactionCard(s.transactionCard);
@@ -2014,10 +2405,16 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         // ── tool_call: create or reuse a tool timeline at current position ──
         if (target === 'tool_call') {
+            const processBody = ensureLiveProcessPanel(state);
             if (!state.liveToolTimeline) {
+                const toolSection = document.createElement('details');
+                toolSection.className = 'process-section process-tools live-process-tools';
+                toolSection.open = false;
+                toolSection.innerHTML = `${'<summary>'}${svgIconNoMargin('gear')} 工具详情 <span>实时调用</span></summary>`;
                 state.liveToolTimeline = document.createElement('div');
                 state.liveToolTimeline.className = 'tool-timeline';
-                state.container?.appendChild(state.liveToolTimeline);
+                toolSection.appendChild(state.liveToolTimeline);
+                processBody?.appendChild(toolSection);
             }
             const stepIdx = s.stepIndex || (state.liveToolTimeline.querySelectorAll('.tool-pair').length + 1);
             const pairDiv = document.createElement('div');
@@ -2062,8 +2459,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 state.liveToolTimeline.appendChild(pairDiv);
             }
         } else if (target === 'tool_result') {
-            // Find the most recent unresolved tool pair across ALL timelines
-            const allTimelines = currentAssistantDiv.querySelectorAll('.tool-timeline');
+            // Find the most recent unresolved tool pair within the current agent view.
+            const searchRoot = state.container || currentAssistantDiv;
+            const allTimelines = searchRoot.querySelectorAll('.tool-timeline');
             for (let i = allTimelines.length - 1; i >= 0; i--) {
                 const tl = allTimelines[i]!;
                 const pairs = Array.from(tl.querySelectorAll('.tool-pair[data-tool="' + s.toolName + '"]:not([data-resolved])'));
@@ -2085,6 +2483,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 }
             }
         } else if (target === 'special') {
+            const processBody = ensureLiveProcessPanel(state);
             const el = document.createElement('div');
             // 添加步骤类型作为额外 CSS 类名（与 finalized renderer 一致）
             el.className = `special-step ${s.type}`;
@@ -2101,7 +2500,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 return _match;
             });
             el.innerHTML = icon + ' ' + safeContent;
-            state.container?.appendChild(el);
+            processBody?.appendChild(el);
         }
         scrollBottom();
     }
@@ -3012,10 +3411,22 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 };
                 const phaseCls = p.phase === 'complete' ? 'phase-complete' : p.phase === 'failed' ? 'phase-failed' : 'phase-active';
                 const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
+                const lanes = Array.isArray(p.lanes) ? p.lanes : [];
+                const laneStats = lanes.reduce((acc: Record<string, number>, lane: any) => {
+                    const key = lane.status || 'pending';
+                    acc[key] = (acc[key] || 0) + 1;
+                    return acc;
+                }, {});
 
                 let html = `<div class="orch-header">
                     <span class="orch-phase ${phaseCls}">${phaseLabels[p.phase] || p.phase}</span>
-                    <span class="orch-progress-text">${p.done}/${p.total} 完成</span>
+                    <span class="orch-progress-text">${p.done}/${p.total} 完成 · ${pct}%</span>
+                </div>
+                <div class="orch-kpis">
+                    <span>${svgIconNoMargin('refresh')} ${laneStats.running || 0} running</span>
+                    <span>${svgIconNoMargin('check')} ${laneStats.done || 0} done</span>
+                    <span>${svgIconNoMargin('warning')} ${laneStats.failed || 0} failed</span>
+                    <span>${svgIconNoMargin('gear')} ${laneStats.pending || 0} pending</span>
                 </div>
                 <div class="orch-progress-bar">
                     <div class="orch-progress-fill" style="width:${pct}%"></div>
@@ -3026,7 +3437,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 }
 
                 // 构建 Agent Lanes（使用 SVG 图标替代 emoji）
-                if (p.lanes && p.lanes.length > 0) {
+                if (lanes.length > 0) {
                     html += '<div class="orch-lanes">';
                     const roleIcons: Record<string, string> = {
                         explorer: svgIconNoMargin('search'),
@@ -3043,13 +3454,14 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         failed: svgIconNoMargin('x'),
                         cancelled: svgIconNoMargin('eyeOff'),
                     };
-                    for (const lane of p.lanes) {
+                    for (const lane of lanes) {
                         const icon = roleIcons[lane.role] || svgIconNoMargin('bot');
                         const sIcon = statusIcons[lane.status] || svgIconNoMargin('question');
                         const durationText = lane.duration ? `${(lane.duration / 1000).toFixed(1)}s` : '';
                         const tokenText = lane.tokenUsed > 0 ? `${formatNum(lane.tokenUsed)} tok` : '';
                         const statusClass = `lane-${lane.status}`;
-                        html += `<div class="orch-lane ${statusClass}">
+                        const laneTitle = `${lane.role || 'agent'} · ${lane.status || 'pending'} · ${lane.taskNodeId || ''}`;
+                        html += `<div class="orch-lane ${statusClass}" title="${escapeHtml(laneTitle)}">
                             <div class="lane-header">
                                 <span class="lane-icon">${icon}</span>
                                 <span class="lane-role">${escapeHtml(lane.role)}</span>

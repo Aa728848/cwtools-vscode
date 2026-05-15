@@ -852,13 +852,28 @@ export class AgentToolExecutor {
 
             // 构建轻量返回结果（只含状态和文件列表，不含完整输出）
             // 减少主 Agent context 大小，缓解总结阶段 thinking 卡顿
-            const agentSummaries: Array<{ id: string; success: boolean; filesWritten: string[]; tokenUsed: number }> = [];
+            const agentSummaries: Array<{
+                id: string;
+                success: boolean;
+                filesWritten: string[];
+                tokenUsed: number;
+                error?: string;
+                needsClarification?: boolean;
+                clarification?: string;
+            }> = [];
+            const clarifications: Array<{ id: string; clarification: string }> = [];
             for (const [id, agentResult] of result.agentResults) {
+                if (agentResult.needsClarification && agentResult.clarification) {
+                    clarifications.push({ id, clarification: agentResult.clarification.slice(0, 4000) });
+                }
                 agentSummaries.push({
                     id,
                     success: agentResult.success,
                     filesWritten: agentResult.writtenFiles,
                     tokenUsed: agentResult.tokenUsage.total,
+                    error: agentResult.error ? agentResult.error.slice(0, 1000) : undefined,
+                    needsClarification: agentResult.needsClarification,
+                    clarification: agentResult.clarification ? agentResult.clarification.slice(0, 2000) : undefined,
                 });
             }
 
@@ -870,7 +885,10 @@ export class AgentToolExecutor {
                 agents: agentSummaries,
                 failedNodes: result.failedNodes,
                 cancelledNodes: result.cancelledNodes,
-                hint: 'To view the detailed output of each sub-agent, use the merge_results tool.',
+                clarifications,
+                hint: clarifications.length > 0
+                    ? 'One or more sub-agents need clarification. The main agent should ask the user in the main chat, then dispatch a follow-up batch after the user answers.'
+                    : 'To view the detailed output of each sub-agent, use the merge_results tool.',
             };
         } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);

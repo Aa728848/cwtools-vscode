@@ -341,6 +341,11 @@ export interface AgentRunnerOptions {
      */
     excludeTools?: string[];
     /**
+     * 使用面向 Orchestrator 子 Agent 的精简系统提示词。
+     * 子 Agent 不应直接向用户提问或等待用户审批，而应把阻塞点上报给主 Agent。
+     */
+    useSlimPrompt?: boolean;
+    /**
      * 是否从上一次异常退出的断点快照中恢复状态 (断点续传)
      */
     resumeFromState?: boolean;
@@ -866,6 +871,11 @@ export class AgentRunner {
                   ]
                 : effectiveUserMessage;
 
+        const providerForPrompt = options?.providerId ?? this.aiService.getConfig().provider;
+        const systemPrompt = options?.useSlimPrompt
+            ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt)
+            : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt);
+
         // Build the message array
         let messages: ChatMessage[];
         
@@ -883,7 +893,7 @@ export class AgentRunner {
                 });
             } else {
                 messages = [
-                    { role: 'system', content: this.promptBuilder.buildSystemPromptForMode(mode, this.aiService.getConfig().provider) },
+                    { role: 'system', content: systemPrompt },
                     ...this.promptBuilder.buildContextMessages(context),
                     ...compactedHistory,
                     { role: 'user', content: userContent },
@@ -891,7 +901,7 @@ export class AgentRunner {
             }
         } else {
             messages = [
-                { role: 'system', content: this.promptBuilder.buildSystemPromptForMode(mode, this.aiService.getConfig().provider) },
+                { role: 'system', content: systemPrompt },
                 ...this.promptBuilder.buildContextMessages(context),
                 ...compactedHistory,
                 { role: 'user', content: userContent },

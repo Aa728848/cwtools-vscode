@@ -492,11 +492,9 @@ body {
     grid-column: 1 / -1;
 }
 
-/* Grid layout for button groups */
+/* Layout for button groups */
 #ctx-planets, #ctx-moons, #ctx-sibling {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1px;
+    display: block;
 }
 
 #context-menu button {

@@ -52,6 +52,7 @@ export default [
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
                 }
             }),
+            copyFile('client/webview/solarSystemPreview.css', 'release/bin/client/webview/solarSystemPreview.css'),
         ],
     },
     // Chat Panel webview bundle

@@ -125,7 +125,7 @@ export class SolarSystemPanel {
                         this._messageQueue = this._messageQueue.then(() => this._handleUpdateProperty(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR updateProperty: ${e}`));
                         break;
                     case 'updateOrbit':
-                        this._messageQueue = this._messageQueue.then(() => this._handleUpdateOrbit(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR updateOrbit: ${e}`));
+                        this._messageQueue = this._messageQueue.then(() => this._handleUpdateOrbits([msg])).catch(e => SolarSystemPanel._getLog().appendLine(`ERR updateOrbit: ${e}`));
                         break;
                     case 'movePlanetOrbit':
                         this._messageQueue = this._messageQueue.then(() => this._handleMovePlanetOrbit(msg)).catch(e => SolarSystemPanel._getLog().appendLine(`ERR movePlanetOrbit: ${e}`));
@@ -560,7 +560,6 @@ export class SolarSystemPanel {
                 edit.replace(doc.uri, range, newValueStr);
                 this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
-                await doc.save();
                 found = true;
                 break;
             }
@@ -592,7 +591,6 @@ export class SolarSystemPanel {
                 edit.replace(doc.uri, range, newValueStr);
                 this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
-                await doc.save();
                 found = true;
                 break;
             }
@@ -615,7 +613,6 @@ export class SolarSystemPanel {
                 edit.insert(doc.uri, insertPos, `${property} = ${newValueStr} `);
                 this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
-                await doc.save();
             } else {
                 // Multi-line block: insert on next line
                 const indent = lineText.match(/^(\s*)/)?.[1] ?? '';
@@ -625,12 +622,14 @@ export class SolarSystemPanel {
                     '\n' + childIndent + `${property} = ${newValueStr}`);
                 this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
-                await doc.save();
             }
         }
 
         // Re-render
         await this._loadAndRender(doc);
+        if (found) {
+            await doc.save();
+        }
     }
 
     /**
@@ -663,8 +662,8 @@ export class SolarSystemPanel {
         edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), planetCode);
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
+        await doc.save();
     }
 
     /**
@@ -695,8 +694,8 @@ export class SolarSystemPanel {
         edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), starCode);
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
+        await doc.save();
     }
 
     /**
@@ -747,8 +746,8 @@ export class SolarSystemPanel {
 
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
+        await doc.save();
     }
     /**
      * Handle adding a sibling body at the same orbit as the clicked body.
@@ -785,8 +784,8 @@ export class SolarSystemPanel {
 
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
+        await doc.save();
     }
 
     /**
@@ -887,67 +886,73 @@ export class SolarSystemPanel {
 
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
+        await doc.save();
     }
 
     /**
      * Handle batch orbit update (distance + angle in a single edit).
      */
-    private async _handleUpdateOrbit(msg: {
+    private async _handleUpdateOrbits(updates: Array<{
         line: number;
-        orbitDistance: number;
-        orbitAngle: number;
-    }) {
+        orbitDistance?: number;
+        orbitAngle?: number;
+    }>) {
         if (!this._document) return;
         const doc = this._document;
 
         this._saveSnapshot(doc);
         this._lastSnapshotTime = Date.now();
 
-        const distStr = this._formatValue('orbit_distance', msg.orbitDistance, 'fixed');
-        const angleStr = this._formatValue('orbit_angle', msg.orbitAngle, 'fixed');
-
-        // Apply both replacements to the same WorkspaceEdit
         const edit = new vscode.WorkspaceEdit();
-        let foundDist = false, foundAngle = false;
+        let anyFound = false;
 
-        for (let i = msg.line - 1; i < Math.min(msg.line + 30, doc.lineCount); i++) {
-            const lineText = doc.lineAt(i).text;
+        for (const update of updates) {
+            let foundDist = false, foundAngle = false;
+            const distStr = update.orbitDistance !== undefined ? this._formatValue('orbit_distance', update.orbitDistance, 'fixed') : null;
+            const angleStr = update.orbitAngle !== undefined ? this._formatValue('orbit_angle', update.orbitAngle, 'fixed') : null;
 
-            if (!foundDist) {
-                const distPattern = /(orbit_distance\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
-                const m = distPattern.exec(lineText);
-                if (m) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    const startCol = m.index + m[1]!.length;
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), distStr);
-                    foundDist = true;
+            for (let i = update.line - 1; i < Math.min(update.line + 30, doc.lineCount); i++) {
+                const lineText = doc.lineAt(i).text;
+
+                if (!foundDist && distStr !== null) {
+                    const distPattern = /(orbit_distance\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
+                    const m = distPattern.exec(lineText);
+                    if (m) {
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                        const startCol = m.index + m[1]!.length;
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                        edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), distStr);
+                        foundDist = true;
+                        anyFound = true;
+                    }
                 }
-            }
-            if (!foundAngle) {
-                const anglePattern = /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
-                const m = anglePattern.exec(lineText);
-                if (m) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    const startCol = m.index + m[1]!.length;
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                    edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), angleStr);
-                    foundAngle = true;
+                if (!foundAngle && angleStr !== null) {
+                    const anglePattern = /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
+                    const m = anglePattern.exec(lineText);
+                    if (m) {
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                        const startCol = m.index + m[1]!.length;
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                        edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), angleStr);
+                        foundAngle = true;
+                        anyFound = true;
+                    }
                 }
-            }
 
-            if (foundDist && foundAngle) break;
-            if (lineText.trim() === '}' && i > msg.line - 1) break;
+                if ((distStr === null || foundDist) && (angleStr === null || foundAngle)) break;
+                if (lineText.trim() === '}' && i > update.line - 1) break;
+            }
         }
 
-        if (foundDist || foundAngle) {
+        if (anyFound) {
             this._skipNextReload = true;
             await vscode.workspace.applyEdit(edit);
-            await doc.save();
         }
         await this._loadAndRender(doc);
+        if (anyFound) {
+            await doc.save();
+        }
     }
 
     /**
@@ -984,9 +989,11 @@ export class SolarSystemPanel {
         if (found) {
             this._skipNextReload = true;
             await vscode.workspace.applyEdit(edit);
-            await doc.save();
         }
         await this._loadAndRender(doc);
+        if (found) {
+            await doc.save();
+        }
     }
 
     /**
@@ -1031,8 +1038,8 @@ export class SolarSystemPanel {
         edit.delete(doc.uri, new vscode.Range(new vscode.Position(startLineIdx, 0), deleteEnd));
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
+        await doc.save();
     }
 
     /**
@@ -1203,9 +1210,8 @@ export class SolarSystemPanel {
                 edit.replace(doc.uri, fullRange, newContent);
                 this._skipNextReload = true;
                 await vscode.workspace.applyEdit(edit);
-                await doc.save();
-                log.appendLine(`  RING: saved`);
                 await this._loadAndRender(doc);
+                await doc.save();
             } else {
                 log.appendLine(`  RING: could not parse change_orbit line`);
             }
@@ -1243,11 +1249,11 @@ export class SolarSystemPanel {
                     if (b.moons.length) log.appendLine(`    moons of L${b.line}: ${b.moons.map(m => `L${m.line}`).join(', ')}`);
                 }
             }
-            await this._handleUpdateOrbit({
+            await this._handleUpdateOrbits([{
                 line: msg.bodyLine,
                 orbitDistance: Math.round(msg.targetResolvedOrbit),
                 orbitAngle: Math.round(msg.targetOrbitAngle),
-            });
+            }]);
             return;
         }
 
@@ -1257,11 +1263,11 @@ export class SolarSystemPanel {
             const cumAtPos = movedBody.resolvedOrbitRadius - rawDist;
             const newDist = Math.max(0, Math.round(msg.targetResolvedOrbit - cumAtPos));
             log.appendLine(`  MOON: rawDist=${rawDist} cum=${cumAtPos} newDist=${newDist}`);
-            await this._handleUpdateOrbit({
+            await this._handleUpdateOrbits([{
                 line: msg.bodyLine,
                 orbitDistance: newDist,
                 orbitAngle: Math.round(msg.targetOrbitAngle),
-            });
+            }]);
             return;
         }
 
@@ -1273,14 +1279,23 @@ export class SolarSystemPanel {
         // True cumulative at this body's position = resolvedOrbit - rawOrbitDistance
         const rawDist = resolveValue(movedBody.orbitDistance);
         const cumAtCurrentPos = movedBody.resolvedOrbitRadius - rawDist;
-        const inPlaceNewDist = Math.max(0, Math.round(msg.targetResolvedOrbit - cumAtCurrentPos));
+        const inPlaceNewDist = Math.round(msg.targetResolvedOrbit - cumAtCurrentPos); // Allow negative
 
-        // Check if reorder is needed: use the RAW target (not the clamped value)
-        // Skip orbit_distance=0 siblings for reorder check (they follow cumulative orbit automatically)
-        const prevBody = currentIdx > 0 ? planets[currentIdx - 1] : null;
+        log.appendLine(`  PLANET: idx=${currentIdx} resolved=${movedBody.resolvedOrbitRadius} rawDist=${rawDist} cum=${cumAtCurrentPos}`);
+        log.appendLine(`  inPlaceNewDist=${inPlaceNewDist} target=${msg.targetResolvedOrbit}`);
+
+        const updates: Array<{ line: number; orbitDistance?: number; orbitAngle?: number }> = [
+            {
+                line: msg.bodyLine,
+                orbitDistance: inPlaceNewDist,
+                orbitAngle: Math.round(msg.targetOrbitAngle),
+            }
+        ];
+
+        // To prevent subsequent planets from shifting their absolute orbits,
+        // we adjust the immediate next sibling planet's orbit_distance in the opposite direction.
         let nextBody: CelestialBody | null = null;
         for (let ni = currentIdx + 1; ni < planets.length; ni++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             const candidate = planets[ni]!;
             const candDist = candidate.orbitDistance.type === 'fixed' ? candidate.orbitDistance.value : -1;
             if (candDist !== 0) {
@@ -1288,164 +1303,21 @@ export class SolarSystemPanel {
                 break;
             }
         }
-        const needsReorder =
-            (msg.targetResolvedOrbit < cumAtCurrentPos) ||  // target below cumulative → can't achieve with non-negative orbit_distance
-            (prevBody && msg.targetResolvedOrbit < prevBody.resolvedOrbitRadius) ||
-            (nextBody && msg.targetResolvedOrbit > nextBody.resolvedOrbitRadius);
 
-        log.appendLine(`  PLANET: idx=${currentIdx} resolved=${movedBody.resolvedOrbitRadius} rawDist=${rawDist} cum=${cumAtCurrentPos}`);
-        log.appendLine(`  inPlaceNewDist=${inPlaceNewDist} target=${msg.targetResolvedOrbit}`);
-        log.appendLine(`  prev=${prevBody?.resolvedOrbitRadius ?? 'none'} next=${nextBody?.resolvedOrbitRadius ?? 'none'}`);
-        log.appendLine(`  needsReorder=${needsReorder}`);
-
-        if (!needsReorder) {
-            // Simple in-place update
-            await this._handleUpdateOrbit({
-                line: msg.bodyLine,
-                orbitDistance: inPlaceNewDist,
-                orbitAngle: Math.round(msg.targetOrbitAngle),
+        if (nextBody && nextBody.orbitDistance.type === 'fixed') {
+            // Target absolute for next body: nextBody.resolvedOrbitRadius
+            // Its new cumulative starting point: msg.targetResolvedOrbit
+            const nextNewDist = Math.round(nextBody.resolvedOrbitRadius - msg.targetResolvedOrbit);
+            log.appendLine(`  ADJUST NEXT: line=${nextBody.line} oldDist=${nextBody.orbitDistance.value} newDist=${nextNewDist}`);
+            updates.push({
+                line: nextBody.line,
+                orbitDistance: nextNewDist,
             });
-            return;
         }
 
-        // ── Reorder needed: cut body, re-parse, find insertion, paste ────────
-        log.appendLine(`  REORDER: cutting body from lines ${msg.bodyLine}-${msg.bodyEndLine}`);
-        const lines = content.split(/\r?\n/);
-        const bodyStartIdx = msg.bodyLine - 1;
-        const bodyEndIdx = msg.bodyEndLine - 1;
-
-        // Extract and remove body block
-        const bodyBlock = lines.slice(bodyStartIdx, bodyEndIdx + 1);
-        log.appendLine(`  extracted ${bodyBlock.length} lines: "${bodyBlock[0]?.substring(0, 60)}..."`);
-        lines.splice(bodyStartIdx, bodyEndIdx - bodyStartIdx + 1);
-
-        // Re-parse the remaining content to get accurate cumulative orbits
-        const remainingContent = lines.join('\n');
-        const reSystems = parseSolarSystemFile(remainingContent);
-        const reSystem = reSystems.find(s => s.key === system!.key);
-        if (!reSystem) {
-            log.appendLine(`  ABORT: reSystem not found! systems: ${reSystems.map(s => s.key).join(', ')}`);
-            return;
-        }
-
-        const rePlanets = reSystem.bodies.filter(b => b.bodyType !== 'star');
-        log.appendLine(`  re-parsed: ${rePlanets.length} planets: ${rePlanets.map(p => `L${p.line}(r=${p.resolvedOrbitRadius})`).join(', ')}`);
-
-        // Find insertion point in the re-parsed (body-removed) data
-        // Skip ring world groups as atomic blocks
-        let insertBefore = rePlanets.length;
-        for (let i = 0; i < rePlanets.length; i++) {
-            // Skip hidden ring segments (they belong to the previous anchor)
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            if (rePlanets[i]!.ringSegmentHidden) continue;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            if (msg.targetResolvedOrbit <= rePlanets[i]!.resolvedOrbitRadius) {
-                insertBefore = i;
-                break;
-            }
-            // If this is a ring group anchor, skip past all its hidden segments
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            if (rePlanets[i]!.ringGroup) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                while (i + 1 < rePlanets.length && rePlanets[i + 1]!.ringSegmentHidden) {
-                    i++;
-                }
-            }
-        }
-
-        // Compute cumulative at insertion point from re-parsed data
-        // We insert AFTER the previous body (before any change_orbit blocks between bodies)
-        // so we use the previous body's end cumulative, not the target body's start cumulative.
-        let cumOrbit = 0;
-        if (insertBefore > 0) {
-            // Find the actual "previous" body (skip hidden ring segments backwards)
-            let prevIdx = insertBefore - 1;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            while (prevIdx > 0 && rePlanets[prevIdx]!.ringSegmentHidden) {
-                prevIdx--;
-            }
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            const prevPlanet = rePlanets[prevIdx]!;
-            // If previous is a ring group anchor, use the ring's orbit + its trailing changeOrbit
-            if (prevPlanet.ringGroup) {
-                // After a ring group, cumulative = ring orbit + any change_orbit after the ring
-                const lastSegIdx = insertBefore - 1;
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                const lastSeg = rePlanets[lastSegIdx]!;
-                cumOrbit = lastSeg.resolvedOrbitRadius;
-            } else {
-                cumOrbit = prevPlanet.resolvedOrbitRadius;
-            }
-        } else if (insertBefore < rePlanets.length) {
-            // Inserting before the first planet
-            // Check if there's a star body (bodyType === 'star') contributing to cumulative
-            const star = reSystem.bodies.find(b => b.bodyType === 'star');
-            if (star) {
-                cumOrbit = star.resolvedOrbitRadius;
-            }
-        }
-
-        const newOrbitDist = Math.max(0, Math.round(msg.targetResolvedOrbit - cumOrbit));
-        const newOrbitAngle = Math.round(msg.targetOrbitAngle);
-        log.appendLine(`  insertBefore=${insertBefore} cumOrbit=${cumOrbit} newOrbitDist=${newOrbitDist}`);
-
-        // Update orbit values in the body text
-        let bodyText = bodyBlock.join('\n');
-        bodyText = bodyText.replace(
-            /(orbit_distance\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/,
-            `$1${newOrbitDist}`,
-        );
-        bodyText = bodyText.replace(
-            /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/,
-            `$1${newOrbitAngle}`,
-        );
-
-        // Find insertion line in the remaining-content line array
-        // Insert AFTER the previous body (not before the target body) to avoid
-        // landing after change_orbit blocks
-        let insertLineIdx: number;
-        if (insertBefore > 0) {
-            // Find the end of the previous body (or ring group)
-            let prevIdx = insertBefore - 1;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            while (prevIdx > 0 && rePlanets[prevIdx]!.ringSegmentHidden) {
-                prevIdx--;
-            }
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            const prevPlanet = rePlanets[prevIdx]!;
-            if (prevPlanet.ringGroup) {
-                insertLineIdx = prevPlanet.ringGroup.lastEndLine;
-            } else {
-                insertLineIdx = prevPlanet.endLine;
-            }
-        } else if (rePlanets.length > 0) {
-            // Before first planet but after star
-            const star = reSystem.bodies.find(b => b.bodyType === 'star');
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            insertLineIdx = star ? star.endLine : rePlanets[0]!.line - 1;
-        } else {
-            insertLineIdx = reSystem.endLine - 1;
-        }
-        log.appendLine(`  insertLineIdx=${insertLineIdx} (0-indexed in remaining content)`);
-        log.appendLine(`  modified body: "${bodyText.substring(0, 80)}..."`);
-
-        // Insert modified body block
-        const newBodyLines = bodyText.split('\n');
-        lines.splice(insertLineIdx, 0, ...newBodyLines);
-
-        // Replace entire document
-        const newContent = lines.join('\n');
-        const fullRange = new vscode.Range(
-            new vscode.Position(0, 0),
-            doc.lineAt(doc.lineCount - 1).range.end,
-        );
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(doc.uri, fullRange, newContent);
-        this._skipNextReload = true;
-        await vscode.workspace.applyEdit(edit);
-        await doc.save();
-        log.appendLine(`  DONE: document saved`);
-        await this._loadAndRender(doc);
+        // Simple in-place update without reordering code blocks, preserving script formatting
+        // and relative cumulative chaining for subsequent planets.
+        await this._handleUpdateOrbits(updates);
     }
 
     private async _handleVscodeUndo() {
@@ -1461,8 +1333,8 @@ export class SolarSystemPanel {
         edit.replace(doc.uri, fullRange, snapshot);
         this._skipNextReload = true;
         await vscode.workspace.applyEdit(edit);
-        await doc.save();
         await this._loadAndRender(doc);
+        await doc.save();
     }
 
     // ── HTML ────────────────────────────────────────────────────────────────

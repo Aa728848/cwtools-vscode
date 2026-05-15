@@ -645,11 +645,36 @@ function drawBody(
 
     // Glow effect for stars
     if (body.bodyType === 'star' || body.planetClass.includes('_star') || body.planetClass === 'star') {
-        const sc = getStarColor(systemClass);
+        let glowColor = 'rgba(255,255,255,0.3)';
+        
+        // If it's the central star, use the system class glow
+        if (body.bodyType === 'star' && body.resolvedOrbitRadius === 0) {
+            glowColor = getStarColor(systemClass).glow;
+        } else {
+            // It's a companion star. Try to find a specific glow.
+            const scName = body.planetClass ? body.planetClass.replace(/^pc_/, 'sc_') : '';
+            if (scName && STAR_COLORS[scName]) {
+                glowColor = STAR_COLORS[scName].glow;
+            } else {
+                // Generate a glow from its fill color
+                const fillHex = color;
+                if (fillHex.startsWith('#') && fillHex.length >= 7) {
+                    const r = parseInt(fillHex.slice(1, 3), 16);
+                    const g = parseInt(fillHex.slice(3, 5), 16);
+                    const b = parseInt(fillHex.slice(5, 7), 16);
+                    glowColor = `rgba(${r},${g},${b},0.4)`;
+                } else if (fillHex.startsWith('rgba')) {
+                    glowColor = fillHex.replace(/[\d.]+\)$/, '0.4)');
+                } else if (fillHex.startsWith('rgb')) {
+                    glowColor = fillHex.replace('rgb', 'rgba').replace(')', ',0.4)');
+                }
+            }
+        }
+
         const glowRadius = screenRadius * 3 * starPulse;
         const gradient = ctx.createRadialGradient(p.x, p.y, screenRadius * 0.5, p.x, p.y, glowRadius);
-        gradient.addColorStop(0, sc.glow);
-        gradient.addColorStop(0.5, sc.glow.replace(/[\d.]+\)$/, '0.1)'));
+        gradient.addColorStop(0, glowColor);
+        gradient.addColorStop(0.5, glowColor.replace(/[\d.]+\)$/, '0.1)'));
         gradient.addColorStop(1, 'transparent');
         ctx.fillStyle = gradient;
         ctx.beginPath();
@@ -820,22 +845,8 @@ function drawBody(
 
 function getDisplaySize(body: CelestialBody): number {
     const size = Math.max(1, body.resolvedSize);
-    if (body.bodyType === 'star') {
-        return Math.max(12, Math.min(25, size * 0.7));
-    }
-    if (body.planetClass === 'pc_gas_giant') {
-        return Math.max(6, Math.min(14, size * 0.5));
-    }
-    if (body.bodyType === 'moon') {
-        return Math.max(2, Math.min(6, size * 0.4));
-    }
-    if (body.planetClass.includes('asteroid')) {
-        return Math.max(2, Math.min(4, size * 0.3));
-    }
-    if (body.planetClass.includes('ringworld')) {
-        return Math.max(5, Math.min(10, 8));
-    }
-    return Math.max(3, Math.min(10, size * 0.45));
+    // 统一缩放系数，确保相同 size 表现出完全相同的视觉大小
+    return Math.max(2, Math.min(40, size * 0.6));
 }
 
 // ─── Color Utilities ────────────────────────────────────────────────────────
@@ -2078,7 +2089,7 @@ function buildContextMenu() {
                         iconHtml = `<img src="${iconInfo.uri}" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:6px">`;
                     }
                 }
-                html += `<button data-action="${actionPrefix}" data-class="${cls}" style="display:block;width:100%;text-align:left;padding:6px 4px;background:transparent;border:none;color:inherit;cursor:pointer;">`;
+                html += `<button data-action="${actionPrefix}" data-class="${cls}">`;
                 html += `${iconHtml}<span style="vertical-align:middle;font-size:13px">${pc.name || cls}</span> <span style="color:var(--text-muted,#888);font-size:11px;vertical-align:middle;margin-left:4px">${cls}</span>`;
                 html += `</button>`;
             }

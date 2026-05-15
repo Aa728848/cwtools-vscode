@@ -257,11 +257,25 @@ function parseValueOrRange(nodes: PdxNode[], key: string): ValueOrRange {
 }
 
 /** Resolve a ValueOrRange to a single number for rendering */
-function resolveValue(v: ValueOrRange): number {
+function resolveValue(v: ValueOrRange, seed?: number): number {
     switch (v.type) {
         case 'fixed': return v.value;
-        case 'range': return (v.min + v.max) / 2;
-        case 'random': return Math.random() * 360;
+        case 'range': {
+            if (seed !== undefined) {
+                const x = Math.sin(seed * 9999) * 10000;
+                const r = Math.abs(x - Math.floor(x));
+                return v.min + (v.max - v.min) * r;
+            }
+            return (v.min + v.max) / 2;
+        }
+        case 'random': {
+            if (seed !== undefined) {
+                const x = Math.sin(seed * 9999) * 10000;
+                const r = Math.abs(x - Math.floor(x));
+                return r * 360;
+            }
+            return Math.random() * 360;
+        }
     }
 }
 
@@ -365,9 +379,7 @@ function resolveMoonsRecursive(parent: CelestialBody): void {
         moonCumulativeOrbit += parentOffset;
         const moonDist = resolveValue(moon.orbitDistance);
         moon.resolvedOrbitRadius = moonCumulativeOrbit + moonDist;
-        moon.resolvedOrbitAngle = moon.orbitAngle.type === 'random'
-            ? Math.random() * 360
-            : resolveValue(moon.orbitAngle);
+        moon.resolvedOrbitAngle = resolveValue(moon.orbitAngle, moon.line);
         moon.resolvedSize = resolveValue(moon.size);
         moon.resolvedCount = resolveCount(moon.count);
         moonCumulativeOrbit = moon.resolvedOrbitRadius;
@@ -455,9 +467,7 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
 
             // Accumulate orbit
             body.resolvedOrbitRadius = cumulativeOrbit + thisOrbitDist;
-            body.resolvedOrbitAngle = body.orbitAngle.type === 'random'
-                ? Math.random() * 360
-                : resolveValue(body.orbitAngle);
+            body.resolvedOrbitAngle = resolveValue(body.orbitAngle, body.line);
             body.resolvedSize = resolveValue(body.size);
             body.resolvedCount = resolveCount(body.count);
 
@@ -472,9 +482,7 @@ function buildSolarSystem(key: string, nodes: PdxNode[], line: number, endLine: 
             for (const sub of body.subPlanets) {
                 const subDist = resolveValue(sub.orbitDistance);
                 sub.resolvedOrbitRadius = subCumulativeOrbit + subDist;
-                sub.resolvedOrbitAngle = sub.orbitAngle.type === 'random'
-                    ? Math.random() * 360
-                    : resolveValue(sub.orbitAngle);
+                sub.resolvedOrbitAngle = resolveValue(sub.orbitAngle, sub.line);
                 sub.resolvedSize = resolveValue(sub.size);
                 sub.resolvedCount = resolveCount(sub.count);
                 subCumulativeOrbit = sub.resolvedOrbitRadius;
@@ -564,7 +572,7 @@ function groupRingWorlds(bodies: CelestialBody[], bodyChangeOrbitMap: { line: nu
         for (let j = groupStart; j < groupEnd; j++) {
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             const body = bodies[j]!;
-            const segAngle = resolveValue(body.orbitAngle);
+            const segAngle = resolveValue(body.orbitAngle, body.line);
             if (j > groupStart) {
                 runningAngle += segAngle;
             }

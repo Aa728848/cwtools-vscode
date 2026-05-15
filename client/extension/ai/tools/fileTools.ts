@@ -111,6 +111,13 @@ export class FileToolHandler {
         }
     }
 
+    private shouldBypassWriteConfirmation(args: unknown, context?: import('../types').AgentToolContext): boolean {
+        const record = (args && typeof args === 'object') ? args as Record<string, unknown> : {};
+        return record._autoApply === true
+            || context?.runnerOptions?.forceAutoApplyWrites === true
+            || context?.runnerOptions?.useSlimPrompt === true;
+    }
+
     private normalizeAgentWorkspacePath(filePath: string, context?: import('../types').AgentToolContext): string {
         const topicId = context?.runnerOptions?.topicId;
         if (!topicId) return filePath;
@@ -274,6 +281,8 @@ export class FileToolHandler {
                             hint = `🚨 YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
                         }
 
+                        hint += ' Do not conclude that a key/ID is missing from this truncated view; use grep/search_mod_files or verify_pdx_identifier for absence checks.';
+
                         return {
                             content: headContent + gapInfo + tailContent,
                             totalLines,
@@ -352,6 +361,8 @@ export class FileToolHandler {
                     gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
                     hint = `🚨 YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
                 }
+
+                hint += ' Do not conclude that a key/ID is missing from this truncated view; use grep/search_mod_files or verify_pdx_identifier for absence checks.';
 
                 return {
                     content: headContent + gapInfo + tailContent,
@@ -483,7 +494,7 @@ export class FileToolHandler {
                 const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
 
                 const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
-                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !vfsOverlay) {
+                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
                     const messageId = `write_${crypto.randomUUID()}`;
                     const confirmed = await this.ctx.onPendingWrite(args.file, args.content, messageId);
                     if (!confirmed) {
@@ -599,7 +610,7 @@ export class FileToolHandler {
         const newContent = newLines.join('\n');
         const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
 
-        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
+        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
             const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `ast_${Date.now()}`);
             if (!confirmed) {
                 return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
@@ -709,7 +720,7 @@ export class FileToolHandler {
             const diff = this.buildUnifiedDiff(filePath, originalContent, content);
 
             const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply && !vfsOverlay) {
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
                 const confirmed = await this.ctx.onPendingWrite(filePath, content, `multireplace_${Date.now()}`);
                 if (!confirmed) {
                     return { success: false, message: 'User cancelled the multi_replace operation', pendingDiff: diff };
@@ -741,6 +752,111 @@ export class FileToolHandler {
     }
 
     // ─── applyPatch ──────────────────────────────────────────────────────────
+
+    async replaceLines(args: import('../types').ReplaceLinesArgs, context?: import('../types').AgentToolContext): Promise<import('../types').ReplaceLinesResult> {
+        if (!args.filePath || typeof args.filePath !== 'string') {
+            return { success: false, message: 'Error: missing or invalid "filePath".' };
+        }
+
+        return this.executeWithLock(args.filePath, async () => {
+            try {
+                args.filePath = this.resolveAndAssertInWorkspace(args.filePath, context);
+                const ymlReject = this.rejectGenericYmlWrite('replace_lines', args.filePath);
+                if (ymlReject) return ymlReject as any;
+            } catch (e) {
+                return { success: false, message: String(e) };
+            }
+
+            const filePath = args.filePath;
+            const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
+            const lines = originalContent.split(/\r?\n/);
+            const startLine = Math.trunc(args.startLine);
+            const endLine = Math.trunc(args.endLine);
+
+            if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) {
+                return { success: false, message: 'replace_lines requires numeric startLine and endLine.' };
+            }
+            if (startLine < 1 || endLine < startLine || endLine > lines.length) {
+                return { success: false, message: `Invalid line range [${args.startLine}, ${args.endLine}] for file with ${lines.length} lines.` };
+            }
+
+            const ending = this.detectLineEnding(originalContent);
+            const currentRange = lines.slice(startLine - 1, endLine).join('\n');
+            const normalizedCurrentRange = this.convertLineEnding(this.normalizeLineEndings(currentRange), '\n');
+            const guardErrors: string[] = [];
+
+            if (typeof args.expectedContent === 'string') {
+                const expected = this.convertLineEnding(this.normalizeLineEndings(args.expectedContent), '\n');
+                if (normalizedCurrentRange !== expected) {
+                    guardErrors.push('expectedContent did not match the current line range');
+                }
+            }
+            if (typeof args.expectedHash === 'string' && args.expectedHash.trim()) {
+                const actualHash = crypto.createHash('sha256').update(normalizedCurrentRange, 'utf8').digest('hex');
+                if (actualHash.toLowerCase() !== args.expectedHash.trim().toLowerCase()) {
+                    guardErrors.push(`expectedHash did not match current line range (actual sha256: ${actualHash})`);
+                }
+            }
+            if (typeof args.expectedStartText === 'string' && args.expectedStartText.trim()) {
+                const expectedStart = this.convertLineEnding(this.normalizeLineEndings(args.expectedStartText), '\n').trimStart();
+                if (!normalizedCurrentRange.trimStart().startsWith(expectedStart)) {
+                    guardErrors.push('expectedStartText did not match the current line range');
+                }
+            }
+            if (typeof args.expectedEndText === 'string' && args.expectedEndText.trim()) {
+                const expectedEnd = this.convertLineEnding(this.normalizeLineEndings(args.expectedEndText), '\n').trimEnd();
+                if (!normalizedCurrentRange.trimEnd().endsWith(expectedEnd)) {
+                    guardErrors.push('expectedEndText did not match the current line range');
+                }
+            }
+            if (guardErrors.length > 0) {
+                const preview = normalizedCurrentRange.split('\n').slice(0, 12).join('\n');
+                return {
+                    success: false,
+                    message: `replace_lines safety check failed for ${path.basename(filePath)} lines ${startLine}-${endLine}: ${guardErrors.join('; ')}. The file may have changed since the line numbers were chosen. Re-read the current context with get_file_context/read_file, then retry with updated line numbers and expectedContent.`,
+                    currentContentPreview: preview,
+                } as any;
+            }
+
+            const replacement = this.convertLineEnding(this.normalizeLineEndings(args.newContent), '\n');
+            const replacementLines = replacement.length === 0 ? [] : replacement.split('\n');
+            lines.splice(startLine - 1, endLine - startLine + 1, ...replacementLines);
+            const newContent = lines.join(ending);
+
+            if (newContent === originalContent) {
+                return { success: true, message: `replace_lines made no changes to ${path.basename(filePath)}.` };
+            }
+
+            const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
+            const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
+                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `replace_lines_${Date.now()}`);
+                if (!confirmed) {
+                    return { success: false, message: 'User cancelled the replace_lines operation', pendingDiff: diff };
+                }
+            } else if (this.ctx.onAutoWritten && !vfsOverlay) {
+                this.ctx.onAutoWritten(filePath, false);
+            }
+
+            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent || null);
+            try {
+                this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
+            } catch (e) {
+                return { success: false, message: `Write failed: ${String(e)}` };
+            }
+
+            this.editFailCount.delete(filePath);
+            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+            let message = `replace_lines: replaced lines ${startLine}-${endLine} in ${path.basename(filePath)}`;
+            const errorsDiags = diagnostics.filter((d: any) => d.severity === 'error');
+            if (errorsDiags.length > 0) {
+                message += `\n\nLSP detected ${errorsDiags.length} error(s) - please fix:\n` +
+                    errorsDiags.slice(0, 5).map((e: any) => `  Line ${e.line + 1}: ${e.message}`).join('\n');
+            }
+
+            return { success: true, message, diff, diagnostics };
+        });
+    }
 
     async applyPatch(args: { patch: string; cwd?: string }, context?: import('../types').AgentToolContext): Promise<{
         success: boolean;
@@ -864,7 +980,7 @@ export class FileToolHandler {
         }
 
         const filesChanged: string[] = [];
-        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !(args as any)._autoApply) {
+        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
             for (const { filePath, newContent } of pendingWrites) {
                 const messageId = `patch_${crypto.randomUUID()}`;
                 const confirmed = await this.ctx.onPendingWrite(filePath, newContent, messageId);
@@ -971,14 +1087,22 @@ export class FileToolHandler {
             // P3 Fix: debounce diagnostic events — wait 300ms after last change
             // to avoid returning incomplete diagnostics from intermediate LSP states
             await new Promise<void>((resolve) => {
-                const maxTimeout = setTimeout(() => { sub.dispose(); resolve(); }, 2000);
+                let settled = false;
                 let debounce: ReturnType<typeof setTimeout> | null = null;
-                const sub = vs.languages.onDidChangeDiagnostics((e) => {
+                let sub: vs.Disposable | undefined;
+                const finish = () => {
+                    if (settled) return;
+                    settled = true;
+                    if (debounce) clearTimeout(debounce);
+                    clearTimeout(maxTimeout);
+                    sub?.dispose();
+                    resolve();
+                };
+                const maxTimeout = setTimeout(finish, 2000);
+                sub = vs.languages.onDidChangeDiagnostics((e) => {
                     if (e.uris.some(u => u.fsPath === uri.fsPath)) {
                         if (debounce) clearTimeout(debounce);
-                        debounce = setTimeout(() => {
-                            clearTimeout(maxTimeout); sub.dispose(); resolve();
-                        }, 300);
+                        debounce = setTimeout(finish, 300);
                     }
                 });
             });
@@ -1128,7 +1252,7 @@ export class FileToolHandler {
                 }
 
                 // Confirm mode
-                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !vfsOverlay) {
+                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
                     const messageId = `writeloc_${crypto.randomUUID()}`;
                     const confirmed = await this.ctx.onPendingWrite(filePath, withBom, messageId);
                     if (!confirmed) {

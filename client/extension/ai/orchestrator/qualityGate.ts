@@ -34,6 +34,30 @@ const DEFAULT_CONFIG: QualityGateConfig = {
     autoFix: true,
 };
 
+export const SPRITE_REPAIR_PROTOCOL = [
+    '## Sprite Resource Diagnostic Protocol',
+    '',
+    'When any diagnostic says `Expected value of type sprite` or a field such as `picture`, `icon`, or `spriteType` references a missing/invalid `GFX_*` value:',
+    '1. Treat it as an asset reference error, not as a generic syntax error.',
+    '2. The value for a sprite-typed field must be an existing sprite name (usually `GFX_*`), never a raw `.dds` file path.',
+    '3. Before proposing or applying a replacement, call `find_sprite_candidates` with the invalid value, the field name, and `searchContext="both"` so both project and vanilla `.gfx` sprite definitions are available.',
+    '4. Prefer a project sprite candidate first, then a semantically close vanilla candidate. For event `picture = ...`, prefer event-picture sprites such as `GFX_evt_*` or candidates whose texture path indicates event/anomaly/archaeology art; avoid UI icon textures unless the field is actually an icon field.',
+    '5. If no candidate is returned, retry with broader keywords from the surrounding content (for example anomaly, archaeology, situation, relic, event) before declaring it blocked.',
+    '6. Fix only the offending line with guarded `replace_lines` when line numbers are known, then run `get_diagnostics` on the file again.',
+].join('\n');
+
+export const SOUND_REPAIR_PROTOCOL = [
+    '## Sound Asset Diagnostic Protocol',
+    '',
+    'When any diagnostic or field involves `show_sound = ...`, `sound = ...`, missing sound references, or an expected sound/music asset:',
+    '1. Treat it as an asset lookup, not as a generic syntax error.',
+    '2. The value should be an existing sound/music asset name from `.asset` definitions, not a raw `.wav`/`.ogg` path unless the local rule explicitly expects a file path.',
+    '3. Before proposing or applying a replacement, call `find_sound_candidates` with the invalid value, the field name, and `searchContext="both"` so both project and vanilla `.asset` definitions are available.',
+    '4. Prefer a project asset candidate first, then a semantically close vanilla candidate. For `show_sound`, prefer event/UI sound effects over music tracks unless the surrounding code clearly expects music.',
+    '5. If no candidate is returned, retry with broader keywords from the surrounding content before declaring it blocked.',
+    '6. Fix only the offending line with guarded `replace_lines` when line numbers are known, then run `get_diagnostics` on the file again.',
+].join('\n');
+
 /**
  * 质量门。
  *
@@ -72,16 +96,23 @@ export class QualityGate {
             ? '1. Review the pre-fetched diagnostics above. DO NOT call `get_diagnostics` again — the diagnostics have already been fetched and are provided above. You MUST resolve ALL LSP red errors!'
             : '1. Call `get_diagnostics` for each file to check for LSP errors. You MUST resolve ALL LSP red errors!';
 
+        const hasSpriteDiagnostics = /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(preFetchedDiagnostics ?? '');
+        const hasSoundDiagnostics = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(preFetchedDiagnostics ?? '');
+        const spriteSection = hasSpriteDiagnostics ? `\n${SPRITE_REPAIR_PROTOCOL}\n` : '';
+        const soundSection = hasSoundDiagnostics ? `\n${SOUND_REPAIR_PROTOCOL}\n` : '';
+
         return [
             '## Quality Gate Review Task',
             '',
             'Please review the code quality of the following files:',
             fileList,
             diagnosticsSection,
+            spriteSection,
+            soundSection,
             'Review Checklist:',
             step1,
             '2. Check for logic conflict issues (e.g., an event has `option` but uses `hide_window = yes`, which is a contradiction). Such conflicts MUST be reported and fixed.',
-            '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys).',
+            '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys, and sprite/asset references).',
             '4. Verify the correctness of the scope chain.',
             '5. Check file structure integrity (Refer to Rule 3b).',
             '',
@@ -157,6 +188,8 @@ export class QualityGate {
      * 基于 Reviewer 的审查报告，构建修复指令。
      */
     buildFixPrompt(reviewReport: string, writtenFiles: string[]): string {
+        const hasSpriteIssues = /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(reviewReport);
+        const hasSoundIssues = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(reviewReport);
         return [
             '## Quality Gate Fix Task',
             '',
@@ -164,13 +197,17 @@ export class QualityGate {
             '',
             reviewReport,
             '',
+            ...(hasSpriteIssues ? [SPRITE_REPAIR_PROTOCOL, ''] : []),
+            ...(hasSoundIssues ? [SOUND_REPAIR_PROTOCOL, ''] : []),
             'Related Files:',
             ...writtenFiles.map(f => `- ${f}`),
             '',
             'Fix Requirements:',
             '1. Only fix the specific issues listed in the review report. You MUST fix ALL LSP red errors and logic conflicts (e.g., `hide_window = yes` used with `option`).',
             '2. Do not delete or simplify existing logic (Follow Rule 3b).',
-            '3. After fixing, call `get_diagnostics` for each modified file to verify that the errors are resolved.',
+            '3. For sprite-type diagnostics, replace invalid values only with candidates returned by `find_sprite_candidates` or another verified `.gfx` definition; never invent a `GFX_*` name.',
+            '4. For sound diagnostics, replace invalid values only with candidates returned by `find_sound_candidates` or another verified `.asset` definition; never invent a sound asset name.',
+            '5. After fixing, call `get_diagnostics` for each modified file to verify that the errors are resolved.',
         ].join('\n');
     }
 

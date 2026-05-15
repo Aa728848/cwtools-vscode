@@ -224,13 +224,28 @@ class PartitionedWriteQueue {
     private queues = new Map<string, WriteQueue>();
     private static readonly IDLE_CLEANUP_MS = 30_000;
 
-    enqueue(files: string[], fn: () => Promise<void>): Promise<void> {
+    enqueue(
+        files: string[],
+        fn: () => Promise<void>,
+        options?: { waitTimeoutMs?: number; timeoutMessage?: string }
+    ): Promise<void> {
         const sorted = [...new Set(files)].sort();
         const seq = Date.now();
+        let started = false;
+        let cancelledBeforeStart = false;
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         // Mark all involved queues as active
         for (const f of sorted) this.getQueue(f).lastUsedSeq = seq;
         const acquire = (idx: number): Promise<void> => {
-            if (idx >= sorted.length) return fn(); // all locks held, execute write
+            if (idx >= sorted.length) {
+                if (cancelledBeforeStart) return Promise.resolve();
+                started = true;
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = undefined;
+                }
+                return fn(); // all locks held, execute write
+            }
             return this.getQueue(sorted[idx]!).enqueue(() => acquire(idx + 1));
         };
         const result = acquire(0);
@@ -238,7 +253,25 @@ class PartitionedWriteQueue {
         void result.then(() => {
             for (const f of sorted) this.scheduleCleanup(f, seq);
         });
-        return result;
+        const waitTimeoutMs = options?.waitTimeoutMs;
+        if (!waitTimeoutMs || waitTimeoutMs <= 0) {
+            return result;
+        }
+
+        return new Promise<void>((resolve, reject) => {
+            timeoutId = setTimeout(() => {
+                if (started) return;
+                cancelledBeforeStart = true;
+                reject(new Error(options?.timeoutMessage ?? `Write queue wait timed out after ${waitTimeoutMs}ms.`));
+            }, waitTimeoutMs);
+
+            result.then(resolve, reject).finally(() => {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = undefined;
+                }
+            });
+        });
     }
 
     private getQueue(filePath: string): WriteQueue {
@@ -340,6 +373,10 @@ export interface AgentRunnerOptions {
      * 防止子 Agent 陷入无意义的搜索循环。
      */
     excludeTools?: string[];
+    /** Force file-mutating tools to bypass interactive diff confirmation. Used by orchestrator sub-agents. */
+    forceAutoApplyWrites?: boolean;
+    /** Max time a write tool may wait for another file lock before returning a structured error. */
+    writeQueueWaitTimeoutMs?: number;
     /**
      * 使用面向 Orchestrator 子 Agent 的精简系统提示词。
      * 子 Agent 不应直接向用户提问或等待用户审批，而应把阻塞点上报给主 Agent。
@@ -354,8 +391,8 @@ export interface AgentRunnerOptions {
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
 const PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'todo_write',
+    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'todo_write',
     'read_file', 'list_directory', 'get_diagnostics', 'web_fetch', 'search_web',
     'glob_files', 'codesearch',
     // Deep API tools for archetype study in Plan mode
@@ -373,8 +410,8 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
 const EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
+    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
     'get_diagnostics', 'web_fetch', 'search_web', 'glob_files',
     // CWTools Deep API tools (read-only, advertised in Explore mode prompt)
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -390,8 +427,8 @@ const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
 /** Review mode: same as explore, plus query_definition — read-only tools only */
 const REVIEW_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
+    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
     'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
@@ -402,9 +439,9 @@ const REVIEW_MODE_TOOLS: AgentToolName[] = [
 
 /** Loc Translator mode: read localisation files, write translated output */
 const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
-    'read_file', 'write_file', 'multi_replace_file_content', 'apply_patch',
-    'list_directory', 'glob_files', 'search_mod_files', 'grep', 'workspace_symbols',
-    'document_symbols', 'get_file_context', 'get_diagnostics',
+    'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
+    'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
+    'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
     // W9 修复：移除 web_fetch/search_web/codesearch，本地化 Agent 不需要网络搜索能力
     'todo_write',
     'write_localisation', 'git_ops',
@@ -412,9 +449,9 @@ const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
 
 /** Loc Writer mode: create new localisation entries from scratch */
 const LOC_WRITER_TOOLS: AgentToolName[] = [
-    'read_file', 'write_file', 'multi_replace_file_content', 'apply_patch',
-    'list_directory', 'glob_files', 'search_mod_files', 'grep', 'workspace_symbols',
-    'document_symbols', 'get_file_context', 'get_diagnostics',
+    'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
+    'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
+    'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references',
     // W9 修复：移除 web_fetch/search_web/codesearch，本地化 Agent 不需要网络搜索能力
     'todo_write',
@@ -425,8 +462,8 @@ const LOC_WRITER_TOOLS: AgentToolName[] = [
 const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     // 只读信息收集
     'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_file_context', 'search_mod_files', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'read_file', 'list_directory',
+    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
     'get_diagnostics', 'web_fetch', 'search_web', 'glob_files', 'codesearch',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
@@ -441,10 +478,11 @@ const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
 
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
-const WRITE_TOOLS = new Set(['write_file', 'multi_replace_file_content', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation', 'git_ops', 'edit_pdx_block']);
+const WRITE_TOOLS = new Set(['write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation', 'write_design_blueprint', 'git_ops', 'edit_pdx_block']);
+export const SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS = new Set<string>(['write_file']);
 const READ_ONLY_TOOLS = new Set<string>([
-    'read_file', 'list_directory', 'search_mod_files', 'grep',
-    'get_file_context', 'document_symbols', 'workspace_symbols',
+    'read_file', 'list_directory', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
+    'get_file_context', 'document_symbols', 'workspace_symbols', 'verify_pdx_identifier',
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_diagnostics', 'get_completion_at',
     // Newly added Deep API tools for parallel execution
@@ -457,10 +495,57 @@ const READ_ONLY_TOOLS = new Set<string>([
     // 不涉及任何文件 IO，不应走 PartitionedWriteQueue 的 __global__ 锁路径，
     // 否则在多 Agent 并发场景中会与其他写操作竞争全局锁导致死锁。
     'todo_write'
-    // Note: dispatch_agents 和 merge_results 已从此处移除——
-    // dispatch_agents 会启动完整的子 Agent 推理循环（长耗时），必须走串行路径防止竞态；
-    // merge_results 依赖 dispatch_agents 的结果，也必须顺序执行。
+    // Long-running orchestrator tools intentionally stay out of both
+    // READ_ONLY_TOOLS and WRITE_TOOLS: they execute serially without holding
+    // the file-write queue.
 ]);
+
+export function getAgentToolTargetFiles(
+    toolName: string,
+    args: Record<string, unknown>,
+    workspaceRoot?: string,
+    topicId?: string
+): string[] {
+    const paths: string[] = [];
+    const add = (value: unknown) => {
+        if (typeof value === 'string' && value.trim()) {
+            const trimmed = value.trim();
+            paths.push(workspaceRoot
+                ? (path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(workspaceRoot, trimmed))
+                : trimmed);
+        }
+    };
+
+    switch (toolName) {
+        case 'write_file':
+        case 'edit_pdx_block':
+        case 'git_ops':
+            add(args.file);
+            break;
+        case 'multi_replace_file_content':
+            add(args.TargetFile);
+            break;
+        case 'replace_lines':
+        case 'ast_mutate':
+        case 'write_localisation':
+            add(args.filePath);
+            break;
+        case 'deploy_mod_asset':
+            if (workspaceRoot && typeof args.targetRelativePath === 'string') {
+                paths.push(path.resolve(workspaceRoot, args.targetRelativePath));
+            } else {
+                add(args.targetRelativePath);
+            }
+            break;
+        case 'write_design_blueprint':
+            if (workspaceRoot) {
+                paths.push(path.join(workspaceRoot, '.cwtools-ai', topicId || 'default', 'design_blueprint.md'));
+            }
+            break;
+    }
+
+    return [...new Set(paths)];
+}
 
 const globalPartitionedWriteQueue = new PartitionedWriteQueue();
 
@@ -1376,9 +1461,10 @@ export class AgentRunner {
 
             const tryAnnouncePath = (name: string, content: string) => {
                 if (!WRITE_TOOLS.has(name)) return;
-                const pathMatch = content.match(/"file(?:Path)?"\s*:\s*"([^"]+)"/);
-                if (pathMatch && pathMatch[1]) {
-                    const extractedPath = pathMatch[1];
+                const matches = content.matchAll(/"(file|filePath|TargetFile|targetRelativePath)"\s*:\s*"([^"]+)"/g);
+                for (const match of matches) {
+                    const extractedPath = match[2];
+                    if (!extractedPath) continue;
                     if (!announcedPaths.has(extractedPath)) {
                         announcedPaths.add(extractedPath);
                         emitStep({
@@ -1636,12 +1722,13 @@ export class AgentRunner {
             // in one response, only keep the LAST one for each file.
             const lastWriteIndexByFile = new Map<string, number>();
             for (let i = 0; i < toolCalls.length; i++) {
-                if (!WRITE_TOOLS.has(toolCalls[i]!.function.name)) continue;  
+                const name = toolCalls[i]!.function.name;
+                if (!SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has(name)) continue;
                 try {
                     const a = JSON.parse(toolCalls[i]!.function.arguments);  
-                    // multi_replace_file_content uses TargetFile, write_file uses file
-                    const filePath: string = a.TargetFile ?? a.file ?? '';
-                    if (filePath) lastWriteIndexByFile.set(filePath, i);
+                    for (const filePath of getAgentToolTargetFiles(name, a, this.toolExecutor.workspaceRoot, options?.topicId)) {
+                        lastWriteIndexByFile.set(filePath, i);
+                    }
                 } catch { /* ignore */ }
             }
 
@@ -1738,29 +1825,42 @@ export class AgentRunner {
                         }
                     }));
                 } else {
+                    if (!WRITE_TOOLS.has(toolName)) {
+                        try {
+                            options?.abortSignal?.throwIfAborted();
+                            toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
+                        } catch (e: any) {
+                            if (e?.name === 'AbortError') throw e;
+                            toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
+                        }
+                        continue;
+                    }
+
                     // Write tool: execute serially taking advantage of PartitionedWriteQueue
-                    const filePath = (toolArgs['filePath'] as string) ?? (toolArgs['file'] as string) ?? '';
-                    const isSupersededWrite = WRITE_TOOLS.has(toolName) && filePath &&
-                        lastWriteIndexByFile.get(filePath) !== i;
+                    const filePaths = getAgentToolTargetFiles(toolName, toolArgs, this.toolExecutor.workspaceRoot, options?.topicId);
+                    const primaryFilePath = filePaths[0] ?? '';
+                    const shouldAutoApplyWrite = options?.forceAutoApplyWrites === true || options?.useSlimPrompt === true;
+                    const isSupersededWrite = SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has(toolName) && primaryFilePath &&
+                        lastWriteIndexByFile.get(primaryFilePath) !== i;
 
                     // Collect all file paths that this tool touches for partitioned locking
-                    const lockPaths: string[] = [];
-                    if (filePath) lockPaths.push(filePath);
+                    const lockPaths = filePaths.length > 0 ? filePaths : ['__global__'];
+                    const waitTimeoutMs = options?.writeQueueWaitTimeoutMs ?? (options?.useSlimPrompt ? 60_000 : 90_000);
 
-
-                    await this.writeQueue.enqueue(lockPaths.length > 0 ? lockPaths : ['__global__'], async () => {
+                    try {
+                        await this.writeQueue.enqueue(lockPaths, async () => {
                         try {
                             options?.abortSignal?.throwIfAborted();
                             
                             // Sub-agent snapshot isolate hook
-                            if (onFileWrite && filePath) {
+                            if (onFileWrite && primaryFilePath) {
                                 if (!fsModule) fsModule = await import('fs');
-                                const prev = fsModule.existsSync(filePath) ? fsModule.readFileSync(filePath, 'utf8') : null;
-                                onFileWrite(filePath, prev);
+                                const prev = fsModule.existsSync(primaryFilePath) ? fsModule.readFileSync(primaryFilePath, 'utf8') : null;
+                                onFileWrite(primaryFilePath, prev);
                             }
 
                             if (isSupersededWrite) {
-                                toolResults[i] = { skipped: true, message: `已被后续对 ${filePath} 的写入操作覆盖，跳过本次写入` };
+                                toolResults[i] = { skipped: true, message: `已被后续对 ${primaryFilePath} 的写入操作覆盖，跳过本次写入` };
                             } else if (toolName === 'write_file') {
                                 const content = (toolArgs['content'] as string) || '';
                                 let openCount = 0, closeCount = 0;
@@ -1771,25 +1871,37 @@ export class AgentRunner {
                                 if (openCount !== closeCount) {
                                     toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). This almost ALWAYS means your code output was truncated due to API length limits. DO NOT retry write_file with the same massive file! Instead, split your task using todo_write, or use multi_replace_file_content to apply the changes incrementally.` };
                                 } else {
-                                    const args = (confirmedWrittenFiles.has(filePath)) ? { ...toolArgs, _autoApply: true } : toolArgs;
+                                    const args = (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite) ? { ...toolArgs, _autoApply: true } : toolArgs;
                                     toolResults[i] = await this.toolExecutor.execute(toolName, args, agentToolContext);
                                     const r = toolResults[i] as Record<string, unknown>;
-                                    if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
+                                    if (r && (r.success || r.confirmed) && primaryFilePath) confirmedWrittenFiles.add(primaryFilePath);
                                 }
-                            } else if (WRITE_TOOLS.has(toolName) && filePath && confirmedWrittenFiles.has(filePath)) {
+                            } else if (WRITE_TOOLS.has(toolName) && primaryFilePath && (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite)) {
                                 toolResults[i] = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true }, agentToolContext);
                             } else {
                                 toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
-                                if (WRITE_TOOLS.has(toolName) && filePath) {
+                                if (WRITE_TOOLS.has(toolName) && primaryFilePath) {
                                     const r = toolResults[i] as Record<string, unknown>;
-                                    if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(filePath);
+                                    if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(primaryFilePath);
                                 }
                             }
                         } catch (e: any) {
                             if (e?.name === 'AbortError') throw e;
                             toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
                         }
-                    });
+                        }, {
+                            waitTimeoutMs,
+                            timeoutMessage: `Write queue wait timed out for ${toolName} (${lockPaths.join(', ')}) after ${Math.round(waitTimeoutMs / 1000)}s. Another write or orchestration task is holding the file lock. Report this blocker to the parent agent instead of retrying in a loop.`,
+                        });
+                    } catch (e) {
+                        toolResults[i] = {
+                            success: false,
+                            error: e instanceof Error ? e.message : String(e),
+                            hint: options?.useSlimPrompt
+                                ? 'Sub-agent should stop retrying this write and report the blocker to the parent agent.'
+                                : 'Try a smaller targeted edit after the current write finishes.',
+                        };
+                    }
                 }
             }
 

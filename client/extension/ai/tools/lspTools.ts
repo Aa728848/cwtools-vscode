@@ -37,6 +37,14 @@ function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
 
+function buildAbsenceWarning(identifier: string): string {
+    return `No matches for "${identifier}" are not proof that it is missing. PDX identifiers can live in vanilla cache, localisation, .gui/.gfx/.asset files, generated indexes, or a different AST type. Before declaring it nonexistent, verify with verify_pdx_identifier or at least two independent lookups such as query_definition_by_name, workspace_symbols/query_types, and search_mod_files(searchContext="both").`;
+}
+
+function uniqStrings(values: string[]): string[] {
+    return Array.from(new Set(values.filter(v => v.trim().length > 0)));
+}
+
 // ─── Context type ────────────────────────────────────────────────────────────
 
 /** Structural type for the properties LspToolHandler reads from the executor. */
@@ -1105,11 +1113,341 @@ export class LspToolHandler {
             searchedRoot: searchedRoots.join(', '),
             totalFound: results.length,
         };
+        if (results.length === 0) {
+            returnObj._warning = buildAbsenceWarning(args.query);
+            returnObj._nextSteps = [
+                'For a PDX ID or key, call verify_pdx_identifier(identifier=...) before treating it as missing.',
+                'If you only searched mod files, retry with searchContext="both" or the likely vanilla/localisation extension.',
+                'For event/scripted trigger/effect/type definitions, prefer query_definition_by_name, workspace_symbols, or query_types.',
+            ];
+        }
         if (limitReached) {
             returnObj._warning = `[CRITICAL TRUNCATION] Truncation: The output limit of ${limit} files has been reached. The remaining matching files (which may contain hundreds) have been forcibly discarded to protect the large model context! Please narrow your search using the more precise \`query\` or \`directory\` parameters.`;
         }
         returnObj._hint = "💡 Found what you need? If the match is in a PDX Script (.txt), DO NOT use read_file! Use document_symbols to find its boundaries, then get_pdx_block to read it, or edit_pdx_block to instantly replace it without reading.";
         return returnObj as import('../types').SearchModFilesResult;
+    }
+
+    async findSpriteCandidates(args: import('../types').FindSpriteCandidatesArgs): Promise<import('../types').FindSpriteCandidatesResult> {
+        const limit = Math.min(args.limit ?? 20, 50);
+        const ctxStr = args.searchContext || 'both';
+        const searchedRoots: string[] = [];
+        const candidates: import('../types').FindSpriteCandidatesResult['candidates'] = [];
+        const seen = new Set<string>();
+
+        const deriveTerms = (): string[] => {
+            const raw = [
+                args.query ?? '',
+                args.currentValue ?? '',
+                args.fieldName ?? '',
+            ].join(' ');
+            const normalized = raw
+                .replace(/\bGFX\b/gi, ' ')
+                .replace(/\bevt\b/gi, ' event ')
+                .replace(/[^A-Za-z0-9]+/g, ' ')
+                .toLowerCase();
+            const stop = new Set(['gfx', 'sprite', 'type', 'picture', 'icon', 'image', 'event', 'evt']);
+            return uniqStrings(normalized.split(/\s+/)
+                .map(t => t.trim())
+                .filter(t => t.length >= 3 && !stop.has(t)));
+        };
+
+        const terms = deriveTerms();
+        const query = args.query?.trim() || args.currentValue?.trim() || terms.join(' ') || '';
+        const field = (args.fieldName ?? '').toLowerCase();
+        const currentLower = (args.currentValue ?? '').toLowerCase();
+        const directName = args.currentValue?.match(/\bGFX_[A-Za-z0-9_.-]+\b/)?.[0];
+
+        const addCandidate = (candidate: import('../types').FindSpriteCandidatesResult['candidates'][number]) => {
+            const key = `${candidate.source}|${candidate.name.toLowerCase()}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            candidates.push(candidate);
+        };
+
+        const scoreCandidate = (name: string, textureFile: string | undefined, source: 'mod' | 'vanilla'): { score: number; matchedBy: string[] } => {
+            const haystack = `${name} ${textureFile ?? ''}`.toLowerCase();
+            const matchedBy: string[] = [];
+            let score = source === 'mod' ? 40 : 20;
+            if (directName && name.toLowerCase() === directName.toLowerCase()) {
+                score += 120;
+                matchedBy.push('exact-current-value');
+            } else if (currentLower && name.toLowerCase().includes(currentLower.replace(/^gfx_/, ''))) {
+                score += 40;
+                matchedBy.push('current-value-fragment');
+            }
+            for (const term of terms) {
+                if (name.toLowerCase().includes(term)) {
+                    score += 18;
+                    matchedBy.push(`name:${term}`);
+                } else if (textureFile?.toLowerCase().includes(term)) {
+                    score += 8;
+                    matchedBy.push(`texture:${term}`);
+                }
+            }
+            if (field === 'picture') {
+                if (/\bGFX_evt_/i.test(name) || /event_pictures|event|anomal/i.test(textureFile ?? '')) score += 35;
+                if (/icons?\/|interface\/icons?|button|modifier/i.test(textureFile ?? '')) score -= 30;
+            } else if (field === 'icon') {
+                if (/icons?\/|interface\/icons?|modifier|technology|tradition/i.test(textureFile ?? '')) score += 25;
+            }
+            return { score, matchedBy: uniqStrings(matchedBy) };
+        };
+
+        const extractSprites = (content: string, file: string, source: 'mod' | 'vanilla', root: string) => {
+            const blockRegex = /\b([A-Za-z0-9_]*spriteType)\s*=\s*\{([\s\S]*?)\n\s*\}/gi;
+            let match: RegExpExecArray | null;
+            while ((match = blockRegex.exec(content)) !== null) {
+                const spriteType = match[1] ?? 'spriteType';
+                const block = match[2] ?? '';
+                const nameMatch = block.match(/\bname\s*=\s*"?([A-Za-z0-9_.-]+)"?/i);
+                if (!nameMatch) continue;
+                const name = nameMatch[1]!;
+                if (!/^GFX_/i.test(name)) continue;
+                const textureMatch = block.match(/\btexturefile\s*=\s*"([^"]+)"/i)
+                    ?? block.match(/\btextureFile\s*=\s*"([^"]+)"/i);
+                const textureFile = textureMatch?.[1];
+                const { score, matchedBy } = scoreCandidate(name, textureFile, source);
+                const hasDirectOrTermMatch = matchedBy.length > 0 || terms.length === 0 || (directName && name.toLowerCase() === directName.toLowerCase());
+                if (!hasDirectOrTermMatch) continue;
+                const before = content.slice(0, match.index);
+                const line = before.split(/\r?\n/).length;
+                const logicalPath = source === 'mod'
+                    ? path.relative(this.ctx.workspaceRoot, file).replace(/\\/g, '/')
+                    : path.relative(root, file).replace(/\\/g, '/');
+                addCandidate({
+                    name,
+                    source,
+                    file: logicalPath,
+                    line,
+                    textureFile,
+                    spriteType,
+                    score,
+                    matchedBy,
+                });
+            }
+        };
+
+        const collectModRoots = (): string[] => {
+            if (ctxStr !== 'mod' && ctxStr !== 'both') return [];
+            const workspaceRoots = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
+            const roots = workspaceRoots.length > 0 ? workspaceRoots : [this.ctx.workspaceRoot];
+            searchedRoots.push(...roots);
+            return roots;
+        };
+
+        const collectVanillaRoots = (): string[] => {
+            if (ctxStr !== 'vanilla' && ctxStr !== 'both') return [];
+            const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
+            const vanillaStellaris = cwtoolsConfig.get<string>('cache.stellaris');
+            const roots = [vanillaStellaris].filter((r): r is string => !!r && fs.existsSync(r));
+            searchedRoots.push(...roots);
+            return roots;
+        };
+
+        const scanRoot = async (root: string, source: 'mod' | 'vanilla', maxFiles: number) => {
+            const interfaceRoot = path.join(root, 'interface');
+            const gfxRoot = path.join(root, 'gfx');
+            const searchRoots = uniqStrings([
+                fs.existsSync(interfaceRoot) ? interfaceRoot : '',
+                fs.existsSync(gfxRoot) ? gfxRoot : '',
+                root,
+            ]);
+            const files: string[] = [];
+            for (const searchRoot of searchRoots) {
+                files.push(...this.findFilesFn(searchRoot, '.gfx', Math.max(1, Math.floor(maxFiles / searchRoots.length))));
+            }
+            for (const file of uniqStrings(files).slice(0, maxFiles)) {
+                if (candidates.length >= limit * 5) break;
+                try {
+                    const content = await fs.promises.readFile(file, 'utf-8');
+                    const lower = content.toLowerCase();
+                    const quickTerms = directName ? [directName.toLowerCase(), ...terms] : terms;
+                    if (quickTerms.length > 0 && !quickTerms.some(t => lower.includes(t))) continue;
+                    extractSprites(content, file, source, root);
+                } catch { /* skip unreadable */ }
+            }
+        };
+
+        for (const root of collectModRoots()) {
+            await scanRoot(root, 'mod', 500);
+        }
+        for (const root of collectVanillaRoots()) {
+            await scanRoot(root, 'vanilla', 1200);
+        }
+
+        const sorted = candidates
+            .sort((a, b) => b.score - a.score || (a.source === 'mod' ? -1 : 1) || a.name.localeCompare(b.name))
+            .slice(0, limit);
+
+        const result: import('../types').FindSpriteCandidatesResult = {
+            query,
+            candidates: sorted,
+            searchedRoots: uniqStrings(searchedRoots),
+            _hint: 'Use a returned name as the value for sprite-typed fields. For event `picture = ...`, prefer event-picture candidates such as GFX_evt_* and do not replace it with a raw .dds path.',
+        };
+        if (sorted.length === 0) {
+            result._warning = `No sprite candidates found for "${query}". Retry with broader semantic terms (for example anomaly, archaeology, situation, relic, event) and searchContext="both" before creating or guessing a GFX name.`;
+        }
+        return result;
+    }
+
+    async findSoundCandidates(args: import('../types').FindSoundCandidatesArgs): Promise<import('../types').FindSoundCandidatesResult> {
+        const limit = Math.min(args.limit ?? 20, 50);
+        const ctxStr = args.searchContext || 'both';
+        const searchedRoots: string[] = [];
+        const candidates: import('../types').FindSoundCandidatesResult['candidates'] = [];
+        const seen = new Set<string>();
+
+        const deriveTerms = (): string[] => {
+            const raw = [
+                args.query ?? '',
+                args.currentValue ?? '',
+                args.fieldName ?? '',
+            ].join(' ');
+            const normalized = raw
+                .replace(/[^A-Za-z0-9]+/g, ' ')
+                .toLowerCase();
+            const stop = new Set(['sound', 'show', 'music', 'asset', 'event', 'audio', 'snd']);
+            return uniqStrings(normalized.split(/\s+/)
+                .map(t => t.trim())
+                .filter(t => t.length >= 3 && !stop.has(t)));
+        };
+
+        const terms = deriveTerms();
+        const query = args.query?.trim() || args.currentValue?.trim() || terms.join(' ') || '';
+        const field = (args.fieldName ?? '').toLowerCase();
+        const currentValue = (args.currentValue ?? '').replace(/^"|"$/g, '');
+        const currentLower = currentValue.toLowerCase();
+
+        const scoreCandidate = (name: string, fileRef: string | undefined, assetType: string | undefined, source: 'mod' | 'vanilla') => {
+            const matchedBy: string[] = [];
+            let score = source === 'mod' ? 40 : 20;
+            if (currentLower && name.toLowerCase() === currentLower) {
+                score += 120;
+                matchedBy.push('exact-current-value');
+            } else if (currentLower && name.toLowerCase().includes(currentLower)) {
+                score += 35;
+                matchedBy.push('current-value-fragment');
+            }
+            for (const term of terms) {
+                if (name.toLowerCase().includes(term)) {
+                    score += 18;
+                    matchedBy.push(`name:${term}`);
+                } else if (fileRef?.toLowerCase().includes(term)) {
+                    score += 8;
+                    matchedBy.push(`file:${term}`);
+                }
+            }
+            if (/show_sound|sound/.test(field)) {
+                if (/\.wav\b|sfx|event|ui|interface/i.test(fileRef ?? '')) score += 15;
+                if (/music|\.ogg\b/i.test(fileRef ?? '') && field === 'show_sound') score -= 8;
+            }
+            return { score, matchedBy: uniqStrings(matchedBy) };
+        };
+
+        const addCandidate = (candidate: import('../types').FindSoundCandidatesResult['candidates'][number]) => {
+            const key = `${candidate.source}|${candidate.name.toLowerCase()}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            candidates.push(candidate);
+        };
+
+        const extractAssets = (content: string, file: string, source: 'mod' | 'vanilla', root: string) => {
+            const blockRegex = /\b([A-Za-z0-9_]*(?:sound|music)[A-Za-z0-9_]*|soundeffect|soundEffect)\s*=\s*\{([\s\S]*?)\n\s*\}/gi;
+            let match: RegExpExecArray | null;
+            while ((match = blockRegex.exec(content)) !== null) {
+                const assetType = match[1] ?? 'sound';
+                const block = match[2] ?? '';
+                const nameMatch = block.match(/\bname\s*=\s*"?([A-Za-z0-9_.:-]+)"?/i);
+                if (!nameMatch) continue;
+                const name = nameMatch[1]!;
+                const fileMatch = block.match(/\bfile\s*=\s*"([^"]+)"/i)
+                    ?? block.match(/\bfiles\s*=\s*\{\s*"([^"]+)"/i);
+                const fileRef = fileMatch?.[1];
+                const { score, matchedBy } = scoreCandidate(name, fileRef, assetType, source);
+                const hasDirectOrTermMatch = matchedBy.length > 0 || terms.length === 0;
+                if (!hasDirectOrTermMatch) continue;
+                const before = content.slice(0, match.index);
+                const line = before.split(/\r?\n/).length;
+                const logicalPath = source === 'mod'
+                    ? path.relative(this.ctx.workspaceRoot, file).replace(/\\/g, '/')
+                    : path.relative(root, file).replace(/\\/g, '/');
+                addCandidate({
+                    name,
+                    source,
+                    file: logicalPath,
+                    line,
+                    assetType,
+                    fileRef,
+                    score,
+                    matchedBy,
+                });
+            }
+        };
+
+        const collectModRoots = (): string[] => {
+            if (ctxStr !== 'mod' && ctxStr !== 'both') return [];
+            const workspaceRoots = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
+            const roots = workspaceRoots.length > 0 ? workspaceRoots : [this.ctx.workspaceRoot];
+            searchedRoots.push(...roots);
+            return roots;
+        };
+
+        const collectVanillaRoots = (): string[] => {
+            if (ctxStr !== 'vanilla' && ctxStr !== 'both') return [];
+            const cwtoolsConfig = vs.workspace.getConfiguration('cwtools');
+            const vanillaStellaris = cwtoolsConfig.get<string>('cache.stellaris');
+            const roots = [vanillaStellaris].filter((r): r is string => !!r && fs.existsSync(r));
+            searchedRoots.push(...roots);
+            return roots;
+        };
+
+        const scanRoot = async (root: string, source: 'mod' | 'vanilla', maxFiles: number) => {
+            const soundRoot = path.join(root, 'sound');
+            const musicRoot = path.join(root, 'music');
+            const searchRoots = uniqStrings([
+                fs.existsSync(soundRoot) ? soundRoot : '',
+                fs.existsSync(musicRoot) ? musicRoot : '',
+                root,
+            ]);
+            const files: string[] = [];
+            for (const searchRoot of searchRoots) {
+                files.push(...this.findFilesFn(searchRoot, '.asset', Math.max(1, Math.floor(maxFiles / searchRoots.length))));
+            }
+            for (const file of uniqStrings(files).slice(0, maxFiles)) {
+                if (candidates.length >= limit * 5) break;
+                try {
+                    const content = await fs.promises.readFile(file, 'utf-8');
+                    const lower = content.toLowerCase();
+                    const quickTerms = currentLower ? [currentLower, ...terms] : terms;
+                    if (quickTerms.length > 0 && !quickTerms.some(t => lower.includes(t))) continue;
+                    extractAssets(content, file, source, root);
+                } catch { /* skip unreadable */ }
+            }
+        };
+
+        for (const root of collectModRoots()) {
+            await scanRoot(root, 'mod', 400);
+        }
+        for (const root of collectVanillaRoots()) {
+            await scanRoot(root, 'vanilla', 1000);
+        }
+
+        const sorted = candidates
+            .sort((a, b) => b.score - a.score || (a.source === 'mod' ? -1 : 1) || a.name.localeCompare(b.name))
+            .slice(0, limit);
+
+        const result: import('../types').FindSoundCandidatesResult = {
+            query,
+            candidates: sorted,
+            searchedRoots: uniqStrings(searchedRoots),
+            _hint: 'Use a returned name as the value for sound-typed fields such as `show_sound = ...`; do not replace it with a raw .wav/.ogg path unless the rule explicitly expects a file path.',
+        };
+        if (sorted.length === 0) {
+            result._warning = `No sound asset candidates found for "${query}". Retry with broader terms and searchContext="both" before creating or guessing a sound asset name.`;
+        }
+        return result;
     }
 
     async grep(args: import('../types').GrepArgs): Promise<import('../types').GrepResult> {
@@ -1180,6 +1518,14 @@ export class LspToolHandler {
             truncated,
             _hint: "💡 If you found your target in a PDX Script (.txt), DO NOT use read_file! Use document_symbols + get_pdx_block to read, or edit_pdx_block to directly replace the node."
         };
+        if (matches.length === 0) {
+            returnObj._warning = buildAbsenceWarning(args.query);
+            returnObj._nextSteps = [
+                'For a PDX ID or key, call verify_pdx_identifier(identifier=...) before treating it as missing.',
+                'If the key may be vanilla, use search_mod_files(searchContext="both") because grep only searches the workspace.',
+                'If the key may be in a large PDX file, use workspace_symbols/document_symbols instead of relying on line search.',
+            ];
+        }
         return returnObj as import('../types').GrepResult;
     }
 
@@ -1258,7 +1604,11 @@ export class LspToolHandler {
             );
 
             if (!symbols || symbols.length === 0) {
-                return { symbols: [] };
+                return {
+                    symbols: [],
+                    _warning: buildAbsenceWarning(args.query),
+                    _hint: 'workspace_symbols depends on the current LSP index. If this was a PDX ID lookup, cross-check with verify_pdx_identifier, query_definition_by_name/query_types, or search_mod_files(searchContext="both") before deciding it is missing.',
+                };
             }
 
             return {
@@ -1276,13 +1626,236 @@ export class LspToolHandler {
 
     // ─── lspOperation ────────────────────────────────────────────────────────
 
+    async verifyPdxIdentifier(args: import('../types').VerifyPdxIdentifierArgs): Promise<import('../types').VerifyPdxIdentifierResult> {
+        const identifier = String(args.identifier ?? '').trim();
+        const limit = Math.min(args.limit ?? 20, 50);
+        const evidence: import('../types').VerifyPdxIdentifierResult['evidence'] = [];
+        const matches: import('../types').VerifyPdxIdentifierResult['matches'] = [];
+        const nextSteps = new Set<string>();
+
+        const addEvidence = (source: string, status: 'found' | 'partial' | 'not_found' | 'error', summary: string) => {
+            evidence.push({ source, status, summary });
+        };
+        const addNextStep = (step: string) => nextSteps.add(step);
+        const addMatch = (match: import('../types').VerifyPdxIdentifierResult['matches'][number]) => {
+            const key = `${match.source}|${match.file}|${match.line ?? ''}|${match.name ?? ''}|${match.content ?? ''}`;
+            const exists = matches.some(existing =>
+                `${existing.source}|${existing.file}|${existing.line ?? ''}|${existing.name ?? ''}|${existing.content ?? ''}` === key
+            );
+            if (!exists) matches.push(match);
+        };
+        const isOkObject = (value: unknown): value is Record<string, unknown> =>
+            typeof value === 'object' && value !== null && (value as Record<string, unknown>).ok === true;
+
+        if (!identifier) {
+            return {
+                identifier,
+                status: 'inconclusive',
+                confidence: 'low',
+                canTreatAsMissing: false,
+                evidence: [{ source: 'input', status: 'error', summary: 'identifier is required.' }],
+                matches: [],
+                nextSteps: ['Pass the exact PDX identifier or localisation key to verify.'],
+                _warning: 'Cannot verify an empty identifier.',
+            };
+        }
+
+        try {
+            const raw = await this.queryDefinitionByName({ symbolName: identifier });
+            if (isOkObject(raw)) {
+                const file = typeof raw.file === 'string' ? raw.file : '';
+                const line = typeof raw.line === 'number' ? raw.line : undefined;
+                addEvidence('query_definition_by_name', 'found', `Exact AST definition found in ${file || 'unknown file'}.`);
+                addMatch({
+                    source: 'query_definition_by_name',
+                    file,
+                    line,
+                    name: typeof raw.name === 'string' ? raw.name : identifier,
+                });
+            } else {
+                const error = typeof raw === 'object' && raw !== null && typeof (raw as any).error === 'string'
+                    ? (raw as any).error
+                    : 'No exact AST definition returned.';
+                addEvidence('query_definition_by_name', 'not_found', error);
+                addNextStep('If this should be a typed game entity, provide typeName so query_types can verify the proper index.');
+            }
+        } catch (e) {
+            addEvidence('query_definition_by_name', 'error', e instanceof Error ? e.message : String(e));
+            addNextStep('Retry query_definition_by_name after the LSP finishes indexing.');
+        }
+
+        try {
+            const symbolRes = await this.workspaceSymbols({ query: identifier, limit });
+            const exactSymbols = symbolRes.symbols.filter(s =>
+                args.caseSensitive ? s.name === identifier : s.name.toLowerCase() === identifier.toLowerCase()
+            );
+            const partialSymbols = symbolRes.symbols.filter(s => !exactSymbols.includes(s));
+            if (exactSymbols.length > 0) {
+                addEvidence('workspace_symbols', 'found', `${exactSymbols.length} exact symbol match(es) found.`);
+                for (const sym of exactSymbols.slice(0, limit)) {
+                    addMatch({
+                        source: 'workspace_symbols',
+                        file: sym.file,
+                        line: sym.line,
+                        name: sym.name,
+                        kind: sym.kind,
+                    });
+                }
+            } else if (partialSymbols.length > 0) {
+                addEvidence('workspace_symbols', 'partial', `${partialSymbols.length} related symbol(s) found, but none exactly matched.`);
+                for (const sym of partialSymbols.slice(0, Math.min(limit, 5))) {
+                    addMatch({
+                        source: 'workspace_symbols',
+                        file: sym.file,
+                        line: sym.line,
+                        name: sym.name,
+                        kind: sym.kind,
+                    });
+                }
+                addNextStep('Inspect related workspace_symbols matches for spelling, namespace, or suffix differences.');
+            } else {
+                addEvidence('workspace_symbols', 'not_found', 'No symbol matches returned by the current LSP workspace index.');
+            }
+        } catch (e) {
+            addEvidence('workspace_symbols', 'error', e instanceof Error ? e.message : String(e));
+        }
+
+        if (args.typeName) {
+            try {
+                const typeRes = await this.queryTypes({
+                    typeName: args.typeName,
+                    filter: identifier,
+                    limit,
+                    vanillaOnly: false,
+                });
+                const exactInstances = typeRes.instances.filter(i =>
+                    args.caseSensitive ? i.id === identifier : i.id.toLowerCase() === identifier.toLowerCase()
+                );
+                const partialInstances = typeRes.instances.filter(i => !exactInstances.includes(i));
+                if (exactInstances.length > 0) {
+                    addEvidence('query_types', 'found', `${exactInstances.length} exact ${args.typeName} instance(s) found.`);
+                    for (const item of exactInstances.slice(0, limit)) {
+                        addMatch({
+                            source: 'query_types',
+                            file: item.file,
+                            name: item.id,
+                            vanilla: (item as any).vanilla === true,
+                        });
+                    }
+                } else if (partialInstances.length > 0) {
+                    addEvidence('query_types', 'partial', `${partialInstances.length} related ${args.typeName} instance(s) found, but none exactly matched.`);
+                    for (const item of partialInstances.slice(0, Math.min(limit, 5))) {
+                        addMatch({
+                            source: 'query_types',
+                            file: item.file,
+                            name: item.id,
+                            vanilla: (item as any).vanilla === true,
+                        });
+                    }
+                    addNextStep(`Check whether the requested ${args.typeName} ID is misspelled or uses a different namespace.`);
+                } else {
+                    addEvidence('query_types', 'not_found', `No ${args.typeName} instances matched the filter.`);
+                    addNextStep(`If ${identifier} is not a ${args.typeName}, retry verify_pdx_identifier with the correct typeName or omit typeName.`);
+                }
+            } catch (e) {
+                addEvidence('query_types', 'error', e instanceof Error ? e.message : String(e));
+            }
+        } else {
+            addEvidence('query_types', 'not_found', 'Skipped because typeName was not provided.');
+            addNextStep('For game entities, pass typeName such as event, technology, scripted_trigger, scripted_effect, static_modifier, or building.');
+        }
+
+        const searchExtensions = args.fileExtensions && args.fileExtensions.length > 0
+            ? args.fileExtensions
+            : ['.txt', '.yml', '.gui', '.gfx', '.asset'];
+        try {
+            const textRes = await this.searchModFiles({
+                query: identifier,
+                directory: args.directory,
+                fileExtensions: searchExtensions,
+                exactMatch: false,
+                searchContext: args.includeVanilla === false ? 'mod' : 'both',
+                caseSensitive: args.caseSensitive ?? false,
+                limit,
+            });
+            if (textRes.files.length > 0) {
+                addEvidence('search_mod_files', 'found', `${textRes.files.length} file(s) contain the identifier text.`);
+                for (const file of textRes.files.slice(0, limit)) {
+                    for (const line of file.matchingLines.slice(0, 3)) {
+                        addMatch({
+                            source: 'search_mod_files',
+                            file: file.logicalPath,
+                            line: line.line,
+                            content: line.content,
+                        });
+                    }
+                }
+            } else {
+                addEvidence('search_mod_files', 'not_found', `No text matches in ${args.includeVanilla === false ? 'mod workspace' : 'mod workspace + vanilla cache'} for extensions ${searchExtensions.join(', ')}.`);
+                addNextStep('If the ID may appear in another file type, retry with fileExtensions including that extension.');
+            }
+        } catch (e) {
+            addEvidence('search_mod_files', 'error', e instanceof Error ? e.message : String(e));
+        }
+
+        const strongFound = evidence.some(e => e.status === 'found' && (e.source === 'query_definition_by_name' || e.source === 'query_types'));
+        const anyFound = evidence.some(e => e.status === 'found');
+        const partialFound = evidence.some(e => e.status === 'partial');
+        const anyError = evidence.some(e => e.status === 'error');
+        const requiredSources = args.typeName
+            ? ['query_definition_by_name', 'workspace_symbols', 'query_types', 'search_mod_files']
+            : ['query_definition_by_name', 'workspace_symbols', 'search_mod_files'];
+        const completedRequired = requiredSources.every(source =>
+            evidence.some(e => e.source === source && e.status !== 'error')
+        );
+
+        let status: import('../types').VerifyPdxIdentifierResult['status'];
+        let confidence: import('../types').VerifyPdxIdentifierResult['confidence'];
+        if (strongFound) {
+            status = 'found';
+            confidence = 'high';
+        } else if (anyFound) {
+            status = 'found';
+            confidence = 'medium';
+        } else if (partialFound) {
+            status = 'ambiguous';
+            confidence = 'low';
+        } else if (!anyError && completedRequired) {
+            status = 'not_found';
+            confidence = 'medium';
+        } else {
+            status = 'inconclusive';
+            confidence = 'low';
+        }
+
+        const canTreatAsMissing = status === 'not_found' && completedRequired && !anyError;
+        if (!canTreatAsMissing && status !== 'found') {
+            addNextStep('Do not delete, recreate, or duplicate this identifier yet; gather another independent source or ask the parent/user if the requirement depends on it.');
+        }
+        if (status === 'not_found') {
+            addNextStep('Only treat this as missing for the searched context/extensions/type; mention that scope in your conclusion.');
+        }
+
+        return {
+            identifier,
+            status,
+            confidence,
+            canTreatAsMissing,
+            evidence,
+            matches: matches.slice(0, limit),
+            nextSteps: Array.from(nextSteps),
+            ...(!canTreatAsMissing && status !== 'found' ? { _warning: buildAbsenceWarning(identifier) } : {}),
+        };
+    }
+
+    // lspOperation
     async lspOperation(args: {
         operation: 'goToDefinition' | 'findReferences' | 'hover' | 'rename';
         file: string;
         line: number;
         column: number;
         newName?: string;
-    }): Promise<unknown> {
+    }, context?: import('../types').AgentToolContext): Promise<unknown> {
         const uri = vs.Uri.file(args.file);
         const position = new vs.Position(args.line, args.column);
 
@@ -1341,7 +1914,9 @@ export class LspToolHandler {
                     });
                     // Permission check: rename modifies multiple files, require user confirmation
                     // in 'confirm' mode (consistent with edit_file/write_file permission model).
-                    if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite) {
+                    const shouldBypassConfirmation = context?.runnerOptions?.forceAutoApplyWrites === true
+                        || context?.runnerOptions?.useSlimPrompt === true;
+                    if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !shouldBypassConfirmation) {
                         const summary = changes.map(c => `${c.file} (${c.edits} edits)`).join(', ');
                         const confirmed = await this.ctx.onPendingWrite(
                             args.file, `Rename: ${changes.length} file(s) affected: ${summary}`, `rename_${Date.now()}`

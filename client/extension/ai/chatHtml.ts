@@ -80,10 +80,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         </div>
         <button class="icon-btn artifact-close-btn" id="btnCloseArtifacts" title="关闭 Artifacts" aria-label="关闭产物中心">${svgIconNoMargin('x')}</button>
     </div>
-    <div class="artifact-filter-row" aria-hidden="true">
-        <span class="artifact-filter active">全部</span>
-        <span class="artifact-filter">计划</span>
-        <span class="artifact-filter">验证</span>
+    <div class="artifact-filter-row" aria-label="Artifact filters">
+        <button type="button" class="artifact-filter active" data-artifact-filter="all">全部</button>
+        <button type="button" class="artifact-filter" data-artifact-filter="plan">计划</button>
+        <button type="button" class="artifact-filter" data-artifact-filter="validation">验证</button>
     </div>
     <div id="artifactList" class="artifact-list"></div>
 </aside>

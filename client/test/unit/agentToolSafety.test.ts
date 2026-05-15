@@ -43,16 +43,18 @@ function loadToolModules() {
             fileTools: require('../../extension/ai/tools/fileTools') as typeof import('../../extension/ai/tools/fileTools'),
             externalTools: require('../../extension/ai/tools/externalTools') as typeof import('../../extension/ai/tools/externalTools'),
             agentTools: require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools'),
+            agentRunner: require('../../extension/ai/agentRunner') as typeof import('../../extension/ai/agentRunner'),
         };
     } finally {
         moduleLoader._load = originalLoad;
     }
 }
 
-const { fileTools, externalTools, agentTools } = loadToolModules();
+const { fileTools, externalTools, agentTools, agentRunner } = loadToolModules();
 const { FileToolHandler } = fileTools;
 const { ExternalToolHandler } = externalTools;
-const { AgentToolExecutor } = agentTools;
+const { AgentToolExecutor, TOOL_DEFINITIONS } = agentTools;
+const { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } = agentRunner;
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
 
 function makeWorkspace(): string {
@@ -179,6 +181,81 @@ describe('agent tool file path safety', () => {
         expect(fs.readFileSync(ymlAbs, 'utf8')).to.equal(original);
     });
 
+    it('replaces an explicit line range with replace_lines', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'events', 'test_events.txt');
+        fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
+        fs.writeFileSync(fileAbs, 'line one\nold a\nold b\nline four', 'utf8');
+
+        const result = await handler.replaceLines({
+            filePath: fileAbs,
+            startLine: 2,
+            endLine: 3,
+            newContent: 'new a\nnew b',
+        }, makeContext()) as any;
+
+        expect(result.success).to.equal(true);
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal('line one\nnew a\nnew b\nline four');
+    });
+
+    it('guards replace_lines with expectedContent to avoid stale line-range edits', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'events', 'guarded_events.txt');
+        fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
+        fs.writeFileSync(fileAbs, 'line one\nchanged a\nold b\nline four', 'utf8');
+
+        const result = await handler.replaceLines({
+            filePath: fileAbs,
+            startLine: 2,
+            endLine: 3,
+            expectedContent: 'old a\nold b',
+            newContent: 'new a\nnew b',
+        }, makeContext()) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.message).to.include('safety check failed');
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal('line one\nchanged a\nold b\nline four');
+    });
+
+    it('allows guarded replace_lines when expected anchors still match', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'events', 'anchored_events.txt');
+        fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
+        fs.writeFileSync(fileAbs, 'country_event = {\n\tid = old.1\n\tis_triggered_only = yes\n}\n', 'utf8');
+
+        const result = await handler.replaceLines({
+            filePath: fileAbs,
+            startLine: 2,
+            endLine: 3,
+            expectedStartText: 'id = old.1',
+            expectedEndText: 'is_triggered_only = yes',
+            newContent: '\tid = new.1\n\tis_triggered_only = yes',
+        }, makeContext()) as any;
+
+        expect(result.success).to.equal(true);
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.include('id = new.1');
+    });
+
+    it('rejects replace_lines for .yml localisation files', async () => {
+        const handler = createFileHandler();
+        const ymlRel = 'localisation/english/test_l_english.yml';
+        const ymlAbs = path.join(workspaceRoot, ...ymlRel.split('/'));
+        const original = 'l_english:\n old_key:0 "Old"\n';
+        fs.mkdirSync(path.dirname(ymlAbs), { recursive: true });
+        fs.writeFileSync(ymlAbs, original, 'utf8');
+
+        const result = await handler.replaceLines({
+            filePath: ymlRel,
+            startLine: 2,
+            endLine: 2,
+            newContent: ' old_key:0 "New"',
+        }, makeContext()) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.message).to.include('write_localisation');
+        expect(fs.readFileSync(ymlAbs, 'utf8')).to.equal(original);
+    });
+
     it('rejects write_localisation targets outside real localisation folders', async () => {
         const handler = createFileHandler();
         const result = await handler.writeLocalisation({
@@ -191,6 +268,184 @@ describe('agent tool file path safety', () => {
         expect(result.message).to.include('Localisation files must be written under');
         const rejectedPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'scratch', 'bad_l_english.yml');
         expect(fs.existsSync(rejectedPath)).to.equal(false);
+    });
+
+    it('extracts write target paths for runner scheduling without marking localisation as superseded', () => {
+        expect(getAgentToolTargetFiles('write_localisation', { filePath: 'localisation/english/kuat_l_english.yml' }, workspaceRoot))
+            .to.deep.equal([path.join(workspaceRoot, 'localisation', 'english', 'kuat_l_english.yml')]);
+        expect(getAgentToolTargetFiles('multi_replace_file_content', { TargetFile: 'events/kuat_events.txt' }, workspaceRoot))
+            .to.deep.equal([path.join(workspaceRoot, 'events', 'kuat_events.txt')]);
+        expect(getAgentToolTargetFiles('replace_lines', { filePath: 'common/scripted_effects/kuat.txt' }, workspaceRoot))
+            .to.deep.equal([path.join(workspaceRoot, 'common', 'scripted_effects', 'kuat.txt')]);
+        expect(getAgentToolTargetFiles('write_file', { file: 'common/relics/kuat.txt' }, workspaceRoot))
+            .to.deep.equal([path.join(workspaceRoot, 'common', 'relics', 'kuat.txt')]);
+        expect(getAgentToolTargetFiles('write_design_blueprint', {}, workspaceRoot, 'topic-123'))
+            .to.deep.equal([path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'design_blueprint.md')]);
+
+        expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_file')).to.equal(true);
+        expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_localisation')).to.equal(false);
+        expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('multi_replace_file_content')).to.equal(false);
+    });
+
+    it('lets orchestrator sub-agents write localisation without waiting for pending-write confirmation', async () => {
+        const pendingWrite = sinon.stub().resolves(false);
+        const handler = new FileToolHandler({
+            workspaceRoot,
+            fileWriteMode: 'confirm',
+            onPendingWrite: pendingWrite,
+        });
+
+        const result = await handler.writeLocalisation({
+            filePath: 'localisation/english/kuat_rakata_arc_epilogue_l_english.yml',
+            language: 'l_english',
+            entries: [{ key: 'kuat_rakata_arc_epilogue_title', value: 'Epilogue' }],
+        }, {
+            runnerOptions: {
+                topicId: 'topic-123',
+                useSlimPrompt: true,
+                forceAutoApplyWrites: true,
+                abortSignal: new AbortController().signal,
+            },
+        } as any);
+
+        expect(result.success).to.equal(true);
+        expect(pendingWrite.called).to.equal(false);
+        const ymlAbs = path.join(workspaceRoot, 'localisation', 'english', 'kuat_rakata_arc_epilogue_l_english.yml');
+        expect(fs.readFileSync(ymlAbs, 'utf8')).to.include('kuat_rakata_arc_epilogue_title');
+    });
+
+    it('lets orchestrator sub-agents run multi_replace_file_content without pending-write confirmation', async () => {
+        const pendingWrite = sinon.stub().resolves(false);
+        const handler = new FileToolHandler({
+            workspaceRoot,
+            fileWriteMode: 'confirm',
+            onPendingWrite: pendingWrite,
+        });
+        const fileAbs = path.join(workspaceRoot, 'events', 'kuat_events.txt');
+        fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
+        fs.writeFileSync(fileAbs, 'country_event = {\n\tid = kuat.1\n}\n', 'utf8');
+
+        const result = await handler.multiReplaceFileContent({
+            TargetFile: fileAbs,
+            Instruction: 'sub-agent edit',
+            ReplacementChunks: [{
+                StartLine: 2,
+                EndLine: 2,
+                TargetContent: '\tid = kuat.1',
+                ReplacementContent: '\tid = kuat.2',
+            }],
+        }, {
+            runnerOptions: {
+                topicId: 'topic-123',
+                useSlimPrompt: true,
+                forceAutoApplyWrites: true,
+                abortSignal: new AbortController().signal,
+            },
+        } as any) as any;
+
+        expect(result.success).to.equal(true);
+        expect(pendingWrite.called).to.equal(false);
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.include('id = kuat.2');
+    });
+});
+
+describe('agent sprite candidate tool contract', () => {
+    let workspaceRoot: string;
+
+    beforeEach(() => {
+        workspaceRoot = makeWorkspace();
+    });
+
+    afterEach(() => {
+        cleanupWorkspace(workspaceRoot);
+    });
+
+    it('registers find_sprite_candidates as a first-class read-only tool', () => {
+        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'find_sprite_candidates');
+        if (!definition) {
+            throw new Error('find_sprite_candidates tool definition is missing');
+        }
+        expect(definition.function.description).to.include('Expected value of type sprite');
+        expect(definition.function.parameters.properties).to.have.property('searchContext');
+    });
+
+    it('registers find_sound_candidates as a first-class read-only tool', () => {
+        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'find_sound_candidates');
+        if (!definition) {
+            throw new Error('find_sound_candidates tool definition is missing');
+        }
+        expect(definition.function.description).to.include('show_sound');
+        expect(definition.function.parameters.properties).to.have.property('searchContext');
+    });
+
+    it('parses project .gfx spriteType candidates and ranks event pictures', async () => {
+        const lspTools = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
+        const interfaceDir = path.join(workspaceRoot, 'interface');
+        fs.mkdirSync(interfaceDir, { recursive: true });
+        fs.writeFileSync(path.join(interfaceDir, 'kuat_eventpictures.gfx'), [
+            'spriteTypes = {',
+            '    spriteType = {',
+            '        name = "GFX_evt_kuat_force_echo"',
+            '        texturefile = "gfx/event_pictures/kuat_force_echo.dds"',
+            '    }',
+            '    spriteType = {',
+            '        name = "GFX_kuat_button_icon"',
+            '        texturefile = "gfx/interface/icons/kuat_button.dds"',
+            '    }',
+            '}',
+        ].join('\n'), 'utf8');
+
+        const handler = new lspTools.LspToolHandler(
+            { workspaceRoot },
+            () => ({}) as any,
+            fileTools.findFiles,
+        );
+        const result = await handler.findSpriteCandidates({
+            currentValue: 'GFX_evt_kuat_missing_echo',
+            query: 'kuat force echo',
+            fieldName: 'picture',
+            searchContext: 'mod',
+            limit: 5,
+        });
+
+        expect(result.candidates.map(c => c.name)).to.include('GFX_evt_kuat_force_echo');
+        expect(result.candidates[0]!.name).to.equal('GFX_evt_kuat_force_echo');
+        expect(result.candidates[0]!.textureFile).to.include('event_pictures');
+    });
+
+    it('parses project .asset sound candidates for show_sound repairs', async () => {
+        const lspTools = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
+        const soundDir = path.join(workspaceRoot, 'sound');
+        fs.mkdirSync(soundDir, { recursive: true });
+        fs.writeFileSync(path.join(soundDir, 'kuat_sounds.asset'), [
+            'sounds = {',
+            '    sound = {',
+            '        name = "kuat_force_echo_reveal"',
+            '        file = "sound/event/kuat_force_echo_reveal.wav"',
+            '    }',
+            '    music = {',
+            '        name = "kuat_force_theme"',
+            '        file = "music/kuat_force_theme.ogg"',
+            '    }',
+            '}',
+        ].join('\n'), 'utf8');
+
+        const handler = new lspTools.LspToolHandler(
+            { workspaceRoot },
+            () => ({}) as any,
+            fileTools.findFiles,
+        );
+        const result = await handler.findSoundCandidates({
+            currentValue: 'kuat_force_echo_missing',
+            query: 'kuat force echo reveal',
+            fieldName: 'show_sound',
+            searchContext: 'mod',
+            limit: 5,
+        });
+
+        expect(result.candidates.map(c => c.name)).to.include('kuat_force_echo_reveal');
+        expect(result.candidates[0]!.name).to.equal('kuat_force_echo_reveal');
+        expect(result.candidates[0]!.fileRef).to.include('.wav');
     });
 });
 

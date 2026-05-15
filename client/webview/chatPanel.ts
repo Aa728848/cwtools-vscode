@@ -134,6 +134,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     };
     let activeContexts: ActiveContext[] = [];
     let artifacts: ArtifactRecord[] = [];
+    let artifactFilter: 'all' | 'plan' | 'validation' = 'all';
     const CONTEXT_TYPE_META: Record<ActiveContext['type'], { icon: keyof typeof Icons; label: string }> = {
         code_selection: { icon: 'file', label: 'selection' },
         diagnostics: { icon: 'stethoscope', label: 'diagnostics' },
@@ -436,6 +437,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     bindBtn('btnArtifacts', toggleArtifactDrawer);
     bindBtn('btnCloseArtifacts', () => setArtifactDrawerOpen(false));
     bindBtn('artifactScrim', () => setArtifactDrawerOpen(false));
+    document.querySelectorAll<HTMLElement>('[data-artifact-filter]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const next = btn.dataset.artifactFilter;
+            artifactFilter = (next === 'plan' || next === 'validation') ? next : 'all';
+            renderArtifactPanel();
+        });
+    });
     bindBtn('btnTopics', () => {
         setArtifactDrawerOpen(false);
         topicsPanel.classList.toggle('show');
@@ -709,6 +717,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const toggle = document.getElementById('btnArtifacts');
         if (!list || !count) return;
 
+        document.querySelectorAll<HTMLElement>('[data-artifact-filter]').forEach(btn => {
+            btn.classList.toggle('active', (btn.dataset.artifactFilter || 'all') === artifactFilter);
+        });
         count.textContent = String(artifacts.length);
         toggle?.classList.toggle('has-artifacts', artifacts.length > 0);
         if (artifacts.length === 0) {
@@ -716,6 +727,21 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 <div class="artifact-empty">
                     <div class="artifact-empty-title">暂无 Artifacts</div>
                     <div class="artifact-empty-subtitle">计划、蓝图、诊断、Diff 和 Walkthrough 会在这里集中出现。</div>
+                </div>
+            `;
+            return;
+        }
+
+        const visibleArtifacts = artifacts.filter(artifact => {
+            if (artifactFilter === 'all') return true;
+            if (artifactFilter === 'plan') return artifact.kind === 'plan' || artifact.kind === 'blueprint';
+            return artifact.kind === 'validation' || artifact.kind === 'diagnostics';
+        });
+        if (visibleArtifacts.length === 0) {
+            list.innerHTML = `
+                <div class="artifact-empty">
+                    <div class="artifact-empty-title">当前筛选无内容</div>
+                    <div class="artifact-empty-subtitle">切回“全部”查看其他 Artifacts。</div>
                 </div>
             `;
             return;
@@ -739,7 +765,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         };
 
         list.innerHTML = '';
-        for (const artifact of artifacts) {
+        for (const artifact of visibleArtifacts) {
             const row = document.createElement('button');
             row.type = 'button';
             row.className = `artifact-row artifact-${artifact.kind} artifact-${artifact.status || 'done'}`;
@@ -751,22 +777,29 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 </span>
                 <span class="artifact-status">${escapeHtml(statusLabel[artifact.status || 'done'] || 'done')}</span>
             `;
+            const togglePreview = () => {
+                const next = row.nextElementSibling as HTMLElement | null;
+                if (next?.classList.contains('artifact-preview')) {
+                    next.remove();
+                    return;
+                }
+                const preview = document.createElement('pre');
+                preview.className = 'artifact-preview';
+                const fallback = {
+                    title: artifact.title,
+                    summary: artifact.summary,
+                    relPath: artifact.relPath,
+                    status: artifact.status || 'done',
+                };
+                preview.textContent = JSON.stringify(artifact.data ?? fallback, null, 2).slice(0, 6000);
+                row.insertAdjacentElement('afterend', preview);
+            };
             if (artifact.filePath) {
                 row.addEventListener('click', () => {
                     vscode.postMessage({ type: 'openPlanFile', filePath: artifact.filePath });
                 });
             } else {
-                row.addEventListener('click', () => {
-                    const next = row.nextElementSibling as HTMLElement | null;
-                    if (next?.classList.contains('artifact-preview')) {
-                        next.remove();
-                        return;
-                    }
-                    const preview = document.createElement('pre');
-                    preview.className = 'artifact-preview';
-                    preview.textContent = JSON.stringify(artifact.data ?? { summary: artifact.summary }, null, 2).slice(0, 6000);
-                    row.insertAdjacentElement('afterend', preview);
-                });
+                row.addEventListener('click', togglePreview);
             }
             list.appendChild(row);
         }
@@ -808,7 +841,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         id: `restored:walkthrough:${step.content}`,
                         kind: 'walkthrough',
                         title: 'Walkthrough Report',
-                        summary: 'Restored from chat history.',
+                        summary: 'Full task walkthrough restored from chat history.',
                         filePath: step.content,
                         relPath: step.content,
                         status: 'done',

@@ -346,6 +346,8 @@ export class Orchestrator {
             // 不需要子代理重复验证。同时避免推理结束后 validation loop 继续产生步骤，
             // 导致外部判断卡片已标记完成但内部仍在运行的 UI 状态不一致。
             skipValidation: true,
+            forceAutoApplyWrites: true,
+            writeQueueWaitTimeoutMs: 60_000,
             // 🔴 子 Agent 禁用特定工具：
             // 1. 网络搜索容易导致无意义的重复搜索循环（doom loop）
             // 2. run_command / mmx_* / convert_* / deploy_mod_asset 需要用户权限审批或涉及外部创建，

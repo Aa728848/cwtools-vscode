@@ -307,6 +307,77 @@ export interface SearchModFilesResult {
     }>;
     searchedRoot?: string;
     totalFound?: number;
+    _warning?: string;
+    _nextSteps?: string[];
+    _hint?: string;
+}
+
+export interface FindSpriteCandidatesArgs {
+    /** Free-text search query such as "anomaly" or "force echo". */
+    query?: string;
+    /** The invalid or desired sprite value, e.g. GFX_evt_analyzing_anomaly. */
+    currentValue?: string;
+    /** PDXScript field being repaired, e.g. picture, icon, spriteType. */
+    fieldName?: string;
+    /** Optional file containing the diagnostic, used only for result context. */
+    file?: string;
+    /** Optional diagnostic line number. */
+    line?: number;
+    /** Search mod workspace, vanilla cache, or both. Defaults to both. */
+    searchContext?: 'mod' | 'vanilla' | 'both';
+    /** Maximum candidates to return. Defaults to 20, max 50. */
+    limit?: number;
+}
+
+export interface FindSpriteCandidatesResult {
+    query: string;
+    candidates: Array<{
+        name: string;
+        source: 'mod' | 'vanilla';
+        file: string;
+        line: number;
+        textureFile?: string;
+        spriteType?: string;
+        score: number;
+        matchedBy: string[];
+    }>;
+    searchedRoots: string[];
+    _warning?: string;
+    _hint?: string;
+}
+
+export interface FindSoundCandidatesArgs {
+    /** Free-text search query such as "alien signal" or "ui click". */
+    query?: string;
+    /** The current invalid or desired sound value, e.g. "event_alien_signal". */
+    currentValue?: string;
+    /** PDXScript field being repaired, e.g. show_sound or sound. */
+    fieldName?: string;
+    /** Optional file containing the diagnostic, used only for result context. */
+    file?: string;
+    /** Optional diagnostic line number. */
+    line?: number;
+    /** Search mod workspace, vanilla cache, or both. Defaults to both. */
+    searchContext?: 'mod' | 'vanilla' | 'both';
+    /** Maximum candidates to return. Defaults to 20, max 50. */
+    limit?: number;
+}
+
+export interface FindSoundCandidatesResult {
+    query: string;
+    candidates: Array<{
+        name: string;
+        source: 'mod' | 'vanilla';
+        file: string;
+        line: number;
+        assetType?: string;
+        fileRef?: string;
+        score: number;
+        matchedBy: string[];
+    }>;
+    searchedRoots: string[];
+    _warning?: string;
+    _hint?: string;
 }
 
 export interface GrepArgs {
@@ -322,6 +393,9 @@ export interface GrepResult {
     matches: Array<{ file: string; line: number; content: string }>;
     totalMatches: number;
     truncated: boolean;
+    _warning?: string;
+    _nextSteps?: string[];
+    _hint?: string;
 }
 
 export interface GetCompletionAtArgs {
@@ -360,6 +434,41 @@ export interface WorkspaceSymbolsResult {
         file: string;
         line: number;
     }>;
+    _warning?: string;
+    _hint?: string;
+}
+
+export interface VerifyPdxIdentifierArgs {
+    identifier: string;
+    typeName?: string;
+    directory?: string;
+    fileExtensions?: string[];
+    includeVanilla?: boolean;
+    caseSensitive?: boolean;
+    limit?: number;
+}
+
+export interface VerifyPdxIdentifierResult {
+    identifier: string;
+    status: 'found' | 'ambiguous' | 'not_found' | 'inconclusive';
+    confidence: 'high' | 'medium' | 'low';
+    canTreatAsMissing: boolean;
+    evidence: Array<{
+        source: string;
+        status: 'found' | 'partial' | 'not_found' | 'error';
+        summary: string;
+    }>;
+    matches: Array<{
+        source: string;
+        file: string;
+        line?: number;
+        name?: string;
+        kind?: string;
+        content?: string;
+        vanilla?: boolean;
+    }>;
+    nextSteps: string[];
+    _warning?: string;
 }
 
 // ─── TodoWrite Tool Types ────────────────────────────────────────────────────
@@ -435,9 +544,12 @@ export type ToolArgs =
     | QueryReferencesArgs
     | GetFileContextArgs
     | SearchModFilesArgs
+    | FindSpriteCandidatesArgs
+    | FindSoundCandidatesArgs
     | GetCompletionAtArgs
     | DocumentSymbolsArgs
     | WorkspaceSymbolsArgs
+    | VerifyPdxIdentifierArgs
     | TodoWriteArgs
     | ReadFileArgs
     | WriteFileArgs
@@ -459,9 +571,12 @@ export type ToolResult =
     | QueryReferencesResult
     | GetFileContextResult
     | SearchModFilesResult
+    | FindSpriteCandidatesResult
+    | FindSoundCandidatesResult
     | GetCompletionAtResult
     | DocumentSymbolsResult
     | WorkspaceSymbolsResult
+    | VerifyPdxIdentifierResult
     | TodoWriteResult
     | ReadFileResult
     | WriteFileResult
@@ -484,13 +599,17 @@ export type AgentToolName =
     | 'get_diagnostics'
     | 'get_file_context'
     | 'search_mod_files'
+    | 'find_sprite_candidates'
+    | 'find_sound_candidates'
     | 'get_completion_at'
     | 'document_symbols'
     | 'workspace_symbols'
+    | 'verify_pdx_identifier'
     | 'todo_write'
     | 'read_file'
     | 'write_file'
     | 'multi_replace_file_content'
+    | 'replace_lines'
     | 'list_directory'
     | 'glob_files'
     | 'lsp_operation'
@@ -604,6 +723,14 @@ export interface ReplaceLinesArgs {
     endLine: number;
     /** The replacement content for the specified line range */
     newContent: string;
+    /** Optional guard: current content of the selected line range must match before replacing */
+    expectedContent?: string;
+    /** Optional guard: sha256 hash of the normalized current selected line range */
+    expectedHash?: string;
+    /** Optional guard: current selected range must start with this text after trimming leading whitespace */
+    expectedStartText?: string;
+    /** Optional guard: current selected range must end with this text after trimming trailing whitespace */
+    expectedEndText?: string;
     encoding?: 'utf8' | 'utf8bom';
 }
 

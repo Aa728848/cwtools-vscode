@@ -151,7 +151,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_mod_files',
-            description: 'Search for files containing text patterns. Default: mod workspace. For vanilla: set searchContext="vanilla" + exactMatch=true. 💡 After finding a target, use get_pdx_block or edit_pdx_block — NOT read_file.',
+            description: 'Search for files containing text patterns. Default: mod workspace. For vanilla: set searchContext="vanilla" + exactMatch=true. Zero results are NOT proof an ID/key is missing; use verify_pdx_identifier before declaring absence. 💡 After finding a target, use get_pdx_block or edit_pdx_block — NOT read_file.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -172,8 +172,48 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'find_sprite_candidates',
+            description: 'Find existing PDX spriteType candidates (GFX_*) in the mod workspace and/or vanilla .gfx files. Use this for diagnostics like "Expected value of type sprite" before changing picture/icon/sprite fields. Returns verified sprite names plus texturefile and source; do not guess GFX names.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Semantic search terms, e.g. "anomaly", "archaeology", "force echo", or keywords from the invalid sprite name.' },
+                    currentValue: { type: 'string', description: 'The current invalid or desired sprite value, e.g. "GFX_evt_analyzing_anomaly". Used to derive fallback search terms.' },
+                    fieldName: { type: 'string', description: 'Field being repaired, e.g. "picture", "icon", "spriteType". Helps rank event pictures vs icons.' },
+                    file: { type: 'string', description: 'Optional file containing the diagnostic, for context only.' },
+                    line: { type: 'number', description: 'Optional diagnostic line number, for context only.' },
+                    searchContext: { type: 'string', enum: ['mod', 'vanilla', 'both'], description: 'Where to search. Defaults to "both"; project sprites are ranked before vanilla.' },
+                    limit: { type: 'number', description: 'Maximum candidates to return (default 20, max 50).' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'find_sound_candidates',
+            description: 'Find existing Clausewitz sound/music asset candidates in mod and/or vanilla .asset files. Use this for diagnostics or fields like `show_sound = ...`, `sound = ...`, or missing sound references before editing. Returns verified asset names plus file references and source; do not guess sound asset names.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Semantic search terms, e.g. "alien signal", "anomaly", "ui click", or keywords from the invalid sound name.' },
+                    currentValue: { type: 'string', description: 'The current invalid or desired sound asset value, e.g. "event_alien_signal". Used to derive fallback search terms.' },
+                    fieldName: { type: 'string', description: 'Field being repaired, e.g. "show_sound", "sound", "music". Helps rank event sounds vs UI sounds.' },
+                    file: { type: 'string', description: 'Optional file containing the diagnostic, for context only.' },
+                    line: { type: 'number', description: 'Optional diagnostic line number, for context only.' },
+                    searchContext: { type: 'string', enum: ['mod', 'vanilla', 'both'], description: 'Where to search. Defaults to "both"; project assets are ranked before vanilla.' },
+                    limit: { type: 'number', description: 'Maximum candidates to return (default 20, max 50).' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'grep',
-            description: 'Searches for files matching the specified text/regular expression within the specified path. Returns matching lines and line numbers. Suitable for searching any text pattern within the workspace. To search for vanilla game files, use `search_mod_files(searchContext="vanilla")`.',
+            description: 'Searches for files matching the specified text/regular expression within the workspace/path. Returns matching lines and line numbers. Zero results are NOT proof an ID/key is missing; use verify_pdx_identifier or an AST lookup before declaring absence. To search for vanilla game files, use `search_mod_files(searchContext="vanilla")`.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -223,7 +263,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'workspace_symbols',
-            description: 'Search symbol definitions by name across workspace + vanilla cache. Use specific queries (e.g. "tech_energy_grid" not "tech") to avoid large result sets.',
+            description: 'Search symbol definitions by name across workspace + vanilla cache. Use specific queries (e.g. "tech_energy_grid" not "tech") to avoid large result sets. Empty results can mean the LSP index/type/file kind missed it; verify absence with verify_pdx_identifier before concluding missing.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -231,6 +271,26 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     limit: { type: 'number', description: 'Max results (default 20, keep low for vanilla searches to avoid token waste)' },
                 },
                 required: ['query'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'verify_pdx_identifier',
+            description: 'Verify whether a PDXScript identifier/localisation key exists using multiple independent sources: AST definition lookup, workspace symbols, optional query_types, and text search across mod + vanilla. Use this before saying a key/ID does not exist, before recreating a missing-looking definition, or after grep/search_mod_files returns zero results.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    identifier: { type: 'string', description: 'Exact PDX identifier or localisation key to verify, e.g. "distar.001", "tech_energy_grid", "my_event.1.title".' },
+                    typeName: { type: 'string', description: 'Optional CWTools type to verify through query_types, e.g. "event", "technology", "scripted_trigger", "scripted_effect", "static_modifier", "building".' },
+                    directory: { type: 'string', description: 'Optional subdirectory for text search, e.g. "events", "common/scripted_triggers", "localisation".' },
+                    fileExtensions: { type: 'array', items: { type: 'string' }, description: 'File extensions for text search. Defaults to [".txt", ".yml", ".gui", ".gfx", ".asset"].' },
+                    includeVanilla: { type: 'boolean', description: 'Whether to include vanilla cache in text search. Default true.' },
+                    caseSensitive: { type: 'boolean', description: 'Case-sensitive exact matching for symbol/type checks. Default false.' },
+                    limit: { type: 'number', description: 'Maximum matches to return (default 20, max 50).' },
+                },
+                required: ['identifier'],
             },
         },
     },
@@ -294,6 +354,28 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         },
     },
 
+    {
+        type: 'function',
+        function: {
+            name: 'replace_lines',
+            description: 'Replace an explicit 1-based line range in a non-localisation file. Prefer this over multi_replace_file_content when you already know exact boundaries from document_symbols/get_file_context, or when multi_replace_file_content reports nearest matching line numbers. To avoid replacing the wrong code after concurrent edits, include expectedContent or expectedStartText/expectedEndText whenever possible. Never use for .yml localisation files; use write_localisation instead.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filePath: { type: 'string', description: 'Absolute or workspace-relative file path.' },
+                    startLine: { type: 'number', description: 'Start line number, 1-based and inclusive.' },
+                    endLine: { type: 'number', description: 'End line number, 1-based and inclusive.' },
+                    newContent: { type: 'string', description: 'Replacement content for the entire line range.' },
+                    expectedContent: { type: 'string', description: 'Optional safety guard. The current selected line range must exactly match this content after line-ending normalization, otherwise the tool refuses to write.' },
+                    expectedHash: { type: 'string', description: 'Optional safety guard. SHA-256 hash of the normalized current selected line range. Use when passing expectedContent would be too large.' },
+                    expectedStartText: { type: 'string', description: 'Optional safety guard. Current selected range must start with this text after trimming leading whitespace.' },
+                    expectedEndText: { type: 'string', description: 'Optional safety guard. Current selected range must end with this text after trimming trailing whitespace.' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'Optional encoding override. Omit to preserve existing encoding.' },
+                },
+                required: ['filePath', 'startLine', 'endLine', 'newContent'],
+            },
+        },
+    },
     {
         type: 'function',
         function: {
@@ -440,7 +522,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'apply_patch',
-            description: 'Apply a unified diff patch to one or more files atomically. Use this instead of multiple multi_replace_file_content calls when you have a git-style patch. All hunks must succeed or none are written.',
+            description: 'Apply a unified diff patch to one or more files atomically. Use this when you already have a valid git-style patch, especially for coordinated multi-file changes. For ordinary PDXScript edits with exact line boundaries, prefer replace_lines; for exact current-text snippets in one file, use multi_replace_file_content. All hunks must succeed or none are written.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -456,7 +538,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'multi_replace_file_content',
-            description: 'Used to perform multiple independent, non-contiguous replacements or edits within an existing file. This provides high precision while maintaining the integrity of surrounding code.',
+            description: 'Perform multiple independent, non-contiguous replacements in an existing non-localisation file. TargetContent must match the current file exactly inside the supplied line range. For exact line boundaries, prefer replace_lines because it does not depend on string matching. Never use for .yml localisation files; use write_localisation instead.',
             parameters: {
                 type: 'object',
                 properties: {

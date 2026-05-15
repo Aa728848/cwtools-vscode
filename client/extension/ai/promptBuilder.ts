@@ -118,6 +118,24 @@ BLOCKED_FOR_ORCHESTRATOR:
 - Otherwise make the most conservative assumption that fits the assigned sub-task, state that assumption briefly in your final output, and continue.
 - This rule supersedes Plan Mode clarification steps and any instruction that tells you to ask the user or wait for approval.`;
 
+const SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL = `## Sprite Diagnostic Repair Protocol
+For diagnostics such as \`Expected value of type sprite\`, \`picture = GFX_...\`, \`icon = GFX_...\`, or invalid/missing sprite references:
+1. Treat the problem as a resource lookup, not ordinary syntax repair.
+2. A sprite-typed field must use an existing sprite name such as \`GFX_...\`; do NOT replace it with a raw \`.dds\` path.
+3. Call \`find_sprite_candidates(currentValue, fieldName, searchContext="both")\` before changing the value. This searches both project and vanilla \`.gfx\` definitions and returns verified names plus texture paths.
+4. Prefer project sprites first, then semantically close vanilla sprites. For event \`picture = ...\`, prefer event-picture candidates such as \`GFX_evt_*\` or candidates with event/anomaly/archaeology textures; avoid icon/button textures unless the field is actually an icon field.
+5. If no candidate is found, retry with broader terms from nearby code (for example anomaly, archaeology, situation, relic, event). Never invent a \`GFX_*\` name to satisfy the LSP.
+6. Edit only the offending line with guarded \`replace_lines\` when line numbers are available, then run \`get_diagnostics\` again.`;
+
+const SOUND_DIAGNOSTIC_REPAIR_PROTOCOL = `## Sound Asset Diagnostic Repair Protocol
+For diagnostics or fields such as \`show_sound = ...\`, \`sound = ...\`, missing sound references, or expected sound/music asset values:
+1. Treat the problem as a resource lookup, not ordinary syntax repair.
+2. A sound-typed field normally expects an existing sound/music asset name from \`.asset\` definitions; do NOT replace it with a raw \`.wav\`/\`.ogg\` path unless the rule explicitly expects a file path.
+3. Call \`find_sound_candidates(currentValue, fieldName, searchContext="both")\` before changing the value. This searches both project and vanilla \`.asset\` files and returns verified names plus file references.
+4. Prefer project assets first, then semantically close vanilla assets. For \`show_sound\`, prefer event/UI sound effects over music tracks unless nearby code clearly expects music.
+5. If no candidate is found, retry with broader terms from nearby code. Never invent a sound asset name to satisfy the LSP.
+6. Edit only the offending line with guarded \`replace_lines\` when line numbers are available, then run \`get_diagnostics\` again.`;
+
 // ─── Build Mode System Prompt Template ───────────────────────────────────────
 
 function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
@@ -140,9 +158,9 @@ ${rules}
 Triggers: single-file edits, renames, value fixes, explanations, one-off questions.
 
 - **Verify Legality First**: Even for simple requests, explicitly consider whether the instruction is reasonable.
-- If verified and safe, call \`multi_replace_file_content\` or \`write_file\` directly to apply the changes.
+- If verified and safe, choose the narrowest edit tool: \`replace_lines\` when exact line boundaries are known (include \`expectedContent\` or start/end anchors whenever possible), \`multi_replace_file_content\` only when the current old text is exact and you need one or more string replacements, \`apply_patch\` only for a real unified diff, or \`write_file\` for new/small whole-file writes.
 - Avoid heavy scanning tools (\`todo_write\`, \`list_directory\`) unless necessary to confirm legality.
-- LSP errors returned by \`multi_replace_file_content\` are sufficient — no separate validate step
+- LSP errors returned by write tools are sufficient — no separate validate step
 - Reply in one sentence after completing the edit
 - **Unfamiliar PDX construct?** (scripted_effect, trigger, modifier tag, enum, vanilla ID): do a quick LSP query first — PDXscript training data is limited and these names are easily confused
 
@@ -203,7 +221,7 @@ strictly. If no blueprint exists and the task matches the criteria above, you MU
 - **NEVER attempt to read or rewrite a file larger than 150 lines in a single \`read_file\` / \`write_file\`.** You will hit token limits and crash.
 - **ZERO-READ EDITING**: For existing files, DO NOT read the entire file just to edit a single event/node. Use \`document_symbols\` to find the target symbol's boundaries, then use \`edit_pdx_block(file, symbol, newContent)\` to replace it directly.
 - If you only need to read a specific node to understand it, use \`get_pdx_block(file, symbol)\`.
-- If you must rewrite a large file manually, use \`multi_replace_file_content\` to perform targeted string replacements.
+- If you must edit a large file manually, prefer \`replace_lines\` when exact line boundaries are known and include \`expectedContent\` or \`expectedStartText\`/\`expectedEndText\` guards; use \`multi_replace_file_content\` only for exact current-text replacements; use \`apply_patch\` only for multi-file unified diff patches.
 - Create new file: \`write_file(path, content)\`
 - Replace small file (<150 lines): \`write_file(path, content)\`
 - After writing, use \`get_diagnostics\` to verify the file has no LSP errors.
@@ -272,6 +290,7 @@ Start with \`todo_write\` listing all files in dependency order. Mark \`in_progr
 #### Rule 5 — MANDATORY Task Walkthrough (CRITICAL)
 Before you conclude any conversation where you have executed file modifications, you **MUST** write a detailed completion report named \`walkthrough.md\` inside the Agent Workspace Dir (provided in the Current Editor Context).
 **DO NOT consider the task complete or stop your reasoning until this file is created.** If an edit was requested, your very last action MUST be to generate this file.
+The Walkthrough must summarize the **entire user-requested task completed in this run**, not just the last repair cycle or most recent fix. Include late quality-gate repairs as part of the global outcome, but do not let them replace the full task summary.
 The Walkthrough must document (in Github Flavored Markdown):
 - Technical approach and methods utilized
 - Detailed list of changes made
@@ -335,6 +354,10 @@ When you see LSP/CWTools errors, classify before acting:
        - If you cannot fix a specific block, keep it intact and add a \`# TODO: [error description]\` comment — let the user decide.
        - **Rationale**: "Simplifying" to fix errors produces code that passes LSP validation but loses all gameplay logic, making the output worse than the error itself. Rule 3b (Structural Completeness) applies DURING error fixing, not just initial creation.
 
+${SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL}
+
+${SOUND_DIAGNOSTIC_REPAIR_PROTOCOL}
+
 ---
 
 ## Step 3 — Context-Efficient Tool Use
@@ -344,8 +367,11 @@ When you see LSP/CWTools errors, classify before acting:
 | Find a specific event/trigger in a large file | \`workspace_symbols("event_id")\` → get file + line, then \`get_file_context\` |
 | Understand a file's structure | \`document_symbols(file)\` only — do not read content |
 | Isolate a large code block | \`get_pdx_block(file, symbol)\` — grabs entire AST sub-tree perfectly |
-| **Modify a specific block without reading** | \`multi_replace_file_content(file, TargetContent, newContent)\` — **ZERO-READ EDIT**, the fastest and safest way to modify PDX scripts |
+| **Modify a symbol/block with exact boundaries** | \`replace_lines(filePath, startLine, endLine, newContent, expectedContent?)\` or \`edit_pdx_block(file, symbol, newContent)\` — guards line edits against stale ranges |
+| **Modify several exact old-text snippets in one file** | \`multi_replace_file_content(file, TargetContent, ReplacementContent)\` — use only when TargetContent is copied from the current file |
+| **Apply a prepared multi-file diff** | \`apply_patch(patch)\` — use only for a valid unified diff, not ordinary line-range PDXScript edits |
 | See code around a specific line | \`get_file_context(file, line, radius=20)\` |
+| Verify an ID/key before saying it is missing | \`verify_pdx_identifier(identifier, typeName?)\` - multi-source evidence with \`canTreatAsMissing\` |
 | Verify an ID exists | \`query_types(typeName, filter)\` — no file reading at all |
 | Search EXACT match in vanilla codebase | \`search_mod_files(query="X", searchContext="vanilla", exactMatch=true)\` — do not use workspace_symbols for text searches |
 | Universal Text Search | \`grep(query="pattern", isRegex=true/false)\` — fast regex or plain text search across the workspace or specific paths |
@@ -354,7 +380,13 @@ When you see LSP/CWTools errors, classify before acting:
 - **BAN ON MINDLESS READING**: NEVER call \`read_file\` on an unknown file without checking its size or structure first. Files over 150 lines will cause network hangs.
 - When reading sibling files (Rule 0), prefer \`get_pdx_block\` to extract exactly one event/node, or use \`read_file\` with \`startLine\` and \`endLine\` to read only the first 60 lines for structure.
 - For MANDATORY FINAL CHECK, if \`get_diagnostics\` returns results with \`_occurrences\` or \`_diagnosticsNote\` fields, the results have been automatically deduplicated — use these metadata fields for accurate counts
-- Before reading a large file in full, consider: can \`document_symbols\` + \`multi_replace_file_content\` solve my problem with zero reading?
+- Before reading a large file in full, consider: can \`document_symbols\`/\`get_file_context\` + \`replace_lines\` or \`edit_pdx_block\` solve my problem with zero full-file reading?
+
+### Absence Proof Protocol
+- **A single failed search is not evidence of absence.** \`grep\`, \`search_mod_files\`, \`workspace_symbols\`, and truncated \`read_file\` output can miss valid PDX identifiers because of vanilla cache scope, file extension, AST type, localisation folders, or stale LSP indexes.
+- Before saying an ID/key does not exist, call \`verify_pdx_identifier(identifier, typeName?)\` and only treat it as missing when \`canTreatAsMissing=true\`. If you do not use that tool, cross-check at least two independent sources: one AST/index lookup (\`query_definition_by_name\`, \`query_types\`, or \`workspace_symbols\`) and one text search with the right context/extensions (\`search_mod_files(searchContext="both")\` or targeted \`grep\`).
+- For event IDs, prefer \`verify_pdx_identifier(identifier, typeName="event", directory="events", fileExtensions=[".txt"])\`; for localisation keys, search \`.yml\` under localisation paths; for UI/assets, include \`.gui\`, \`.gfx\`, and \`.asset\`.
+- If verification returns \`inconclusive\` or \`ambiguous\`, do not create a duplicate or delete references. Narrow the type/directory/extension and retry, or escalate the uncertainty.
 
 ---
 
@@ -365,7 +397,7 @@ When you see LSP/CWTools errors, classify before acting:
 - **TEMPORARY FILES**: All temporary files, scratchpads, and script files (e.g., .sh, .ps1, .py, .js) created for execution via \`run_command\` MUST be placed strictly inside the Agent Workspace Dir (\`.cwtools-ai/{Topic_ID}/\`). NEVER clutter the workspace root or source directories with temporary script files.
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **MAX 3 RETRIES & GRACEFUL DEGRADATION**: If a specific error persists after 3 fix attempts, DO NOT delete the entire block and DO NOT guess. Leave the best-effort code in the file, place a \`# TODO: [USER INTERVENTION REQUIRED] - LSP error: <error text>\` comment above it, and continue to the next error. The ZERO-ERROR DELIVERY GATE will enforce the final quality check and report all remaining errors to the user.
-- **EDIT RECOVERY**: If \`multi_replace_file_content\` fails with "TargetContent not found", you MUST call \`read_file\` or \`get_file_context\` on that file first to get its exact current content, then retry with the precise text from the file as \`TargetContent\`. Never guess or reconstruct the TargetContent from memory. If the error message includes a "Nearest partial match" hint with line numbers, use \`replace_lines(filePath, startLine, endLine, newContent)\` to directly replace that line range instead of retrying string matching.
+- **EDIT RECOVERY**: If \`multi_replace_file_content\` fails with "TargetContent not found", do not retry guessed old text. If you have reliable line numbers from \`document_symbols\`, \`get_file_context\`, diagnostics, or a nearest-match hint, switch to \`replace_lines(filePath, startLine, endLine, newContent)\` and add \`expectedContent\` or start/end anchors from the current context. Only retry \`multi_replace_file_content\` after calling \`read_file\` or \`get_file_context\` and copying the exact current \`TargetContent\` from the file.
 - **GIT RECOVERY**: If your edits have corrupted a file beyond repair (5+ failures, or the file structure is completely broken), use \`git_ops(action="checkout", file="path")\` to revert it to the last committed state. Use \`git_ops(action="diff", file="path")\` first to see what changed. This is a last resort — it discards ALL uncommitted changes to that file.
 
 ## Verification Checks
@@ -384,7 +416,8 @@ When encountering any of the following constructs **for the first time** in a ta
 | Any \`@variable\` constant | \`query_variables("@prefix")\` — get actual value |
 | Finding where a symbol is defined | \`query_definition_by_name(symbolName="symbol")\` — instant AST lookup |
 | Any vanilla game ID (tech, building, trait…) | \`query_types(typeName, filter)\` — confirm it exists |
-| Any GFX/sprite reference (GFX_*) | \`workspace_symbols("GFX_prefix")\` for mod sprites + \`search_mod_files(query, searchContext="vanilla", fileExtension=".gfx")\` for vanilla sprites — NEVER guess GFX names |
+| Any GFX/sprite reference (GFX_*) | \`find_sprite_candidates(currentValue, fieldName, searchContext="both")\` — verified mod + vanilla spriteType candidates; NEVER guess GFX names |
+| Any sound asset reference (\`show_sound\`, \`sound\`) | \`find_sound_candidates(currentValue, fieldName, searchContext="both")\` — verified mod + vanilla .asset candidates; NEVER guess sound names |
 
 ## Project Context Usage (MANDATORY when project-premise is present)
 If a \`<project-premise>\` block is provided above, you MUST:
@@ -407,8 +440,9 @@ When creating new game entities (technologies, traditions, edicts, events, etc.)
 
 ### Decision Flow (MANDATORY before generating any media asset)
 1. **Check for existing assets FIRST** (two-stage search):
-   - **Mod workspace**: \`workspace_symbols("GFX_your_keyword")\` — finds spriteType definitions within the current mod project. Note: \`workspace_symbols\` does NOT search vanilla files!
-   - **Vanilla game files**: \`search_mod_files(query="your_keyword", directory="gfx", searchContext="vanilla", fileExtension=".gfx")\` — searches vanilla .gfx files for matching sprite definitions.
+   - **Sprite candidates**: \`find_sprite_candidates(query="your_keyword", searchContext="both")\` — finds verified project and vanilla \`spriteType\` definitions, including the texture path for semantic checking.
+   - **Sound candidates**: \`find_sound_candidates(query="your_keyword", searchContext="both")\` — finds verified project and vanilla sound/music assets from \`.asset\` files.
+   - If you need raw file evidence, cross-check with \`search_mod_files(query="your_keyword", directory="interface", searchContext="vanilla", fileExtension=".gfx")\`.
    - Prefer reusing existing assets whenever a suitable match is found.
 2. **If no existing asset matches AND the task benefits from a custom one**: You MUST explicitly ask the user whether they want you to generate a new asset. **Never silently generate images or audio without user consent.** Example: *"This technology needs an icon. Would you like me to generate a custom icon, or should I use an existing vanilla sprite (e.g. \`GFX_tech_mine_exotic_gas\`)?"*
 3. **If the user agrees to generation**: Call the appropriate tool. If it returns an error indicating the required CLI tool is not installed (mmx, ImageMagick, ffmpeg), **do NOT retry or work around it**. Instead:
@@ -422,7 +456,7 @@ When creating new game entities (technologies, traditions, edicts, events, etc.)
 Step 1: mmx_generate_image(prompt, aspect_ratio)  → .cwtools-ai/<current-topic-id>/media/xxx.png
 Step 2: convert_image_to_dds(source, compression="dxt5")  → .cwtools-ai/<current-topic-id>/media/xxx.dds
 Step 3: deploy_mod_asset(source, target="gfx/interface/icons/my_icon.dds")
-Step 4: multi_replace_file_content("interface/my_mod.gfx", register spriteType)
+Step 4: register the spriteType with guarded \`replace_lines\` when you know the insertion range, or \`multi_replace_file_content\` only after copying the exact current anchor text
 \`\`\`
 For audio: \`mmx_generate_music\`/\`mmx_generate_speech\` → \`convert_audio(targetFormat="ogg")\` → \`deploy_mod_asset(target="sound/...")\`
 ${gameKnowledge}`;
@@ -541,7 +575,7 @@ After collecting user answers from Step 2, you MUST complete this step BEFORE wr
 **After outputting the blueprint, STOP and wait for user approval before proceeding to Step 4.**
 
 ### Step 4 — Research & Analysis (read-only tools)
-\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`grep\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
+\`get_file_context\`, \`read_file\`, \`search_mod_files\`, \`grep\`, \`list_directory\`, \`document_symbols\`, \`workspace_symbols\`, \`verify_pdx_identifier\`, \`web_fetch\`, \`search_web\`, \`codesearch\`
 Also available: Deep API tools (\`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`get_entity_info\`, \`query_definition_by_name\`, \`query_static_modifiers\`, \`query_variables\`)
 Use \`query_scope\`, \`query_rules\`, \`query_references\` to understand patterns.
 
@@ -588,7 +622,7 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 </system-reminder>
 
 ## Explore Mode Guidelines
-- **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`grep\`, \`document_symbols\`, \`workspace_symbols\`, \`query_references\`, \`get_file_context\`
+- **File-level tools** (read-only): \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`grep\`, \`document_symbols\`, \`workspace_symbols\`, \`verify_pdx_identifier\`, \`query_references\`, \`get_file_context\`
 - **AST-level tools** (read-only, faster): \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\`, \`get_entity_info\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`
 - **Web tools**: \`web_fetch\`, \`search_web\`, \`codesearch\` — look up game wiki, Paradox forum, or modding docs
 - **ALWAYS prefer AST-level tools over file-system search** — they are indexed, scope-aware, and consume far less context
@@ -629,6 +663,7 @@ General mode is a simple Q&A and guidance mode. You MUST NOT modify any files, e
 ## Context Efficiency
 Choose the right read-only tool for each situation:
 - **Quick verification?** Use AST queries (\`query_definition_by_name\`, \`query_scripted_effects\`, \`query_types\`) — they return structured data with minimal context cost
+- **Proving absence?** Use \`verify_pdx_identifier\` first. Do not conclude an ID/key is missing from one empty \`grep\`, \`search_mod_files\`, \`workspace_symbols\`, or truncated \`read_file\` result.
 - **Inspecting a specific location?** Use \`get_file_context(file, line, radius=20)\` — precise and lightweight
 - **Need full file understanding?** Reading complete files is appropriate, just prefer \`document_symbols\` first to know what you're looking at
 - **Searching across files?** Use \`grep\`, \`search_mod_files\` or \`workspace_symbols\` before resorting to reading multiple files
@@ -656,9 +691,11 @@ Review mode is active. You MUST NOT write or modify any files. Your goal is to r
 </system-reminder>
 
 ## Review Mode Guidelines
-- **Tools**: \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`grep\`, \`document_symbols\`, \`workspace_symbols\`, \`get_diagnostics\`, \`query_*\`
+- **Tools**: \`read_file\`, \`list_directory\`, \`search_mod_files\`, \`find_sprite_candidates\`, \`grep\`, \`document_symbols\`, \`workspace_symbols\`, \`verify_pdx_identifier\`, \`get_diagnostics\`, \`query_*\`
 - **Goal**: Find logic errors, scoping bugs, performance issues, and CWTools validation warnings.
 - Be highly critical of scope changes and ensure they are valid.
+
+${SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL}
 
 ## Diagnostics Retrieval (IMPORTANT)
 When calling \`get_diagnostics\`:
@@ -727,7 +764,8 @@ You are dealing exclusively with .gui files. After modifying GUI files, use \`ge
 - **Button Effect & Scripted GUI Tracing**: UI buttons are often tied to backend scripts. Before modifying or overriding a button's \`name\`, you MUST use \`grep\` or \`workspace_symbols\` to check if it is tied to a \`button_effect\` or \`scripted_gui\` in the \`common/\` folder.
 - **Read Full Hierarchy**: Always read the entire parent \`containerWindowType\` structure using \`get_pdx_block\` before modifying elements. Elements inherit coordinates from parents.
 - **Orientation and Origo**: Do not arbitrarily change them without understanding the parent window anchor.
-- **Textures**: Use \`workspace_symbols\` to look up defined \`spriteType\` bindings if an image is missing.
+- **Textures/Sprites**: Use \`find_sprite_candidates\` for any \`spriteType\`, \`quadTextureSprite\`, button/background image, or GFX reference. GUI Expert agents must verify project and vanilla \`.gfx\` definitions before replacing or adding sprite names.
+- **Sounds**: Use \`find_sound_candidates\` for \`show_sound\` or other sound references before editing GUI event hooks or scripted GUI blocks.
 ${gameKnowledge}`;
 }
 
@@ -1460,12 +1498,20 @@ ${trimmed}
 
 
     // W6 修复：不再重复注入完整代码块（AI 已经在上一轮看过自己生成的代码了）。
-    // 仅列出错误行，指导 AI 使用 multi_replace_file_content 定向修复，避免大文件时数千 tokens 的浪费。
+    // 仅列出错误行，指导 AI 使用 replace_lines 定向修复，避免大文件时数千 tokens 的浪费。
     buildValidationRetryMessage(code: string, errors: Array<{ message: string; line: number }>): ChatMessage {
         const errorList = errors.map(e => `  - Line ${e.line}: ${e.message}`).join('\n');
+        const hasSpriteError = errors.some(e => /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(e.message));
+        const hasSoundError = errors.some(e => /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(e.message));
+        const spriteGuidance = hasSpriteError
+            ? `\n\n${SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL}\n`
+            : '';
+        const soundGuidance = hasSoundError
+            ? `\n\n${SOUND_DIAGNOSTIC_REPAIR_PROTOCOL}\n`
+            : '';
         return {
             role: 'user',
-            content: `The code you generated has validation errors. Please fix ONLY the specific error lines listed below using \`multi_replace_file_content\` — do NOT rewrite the entire file.\n\n**Errors:**\n${errorList}\n\nFix each error individually. After fixing, call \`get_diagnostics\` to verify.`,
+            content: `The code you generated has validation errors. Please fix ONLY the specific error lines listed below using \`replace_lines\` with expectedContent/start-end guards when the line range is clear, or \`multi_replace_file_content\` only after copying exact current TargetContent — do NOT rewrite the entire file.\n\n**Errors:**\n${errorList}${spriteGuidance}${soundGuidance}\nFix each error individually. After fixing, call \`get_diagnostics\` to verify.`,
         };
     }
 }

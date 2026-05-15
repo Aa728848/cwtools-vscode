@@ -41,9 +41,12 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     get_diagnostics: 45_000,
     get_file_context: 45_000,
     search_mod_files: 45_000,
+    find_sprite_candidates: 45_000,
+    find_sound_candidates: 45_000,
     get_completion_at: 45_000,
     document_symbols: 45_000,
     workspace_symbols: 45_000,
+    verify_pdx_identifier: 45_000,
     get_pdx_block: 45_000,
     lsp_operation: 45_000,
     query_definition: 45_000,
@@ -58,6 +61,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     read_file: 30_000,
     write_file: 30_000,
     multi_replace_file_content: 30_000,
+    replace_lines: 30_000,
     apply_patch: 30_000,
     list_directory: 30_000,
     glob_files: 30_000,
@@ -322,7 +326,7 @@ export class AgentToolExecutor {
                 }
             }
         } catch (e) {
-            if (e instanceof Error && e.message.includes('执行超时')) {
+            if (e instanceof Error && (e.name === 'TimeoutError' || e.message.includes('执行超时'))) {
                 return { error: e.message, hint: '请重试或使用更小范围的操作' };
             }
             throw e;
@@ -349,6 +353,10 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.getFileContext(args as any); break;
             case 'search_mod_files':
                 result = await this.lspHandler.searchModFiles(args as any); break;
+            case 'find_sprite_candidates':
+                result = await this.lspHandler.findSpriteCandidates(args as any); break;
+            case 'find_sound_candidates':
+                result = await this.lspHandler.findSoundCandidates(args as any); break;
             case 'grep':
                 result = await this.lspHandler.grep(args as any); break;
             case 'get_completion_at':
@@ -357,6 +365,8 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.documentSymbols(args as any); break;
             case 'workspace_symbols':
                 result = await this.lspHandler.workspaceSymbols(args as any); break;
+            case 'verify_pdx_identifier':
+                result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
             case 'get_pdx_block':
                 result = await this.lspHandler.getPdxBlock(args as any); break;
             case 'edit_pdx_block': {
@@ -423,7 +433,7 @@ export class AgentToolExecutor {
                 break;
             }
             case 'lsp_operation':
-                result = await this.lspHandler.lspOperation(args as any); break;
+                result = await this.lspHandler.lspOperation(args as any, context); break;
             case 'query_definition':
                 result = await this.lspHandler.queryDefinition(args as any); break;
             case 'query_definition_by_name':
@@ -448,6 +458,8 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.writeFile(args as any, context); break;
             case 'multi_replace_file_content':
                 result = await this.fileHandler.multiReplaceFileContent(args as any, context); break;
+            case 'replace_lines':
+                result = await this.fileHandler.replaceLines(args as any, context); break;
             case 'apply_patch':
                 result = await this.fileHandler.applyPatch(args as any, context); break;
             case 'list_directory':

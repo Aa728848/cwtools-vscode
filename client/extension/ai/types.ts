@@ -799,7 +799,7 @@ export interface AgentStep {
     | 'code_generated' | 'validation' | 'error' | 'compaction'
     | 'todo_update' | 'permission_request'
     | 'subtask_start' | 'subtask_complete' | 'diff_summary'
-    | 'plan_card' | 'walkthrough_card' | 'transaction_card' | 'orchestrator_progress';
+    | 'plan_card' | 'blueprint_card' | 'walkthrough_card' | 'transaction_card' | 'orchestrator_progress';
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;
@@ -822,6 +822,29 @@ export interface AgentStep {
     iterationInfo?: string;
     /** 子 Agent 节点 ID，用于 UI 分组显示 */
     agentId?: string;
+}
+
+export type AgentArtifactKind =
+    | 'plan'
+    | 'blueprint'
+    | 'walkthrough'
+    | 'diff'
+    | 'diagnostics'
+    | 'validation'
+    | 'media'
+    | 'blackboard';
+
+export interface AgentArtifact {
+    id: string;
+    kind: AgentArtifactKind;
+    title: string;
+    summary?: string;
+    filePath?: string;
+    relPath?: string;
+    status?: 'pending' | 'running' | 'done' | 'failed';
+    createdAt: number;
+    updatedAt?: number;
+    data?: unknown;
 }
 
 export interface GenerationResult {
@@ -854,6 +877,10 @@ export interface ChatTopic {
 export interface ChatHistoryMessage {
     role: 'user' | 'assistant';
     content: string;
+    /** Optional compact UI text when content contains injected context for the model. */
+    displayContent?: string;
+    /** Structured references attached to this user turn for compact replay in the UI. */
+    contexts?: ContextItem[];
     code?: string;
     isValid?: boolean;
     timestamp: number;
@@ -866,13 +893,15 @@ export interface ChatHistoryMessage {
 
 // ─── Context Tray Types ──────────────────────────────────────────────────────
 
-export type ContextItemType = 'code_selection' | 'image' | 'file';
+export type ContextItemType = 'code_selection' | 'image' | 'diagnostics' | 'file' | 'folder' | 'scope' | 'symbol' | 'vanilla' | 'blackboard';
 
 export interface BaseContextItem {
     id: string;
     type: ContextItemType;
     label: string;
     description?: string;
+    tokenEstimate?: number;
+    cacheStatus?: 'live' | 'disk' | 'cached' | 'large' | 'missing' | 'external' | 'unknown';
 }
 
 export interface CodeSelectionContext extends BaseContextItem {
@@ -887,13 +916,52 @@ export interface FileContext extends BaseContextItem {
     uri: string;
 }
 
-export type ContextItem = CodeSelectionContext | FileContext | BaseContextItem;
+export interface FolderContext extends BaseContextItem {
+    type: 'folder';
+    uri: string;
+}
+
+export interface DiagnosticsContext extends BaseContextItem {
+    type: 'diagnostics';
+    uri?: string;
+}
+
+export interface ScopeContext extends BaseContextItem {
+    type: 'scope';
+    uri?: string;
+    line?: number;
+    column?: number;
+}
+
+export interface SymbolContext extends BaseContextItem {
+    type: 'symbol';
+    name: string;
+    kind?: string;
+    uri?: string;
+    line?: number;
+    column?: number;
+}
+
+export interface VanillaContext extends BaseContextItem {
+    type: 'vanilla';
+    vanillaType: string;
+    vanillaId: string;
+    uri?: string;
+}
+
+export interface BlackboardContext extends BaseContextItem {
+    type: 'blackboard';
+    key: string;
+}
+
+export type ContextItem = CodeSelectionContext | FileContext | FolderContext | DiagnosticsContext | ScopeContext | SymbolContext | VanillaContext | BlackboardContext | BaseContextItem;
 
 // ─── WebView Communication ───────────────────────────────────────────────────
 
 export type WebViewMessage =
     | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
     | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[] }
+    | { type: 'openContextReference'; context: ContextItem }
     | { type: 'insertCode'; code: string }
     | { type: 'copyCode'; code: string }
     | { type: 'regenerate' }
@@ -947,7 +1015,7 @@ export type WebViewMessage =
     | { type: 'requestMentionSearch'; query: string };
 
 export type HostMessage =
-    | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[] }
+    | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
     | { type: 'startBackgroundGeneration' }
     | { type: 'agentStep'; step: AgentStep }
     | { type: 'generationComplete'; result: GenerationResult }
@@ -974,11 +1042,11 @@ export type HostMessage =
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */
     | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
     /** Plan file saved to disk — tells webview to show the Open/Submit card */
-    | { type: 'planFileSaved'; filePath: string; relPath: string }
+    | { type: 'planFileSaved'; filePath: string; relPath: string; mode?: AgentMode }
     | { type: 'walkthroughFileSaved'; filePath: string; relPath: string }
     | { type: 'blueprintFileSaved'; filePath: string; relPath: string }
     /** Send plan sections to webview for interactive inline annotation */
-    | { type: 'renderPlan'; sections: string[]; planText?: string }
+    | { type: 'renderPlan'; sections: string[]; planText?: string; mode?: AgentMode }
     | { type: 'renderWalkthrough'; sections: string[] }
     | { type: 'renderBlueprint'; sections: string[]; planText?: string }
     /** Return workspace file list for @ mention popup */
@@ -994,9 +1062,26 @@ export type HostMessage =
     | { type: 'skillsList'; skills: string[] }
     | { type: 'skillInstallComplete'; success: boolean }
     | { type: 'usageStats'; stats: any }
+    | { type: 'artifactList'; artifacts: AgentArtifact[] }
     /** 多 Agent 协调器进度推送 — Agent Lane UI */
     | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
-    | { type: 'mentionSearchResults'; results: Array<{ uri: string; label: string; desc: string }> };
+    | { type: 'mentionSearchResults'; results: Array<{
+        type?: ContextItemType;
+        uri?: string;
+        label: string;
+        desc: string;
+        startLine?: number;
+        endLine?: number;
+        line?: number;
+        column?: number;
+        name?: string;
+        kind?: string;
+        vanillaType?: string;
+        vanillaId?: string;
+        key?: string;
+        tokenEstimate?: number;
+        cacheStatus?: BaseContextItem['cacheStatus'];
+    }> };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

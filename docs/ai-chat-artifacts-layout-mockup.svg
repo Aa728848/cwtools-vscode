@@ -1,0 +1,169 @@
+<svg width="1080" height="1600" viewBox="0 0 1080 1600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
+    <style>
+      .bg { fill: #1e1e1e; }
+      .panel { fill: #252526; stroke: #3c3c3c; stroke-width: 1; }
+      .panel2 { fill: #2d2d2d; stroke: #444; stroke-width: 1; }
+      .muted { fill: #8f8f8f; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .text { fill: #f3f3f3; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .title { fill: #fff5d8; font-family: Georgia, "Microsoft YaHei", serif; font-weight: 700; }
+      .small { font-size: 16px; }
+      .xs { font-size: 13px; }
+      .m { font-size: 18px; }
+      .l { font-size: 23px; }
+      .xl { font-size: 28px; }
+      .accent { fill: #e8c840; }
+      .blue { fill: #64a6ff; }
+      .green { fill: #62c98f; }
+      .red { fill: #ff6b5f; }
+      .purple { fill: #b995ff; }
+      .strokeAccent { stroke: #e8c840; }
+      .strokeBlue { stroke: #64a6ff; }
+      .strokeGreen { stroke: #62c98f; }
+      .strokePurple { stroke: #b995ff; }
+      .mono { font-family: "Cascadia Mono", Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1080" height="1600"/>
+
+  <!-- Header -->
+  <rect x="0" y="0" width="1080" height="76" fill="#202020"/>
+  <line x1="0" y1="76.5" x2="1080" y2="76.5" stroke="#333"/>
+  <path class="accent" d="M44 31l5.5-20 5.5 20 20 5.5-20 5.5-5.5 20-5.5-20-20-5.5 20-5.5z"/>
+  <circle class="accent" cx="72" cy="17" r="4"/>
+  <text class="title xl" x="92" y="48">Eddy CWTool Code</text>
+
+  <!-- Header buttons -->
+  <rect class="panel2" x="770" y="20" width="132" height="40" rx="8"/>
+  <text class="text small" x="793" y="45">Artifacts</text>
+  <circle class="blue" cx="884" cy="20" r="11"/>
+  <text class="text xs mono" x="880" y="25">7</text>
+  <rect class="panel2" x="916" y="20" width="40" height="40" rx="8"/>
+  <text class="muted m" x="929" y="46">+</text>
+  <rect class="panel2" x="968" y="20" width="40" height="40" rx="8"/>
+  <text class="muted m" x="982" y="45">≡</text>
+  <rect class="panel2" x="1020" y="20" width="40" height="40" rx="8"/>
+  <text class="muted m" x="1033" y="45">⚙</text>
+
+  <!-- Main chat column -->
+  <rect x="24" y="100" width="662" height="1300" rx="14" fill="#1e1e1e" stroke="#2c2c2c"/>
+  <text class="muted xs" x="48" y="132">CHAT</text>
+  <text class="text l" x="48" y="172">把聊天区保持安静，让内容自己成为主角</text>
+  <text class="muted small" x="48" y="204">Artifacts 不常驻挤占正文，而是通过右侧抽屉随时查看。</text>
+
+  <!-- Chat examples -->
+  <rect class="panel2" x="48" y="250" width="590" height="118" rx="10"/>
+  <rect x="70" y="272" width="232" height="32" rx="7" fill="#26324d" stroke="#4f73d9"/>
+  <text class="blue xs mono" x="86" y="293">SELECTION exe_start.txt #L166-169</text>
+  <text class="text m" x="70" y="338">这串代码写了什么</text>
+
+  <rect x="48" y="394" width="590" height="166" rx="10" fill="#242424" stroke="#3a3a3a"/>
+  <text class="accent small" x="70" y="426">AI</text>
+  <text class="text small" x="104" y="426">这段代码定义了一个初始化脚本片段...</text>
+  <rect x="70" y="456" width="168" height="28" rx="6" fill="#2b2b2b" stroke="#444"/>
+  <text class="muted xs" x="86" y="475">引用上下文已折叠</text>
+  <rect x="252" y="456" width="126" height="28" rx="6" fill="#2b2b2b" stroke="#444"/>
+  <text class="muted xs" x="268" y="475">~94 tokens</text>
+  <text class="muted xs" x="70" y="516">正文里不再重复显示 @exe_start.txt，引用只保留为 chip。</text>
+
+  <!-- Suggest section -->
+  <g transform="translate(178 650)">
+    <path class="accent" d="M134 0l8 30 30 8-30 8-8 30-8-30-30-8 30-8 8-30z"/>
+    <circle class="accent" cx="172" cy="12" r="5"/>
+    <text class="title l" x="40" y="122">Eddy CWTool Code Assistant</text>
+    <text class="muted small" x="0" y="156">描述你的需求，AI 将生成并验证 Paradox 脚本</text>
+    <rect class="panel2" x="-12" y="196" width="178" height="112" rx="12"/>
+    <text class="muted l" x="22" y="254">检查 LSP 错误</text>
+    <rect class="panel2" x="184" y="196" width="178" height="112" rx="12"/>
+    <text class="muted l" x="218" y="254">作用域解释</text>
+    <rect class="panel2" x="-12" y="326" width="178" height="112" rx="12"/>
+    <text class="muted l" x="22" y="384">添加注释</text>
+    <rect class="panel2" x="184" y="326" width="178" height="112" rx="12"/>
+    <text class="muted l" x="218" y="384">代码审查</text>
+  </g>
+
+  <!-- Input -->
+  <rect class="panel" x="48" y="1248" width="590" height="124" rx="14"/>
+  <text class="muted m" x="72" y="1292">检查当前文件的 LSP 错误并修复</text>
+  <rect x="72" y="1320" width="118" height="38" rx="8" fill="#343434" stroke="#555"/>
+  <text class="text small" x="90" y="1345">构建模式</text>
+  <rect x="202" y="1320" width="214" height="38" rx="8" fill="#343434" stroke="#555"/>
+  <text class="text small mono" x="224" y="1345">mimo-v2.5-pro</text>
+  <rect x="428" y="1320" width="42" height="38" rx="8" fill="#343434" stroke="#555"/>
+  <text class="text m" x="442" y="1346">+</text>
+  <rect x="586" y="1318" width="40" height="40" rx="9" fill="#f26a4f"/>
+  <text class="text l" x="600" y="1346">↑</text>
+
+  <!-- Artifact drawer -->
+  <g filter="url(#softShadow)">
+    <rect class="panel" x="712" y="100" width="344" height="1300" rx="16"/>
+  </g>
+  <text class="text l" x="740" y="144">Artifacts</text>
+  <text class="muted small" x="740" y="172">本轮产物、验证、文件变更集中管理</text>
+  <rect x="740" y="198" width="86" height="34" rx="17" fill="#293247" stroke="#4f73d9"/>
+  <text class="blue xs" x="762" y="220">全部</text>
+  <rect x="838" y="198" width="82" height="34" rx="17" fill="#2b2b2b" stroke="#444"/>
+  <text class="muted xs" x="861" y="220">计划</text>
+  <rect x="932" y="198" width="88" height="34" rx="17" fill="#2b2b2b" stroke="#444"/>
+  <text class="muted xs" x="953" y="220">验证</text>
+
+  <!-- Artifact cards -->
+  <g transform="translate(740 262)">
+    <rect width="280" height="104" rx="12" fill="#2b2f3a" stroke="#4f73d9"/>
+    <text class="blue xs mono" x="16" y="26">PLAN · pending</text>
+    <text class="text small" x="16" y="56">Implementation Plan</text>
+    <text class="muted xs" x="16" y="80">等待确认后进入构建执行</text>
+  </g>
+
+  <g transform="translate(740 384)">
+    <rect width="280" height="104" rx="12" fill="#312b3a" stroke="#896ee6"/>
+    <text class="purple xs mono" x="16" y="26">BLUEPRINT</text>
+    <text class="text small" x="16" y="56">Design Blueprint</text>
+    <text class="muted xs" x="16" y="80">实体拓扑、依赖顺序、scope 链</text>
+  </g>
+
+  <g transform="translate(740 506)">
+    <rect width="280" height="104" rx="12" fill="#2b342f" stroke="#5ebd81"/>
+    <text class="green xs mono" x="16" y="26">DIFF</text>
+    <text class="text small" x="16" y="56">Diff Summary</text>
+    <text class="green xs mono" x="16" y="82">+128  -23   5 files</text>
+  </g>
+
+  <g transform="translate(740 628)">
+    <rect width="280" height="104" rx="12" fill="#2e2e2e" stroke="#555"/>
+    <text class="accent xs mono" x="16" y="26">DIAGNOSTICS</text>
+    <text class="text small" x="16" y="56">Diagnostics Report</text>
+    <text class="muted xs" x="16" y="80">0 error · 2 warnings · cached live</text>
+  </g>
+
+  <g transform="translate(740 750)">
+    <rect width="280" height="104" rx="12" fill="#2e2e2e" stroke="#555"/>
+    <text class="accent xs mono" x="16" y="26">WALKTHROUGH</text>
+    <text class="text small" x="16" y="56">Completion Report</text>
+    <text class="muted xs" x="16" y="80">交付说明与验证结果</text>
+  </g>
+
+  <g transform="translate(740 872)">
+    <rect width="280" height="104" rx="12" fill="#2e2e2e" stroke="#555"/>
+    <text class="purple xs mono" x="16" y="26">BLACKBOARD</text>
+    <text class="text small" x="16" y="56">Shared Context</text>
+    <text class="muted xs" x="16" y="80">子 Agent 共享摘要和键值</text>
+  </g>
+
+  <line x1="740" y1="1032" x2="1020" y2="1032" stroke="#3a3a3a"/>
+  <text class="muted xs" x="740" y="1070">建议交互</text>
+  <text class="text small" x="740" y="1104">1. 顶部 Artifacts 按钮显示数量徽标</text>
+  <text class="text small" x="740" y="1136">2. 点击打开右侧抽屉，不挤压聊天流</text>
+  <text class="text small" x="740" y="1168">3. 文件类产物点击打开，报告类点击展开</text>
+  <text class="text small" x="740" y="1200">4. 错误/验证结果用颜色给状态反馈</text>
+
+  <!-- Callouts -->
+  <path d="M884 61 C884 78 884 84 884 100" stroke="#64a6ff" stroke-width="2" stroke-dasharray="5 5"/>
+  <text class="blue xs" x="744" y="88">入口放标题栏，少占空间</text>
+  <path d="M686 420 C706 420 708 420 712 420" stroke="#e8c840" stroke-width="2" stroke-dasharray="5 5"/>
+  <text class="accent xs" x="492" y="414">右侧抽屉承载产物中心</text>
+</svg>

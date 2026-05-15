@@ -18,6 +18,8 @@ import type {
     HostMessage,
     AgentStep,
     AgentMode,
+    AgentArtifact,
+    AgentArtifactKind,
 } from './types';
 import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
@@ -28,6 +30,7 @@ import { generateInitFile } from './chatInit';
 import { ChatSettingsManager } from './chatSettings';
 import { ErrorReporter } from './errorReporter';
 import { UI, SOURCE } from './messages';
+import { ContextReferenceManager } from './contextReferences';
 
 export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public static readonly viewType = 'cwtools.aiChat';
@@ -68,6 +71,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private _viewDisposables: vs.Disposable[] = [];
     private topicManager!: ChatTopicManager;
     private settingsManager!: ChatSettingsManager;
+    private contextReferences: ContextReferenceManager;
+    private artifacts = new Map<string, AgentArtifact>();
 
     constructor(
         private extensionUri: vs.Uri,
@@ -78,6 +83,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     ) {
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
+        this.contextReferences = new ContextReferenceManager(() => this.agentRunner.toolExecutor.blackboard);
     }
 
     /**
@@ -170,46 +176,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this._isGenerating && this._liveSteps.length > 0) {
             this.postMessage({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
         }
+        if (this.artifacts.size > 0) {
+            this.postMessage({ type: 'artifactList', artifacts: [...this.artifacts.values()] });
+        }
         // 4. Restore model lists and settings bindings
         void this.settingsManager.buildAndSendSettingsData();
     }
 
     // ─── Message Handling ────────────────────────────────────────────────────
-
-    /**
-     * 活体抓取工厂：优先从 VSCode 活动缓冲区获取带脏缓存的最新代码
-     */
-    private async resolveLiveCodeContext(uriStr: string, startLine: number, endLine: number): Promise<string> {
-        try {
-            const rootPath = vs.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-            const targetUri = vs.Uri.file(require('path').resolve(rootPath, uriStr));
-            
-            // 优先尝试从活动文档缓冲区获取（含脏缓存）
-            const openDocs = vs.workspace.textDocuments;
-            const activeDoc = openDocs.find(d => d.uri.fsPath.toLowerCase() === targetUri.fsPath.toLowerCase());
-            
-            if (activeDoc) {
-                let text = '';
-                const start = Math.max(0, startLine - 1);
-                const end = Math.min(activeDoc.lineCount - 1, endLine - 1);
-                for (let i = start; i <= end; i++) {
-                    text += activeDoc.lineAt(i).text + '\n';
-                }
-                return text.trimEnd();
-            }
-            
-            // 缓冲区未命中，回退到磁盘读取
-            const data = await vs.workspace.fs.readFile(targetUri);
-            const content = new TextDecoder('utf-8').decode(data);
-            const lines = content.split(/\r?\n/);
-            const start = Math.max(0, startLine - 1);
-            const end = Math.min(lines.length - 1, endLine - 1);
-            return lines.slice(start, end + 1).join('\n').trimEnd();
-        } catch (e) {
-            console.error('[LiveContext] Error resolving context:', e);
-            return `// [Failed to read context]`;
-        }
-    }
 
     private async handleWebViewMessage(msg: WebViewMessage): Promise<void> {
         switch (msg.type) {
@@ -217,28 +191,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.handleUserMessage(msg.text, msg.images, msg.attachedFiles);
                 break;
             case 'sendMessageWithReference': {
-                const { contexts, text, images } = msg as any; // Cast as any because TypeScript hasn't recognized the new union variation yet in some strict checks
-                let contextPrompt = '';
-                const attachedFiles: string[] = [];
-                for (const ctx of contexts) {
-                    if (ctx.type === 'code_selection') {
-                        const liveContent = await this.resolveLiveCodeContext(ctx.uri, ctx.startLine, ctx.endLine);
-                        contextPrompt += `文件 \`${ctx.uri}\` 第 ${ctx.startLine}-${ctx.endLine} 行：\n\`\`\`pdx\n${liveContent}\n\`\`\`\n\n`;
-                    } else if (ctx.type === 'file') {
-                        if (!attachedFiles.includes(ctx.uri)) {
-                            attachedFiles.push(ctx.uri);
-                        }
-                    }
-                }
-                const refPrompt = [
-                    contextPrompt.trim(),
-                    '',
-                    text || (contextPrompt ? '请解释以上引用的上下文内容' : '')
-                ].join('\n').trim();
-                
-                await this.handleUserMessage(refPrompt || (attachedFiles.length > 0 ? '请查阅附带的文件。' : ''), images, attachedFiles);
+                const referencePrompt = await this.contextReferences.buildReferencePrompt(msg.contexts);
+                const displayText = msg.text.trim();
+                const agentText = [
+                    referencePrompt,
+                    msg.text || 'Please use the referenced context above.',
+                ].filter(Boolean).join('\n\n');
+
+                await this.handleUserMessage(agentText, msg.images, undefined, false, false, false, displayText, msg.contexts);
                 break;
             }
+            case 'openContextReference':
+                await this.contextReferences.openReference(msg.context);
+                break;
             case 'insertCode':
                 await this.insertCodeWithDiff(msg.code);
                 break;
@@ -387,43 +352,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.sendWorkspaceFileList();
                 break;
             case 'requestMentionSearch': {
-                const query = msg.query;
-                if (!query) {
-                    this.postMessage({ type: 'mentionSearchResults', results: [] });
-                    break;
-                }
-                
-                // Limit results to 30 for performance
-                const globPattern = `**/*${query}*.*`;
-                const maxResults = 30;
-                
                 try {
-                    const files = await vs.workspace.findFiles(globPattern, '**/node_modules/**', maxResults);
-                    
-                    // Priority sorting: basename match first
-                    files.sort((a, b) => {
-                        const baseA = require('path').basename(a.fsPath).toLowerCase();
-                        const baseB = require('path').basename(b.fsPath).toLowerCase();
-                        const q = query.toLowerCase();
-                        const idxA = baseA.indexOf(q);
-                        const idxB = baseB.indexOf(q);
-                        if (idxA !== idxB) {
-                            if (idxA === -1) return 1;
-                            if (idxB === -1) return -1;
-                            return idxA - idxB;
-                        }
-                        return a.fsPath.length - b.fsPath.length;
-                    });
-                    
-                    const results = files.map(f => ({
-                        uri: f.fsPath,
-                        label: require('path').basename(f.fsPath),
-                        desc: vs.workspace.asRelativePath(f)
-                    }));
-                    
-                    this.postMessage({ type: 'mentionSearchResults', results });
+                    this.postMessage({ type: 'mentionSearchResults', results: await this.contextReferences.search(msg.query) });
                 } catch (e) {
-                    console.error('[MentionSearch] Error searching files:', e);
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Mention search failed', e);
                     this.postMessage({ type: 'mentionSearchResults', results: [] });
                 }
                 break;
@@ -465,7 +397,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(text);
     }
 
-    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], skipAutoModeSwitch = false, isBackground = false, resumeFromState = false): Promise<void> {
+    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
         if (text.trim().startsWith('/')) {
@@ -485,8 +417,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         // Ensure we have a topic
+        const visibleUserText = displayText ?? text;
+
         if (!this.topicManager.currentTopic) {
-            this.topicManager.createNewTopic(text);
+            this.topicManager.createNewTopic(visibleUserText);
         }
 
         // Track message index for retract support
@@ -495,13 +429,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // Add user message to UI — pass images array directly (not just a bool flag)
         if (!resumeFromState) {
             if (!isBackground) {
-                this.postMessage({ type: 'addUserMessage', text, messageIndex, images: images?.length ? images : undefined });
+                this.postMessage({ type: 'addUserMessage', text: visibleUserText, messageIndex, images: images?.length ? images : undefined, contexts });
             } else {
                 this.postMessage({ type: 'startBackgroundGeneration' });
             }
 
             // Add to history — store images for topic persistence
-            this.topicManager.addHistoryMessage({ role: 'user', content: text, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
+            this.topicManager.addHistoryMessage({ role: 'user', content: text, displayContent: displayText, contexts, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
             
             // 新任务开始，清理旧的断点快照，防止上下文污染
             if (this.topicManager.currentTopic?.id) {
@@ -639,6 +573,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     void this.renderBlueprintUI(bpPath, topicId, result.steps);
                 }
             }
+
+            this.collectArtifactsFromResult(result);
 
             // ── Send token usage stats to UI ────────────────────────────────────
             if (result.tokenUsage && result.tokenUsage.total > 0) {
@@ -865,6 +801,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         if (files.length > 0) {
             this.postMessage({ type: 'diffSummary', files });
+            const additions = files.reduce((sum, file) => sum + (file.additions ?? 0), 0);
+            const deletions = files.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
+            this.upsertArtifact({
+                id: this.artifactId('diff', String(Date.now())),
+                kind: 'diff',
+                title: 'Diff Summary',
+                summary: `${files.length} file(s), +${additions} -${deletions}`,
+                status: 'done',
+                data: files,
+            });
         }
     }
 
@@ -913,7 +859,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         if (filePath) {
             // Post plan file saved card and render interactive annotation UI
-            this.postMessage({ type: 'planFileSaved', filePath, relPath });
+            this.postMessage({ type: 'planFileSaved', filePath, relPath, mode: this.currentMode });
+            this.upsertArtifact({
+                id: this.artifactId('plan', path.basename(filePath)),
+                kind: 'plan',
+                title: this.currentMode === 'orchestrator' ? 'Orchestrator Plan' : 'Implementation Plan',
+                summary: this.currentMode === 'orchestrator'
+                    ? 'DAG dispatch plan awaiting approval.'
+                    : 'Single-agent implementation plan awaiting approval.',
+                filePath,
+                relPath,
+                status: 'pending',
+            });
 
             const sections: string[] = [];
             let currentSection = '';
@@ -932,10 +889,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (currentSection.trim()) sections.push(currentSection.trim());
             if (sections.length === 0 && planText.trim()) sections.push(planText.trim());
 
-            this.postMessage({ type: 'renderPlan', sections, planText });
+            this.postMessage({ type: 'renderPlan', sections, planText, mode: this.currentMode });
 
             if (steps) {
-                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, timestamp: Date.now() });
+                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode: this.currentMode, timestamp: Date.now() });
             }
 
         }
@@ -947,6 +904,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const relPath = path.posix.join('.cwtools-ai', topicId, 'walkthrough.md');
 
             this.postMessage({ type: 'walkthroughFileSaved', filePath, relPath });
+            this.upsertArtifact({
+                id: this.artifactId('walkthrough', path.basename(filePath)),
+                kind: 'walkthrough',
+                title: 'Walkthrough Report',
+                summary: 'Post-task walkthrough report generated by the agent.',
+                filePath,
+                relPath,
+                status: 'done',
+            });
 
             const sections: string[] = [];
             let currentSection = '';
@@ -982,6 +948,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const relPath = path.posix.join('.cwtools-ai', topicId, 'design_blueprint.md');
 
             this.postMessage({ type: 'blueprintFileSaved', filePath, relPath });
+            this.upsertArtifact({
+                id: this.artifactId('blueprint', path.basename(filePath)),
+                kind: 'blueprint',
+                title: 'Design Blueprint',
+                summary: 'Structured architecture blueprint for cross-file work.',
+                filePath,
+                relPath,
+                status: 'pending',
+            });
 
             const sections: string[] = [];
             let currentSection = '';
@@ -1237,9 +1212,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.conversationMessages = [];
         this._messageFileSnapshots.clear();
         this._currentMessageSnapshots = null;
+        this.clearArtifacts();
     }
 
     private async loadTopic(topicId: string): Promise<void> {
+        this.clearArtifacts();
         this.conversationMessages = this.topicManager.loadTopic(topicId);
         const hasResume = await this.agentRunner.hasResumeState(topicId);
         if (hasResume) {
@@ -1253,6 +1230,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.conversationMessages = [];
             this._messageFileSnapshots.clear();
             this._currentMessageSnapshots = null;
+            this.clearArtifacts();
         }
     }
 
@@ -1261,6 +1239,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Creates a new topic with messages[0..messageIndex], switches to it.
      */
     private forkTopic(topicId: string, messageIndex: number): void {
+        this.clearArtifacts();
         this.conversationMessages = this.topicManager.forkTopic(topicId, messageIndex);
     }
 
@@ -1271,6 +1250,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.conversationMessages = [];
             this._messageFileSnapshots.clear();
             this._currentMessageSnapshots = null;
+            this.clearArtifacts();
         }
     }
 
@@ -1302,7 +1282,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (lastUserMsg?.role === 'user') {
             this.topicManager.currentTopic.messages.pop();
             this.conversationMessages.pop();
-            await this.handleUserMessage(lastUserMsg.content, lastUserMsg.images);
+            await this.handleUserMessage(lastUserMsg.content, lastUserMsg.images, undefined, false, false, false, lastUserMsg.displayContent, lastUserMsg.contexts);
         }
     }
 
@@ -1335,7 +1315,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.startNewTopic();
         } else if (cmd.startsWith('mode:') || cmd.startsWith('/mode:')) {
             const mode = cmd.split(':')[1] as AgentMode;
-            if (['build', 'plan', 'explore', 'general', 'review'].includes(mode)) {
+            if (['build', 'plan', 'explore', 'general', 'review', 'orchestrator'].includes(mode)) {
                 this.switchMode(mode);
             }
         } else if (cmd === 'fork' || cmd === '/fork') {
@@ -1461,8 +1441,131 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.postMessage({ type: 'fileList', files: files.slice(0, 500) });
     }
 
+    private searchWorkspaceFolders(query: string, maxResults: number): string[] {
+        const root = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root || maxResults <= 0) return [];
+
+        const q = query.toLowerCase();
+        const ignored = new Set(['node_modules', '.git', '.cwtools', '__pycache__', 'bin', 'obj', 'release']);
+        const results: string[] = [];
+        let visited = 0;
+        const walk = (dir: string) => {
+            if (results.length >= maxResults || visited > 3000) return;
+            visited++;
+            let entries: fs.Dirent[];
+            try {
+                entries = fs.readdirSync(dir, { withFileTypes: true });
+            } catch {
+                return;
+            }
+            for (const entry of entries) {
+                if (results.length >= maxResults || visited > 3000) return;
+                if (!entry.isDirectory() || ignored.has(entry.name) || entry.name.startsWith('.')) continue;
+                const fullPath = path.join(dir, entry.name);
+                const relPath = path.relative(root, fullPath).replace(/\\/g, '/');
+                if (entry.name.toLowerCase().includes(q) || relPath.toLowerCase().includes(q)) {
+                    results.push(fullPath);
+                }
+                walk(fullPath);
+            }
+        };
+
+        walk(root);
+        return results.sort((a, b) => a.length - b.length);
+    }
+
     private postMessage(msg: HostMessage): void {
         this.view?.webview.postMessage(msg);
+    }
+
+    private clearArtifacts(): void {
+        this.artifacts.clear();
+        this.postMessage({ type: 'artifactList', artifacts: [] });
+    }
+
+    private upsertArtifact(artifact: Omit<AgentArtifact, 'createdAt'> & { createdAt?: number }): void {
+        const now = Date.now();
+        const previous = this.artifacts.get(artifact.id);
+        this.artifacts.set(artifact.id, {
+            ...previous,
+            ...artifact,
+            createdAt: previous?.createdAt ?? artifact.createdAt ?? now,
+            updatedAt: now,
+        });
+        this.postMessage({
+            type: 'artifactList',
+            artifacts: [...this.artifacts.values()].sort((a, b) => b.createdAt - a.createdAt),
+        });
+    }
+
+    private artifactId(kind: AgentArtifactKind, key: string): string {
+        const topicId = this.topicManager.currentTopic?.id ?? 'session';
+        return `${topicId}:${kind}:${key.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+    }
+
+    private collectArtifactsFromResult(result: import('./types').GenerationResult): void {
+        const generationKey = String(Date.now());
+        const validationSteps = result.steps.filter(s => s.type === 'validation');
+        if (validationSteps.length > 0 || result.validationErrors.length > 0) {
+            const errorCount = result.validationErrors.length;
+            this.upsertArtifact({
+                id: this.artifactId('validation', generationKey),
+                kind: 'validation',
+                title: errorCount > 0 ? 'Validation Result: issues found' : 'Validation Result: passed',
+                summary: errorCount > 0 ? `${errorCount} validation issue(s) remain.` : 'No validation errors reported for this run.',
+                status: errorCount > 0 ? 'failed' : 'done',
+                data: { validationErrors: result.validationErrors, validationSteps },
+            });
+        }
+
+        const diagnosticSteps = result.steps.filter(s => s.toolName === 'get_diagnostics' && s.toolResult);
+        if (diagnosticSteps.length > 0) {
+            this.upsertArtifact({
+                id: this.artifactId('diagnostics', generationKey),
+                kind: 'diagnostics',
+                title: 'Diagnostics Report',
+                summary: `${diagnosticSteps.length} get_diagnostics call(s) captured.`,
+                status: 'done',
+                data: diagnosticSteps.map(s => s.toolResult),
+            });
+        }
+
+        const mediaSteps = result.steps.filter(s =>
+            ['mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech', 'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'].includes(String(s.toolName))
+        );
+        if (mediaSteps.length > 0) {
+            const files = mediaSteps.flatMap(s => {
+                const r = s.toolResult as any;
+                if (!r) return [];
+                if (Array.isArray(r.files)) return r.files;
+                if (r.file) return [r.file];
+                if (r.outputFile) return [r.outputFile];
+                if (r.destination) return [r.destination];
+                return [];
+            });
+            this.upsertArtifact({
+                id: this.artifactId('media', generationKey),
+                kind: 'media',
+                title: 'Generated Media / Assets',
+                summary: files.length > 0 ? `${files.length} generated or deployed asset(s).` : `${mediaSteps.length} media tool call(s) captured.`,
+                status: mediaSteps.some(s => (s.toolResult as any)?.success === false) ? 'failed' : 'done',
+                data: { files, steps: mediaSteps.map(s => ({ toolName: s.toolName, result: s.toolResult })) },
+            });
+        }
+
+        const blackboardSteps = result.steps.filter(s =>
+            ['set_memory', 'get_memory', 'search_memory', 'query_blackboard', 'merge_results', 'dispatch_agents'].includes(String(s.toolName))
+        );
+        if (blackboardSteps.length > 0) {
+            this.upsertArtifact({
+                id: this.artifactId('blackboard', generationKey),
+                kind: 'blackboard',
+                title: 'Blackboard Summary',
+                summary: `${blackboardSteps.length} blackboard/orchestrator coordination step(s).`,
+                status: 'done',
+                data: blackboardSteps.map(s => ({ toolName: s.toolName, args: s.toolArgs, result: s.toolResult })),
+            });
+        }
     }
 
     // ─── HTML Content ────────────────────────────────────────────────────────

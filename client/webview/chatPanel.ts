@@ -66,8 +66,66 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     let pendingFiles: string[] = [];
     /** Available workspace files received from host for @ popup */
     let workspaceFiles: string[] = [];
-    /** Pending code selection reference */
-    let activeContexts: any[] = [];
+    /** Pending structured references to attach to the next sent message */
+    type ActiveContext = {
+        id: string;
+        type: 'code_selection' | 'diagnostics' | 'file' | 'folder' | 'scope' | 'symbol' | 'vanilla' | 'blackboard';
+        label: string;
+        description?: string;
+        uri?: string;
+        startLine?: number;
+        endLine?: number;
+        line?: number;
+        column?: number;
+        name?: string;
+        kind?: string;
+        vanillaType?: string;
+        vanillaId?: string;
+        key?: string;
+        tokenEstimate?: number;
+        cacheStatus?: 'live' | 'disk' | 'cached' | 'large' | 'missing' | 'external' | 'unknown';
+    };
+    type MentionResult = {
+        type?: ActiveContext['type'];
+        uri?: string;
+        label: string;
+        desc: string;
+        startLine?: number;
+        endLine?: number;
+        line?: number;
+        column?: number;
+        name?: string;
+        kind?: string;
+        vanillaType?: string;
+        vanillaId?: string;
+        key?: string;
+        tokenEstimate?: number;
+        cacheStatus?: ActiveContext['cacheStatus'];
+    };
+    type ArtifactRecord = {
+        id: string;
+        kind: 'plan' | 'blueprint' | 'walkthrough' | 'diff' | 'diagnostics' | 'validation' | 'media' | 'blackboard';
+        title: string;
+        summary?: string;
+        filePath?: string;
+        relPath?: string;
+        status?: 'pending' | 'running' | 'done' | 'failed';
+        createdAt: number;
+        updatedAt?: number;
+        data?: unknown;
+    };
+    let activeContexts: ActiveContext[] = [];
+    let artifacts: ArtifactRecord[] = [];
+    const CONTEXT_TYPE_META: Record<ActiveContext['type'], { icon: keyof typeof Icons; label: string }> = {
+        code_selection: { icon: 'file', label: 'selection' },
+        diagnostics: { icon: 'stethoscope', label: 'diagnostics' },
+        file: { icon: 'file', label: 'file' },
+        folder: { icon: 'folder', label: 'folder' },
+        scope: { icon: 'ruler', label: 'scope' },
+        symbol: { icon: 'link', label: 'symbol' },
+        vanilla: { icon: 'package', label: 'vanilla' },
+        blackboard: { icon: 'clipboard', label: 'blackboard' },
+    };
     
     function generateContextId() {
         return 'ctx_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
@@ -93,12 +151,25 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         area.style.display = 'flex';
         
         activeContexts.forEach(ctx => {
+            const meta = CONTEXT_TYPE_META[ctx.type] || CONTEXT_TYPE_META.file;
+            const range = typeof ctx.startLine === 'number' && typeof ctx.endLine === 'number'
+                ? ` #L${ctx.startLine}-${ctx.endLine}`
+                : typeof ctx.line === 'number'
+                    ? ` #L${ctx.line + 1}`
+                    : '';
+            const title = ctx.description || ctx.uri || ctx.label;
+            const metaBits = [
+                typeof ctx.tokenEstimate === 'number' && ctx.tokenEstimate > 0 ? `~${formatNum(ctx.tokenEstimate)} tok` : '',
+                ctx.cacheStatus ? ctx.cacheStatus : '',
+            ].filter(Boolean).join(' · ');
             const chip = document.createElement('span');
-            chip.className = 'reference-chip';
+            chip.className = `reference-chip ref-${ctx.type}`;
             chip.innerHTML = `
-                ${svgIconNoMargin('file')}
-                <span class="ref-text" title="${mrEscapeHtml(ctx.uri)}">${mrEscapeHtml(ctx.label)} #L${ctx.startLine}-${ctx.endLine}</span>
-                <button class="remove-ctx-btn" data-id="${ctx.id}">✕</button>
+                ${svgIconNoMargin(meta.icon)}
+                <span class="ref-kind">${mrEscapeHtml(meta.label)}</span>
+                <span class="ref-text" title="${mrEscapeHtml(title)}">${mrEscapeHtml(ctx.label)}${range}</span>
+                ${metaBits ? `<span class="ref-meta">${mrEscapeHtml(metaBits)}</span>` : ''}
+                <button class="remove-ctx-btn" data-id="${ctx.id}" aria-label="Remove reference">&times;</button>
             `;
             area!.appendChild(chip);
         });
@@ -260,6 +331,27 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
     });
     input.addEventListener('keydown', e => {
+        if (_atPopupVisible && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === 'Tab' || e.key === 'Escape')) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setMentionSelectedIndex(_mentionSelectedIndex + 1);
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setMentionSelectedIndex(_mentionSelectedIndex - 1);
+                return;
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                if (acceptSelectedMention()) return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeAtPopup();
+                return;
+            }
+        }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (!isGenerating) sendMessage();
@@ -286,6 +378,20 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (el) el.addEventListener('click', handler);
     }
 
+    function setArtifactDrawerOpen(open: boolean) {
+        const drawer = document.getElementById('artifactDrawer');
+        const toggle = document.getElementById('btnArtifacts');
+        document.body.classList.toggle('artifact-drawer-open', open);
+        drawer?.setAttribute('aria-hidden', open ? 'false' : 'true');
+        toggle?.classList.toggle('active', open);
+    }
+
+    function toggleArtifactDrawer() {
+        const nextOpen = !document.body.classList.contains('artifact-drawer-open');
+        if (nextOpen) topicsPanel.classList.remove('show');
+        setArtifactDrawerOpen(nextOpen);
+    }
+
     const quickModelSel = document.getElementById('quickModelSelect');
     if (quickModelSel) {
         quickModelSel.addEventListener('change', () => {
@@ -294,9 +400,16 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     bindBtn('btnNewTopic', () => vscode.postMessage({ type: 'newTopic' }));
-    bindBtn('btnTopics', () => topicsPanel.classList.toggle('show'));
+    bindBtn('btnArtifacts', toggleArtifactDrawer);
+    bindBtn('btnCloseArtifacts', () => setArtifactDrawerOpen(false));
+    bindBtn('artifactScrim', () => setArtifactDrawerOpen(false));
+    bindBtn('btnTopics', () => {
+        setArtifactDrawerOpen(false);
+        topicsPanel.classList.toggle('show');
+    });
     bindBtn('btnNewTopicPanel', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); });
     bindBtn('btnSettings', () => {
+        setArtifactDrawerOpen(false);
         vscode.postMessage({ type: 'openSettings' });
         topicsPanel.classList.remove('show');
     });
@@ -352,6 +465,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         topicsPanel.classList.remove('show');
     });
 
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && document.body.classList.contains('artifact-drawer-open')) {
+            setArtifactDrawerOpen(false);
+        }
+    });
+    renderArtifactPanel();
+
 
     // ── Mode dropdown ──────────────────────────────────────────────────────────
     const modeSel = document.getElementById('modeSel') as HTMLSelectElement | null;
@@ -368,10 +488,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         { cmd: '/fork', desc: '从当前位置分叉对话' },
         { cmd: '/archive', desc: '归档当前话题' },
         { cmd: '/mode:build', desc: '切换到构建模式（生成代码）' },
-        { cmd: '/mode:plan', desc: '切换到计划模式（只读规划）' },
+        { cmd: '/mode:plan', desc: '切换到计划模式（单 Agent 只读规划）' },
         { cmd: '/mode:explore', desc: '切换到分析模式（探索代码库）' },
         { cmd: '/mode:general', desc: '切换到问答模式（通用问答）' },
         { cmd: '/mode:review', desc: '切换到审查模式（代码审查）' },
+        { cmd: '/mode:orchestrator', desc: '切换到多 Agent 执行模式（DAG 分派与并行协作）' },
     ];
     const slashPopup = document.getElementById('slashPopup');
 
@@ -434,57 +555,83 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     let _atPopupVisible = false;
 
     let _mentionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let _mentionResults: MentionResult[] = [];
+    let _mentionSelectedIndex = 0;
 
     function showAtPopup(filter: string) {
         if (!atPopup) return;
         const q = filter.trim();
-        if (!q) {
-            atPopup.style.display = 'none';
-            _atPopupVisible = false;
-            return;
-        }
 
         if (_mentionDebounceTimer) clearTimeout(_mentionDebounceTimer);
         _mentionDebounceTimer = setTimeout(() => {
             vscode.postMessage({ type: 'requestMentionSearch', query: q });
-        }, 200);
+        }, q ? 200 : 0);
     }
 
-    function renderMentionMenu(results: Array<{uri: string; label: string; desc: string}>) {
+    function renderMentionMenu(results: MentionResult[]) {
         if (!atPopup) return;
+        _mentionResults = results;
+        _mentionSelectedIndex = 0;
         if (results.length === 0) {
             atPopup.style.display = 'none';
             _atPopupVisible = false;
             return;
         }
 
-        atPopup.innerHTML = results.map((res, index) =>
-            `<div class="slash-popup-item" data-uri="${escapeHtml(res.uri)}" data-label="${escapeHtml(res.label)}" tabindex="${index}">` +
-                `<span class="slash-popup-cmd">${svgIconNoMargin('file')} @${escapeHtml(res.label)}</span>` +
+        atPopup.innerHTML = results.map((res, index) => {
+            const type = res.type || 'file';
+            const meta = CONTEXT_TYPE_META[type] || CONTEXT_TYPE_META.file;
+            return `<div class="slash-popup-item ${index === _mentionSelectedIndex ? 'selected' : ''}" data-index="${index}" tabindex="${index}">` +
+                `<span class="slash-popup-cmd">${svgIconNoMargin(meta.icon)} @${escapeHtml(res.label)}</span>` +
                 `<span class="slash-popup-desc" style="opacity:0.5;font-size:10px">${escapeHtml(res.desc)}</span>` +
             `</div>`
-        ).join('');
+        }).join('');
 
         atPopup.querySelectorAll('.slash-popup-item').forEach(el => {
             el.addEventListener('click', () => {
-                const uri = (el as HTMLElement).dataset.uri;
-                const label = (el as HTMLElement).dataset.label;
-                if (!uri || !label) return;
+                const index = Number((el as HTMLElement).dataset.index);
+                const result = results[index];
+                if (!result) return;
+                const type = result.type || 'file';
+                if ((type === 'file' || type === 'folder' || type === 'code_selection') && !result.uri) return;
+                const isTemplate = (type === 'symbol' || type === 'vanilla' || type === 'blackboard')
+                    && !result.uri && !result.name && !result.key && !result.vanillaType;
+                if (isTemplate) {
+                    const v = input.value;
+                    const atIdx = v.lastIndexOf('@');
+                    input.value = (atIdx >= 0 ? v.slice(0, atIdx) : v) + '@' + result.label;
+                    autoResizeInput();
+                    input.focus();
+                    showAtPopup(result.label);
+                    return;
+                }
                 closeAtPopup();
                 
                 // Track into Context Tray
                 activeContexts.push({
                     id: generateContextId(),
-                    type: 'file',
-                    label: label,
-                    uri: uri
+                    type,
+                    label: result.label,
+                    description: result.desc,
+                    uri: result.uri,
+                    startLine: result.startLine,
+                    endLine: result.endLine,
+                    line: result.line,
+                    column: result.column,
+                    name: result.name,
+                    kind: result.kind,
+                    vanillaType: result.vanillaType,
+                    vanillaId: result.vanillaId,
+                    key: result.key,
+                    tokenEstimate: result.tokenEstimate,
+                    cacheStatus: result.cacheStatus,
                 });
                 renderContextTray();
 
                 // Replace the @partial in input with nothing (consume the mention)
                 const v = input.value;
                 const atIdx = v.lastIndexOf('@');
-                input.value = v.slice(0, atIdx);
+                input.value = atIdx >= 0 ? v.slice(0, atIdx) : v;
                 autoResizeInput();
                 input.focus();
             });
@@ -492,7 +639,169 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         atPopup.style.display = 'block'; _atPopupVisible = true;
     }
 
-    function closeAtPopup() { if (atPopup) { atPopup.style.display = 'none'; _atPopupVisible = false; } }
+    function setMentionSelectedIndex(index: number) {
+        if (!atPopup || _mentionResults.length === 0) return;
+        _mentionSelectedIndex = (index + _mentionResults.length) % _mentionResults.length;
+        atPopup.querySelectorAll('.slash-popup-item').forEach((el, idx) => {
+            el.classList.toggle('selected', idx === _mentionSelectedIndex);
+            if (idx === _mentionSelectedIndex) (el as HTMLElement).scrollIntoView({ block: 'nearest' });
+        });
+    }
+
+    function renderArtifactPanel() {
+        const list = document.getElementById('artifactList');
+        const count = document.getElementById('artifactCount');
+        const toggle = document.getElementById('btnArtifacts');
+        if (!list || !count) return;
+
+        count.textContent = String(artifacts.length);
+        toggle?.classList.toggle('has-artifacts', artifacts.length > 0);
+        if (artifacts.length === 0) {
+            list.innerHTML = `
+                <div class="artifact-empty">
+                    <div class="artifact-empty-title">暂无 Artifacts</div>
+                    <div class="artifact-empty-subtitle">计划、蓝图、诊断、Diff 和 Walkthrough 会在这里集中出现。</div>
+                </div>
+            `;
+            return;
+        }
+
+        const iconFor: Record<ArtifactRecord['kind'], keyof typeof Icons> = {
+            plan: 'clipboard',
+            blueprint: 'layers',
+            walkthrough: 'flag',
+            diff: 'edit',
+            diagnostics: 'stethoscope',
+            validation: 'check',
+            media: 'sparkles',
+            blackboard: 'bookmark',
+        };
+        const statusLabel: Record<string, string> = {
+            pending: 'pending',
+            running: 'running',
+            done: 'done',
+            failed: 'failed',
+        };
+
+        list.innerHTML = '';
+        for (const artifact of artifacts) {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = `artifact-row artifact-${artifact.kind} artifact-${artifact.status || 'done'}`;
+            row.innerHTML = `
+                <span class="artifact-icon">${svgIconNoMargin(iconFor[artifact.kind] || 'file')}</span>
+                <span class="artifact-main">
+                    <span class="artifact-title">${escapeHtml(artifact.title)}</span>
+                    <span class="artifact-summary">${escapeHtml(artifact.summary || artifact.relPath || artifact.kind)}</span>
+                </span>
+                <span class="artifact-status">${escapeHtml(statusLabel[artifact.status || 'done'] || 'done')}</span>
+            `;
+            if (artifact.filePath) {
+                row.addEventListener('click', () => {
+                    vscode.postMessage({ type: 'openPlanFile', filePath: artifact.filePath });
+                });
+            } else {
+                row.addEventListener('click', () => {
+                    const next = row.nextElementSibling as HTMLElement | null;
+                    if (next?.classList.contains('artifact-preview')) {
+                        next.remove();
+                        return;
+                    }
+                    const preview = document.createElement('pre');
+                    preview.className = 'artifact-preview';
+                    preview.textContent = JSON.stringify(artifact.data ?? { summary: artifact.summary }, null, 2).slice(0, 6000);
+                    row.insertAdjacentElement('afterend', preview);
+                });
+            }
+            list.appendChild(row);
+        }
+    }
+
+    function restoreArtifactsFromMessages(messages: any[]) {
+        const restored: ArtifactRecord[] = [];
+        const pushUnique = (artifact: ArtifactRecord) => {
+            if (!restored.some(a => a.id === artifact.id)) restored.push(artifact);
+        };
+        for (const message of messages) {
+            if (!message?.steps) continue;
+            for (const step of message.steps) {
+                const stamp = step.timestamp || message.timestamp || Date.now();
+                if (step.type === 'plan_card') {
+                    pushUnique({
+                        id: `restored:plan:${step.content}`,
+                        kind: 'plan',
+                        title: step.mode === 'orchestrator' ? 'Orchestrator Plan' : 'Implementation Plan',
+                        summary: 'Restored from chat history.',
+                        filePath: step.content,
+                        relPath: step.content,
+                        status: 'pending',
+                        createdAt: stamp,
+                    });
+                } else if (step.type === 'blueprint_card') {
+                    pushUnique({
+                        id: `restored:blueprint:${step.content}`,
+                        kind: 'blueprint',
+                        title: 'Design Blueprint',
+                        summary: 'Restored from chat history.',
+                        filePath: step.content,
+                        relPath: step.content,
+                        status: 'pending',
+                        createdAt: stamp,
+                    });
+                } else if (step.type === 'walkthrough_card') {
+                    pushUnique({
+                        id: `restored:walkthrough:${step.content}`,
+                        kind: 'walkthrough',
+                        title: 'Walkthrough Report',
+                        summary: 'Restored from chat history.',
+                        filePath: step.content,
+                        relPath: step.content,
+                        status: 'done',
+                        createdAt: stamp,
+                    });
+                } else if (step.type === 'validation') {
+                    pushUnique({
+                        id: `restored:validation:${stamp}`,
+                        kind: 'validation',
+                        title: 'Validation Result',
+                        summary: step.content || 'Validation step restored from history.',
+                        status: /error|failed|失败|错误/i.test(step.content || '') ? 'failed' : 'done',
+                        createdAt: stamp,
+                        data: step.toolResult,
+                    });
+                } else if (step.toolName === 'get_diagnostics') {
+                    pushUnique({
+                        id: `restored:diagnostics:${stamp}`,
+                        kind: 'diagnostics',
+                        title: 'Diagnostics Report',
+                        summary: 'Restored get_diagnostics result.',
+                        status: 'done',
+                        createdAt: stamp,
+                        data: step.toolResult,
+                    });
+                }
+            }
+        }
+        artifacts = restored.sort((a, b) => b.createdAt - a.createdAt);
+        renderArtifactPanel();
+    }
+
+    function acceptSelectedMention() {
+        if (!atPopup || !_atPopupVisible) return false;
+        const item = atPopup.querySelector(`.slash-popup-item[data-index="${_mentionSelectedIndex}"]`) as HTMLElement | null;
+        if (!item) return false;
+        item.click();
+        return true;
+    }
+
+    function closeAtPopup() {
+        if (atPopup) {
+            atPopup.style.display = 'none';
+            _atPopupVisible = false;
+            _mentionResults = [];
+            _mentionSelectedIndex = 0;
+        }
+    }
 
     function addFileBadge(file: string) {
         let area = document.getElementById('fileBadgeArea');
@@ -663,8 +972,24 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     const endpointInp = document.getElementById('settingsEndpoint');
     if (endpointInp) endpointInp.addEventListener('input', onEndpointChange);
 
+    function stripConsumedMentionText(raw: string, contexts: ActiveContext[]): string {
+        let text = raw;
+        for (const ctx of contexts) {
+            const labels = new Set<string>([ctx.label]);
+            if (ctx.uri) labels.add(ctx.uri.replace(/\\/g, '/').split('/').pop() || ctx.uri);
+            if (ctx.key) labels.add(`blackboard:${ctx.key}`);
+            if (ctx.vanillaType) labels.add(`vanilla::${ctx.vanillaType}${ctx.vanillaId ? `:${ctx.vanillaId}` : ''}`);
+            for (const label of labels) {
+                const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                text = text.replace(new RegExp(`(^|\\n)\\s*@${escaped}\\s*(?=\\n|$)`, 'gi'), '$1');
+            }
+        }
+        return text.trim();
+    }
+
     function sendMessage() {
-        const text = input.value.trim();
+        const rawText = input.value.trim();
+        const text = activeContexts.length > 0 ? stripConsumedMentionText(rawText, activeContexts) : rawText;
         if (!text && pendingImages.length === 0 && activeContexts.length === 0) return;
         
         if (activeContexts.length > 0) {
@@ -702,13 +1027,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
     const MODE_META: Record<string, { label: string | null; bodyClass: string }> = {
         build: { label: null, bodyClass: 'build-mode' },
-        plan: { label: '计划模式 — 只读分析，不修改文件', bodyClass: 'plan-mode' },
+        plan: { label: '计划模式 - 单 Agent 只读规划，不修改文件', bodyClass: 'plan-mode' },
         explore: { label: '分析模式 — 探索代码库结构', bodyClass: 'explore-mode' },
         general: { label: '问答模式 — 通用问答', bodyClass: 'general-mode' },
         review: { label: '审查模式 — 代码审查', bodyClass: 'review-mode' },
         loc_translator: { label: '翻译模式 — 本地化文件翻译（子代理专用）', bodyClass: 'build-mode' },
         loc_writer: { label: '写作模式 — 本地化内容创作（子代理专用）', bodyClass: 'build-mode' },
-        orchestrator: { label: '协调模式 — 多 Agent 协作执行', bodyClass: 'orchestrator-mode' },
+        orchestrator: { label: '多 Agent 执行 - DAG 分派与并行协作', bodyClass: 'orchestrator-mode' },
     };
 
     /**
@@ -1851,7 +2176,41 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         return row;
     }
 
-    function addUserMessage(text: string, msgIdx: number, images?: string[]) {
+    function buildContextChipRow(contexts?: ActiveContext[]) {
+        if (!contexts || contexts.length === 0) return null;
+        const chipsContainer = document.createElement('div');
+        chipsContainer.className = 'message-reference-row';
+        for (const ctx of contexts) {
+            const meta = CONTEXT_TYPE_META[ctx.type] || CONTEXT_TYPE_META.file;
+            const range = typeof ctx.startLine === 'number' && typeof ctx.endLine === 'number'
+                ? ` #L${ctx.startLine}-${ctx.endLine}`
+                : typeof ctx.line === 'number'
+                    ? ` #L${ctx.line + 1}`
+                    : '';
+            const title = ctx.description || ctx.uri || ctx.label;
+            const metaBits = [
+                typeof ctx.tokenEstimate === 'number' && ctx.tokenEstimate > 0 ? `~${formatNum(ctx.tokenEstimate)} tok` : '',
+                ctx.cacheStatus ? ctx.cacheStatus : '',
+            ].filter(Boolean).join(' · ');
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = `reference-chip ref-${ctx.type} ref-clickable`;
+            chip.title = title;
+            chip.innerHTML = `
+                ${svgIconNoMargin(meta.icon)}
+                <span class="ref-kind">${escapeHtml(meta.label)}</span>
+                <span class="ref-text">${escapeHtml(ctx.label)}${range}</span>
+                ${metaBits ? `<span class="ref-meta">${escapeHtml(metaBits)}</span>` : ''}
+            `;
+            chip.addEventListener('click', () => {
+                vscode.postMessage({ type: 'openContextReference', context: ctx });
+            });
+            chipsContainer.appendChild(chip);
+        }
+        return chipsContainer;
+    }
+
+    function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[]) {
         emptyState.style.display = 'none';
         const div = document.createElement('div');
         div.className = 'message user';
@@ -1863,6 +2222,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble user-bubble';
+
+        const structuredChips = buildContextChipRow(contexts);
+        if (structuredChips) bubble.appendChild(structuredChips);
         
         // 解析带有代码引用的 Prompt 模板，转换为 UI 芯片 (支持多重引用)
         const refRegex = /文件 `([^`]+)` 第 (\d+-\d+) 行[^\n]*：\n```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```/g;
@@ -1891,13 +2253,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             remainingText = remainingText.replace(match[0], '');
         }
 
-        if (foundAny) {
-            bubble.appendChild(chipsContainer);
+        if (foundAny) bubble.appendChild(chipsContainer);
+
+        const textToShow = remainingText.trim();
+        if (textToShow) {
             const textNode = document.createElement('div');
             textNode.style.whiteSpace = 'pre-wrap';
-            textNode.textContent = remainingText.trim();
+            textNode.textContent = textToShow;
             bubble.appendChild(textNode);
-        } else {
+        } else if (!structuredChips && !foundAny) {
             bubble.textContent = text;
         }
 
@@ -2144,7 +2508,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             case 'addUserMessage':
                 setGenerating(true);
                 streamStates.clear();
-                addUserMessage(msg.text, msg.messageIndex, msg.images);
+                addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
                 scrollBottom(true);
@@ -2267,6 +2631,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 currentAssistantDiv = null;
                 streamStates.clear();
                 totalConversationTokens = 0;
+                artifacts = [];
+                renderArtifactPanel();
                 { const bar = document.getElementById('tokenUsageBar'); if (bar) bar.style.display = 'none'; }
                 startPlaceholderRotation();
                 break;
@@ -2285,6 +2651,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     const atIdx = v.lastIndexOf('@');
                     if (atIdx >= 0) showAtPopup(v.slice(atIdx + 1));
                 }
+                break;
+
+            case 'artifactList':
+                artifacts = (msg.artifacts || []).slice().sort((a: ArtifactRecord, b: ArtifactRecord) => b.createdAt - a.createdAt);
+                renderArtifactPanel();
                 break;
 
             case 'topicTitleGenerated': {
@@ -2311,11 +2682,12 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
 
             case 'loadTopicMessages':
+                restoreArtifactsFromMessages(msg.messages || []);
                 msg.messages.forEach((m: any, idx: number) => {
                     if (m.isHidden === true) return;
                     
                     // M4 fix: pass images array when restoring user messages from history
-                    if (m.role === 'user') addUserMessage(m.content, idx, m.images);
+                    if (m.role === 'user') addUserMessage(m.displayContent || m.content, idx, m.images, m.contexts);
                     else {
                         chatArea.appendChild(buildAssistantMessage(m.content, m.steps, null));
                         scrollBottom();
@@ -2324,7 +2696,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                             const pCard = m.steps.find((s: any) => s.type === 'plan_card');
                             if (pCard && pCard.toolResult) {
                                 window.dispatchEvent(new MessageEvent('message', {
-                                    data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content }
+                                    data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content, mode: pCard.mode }
                                 }));
                             }
                             const wtCard = m.steps.find((s: any) => s.type === 'walkthrough_card');
@@ -2702,13 +3074,15 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'planFileSaved': {
                 // Compact card — just "open file" button; annotation is handled by renderPlan below
+                const isOrchestratorPlan = msg.mode === 'orchestrator';
                 const card = document.createElement('div');
-                card.className = 'plan-file-card';
+                card.className = `plan-file-card ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`;
                 card.innerHTML = `
-                    <div class="plan-file-icon">${svgIconNoMargin('clipboard')}</div>
+                    <div class="plan-file-icon">${svgIconNoMargin(isOrchestratorPlan ? 'bot' : 'clipboard')}</div>
                     <div class="plan-file-info">
-                        <div class="plan-file-title">计划已导出</div>
+                        <div class="plan-file-title">${isOrchestratorPlan ? '多 Agent 执行计划已导出' : '计划已导出'}</div>
                         <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
+                        <div class="plan-file-hint">${isOrchestratorPlan ? '确认后将进入 dispatch_agents 并行执行。' : '确认后将切换到构建执行。'}</div>
                     </div>
                     <div class="plan-file-actions">
                         <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} 打开文件</button>
@@ -2724,20 +3098,21 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             case 'renderPlan': {
                 // Remove old plan cards when a new one arrives
                 document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
+                const isOrchestratorPlan = msg.mode === 'orchestrator';
                 
                 // ── Interactive inline annotation view ──────────────────────────
                 const annotations: {sectionIdx: number; section: string; note: string}[] = [];   // { sectionIdx, section, note }
 
                 const wrap = document.createElement('div');
-                wrap.className = 'annotatable-plan plan-card-wrap';
+                wrap.className = `annotatable-plan plan-card-wrap ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`;
 
                 // Header row
                 const header = document.createElement('div');
                 header.className = 'ap-header';
-                header.innerHTML = `<span class="ap-header-title">${svgIcon('edit')}在线批注</span>
-                    <span class="ap-header-hint">点击段落添加批注</span>
+                header.innerHTML = `<span class="ap-header-title">${svgIcon(isOrchestratorPlan ? 'bot' : 'edit')}${isOrchestratorPlan ? '多 Agent 计划批注' : '在线批注'}</span>
+                    <span class="ap-header-hint">${isOrchestratorPlan ? '确认后进入 DAG 分派与并行执行' : '点击段落添加批注'}</span>
                     <div style="display:flex; gap:6px;">
-                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">${svgIcon('check')}同意执行</button>
+                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">${svgIcon(isOrchestratorPlan ? 'zap' : 'check')}${isOrchestratorPlan ? '启动多 Agent' : '同意执行'}</button>
                         <button class="ap-submit-btn" disabled>${svgIconNoMargin('upload')} 提交批注 (0)</button>
                     </div>`;
                 wrap.appendChild(header);
@@ -2755,7 +3130,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         type: 'submitPlanAnnotations',
                         annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
                     });
-                    approveBtn.innerHTML = svgIcon('check') + '已开始执行...';
+                    approveBtn.innerHTML = svgIcon('check') + (isOrchestratorPlan ? '已启动多 Agent...' : '已开始执行...');
                     approveBtn.disabled = true;
                     submitBtn.disabled = true;
                     dismissCard(wrap, 400);
@@ -3199,7 +3574,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     label: msg.relPath.split('/').pop() || msg.relPath,
                     uri: msg.relPath,
                     startLine: msg.startLine,
-                    endLine: msg.endLine
+                    endLine: msg.endLine,
+                    tokenEstimate: Math.max(1, (msg.endLine - msg.startLine + 1) * 24),
+                    cacheStatus: 'live',
                 });
                 
                 renderContextTray();

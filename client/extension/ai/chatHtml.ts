@@ -40,6 +40,11 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <span class="brand-text">Eddy CWTool Code</span>
     </div>
     <div class="header-actions">
+        <button class="artifact-toggle" id="btnArtifacts" title="查看 Artifacts" aria-label="打开产物中心">
+            ${svgIconNoMargin('layers')}
+            <span class="artifact-toggle-text">Artifacts</span>
+            <span class="artifact-badge" id="artifactCount">0</span>
+        </button>
         <button class="icon-btn" id="btnNewTopic" title="新话题" aria-label="新建对话话题">${svgIconNoMargin('plus')}</button>
         <button class="icon-btn" id="btnTopics" title="历史话题" aria-label="展开历史话题面板">≡</button>
         <button class="icon-btn" id="btnSettings" title="设置" aria-label="打开 AI 设置">${svgIconNoMargin('gear')}</button>
@@ -64,6 +69,23 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
     <summary class="todo-panel-title">Tasks</summary>
     <div id="todoList"></div>
 </details>
+
+<div class="artifact-scrim" id="artifactScrim" aria-hidden="true"></div>
+<aside class="artifact-drawer" id="artifactDrawer" aria-label="Artifacts" aria-hidden="true">
+    <div class="artifact-drawer-header">
+        <div>
+            <div class="artifact-drawer-title">${svgIcon('layers')}Artifacts</div>
+            <div class="artifact-drawer-subtitle">本轮产物、验证和文件变更</div>
+        </div>
+        <button class="icon-btn artifact-close-btn" id="btnCloseArtifacts" title="关闭 Artifacts" aria-label="关闭产物中心">${svgIconNoMargin('x')}</button>
+    </div>
+    <div class="artifact-filter-row" aria-hidden="true">
+        <span class="artifact-filter active">全部</span>
+        <span class="artifact-filter">计划</span>
+        <span class="artifact-filter">验证</span>
+    </div>
+    <div id="artifactList" class="artifact-list"></div>
+</aside>
 
 <div class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="AI 对话消息区">
     <div class="empty-state" id="emptyState">
@@ -102,7 +124,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <option value="explore">分析模式</option>
                     <option value="general">问答模式</option>
                     <option value="review">审查模式</option>
-                    <option value="orchestrator">协调模式</option>
+                    <option value="orchestrator">协作模式</option>
                 </select>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
                 <button class="img-pick-btn" id="imgPickBtn" title="上传图片">${svgIconNoMargin('plus')}</button>

@@ -1021,7 +1021,7 @@ export type HostMessage =
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }
-    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; archived?: boolean }> }
+    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null } }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[] }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat' }
@@ -1056,7 +1056,7 @@ export type HostMessage =
     /** Emit a unified diff summary of all files changed in the message */
     | { type: 'diffSummary'; files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string; additions?: number; deletions?: number; diffLines?: Array<{ type: 'add' | 'remove' | 'context'; content: string; oldLineNo?: number; newLineNo?: number }> }> }
     /** Topic search results */
-    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number }> }
+    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; matchContext?: string; score?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; query?: string; totalCount?: number; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null } }
     /** Topic imported successfully */
     | { type: 'topicImported'; topicId: string; title: string }
     | { type: 'skillsList'; skills: string[] }

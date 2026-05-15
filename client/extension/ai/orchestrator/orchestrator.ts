@@ -36,10 +36,10 @@ import { SOURCE } from '../messages';
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
 
 const SUB_AGENT_ABSOLUTE_TIMEOUT_MS = 20 * 60 * 1000;
-const SUB_AGENT_IDLE_WARNING_MS = 2 * 60 * 1000;
+const SUB_AGENT_IDLE_WARNING_MS = 60 * 1000;
 const SUB_AGENT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const SUB_AGENT_IDLE_CHECK_MS = 30 * 1000;
-const SUB_AGENT_IDLE_NOTICE_INTERVAL_MS = 60 * 1000;
+const SUB_AGENT_IDLE_NOTICE_INTERVAL_MS = 30 * 1000;
 const CLARIFICATION_PREFIX = 'BLOCKED_FOR_ORCHESTRATOR';
 
 function formatDurationMs(ms: number): string {
@@ -261,7 +261,7 @@ export class Orchestrator {
                                 skipValidation: true, // Orchestrator 已有独立的 QualityGate，无需重复验证
                                 excludeTools: [ // 与正常子代理保持一致的安全约束
                                     'web_fetch', 'search_web', 'codesearch',
-                                    'run_command',
+                                    'run_command', 'git_ops',
                                     'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
                                     'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
                                 ],
@@ -353,7 +353,7 @@ export class Orchestrator {
             // 3. 如果子任务需要网络信息，应由 Orchestrator 在分派前搜索并通过 contextFiles 注入
             excludeTools: [
                 'web_fetch', 'search_web', 'codesearch', 
-                'run_command', 
+                'run_command', 'git_ops',
                 'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech', 
                 'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
             ],
@@ -465,6 +465,34 @@ export class Orchestrator {
             }
         };
 
+        let subAgentAbortListener: (() => void) | undefined;
+        const subAgentAbortPromise = new Promise<never>((_, reject) => {
+            subAgentAbortListener = () => {
+                const reason = subAgentController.signal.reason;
+                if (reason instanceof Error) {
+                    reject(reason);
+                    return;
+                }
+                const err = new Error(reason ? String(reason) : 'Sub-Agent execution aborted.');
+                err.name = 'AbortError';
+                reject(err);
+            };
+            if (subAgentController.signal.aborted) {
+                subAgentAbortListener();
+                return;
+            }
+            subAgentController.signal.addEventListener('abort', subAgentAbortListener, { once: true });
+        });
+
+        const clearSubAgentGuards = () => {
+            clearSubAgentTimers();
+            abortSignal.removeEventListener('abort', parentAbortHandler);
+            if (subAgentAbortListener) {
+                subAgentController.signal.removeEventListener('abort', subAgentAbortListener);
+                subAgentAbortListener = undefined;
+            }
+        };
+
         // 设定绝对超时：20 分钟 (1,200,000 ms)
         subAgentTimeoutId = setTimeout(() => {
             const err = new Error('Sub-Agent execution absolute timeout exceeded (20 minutes).');
@@ -507,15 +535,15 @@ export class Orchestrator {
                 timestamp: Date.now(),
             });
 
-            const result: GenerationResult = await this.agentRunner.run(
+            const runPromise = this.agentRunner.run(
                 effectivePrompt,
                 { topicId: orchestratorOptions.topicId },
                 [], // 空对话历史 — 子 Agent 从头开始
                 runnerOptions,
             );
+            const result: GenerationResult = await Promise.race([runPromise, subAgentAbortPromise]);
             
-            clearSubAgentTimers();
-            abortSignal.removeEventListener('abort', parentAbortHandler);
+            clearSubAgentGuards();
 
             const output = result.explanation || result.code || '';
             const clarification = this.extractSubAgentClarification(output);
@@ -581,8 +609,7 @@ export class Orchestrator {
                 stepCount,
             };
         } catch (e) {
-            clearSubAgentTimers();
-            abortSignal.removeEventListener('abort', parentAbortHandler);
+            clearSubAgentGuards();
 
             const error = e instanceof Error ? e.message : String(e);
             wrappedOnStep({

@@ -329,6 +329,107 @@ describe('ConflictDetector', () => {
     });
 });
 
+// ── ParallelExecutor / Orchestrator Runtime Safety ───────────────────────────
+
+describe('Orchestrator runtime safety', () => {
+    let ParallelExecutor: typeof import('../../extension/ai/orchestrator/parallelExecutor').ParallelExecutor;
+    let Orchestrator: typeof import('../../extension/ai/orchestrator/orchestrator').Orchestrator;
+    let TaskGraphEngine: typeof import('../../extension/ai/orchestrator/taskGraphEngine').TaskGraphEngine;
+    let Blackboard: typeof import('../../extension/ai/orchestrator/blackboard').Blackboard;
+
+    before(() => {
+        ParallelExecutor = require('../../extension/ai/orchestrator/parallelExecutor').ParallelExecutor;
+        Orchestrator = require('../../extension/ai/orchestrator/orchestrator').Orchestrator;
+        TaskGraphEngine = require('../../extension/ai/orchestrator/taskGraphEngine').TaskGraphEngine;
+        Blackboard = require('../../extension/ai/orchestrator/blackboard').Blackboard;
+    });
+
+    it('executeGraph: reports missing dependencies instead of silently completing', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const graph = TaskGraphEngine.createGraph('missing dependency');
+        TaskGraphEngine.addNode(graph, 'A', 'build', 'build', { dependencies: ['missing_node'] });
+
+        const result = await executor.executeGraph(
+            graph,
+            new Blackboard(),
+            async () => {
+                throw new Error('should not run');
+            },
+            {},
+        );
+
+        expect(result.success).to.equal(false);
+        expect(result.failedNodes).to.deep.equal(['A']);
+        expect(result.summary).to.include('不存在的依赖');
+    });
+
+    it('executeGraph: does not retry timeout-like sub-agent failures', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const graph = TaskGraphEngine.createGraph('timeout');
+        TaskGraphEngine.addNode(graph, 'A', 'build', 'build', { maxRetries: 2 });
+        let calls = 0;
+
+        const result = await executor.executeGraph(
+            graph,
+            new Blackboard(),
+            async () => {
+                calls++;
+                return {
+                    nodeId: 'A',
+                    success: false,
+                    output: '',
+                    error: 'Sub-Agent idle timeout exceeded (10m without progress).',
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: [],
+                    stepCount: 1,
+                };
+            },
+            {},
+        );
+
+        expect(calls).to.equal(1);
+        expect(result.success).to.equal(false);
+        expect(result.failedNodes).to.deep.equal(['A']);
+    });
+
+    it('executeSubAgent: returns on abort even if AgentRunner.run never settles', async () => {
+        const runner = {
+            run: () => new Promise(() => undefined),
+        };
+        const orchestrator = new Orchestrator(runner as any);
+        const abortController = new AbortController();
+        const node = {
+            id: 'A',
+            agentType: 'explore',
+            prompt: 'scan',
+            dependencies: [],
+            priority: 'normal',
+            status: 'pending',
+            retryCount: 0,
+            maxRetries: 0,
+        };
+
+        const promise = (orchestrator as any).executeSubAgent(
+            node,
+            new Blackboard(),
+            { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            abortController.signal,
+            () => undefined,
+            { topicId: 'topic-1' },
+        );
+
+        abortController.abort(new Error('manual abort'));
+        const result = await Promise.race([
+            promise,
+            new Promise(resolve => setTimeout(() => resolve('__timeout__'), 200)),
+        ]) as any;
+
+        expect(result).to.not.equal('__timeout__');
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('manual abort');
+    });
+});
+
 // ── QualityGate ───────────────────────────────────────────────────────────────
 
 describe('QualityGate', () => {

@@ -42,6 +42,16 @@ function walkDir(dir: string, ext: string, results: string[], maxFiles: number):
     }
 }
 
+function isPathInsideOrEqual(candidate: string, root: string): boolean {
+    const isWindows = process.platform === 'win32';
+    const normalizedCandidate = path.resolve(candidate);
+    const normalizedRoot = path.resolve(root);
+    const checkCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
+    const checkRoot = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot;
+    const relative = path.relative(checkRoot, checkCandidate);
+    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 // ─── Context type ────────────────────────────────────────────────────────────
 
 /** Structural type for the properties FileToolHandler reads from the executor. */
@@ -101,7 +111,33 @@ export class FileToolHandler {
         }
     }
 
-    private resolveAndAssertInWorkspace(filePath: string): string {
+    private normalizeAgentWorkspacePath(filePath: string, context?: import('../types').AgentToolContext): string {
+        const topicId = context?.runnerOptions?.topicId;
+        if (!topicId) return filePath;
+
+        const wsRoot = path.resolve(this.ctx.workspaceRoot);
+        const resolved = path.isAbsolute(filePath)
+            ? path.resolve(filePath)
+            : path.resolve(wsRoot, filePath);
+        const relPath = path.relative(wsRoot, resolved).replace(/\\/g, '/');
+
+        if (relPath === '.cwtools-ai') {
+            return path.join(wsRoot, '.cwtools-ai', topicId);
+        }
+
+        if (relPath.startsWith('.cwtools-ai/')) {
+            const rest = relPath.slice('.cwtools-ai/'.length);
+            const firstSegment = rest.split('/')[0];
+            if (firstSegment !== topicId) {
+                return path.join(wsRoot, '.cwtools-ai', topicId, rest);
+            }
+        }
+
+        return filePath;
+    }
+
+    private resolveAndAssertInWorkspace(filePath: string, context?: import('../types').AgentToolContext): string {
+        filePath = this.normalizeAgentWorkspacePath(filePath, context);
         const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(this.ctx.workspaceRoot, filePath);
         const normalized = path.resolve(absolutePath);
         
@@ -110,13 +146,9 @@ export class FileToolHandler {
             return normalized;
         }
 
-        const isWindows = process.platform === 'win32';
-        const checkPath = isWindows ? normalized.toLowerCase() : normalized;
-        
         // 1. Check primary workspace root (from context)
         const wsRoot = path.resolve(this.ctx.workspaceRoot);
-        const checkWsRoot = isWindows ? wsRoot.toLowerCase() : wsRoot;
-        if (checkPath.startsWith(checkWsRoot)) {
+        if (isPathInsideOrEqual(normalized, wsRoot)) {
             return normalized;
         }
 
@@ -125,14 +157,43 @@ export class FileToolHandler {
         if (wsFolders) {
             for (const folder of wsFolders) {
                 const folderRoot = path.resolve(folder.uri.fsPath);
-                const checkFolderRoot = isWindows ? folderRoot.toLowerCase() : folderRoot;
-                if (checkPath.startsWith(checkFolderRoot)) {
+                if (isPathInsideOrEqual(normalized, folderRoot)) {
                     return normalized;
                 }
             }
         }
 
         throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
+    }
+
+    private workspaceRelativePath(filePath: string): string {
+        return path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/');
+    }
+
+    private isLocalisationPath(filePath: string): boolean {
+        const relPath = this.workspaceRelativePath(filePath).toLowerCase();
+        return relPath.startsWith('localisation/')
+            || relPath.startsWith('localisation_synced/')
+            || relPath.startsWith('localization/');
+    }
+
+    private rejectGenericYmlWrite(toolName: string, filePath: string): import('../types').WriteFileResult | null {
+        if (!filePath.toLowerCase().endsWith('.yml')) return null;
+
+        return {
+            success: false,
+            message: `${toolName} refused to write a .yml localisation file. Use write_localisation with a real localisation path under localisation/, localisation_synced/, or localization/. Do not write localisation YAML into .cwtools-ai scratch/topic folders.`,
+        };
+    }
+
+    private validateLocalisationTarget(filePath: string): string | null {
+        if (!filePath.toLowerCase().endsWith('.yml')) {
+            return 'write_localisation only works with .yml files.';
+        }
+        if (!this.isLocalisationPath(filePath)) {
+            return `write_localisation refused '${this.workspaceRelativePath(filePath)}'. Localisation files must be written under localisation/, localisation_synced/, or localization/, never under .cwtools-ai scratch/topic folders.`;
+        }
+        return null;
     }
 
     private readTextFile(filePath: string, context?: import('../types').AgentToolContext): { content: string; hasBom: boolean } {
@@ -177,7 +238,7 @@ export class FileToolHandler {
 
     async readFile(args: { file: string; startLine?: number; endLine?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
-            args.file = this.resolveAndAssertInWorkspace(args.file);
+            args.file = this.resolveAndAssertInWorkspace(args.file, context);
 
             const ext = path.extname(args.file).toLowerCase();
             const IMAGE_EXTS = ['.dds', '.tga', '.png', '.jpg', '.jpeg', '.bmp'];
@@ -411,11 +472,11 @@ export class FileToolHandler {
     async writeFile(args: { file: string; content: string; encoding?: string }, context?: import('../types').AgentToolContext): Promise<import('../types').WriteFileResult> {
         return this.executeWithLock(args.file, async () => {
             try {
-                args.file = this.resolveAndAssertInWorkspace(args.file);
+                args.file = this.resolveAndAssertInWorkspace(args.file, context);
+                const ymlReject = this.rejectGenericYmlWrite('write_file', args.file);
+                if (ymlReject) return ymlReject;
                 
                 // 安全阻断已被移除：允许AI直接覆写文件
-                const lowerFile = args.file.toLowerCase();
-
                 const { content: originalContent, hasBom } = this.readTextFile(args.file, context);
                 (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(args.file, originalContent);
 
@@ -455,7 +516,7 @@ export class FileToolHandler {
 
         return this.executeWithLock(args.filePath, async () => {
             try {
-                args.filePath = this.resolveAndAssertInWorkspace(args.filePath);
+                args.filePath = this.resolveAndAssertInWorkspace(args.filePath, context);
             } catch (e) {
                 return { success: false, message: String(e) };
             }
@@ -585,7 +646,9 @@ export class FileToolHandler {
 
         return this.executeWithLock(args.TargetFile, async () => {
             try {
-                args.TargetFile = this.resolveAndAssertInWorkspace(args.TargetFile);
+                args.TargetFile = this.resolveAndAssertInWorkspace(args.TargetFile, context);
+                const ymlReject = this.rejectGenericYmlWrite('multi_replace_file_content', args.TargetFile);
+                if (ymlReject) return ymlReject as any;
             } catch (e) {
                 return { success: false, message: String(e) };
             }
@@ -687,7 +750,7 @@ export class FileToolHandler {
         const cwd = args.cwd ?? this.ctx.workspaceRoot;
 
         try {
-            this.resolveAndAssertInWorkspace(cwd);
+            this.resolveAndAssertInWorkspace(cwd, context);
         } catch (e) {
             return { success: false, filesChanged: [], errors: [String(e)] };
         }
@@ -715,7 +778,11 @@ export class FileToolHandler {
                         ? filePath
                         : path.join(cwd, filePath);
                     try {
-                        this.resolveAndAssertInWorkspace(currentFile);
+                        currentFile = this.resolveAndAssertInWorkspace(currentFile, context);
+                        const ymlReject = this.rejectGenericYmlWrite('apply_patch', currentFile);
+                        if (ymlReject) {
+                            return { success: false, filesChanged: [], errors: [ymlReject.message] };
+                        }
                     } catch (e) {
                         return { success: false, filesChanged: [], errors: [String(e)] };
                     }
@@ -833,12 +900,13 @@ export class FileToolHandler {
 
     // ─── listDirectory ───────────────────────────────────────────────────────
 
-    async listDirectory(args: { directory: string; recursive?: boolean }): Promise<import('../types').ListDirectoryResult> {
+    async listDirectory(args: { directory: string; recursive?: boolean }, context?: import('../types').AgentToolContext): Promise<import('../types').ListDirectoryResult> {
         try {
             const dirPath = this.resolveAndAssertInWorkspace(
                 path.isAbsolute(args.directory)
                     ? args.directory
-                    : path.join(this.ctx.workspaceRoot, args.directory)
+                    : path.join(this.ctx.workspaceRoot, args.directory),
+                context
             );
 
             if (!fs.existsSync(dirPath)) {
@@ -962,9 +1030,10 @@ export class FileToolHandler {
     }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
         return this.executeWithLock(args.filePath, async () => {
             try {
-                const filePath = this.resolveAndAssertInWorkspace(args.filePath);
-                if (!filePath.toLowerCase().endsWith('.yml')) {
-                    return { success: false, message: 'write_localisation only works with .yml files.' };
+                const filePath = this.resolveAndAssertInWorkspace(args.filePath, context);
+                const targetError = this.validateLocalisationTarget(filePath);
+                if (targetError) {
+                    return { success: false, message: targetError };
                 }
                 if (!args.entries || args.entries.length === 0) {
                     return { success: false, message: 'No entries provided.' };

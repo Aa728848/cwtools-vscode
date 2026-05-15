@@ -62,6 +62,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
             <button class="icon-btn topics-export-btn" id="btnExportTopic" title="导出当前对话 (Markdown)" style="font-size:11px;padding:4px 7px;">${svgIcon('save')}导出</button>
         </div>
     </div>
+    <div class="topics-panel-summary" id="topicsPanelSummary"></div>
     <div class="topics-list" id="topicsList"></div>
 </div>
 <div class="mode-indicator" id="modeIndicator">${svgIcon('clipboard')}Plan Mode — 只读分析，不修改文件</div>
@@ -138,7 +139,17 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 <div class="settings-page" id="settingsPage">
     <div class="settings-header">
         <button class="settings-back-btn" id="settingsBackBtn">←</button>
-        <span class="settings-title">${svgIcon('gear')} AI 设置</span>
+        <div class="settings-header-text">
+            <span class="settings-title">${svgIcon('gear')} AI 设置</span>
+            <span class="settings-header-subtitle" id="settingsHeaderSubtitle">查看主模型、上下文、API 和 MCP 状态</span>
+        </div>
+    </div>
+    <div class="settings-overview" id="settingsOverview">
+        <div class="settings-overview-main">
+            <div class="settings-overview-title" id="settingsOverviewTitle">—</div>
+            <div class="settings-overview-subtitle" id="settingsOverviewSubtitle">—</div>
+        </div>
+        <div class="settings-overview-chips" id="settingsOverviewChips"></div>
     </div>
     <div class="settings-body">
         <div class="accordion-section open" id="chatModelSection">
@@ -307,8 +318,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
     </div>
     <div class="settings-footer">
         <div class="test-result" id="testResult"></div>
-        <button class="settings-test-btn" id="testConnBtn">${svgIcon('info')}测试连接</button>
-        <button class="settings-save-btn" id="saveSettingsBtn">${svgIcon('save')}保存设置</button>
+        <div class="settings-footer-actions">
+            <button class="settings-test-btn" id="testConnBtn">${svgIcon('info')}测试连接</button>
+            <button class="settings-save-btn" id="saveSettingsBtn">${svgIcon('save')}保存设置</button>
+        </div>
     </div>
 </div>
 

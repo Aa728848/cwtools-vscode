@@ -14,6 +14,10 @@ import { SOURCE } from './messages';
 import type { Blackboard } from './orchestrator/blackboard';
 import type { BlackboardEntry } from './orchestrator/types';
 
+function isAgentTempPath(filePath: string): boolean {
+    return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
+}
+
 export interface MentionSearchResult {
     type?: ContextItemType;
     uri?: string;
@@ -499,7 +503,7 @@ export class ContextReferenceManager {
         const entries: string[] = [];
         let total = 0;
         for (const [uri, diagnostics] of pairs) {
-            if (uri.fsPath.includes(`${path.sep}.cwtools-ai${path.sep}tmp`)) continue;
+            if (isAgentTempPath(uri.fsPath)) continue;
             for (const diag of diagnostics) {
                 total++;
                 if (entries.length >= 60) continue;

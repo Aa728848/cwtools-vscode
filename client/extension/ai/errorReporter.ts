@@ -58,8 +58,12 @@ export const ErrorReporter = {
         if (error instanceof Error && error.stack) {
             getChannel().appendLine(error.stack);
         }
-        // Show in status bar briefly so user is aware but not interrupted
-        void vs.window.setStatusBarMessage(`$(warning) ${PREFIX} ${message}`, 5000);
+        // Show in status bar briefly so user is aware but not interrupted.
+        try {
+            void vs.window.setStatusBarMessage?.(`$(warning) ${PREFIX} ${message}`, 5000);
+        } catch {
+            // Test hosts and partial VS Code shims may not implement the status bar API.
+        }
     },
 
     /**

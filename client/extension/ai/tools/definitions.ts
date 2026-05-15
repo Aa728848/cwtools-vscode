@@ -281,13 +281,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_file',
-            description: 'Write/create a file. For new files or full rewrites of files YOU created this session. Pre-existing files not created by you are blocked — use multi_replace_file_content/edit_pdx_block for those.',
+            description: 'Write/create a non-localisation file. Never use this for .yml localisation files; the tool layer refuses .yml writes. For localisation, use write_localisation with a real path under localisation/, localisation_synced/, or localization/.',
             parameters: {
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
                     content: { type: 'string', description: 'New file content' },
-                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Localisation files (.yml) MUST use utf8bom. All other code files (.txt, .gui, etc.) MUST use utf8. Omit to let the system auto-detect.' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Non-localisation files should use utf8. Omit to let the system auto-detect.' },
                 },
                 required: ['file', 'content'],
             },
@@ -665,7 +665,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'mmx_generate_image',
-            description: '🎨 Generate image(s) from a text prompt using MiniMax CLI (mmx). Requires `mmx` CLI installed and authenticated. Output is saved to the workspace `.cwtools-ai/media/` directory. Each invocation requires user permission.',
+            description: '🎨 Generate image(s) from a text prompt using MiniMax CLI (mmx). Requires `mmx` CLI installed and authenticated. Output is saved to the current topic media directory `.cwtools-ai/<topicId>/media/`. Each invocation requires user permission.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -681,7 +681,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'mmx_generate_video',
-            description: '🎬 Generate a video from a text prompt using MiniMax CLI (mmx). Video generation is asynchronous and may take 1-3 minutes. Requires `mmx` CLI installed and authenticated. Output is saved to the workspace `.cwtools-ai/media/` directory. Each invocation requires user permission.',
+            description: '🎬 Generate a video from a text prompt using MiniMax CLI (mmx). Video generation is asynchronous and may take 1-3 minutes. Requires `mmx` CLI installed and authenticated. Output is saved to the current topic media directory `.cwtools-ai/<topicId>/media/`. Each invocation requires user permission.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -695,7 +695,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'mmx_generate_music',
-            description: '🎵 Generate music from a text prompt using MiniMax CLI (mmx). Supports lyrics, instrumental mode, and auto-lyric generation. Requires `mmx` CLI installed and authenticated. Output is saved to the workspace `.cwtools-ai/media/` directory. Each invocation requires user permission.',
+            description: '🎵 Generate music from a text prompt using MiniMax CLI (mmx). Supports lyrics, instrumental mode, and auto-lyric generation. Requires `mmx` CLI installed and authenticated. Output is saved to the current topic media directory `.cwtools-ai/<topicId>/media/`. Each invocation requires user permission.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -712,7 +712,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'mmx_generate_speech',
-            description: '🗣️ Synthesize speech (TTS) from text using MiniMax CLI (mmx). Supports 30+ voices and speed control. Requires `mmx` CLI installed and authenticated. Output is saved to the workspace `.cwtools-ai/media/` directory. Each invocation requires user permission.',
+            description: '🗣️ Synthesize speech (TTS) from text using MiniMax CLI (mmx). Supports 30+ voices and speed control. Requires `mmx` CLI installed and authenticated. Output is saved to the current topic media directory `.cwtools-ai/<topicId>/media/`. Each invocation requires user permission.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -801,11 +801,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_localisation',
-            description: '🌐 MANDATORY for all .yml localisation file operations. Safely write localisation entries to Stellaris .yml files. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use multi_replace_file_content, or write_file for .yml localisation files — ALWAYS use this tool instead.',
+            description: '🌐 MANDATORY for all .yml localisation file operations. Safely write localisation entries to Stellaris .yml files. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use multi_replace_file_content, apply_patch, or write_file for .yml localisation files — ALWAYS use this tool instead.',
             parameters: {
                 type: 'object',
                 properties: {
-                    filePath: { type: 'string', description: 'Path to the .yml localisation file (absolute or relative to workspace)' },
+                    filePath: { type: 'string', description: 'Path to the real .yml localisation file (absolute or relative to workspace), under localisation/, localisation_synced/, or localization/. Do not use .cwtools-ai paths.' },
                     language: { type: 'string', description: 'Language header, e.g. "l_english", "l_simp_chinese", "l_braz_por". Used when creating a new file.' },
                     entries: {
                         type: 'array',

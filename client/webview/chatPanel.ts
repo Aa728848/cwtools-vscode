@@ -58,6 +58,24 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     let settingsModelContextTokens: Record<string, number> = {};
     /** Thinking model prefixes — these models are excluded from inline completion selectors */
     let settingsThinkingPrefixes: string[] = [];
+    type TopicPanelItem = {
+        id: string;
+        title: string;
+        updatedAt: number;
+        createdAt?: number;
+        archived?: boolean;
+        messageCount?: number;
+        matchContext?: string;
+        score?: number;
+        parentTopicId?: string;
+        forkedFromMessageIndex?: number;
+    };
+    type TopicPanelStats = {
+        total: number;
+        visible: number;
+        archived: number;
+        currentTopicId?: string | null;
+    };
     let totalConversationTokens = 0;
     let contextLimit = 128000;
     /** Pending images (base64 data URLs) to attach to next sent message */
@@ -454,6 +472,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     bindBtn('clearUsageBtn', () => {
         vscode.postMessage({ type: 'promptClearUsageStats' });
     });
+
+    if (settingsPage) {
+        settingsPage.addEventListener('input', () => { if (settingsPage.classList.contains('active')) refreshSettingsOverview(); });
+        settingsPage.addEventListener('change', () => { if (settingsPage.classList.contains('active')) refreshSettingsOverview(); });
+    }
 
     // ── Topic search (debounced 300ms) ─────────────────────────────────────────
     (() => {
@@ -1907,6 +1930,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
 
         let hadTextDelta = false;
+        let streamedText = '';
         const subAgentGroups = new Map<string, any[]>();
         const mainSteps: any[] = [];
 
@@ -1934,14 +1958,26 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             const processPanel = buildProcessPanel(sorted);
             if (processPanel) div.appendChild(processPanel);
             hadTextDelta = sorted.some((s: any) => s.type === 'text_delta');
+            streamedText = sorted.filter((s: any) => s.type === 'text_delta').map((s: any) => s.content || '').join('').trim();
         }
 
         // Final text response — only render if no text_delta steps were rendered inline
         // (otherwise content is a duplicate of what text_delta already streamed)
-        if (!hadTextDelta && content && content.trim()) {
+        let finalText = (content || '').trim();
+        if (hadTextDelta && streamedText) {
+            if (finalText === streamedText) {
+                finalText = '';
+            } else if (finalText.startsWith(streamedText)) {
+                finalText = finalText.slice(streamedText.length).trim();
+            }
+        }
+
+        // Final text response: hide exact streamed duplicates, but keep host-added
+        // plan/clarification text that is appended after streaming completes.
+        if (finalText) {
             const b = document.createElement('div');
             b.className = 'msg-bubble';
-            b.innerHTML = renderMarkdown(content);
+            b.innerHTML = renderMarkdown(finalText);
             div.appendChild(b);
         }
 
@@ -3036,7 +3072,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 startPlaceholderRotation();
                 break;
 
-            case 'topicList': renderTopics(msg.topics); break;
+            case 'topicList': renderTopics(msg.topics, msg.stats); break;
 
             case 'mentionSearchResults':
                 renderMentionMenu(msg.results);
@@ -4096,25 +4132,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
 
             case 'topicSearchResults': {
-                const list = document.getElementById('topicsList');
-                if (!list) break;
-                if (!msg.results || msg.results.length === 0) {
-                    list.innerHTML = '<div style="padding:12px 8px;opacity:0.5;font-size:11px;text-align:center;">无匹配结果</div>';
-                    break;
-                }
-                list.innerHTML = msg.results.map((t: any) =>
-                    `<div class="topic-item" data-topic-id="${escapeHtml(t.id)}" onclick="this.dispatchEvent(new CustomEvent('topic-click',{bubbles:true,detail:'${escapeHtml(t.id)}'}))">
-                        <span class="topic-title">${escapeHtml(t.title)}</span>
-                        <span class="topic-date" style="font-size:10px;opacity:0.5">${new Date(t.updatedAt).toLocaleDateString('zh-CN')}</span>
-                    </div>`
-                ).join('');
-                // Re-attach click handlers
-                list.querySelectorAll('.topic-item').forEach(el => {
-                    el.addEventListener('click', () => {
-                        vscode.postMessage({ type: 'loadTopic', topicId: (el as HTMLElement).dataset.topicId });
-                        topicsPanel.classList.remove('show');
-                    });
-                });
+                renderTopicSearchResults(msg.results || [], msg.query || '', msg.totalCount || (msg.results ? msg.results.length : 0), msg.stats);
                 break;
             }
         }
@@ -4141,10 +4159,148 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         });
     }
 
-    function renderTopics(topics: any[]) {
+    function shortenText(text: string, maxLen: number) {
+        const value = String(text ?? '');
+        if (value.length <= maxLen) return value;
+        return value.slice(0, Math.max(0, maxLen - 1)).trimEnd() + '…';
+    }
+
+    function formatTopicMoment(ts?: number) {
+        if (!ts) return '未知时间';
+        const d = new Date(ts);
+        const now = new Date();
+        const isSameDay = d.toDateString() === now.toDateString();
+        const dateLabel = isSameDay ? '今天' : d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+        return `${dateLabel} ${formatTime(ts)}`;
+    }
+
+    function renderTopicPanelSummary(mode: 'list' | 'search', items: TopicPanelItem[], stats?: TopicPanelStats, query?: string, totalCount?: number) {
+        const summary = document.getElementById('topicsPanelSummary');
+        if (!summary) return;
+
+        const currentTopic = stats?.currentTopicId ? items.find(t => t.id === stats.currentTopicId) : undefined;
+        const visibleCount = stats?.visible ?? items.length;
+        const archivedCount = stats?.archived ?? items.filter(t => t.archived).length;
+        const currentLabel = currentTopic
+            ? `${currentTopic.archived ? '当前归档' : '当前'}：${shortenText(currentTopic.title, 18)}`
+            : (stats?.currentTopicId ? '当前：会话已隐藏' : '当前：无活动会话');
+
+        summary.innerHTML = `
+            <div class="topics-panel-summary-main">
+                <div class="topics-panel-summary-title">${mode === 'search' ? '搜索结果' : '话题浏览器'}</div>
+                <div class="topics-panel-summary-subtitle">${
+                    mode === 'search'
+                        ? `关键词 ${escapeHtml(query || '空')} · ${totalCount ?? visibleCount} 条结果`
+                        : '按更新时间自动分组，支持分叉、归档和导出'
+                }</div>
+            </div>
+            <div class="topics-panel-summary-chips">
+                <span class="topics-summary-chip"><strong>${visibleCount}</strong> ${mode === 'search' ? '命中' : '显示'}</span>
+                <span class="topics-summary-chip"><strong>${archivedCount}</strong> 归档</span>
+                <span class="topics-summary-chip">${escapeHtml(currentLabel)}</span>
+            </div>
+        `;
+    }
+
+    function buildTopicItem(topic: TopicPanelItem, currentTopicId?: string | null, mode: 'list' | 'search' = 'list') {
+        const item = document.createElement('div');
+        item.className = 'topic-item';
+        item.dataset.topicId = topic.id;
+        if (topic.id === currentTopicId) item.classList.add('topic-item-active');
+        if (topic.archived) item.classList.add('topic-item-archived');
+
+        const main = document.createElement('div');
+        main.className = 'topic-main';
+
+        const head = document.createElement('div');
+        head.className = 'topic-head';
+
+        const title = document.createElement('span');
+        title.className = 'topic-title';
+        title.textContent = topic.archived ? `[已归档] ${topic.title}` : topic.title;
+        head.appendChild(title);
+
+        if (topic.id === currentTopicId) {
+            const state = document.createElement('span');
+            state.className = 'topic-state topic-state-current';
+            state.textContent = '当前';
+            head.appendChild(state);
+        } else if (topic.archived) {
+            const state = document.createElement('span');
+            state.className = 'topic-state topic-state-archived';
+            state.textContent = '归档';
+            head.appendChild(state);
+        } else if (topic.parentTopicId) {
+            const state = document.createElement('span');
+            state.className = 'topic-state topic-state-forked';
+            state.textContent = '分支';
+            head.appendChild(state);
+        }
+
+        const metaRow = document.createElement('div');
+        metaRow.className = 'topic-meta-row';
+        const metaBits = [
+            `消息 ${topic.messageCount ?? 0}`,
+            `更新 ${formatTopicMoment(topic.updatedAt)}`,
+        ];
+        if (topic.createdAt) metaBits.push(`创建 ${formatTopicMoment(topic.createdAt)}`);
+        if (topic.parentTopicId && topic.forkedFromMessageIndex != null) {
+            metaBits.push(`分叉于 #${topic.forkedFromMessageIndex + 1}`);
+        } else if (topic.parentTopicId) {
+            metaBits.push('分叉来源');
+        }
+        if (topic.score != null) metaBits.push(`相关度 ${Math.round(topic.score)}`);
+        metaRow.innerHTML = metaBits.map(bit => `<span class="topic-meta-chip">${escapeHtml(bit)}</span>`).join('');
+
+        main.appendChild(head);
+        main.appendChild(metaRow);
+
+        if (mode === 'search' && topic.matchContext) {
+            const summary = document.createElement('div');
+            summary.className = 'topic-summary';
+            summary.textContent = topic.matchContext;
+            main.appendChild(summary);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'topic-actions';
+
+        const forkBtn = document.createElement('button');
+        forkBtn.className = 'topic-action-btn topic-fork-btn';
+        forkBtn.innerHTML = svgIconNoMargin('link');
+        forkBtn.title = '分叉话题';
+        forkBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'forkTopic', topicId: topic.id, messageIndex: 999 }); });
+
+        const archBtn = document.createElement('button');
+        archBtn.className = 'topic-action-btn topic-archive-btn';
+        archBtn.innerHTML = topic.archived ? `${svgIconNoMargin('refresh')} 恢复` : svgIconNoMargin('bookmark');
+        archBtn.title = topic.archived ? '取消归档' : '归档';
+        archBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'archiveTopic', topicId: topic.id }); });
+
+        const del = document.createElement('button');
+        del.className = 'topic-action-btn topic-delete';
+        del.innerHTML = svgIconNoMargin('trash');
+        del.title = '删除';
+        del.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'deleteTopic', topicId: topic.id }); });
+
+        actions.appendChild(forkBtn);
+        actions.appendChild(archBtn);
+        actions.appendChild(del);
+        item.appendChild(main);
+        item.appendChild(actions);
+        item.addEventListener('click', () => { vscode.postMessage({ type: 'loadTopic', topicId: topic.id }); topicsPanel.classList.remove('show'); });
+        return item;
+    }
+
+    function renderTopics(topics: TopicPanelItem[], stats?: TopicPanelStats) {
         const list = document.getElementById('topicsList')!;
+        renderTopicPanelSummary('list', topics, stats);
         if (!topics.length) {
-            list.innerHTML = '<div style="text-align:center;opacity:0.5;padding:20px;font-size:12px;">暂无历史话题</div>';
+            list.innerHTML = `
+                <div class="topic-empty-state">
+                    <div class="topic-empty-title">暂无历史话题</div>
+                    <div class="topic-empty-subtitle">创建一个新会话，或用搜索快速回到旧会话。</div>
+                </div>`;
             return;
         }
         list.innerHTML = '';
@@ -4155,32 +4311,29 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             header.textContent = group.label;
             list.appendChild(header);
             for (const t of group.items) {
-                const item = document.createElement('div');
-                item.className = 'topic-item'; item.dataset.topicId = t.id;
-                if (t.archived) {
-                    item.style.opacity = '0.6';
-                    item.style.fontStyle = 'italic';
-                }
-                const title = document.createElement('span'); title.className = 'topic-title'; 
-                title.textContent = t.archived ? `[归档] ${t.title}` : t.title;
-                // Action buttons: fork, archive, delete
-                const actions = document.createElement('div'); actions.className = 'topic-actions';
-                const forkBtn = document.createElement('button');
-                forkBtn.className = 'topic-action-btn topic-fork-btn'; forkBtn.innerHTML = svgIconNoMargin('link'); forkBtn.title = '分叉话题';
-                forkBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'forkTopic', topicId: t.id, messageIndex: 999 }); });
-                const archBtn = document.createElement('button');
-                archBtn.className = 'topic-action-btn topic-archive-btn'; 
-                archBtn.innerHTML = t.archived ? `${svgIconNoMargin('refresh')} 恢复` : svgIconNoMargin('bookmark'); 
-                archBtn.title = t.archived ? '取消归档' : '归档';
-                archBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'archiveTopic', topicId: t.id }); });
-                const del = document.createElement('button');
-                del.className = 'topic-action-btn topic-delete'; del.innerHTML = svgIconNoMargin('trash'); del.title = '删除';
-                del.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'deleteTopic', topicId: t.id }); });
-                actions.appendChild(forkBtn); actions.appendChild(archBtn); actions.appendChild(del);
-                item.appendChild(title); item.appendChild(actions);
-                item.addEventListener('click', () => { vscode.postMessage({ type: 'loadTopic', topicId: t.id }); topicsPanel.classList.remove('show'); });
-                list.appendChild(item);
+                list.appendChild(buildTopicItem(t, stats?.currentTopicId, 'list'));
             }
+        }
+    }
+
+    function renderTopicSearchResults(results: TopicPanelItem[], query: string, totalCount: number, stats?: TopicPanelStats) {
+        const list = document.getElementById('topicsList')!;
+        renderTopicPanelSummary('search', results, stats, query, totalCount);
+        if (!results.length) {
+            list.innerHTML = `
+                <div class="topic-empty-state">
+                    <div class="topic-empty-title">没有找到匹配结果</div>
+                    <div class="topic-empty-subtitle">试试更短的关键词，或者切回完整话题列表。</div>
+                </div>`;
+            return;
+        }
+        list.innerHTML = '';
+        const header = document.createElement('div');
+        header.className = 'topic-date-group';
+        header.textContent = query ? `搜索结果 · ${shortenText(query, 18)}` : '搜索结果';
+        list.appendChild(header);
+        for (const t of results) {
+            list.appendChild(buildTopicItem(t, stats?.currentTopicId, 'search'));
         }
     }
 
@@ -4203,6 +4356,52 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (models.length > 0) {
             for (const m of models) { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; opt.selected = m === current.model; qms.appendChild(opt); }
         } else { const opt = document.createElement('option'); opt.value = current.model || ''; opt.textContent = current.model || '(未设置)'; qms.appendChild(opt); }
+    }
+
+    function refreshSettingsOverview() {
+        const titleEl = document.getElementById('settingsOverviewTitle');
+        const subtitleEl = document.getElementById('settingsOverviewSubtitle');
+        const chipsEl = document.getElementById('settingsOverviewChips');
+        const providerSel = document.getElementById('settingsProvider') as HTMLSelectElement | null;
+        if (!titleEl || !subtitleEl || !chipsEl || !providerSel) return;
+
+        const providerId = providerSel.value || settingsProviders[0]?.id || '';
+        const provider = settingsProviders.find((p: any) => p.id === providerId);
+        const modelInput = document.getElementById('settingsModelInput') as HTMLInputElement | null;
+        const endpointInput = document.getElementById('settingsEndpoint') as HTMLInputElement | null;
+        const ctxInput = document.getElementById('settingsCtx') as HTMLInputElement | null;
+        const inlineEnabled = document.getElementById('inlineEnabled') as HTMLInputElement | null;
+        const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement | null;
+        const agentModeSel = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
+        const reasoningSel = document.getElementById('settingsReasoningEffort') as HTMLSelectElement | null;
+
+        const model = modelInput?.value.trim() || provider?.defaultModel || '未设置模型';
+        const endpoint = endpointInput?.value.trim() || provider?.defaultEndpoint || '默认端点';
+        const ctxValue = parseInt(ctxInput?.value || '0', 10) || 0;
+        const ctxLabel = ctxValue > 0 ? `${formatNum(ctxValue)} tokens` : '自动';
+        const apiState = providerId === 'ollama'
+            ? '本地模型'
+            : (provider?.hasKey ? 'API Key 已配置' : 'API Key 未配置');
+        const inlineState = inlineEnabled?.checked
+            ? `补全: ${inlineProviderSel?.value ? (settingsProviders.find((p: any) => p.id === inlineProviderSel.value)?.name || inlineProviderSel.value) : '同主模型'}`
+            : '补全: 关闭';
+        const mcpCount = document.querySelectorAll('#mcpServersList .mcp-server-block').length;
+        const writeMode = agentModeSel?.value === 'auto' ? '写入自动' : '写入确认';
+        const reasoning = reasoningSel?.value || 'high';
+        const headerSubtitle = document.getElementById('settingsHeaderSubtitle');
+
+        titleEl.textContent = `${provider?.name || providerId || '未选择 Provider'} · ${model}`;
+        subtitleEl.textContent = `${endpoint} · 上下文 ${ctxLabel} · ${apiState}`;
+        if (headerSubtitle) {
+            headerSubtitle.textContent = `${apiState} · ${mcpCount} 个 MCP · ${writeMode}`;
+        }
+        chipsEl.innerHTML = [
+            `<span class="settings-overview-chip">Provider <strong>${escapeHtml(provider?.name || providerId || '未选')}</strong></span>`,
+            `<span class="settings-overview-chip">MCP <strong>${mcpCount}</strong></span>`,
+            `<span class="settings-overview-chip">${escapeHtml(inlineState)}</span>`,
+            `<span class="settings-overview-chip">写入 <strong>${escapeHtml(writeMode)}</strong></span>`,
+            `<span class="settings-overview-chip">推理 <strong>${escapeHtml(reasoning)}</strong></span>`,
+        ].join('');
     }
 
     function showSettingsPage(providers: any[], current: any, ollamaModels: any[]) {
@@ -4357,6 +4556,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         settingsPage.classList.add('active');
         const _tr = document.getElementById('testResult');
         if (_tr) { _tr.className = 'test-result'; _tr.textContent = ''; }
+        refreshSettingsOverview();
     }
 
     /** Look up per-model context size with fallback to provider level */
@@ -4393,7 +4593,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const status = document.getElementById('apiKeyStatus')!;
         const group = document.getElementById('apiKeyGroup')!;
         const providerHint = document.getElementById('providerHint')!;
-        if (providerId === 'ollama') { group.style.display = 'none'; providerHint.innerHTML = ''; return; }
+        if (providerId === 'ollama') { group.style.display = 'none'; providerHint.innerHTML = ''; refreshSettingsOverview(); return; }
         group.style.display = '';
         
         if (p && p.hasKey) { status.innerHTML = svgIcon('check') + '已配置 API Key'; status.style.color = '#4caf50'; }
@@ -4404,6 +4604,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         } else {
             providerHint.innerHTML = '';
         }
+        refreshSettingsOverview();
     }
 
     function onProviderChange() {
@@ -4416,6 +4617,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (provider && provider.maxContextTokens > 0) {
             (document.getElementById('settingsCtx') as HTMLInputElement).value = provider.maxContextTokens;
         }
+        refreshSettingsOverview();
     }
 
     function updateModelUI(providerId: string, currentModel: string, ollamaModels: any[] | null) {
@@ -4428,6 +4630,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         function onModelSelected(model: string) {
             const ctx = autoFillContextForModel(model, providerId);
             if (ctx > 0) (document.getElementById('settingsCtx') as HTMLInputElement).value = ctx;
+            refreshSettingsOverview();
         }
 
         let currentDropdownOpts: string[] = [];
@@ -4463,6 +4666,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         if (modelInput.value) onModelSelected(modelInput.value);
 
         updateEndpointHint(providerId);
+        refreshSettingsOverview();
     }
 
     function updateEndpointHint(providerId: string) {
@@ -4563,7 +4767,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         div.querySelector('.mcp-delete-btn')!.addEventListener('click', () => {
             div.remove();
+            refreshSettingsOverview();
         });
+        refreshSettingsOverview();
     }
 
     document.getElementById('detectBtn')!.addEventListener('click', detectOllamaModels);

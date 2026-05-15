@@ -20,6 +20,7 @@ import type {
     AgentMode,
     AgentArtifact,
     AgentArtifactKind,
+    GenerationResult,
 } from './types';
 import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
@@ -397,6 +398,178 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(text);
     }
 
+    private ensureDispatchAgentFeedbackVisible(result: GenerationResult): GenerationResult {
+        if (this.currentMode !== 'orchestrator') return result;
+        if (!result.steps.some(s => s.toolName === 'dispatch_agents')) return result;
+
+        const existing = (result.explanation || '').trim();
+        const additions: string[] = [];
+
+        if (!existing.includes('多 Agent 执行计划') && !existing.includes('Orchestrator Dispatch Plan')) {
+            const planText = this.buildDispatchPlanMarkdown(result);
+            if (planText) additions.push(planText);
+        }
+
+        const escalations = this.extractDispatchClarifications(result);
+        if (escalations.length > 0 && !existing) {
+            additions.push(this.buildDispatchEscalationMarkdown(escalations));
+        }
+
+        if (additions.length === 0) return result;
+        return {
+            ...result,
+            explanation: [existing, ...additions].filter(Boolean).join('\n\n'),
+        };
+    }
+
+    private buildDispatchPlanMarkdown(result: GenerationResult): string {
+        const tasks = this.extractDispatchTasks(result);
+        if (tasks.length === 0) return '';
+
+        const lines = [
+            '## 多 Agent 执行计划',
+            '',
+            '当前 orchestrator 已提交的 DAG 子任务如下：',
+            '',
+        ];
+
+        for (const task of tasks) {
+            const deps = task.dependencies.length > 0
+                ? task.dependencies.map(d => `\`${d}\``).join(', ')
+                : '无';
+            const contextFiles = task.contextFiles.length > 0
+                ? task.contextFiles.map(c => `\`${c}\``).join(', ')
+                : '无';
+            lines.push(`- \`${task.id}\` (${task.agentType})`);
+            lines.push(`  - 依赖: ${deps}`);
+            lines.push(`  - 上下文: ${contextFiles}`);
+            lines.push(`  - 任务: ${task.prompt}`);
+        }
+
+        return lines.join('\n');
+    }
+
+    private extractDispatchTasks(result: GenerationResult): Array<{
+        id: string;
+        agentType: string;
+        prompt: string;
+        dependencies: string[];
+        contextFiles: string[];
+    }> {
+        const tasks: Array<{
+            id: string;
+            agentType: string;
+            prompt: string;
+            dependencies: string[];
+            contextFiles: string[];
+        }> = [];
+        const seen = new Set<string>();
+
+        for (const step of result.steps) {
+            if (step.type !== 'tool_call' || step.toolName !== 'dispatch_agents') continue;
+            const rawTasks = step.toolArgs?.tasks;
+            if (!Array.isArray(rawTasks)) continue;
+
+            for (const rawTask of rawTasks) {
+                if (!rawTask || typeof rawTask !== 'object') continue;
+                const task = rawTask as Record<string, unknown>;
+                const id = this.shortPlainText(task.id, 80) || `task_${tasks.length + 1}`;
+                const agentType = this.shortPlainText(task.agentType, 40) || 'agent';
+                const prompt = this.shortPlainText(task.prompt, 320) || '未提供任务描述';
+                const dependencies = Array.isArray(task.dependencies)
+                    ? task.dependencies.map(d => this.shortPlainText(d, 80)).filter(Boolean)
+                    : [];
+                const contextFiles = Array.isArray(task.contextFiles)
+                    ? task.contextFiles.map(c => this.shortPlainText(c, 120)).filter(Boolean)
+                    : [];
+                const key = `${id}:${agentType}:${prompt}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                tasks.push({ id, agentType, prompt, dependencies, contextFiles });
+            }
+        }
+
+        return tasks;
+    }
+
+    private extractDispatchClarifications(result: GenerationResult): Array<{ id: string; clarification: string }> {
+        const clarifications: Array<{ id: string; clarification: string }> = [];
+        const seen = new Set<string>();
+
+        const pushClarification = (idValue: unknown, clarificationValue: unknown) => {
+            const clarification = this.shortPlainText(clarificationValue, 1200);
+            if (!clarification) return;
+            const id = this.shortPlainText(idValue, 80) || `subtask_${clarifications.length + 1}`;
+            const key = `${id}:${clarification}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            clarifications.push({ id, clarification });
+        };
+
+        for (const step of result.steps) {
+            if (step.type !== 'tool_result' || step.toolName !== 'dispatch_agents') continue;
+            const toolResult = step.toolResult as Record<string, unknown> | undefined;
+            if (!toolResult || typeof toolResult !== 'object') continue;
+
+            const rawClarifications = toolResult.clarifications;
+            if (Array.isArray(rawClarifications)) {
+                for (const item of rawClarifications) {
+                    if (item && typeof item === 'object') {
+                        const rec = item as Record<string, unknown>;
+                        pushClarification(rec.id, rec.clarification);
+                    }
+                }
+            }
+
+            const rawAgents = toolResult.agents;
+            if (Array.isArray(rawAgents)) {
+                for (const item of rawAgents) {
+                    if (item && typeof item === 'object') {
+                        const rec = item as Record<string, unknown>;
+                        if (rec.needsClarification) {
+                            pushClarification(rec.id, rec.clarification ?? rec.error);
+                        }
+                    }
+                }
+            }
+        }
+
+        return clarifications;
+    }
+
+    private buildDispatchEscalationMarkdown(clarifications: Array<{ id: string; clarification: string }>): string {
+        const lines = [
+            '## 子任务上报给父 Agent 的待决事项',
+            '',
+            '以下事项来自子 Agent。父 Agent 应先依据已批准计划、上下文和保守默认原则自行决策；只有无法安全决断时，才向用户发起澄清。',
+            '',
+        ];
+
+        for (const item of clarifications) {
+            const detail = this.shortPlainText(item.clarification, 700);
+            lines.push(`- \`${item.id}\`: ${detail}`);
+        }
+
+        return lines.join('\n').trim();
+    }
+
+    private shortPlainText(value: unknown, maxLength: number): string {
+        if (value === undefined || value === null) return '';
+        let text: string;
+        if (typeof value === 'string') {
+            text = value;
+        } else {
+            try {
+                text = JSON.stringify(value);
+            } catch {
+                text = String(value);
+            }
+        }
+        text = text.replace(/\s+/g, ' ').trim();
+        if (text.length <= maxLength) return text;
+        return text.slice(0, Math.max(0, maxLength - 3)).trimEnd() + '...';
+    }
+
     private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
@@ -478,7 +651,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         };
 
         try {
-            const result = await this.agentRunner.run(
+            const rawResult = await this.agentRunner.run(
                 text,
                 { ...context, topicId: this.topicManager.currentTopic?.id },
                 this.conversationMessages,
@@ -500,6 +673,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 },
                 images  // pass images to build ContentPart[] user turn
             );
+            const result = this.ensureDispatchAgentFeedbackVisible(rawResult);
 
             // ── Update conversation history ───────────────────────────────────────
             // For the user turn: use ContentPart[] if images were sent, otherwise plain text.
@@ -569,7 +743,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const wroteBlueprint = this._currentMessageSnapshots?.some(s =>
                     path.normalize(s.filePath).toLowerCase() === normBpPath
                 );
-                if (wroteBlueprint) {
+                if (wroteBlueprint && this.currentMode !== 'orchestrator') {
                     void this.renderBlueprintUI(bpPath, topicId, result.steps);
                 }
             }
@@ -1009,7 +1183,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             // ── Open VSCode native diff editor ────────────────────────────────
             const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-            const tmpDir = path.join(workspaceRoot, '.cwtools-ai', 'tmp');
+            const topicId = this.topicManager.currentTopic?.id || 'default';
+            const tmpDir = path.join(workspaceRoot, '.cwtools-ai', topicId, 'tmp');
             const ext = path.extname(file) || '.txt';
             const tempPath = path.join(tmpDir, `__pending_${messageId}${ext}`);
 

@@ -23,6 +23,20 @@ import type {
     RuleInfo,
 } from '../types';
 
+function isPathInsideOrEqual(candidate: string, root: string): boolean {
+    const isWindows = process.platform === 'win32';
+    const normalizedCandidate = path.resolve(candidate);
+    const normalizedRoot = path.resolve(root);
+    const checkCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
+    const checkRoot = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot;
+    const relative = path.relative(checkRoot, checkCandidate);
+    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function isAgentTempPath(filePath: string): boolean {
+    return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
+}
+
 // ─── Context type ────────────────────────────────────────────────────────────
 
 /** Structural type for the properties LspToolHandler reads from the executor. */
@@ -810,7 +824,7 @@ export class LspToolHandler {
                 if (!pathNorm.includes(fileNorm)) continue;
             }
 
-            if (fsPath.includes(`${path.sep}.cwtools-ai${path.sep}tmp`)) continue;
+            if (isAgentTempPath(fsPath)) continue;
 
             filesWithDiags.add(fsPath);
 
@@ -855,7 +869,7 @@ export class LspToolHandler {
 
         let totalDiagCount = 0;
         for (const [uri, diags] of allPairs) {
-            if (uri.fsPath.includes(`${path.sep}.cwtools-ai${path.sep}tmp`)) continue;
+            if (isAgentTempPath(uri.fsPath)) continue;
             if (args.file) {
                 const fileNorm = args.file.replace(/\\/g, '/').toLowerCase();
                 if (!uri.fsPath.replace(/\\/g, '/').toLowerCase().includes(fileNorm)) continue;
@@ -1117,11 +1131,8 @@ export class LspToolHandler {
         let includePattern = args.include ?? '**/*';
         
         // Ensure path stays within workspace boundaries to use findTextInFiles
-        const isWindows = process.platform === 'win32';
-        const checkDir = isWindows ? searchPath.toLowerCase() : searchPath;
-        const checkWs = isWindows ? this.ctx.workspaceRoot.toLowerCase() : this.ctx.workspaceRoot;
         let relativePath = '';
-        if (checkDir.startsWith(checkWs)) {
+        if (isPathInsideOrEqual(searchPath, this.ctx.workspaceRoot)) {
             relativePath = path.relative(this.ctx.workspaceRoot, searchPath).replace(/\\/g, '/');
             if (relativePath) {
                 includePattern = `${relativePath}/${includePattern}`;

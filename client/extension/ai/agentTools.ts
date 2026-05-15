@@ -219,6 +219,13 @@ export class AgentToolExecutor {
      * to prevent hangs on network filesystems, LSP deadlocks, or unresponsive external services.
      */
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
+        if (context?.runnerOptions?.useSlimPrompt && toolName === 'git_ops') {
+            return {
+                success: false,
+                message: 'git_ops is disabled for orchestrator sub-agents. Report the issue to the main agent instead of running git commands.',
+            };
+        }
+
         let timeout = TOOL_TIMEOUTS[toolName];
         if (timeout === undefined) {
             if (toolName.startsWith('mcp_') || toolName === 'mcp_call') {
@@ -228,43 +235,90 @@ export class AgentToolExecutor {
             }
         }
         try {
-            const abortSignal = context?.runnerOptions?.abortSignal;
-            if (abortSignal?.aborted) {
+            const parentAbortSignal = context?.runnerOptions?.abortSignal;
+            if (parentAbortSignal?.aborted) {
                 const err = new Error('AbortError');
                 err.name = 'AbortError';
                 throw err;
             }
 
+            const toolAbortController = new AbortController();
+            const abortSignal = toolAbortController.signal;
+            const onParentAbort = () => toolAbortController.abort(parentAbortSignal?.reason);
+            if (parentAbortSignal) {
+                parentAbortSignal.addEventListener('abort', onParentAbort);
+            }
+
+            const startedAt = Date.now();
+            let heartbeatId: ReturnType<typeof setInterval> | undefined;
+            if (context?.onStep) {
+                heartbeatId = setInterval(() => {
+                    if (abortSignal.aborted) return;
+                    const elapsedSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+                    context.onStep?.({
+                        type: 'orchestrator_progress',
+                        content: `工具 ${toolName} 已执行 ${elapsedSec}s，仍在等待返回...`,
+                        toolName,
+                        timestamp: Date.now(),
+                    });
+                }, 15_000);
+            }
+
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            if (timeout > 0) {
+                timeoutId = setTimeout(() => {
+                    if (abortSignal.aborted) return;
+                    const err = new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`);
+                    err.name = 'TimeoutError';
+                    toolAbortController.abort(err);
+                }, timeout);
+            }
+
             let abortListener: (() => void) | undefined;
-            const abortPromise = abortSignal ? new Promise<never>((_, reject) => {
+            const abortPromise = new Promise<never>((_, reject) => {
                 abortListener = () => {
-                    const err = new Error('AbortError');
+                    const reason = abortSignal.reason;
+                    if (reason instanceof Error) {
+                        reject(reason);
+                        return;
+                    }
+                    const err = new Error(reason ? String(reason) : 'AbortError');
                     err.name = 'AbortError';
                     reject(err);
                 };
-                abortSignal.addEventListener('abort', abortListener);
-            }) : null;
+                if (abortSignal.aborted) {
+                    abortListener();
+                    return;
+                }
+                abortSignal.addEventListener('abort', abortListener, { once: true });
+            });
 
-            // timeout === 0 表示禁用工具级超时（用于需要用户权限审批的工具），
-            // 这些工具有独立的内部超时保护，外层仅依赖 AbortSignal 中断
-            const timeoutPromise = timeout > 0
-                ? new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`)), timeout)
-                )
-                : null;
+            const toolContext = context
+                ? {
+                    ...context,
+                    runnerOptions: {
+                        ...(context.runnerOptions ?? {}),
+                        abortSignal,
+                    },
+                } as import('./types').AgentToolContext
+                : undefined;
 
             const racePromises: Promise<unknown>[] = [
-                this.executeInternal(toolName, args, context),
+                this.executeInternal(toolName, args, toolContext),
+                abortPromise,
             ];
-            if (timeoutPromise) racePromises.push(timeoutPromise);
-            if (abortPromise) racePromises.push(abortPromise);
 
             try {
                 const result = await Promise.race(racePromises);
                 return this.truncateResult(result);
             } finally {
-                if (abortSignal && abortListener) {
+                if (heartbeatId) clearInterval(heartbeatId);
+                if (timeoutId) clearTimeout(timeoutId);
+                if (abortListener) {
                     abortSignal.removeEventListener('abort', abortListener);
+                }
+                if (parentAbortSignal) {
+                    parentAbortSignal.removeEventListener('abort', onParentAbort);
                 }
             }
         } catch (e) {
@@ -397,7 +451,7 @@ export class AgentToolExecutor {
             case 'apply_patch':
                 result = await this.fileHandler.applyPatch(args as any, context); break;
             case 'list_directory':
-                result = await this.fileHandler.listDirectory(args as any); break;
+                result = await this.fileHandler.listDirectory(args as any, context); break;
             case 'glob_files':
                 result = await this.fileHandler.globFiles(args as any); break;
             case 'write_localisation':
@@ -436,11 +490,11 @@ export class AgentToolExecutor {
 
             // ── Media Asset Conversion tools ──────────────────────────
             case 'convert_image_to_dds':
-                result = await this.externalHandler.convertImageToDds(args as any); break;
+                result = await this.externalHandler.convertImageToDds(args as any, context); break;
             case 'convert_audio':
-                result = await this.externalHandler.convertAudio(args as any); break;
+                result = await this.externalHandler.convertAudio(args as any, context); break;
             case 'deploy_mod_asset':
-                result = await this.externalHandler.deployModAsset(args as any); break;
+                result = await this.externalHandler.deployModAsset(args as any, context); break;
 
             case 'analyze_diagnostic_error':
                 result = {
@@ -519,7 +573,7 @@ export class AgentToolExecutor {
 
             // ── MCP tool call ────────────────────────────────────────────────────
             case 'mcp_call':
-                result = await this.executeMcpTool(args as any); break;
+                result = await this.executeMcpTool(args as any, context); break;
 
             // ── Orchestrator tools ───────────────────────────────────────────────
             case 'dispatch_agents': {
@@ -569,7 +623,7 @@ export class AgentToolExecutor {
             default:
                 // Check if this is a dynamically registered MCP tool (mcp_<server>_<tool>)
                 if (toolName.startsWith('mcp_')) {
-                    result = await this.executeMcpTool({ ...args, _toolName: toolName } as any);
+                    result = await this.executeMcpTool({ ...args, _toolName: toolName } as any, context);
                 } else {
                     throw new Error(`Unknown tool: ${toolName}`);
                 }
@@ -586,7 +640,7 @@ export class AgentToolExecutor {
     private static readonly MCP_IDLE_TIMEOUT_MS = 60_000;
 
     /** Get or create a pooled MCP client for the given server. */
-    private async getMcpClient(serverName: string): Promise<import('./mcpClient').MCPClient> {
+    private async getMcpClient(serverName: string, abortSignal?: AbortSignal): Promise<import('./mcpClient').MCPClient> {
         const cached = this.mcpPool.get(serverName);
         if (cached) {
             cached.lastUsed = Date.now();
@@ -611,7 +665,7 @@ export class AgentToolExecutor {
             env: serverConfig.env,
             url: serverConfig.url,
         });
-        await client.connect();
+        await client.connect(abortSignal);
 
         const timer = setTimeout(() => this.evictMcpClient(serverName), AgentToolExecutor.MCP_IDLE_TIMEOUT_MS);
         this.mcpPool.set(serverName, { client, lastUsed: Date.now(), timer });
@@ -649,7 +703,7 @@ export class AgentToolExecutor {
         arguments?: Record<string, unknown>;
         _toolName?: string;
         [key: string]: unknown;
-    }): Promise<{ success: boolean; result?: unknown; error?: string }> {
+    }, context?: import('./types').AgentToolContext): Promise<{ success: boolean; result?: unknown; error?: string }> {
         let serverName = args.server;
         let toolName = args.tool;
 
@@ -667,10 +721,11 @@ export class AgentToolExecutor {
         }
 
         const CONNECTION_ERRORS = /ECONNREFUSED|EPIPE|disconnect|not connected|ECONNRESET/i;
+        const abortSignal = context?.runnerOptions?.abortSignal;
 
         try {
-            const client = await this.getMcpClient(serverName!);
-            const result = await client.callTool(toolName!, (args.arguments || {}) as Record<string, unknown>);
+            const client = await this.getMcpClient(serverName!, abortSignal);
+            const result = await client.callTool(toolName!, (args.arguments || {}) as Record<string, unknown>, abortSignal);
             return { success: true, result };
         } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
@@ -678,8 +733,8 @@ export class AgentToolExecutor {
             if (CONNECTION_ERRORS.test(errMsg)) {
                 this.evictMcpClient(serverName!);
                 try {
-                    const client = await this.getMcpClient(serverName!);
-                    const result = await client.callTool(toolName!, (args.arguments || {}) as Record<string, unknown>);
+                    const client = await this.getMcpClient(serverName!, abortSignal);
+                    const result = await client.callTool(toolName!, (args.arguments || {}) as Record<string, unknown>, abortSignal);
                     return { success: true, result };
                 } catch (retryErr) {
                     return { success: false, error: `MCP tool call failed after reconnect: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}` };
@@ -887,7 +942,7 @@ export class AgentToolExecutor {
                 cancelledNodes: result.cancelledNodes,
                 clarifications,
                 hint: clarifications.length > 0
-                    ? 'One or more sub-agents need clarification. The main agent should ask the user in the main chat, then dispatch a follow-up batch after the user answers.'
+                    ? 'One or more sub-agents escalated a decision to the parent agent. The parent agent should decide from the approved plan and available context when safe. Ask the user in the main chat only if the parent agent cannot make a safe decision, then dispatch a follow-up batch after the answer.'
                     : 'To view the detailed output of each sub-agent, use the merge_results tool.',
             };
         } catch (e) {

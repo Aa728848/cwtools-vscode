@@ -610,10 +610,7 @@ export async function activate(context: ExtensionContext) {
 			fs.chmodSync(serverExe, '755');
 		}
 		
-		async function getBestRepoPath(originalUrl: string): Promise<string> {
-			const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-			let isCN = timeZone === 'Asia/Shanghai' || timeZone === 'Asia/Chongqing' || timeZone === 'Asia/Urumqi';
-
+		function getBestRepoPath(originalUrl: string): string {
 			const customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim();
 			if (customProxy) {
 				if (customProxy.toLowerCase() === 'none' || customProxy.toLowerCase() === 'direct') {
@@ -621,98 +618,8 @@ export async function activate(context: ExtensionContext) {
 				}
 				return customProxy.endsWith('/') ? customProxy + originalUrl : customProxy + '/' + originalUrl;
 			}
-			
-			// If the user has a local proxy environment configured, assume direct connection works
-			if (process.env.http_proxy || process.env.https_proxy || process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
-				return originalUrl;
-			}
 
-			// If timezone is CN, verify via IP API in case user is using a VPN/Proxy
-			if (isCN) {
-				try {
-					const isOutsideCN = await new Promise<boolean>((resolve) => {
-						const req = require('https').request('https://api.myip.com', { method: 'GET', timeout: 1500 }, (res: any) => {
-							let data = '';
-							res.on('data', (chunk: any) => data += chunk);
-							res.on('end', () => {
-								try {
-									const json = JSON.parse(data);
-									if (json && json.cc && json.cc !== 'CN') {
-										resolve(true);
-									} else {
-										resolve(false);
-									}
-								} catch {
-									resolve(false);
-								}
-							});
-						});
-						req.on('error', () => resolve(false));
-						req.on('timeout', () => { req.destroy(); resolve(false); });
-						req.end();
-					});
-					if (isOutsideCN) {
-						isCN = false;
-						ErrorReporter.debug('Extension', 'Detected foreign IP via VPN/Proxy, routing to GitHub.');
-					}
-				} catch (e) {
-					// Ignore API failures
-				}
-			}
-
-			if (!isCN) {
-				return originalUrl;
-			}
-
-			if (isCN && originalUrl === stellarisRemote) {
-				const giteeUrl = 'https://gitee.com/cChen2422/cwtools-stellaris-config';
-				try {
-					await new Promise<void>((resolve, reject) => {
-						const req = require('https').request('https://gitee.com', { method: 'HEAD', timeout: 1500 }, (res: any) => {
-							resolve();
-						});
-						req.on('error', reject);
-						req.on('timeout', () => { req.destroy(); reject(); });
-						req.end();
-					});
-					return giteeUrl;
-				} catch (e) {
-					// Fallback to github logic below if Gitee is completely down
-				}
-			}
-
-			return new Promise(resolve => {
-				const req = require('https').request('https://github.com', { method: 'HEAD', timeout: 1500 }, (res: any) => {
-					resolve(originalUrl); // Success within time, use direct connection
-				});
-				
-				const fallback = () => {
-					const proxies = [
-						`https://gh-proxy.org/${originalUrl}`,
-						`https://hk.gh-proxy.org/${originalUrl}`,
-						`https://cdn.gh-proxy.org/${originalUrl}`,
-						`https://edgeone.gh-proxy.org/${originalUrl}`,
-						originalUrl.replace('github.com', 'kkgithub.com')
-					];
-					if (typeof (Promise as any).any === 'function') {
-						(Promise as any).any(proxies.map(p => new Promise<string>((res, rej) => {
-							const preq = require('https').request(p, { method: 'HEAD', timeout: 2500 }, (pres: any) => {
-								if (pres.statusCode === 200 || pres.statusCode === 301 || pres.statusCode === 302) res(p);
-								else rej();
-							});
-							preq.on('error', rej);
-							preq.on('timeout', () => { preq.destroy(); rej(); });
-							preq.end();
-						}))).then((res: string) => resolve(res)).catch(() => resolve(proxies[0]!));
-					} else {
-						resolve(proxies[0]!);
-					}
-				};
-
-				req.on('error', fallback);
-				req.on('timeout', () => { req.destroy(); fallback(); });
-				req.end();
-			});
+			return originalUrl;
 		}
 
 		let repoPathStr = undefined;
@@ -728,7 +635,7 @@ export async function activate(context: ExtensionContext) {
 			case "eu5": repoPathStr = eu5Remote; break;
 			default: repoPathStr = stellarisRemote; break;
 		}
-		const repoPath = await getBestRepoPath(repoPathStr);
+		const repoPath = getBestRepoPath(repoPathStr);
 		ErrorReporter.debug('Extension', `Language: ${language}, repo: ${repoPath}`);
 
 		// If the extension is launched in debug mode then the debug server options are used

@@ -1296,6 +1296,10 @@ export class AgentRunner {
             availableTools = TOOL_DEFINITIONS.filter(t => !['dispatch_agents', 'query_blackboard', 'merge_results'].includes(t.function.name));
         }
 
+        if (options?.useSlimPrompt) {
+            availableTools = availableTools.filter(t => t.function.name !== 'git_ops');
+        }
+
         // 子 Agent 工具排除：根据 excludeTools 过滤掉不适合子 Agent 自主使用的工具
         if (options?.excludeTools && options.excludeTools.length > 0) {
             const excluded = new Set(options.excludeTools);
@@ -1390,6 +1394,19 @@ export class AgentRunner {
             let dsmlArgsBuf = '';
             let isInsideDsml = false;
 
+            const modelWaitStartedAt = Date.now();
+            let modelHeartbeatId: ReturnType<typeof setInterval> | undefined;
+            if (options?.onStep) {
+                modelHeartbeatId = setInterval(() => {
+                    const elapsedSec = Math.max(1, Math.round((Date.now() - modelWaitStartedAt) / 1000));
+                    emitStep({
+                        type: 'orchestrator_progress',
+                        content: `正在等待模型返回 (${elapsedSec}s)...`,
+                        timestamp: Date.now(),
+                    });
+                }, 30_000);
+            }
+
             let response;
             try {
                 response = await this.aiService.chatCompletion(messages, {
@@ -1465,6 +1482,8 @@ export class AgentRunner {
                 } else {
                     throw err;
                 }
+            } finally {
+                if (modelHeartbeatId) clearInterval(modelHeartbeatId);
             }
 
             // Accumulate token usage from this API call

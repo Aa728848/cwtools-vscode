@@ -19,12 +19,46 @@ export interface ExternalToolContext {
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
 }
 
+function isPathInsideOrEqual(candidate: string, root: string): boolean {
+    const isWindows = process.platform === 'win32';
+    const normalizedCandidate = path.resolve(candidate);
+    const normalizedRoot = path.resolve(root);
+    const checkCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
+    const checkRoot = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot;
+    const relative = path.relative(checkRoot, checkCandidate);
+    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 // ─── Handler class ───────────────────────────────────────────────────────────
 
 export class ExternalToolHandler {
     private currentTodos: TodoItem[] = [];
 
     constructor(private ctx: ExternalToolContext) {}
+
+    private isWithinAnyWorkspace(candidate: string): boolean {
+        const normalized = path.resolve(candidate);
+        if (isPathInsideOrEqual(normalized, this.ctx.workspaceRoot)) {
+            return true;
+        }
+
+        const wsFolders = vs.workspace.workspaceFolders;
+        if (wsFolders) {
+            for (const folder of wsFolders) {
+                if (isPathInsideOrEqual(normalized, folder.uri.fsPath)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private resolveWorkspacePath(inputPath: string): string {
+        return path.resolve(path.isAbsolute(inputPath)
+            ? inputPath
+            : path.join(this.ctx.workspaceRoot, inputPath));
+    }
 
     // ─── 权限请求辅助：与 AbortSignal 竞争，abort 时自动 deny ────────────────
 
@@ -39,13 +73,21 @@ export class ExternalToolHandler {
         if (!abortSignal) {
             return onPermissionRequest(id, tool, description, command);
         }
+        let onAbort: (() => void) | undefined;
         const abortDeny = new Promise<boolean>((resolve) => {
-            abortSignal.addEventListener('abort', () => resolve(false), { once: true });
+            onAbort = () => resolve(false);
+            abortSignal.addEventListener('abort', onAbort, { once: true });
         });
-        return Promise.race([
-            onPermissionRequest(id, tool, description, command),
-            abortDeny,
-        ]);
+        try {
+            return await Promise.race([
+                onPermissionRequest(id, tool, description, command),
+                abortDeny,
+            ]);
+        } finally {
+            if (onAbort) {
+                abortSignal.removeEventListener('abort', onAbort);
+            }
+        }
     }
 
     // ─── todoWrite ───────────────────────────────────────────────────────────
@@ -320,28 +362,7 @@ export class ExternalToolHandler {
         try {
             cwd = path.resolve(args.cwd ?? this.ctx.workspaceRoot);
             
-            const isWindows = process.platform === 'win32';
-            const checkCwd = isWindows ? cwd.toLowerCase() : cwd;
-            
-            let isWithinWorkspace = false;
-            
-            const wsRoot = path.resolve(this.ctx.workspaceRoot);
-            const checkWsRoot = isWindows ? wsRoot.toLowerCase() : wsRoot;
-            if (checkCwd.startsWith(checkWsRoot)) {
-                isWithinWorkspace = true;
-            }
-
-            const wsFolders = vs.workspace.workspaceFolders;
-            if (!isWithinWorkspace && wsFolders) {
-                for (const folder of wsFolders) {
-                    const folderRoot = path.resolve(folder.uri.fsPath);
-                    const checkFolderRoot = isWindows ? folderRoot.toLowerCase() : folderRoot;
-                    if (checkCwd.startsWith(checkFolderRoot)) {
-                        isWithinWorkspace = true;
-                        break;
-                    }
-                }
-            }
+            const isWithinWorkspace = this.isWithinAnyWorkspace(cwd);
 
             if (!isWithinWorkspace && !bypassSandbox) {
                 if (args.requestEscalation) {
@@ -387,25 +408,29 @@ export class ExternalToolHandler {
 
         return new Promise(resolve => {
             const proc = spawn(shell, shellArgs, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-
-            const timer = setTimeout(() => {
-                proc.kill();
-                resolve({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + '\n[... 超时已终止]',
-                    stderr: stderrBuf.substring(0, 2000),
-                    exitCode: -1,
-                    timedOut: true,
-                });
-            }, timeoutMs);
-
+            let settled = false;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
             const abortSignal = context?.runnerOptions?.abortSignal;
+
+            const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut?: boolean }) => {
+                if (settled) return;
+                settled = true;
+                if (timer) clearTimeout(timer);
+                if (heartbeatTimer) clearInterval(heartbeatTimer);
+                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
+                resolve(result);
+            };
+
             const onParentAbort = () => {
+                const reason = abortSignal?.reason;
+                const abortedByTimeout = reason instanceof Error && reason.name === 'TimeoutError';
                 proc.kill();
-                resolve({
-                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + '\n[... 被用户中止]',
+                finish({
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + (abortedByTimeout ? '\n[... 超时已终止]' : '\n[... 被用户中止]'),
                     stderr: stderrBuf.substring(0, 2000),
                     exitCode: -1,
-                    timedOut: false,
+                    timedOut: abortedByTimeout,
                 });
             };
             if (abortSignal) {
@@ -415,6 +440,28 @@ export class ExternalToolHandler {
                 }
                 abortSignal.addEventListener('abort', onParentAbort);
             }
+
+            const startedAt = Date.now();
+            heartbeatTimer = setInterval(() => {
+                if (settled) return;
+                const onStep = context?.onStep;
+                const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+                onStep?.({
+                    type: 'orchestrator_progress',
+                    content: `run_command 正在执行中 (${elapsed}s): ${args.command.slice(0, 120)}`,
+                    timestamp: Date.now(),
+                });
+            }, 15_000);
+
+            timer = setTimeout(() => {
+                proc.kill();
+                finish({
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT) + '\n[... 超时已终止]',
+                    stderr: stderrBuf.substring(0, 2000),
+                    exitCode: -1,
+                    timedOut: true,
+                });
+            }, timeoutMs);
 
             proc.stdout?.on('data', (chunk: Buffer) => {
                 const text = chunk.toString();
@@ -430,12 +477,16 @@ export class ExternalToolHandler {
 
             proc.stderr?.on('data', (chunk: Buffer) => {
                 stderrBuf += chunk.toString();
+                const onStep = context?.onStep;
+                onStep?.({
+                    type: 'thinking',
+                    content: chunk.toString().substring(0, 200),
+                    timestamp: Date.now(),
+                });
             });
 
             proc.on('close', code => {
-                clearTimeout(timer);
-                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
-                resolve({
+                finish({
                     stdout: stdoutBuf.substring(0, MAX_OUTPUT),
                     stderr: stderrBuf.substring(0, 2000),
                     exitCode: code ?? 0,
@@ -443,9 +494,7 @@ export class ExternalToolHandler {
             });
 
             proc.on('error', err => {
-                clearTimeout(timer);
-                if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
-                resolve({
+                finish({
                     stdout: stdoutBuf.substring(0, MAX_OUTPUT),
                     stderr: `spawn error: ${err.message}`,
                     exitCode: 1,
@@ -657,9 +706,10 @@ export class ExternalToolHandler {
         return this.mmxAvailable;
     }
 
-    /** Ensure the media output directory exists and return its path. */
-    private async getMediaOutputDir(): Promise<string> {
-        const mediaDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai', 'media');
+    /** Ensure the topic-scoped media output directory exists and return its path. */
+    private async getMediaOutputDir(context?: import('../types').AgentToolContext): Promise<string> {
+        const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId ?? 'session';
+        const mediaDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai', topicId, 'media');
         if (!fs.existsSync(mediaDir)) {
             fs.mkdirSync(mediaDir, { recursive: true });
         }
@@ -695,11 +745,27 @@ export class ExternalToolHandler {
         }
 
         const onStep = context?.onStep;
+        const abortSignal = context?.runnerOptions?.abortSignal;
+        const label = `[MiniMax CLI:${toolLabel}]`;
         onStep?.({
             type: 'thinking',
-            content: `[MiniMax CLI] Executing: ${command.substring(0, 200)}...`,
+            content: `${label} Executing: ${command.substring(0, 200)}...`,
             timestamp: Date.now(),
         });
+
+        const startedAt = Date.now();
+        let heartbeatId: ReturnType<typeof setInterval> | undefined;
+        if (onStep) {
+            heartbeatId = setInterval(() => {
+                if (abortSignal?.aborted) return;
+                const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+                onStep({
+                    type: 'orchestrator_progress',
+                    content: `${label} still running (${elapsed}s): ${command.substring(0, 120)}`,
+                    timestamp: Date.now(),
+                });
+            }, 15_000);
+        }
 
         try {
             const { exec } = await import('child_process');
@@ -708,18 +774,33 @@ export class ExternalToolHandler {
             const { stdout, stderr } = await execAsync(command, {
                 timeout: timeoutMs,
                 cwd: this.ctx.workspaceRoot,
+                signal: abortSignal,
+                maxBuffer: 10 * 1024 * 1024,
             });
 
             onStep?.({
                 type: 'thinking',
-                content: `[MiniMax CLI] Completed: ${stdout.trim().substring(0, 300)}`,
+                content: `${label} Completed: ${stdout.trim().substring(0, 300)}`,
                 timestamp: Date.now(),
             });
 
             return { success: true, stdout: stdout.trim(), stderr: stderr.trim(), message: 'OK' };
         } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            return { success: false, stdout: '', stderr: errMsg, message: `MiniMax CLI execution failed: ${errMsg}` };
+            const e = err as Error & { stdout?: string; stderr?: string; code?: string };
+            const errMsg = e instanceof Error ? e.message : String(err);
+            const stdout = typeof e.stdout === 'string' ? e.stdout.trim() : '';
+            const stderr = typeof e.stderr === 'string' ? e.stderr.trim() : errMsg;
+            const reason = abortSignal?.reason;
+            const abortedByTimeout = reason instanceof Error && reason.name === 'TimeoutError';
+            const aborted = abortSignal?.aborted || e.name === 'AbortError' || /aborted/i.test(errMsg);
+            const message = abortedByTimeout
+                ? `${toolLabel} timed out after ${Math.round(timeoutMs / 1000)}s`
+                : aborted
+                    ? `${toolLabel} was cancelled`
+                    : `MiniMax CLI execution failed: ${errMsg}`;
+            return { success: false, stdout, stderr: stderr || errMsg, message };
+        } finally {
+            if (heartbeatId) clearInterval(heartbeatId);
         }
     }
 
@@ -730,11 +811,27 @@ export class ExternalToolHandler {
         context?: import('../types').AgentToolContext
     ): Promise<{ success: boolean; stdout: string; stderr: string; message: string }> {
         const onStep = context?.onStep;
+        const abortSignal = context?.runnerOptions?.abortSignal;
+        const label = '[Local Convert]';
         onStep?.({
             type: 'thinking',
-            content: `[Local Convert] Executing: ${command.substring(0, 200)}...`,
+            content: `${label} Executing: ${command.substring(0, 200)}...`,
             timestamp: Date.now(),
         });
+
+        const startedAt = Date.now();
+        let heartbeatId: ReturnType<typeof setInterval> | undefined;
+        if (onStep) {
+            heartbeatId = setInterval(() => {
+                if (abortSignal?.aborted) return;
+                const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+                onStep({
+                    type: 'orchestrator_progress',
+                    content: `${label} still running (${elapsed}s): ${command.substring(0, 120)}`,
+                    timestamp: Date.now(),
+                });
+            }, 15_000);
+        }
 
         try {
             const { exec } = await import('child_process');
@@ -743,12 +840,33 @@ export class ExternalToolHandler {
             const { stdout, stderr } = await execAsync(command, {
                 timeout: timeoutMs,
                 cwd: this.ctx.workspaceRoot,
+                signal: abortSignal,
+                maxBuffer: 10 * 1024 * 1024,
+            });
+
+            onStep?.({
+                type: 'thinking',
+                content: `${label} Completed: ${stdout.trim().substring(0, 300)}`,
+                timestamp: Date.now(),
             });
 
             return { success: true, stdout: stdout.trim(), stderr: stderr.trim(), message: 'OK' };
         } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
-            return { success: false, stdout: '', stderr: errMsg, message: `Execution failed: ${errMsg}` };
+            const e = err as Error & { stdout?: string; stderr?: string; code?: string };
+            const errMsg = e instanceof Error ? e.message : String(err);
+            const stdout = typeof e.stdout === 'string' ? e.stdout.trim() : '';
+            const stderr = typeof e.stderr === 'string' ? e.stderr.trim() : errMsg;
+            const reason = abortSignal?.reason;
+            const abortedByTimeout = reason instanceof Error && reason.name === 'TimeoutError';
+            const aborted = abortSignal?.aborted || e.name === 'AbortError' || /aborted/i.test(errMsg);
+            const message = abortedByTimeout
+                ? `Local conversion timed out after ${Math.round(timeoutMs / 1000)}s`
+                : aborted
+                    ? 'Local conversion was cancelled'
+                    : `Execution failed: ${errMsg}`;
+            return { success: false, stdout, stderr: stderr || errMsg, message };
+        } finally {
+            if (heartbeatId) clearInterval(heartbeatId);
         }
     }
 
@@ -759,7 +877,7 @@ export class ExternalToolHandler {
         aspectRatio?: string;
         count?: number;
     }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; files?: string[] }> {
-        const outDir = await this.getMediaOutputDir();
+        const outDir = await this.getMediaOutputDir(context);
         const timestamp = Date.now();
         const outPath = path.join(outDir, `image_${timestamp}`);
 
@@ -791,7 +909,7 @@ export class ExternalToolHandler {
     async mmxGenerateVideo(args: {
         prompt: string;
     }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; file?: string }> {
-        const outDir = await this.getMediaOutputDir();
+        const outDir = await this.getMediaOutputDir(context);
         const timestamp = Date.now();
         const outFile = path.join(outDir, `video_${timestamp}.mp4`);
 
@@ -815,7 +933,7 @@ export class ExternalToolHandler {
         instrumental?: boolean;
         lyricsOptimizer?: boolean;
     }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; file?: string }> {
-        const outDir = await this.getMediaOutputDir();
+        const outDir = await this.getMediaOutputDir(context);
         const timestamp = Date.now();
         const outFile = path.join(outDir, `music_${timestamp}.mp3`);
 
@@ -841,7 +959,7 @@ export class ExternalToolHandler {
         voice?: string;
         speed?: number;
     }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; file?: string }> {
-        const outDir = await this.getMediaOutputDir();
+        const outDir = await this.getMediaOutputDir(context);
         const timestamp = Date.now();
         const outFile = path.join(outDir, `speech_${timestamp}.mp3`);
 
@@ -921,20 +1039,28 @@ export class ExternalToolHandler {
             };
         }
 
-        if (!fs.existsSync(args.sourcePath)) {
+        const sourcePath = this.resolveWorkspacePath(args.sourcePath);
+        if (!this.isWithinAnyWorkspace(sourcePath)) {
+            return { success: false, message: `Source file must be within the workspace: ${args.sourcePath}` };
+        }
+
+        if (!fs.existsSync(sourcePath)) {
             return { success: false, message: `Source file not found: ${args.sourcePath}` };
         }
 
         // Resolve output directory
         const outDir = args.outputDir
-            ? (path.isAbsolute(args.outputDir) ? args.outputDir : path.join(this.ctx.workspaceRoot, args.outputDir))
-            : path.dirname(args.sourcePath);
+            ? this.resolveWorkspacePath(args.outputDir)
+            : path.dirname(sourcePath);
+        if (!this.isWithinAnyWorkspace(outDir)) {
+            return { success: false, message: `Output directory must be within the workspace: ${args.outputDir}` };
+        }
         if (!fs.existsSync(outDir)) {
             fs.mkdirSync(outDir, { recursive: true });
         }
 
         // Build output filename: same basename, .dds extension
-        const baseName = path.basename(args.sourcePath, path.extname(args.sourcePath));
+        const baseName = path.basename(sourcePath, path.extname(sourcePath));
         const outFile = path.join(outDir, `${baseName}.dds`);
 
         // Build ImageMagick command
@@ -957,7 +1083,7 @@ export class ExternalToolHandler {
             ddsDefines += ' -define dds:mipmaps=0';
         }
 
-        const cmd = `${magickBin} convert "${args.sourcePath}" ${ddsDefines} "${outFile}"`;
+        const cmd = `${magickBin} convert "${sourcePath}" ${ddsDefines} "${outFile}"`;
 
         const result = await this.execLocalCommand(cmd, 60000, context);
         if (!result.success) {
@@ -991,19 +1117,27 @@ export class ExternalToolHandler {
             };
         }
 
-        if (!fs.existsSync(args.sourcePath)) {
+        const sourcePath = this.resolveWorkspacePath(args.sourcePath);
+        if (!this.isWithinAnyWorkspace(sourcePath)) {
+            return { success: false, message: `Source file must be within the workspace: ${args.sourcePath}` };
+        }
+
+        if (!fs.existsSync(sourcePath)) {
             return { success: false, message: `Source file not found: ${args.sourcePath}` };
         }
 
         // Resolve output directory
         const outDir = args.outputDir
-            ? (path.isAbsolute(args.outputDir) ? args.outputDir : path.join(this.ctx.workspaceRoot, args.outputDir))
-            : path.dirname(args.sourcePath);
+            ? this.resolveWorkspacePath(args.outputDir)
+            : path.dirname(sourcePath);
+        if (!this.isWithinAnyWorkspace(outDir)) {
+            return { success: false, message: `Output directory must be within the workspace: ${args.outputDir}` };
+        }
         if (!fs.existsSync(outDir)) {
             fs.mkdirSync(outDir, { recursive: true });
         }
 
-        const baseName = path.basename(args.sourcePath, path.extname(args.sourcePath));
+        const baseName = path.basename(sourcePath, path.extname(sourcePath));
         const outFile = path.join(outDir, `${baseName}.${args.targetFormat}`);
         const ffmpegBin = this.getFfmpegBin();
 
@@ -1011,11 +1145,11 @@ export class ExternalToolHandler {
         let cmd: string;
         if (args.targetFormat === 'ogg') {
             // Vorbis encoding, quality 4 (~128kbps)
-            cmd = `${ffmpegBin} -y -i "${args.sourcePath}" -c:a libvorbis -q:a 4`;
+            cmd = `${ffmpegBin} -y -i "${sourcePath}" -c:a libvorbis -q:a 4`;
         } else {
             // WAV: 16-bit PCM, default 44100 Hz
             const sr = args.sampleRate ?? 44100;
-            cmd = `${ffmpegBin} -y -i "${args.sourcePath}" -acodec pcm_s16le -ar ${sr}`;
+            cmd = `${ffmpegBin} -y -i "${sourcePath}" -acodec pcm_s16le -ar ${sr}`;
         }
 
         // Optional sample rate override for OGG
@@ -1053,12 +1187,19 @@ export class ExternalToolHandler {
         targetRelativePath: string;
         overwrite?: boolean;
     }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; finalPath?: string }> {
-        if (!fs.existsSync(args.sourcePath)) {
+        const sourcePath = this.resolveWorkspacePath(args.sourcePath);
+        if (!this.isWithinAnyWorkspace(sourcePath)) {
+            return { success: false, message: `Source file must be within the workspace: ${args.sourcePath}` };
+        }
+        if (!fs.existsSync(sourcePath)) {
             return { success: false, message: `Source file not found: ${args.sourcePath}` };
         }
 
         // Compute absolute target path
-        const targetPath = path.join(this.ctx.workspaceRoot, args.targetRelativePath);
+        const targetPath = this.resolveWorkspacePath(args.targetRelativePath);
+        if (!this.isWithinAnyWorkspace(targetPath)) {
+            return { success: false, message: `Target path must be within the workspace: ${args.targetRelativePath}` };
+        }
         const targetDir = path.dirname(targetPath);
 
         // Check overwrite safety
@@ -1075,7 +1216,7 @@ export class ExternalToolHandler {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const allowed = await this.requestPermissionWithAbort(
                 onPermissionRequest, permId, 'deploy_mod_asset',
-                `AI 请求将媒体资产部署到 Mod 工作区：\n\n【源文件】：${args.sourcePath}\n【目标位置】：${args.targetRelativePath}\n【覆盖现有】：${args.overwrite ? '是' : '否'}`,
+                `AI 请求将媒体资产部署到 Mod 工作区：\n\n【源文件】：${sourcePath}\n【目标位置】：${args.targetRelativePath}\n【覆盖现有】：${args.overwrite ? '是' : '否'}`,
                 context
             );
             if (!allowed) {
@@ -1096,12 +1237,12 @@ export class ExternalToolHandler {
             this.ctx.onBeforeFileWrite?.(targetPath, previousContent);
 
             // Copy the file
-            fs.copyFileSync(args.sourcePath, targetPath);
+            fs.copyFileSync(sourcePath, targetPath);
 
             const onStep = context?.onStep;
             onStep?.({
                 type: 'thinking',
-                content: `[Deploy] ${path.basename(args.sourcePath)} → ${args.targetRelativePath}`,
+                content: `[Deploy] ${path.basename(sourcePath)} → ${args.targetRelativePath}`,
                 timestamp: Date.now(),
             });
 

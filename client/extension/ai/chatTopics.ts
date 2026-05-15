@@ -170,16 +170,27 @@ export class ChatTopicManager {
     // ─── Topic List & Search ──────────────────────────────────────────────────
 
     sendTopicList(): void {
+        const visibleTopics = this.topics
+            .filter(t => this.showArchived || !t.archived);
+        const archivedCount = this.topics.filter(t => t.archived).length;
         this.postMessage({
             type: 'topicList',
-            topics: this.topics
-                .filter(t => this.showArchived || !t.archived)
-                .map(t => ({
-                    id: t.id,
-                    title: t.title,
-                    updatedAt: t.updatedAt,
-                    archived: t.archived,
-                })),
+            topics: visibleTopics.map(t => ({
+                id: t.id,
+                title: t.title,
+                updatedAt: t.updatedAt,
+                createdAt: t.createdAt,
+                archived: t.archived,
+                messageCount: t.messages.length,
+                parentTopicId: t.parentTopicId,
+                forkedFromMessageIndex: t.forkedFromMessageIndex,
+            })),
+            stats: {
+                total: this.topics.length,
+                visible: visibleTopics.length,
+                archived: archivedCount,
+                currentTopicId: this.currentTopic?.id ?? null,
+            },
         });
     }
 
@@ -257,10 +268,27 @@ export class ChatTopicManager {
             id: s.id,
             title: s.title,
             updatedAt: s.updatedAt,
+            createdAt: this.topics.find(t => t.id === s.id)?.createdAt,
+            archived: this.topics.find(t => t.id === s.id)?.archived,
+            messageCount: this.topics.find(t => t.id === s.id)?.messages.length || 0,
             matchContext: s.matchContext,
+            score: s.score,
+            parentTopicId: this.topics.find(t => t.id === s.id)?.parentTopicId,
+            forkedFromMessageIndex: this.topics.find(t => t.id === s.id)?.forkedFromMessageIndex,
         }));
 
-        this.postMessage({ type: 'topicSearchResults', results });
+        this.postMessage({
+            type: 'topicSearchResults',
+            results,
+            query,
+            totalCount: scored.length,
+            stats: {
+                total: this.topics.length,
+                visible: results.length,
+                archived: this.topics.filter(t => t.archived).length,
+                currentTopicId: this.currentTopic?.id ?? null,
+            },
+        });
     }
 
     // ─── Topic Export / Import ────────────────────────────────────────────────

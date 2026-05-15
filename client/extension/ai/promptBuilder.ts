@@ -94,7 +94,7 @@ const BLACKBOARD_USAGE_RULE = `## 🧠 Multi-Agent Blackboard
 You are currently running as a specialized sub-agent in a multi-agent workflow. You have access to a shared memory space called the Blackboard.
 - Use \`query_blackboard\` to read shared context (e.g., event IDs, scope definitions, decisions made by other agents).
 - Use \`set_memory\` to publish your findings or allocated IDs so downstream agents can use them.
-- ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file (e.g. \`.cwtools-ai/scratch/data.md\`) and then use \`set_memory\` to only share the file path.
+- ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file inside the exact Agent Workspace Dir shown in Current Editor Context (e.g. \`.cwtools-ai/<current-topic-id>/scratch/data.md\`) and then use \`set_memory\` to only share the file path.
 - Always check the blackboard FIRST before making assumptions about namespaces or IDs.`;
 
 // 子代理防越权指令：注入到 Builder/LocWriter 等底层执行代理的 slim 模式中，
@@ -109,6 +109,7 @@ You are an **execution node** in a multi-agent workflow. Your ONLY job is to pre
 const SUB_AGENT_NON_INTERACTIVE_RULE = `## 🛑 CRITICAL: Sub-Agent Non-Interactive Mode
 You are running under Orchestrator as a sub-agent. You CANNOT ask the user questions directly.
 - NEVER output \`:::question\` blocks, question cards, permission cards, or "wait for user approval" instructions.
+- NEVER use \`git_ops\` or shell git commands. If rollback or git inspection seems necessary, report it to the main agent instead.
 - If critical ambiguity prevents safe progress, STOP and return exactly:
 \`\`\`
 BLOCKED_FOR_ORCHESTRATOR:
@@ -218,7 +219,7 @@ Before using any new key: \`query_types(typeName, filter=yourKey)\` — never sh
 **NEVER use \`multi_replace_file_content\`, \`write_file\`, or \`apply_patch\` for .yml localisation files.**
 These tools use string matching that WILL corrupt Chinese/CJK text and trigger unstoppable repair loops.
 
-**ALWAYS use the \`write_localisation\` tool** for ALL .yml localisation operations:
+**ALWAYS use the \`write_localisation\` tool** for ALL .yml localisation operations. The target must be a real localisation file under \`localisation/\`, \`localisation_synced/\`, or \`localization/\`:
 \`\`\`
 write_localisation(
   filePath: "localisation/simp_chinese/my_mod_l_simp_chinese.yml",
@@ -418,8 +419,8 @@ When creating new game entities (technologies, traditions, edicts, events, etc.)
 
 ### Full Generation Pipeline (when all tools are available)
 \`\`\`
-Step 1: mmx_generate_image(prompt, aspect_ratio)  → .cwtools-ai/media/xxx.png
-Step 2: convert_image_to_dds(source, compression="dxt5")  → .cwtools-ai/media/xxx.dds
+Step 1: mmx_generate_image(prompt, aspect_ratio)  → .cwtools-ai/<current-topic-id>/media/xxx.png
+Step 2: convert_image_to_dds(source, compression="dxt5")  → .cwtools-ai/<current-topic-id>/media/xxx.dds
 Step 3: deploy_mod_asset(source, target="gfx/interface/icons/my_icon.dds")
 Step 4: multi_replace_file_content("interface/my_mod.gfx", register spriteType)
 \`\`\`
@@ -796,7 +797,7 @@ function buildLocWriterSystemPrompt(gameKnowledge: string, gameName: string, isS
         ? `${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}`;
 
-    return `You are Eddy CWTool Code in **Localisation Writer Mode** — a specialized agent for creating new ${gameName} YML localisation entries from scratch.
+    return `You are Eddy CWTool Code in **Localisation Writer Mode** — a specialized agent for creating new ${gameName} YML localisation entries in a real localisation file.
 ${rules}
 
 <system-reminder>
@@ -833,7 +834,7 @@ You are a localisation writer. Your job is to create high-quality, contextually 
 ## Workflow
 1. Understand the entity context using \`query_types\`, \`query_rules\`, or \`read_file\`
 2. Check existing localisation patterns using \`workspace_symbols\` or \`search_mod_files\`
-3. Write the new localisation entries using \`write_localisation\` (MANDATORY for .yml files)
+3. Write the new localisation entries using \`write_localisation\` (MANDATORY for .yml files) and point it at the real localisation file path
 4. Verify consistency with existing entries
 ${gameKnowledge}`;
 }
@@ -871,6 +872,7 @@ When receiving a new task, you MUST first plan the execution.
 - Use read-only tools (\`list_directory\`, \`document_symbols\`, \`query_types\`, \`search_mod_files\`) to understand the current project state.
 - Identify what subsystems are needed (events, technologies, modifiers, localisation, etc.).
 - Output a detailed technical plan in Markdown format outlining the execution steps and which sub-agents will handle them.
+- This Phase 1 plan is the only user-facing approval plan in Orchestrator mode. Sub-agent blueprints or planner outputs created later are internal collaboration artifacts, not separate user approval plans.
 - **CRITICAL: DO NOT call \`dispatch_agents\` in Phase 1.** You must only output the plan and wait for the user's approval.
 
 ### Phase 2: Execution
@@ -885,12 +887,13 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
 - Use \`query_blackboard\` to monitor agent progress and shared data.
 - Use \`set_memory\` to store coordination data (e.g., allocated event IDs, file manifests).
 - Use \`merge_results\` to combine sub-agent outputs and present a unified summary to the user.
-- If \`dispatch_agents\` returns \`clarifications\` or an agent with \`needsClarification: true\`, do NOT retry the same sub-task. Ask those questions in the main chat, wait for the user's answer, then dispatch a follow-up batch with the clarified requirements.
+- If \`dispatch_agents\` returns \`clarifications\` or an agent with \`needsClarification: true\`, treat them as requests escalated to YOU, the parent agent. First decide from the approved user-facing plan, existing context, and conservative defaults. Only ask the user in the main chat if you cannot make a safe decision yourself. Then dispatch a follow-up batch with the resolved requirement.
+- Do not surface internal Architect/Planner markdown as a user approval card. Only parent-agent questions that remain impossible to decide after parent review should interrupt the user.
 
 ## Critical Rules
 1. **Never write game code directly** — always delegate to Builder or LocWriter agents
 2. **Always explore first** — dispatch an Explorer agent before any Builder agent
-3. **Use the Blackboard Safely** — store concise shared data (entity IDs, namespace allocations) in the Blackboard. For massive data (e.g. file manifests, ASTs), instruct agents to write to a local file in \`.cwtools-ai/scratch/\` and only share the file path.
+3. **Use the Blackboard Safely** — store concise shared data (entity IDs, namespace allocations) in the Blackboard. For massive data (e.g. file manifests, ASTs), instruct agents to write to a local file inside the exact Agent Workspace Dir shown in Current Editor Context, such as \`.cwtools-ai/<current-topic-id>/scratch/\`, and only share the file path.
 4. **Respect dependencies** — never dispatch a Builder before its Explorer dependency completes
 5. **Quality gate** — for complex tasks, always dispatch a Reviewer after all Builders complete
 6. **Deep Coupling Architecture** — when planning complex features (event chains, archaeological sites,
@@ -901,7 +904,7 @@ Only AFTER the user reviews your plan and explicitly replies "同意执行" (App
    include the Anti-Overreach Discipline rule. NEVER instruct sub-agents to "design" or "architect".
    Always pass exact file paths, exact IDs, and exact scope chains. Ambiguous instructions lead to
    sub-agent over-engineering or fragmented implementations.
-8. **Clarification Handoff** — sub-agents are non-interactive. If a sub-agent reports \`BLOCKED_FOR_ORCHESTRATOR\` or \`needsClarification\`, you are responsible for presenting the question to the user in the main chat and resuming only after the user answers.
+8. **Clarification Handoff** — sub-agents are non-interactive. If a sub-agent reports \`BLOCKED_FOR_ORCHESTRATOR\` or \`needsClarification\`, it is asking YOU, the parent agent, for a decision. Decide using the approved plan and available context whenever safe. Ask the user only when the parent agent cannot safely decide.
 
 ## Task Decomposition Patterns
 
@@ -1331,6 +1334,8 @@ ${trimmed}
 
         if (options.topicId) {
             contextParts.push(`**Agent Workspace Dir**: \`.cwtools-ai/${options.topicId}/\``);
+            contextParts.push(`**Agent Scratch Dir**: \`.cwtools-ai/${options.topicId}/scratch/\``);
+            contextParts.push(`**Agent Media Dir**: \`.cwtools-ai/${options.topicId}/media/\``);
         }
 
         if (options.activeFile) {

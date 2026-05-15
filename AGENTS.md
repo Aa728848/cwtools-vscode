@@ -11,6 +11,11 @@ The extension architecture consists of three main components:
 2. **Backend (.NET/F#)** (`src/LSP/`): The Language Server Protocol (LSP) implementation, built on top of the F# `CWTools` library.
 3. **Webviews** (`client/webview/`): Interactive UI panels embedded within VS Code, running in isolated browser sandboxes.
 
+Current chat UI notes:
+- The webview HTML template lives in `client/extension/ai/chatHtml.ts`; runtime rendering and interaction logic live in `client/webview/chatPanel.ts`.
+- The topic panel now uses grouped cards with summary chips, richer metadata, and search-result context previews.
+- The settings page now has a live overview strip and a split footer action row for test/save.
+
 ## 📂 Key Features & Code Mapping
 
 ### 1. 🤖 AI Agent Integration

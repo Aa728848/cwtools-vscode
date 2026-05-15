@@ -31,6 +31,10 @@ export type SubAgentExecutor = (
     onStep: (step: AgentStep) => void,
 ) => Promise<SubAgentResult>;
 
+function isTimeoutLikeError(error?: string): boolean {
+    return !!error && /timeout|timed out|idle timeout|absolute timeout|超时/i.test(error);
+}
+
 /**
  * 并行执行器。
  *
@@ -98,6 +102,27 @@ export class ParallelExecutor {
             };
         }
 
+        const missingDependencies: Array<{ nodeId: string; dependencyId: string }> = [];
+        for (const node of graph.nodes.values()) {
+            for (const depId of node.dependencies) {
+                if (!graph.nodes.has(depId)) {
+                    missingDependencies.push({ nodeId: node.id, dependencyId: depId });
+                }
+            }
+        }
+        if (missingDependencies.length > 0) {
+            const summary = `任务图存在不存在的依赖: ${missingDependencies.map(d => `${d.nodeId} -> ${d.dependencyId}`).join('; ')}`;
+            emitStep({ type: 'error', content: summary, timestamp: Date.now() });
+            return {
+                success: false,
+                summary,
+                agentResults,
+                totalTokenUsage,
+                failedNodes: [...new Set(missingDependencies.map(d => d.nodeId))],
+                cancelledNodes: [],
+            };
+        }
+
         emitStep({
             type: 'orchestrator_progress',
             content: `$(chart) 任务图调度开始: ${graph.nodes.size} 个节点, 最大并发 ${this.maxConcurrency}`,
@@ -110,9 +135,16 @@ export class ParallelExecutor {
 
             const readyNodes = this.graphEngine.getReadyNodes(graph);
             if (readyNodes.length === 0) {
-                // 没有就绪节点但图未完成 — 说明有运行中的节点，等待
-                // 实际上不会发生，因为我们同步等待每批次完成
-                break;
+                const summary = `任务图调度停滞: 没有可执行节点，但仍有未完成节点。`;
+                emitStep({ type: 'error', content: summary, timestamp: Date.now() });
+                return {
+                    success: false,
+                    summary,
+                    agentResults,
+                    totalTokenUsage,
+                    failedNodes: [...graph.nodes.values()].filter(n => n.status === 'pending' || n.status === 'running').map(n => n.id),
+                    cancelledNodes: [...graph.nodes.values()].filter(n => n.status === 'cancelled').map(n => n.id),
+                };
             }
 
             // 检查 Token 预算
@@ -254,6 +286,20 @@ export class ParallelExecutor {
                             timestamp: Date.now(),
                         });
                     }
+                    // Timeout/idle aborts are usually environmental stalls, not useful model mistakes.
+                    // Retrying them silently makes collaboration feel frozen for much longer.
+                    else if (isTimeoutLikeError(result.error)) {
+                        const cancelled = this.graphEngine.markFailed(
+                            graph,
+                            node.id,
+                            result.error ?? '子任务超时'
+                        );
+                        options.onStep?.({
+                            type: 'error',
+                            content: `节点 ${node.id} 超时终止，已停止重试${cancelled.length ? `，并取消下游节点: ${cancelled.join(', ')}` : ''}`,
+                            timestamp: Date.now(),
+                        });
+                    }
                     // 检查是否可重试
                     else if (node.retryCount < node.maxRetries) {
                         node.retryCount++;
@@ -290,6 +336,8 @@ export class ParallelExecutor {
                 // Check if this was a user cancellation
                 if (options.abortSignal?.aborted) {
                     node.status = 'cancelled';
+                } else if (isTimeoutLikeError(error)) {
+                    this.graphEngine.markFailed(graph, node.id, error);
                 } else if (node.retryCount < node.maxRetries) {
                     // 重试
                     node.retryCount++;

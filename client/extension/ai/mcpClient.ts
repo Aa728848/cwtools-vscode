@@ -16,18 +16,19 @@ export class MCPClient {
     private initialized = false;
     private ssePostEndpoint: string | null = null;
     private sseRequest: http.ClientRequest | null = null;
+    private static readonly CONNECT_TIMEOUT_MS = 30_000;
 
     constructor(private config: MCPServerConfig) {}
 
-    async connect(): Promise<void> {
+    async connect(abortSignal?: AbortSignal): Promise<void> {
         if (this.config.type === 'stdio') {
-            return this.connectStdio();
+            return this.connectStdio(abortSignal);
         } else if (this.config.type === 'sse') {
-            return this.connectSse();
+            return this.connectSse(abortSignal);
         }
     }
 
-    private async connectStdio(): Promise<void> {
+    private async connectStdio(abortSignal?: AbortSignal): Promise<void> {
         if (!this.config.command) throw new Error('Command is required for stdio MCP server');
 
         const workspaceFolder = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -56,16 +57,61 @@ export class MCPClient {
             this.cleanup();
         });
 
-        await this.initialize();
+        try {
+            await this.initialize(abortSignal);
+        } catch (e) {
+            this.disconnect();
+            throw e;
+        }
     }
 
-    private async connectSse(): Promise<void> {
+    private async connectSse(abortSignal?: AbortSignal): Promise<void> {
         if (!this.config.url) throw new Error('URL is required for sse MCP server');
         return new Promise((resolve, reject) => {
             const url = new URL(this.config.url!);
             const client = url.protocol === 'https:' ? https : http;
-            
-            const req = client.request(url, {
+            let settled = false;
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            let onAbort: (() => void) | undefined;
+            let req: http.ClientRequest | undefined;
+
+            const clearGuards = () => {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = undefined;
+                }
+                if (abortSignal && onAbort) {
+                    abortSignal.removeEventListener('abort', onAbort);
+                }
+            };
+            const fail = (err: Error) => {
+                if (settled) return;
+                settled = true;
+                clearGuards();
+                try { req?.destroy(); } catch { /* ignore */ }
+                this.cleanup();
+                reject(err);
+            };
+            const complete = () => {
+                if (settled) return;
+                settled = true;
+                clearGuards();
+                resolve();
+            };
+
+            onAbort = () => fail(new Error('MCP SSE connect aborted'));
+            if (abortSignal?.aborted) {
+                fail(new Error('MCP SSE connect aborted'));
+                return;
+            }
+            if (abortSignal) {
+                abortSignal.addEventListener('abort', onAbort, { once: true });
+            }
+            timeoutId = setTimeout(() => {
+                fail(new Error(`MCP SSE connect timed out after ${MCPClient.CONNECT_TIMEOUT_MS}ms`));
+            }, MCPClient.CONNECT_TIMEOUT_MS);
+
+            req = client.request(url, {
                 method: 'GET',
                 headers: {
                     'Accept': 'text/event-stream',
@@ -74,7 +120,7 @@ export class MCPClient {
                 }
             }, (res) => {
                 if (res.statusCode !== 200) {
-                    reject(new Error(`Failed to connect to SSE: ${res.statusCode}`));
+                    fail(new Error(`Failed to connect to SSE: ${res.statusCode}`));
                     return;
                 }
 
@@ -106,7 +152,9 @@ export class MCPClient {
                                 // Resolve relative URL
                                 this.ssePostEndpoint = new URL(this.ssePostEndpoint, url.origin).toString();
                             }
-                            this.initialize().then(resolve).catch(reject);
+                            this.initialize(abortSignal).then(complete).catch((e) => {
+                                fail(e instanceof Error ? e : new Error(String(e)));
+                            });
                         } else if (eventType === 'message' && data) {
                             try {
                                 const message = JSON.parse(data);
@@ -119,13 +167,16 @@ export class MCPClient {
                 });
 
                 res.on('close', () => {
-                    this.cleanup();
+                    if (!settled) {
+                        fail(new Error('MCP SSE connection closed before initialization completed'));
+                    } else {
+                        this.cleanup();
+                    }
                 });
             });
 
             req.on('error', (err) => {
-                reject(err);
-                this.cleanup();
+                fail(err);
             });
 
             req.end();
@@ -165,21 +216,53 @@ export class MCPClient {
 
     private static readonly REQUEST_TIMEOUT_MS = 30_000;
 
-    private sendRequest(method: string, params: any = {}): Promise<any> {
+    private sendRequest(method: string, params: any = {}, abortSignal?: AbortSignal): Promise<any> {
         return new Promise((resolve, reject) => {
+            if (abortSignal?.aborted) {
+                reject(new Error(`MCP request '${method}' aborted`));
+                return;
+            }
+
             const id = ++this.messageId;
+            let settled = false;
+            let abortListener: (() => void) | undefined;
+            let timer: ReturnType<typeof setTimeout>;
+            let postRequest: http.ClientRequest | undefined;
+
+            const cleanup = () => {
+                clearTimeout(timer);
+                if (abortSignal && abortListener) {
+                    abortSignal.removeEventListener('abort', abortListener);
+                }
+                this.pendingRequests.delete(id);
+                try { postRequest?.destroy(); } catch { /* ignore */ }
+            };
+            const settleResolve = (val: any) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(val);
+            };
+            const settleReject = (err: any) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                reject(err);
+            };
 
             // Timeout: reject and clean up if server doesn't respond within 30s
-            const timer = setTimeout(() => {
-                if (this.pendingRequests.has(id)) {
-                    this.pendingRequests.delete(id);
-                    reject(new Error(`MCP request '${method}' timed out after ${MCPClient.REQUEST_TIMEOUT_MS}ms`));
-                }
+            timer = setTimeout(() => {
+                settleReject(new Error(`MCP request '${method}' timed out after ${MCPClient.REQUEST_TIMEOUT_MS}ms`));
             }, MCPClient.REQUEST_TIMEOUT_MS);
 
+            abortListener = () => settleReject(new Error(`MCP request '${method}' aborted`));
+            if (abortSignal) {
+                abortSignal.addEventListener('abort', abortListener, { once: true });
+            }
+
             this.pendingRequests.set(id, {
-                resolve: (val: any) => { clearTimeout(timer); resolve(val); },
-                reject: (err: any) => { clearTimeout(timer); reject(err); },
+                resolve: settleResolve,
+                reject: settleReject,
             });
 
             const payload = JSON.stringify({
@@ -202,30 +285,27 @@ export class MCPClient {
                     }
                 }, (res) => {
                     if (res.statusCode && res.statusCode >= 400) {
-                        clearTimeout(timer);
-                        this.pendingRequests.delete(id);
-                        reject(new Error(`MCP POST failed: ${res.statusCode}`));
+                        settleReject(new Error(`MCP POST failed: ${res.statusCode}`));
                     }
                 });
-                req.on('error', (e) => { clearTimeout(timer); this.pendingRequests.delete(id); reject(e); });
+                postRequest = req;
+                req.on('error', (e) => settleReject(e));
                 req.write(payload);
                 req.end();
             } else {
-                clearTimeout(timer);
-                this.pendingRequests.delete(id);
-                reject(new Error('Connection not established'));
+                settleReject(new Error('Connection not established'));
             }
         });
     }
 
-    async initialize(): Promise<void> {
+    async initialize(abortSignal?: AbortSignal): Promise<void> {
         const res = await this.sendRequest('initialize', {
             clientInfo: {
                 name: 'cwtools-vscode-ai',
                 version: '1.0.0',
             },
             capabilities: {},
-        });
+        }, abortSignal);
         if (!res || typeof res !== 'object' || !res.serverInfo) {
             throw new Error('MCP initialize: invalid response — missing serverInfo');
         }
@@ -254,24 +334,24 @@ export class MCPClient {
         }
     }
 
-    async getResources(): Promise<any> {
+    async getResources(abortSignal?: AbortSignal): Promise<any> {
         if (!this.initialized) throw new Error('MCP Client not initialized');
-        return this.sendRequest('resources/list');
+        return this.sendRequest('resources/list', {}, abortSignal);
     }
 
-    async readResource(uri: string): Promise<any> {
+    async readResource(uri: string, abortSignal?: AbortSignal): Promise<any> {
         if (!this.initialized) throw new Error('MCP Client not initialized');
-        return this.sendRequest('resources/read', { uri });
+        return this.sendRequest('resources/read', { uri }, abortSignal);
     }
 
-    async listTools(): Promise<any> {
+    async listTools(abortSignal?: AbortSignal): Promise<any> {
         if (!this.initialized) throw new Error('MCP Client not initialized');
-        return this.sendRequest('tools/list');
+        return this.sendRequest('tools/list', {}, abortSignal);
     }
 
-    async callTool(name: string, args: Record<string, unknown> = {}): Promise<any> {
+    async callTool(name: string, args: Record<string, unknown> = {}, abortSignal?: AbortSignal): Promise<any> {
         if (!this.initialized) throw new Error('MCP Client not initialized');
-        return this.sendRequest('tools/call', { name, arguments: args });
+        return this.sendRequest('tools/call', { name, arguments: args }, abortSignal);
     }
 
     disconnect() {
@@ -291,6 +371,9 @@ export class MCPClient {
             req.reject(new Error('Connection closed'));
         }
         this.pendingRequests.clear();
+        this.ssePostEndpoint = null;
+        this.sseRequest = null;
+        this.process = null;
         this.initialized = false;
     }
 }

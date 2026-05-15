@@ -4,6 +4,11 @@
 
 本文档描述系统架构、模块关系和关键设计决策，供开发者参考。
 
+Recent UI notes:
+- The chat webview template is in `client/extension/ai/chatHtml.ts`, while the live interaction logic is in `client/webview/chatPanel.ts`.
+- The topic panel now renders grouped cards with metadata chips and search-context previews.
+- The settings page now shows a live overview strip and a two-button footer for test/save.
+
 ---
 
 ## 总体架构

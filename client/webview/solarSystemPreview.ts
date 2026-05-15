@@ -218,6 +218,12 @@ let hoveredBody: CelestialBody | null = null;
 let dynamicClasses: CelestialClass[] = [];
 let portraits: Record<string, string[]> = {};
 let planetIcons: Record<string, { uri: string, frame?: number, noOfFrames?: number }> = {};
+let locDict: Record<string, string> = {};
+
+function getLoc(key: string | undefined, fallback: string = ''): string {
+    if (!key) return fallback;
+    return locDict[key] || fallback || key;
+}
 
 // Drag editing
 let isDragEditing = false;
@@ -1541,10 +1547,11 @@ function showTooltip(body: CelestialBody, clientX: number, clientY: number) {
         }
     }
 
-    html += `<div class="tip-type" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}">${typeNames[body.bodyType] || body.bodyType}</div>`;
-    html += `<div class="tip-name">${body.name || pc.name || '(未命名)'}</div>`;
+    html += `<div class="tip-type" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}">${getLoc(body.planetClass, typeNames[body.bodyType] || body.bodyType)}</div>`;
+    const localizedClass = getLoc(body.planetClass, pc.name);
+    html += `<div class="tip-name">${getLoc(body.name, localizedClass || '(未命名)')}</div>`;
     html += `<table>`;
-    html += `<tr><td>类型</td><td>${pc.name}</td></tr>`;
+    html += `<tr><td>类型</td><td>${localizedClass}</td></tr>`;
     html += `<tr><td>轨道距离</td><td>${formatValueOrRange(body.orbitDistance)}</td></tr>`;
     html += `<tr><td>轨道角度</td><td>${formatValueOrRange(body.orbitAngle)}</td></tr>`;
     html += `<tr><td>大小</td><td>${formatValueOrRange(body.size)}</td></tr>`;
@@ -1593,9 +1600,9 @@ function updateInfoPanel() {
     const sc = getStarColor(system.starClass);
 
     let html = `<div class="sys-card">`;
-    html += `<div class="sys-card-title">${system.displayName || system.key}</div>`;
+    html += `<div class="sys-card-title">${getLoc(system.displayName, system.displayName || system.key)}</div>`;
     html += `<div class="sys-card-row"><span class="sys-card-label">标识</span><span class="sys-card-value">${system.key}</span></div>`;
-    html += `<div class="sys-card-row"><span class="sys-card-label">星级类型</span><span class="sys-card-value" style="color:${sc.fill}">${sc.name} (${system.starClass})</span></div>`;
+    html += `<div class="sys-card-row"><span class="sys-card-label">星级类型</span><span class="sys-card-value" style="color:${sc.fill}">${getLoc(system.starClass, sc.name)} (${system.starClass})</span></div>`;
     if (system.usage) html += `<div class="sys-card-row"><span class="sys-card-label">用途</span><span class="sys-card-value">${system.usage}</span></div>`;
     if (system.flags.length > 0) {
         html += `<div class="sys-card-row"><span class="sys-card-label">标志</span><span class="sys-card-value">${system.flags.join(', ')}</span></div>`;
@@ -1629,7 +1636,8 @@ function updateInfoPanel() {
 function renderBodyListItem(body: CelestialBody, systemClass: string, indent: number): string {
     const color = getBodyColor(body, systemClass);
     const pc = getPlanetColor(body.planetClass);
-    const name = body.name || pc.name || body.bodyType;
+    const localizedClass = getLoc(body.planetClass, pc.name);
+    const name = getLoc(body.name, body.name || localizedClass || body.bodyType);
     const isSelected = selectedBody === body;
 
     let html = `<li class="body-item ${isSelected ? 'selected' : ''} body-indent-${indent}" data-line="${body.line}">`;
@@ -1696,9 +1704,9 @@ function updatePropertiesPanel() {
     html += `<div class="prop-group">`;
     html += `<div class="prop-group-title">基本信息</div>`;
     if (body.name) {
-        html += propRow('名称', `<input class="prop-input" type="text" value="${body.name}" data-prop="name" data-line="${body.line}" style="width:120px;text-align:left" />`);
+        html += propRow('名称', `<input class="prop-input" type="text" value="${body.name}" title="${getLoc(body.name)}" data-prop="name" data-line="${body.line}" style="width:120px;text-align:left" />`);
     }
-    html += propRow('星球类型', `<span class="prop-value" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}">${pc.name}</span>`);
+    html += propRow('星球类型', `<span class="prop-value" style="color:${getBodyColor(body, allSystems[currentSystemIndex]?.starClass ?? '')}" title="${body.planetClass}">${getLoc(body.planetClass, pc.name)}</span>`);
     html += propRow('类型代码', `<div class="class-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="class-search" type="text" value="${body.planetClass}" data-prop="class" data-line="${body.line}" autocomplete="off" style="width:100%;text-align:left" /></div>`);
     html += `</div>`;
 
@@ -1894,7 +1902,7 @@ function setupClassAutocomplete(inputEl: HTMLInputElement, dataSource: string[])
                             iconHtml = `<img src="${iconInfo.uri}" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:6px">`;
                         }
                     }
-                    const label = `${iconHtml}<span style="vertical-align:middle;font-size:13px">${s}</span> <span style="color:var(--text-muted,#888);font-size:11px;vertical-align:middle;margin-left:4px">${pc.name}</span>`;
+                    const label = `${iconHtml}<span style="vertical-align:middle;font-size:13px">${getLoc(s, pc.name || s)}</span> <span style="color:var(--text-muted,#888);font-size:11px;vertical-align:middle;margin-left:4px">${s}</span>`;
                     html += `<div class="class-option" data-value="${s}" style="padding:6px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>`;
                 }
             }
@@ -1982,6 +1990,7 @@ window.addEventListener('message', (event) => {
         dynamicClasses = msg.dynamicClasses || [];
         portraits = msg.portraits || {};
         planetIcons = msg.planetIcons || {};
+        if (msg.locDict) locDict = msg.locDict;
         buildContextMenu();
         
         document.getElementById('title')!.textContent = `星系预览: ${msg.fileName}`;
@@ -2090,7 +2099,7 @@ function buildContextMenu() {
                     }
                 }
                 html += `<button data-action="${actionPrefix}" data-class="${cls}">`;
-                html += `${iconHtml}<span style="vertical-align:middle;font-size:13px">${pc.name || cls}</span> <span style="color:var(--text-muted,#888);font-size:11px;vertical-align:middle;margin-left:4px">${cls}</span>`;
+                html += `${iconHtml}<span style="vertical-align:middle;font-size:13px">${getLoc(cls, pc.name || cls)}</span> <span style="color:var(--text-muted,#888);font-size:11px;vertical-align:middle;margin-left:4px">${cls}</span>`;
                 html += `</button>`;
             }
             html += `</details>`;

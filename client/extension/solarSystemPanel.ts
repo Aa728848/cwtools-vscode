@@ -45,6 +45,7 @@ export class SolarSystemPanel {
     private _celestialClassesCache: Array<{ name: string, color: string, isRingWorld: boolean, picture: string, icon: string, iconLarge: string }> | null = null;
     private _portraitsCache: Record<string, string[]> | null = null;
     private _planetIconsCache: Record<string, { uri: string, frame?: number, noOfFrames?: number }> | null = null;
+    private _locCache: Record<string, string> | null = null;
     private _textureCache: Map<string, string> = new Map();
     private _textureCacheSize = 0;
     private static readonly MAX_CACHE_BYTES = 50 * 1024 * 1024;
@@ -468,14 +469,105 @@ export class SolarSystemPanel {
         const portraits = await this._resolveEnvironmentPortraits(searchRoots, celestialClasses);
         const planetIcons = await this._resolvePlanetIcons(searchRoots, celestialClasses);
 
+        const fullLocDict = await this._getLocDict(searchRoots);
+        const neededLoc: Record<string, string> = {};
+        const addLoc = (key: string | undefined) => {
+            if (key && fullLocDict[key]) neededLoc[key] = fullLocDict[key]!;
+        };
+        for (const cls of celestialClasses) {
+            addLoc(cls.name);
+        }
+        for (const sys of systems) {
+            addLoc(sys.displayName);
+            addLoc(sys.key);
+            addLoc(sys.starClass);
+            const collectKeys = (bodies: CelestialBody[]) => {
+                for (const b of bodies) {
+                    addLoc(b.name);
+                    addLoc(b.planetClass);
+                    collectKeys(b.moons);
+                    collectKeys(b.subPlanets);
+                }
+            };
+            collectKeys(sys.bodies);
+        }
+
         this._panel.webview.postMessage({
             command: 'render',
             data: systems,
             fileName: path.basename(document.fileName),
             dynamicClasses: celestialClasses,
             portraits,
-            planetIcons
+            planetIcons,
+            locDict: neededLoc
         });
+    }
+
+    private async _getLocDict(searchRoots: string[]) {
+        if (this._locCache) return this._locCache;
+        
+        const locMap: Record<string, string> = {};
+        const config = vscode.workspace.getConfiguration('cwtools');
+        const locLangs = config.get<string[]>('localisation.languages') || ['English'];
+        let targetLangs = locLangs.map(l => l.toLowerCase());
+        if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {
+            targetLangs = ['simp_chinese', 'chinese'];
+        } else {
+            targetLangs = targetLangs.map(l => l === 'english' ? 'english' : l === 'chinese' ? 'simp_chinese' : l);
+        }
+
+        const linePattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
+
+        const scanDir = async (dirPath: string) => {
+            try {
+                const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+                for (const e of entries) {
+                    if (e.isDirectory()) {
+                        await scanDir(path.join(dirPath, e.name));
+                    } else if (e.isFile() && e.name.endsWith('.yml')) {
+                        const isTarget = targetLangs.some(lang => e.name.toLowerCase().includes(`l_${lang}.yml`));
+                        if (isTarget) {
+                            try {
+                                const content = await fs.promises.readFile(path.join(dirPath, e.name), 'utf-8');
+                                for (const line of content.split('\n')) {
+                                    const m = linePattern.exec(line);
+                                    if (m) {
+                                        locMap[m[1]!] = m[2]!.replace(/§[RGBYWHETLMSPr!]/g, '');
+                                    }
+                                }
+                            } catch { }
+                        }
+                    }
+                }
+            } catch { }
+        };
+
+        for (const root of searchRoots) {
+            for (const locDir of ['localisation', 'localisation_synced', 'localization']) {
+                await scanDir(path.join(root, locDir));
+            }
+        }
+        
+        // Resolve $key$ interpolations in localization values
+        const resolveInterpolation = (text: string, visited: Set<string>): string => {
+            if (!text.includes('$')) return text;
+            return text.replace(/\$([a-zA-Z0-9_.:-]+)\$/g, (match, key) => {
+                if (visited.has(key)) return match; // prevent infinite loops
+                const val = locMap[key];
+                if (!val) return match; // if not found, leave it as is
+                visited.add(key);
+                const resolved = resolveInterpolation(val, visited);
+                visited.delete(key);
+                return resolved;
+            });
+        };
+
+        for (const key of Object.keys(locMap)) {
+            locMap[key] = resolveInterpolation(locMap[key]!, new Set([key]));
+        }
+
+        this._locCache = locMap;
+        return locMap;
     }
 
     public dispose() {

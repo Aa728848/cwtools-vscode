@@ -75,7 +75,7 @@ const TOOL_ICON_LABELS: Record<string, string> = {
     query_types: '📏', query_rules: '📏', query_references: '🔗',
     todo_write: '📋', run_command: '⚡', search_web: '🌐', codesearch: '🔎',
     glob_files: '📁', delete_file: '🗑️', apply_patch: '🩹',
-    spawn_sub_agents: '🤖', web_fetch: '🌐',
+    web_fetch: '🌐',
     permission_request: '🔑',
     // 协调器工具
     dispatch_agents: '🎯', query_blackboard: '📋', merge_results: '🔗',

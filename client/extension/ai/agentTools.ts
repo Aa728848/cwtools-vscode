@@ -418,7 +418,6 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.searchCode(args as any, context); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any, context); break;
-            // spawn_sub_agents — REMOVED: sub-agent system not suitable for current architecture
             // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
             case 'remove_ignored_diagnostic':
                 result = await this.externalHandler.removeIgnoredDiagnostic(args as any, context); break;

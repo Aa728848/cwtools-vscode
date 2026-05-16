@@ -35,6 +35,13 @@ import { ChatSettingsManager } from './chatSettings';
 import { ErrorReporter } from './errorReporter';
 import { UI, SOURCE } from './messages';
 import { ContextReferenceManager } from './contextReferences';
+import {
+    getAiStorageRoot,
+    getProjectWorkspaceRoot,
+    getTopicFileCandidates,
+    getTopicStorageDir,
+    getTopicStorageDirCandidates,
+} from './workspacePaths';
 
 type FileSnapshot = { filePath: string; previousContent: string | null; _tooLarge?: boolean };
 const MAX_ARTIFACT_DIFF_CONTENT = 500000;
@@ -735,29 +742,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.topicManager.saveTopics();
 
             // ── Check if Walkthrough was generated ──
-            const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (wsRoot) {
-                const topicId = this.topicManager.currentTopic?.id || 'default';
-                const wtPath = path.join(wsRoot, '.cwtools-ai', topicId, 'walkthrough.md');
-                // Use normalize for safter comparisons
-                const normWtPath = path.normalize(wtPath).toLowerCase();
-                const wroteWalkthrough = this._currentMessageSnapshots.some(s =>
-                    path.normalize(s.filePath).toLowerCase() === normWtPath
-                );
+            const topicId = this.topicManager.currentTopic?.id || 'default';
+            const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
+            if (wtPath) {
+                void this.renderWalkthroughUI(wtPath, topicId, result.steps);
+            }
 
-                if (wroteWalkthrough) {
-                    void this.renderWalkthroughUI(wtPath, topicId, result.steps);
-                }
-
-                // ── Check if Blueprint was generated ──
-                const bpPath = path.join(wsRoot, '.cwtools-ai', topicId, 'design_blueprint.md');
-                const normBpPath = path.normalize(bpPath).toLowerCase();
-                const wroteBlueprint = this._currentMessageSnapshots?.some(s =>
-                    path.normalize(s.filePath).toLowerCase() === normBpPath
-                );
-                if (wroteBlueprint && this.currentMode !== 'orchestrator') {
-                    void this.renderBlueprintUI(bpPath, topicId, result.steps);
-                }
+            const bpPath = this.findGeneratedTopicFile(topicId, 'design_blueprint.md');
+            if (bpPath && this.currentMode !== 'orchestrator') {
+                void this.renderBlueprintUI(bpPath, topicId, result.steps);
             }
 
             this.collectArtifactsFromResult(result);
@@ -1141,18 +1134,24 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private getArtifactDiffTempDir(): string {
-        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const topicId = (this.topicManager.currentTopic?.id || 'default').replace(/[^a-zA-Z0-9_.-]/g, '_');
-        const baseDir = workspaceRoot
-            ? path.join(workspaceRoot, '.cwtools-ai')
-            : (this.storageUri?.fsPath ?? path.join(path.dirname(this.extensionUri.fsPath), '.cwtools-ai'));
-        return path.join(baseDir, topicId, 'tmp', 'artifacts');
+        const topicDir = getTopicStorageDir(this.topicManager.currentTopic?.id, getProjectWorkspaceRoot());
+        const fallbackDir = this.storageUri?.fsPath ?? path.join(path.dirname(this.extensionUri.fsPath), '.cwtools-ai', 'default');
+        return path.join(topicDir || fallbackDir, 'tmp', 'artifacts');
     }
 
     private makeArtifactDiffTempPath(tmpDir: string, filePath: string, side: 'before' | 'after', index: number): string {
         const ext = path.extname(filePath) || '.txt';
         const name = (path.basename(filePath, ext) || 'artifact').replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
         return path.join(tmpDir, `${Date.now()}_${index}_${name}_${side}${ext}`);
+    }
+
+    private findGeneratedTopicFile(topicId: string, fileName: string): string | null {
+        const candidates = getTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
+        const normalizedCandidates = new Set(candidates.map(candidate => path.normalize(candidate).toLowerCase()));
+        const written = this._currentMessageSnapshots?.find(snapshot =>
+            normalizedCandidates.has(path.normalize(snapshot.filePath).toLowerCase())
+        );
+        return written?.filePath ?? null;
     }
 
     private _recordFileSnapshot(filePath: string): void {
@@ -1171,11 +1170,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private async savePlanFile(planText: string, userPrompt: string, steps?: any[]): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────
-        const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
         let filePath = '';
         let relPath = '';
-        if (wsRoot) {
-            const baseDir = path.join(wsRoot, '.cwtools-ai');
+        const baseDir = getAiStorageRoot(getProjectWorkspaceRoot());
+        if (baseDir) {
             const topicId = this.topicManager.currentTopic?.id || 'default';
             // Put under topic folder to scope "同一个对话系列" (same conversation series) while keeping exactly "Implementation_Plan.md"
             const planDir = path.join(baseDir, topicId);
@@ -1341,9 +1339,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const isNewFile = !fs.existsSync(file);
 
             // ── Open VSCode native diff editor ────────────────────────────────
-            const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
             const topicId = this.topicManager.currentTopic?.id || 'default';
-            const tmpDir = path.join(workspaceRoot, '.cwtools-ai', topicId, 'tmp');
+            const tmpDir = path.join(getTopicStorageDir(topicId, getProjectWorkspaceRoot()), 'tmp');
             const ext = path.extname(file) || '.txt';
             const tempPath = path.join(tmpDir, `__pending_${messageId}${ext}`);
 
@@ -1430,10 +1427,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 } catch { /* 防止 postMessage 异常影响 task.md 写入 */ }
 
                 // Natively save task.md in the topic folder
-                const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-                if (wsRoot && currentTodos.length > 0) {
-                    const topicId = this.topicManager.currentTopic?.id || 'default';
-                    const taskPath = path.join(wsRoot, '.cwtools-ai', topicId, 'task.md');
+                const topicId = this.topicManager.currentTopic?.id || 'default';
+                const topicDir = getTopicStorageDir(topicId, getProjectWorkspaceRoot());
+                if (topicDir && currentTodos.length > 0) {
+                    const taskPath = path.join(topicDir, 'task.md');
 
                     const lines: string[] = ['# Task List\n'];
                     for (const t of currentTodos) {
@@ -1569,10 +1566,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // 异步清理话题对应的磁盘文件夹（.cwtools-ai/{topicId}/），
         // 包括 plan、walkthrough、task、scratch、media、tmp 等所有衍生文件
-        const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (wsRoot) {
-            const topicDir = path.join(wsRoot, '.cwtools-ai', topicId);
-            fs.promises.rm(topicDir, { recursive: true, force: true }).catch(() => {
+        const topicDirs = getTopicStorageDirCandidates(topicId, getProjectWorkspaceRoot());
+        if (topicDirs.length > 0) {
+            for (const topicDir of topicDirs) fs.promises.rm(topicDir, { recursive: true, force: true }).catch(() => {
                 // 文件夹不存在或删除失败时静默忽略
             });
         }
@@ -1708,10 +1704,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         command?: string
     ): Promise<boolean> {
         const requestMode = this.currentMode;
+        const isEscalationRequest = /\[ESCALATION\]|escalation/i.test(description);
+        if (tool === 'run_command' && this.alwaysAllowRunCommand && !isEscalationRequest) {
+            return Promise.resolve(true);
+        }
         if (tool === 'run_command' && requestMode === 'utility') {
             const autoWriteMode = this.aiService.getConfig().agentFileWriteMode === 'auto';
-            const isEscalationRequest = /提权|高危|越过安全沙盒|escalation/i.test(description);
-            if (this.alwaysAllowRunCommand || (autoWriteMode && !isEscalationRequest)) {
+            if (autoWriteMode && !isEscalationRequest) {
                 // Auto-approve Utility mode commands when the session or global auto mode allows it.
                 return Promise.resolve(true);
             }
@@ -1729,7 +1728,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 tool,
                 description,
                 command,
-                allowAlways: tool === 'run_command' && requestMode === 'utility',
+                allowAlways: tool === 'run_command' && !isEscalationRequest,
             });
         });
     }
@@ -1737,10 +1736,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private resolvePermissionRequest(permissionId: string, allowed: boolean, alwaysAllow?: boolean): void {
         const resolver = this.pendingPermissionResolvers.get(permissionId);
         if (resolver) {
-            const requestMode = this.pendingPermissionModes.get(permissionId);
             this.pendingPermissionResolvers.delete(permissionId);
             this.pendingPermissionModes.delete(permissionId);
-            if (alwaysAllow && allowed && requestMode === 'utility') {
+            if (alwaysAllow && allowed) {
                 this.alwaysAllowRunCommand = true;
             }
             resolver(allowed);
@@ -1771,7 +1769,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Limits to 500 files to avoid UI lag; excludes binary/generated directories.
      */
     private sendWorkspaceFileList(): void {
-        const root = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const root = getProjectWorkspaceRoot();
         if (!root) {
             this.postMessage({ type: 'fileList', files: [] });
             return;
@@ -1805,7 +1803,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private searchWorkspaceFolders(query: string, maxResults: number): string[] {
-        const root = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const root = getProjectWorkspaceRoot();
         if (!root || maxResults <= 0) return [];
 
         const q = query.toLowerCase();

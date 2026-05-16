@@ -15,6 +15,7 @@ import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
+import { getAiStorageRootCandidates } from './workspacePaths';
 
 // ─── Parsed CWTOOLS.md Structure ─────────────────────────────────────────────
 
@@ -394,7 +395,8 @@ ${SOUND_DIAGNOSTIC_REPAIR_PROTOCOL}
 - **USER INSTRUCTIONS ARE SUPREME**: When the user gives a direct correction (e.g. "change X to Y", "the correct syntax for X is Y", "replace X with Y"), execute the change **EXACTLY as instructed** without second-guessing, modifying, or re-interpreting the content. The user knows their project. Apply the replacement verbatim.
 - **TOOL CALLS ARE MANDATORY**: Saying "I have updated the file" in chat does NOT perform the update. You MUST emit a valid \`tool_call\` to actually change files.
 - **COMMAND PERMISSION**: \`run_command\` auto-runs only when the tool classifies the command as safe/read-only. Commands that may modify state, use shell hosts, or request escalation go through the permission flow; explain what they do and why before calling them.
-- **TEMPORARY FILES**: All temporary files, scratchpads, and script files (e.g., .sh, .ps1, .py, .js) created for execution via \`run_command\` MUST be placed strictly inside the Agent Workspace Dir (\`.cwtools-ai/{Topic_ID}/\`). NEVER clutter the workspace root or source directories with temporary script files.
+- **TEMPORARY FILES**: All temporary files, scratchpads, and script files (e.g., .sh, .ps1, .py, .js) created for execution via \`run_command\` MUST be placed strictly inside \`.cwtools-ai/scratch/\`. NEVER clutter the workspace root, source directories, or topic history folders with temporary script files.
+- **RUN COMMAND CWD**: \`run_command\` defaults to the Project Workspace Root, not \`.cwtools-ai/scratch/\`. Keep temporary scripts in \`.cwtools-ai/scratch/\`, but run them from the default cwd when they need to read or write project files. If a script needs paths, read \`CWT_WORKSPACE_ROOT\`, \`CWT_AGENT_WORKSPACE_DIR\`, or \`CWT_AGENT_SCRATCH_DIR\` from the command environment instead of guessing with relative \`..\` paths.
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **MAX 3 RETRIES & GRACEFUL DEGRADATION**: If a specific error persists after 3 fix attempts, DO NOT delete the entire block and DO NOT guess. Leave the best-effort code in the file, place a \`# TODO: [USER INTERVENTION REQUIRED] - LSP error: <error text>\` comment above it, and continue to the next error. The ZERO-ERROR DELIVERY GATE will enforce the final quality check and report all remaining errors to the user.
 - **EDIT RECOVERY**: If \`multi_replace_file_content\` fails with "TargetContent not found", do not retry guessed old text. If you have reliable line numbers from \`document_symbols\`, \`get_file_context\`, diagnostics, or a nearest-match hint, switch to \`replace_lines(filePath, startLine, endLine, newContent)\` and add \`expectedContent\` or start/end anchors from the current context. Only retry \`multi_replace_file_content\` after calling \`read_file\` or \`get_file_context\` and copying the exact current \`TargetContent\` from the file.
@@ -1234,21 +1236,21 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
     private getDesignBlueprintPrompt(): string {
         try {
             if (!this.workspaceRoot) return '';
-            const aiDir = path.join(this.workspaceRoot, '.cwtools-ai');
-            if (!fs.existsSync(aiDir)) return '';
-
             // Scan topic directories for the most recently modified blueprint
             let bestPath = '';
             let bestMtime = 0;
-            const entries = fs.readdirSync(aiDir, { withFileTypes: true });
-            for (const entry of entries) {
-                if (!entry.isDirectory() || !entry.name.startsWith('topic_')) continue;
-                const bp = path.join(aiDir, entry.name, 'design_blueprint.md');
-                if (fs.existsSync(bp)) {
-                    const stat = fs.statSync(bp);
-                    if (stat.mtimeMs > bestMtime) {
-                        bestMtime = stat.mtimeMs;
-                        bestPath = bp;
+            for (const aiDir of getAiStorageRootCandidates(this.workspaceRoot)) {
+                if (!fs.existsSync(aiDir)) continue;
+                const entries = fs.readdirSync(aiDir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (!entry.isDirectory() || !entry.name.startsWith('topic_')) continue;
+                    const bp = path.join(aiDir, entry.name, 'design_blueprint.md');
+                    if (fs.existsSync(bp)) {
+                        const stat = fs.statSync(bp);
+                        if (stat.mtimeMs > bestMtime) {
+                            bestMtime = stat.mtimeMs;
+                            bestPath = bp;
+                        }
                     }
                 }
             }
@@ -1398,10 +1400,13 @@ ${trimmed}
         topicId?: string;
     }): ChatMessage[] {
         const contextParts: string[] = [];
+        const workspaceRel = this.workspaceRoot.replace(/\\/g, '/');
+        contextParts.push(`**Project Workspace Root**: \`${workspaceRel}\``);
+        contextParts.push('**run_command cwd**: defaults to Project Workspace Root. Agent Workspace Dir is for temporary artifacts only.');
 
         if (options.topicId) {
             contextParts.push(`**Agent Workspace Dir**: \`.cwtools-ai/${options.topicId}/\``);
-            contextParts.push(`**Agent Scratch Dir**: \`.cwtools-ai/${options.topicId}/scratch/\``);
+            contextParts.push(`**Agent Scratch Dir**: \`.cwtools-ai/scratch/\``);
             contextParts.push(`**Agent Media Dir**: \`.cwtools-ai/${options.topicId}/media/\``);
         }
 

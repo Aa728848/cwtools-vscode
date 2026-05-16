@@ -13,6 +13,7 @@ import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
 import type { Blackboard } from './orchestrator/blackboard';
 import type { BlackboardEntry } from './orchestrator/types';
+import { getProjectWorkspaceRoot } from './workspacePaths';
 
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
@@ -273,7 +274,7 @@ export class ContextReferenceManager {
     }
 
     private searchWorkspaceFolders(query: string, maxResults: number): MentionSearchResult[] {
-        const root = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const root = getProjectWorkspaceRoot();
         if (!root || maxResults <= 0) return [];
         const matches: MentionSearchResult[] = [];
         const q = query.toLowerCase();

@@ -20,6 +20,7 @@ export { TOOL_DEFINITIONS } from './tools/definitions';
 import { FileToolHandler, findFiles } from './tools/fileTools';
 import { LspToolHandler } from './tools/lspTools';
 import { ExternalToolHandler } from './tools/externalTools';
+import { getTopicStorageDir } from './workspacePaths';
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
 
@@ -530,7 +531,7 @@ export class AgentToolExecutor {
                     const topicId = context?.runnerOptions?.topicId ?? this.parentRunnerOptions?.topicId ?? 'session';
                     const fs = await import('fs');
                     const path = await import('path');
-                    const blackboardDir = path.join(this.workspaceRoot, '.cwtools-ai', topicId, 'blackboard');
+                    const blackboardDir = path.join(getTopicStorageDir(topicId, this.workspaceRoot), 'blackboard');
                     fs.mkdirSync(blackboardDir, { recursive: true });
                     const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
                     const filePath = path.join(blackboardDir, `${safeKey}.txt`);

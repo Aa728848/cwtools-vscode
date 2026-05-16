@@ -7,6 +7,14 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { TodoItem, TodoWriteResult } from '../types';
+import { getAiStorageRoot, getAiStorageRootCandidates, getScratchDir, getTopicStorageDir } from '../workspacePaths';
+import {
+    escapeRegExp,
+    isPathInsideOrEqual,
+    isSecuritySandboxDisabled,
+    resolveWorkspacePathInput,
+    sanitizePathInput,
+} from '../workspaceSandbox';
 
 // ─── Context type ────────────────────────────────────────────────────────────
 
@@ -19,16 +27,6 @@ export interface ExternalToolContext {
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
 }
 
-function isPathInsideOrEqual(candidate: string, root: string): boolean {
-    const isWindows = process.platform === 'win32';
-    const normalizedCandidate = path.resolve(candidate);
-    const normalizedRoot = path.resolve(root);
-    const checkCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
-    const checkRoot = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot;
-    const relative = path.relative(checkRoot, checkCandidate);
-    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
 // ─── Handler class ───────────────────────────────────────────────────────────
 
 export class ExternalToolHandler {
@@ -37,30 +35,105 @@ export class ExternalToolHandler {
     constructor(private ctx: ExternalToolContext) {}
 
     private isWithinAnyWorkspace(candidate: string): boolean {
-        const normalized = path.resolve(candidate);
-        if (isPathInsideOrEqual(normalized, this.ctx.workspaceRoot)) {
-            return true;
-        }
+        return resolveWorkspacePathInput(candidate, this.ctx.workspaceRoot, { preferExistingAiPath: true }).isWithinAnyWorkspace;
+    }
 
-        const wsFolders = vs.workspace.workspaceFolders;
-        if (wsFolders) {
-            for (const folder of wsFolders) {
-                if (isPathInsideOrEqual(normalized, folder.uri.fsPath)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+    private isTrustedCommandWorkspace(candidate: string): boolean {
+        return resolveWorkspacePathInput(candidate, this.ctx.workspaceRoot, { preferExistingAiPath: true }).isTrusted;
     }
 
     private resolveWorkspacePath(inputPath: string): string {
-        return path.resolve(path.isAbsolute(inputPath)
-            ? inputPath
-            : path.join(this.ctx.workspaceRoot, inputPath));
+        return resolveWorkspacePathInput(inputPath, this.ctx.workspaceRoot, { preferExistingAiPath: true }).resolved;
     }
 
     // ─── 权限请求辅助：与 AbortSignal 竞争，abort 时自动 deny ────────────────
+
+    private quoteCommandPath(filePath: string, alreadyQuoted: boolean): string {
+        if (alreadyQuoted) return filePath;
+        return /[\s&()]/.test(filePath) ? `"${filePath.replace(/"/g, '\\"')}"` : filePath;
+    }
+
+    private normalizeAgentWorkspaceCommand(command: string, topicId: string): string {
+        const aiRoot = getAiStorageRoot(this.ctx.workspaceRoot);
+        const aiRoots = getAiStorageRootCandidates(this.ctx.workspaceRoot);
+        const rewriteAgentPath = (rawPath: string): string => {
+            const normalized = rawPath.replace(/\\/g, '/');
+            const rest = normalized.replace(/^\.cwtools-ai(?:[\\/]|$)/i, '').replace(/^\/+/, '');
+            if (!rest) return aiRoot || '.cwtools-ai';
+
+            const firstSegment = rest.split('/')[0]?.toLowerCase() ?? '';
+            const scoped = firstSegment === 'scratch'
+                || firstSegment.startsWith('topic_')
+                || firstSegment === topicId.toLowerCase();
+            const targetRest = scoped ? rest : path.posix.join('scratch', rest);
+
+            if (!aiRoot) {
+                return scoped ? rawPath : `.cwtools-ai/${targetRest}`;
+            }
+
+            const restSegments = rest.split('/').filter(Boolean);
+            const existingScoped = aiRoots
+                .map(root => path.join(root, ...restSegments))
+                .find(candidate => fs.existsSync(candidate));
+            if (scoped && existingScoped) {
+                return existingScoped;
+            }
+
+            const targetCandidate = path.join(aiRoot, ...targetRest.split('/').filter(Boolean));
+            if (!scoped) {
+                const existingRootFile = aiRoots
+                    .map(root => path.join(root, ...restSegments))
+                    .find(candidate => fs.existsSync(candidate));
+                if (existingRootFile && !fs.existsSync(targetCandidate)) {
+                    return existingRootFile;
+                }
+            }
+            return targetCandidate;
+        };
+
+        const quotedPattern = /(^|[\s(])(["'])(\.cwtools-ai(?:[\\/][^"']+)?)\2/g;
+        const withQuotedPaths = command.replace(quotedPattern, (_match, prefix: string, quote: string, agentPath: string) =>
+            `${prefix}${quote}${rewriteAgentPath(agentPath)}${quote}`
+        );
+
+        const barePattern = /(^|[\s(])(\.cwtools-ai(?:[\\/][^\s"';&|<>]+)?)/g;
+        return withQuotedPaths.replace(barePattern, (_match, prefix: string, agentPath: string) =>
+            `${prefix}${this.quoteCommandPath(rewriteAgentPath(agentPath), false)}`
+        );
+    }
+
+    private normalizeWorkspaceFolderAliasCommand(command: string): { command: string; crossWorkspacePathAccess: boolean } {
+        let normalizedCommand = command;
+        let crossWorkspacePathAccess = false;
+        const folders = vs.workspace.workspaceFolders ?? [];
+        for (const folder of folders) {
+            const alias = path.basename(folder.uri.fsPath);
+            if (!alias || alias.toLowerCase() === '.cwtools-ai') continue;
+            const aliasPattern = escapeRegExp(alias);
+
+            const rewriteAliasPath = (aliasPath: string): string | null => {
+                const rest = aliasPath.slice(alias.length).replace(/^[\\/]+/, '');
+                const segments = rest.split(/[\\/]+/).filter(Boolean);
+                const resolved = path.resolve(folder.uri.fsPath, ...segments);
+                return isPathInsideOrEqual(resolved, folder.uri.fsPath) ? resolved : null;
+            };
+
+            const quotedPattern = new RegExp(`(^|[\\s(])(["'])(${aliasPattern}[\\\\/][^"']+)\\2`, 'g');
+            normalizedCommand = normalizedCommand.replace(quotedPattern, (match, prefix: string, quote: string, aliasPath: string) => {
+                const resolved = rewriteAliasPath(aliasPath);
+                if (resolved && !this.isTrustedCommandWorkspace(resolved)) crossWorkspacePathAccess = true;
+                return resolved ? `${prefix}${quote}${resolved}${quote}` : match;
+            });
+
+            const barePattern = new RegExp(`(^|[\\s(])(${aliasPattern}[\\\\/][^\\s"';&|<>]+)`, 'g');
+            normalizedCommand = normalizedCommand.replace(barePattern, (match, prefix: string, aliasPath: string) => {
+                const resolved = rewriteAliasPath(aliasPath);
+                if (resolved && !this.isTrustedCommandWorkspace(resolved)) crossWorkspacePathAccess = true;
+                return resolved ? `${prefix}${this.quoteCommandPath(resolved, false)}` : match;
+            });
+        }
+        return { command: normalizedCommand, crossWorkspacePathAccess };
+    }
 
     private async requestPermissionWithAbort(
         onPermissionRequest: (id: string, tool: string, description: string, command?: string) => Promise<boolean>,
@@ -311,6 +384,11 @@ export class ExternalToolHandler {
         // may invoke PowerShell hosts; other modes still require escalation there.
         const mode = context?.runnerOptions?.mode;
         const isUtilityMode = mode === 'utility';
+        const topicId = context?.runnerOptions?.topicId || 'default';
+        args.command = this.normalizeAgentWorkspaceCommand(args.command, topicId);
+        const aliasNormalized = this.normalizeWorkspaceFolderAliasCommand(args.command);
+        args.command = aliasNormalized.command;
+        const crossWorkspacePathAccess = aliasNormalized.crossWorkspacePathAccess;
         const DESTRUCTIVE_BLOCKED = [
             /\brm\s+-rf\b/i, /\bdel\s+\/[fqs]/i, /\bformat\b/i,
             /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
@@ -360,7 +438,7 @@ export class ExternalToolHandler {
         ];
         const isAutoApproveSafeCommand = SAFE_AUTO_APPROVE_PATTERNS.some(pat => pat.test(cmdLower));
 
-        const bypassSandbox = vs.workspace.getConfiguration('cwtools.ai.developer').get<boolean>('disableSecuritySandbox') === true;
+        const bypassSandbox = isSecuritySandboxDisabled();
         const fileWriteMode = vs.workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
         let escalationReason = '';
 
@@ -386,19 +464,29 @@ export class ExternalToolHandler {
 
         let cwd: string;
         try {
-            cwd = path.resolve(args.cwd ?? this.ctx.workspaceRoot);
-            
-            const isWithinWorkspace = this.isWithinAnyWorkspace(cwd);
+            const requestedCwd = typeof args.cwd === 'string' && args.cwd.trim()
+                ? sanitizePathInput(args.cwd)
+                : this.ctx.workspaceRoot;
+            const cwdResolution = resolveWorkspacePathInput(requestedCwd, this.ctx.workspaceRoot, { preferExistingAiPath: true });
+            cwd = cwdResolution.resolved;
 
-            if (!isWithinWorkspace && !bypassSandbox) {
-                if (args.requestEscalation) {
-                    escalationReason = '工作目录越界访问';
+            if (!cwdResolution.isTrusted && !bypassSandbox) {
+                if (cwdResolution.isWithinAnyWorkspace) {
+                    if (!isAutoApproveSafeCommand) {
+                        escalationReason = escalationReason || '跨工作区工作目录访问';
+                    }
+                } else if (args.requestEscalation) {
+                    escalationReason = escalationReason || '工作目录越界访问';
                 } else {
-                    return { stdout: '', stderr: `Blocked: Working directory must be within the workspace root. If you are ABSOLUTELY sure this is required, you can retry with "requestEscalation": true to ask the user for a one-time privilege override.`, exitCode: 1 };
+                    return { stdout: '', stderr: `Blocked: Working directory points outside the workspace roots. If this is required, retry with "requestEscalation": true to ask the user for a one-time privilege override.`, exitCode: 1 };
                 }
             }
         } catch (e) {
             return { stdout: '', stderr: `Blocked: Invalid working directory`, exitCode: 1 };
+        }
+
+        if (crossWorkspacePathAccess && !isAutoApproveSafeCommand && !bypassSandbox) {
+            escalationReason = escalationReason || '跨工作区路径访问';
         }
 
         const safeAutoApprove = isAutoApproveSafeCommand && !hasShellControlOperator && !args.requestEscalation && !escalationReason;
@@ -409,7 +497,7 @@ export class ExternalToolHandler {
         if (requiresPermission && onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const description = escalationReason 
-                ? `⚠️ AI 申请提权越过安全沙盒执行高危操作 (${escalationReason})：${args.command}`
+                ? `[ESCALATION] AI requests a sandbox override (${escalationReason}): ${args.command}`
                 : `AI 请求执行终端命令：${args.command}`;
             
             const allowed = await this.requestPermissionWithAbort(
@@ -429,13 +517,37 @@ export class ExternalToolHandler {
         const isWindows = process.platform === 'win32';
         const shell = isWindows ? 'cmd.exe' : '/bin/sh';
         const shellArgs = isWindows ? ['/c', args.command] : ['-c', args.command];
+        const agentWorkspaceDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
+        const scratchDir = getScratchDir(this.ctx.workspaceRoot);
+        try {
+            if (scratchDir) fs.mkdirSync(scratchDir, { recursive: true });
+            fs.mkdirSync(path.join(agentWorkspaceDir, 'media'), { recursive: true });
+        } catch { /* best effort */ }
+        const commandEnv = {
+            ...process.env,
+            CWT_WORKSPACE_ROOT: this.ctx.workspaceRoot,
+            CWT_AGENT_TOPIC_ID: topicId,
+            CWT_AGENT_WORKSPACE_DIR: agentWorkspaceDir,
+            CWT_AGENT_SCRATCH_DIR: scratchDir,
+            CWT_AGENT_MEDIA_DIR: path.join(agentWorkspaceDir, 'media'),
+        };
 
         let stdoutBuf = '';
         let stderrBuf = '';
         const MAX_OUTPUT = 4000;
 
         return new Promise(resolve => {
-            const proc = spawn(shell, shellArgs, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+            let proc: ReturnType<typeof spawn>;
+            try {
+                proc = spawn(shell, shellArgs, { cwd, env: commandEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+            } catch (e) {
+                resolve({
+                    stdout: '',
+                    stderr: `Failed to start command in cwd "${cwd}": ${e instanceof Error ? e.message : String(e)}`,
+                    exitCode: 1,
+                });
+                return;
+            }
             let settled = false;
             let timer: ReturnType<typeof setTimeout> | undefined;
             let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
@@ -468,6 +580,14 @@ export class ExternalToolHandler {
                 }
                 abortSignal.addEventListener('abort', onParentAbort);
             }
+
+            proc.on('error', (e: Error) => {
+                finish({
+                    stdout: stdoutBuf.substring(0, MAX_OUTPUT),
+                    stderr: `Command failed to start in cwd "${cwd}": ${e.message}`,
+                    exitCode: 1,
+                });
+            });
 
             const startedAt = Date.now();
             heartbeatTimer = setInterval(() => {
@@ -737,7 +857,7 @@ export class ExternalToolHandler {
     /** Ensure the topic-scoped media output directory exists and return its path. */
     private async getMediaOutputDir(context?: import('../types').AgentToolContext): Promise<string> {
         const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId ?? 'session';
-        const mediaDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai', topicId, 'media');
+        const mediaDir = path.join(getTopicStorageDir(topicId, this.ctx.workspaceRoot), 'media');
         if (!fs.existsSync(mediaDir)) {
             fs.mkdirSync(mediaDir, { recursive: true });
         }

@@ -15,6 +15,12 @@ import type { ValidationError } from '../types';
 import { getCachedFile, setCachedFile } from '../fileCache';
 import { getToolResultBudget } from '../contextBudget';
 import { fuzzyReplace } from './replacerSuite';
+import { getTopicStorageDir } from '../workspacePaths';
+import {
+    isSecuritySandboxDisabled,
+    resolveWorkspacePathInput,
+    type WorkspacePathResolution,
+} from '../workspaceSandbox';
 
 // ─── Shared file-system helpers ──────────────────────────────────────────────
 
@@ -40,16 +46,6 @@ function walkDir(dir: string, ext: string, results: string[], maxFiles: number):
             results.push(fullPath);
         }
     }
-}
-
-function isPathInsideOrEqual(candidate: string, root: string): boolean {
-    const isWindows = process.platform === 'win32';
-    const normalizedCandidate = path.resolve(candidate);
-    const normalizedRoot = path.resolve(root);
-    const checkCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
-    const checkRoot = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot;
-    const relative = path.relative(checkRoot, checkCandidate);
-    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 // ─── Context type ────────────────────────────────────────────────────────────
@@ -118,63 +114,81 @@ export class FileToolHandler {
             || context?.runnerOptions?.useSlimPrompt === true;
     }
 
-    private normalizeAgentWorkspacePath(filePath: string, context?: import('../types').AgentToolContext): string {
-        const topicId = context?.runnerOptions?.topicId;
-        if (!topicId) return filePath;
-
-        const wsRoot = path.resolve(this.ctx.workspaceRoot);
-        const resolved = path.isAbsolute(filePath)
-            ? path.resolve(filePath)
-            : path.resolve(wsRoot, filePath);
-        const relPath = path.relative(wsRoot, resolved).replace(/\\/g, '/');
-
-        if (relPath === '.cwtools-ai') {
-            return path.join(wsRoot, '.cwtools-ai', topicId);
-        }
-
-        if (relPath.startsWith('.cwtools-ai/')) {
-            const rest = relPath.slice('.cwtools-ai/'.length);
-            const firstSegment = rest.split('/')[0];
-            if (firstSegment !== topicId) {
-                return path.join(wsRoot, '.cwtools-ai', topicId, rest);
-            }
-        }
-
+    private normalizeAgentWorkspacePath(filePath: string): string {
         return filePath;
     }
 
+    private resolveWorkspacePath(filePath: string, preferExistingAiPath: boolean): WorkspacePathResolution {
+        const normalizedInput = this.normalizeAgentWorkspacePath(filePath);
+        return resolveWorkspacePathInput(normalizedInput, this.ctx.workspaceRoot, { preferExistingAiPath });
+    }
+
     private resolveAndAssertInWorkspace(filePath: string, context?: import('../types').AgentToolContext): string {
-        filePath = this.normalizeAgentWorkspacePath(filePath, context);
-        const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(this.ctx.workspaceRoot, filePath);
-        const normalized = path.resolve(absolutePath);
-        
-        const bypassSandbox = vs.workspace.getConfiguration('cwtools.ai.developer').get<boolean>('disableSecuritySandbox') === true;
-        if (bypassSandbox) {
-            return normalized;
+        const resolution = this.resolveWorkspacePath(filePath, true);
+        if (isSecuritySandboxDisabled() || resolution.isWithinAnyWorkspace) {
+            return resolution.resolved;
         }
-
-        // 1. Check primary workspace root (from context)
-        const wsRoot = path.resolve(this.ctx.workspaceRoot);
-        if (isPathInsideOrEqual(normalized, wsRoot)) {
-            return normalized;
-        }
-
-        // 2. Check all other VS Code workspace folders (multi-root support)
-        const wsFolders = vs.workspace.workspaceFolders;
-        if (wsFolders) {
-            for (const folder of wsFolders) {
-                const folderRoot = path.resolve(folder.uri.fsPath);
-                if (isPathInsideOrEqual(normalized, folderRoot)) {
-                    return normalized;
-                }
-            }
-        }
-
         throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
     }
 
+    private async requestPermissionWithAbort(
+        id: string,
+        tool: string,
+        description: string,
+        context?: import('../types').AgentToolContext,
+        command?: string
+    ): Promise<boolean> {
+        const onPermissionRequest = context?.onPermissionRequest;
+        if (!onPermissionRequest) return false;
+
+        const abortSignal = context?.runnerOptions?.abortSignal;
+        if (abortSignal?.aborted) return false;
+        if (!abortSignal) {
+            return onPermissionRequest(id, tool, description, command);
+        }
+
+        let onAbort: (() => void) | undefined;
+        const abortDeny = new Promise<boolean>((resolve) => {
+            onAbort = () => resolve(false);
+            abortSignal.addEventListener('abort', onAbort, { once: true });
+        });
+        try {
+            return await Promise.race([
+                onPermissionRequest(id, tool, description, command),
+                abortDeny,
+            ]);
+        } finally {
+            if (onAbort) abortSignal.removeEventListener('abort', onAbort);
+        }
+    }
+
+    private async resolveAndAuthorizeWrite(filePath: string, toolName: string, context?: import('../types').AgentToolContext): Promise<string> {
+        const resolution = this.resolveWorkspacePath(filePath, false);
+        if (isSecuritySandboxDisabled()) {
+            return resolution.resolved;
+        }
+        if (!resolution.isWithinAnyWorkspace) {
+            throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
+        }
+        if (resolution.scope === 'workspace') {
+            const allowed = await this.requestPermissionWithAbort(
+                `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                toolName,
+                `[ESCALATION] AI requests permission to modify another workspace root: ${resolution.resolved}`,
+                context,
+                resolution.resolved
+            );
+            if (!allowed) {
+                throw new Error(`Access denied: User denied cross-workspace write for '${resolution.resolved}'.`);
+            }
+        }
+        return resolution.resolved;
+    }
+
     private workspaceRelativePath(filePath: string): string {
-        return path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/');
+        const resolution = resolveWorkspacePathInput(filePath, this.ctx.workspaceRoot, { preferExistingAiPath: true });
+        const root = resolution.workspaceFolder ?? this.ctx.workspaceRoot;
+        return path.relative(root, resolution.resolved).replace(/\\/g, '/');
     }
 
     private isLocalisationPath(filePath: string): boolean {
@@ -483,7 +497,7 @@ export class FileToolHandler {
     async writeFile(args: { file: string; content: string; encoding?: string }, context?: import('../types').AgentToolContext): Promise<import('../types').WriteFileResult> {
         return this.executeWithLock(args.file, async () => {
             try {
-                args.file = this.resolveAndAssertInWorkspace(args.file, context);
+                args.file = await this.resolveAndAuthorizeWrite(args.file, 'write_file', context);
                 const ymlReject = this.rejectGenericYmlWrite('write_file', args.file);
                 if (ymlReject) return ymlReject;
                 
@@ -527,7 +541,7 @@ export class FileToolHandler {
 
         return this.executeWithLock(args.filePath, async () => {
             try {
-                args.filePath = this.resolveAndAssertInWorkspace(args.filePath, context);
+                args.filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'ast_mutate', context);
             } catch (e) {
                 return { success: false, message: String(e) };
             }
@@ -657,7 +671,7 @@ export class FileToolHandler {
 
         return this.executeWithLock(args.TargetFile, async () => {
             try {
-                args.TargetFile = this.resolveAndAssertInWorkspace(args.TargetFile, context);
+                args.TargetFile = await this.resolveAndAuthorizeWrite(args.TargetFile, 'multi_replace_file_content', context);
                 const ymlReject = this.rejectGenericYmlWrite('multi_replace_file_content', args.TargetFile);
                 if (ymlReject) return ymlReject as any;
             } catch (e) {
@@ -760,7 +774,7 @@ export class FileToolHandler {
 
         return this.executeWithLock(args.filePath, async () => {
             try {
-                args.filePath = this.resolveAndAssertInWorkspace(args.filePath, context);
+                args.filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'replace_lines', context);
                 const ymlReject = this.rejectGenericYmlWrite('replace_lines', args.filePath);
                 if (ymlReject) return ymlReject as any;
             } catch (e) {
@@ -894,7 +908,7 @@ export class FileToolHandler {
                         ? filePath
                         : path.join(cwd, filePath);
                     try {
-                        currentFile = this.resolveAndAssertInWorkspace(currentFile, context);
+                        currentFile = await this.resolveAndAuthorizeWrite(currentFile, 'apply_patch', context);
                         const ymlReject = this.rejectGenericYmlWrite('apply_patch', currentFile);
                         if (ymlReject) {
                             return { success: false, filesChanged: [], errors: [ymlReject.message] };
@@ -1018,12 +1032,7 @@ export class FileToolHandler {
 
     async listDirectory(args: { directory: string; recursive?: boolean }, context?: import('../types').AgentToolContext): Promise<import('../types').ListDirectoryResult> {
         try {
-            const dirPath = this.resolveAndAssertInWorkspace(
-                path.isAbsolute(args.directory)
-                    ? args.directory
-                    : path.join(this.ctx.workspaceRoot, args.directory),
-                context
-            );
+            const dirPath = this.resolveAndAssertInWorkspace(args.directory, context);
 
             if (!fs.existsSync(dirPath)) {
                 return { entries: [], path: dirPath };
@@ -1154,7 +1163,7 @@ export class FileToolHandler {
     }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
         return this.executeWithLock(args.filePath, async () => {
             try {
-                const filePath = this.resolveAndAssertInWorkspace(args.filePath, context);
+                const filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'write_localisation', context);
                 const targetError = this.validateLocalisationTarget(filePath);
                 if (targetError) {
                     return { success: false, message: targetError };
@@ -1292,9 +1301,10 @@ export class FileToolHandler {
         try {
             // Save to topic-scoped folder (same as Implementation_Plan.md)
             const topicId = context?.runnerOptions?.topicId || 'default';
-            const blueprintDir = path.join(this.ctx.workspaceRoot, '.cwtools-ai', topicId);
+            const blueprintDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
             if (!fs.existsSync(blueprintDir)) fs.mkdirSync(blueprintDir, { recursive: true });
             const blueprintPath = path.join(blueprintDir, 'design_blueprint.md');
+            const previousContent = fs.existsSync(blueprintPath) ? fs.readFileSync(blueprintPath, 'utf-8') : null;
 
             const lines: string[] = [];
             lines.push(`# Design Blueprint: ${args.title}`);
@@ -1398,6 +1408,7 @@ export class FileToolHandler {
             lines.push('');
 
             const content = lines.join('\n');
+            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(blueprintPath, previousContent);
             fs.writeFileSync(blueprintPath, content, 'utf-8');
 
             // Emit step event so chatPanel can display the blueprint in the UI

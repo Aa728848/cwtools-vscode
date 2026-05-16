@@ -22,16 +22,7 @@ import type {
     WorkspaceSymbolsResult,
     RuleInfo,
 } from '../types';
-
-function isPathInsideOrEqual(candidate: string, root: string): boolean {
-    const isWindows = process.platform === 'win32';
-    const normalizedCandidate = path.resolve(candidate);
-    const normalizedRoot = path.resolve(root);
-    const checkCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
-    const checkRoot = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot;
-    const relative = path.relative(checkRoot, checkCandidate);
-    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-}
+import { isPathInsideOrEqual } from '../workspaceSandbox';
 
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);

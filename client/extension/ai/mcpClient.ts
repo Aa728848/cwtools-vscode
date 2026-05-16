@@ -7,6 +7,7 @@ import { URL } from 'url';
 import { MCPServerConfig } from './types';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
+import { getProjectWorkspaceRoot } from './workspacePaths';
 
 export class MCPClient {
     private process: cp.ChildProcess | null = null;
@@ -31,7 +32,7 @@ export class MCPClient {
     private async connectStdio(abortSignal?: AbortSignal): Promise<void> {
         if (!this.config.command) throw new Error('Command is required for stdio MCP server');
 
-        const workspaceFolder = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const workspaceFolder = getProjectWorkspaceRoot();
         
         const safeEnv = Object.fromEntries(
             Object.entries(process.env).filter(([k]) =>
@@ -40,7 +41,7 @@ export class MCPClient {
         );
         this.process = cp.spawn(this.config.command, this.config.args || [], {
             env: { ...safeEnv, PATH: process.env.PATH, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, ...this.config.env },
-            cwd: workspaceFolder,
+            cwd: workspaceFolder || undefined,
         });
 
         this.process.stdout?.on('data', (data) => {

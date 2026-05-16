@@ -10,6 +10,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
 import { UI } from './messages';
+import { getAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
 
 /** Callback type for sending messages to the WebView */
 type PostMessageFn = (msg: HostMessage) => void;
@@ -357,7 +358,7 @@ export class ChatTopicManager {
         }
 
         const content = lines.join('\n');
-        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const workspaceRoot = getProjectWorkspaceRoot();
         if (!workspaceRoot) {
             vs.window.showWarningMessage(UI.NO_WORKSPACE);
             return;
@@ -369,7 +370,7 @@ export class ChatTopicManager {
             .replace(/_+/g, '_')
             .replace(/^_|_$/g, '')
             .substring(0, 60);
-        const outPath = path.join(workspaceRoot, '.cwtools-ai', 'exports', `${safeName || 'chat'}.md`);
+        const outPath = path.join(getAiStorageRoot(workspaceRoot), 'exports', `${safeName || 'chat'}.md`);
         const outDir = path.dirname(outPath);
         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
         fs.writeFileSync(outPath, content, 'utf-8');
@@ -392,7 +393,7 @@ export class ChatTopicManager {
             return;
         }
 
-        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const workspaceRoot = getProjectWorkspaceRoot();
         if (!workspaceRoot) {
             vs.window.showWarningMessage(UI.NO_WORKSPACE);
             return;
@@ -406,7 +407,7 @@ export class ChatTopicManager {
             .substring(0, 60);
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
-        const outPath = path.join(workspaceRoot, '.cwtools-ai', 'exports', `${safeName || 'chat'}_${timestamp}.json`);
+        const outPath = path.join(getAiStorageRoot(workspaceRoot), 'exports', `${safeName || 'chat'}_${timestamp}.json`);
         const outDir = path.dirname(outPath);
 
         if (!fs.existsSync(outDir)) {

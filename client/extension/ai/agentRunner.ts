@@ -36,6 +36,7 @@ import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace, TOOL_RESULT_BUDGET_BASE } from './contextBudget';
 import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
+import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from './workspacePaths';
 
 // Base fallback tool iterations (dynamically scaled in reasoningLoop)
 const MAX_TOOL_ITERATIONS_BASE = 150;
@@ -541,7 +542,7 @@ export function getAgentToolTargetFiles(
             break;
         case 'write_design_blueprint':
             if (workspaceRoot) {
-                paths.push(path.join(workspaceRoot, '.cwtools-ai', topicId || 'default', 'design_blueprint.md'));
+                paths.push(path.join(getTopicStorageDir(topicId || 'default', workspaceRoot), 'design_blueprint.md'));
             }
             break;
     }
@@ -603,10 +604,10 @@ export class AgentRunner {
         try {
             const fs = await import('fs');
             const pathModule = await import('path');
-            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (!wsRoot) return;
+            const wsRoot = getProjectWorkspaceRoot();
 
-            const checkpointDir = pathModule.join(wsRoot, '.cwtools-ai', topicId || 'default');
+            const checkpointDir = getTopicStorageDir(topicId || 'default', wsRoot);
+            if (!checkpointDir) return;
             if (!fs.existsSync(checkpointDir)) fs.mkdirSync(checkpointDir, { recursive: true });
 
             const checkpoint: import('./types').AgentCheckpoint = {
@@ -643,11 +644,12 @@ export class AgentRunner {
         try {
             const fs = await import('fs');
             const pathModule = await import('path');
-            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (!wsRoot) return null;
+            const wsRoot = getProjectWorkspaceRoot();
 
-            const checkpointPath = pathModule.join(wsRoot, '.cwtools-ai', topicId, 'checkpoint.json');
-            if (!fs.existsSync(checkpointPath)) return null;
+            const checkpointPath = getTopicStorageDirCandidates(topicId, wsRoot)
+                .map(dir => pathModule.join(dir, 'checkpoint.json'))
+                .find(candidate => fs.existsSync(candidate));
+            if (!checkpointPath) return null;
 
             const raw = JSON.parse(fs.readFileSync(checkpointPath, 'utf-8'));
             if (!raw || raw.version !== 1 || typeof raw.timestamp !== 'number') return null;
@@ -671,10 +673,11 @@ export class AgentRunner {
         try {
             const fs = await import('fs');
             const pathModule = await import('path');
-            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (!wsRoot || !topicId) return;
+            const wsRoot = getProjectWorkspaceRoot();
+            if (!topicId) return;
 
-            const resumeDir = pathModule.join(wsRoot, '.cwtools-ai', topicId);
+            const resumeDir = getTopicStorageDir(topicId, wsRoot);
+            if (!resumeDir) return;
             if (!fs.existsSync(resumeDir)) fs.mkdirSync(resumeDir, { recursive: true });
 
             const resumeState: import('./types').AgentResumeState = {
@@ -702,11 +705,12 @@ export class AgentRunner {
         try {
             const fs = await import('fs');
             const pathModule = await import('path');
-            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (!wsRoot) return null;
+            const wsRoot = getProjectWorkspaceRoot();
 
-            const resumePath = pathModule.join(wsRoot, '.cwtools-ai', topicId, 'resume_state.json');
-            if (!fs.existsSync(resumePath)) return null;
+            const resumePath = getTopicStorageDirCandidates(topicId, wsRoot)
+                .map(dir => pathModule.join(dir, 'resume_state.json'))
+                .find(candidate => fs.existsSync(candidate));
+            if (!resumePath) return null;
 
             const raw = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
             if (!raw || !raw.messages || !Array.isArray(raw.messages)) return null;
@@ -725,10 +729,10 @@ export class AgentRunner {
         try {
             const fs = await import('fs');
             const pathModule = await import('path');
-            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (!wsRoot) return false;
-            const resumePath = pathModule.join(wsRoot, '.cwtools-ai', topicId, 'resume_state.json');
-            return fs.existsSync(resumePath);
+            const wsRoot = getProjectWorkspaceRoot();
+            return getTopicStorageDirCandidates(topicId, wsRoot)
+                .map(dir => pathModule.join(dir, 'resume_state.json'))
+                .some(candidate => fs.existsSync(candidate));
         } catch {
             return false;
         }
@@ -742,11 +746,12 @@ export class AgentRunner {
         try {
             const fs = await import('fs');
             const pathModule = await import('path');
-            const wsRoot = (await import('vscode')).workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (!wsRoot) return;
-            const resumePath = pathModule.join(wsRoot, '.cwtools-ai', topicId, 'resume_state.json');
-            if (fs.existsSync(resumePath)) {
-                fs.unlinkSync(resumePath);
+            const wsRoot = getProjectWorkspaceRoot();
+            for (const resumeDir of getTopicStorageDirCandidates(topicId, wsRoot)) {
+                const resumePath = pathModule.join(resumeDir, 'resume_state.json');
+                if (fs.existsSync(resumePath)) {
+                    fs.unlinkSync(resumePath);
+                }
             }
         } catch {
             // Ignore deletion errors

@@ -27,6 +27,7 @@ import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
 import { registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
+import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 
 const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
 const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
@@ -240,7 +241,7 @@ export async function activate(context: ExtensionContext) {
 
 	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
 	const aiService = new AIService(context);
-	const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+	const workspaceRoot = getProjectWorkspaceRoot();
 	// AgentToolExecutor gets a lazy getter so it can be registered before client starts
 	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot);
 	const promptBuilder = new PromptBuilder(workspaceRoot, context.globalStorageUri.fsPath, context.extensionPath);

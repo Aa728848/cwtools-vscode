@@ -1,416 +1,324 @@
 # 架构文档
 
-> **Eddy's Stellaris CWTools** — 面向 Paradox Interactive 游戏 Modding 的高级 VS Code 扩展。
+本文档描述 **Eddy's Stellaris CWTools** 的当前架构、模块边界、数据流和维护约束。
+项目是一个面向 Paradox 游戏 Modding 的 VS Code 扩展，主要增强 Stellaris 的语言服务、可视化预览和 AI 辅助开发能力。
 
-本文档描述系统架构、模块关系和关键设计决策，供开发者参考。
+当前版本：`2.1.21`
 
-Recent UI notes:
-- The chat webview template is in `client/extension/ai/chatHtml.ts`, while the live interaction logic is in `client/webview/chatPanel.ts`.
-- The topic panel now renders grouped cards with metadata chips and search-context previews.
-- The settings page now shows a live overview strip and a two-button footer for test/save.
+## 总体结构
 
----
+系统由四层组成：
 
-## 总体架构
-
-扩展采用 **三层架构**：TypeScript VS Code **客户端**（前端）、.NET/F# **语言服务器**（后端）、以及沙盒化 **Webview 面板**（富交互 UI）。
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                     VS Code Extension Host                       │
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
-│  │  Extension    │  │  AI Agent    │  │  Webview Panel Hosts   │  │
-│  │  Client       │  │  Module      │  │  guiPanel.ts           │  │
-│  │ (extension.ts)│  │  (ai/)       │  │  solarSystemPanel.ts   │  │
-│  │              │  │              │  │  eventChainPanel.ts    │  │
-│  │              │  │              │  │  techTreePanel.ts      │  │
-│  │              │  │              │  │  entityPreviewPanel.ts │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬─────────────────┘  │
-│         │                 │                  │                    │
-│         │    ┌────────────┴────────────┐     │                    │
-│         │    │      postMessage        │     │                    │
-│         │    │      (Webview IPC)      │     │                    │
-│         │    └────────────┬────────────┘     │                    │
-│         │                 │                  │                    │
-│  ┌──────┴─────────────────┴──────────────────┴─────────────────┐  │
-│  │                     Webview Sandbox                          │  │
-│  │ chatPanel │ guiPreview │ solarPreview │ eventChain │ techTree│  │
-│  │                                          entityPreview       │  │
-│  └─────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────┬───────────────────────────────────┘
-                               │ LSP (JSON-RPC over stdio)
-                         ┌─────┴─────┐
-                         │  F#/.NET  │
-                         │  Language │
-                         │  Server   │
-                         └───────────┘
-```
-
----
-
-## 模块地图
-
-### 1. 扩展客户端 (`client/extension/`)
-
-| 文件 | 职责 |
-|------|------|
-| `extension.ts` | 主入口。注册命令、启动 LSP 客户端、创建面板 |
-| `guiPanel.ts` | GUI 预览 Webview 宿主 — 管理生命周期、发送解析数据 |
-| `guiParser.ts` | Paradox `.gui` 文件 AST 解析器 — 将脚本转为可渲染树 |
-| `solarSystemPanel.ts` | 星系可视化器宿主 |
-| `solarSystemParser.ts` | 星系初始化器解析器 |
-| `eventChainPanel.ts` | 事件链可视化器宿主 — BFS 扩展、命名空间过滤、源码跳转 |
-| `eventChainParser.ts` | 事件链图解析器 — 解析事件/on_action/decision 引用关系 |
-| `techTreePanel.ts` | 科技树可视化器宿主 — 按领域/层级筛选、前置科技关系图 |
-| `techTreeParser.ts` | 科技树解析器 — 解析前置条件边和科技属性 |
-| `entityPreviewPanel.ts`| 3D 实体模型可视化器宿主 — 处理 Three.js 通信 |
-| `entityParser.ts` | 实体文件解析器 — 解析 Paradox 3D 实体树和状态继承 |
-| `codeActions.ts` | CodeActionProvider — 提供 "AI: 修复"、"AI: 解释" 快速操作 |
-| `ddsDecoder.ts` | DDS 纹理解码器 (BC1/BC3/BC7) |
-| `pdxTokenizer.ts` | 共享 PDX 脚本分词器 — 供 guiParser 和 solarParser 使用 |
-| `exprEval.ts` | 安全的数学表达式求值器（用于 `@[...]` 表达式） |
-| `locDecorations.ts` | 本地化文本索引 + 编辑器内联装饰 |
-| `fileExplorer.ts` | Mod 文件树视图提供者 |
-| `updateChecker.ts` | 扩展版本更新通知 |
-
-### 2. AI Agent 模块 (`client/extension/ai/`)
-
-AI 子系统是最大的模块（27+ 文件）。数据流：
-
-```
-用户输入 → promptBuilder → aiService → agentRunner (推理循环)
-    ↓                                         ↓
-chatPanel ← postMessage ← steps/results ← 工具执行
-                                              ↓
-                                   spawn_sub_agents (并行子代理)
-```
-
-#### 核心循环
-
-| 文件 | 职责 |
-|------|------|
-| `agentRunner.ts` | 推理循环：Build/Plan/Explore/General/Review/LocTranslator/LocWriter 模式，工具分发，上下文压缩，检查点，回退，doom-loop 检测，分区写队列 |
-| `aiService.ts` | 所有 AI 提供商的 HTTP 客户端（支持 16+ 提供商），SSE 流式传输，Anthropic Messages API 适配器 |
-| `promptBuilder.ts` | 系统提示词组装 — 注入游戏知识、工作区上下文、工具定义、模式特化提示词 |
-| `contextBudget.ts` | Token 预算管理 — 截断、压缩触发器、工具结果预算分配 |
-| `diffEngine.ts` | 轻量级 Myers 行级 diff 算法 — 文件快照变更可视化 |
-
-#### 提供商层
-
-| 文件 | 职责 |
-|------|------|
-| `providers.ts` | 16+ 内置提供商配置（OpenAI, Claude, Gemini, DeepSeek, MiniMax, GLM, Qwen, MiMo, Ollama, SiliconFlow, OpenRouter, GitHub Models, Together AI, DeepInfra, OpenCode Zen），视觉/FIM 能力映射，上下文窗口大小，模型级 thinking 标记 |
-| `pricing.ts` + `pricingData.json` | 按模型成本估算 |
-
-#### 工具系统
-
-| 文件 | 职责 |
-|------|------|
-| `tools/definitions.ts` | 工具 JSON Schema 定义（40+ 工具） |
-| `tools/fileTools.ts` | `read_file`, `write_file`, `edit_file`, `multiedit`, `apply_patch`, `list_directory`, `glob_files`, `search_mod_files`, `codesearch`, `deploy_mod_asset` |
-| `tools/lspTools.ts` | `query_scope`, `query_types`, `validate_code`, `get_completion_at`, `document_symbols`, `workspace_symbols`, `get_diagnostics`, `lsp_operation`, CWTools Deep API 工具（`query_definition`, `query_scripted_effects`, `query_enums`, `get_entity_info` 等）— LRU+TTL 缓存 |
-| `tools/externalTools.ts` | `run_command`, `web_fetch`, `search_web`, `spawn_sub_agents`, 媒体工具（`mmx_generate_image`, `mmx_generate_video`, `mmx_generate_music`, `mmx_generate_speech`），资产转换（`convert_image_to_dds`, `convert_audio`），`mcp_call` — 权限控制 |
-| `tools/replacerSuite.ts` | 8 种模糊匹配替换策略（移植自 OpenCode） — 确保 `edit_file` 在 AI 输出不精确时仍能匹配 |
-| `agentTools.ts` | 工具分发路由 — 映射工具名称到处理函数 |
-| `toolCallParser.ts` | 非标准工具调用格式回退解析器（DeepSeek DSML、Qwen `<tool_call>` 等） |
-| `jsonRepair.ts` | 修复 AI 返回的格式不良 JSON |
-
-#### UI 与状态
-
-| 文件 | 职责 |
-|------|------|
-| `chatPanel.ts` | VS Code Webview 宿主 — 管理聊天面板生命周期、消息路由、设置 |
-| `chatHtml.ts` | 聊天面板 HTML 模板生成器 |
-| `chatInit.ts` | `/init` 命令 — 工作区扫描 + CWTOOLS.md 生成 |
-| `chatTopics.ts` | 会话主题持久化（保存/加载/分叉/归档） |
-| `chatSettings.ts` | 设置持久化（提供商、模型、API 密钥） |
-
-#### 支持模块
-
-| 文件 | 职责 |
-|------|------|
-| `types.ts` | 所有 TypeScript 接口（ChatMessage, TokenUsage, AgentCheckpoint, 40+ 工具类型等） |
-| `messages.ts` | 集中化 UI 字符串（i18n 就绪） |
-| `errorReporter.ts` | 3 级错误报告：fatal → warn → debug |
-| `usageTracker.ts` | Token 使用持久化、统计聚合、CSV/JSON 导出 |
-| `gameKnowledge.ts` | Stellaris 领域知识注入提示词 |
-| `memoryParser.ts` | 代理记忆跨会话持久化 |
-| `mcpClient.ts` | Model Context Protocol 客户端（stdio/SSE 传输） |
-| `inlineProvider.ts` | AI 驱动的内联代码补全（FIM 支持），自动过滤 thinking 模型 |
-| `fileCache.ts` | 文件内容 LRU 缓存 |
-
-### 3. Webview 脚本 (`client/webview/`)
-
-这些在 **隔离浏览器沙盒** 中运行 — 无 Node.js 或 VS Code API 访问。
-
-| 文件 | 职责 |
-|------|------|
-| `chatPanel.ts` + `chatPanel.css` | 聊天 UI：消息渲染、Markdown 解析器、虚拟滚动、设置页、diff 视图、媒体播放 |
-| `guiPreview.ts` + `guiPreview.css` | Canvas GUI 渲染器 — DDS/TGA 纹理、9-slice 精灵、拖放编辑 |
-| `solarSystemPreview.ts` + `solarSystemPreview.css` | 3D 星系可视化器 — 轨道编辑、天体放置 |
-| `eventChainPreview.ts` + `eventChainPreview.css` | 事件链可视化器 — Cytoscape.js 图渲染、ELK 自动布局、命名空间筛选、事件搜索 |
-| `techTreePreview.ts` + `techTreePreview.css` | 科技树可视化器 — Cytoscape.js 图、领域/层级筛选、稀有科技标记 |
-| `entityPreview.ts` + `entityPreview.css` | 3D 实体模型渲染器 — Three.js WebGL、动画网格与 `get_state_from_parent` 同步 |
-| `svgIcons.ts` | 共享 SVG 图标库 |
-| `canvas.ts` | Canvas 工具函数 |
-
-### 4. F# 语言服务器 (`src/LSP/`)
-
-语言服务器提供语法验证、自动补全、跳转到定义和语义分析。使用 **CWTools** F# 库（Git 子模块 `submodules/cwtools`）。
-
-| 文件 | 职责 |
-|------|------|
-| `LanguageServer.fs` | LSP 协议实现、自定义扩展请求处理 |
-| `DocumentStore.fs` | 文档存储 — O(1) 文档查找 |
-| `Parser.fs` | PDX 脚本解析器 |
-| `Tokenizer.fs` | 词法分析器 |
-| `Types.fs` | 类型定义和 CWTools 引擎集成 |
-| `Ser.fs` | 序列化层 |
-
-### 5. 构建系统
-
-| 命令 | 描述 |
-|------|------|
-| `npm run compile` | `tsc` 编译扩展 TS → `release/bin/`，`rollup` 打包 6 个 Webview 脚本 |
-| `npm run test` | 编译 + VS Code 集成测试 |
-| `npm run test:unit` | 通过 `ts-mocha` 运行单元测试 |
-| `npm run test:coverage` | 带覆盖率报告的单元测试 |
-| `npm run lint` | ESLint 检查 `client/` |
-| `dotnet build` | 构建 F# 语言服务器 |
-
----
-
-## 关键数据流
-
-### AI Agent 推理循环
-
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant CP as ChatPanel
-    participant AR as AgentRunner
-    participant AI as AIService
-    participant T as Tools
-    participant LSP as 语言服务器
-
-    U->>CP: 发送消息
-    CP->>AR: runAgent(message, mode)
-    
-    loop 推理循环 (max iterations, doom-loop 检测)
-        AR->>AI: chatCompletion(messages)
-        AI-->>AR: Response (text + tool_calls)
-        
-        alt 有工具调用
-            alt 只读工具
-                AR->>T: 并行执行 (Promise.allSettled)
-            else 写入工具
-                AR->>T: 分区写队列串行执行
-            end
-            T->>LSP: 查询 (LSP 工具)
-            LSP-->>T: 结果
-            T-->>AR: ToolResult
-            AR->>CP: emitStep(tool_call/tool_result)
-        end
-        
-        alt 上下文过大
-            AR->>AR: compactConversation()
-        end
-        
-        alt 定期检查点 (每 10 轮)
-            AR->>AR: saveCheckpoint() [fire-and-forget]
-        end
-        
-        alt 提供商故障 (5xx/超时)
-            AR->>AR: tryFallbackProvider()
-        end
-    end
-    
-    AR->>CP: generationComplete(result)
-    CP->>U: 渲染响应
-```
-
-### Webview 通信
-
-```mermaid
-flowchart LR
-    subgraph "Extension Host (Node.js)"
-        EP[chatPanel.ts<br/>Extension]
-    end
-    
-    subgraph "Webview Sandbox (Browser)"
-        WV[chatPanel.ts<br/>Webview]
-    end
-    
-    EP -->|"postMessage<br/>(addUserMessage, agentStep,<br/>generationComplete, usageStats)"| WV
-    WV -->|"postMessage<br/>(sendMessage, switchMode,<br/>openSettings, retractMessage,<br/>quickChangeModel, slashCommand)"| EP
-```
-
-### 子代理并行执行
+1. VS Code Extension Host：`client/extension/`
+2. AI Agent 子系统：`client/extension/ai/`
+3. Webview 沙盒 UI：`client/webview/`
+4. .NET/F# 语言服务器：`src/LSP/` 与 `src/Main/`
 
 ```mermaid
 flowchart TD
-    A[AgentRunner] -->|spawn_sub_agents| B[DAG 调度器]
-    B --> C[Sub-Agent 1: explore]
-    B --> D[Sub-Agent 2: build]
-    B --> E[Sub-Agent 3: loc_writer]
-    C -->|完成| F[结果合并]
-    D -->|完成| F
-    E -->|完成| F
-    F --> A
+    VS["VS Code Extension Host\nclient/extension"]
+    AI["AI Agent\nclient/extension/ai"]
+    WV["Webview Sandbox\nclient/webview"]
+    LSP["CWTools Server\nsrc/Main + src/LSP"]
+    CW["CWTools F# library\nsubmodules/cwtools"]
+
+    VS --> AI
+    VS <-->|postMessage| WV
+    VS <-->|LSP JSON-RPC over stdio| LSP
+    LSP --> CW
 ```
 
-> ⚠️ **关键规则**：Webview 无法访问 `vscode` API 或 `require()`。所有数据交换 **必须** 通过 `postMessage`。
+Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访问 `vscode`、Node.js、`fs`、`path` 或 `require()`。
 
----
+## Extension Host
 
-## Agent 模式
+`client/extension/` 运行在 VS Code 扩展宿主进程中，负责命令注册、LSP 客户端、文件系统访问、Webview 面板宿主和 AI 面板宿主。
 
-| 模式 | 描述 | 工具权限 |
-|------|------|---------|
-| `build` | 完整构建模式（默认） | 所有工具 + 写文件 + 验证循环 |
-| `plan` | 只读分析、结构化计划输出 | 只读工具 + todo_write |
-| `explore` | 并行只读探索 | 只读 + CWTools Deep API |
-| `general` | 研究模式，完整工具但无 todo | 所有工具 - todo_write |
-| `review` | 代码审查模式 | 只读 + Deep API + query_definition |
-| `gui_expert` | GUI 脚本专家子代理 | 继承父代理 |
-| `script_reviewer` | 脚本审查专家子代理 | 继承父代理 |
-| `loc_translator` | YML 本地化翻译模式 | 读写 + 搜索 + todo |
-| `loc_writer` | YML 本地化编写模式 | 读写 + 搜索 + 查询 + todo |
+| 文件 | 作用 |
+| --- | --- |
+| `extension.ts` | 扩展入口，注册命令、启动语言服务器、初始化功能 |
+| `codeActions.ts` | AI 诊断修复、解释和批量修复 Code Actions |
+| `guiPanel.ts` / `guiParser.ts` | `.gui` 文件解析与 Canvas 预览宿主 |
+| `solarSystemPanel.ts` / `solarSystemParser.ts` | `solar_system_initializers/` 星系预览 |
+| `eventChainPanel.ts` / `eventChainParser.ts` | 事件链扫描、BFS 子图、源码跳转 |
+| `techTreePanel.ts` / `techTreeParser.ts` | 科技树扫描、筛选和依赖图 |
+| `entityPanel.ts` / `entityAssetParser.ts` | `.asset` 实体模型预览宿主和资源解析 |
+| `graphicsFeatures.ts` | 图形资源相关编辑器功能 |
+| `ddsDecoder.ts` | DDS/TGA 解码支持 |
+| `locDecorations.ts` | 本地化索引和编辑器装饰 |
+| `fileExplorer.ts` | Mod 文件树视图 |
+| `vanillaCompare.ts` | 与原版文件比较 |
+| `updateChecker.ts` | 更新检查 |
+| `pdxTokenizer.ts` | PDX 脚本共享分词器 |
+| `exprEval.ts` | `@[...]` 数学表达式安全求值 |
 
----
+## AI Agent 子系统
 
-## 设计决策
+AI 代码位于 `client/extension/ai/`，由聊天宿主、模型提供商、提示词构建、工具系统、执行循环和多 Agent 协作层组成。
 
-### 1. 自定义 Markdown 渲染器（非 `marked`）
-聊天面板使用手写正则 Markdown 解析器。避免了：
-- CSP 内联脚本注入违规
-- 包体积增长（~30KB for marked）
-- Paradox 特定语法在代码块中的边缘情况
+### 核心数据流
 
-### 2. 有界 LRU+TTL 缓存
-LSP 工具使用 128 条目 LRU 缓存 + 30s TTL。防止长 Agent 会话中无界内存增长。
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant Chat as chatPanel.ts
+    participant Runner as agentRunner.ts
+    participant Service as aiService.ts
+    participant Tools as agentTools.ts
+    participant LSP as LSP
 
-### 3. Fire-and-Forget 检查点
-Agent 检查点以 `void`（无 await）保存，防止给推理循环增加延迟。磁盘 I/O 失败时静默跳过。
-
-### 4. 提供商回退路由
-主 AI 提供商 5xx/超时错误时，Agent 自动使用 `PROVIDER_FALLBACK` 映射中的备用提供商重试。对用户透明。外部工具请求强制施加网络超时和中止 (Abort) 机制防挂起。
-
-### 5. 分区写队列 (PartitionedWriteQueue)
-替换全局单写队列。允许不同文件的并行写入，同时保持单文件内的顺序。多文件操作按路径字典序获取锁，防止 AB/BA 死锁。空闲队列 30s 后自动清理。**注意**：`todo_write` 工具被隔离在此写锁之外，以消除多智能体并发规划时的死锁。
-
-### 6. 虚拟滚动 + IntersectionObserver
-聊天消息使用 `content-visibility: auto` + IntersectionObserver 跳过屏幕外 DOM 子树的布局/绘制。保持 100+ 消息会话流畅。
-
-### 7. Doom-Loop 检测
-两阶段方法：
-- **阶段 1**：签名对追踪 — 相同 (prevSig, currSig) 对 ≥ 4 次触发阶段 2
-- **阶段 2**：归一化结果哈希比较 — 相同哈希 = 原地打转 → 确认 doom-loop → 停止
-
-### 8. 8 策略模糊替换器 (ReplacerSuite)
-`edit_file` 使用 8 种递进模糊匹配策略（移植自 OpenCode），确保 AI 输出的不精确文本仍能定位到正确位置。
-
-### 9. VLM 回退（非视觉提供商图片处理）
-当提供商不支持视觉输入时，自动检测 MiniMax CLI (`mmx`) 并使用其 VLM 能力分析图片，将文本描述注入上下文。
-
-### 10. 事务管理
-写操作可以在虚拟文件系统覆盖层中暂存，通过两阶段提交 (`commitTransaction` / `discardTransaction`) 控制是否实际写入磁盘。
-
-### 11. 按引用传递上下文注入 (Pass-by-Reference Context Injection)
-多智能体间通信不再依赖臃肿的硬编码提示词。而是通过 `TaskNode` 中的 `contextFiles` 引用和黑板 (Blackboard-based) 数据结构，实现精准按需的上下文加载，节约 token 预算并降低出错率。
-
-### 12. Walkthrough 持久化与交互 UI
-代理生成的 `walkthrough.md` 报告会被定向保存至当前会话特有的 `Agent Workspace Dir` 内，而不会污染全局工作区。此外，保存会触发聊天面板内的可交互标注卡片 (Interactive Annotation UI)，方便用户审核代码执行路径。
-
----
-
-## 安全模型
-
-- **CSP**：Webview 使用严格 Content-Security-Policy — 无 `eval()`、无内联脚本
-- **API 密钥**：存储在 VS Code 的 `SecretStorage`（OS 密钥链），绝不明文存储
-- **命令执行**：`run_command` 工具需要用户通过 UI 卡片显式授权
-- **文件写入**：可通过设置启用 diff 确认模式
-- **GLM JWT**：Zhipu API 密钥 (`{id}.{secret}`) 自动生成 HS256 JWT 令牌
-
----
-
-## 目录结构
-
+    User->>Chat: sendMessage
+    Chat->>Runner: runAgent(mode, context)
+    Runner->>Service: chat/completion request
+    Service-->>Runner: text + tool calls
+    Runner->>Tools: execute tools
+    Tools->>LSP: optional LSP/deep queries
+    Tools-->>Runner: tool results
+    Runner-->>Chat: agent steps + final result
+    Chat-->>User: render messages/artifacts
 ```
+
+### 核心文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `agentRunner.ts` | 推理循环、工具权限、上下文压缩、检查点、回退、写队列 |
+| `agentTools.ts` | 工具分发、工具超时、共享黑板和 orchestrator 工具入口 |
+| `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配和回退 |
+| `providers.ts` | Provider 元数据、默认模型、视觉/FIM/上下文窗口能力 |
+| `promptBuilder.ts` | 系统提示词、模式提示词、项目上下文和子 Agent 提示词 |
+| `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
+| `contextBudget.ts` | Token 预算和工具结果裁剪 |
+| `contextReferences.ts` | `@file`、`@folder`、`@symbol`、`@blackboard` 引用解析 |
+| `chatPanel.ts` / `chatHtml.ts` | Extension 侧聊天宿主与 Webview HTML 模板 |
+| `chatSettings.ts` / `chatTopics.ts` | AI 设置和会话主题持久化 |
+| `inlineProvider.ts` | AI 内联补全 |
+| `mcpClient.ts` | MCP stdio/SSE 客户端 |
+| `toolCallParser.ts` | DeepSeek DSML、Qwen `<tool_call>` 等非标准工具调用解析 |
+| `jsonRepair.ts` | 修复不完整或格式不良的 JSON |
+| `usageTracker.ts` | Token 和成本统计 |
+| `memoryParser.ts` | 跨会话记忆解析 |
+
+### Agent 模式
+
+`AgentMode` 定义在 `client/extension/ai/types.ts`：
+
+| 模式 | 用途 |
+| --- | --- |
+| `build` | 默认构建模式，允许读写和验证 |
+| `plan` | 计划模式，只读为主，可写设计蓝图 |
+| `explore` | 只读探索和 CWTools 查询 |
+| `general` | 通用研究模式，排除 `todo_write` |
+| `review` | 只读审查模式 |
+| `gui_expert` | GUI 专家子 Agent |
+| `script_reviewer` | 脚本审查子 Agent |
+| `loc_translator` | 本地化翻译 |
+| `loc_writer` | 本地化创作 |
+| `orchestrator` | 多 Agent 协作调度 |
+
+### 工具系统
+
+工具定义集中在 `client/extension/ai/tools/definitions.ts`，当前定义超过 50 个工具。
+
+| 文件 | 作用 |
+| --- | --- |
+| `tools/definitions.ts` | 工具 JSON Schema |
+| `tools/fileTools.ts` | 文件读写、精确替换、补丁、本地化写入、资产部署 |
+| `tools/lspTools.ts` | LSP 查询、诊断、CWTools Deep API、缓存 |
+| `tools/externalTools.ts` | 命令、网络搜索、媒体生成/转换、外部资源 |
+| `tools/replacerSuite.ts` | `edit_file` 的多策略模糊替换 |
+| `agentTools.ts` | 工具名称到实现的路由 |
+| `types.ts` | `AgentToolName`、Args、Result 类型 |
+
+新增工具时必须同步更新：
+
+1. `tools/definitions.ts`
+2. `agentTools.ts`
+3. `types.ts`
+4. 如果会写文件，还要加入 `agentRunner.ts` 的 `WRITE_TOOLS`
+
+当前注意事项：
+
+- `write_file`、`multi_replace_file_content`、`replace_lines`、`apply_patch`、`write_localisation` 等写工具经由 `PartitionedWriteQueue` 管理。
+- `todo_write` 是纯内存/UI 计划工具，故意不进入写文件锁。
+- `.yml` 本地化文件必须使用 `write_localisation`；通用写工具会拒绝本地化写入。
+- 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。
+- `ast_mutate` 仍出现在类型和写工具集合中，但没有当前 schema 定义；除非专门补齐该工具，否则不要依赖它。
+
+### Orchestrator
+
+`client/extension/ai/orchestrator/` 管理 DAG 子任务、多 Agent 并行、共享黑板、冲突检测和质量门。
+
+| 文件 | 作用 |
+| --- | --- |
+| `agentRegistry.ts` | 子 Agent 角色、模式、预算和默认配置 |
+| `blackboard.ts` | 跨 Agent 共享数据，支持 key/prefix/type 查询 |
+| `taskGraphEngine.ts` | DAG 构建、拓扑排序、就绪节点和循环检测 |
+| `parallelExecutor.ts` | 按依赖批次并行执行子任务 |
+| `orchestrator.ts` | 调度入口、上下文注入、质量门整合 |
+| `conflictDetector.ts` | 基于黑板的写意图和实体注册冲突检测 |
+| `qualityGate.ts` | 审查和自动修复流程 |
+
+已注册角色包括 `explorer`、`architect`、`builder`、`locWriter`、`reviewer`、`assetGen`、`guiExpert` 和 `locTranslator`。
+
+## Webview 层
+
+`client/webview/` 编译为浏览器端脚本。Rollup 打包 6 个入口：
+
+| 入口 | 相关文件 | 作用 |
+| --- | --- | --- |
+| `chatPanel.ts` | `chatPanel.css`, `messageRenderer.ts`, `svgIcons.ts` | AI 聊天 UI、设置、Artifact、计划卡、diff 展示 |
+| `guiPreview.ts` | `guiPreview.css`, `canvas.ts` | `.gui` Canvas 预览、拖拽编辑、DDS/TGA 显示 |
+| `solarSystemPreview.ts` | `solarSystemPreview.css` | 星系、轨道、行星和环世界交互预览 |
+| `eventChainPreview.ts` | `eventChainPreview.css` | Cytoscape.js 事件引用图 |
+| `techTreePreview.ts` | `techTreePreview.css` | Cytoscape.js 科技依赖图 |
+| `entityPreview.ts` | `entityPreview.css`, `meshWorker.ts`, `pdxMeshParser.ts`, `pdxShaders.ts` | Three.js 实体模型、网格、动画和材质渲染 |
+
+Webview 维护规则：
+
+- 不要导入 Node.js 模块或 `vscode`。
+- 所有数据通过 `postMessage` 从 Extension Host 注入。
+- CSS 使用 VS Code 主题变量。
+- 动画支持 `prefers-reduced-motion`。
+- WebGL/Three.js 必须在销毁时释放资源。
+
+## F# / .NET 后端
+
+后端使用 .NET 9。`global.json` 当前固定 SDK `9.0.300`，允许 `latestMinor` roll-forward。
+
+| 路径 | 作用 |
+| --- | --- |
+| `src/LSP/` | LSP 协议、文档存储、解析和序列化 |
+| `src/Main/` | `CWTools Server` 可执行入口、游戏加载、补全、特性桥接 |
+| `src/Languages/` | 本地化资源 |
+| `src/CSharpExtensions/` | C# 辅助扩展 |
+| `submodules/cwtools/` | 上游 CWTools F# 库子模块 |
+
+`src/Main/Main.fsproj` 默认引用 `submodules/cwtools/CWTools/CWTools.fsproj`。
+如需使用本地 CWTools，可在 `src/Main/cwtools.local.props` 中设置 `UseLocalCwtools=True` 和 `CwtoolsPath`。
+
+## 构建系统
+
+根目录 `package.json`：
+
+| 命令 | 作用 |
+| --- | --- |
+| `npm run compile` | TypeScript 扩展编译 + Rollup Webview 打包 |
+| `npm run lint` | ESLint 9 检查 `client/` |
+| `npm run test:unit` | `ts-mocha` 单元测试 |
+| `npm run test:coverage` | `nyc` 覆盖率运行单元测试 |
+| `npm run test` | 编译后运行 VS Code 集成测试 |
+
+.NET 常用命令：
+
+```bash
+dotnet build src/LSP/
+dotnet build src/Main/
+```
+
+便捷脚本：
+
+- `build.cmd`
+- `build.sh`
+- `build.nu`
+
+这些脚本会恢复 dotnet tools、初始化子模块，并调用 `dotnet run --project build -- -t ...`。
+
+## 打包
+
+打包流程记录在 `.agents/workflows/package.md`。当前 release 包从 `release/package.json`
+生成，并在 `release/` 目录中执行：
+
+```powershell
+npx @vscode/vsce package
+```
+
+打包前需要准备 TypeScript/Webview 输出和三平台服务端输出。不要引用根目录 `package.ps1`，当前仓库没有该脚本。
+
+## 关键设计约束
+
+### Webview 隔离
+
+Webview 与 Extension Host 是不同运行环境。Webview 只能发送消息，不能直接访问工作区文件、VS Code API 或 Node.js。
+
+### 写入并发
+
+`PartitionedWriteQueue` 按目标文件串行化写入，不同文件可并行。多文件写入应按路径字典序获取锁，避免 AB/BA 死锁。
+
+### 本地化写入
+
+本地化文件通常需要 BOM、语言头和 key 更新语义。AI 工具层强制使用 `write_localisation`，不要用通用文本替换写 `.yml`。
+
+### 提供商兼容
+
+`aiService.ts` 负责不同 Provider 的请求兼容：
+
+- Claude 使用 Anthropic Messages API 适配。
+- GLM 使用 `{id}.{secret}` 生成 HS256 JWT。
+- DeepSeek/Qwen 等非标准工具调用由 `toolCallParser.ts` 回退解析。
+- 不支持 `tool_choice` 的 Provider 会进行请求清理。
+
+### 内存和性能
+
+项目会扫描大型 Mod 和原版资源：
+
+- LSP 和工具查询必须使用有界缓存。
+- Webview 大列表使用虚拟化或 `content-visibility`。
+- Three.js、纹理、worker 和事件监听器必须显式清理。
+
+### 错误处理
+
+Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。用户可见中文文本尽量集中在 `client/extension/ai/messages.ts`。
+
+## 目录概览
+
+```text
 cwtools-vscode/
-├── client/
-│   ├── extension/              # VS Code 扩展上下文 (Node.js)
-│   │   ├── ai/                 # AI Agent 模块 (27+ 文件)
-│   │   │   ├── tools/          # Agent 工具实现
-│   │   │   │   ├── definitions.ts    # 工具 JSON Schema
-│   │   │   │   ├── fileTools.ts      # 文件操作工具
-│   │   │   │   ├── lspTools.ts       # LSP 查询工具
-│   │   │   │   ├── externalTools.ts  # 外部工具 (命令/网络/子代理/媒体)
-│   │   │   │   └── replacerSuite.ts  # 模糊替换策略
-│   │   │   ├── agentRunner.ts        # 核心推理循环
-│   │   │   ├── aiService.ts          # 提供商 HTTP 客户端
-│   │   │   ├── promptBuilder.ts      # 系统提示词组装
-│   │   │   ├── chatPanel.ts          # 聊天 Webview 宿主
-│   │   │   ├── providers.ts          # 16+ 提供商配置
-│   │   │   ├── diffEngine.ts         # Myers diff 算法
-│   │   │   └── ...
-│   │   ├── extension.ts              # 主入口
-│   │   ├── guiPanel.ts               # GUI 预览宿主
-│   │   ├── solarSystemPanel.ts       # 星系可视化器宿主
-│   │   ├── eventChainPanel.ts        # 事件链可视化器宿主
-│   │   ├── techTreePanel.ts          # 科技树可视化器宿主
-│   │   ├── codeActions.ts            # AI 快速修复 CodeActions
-│   │   ├── pdxTokenizer.ts           # 共享 PDX 脚本分词器
-│   │   └── exprEval.ts               # 数学表达式求值器
-│   ├── webview/                # Webview 脚本 (浏览器沙盒)
-│   │   ├── chatPanel.ts        # 聊天 UI (167KB)
-│   │   ├── guiPreview.ts       # GUI Canvas 渲染器 (118KB)
-│   │   ├── solarSystemPreview.ts  # 星系可视化器 (81KB)
-│   │   ├── eventChainPreview.ts   # 事件链可视化器
-│   │   ├── techTreePreview.ts     # 科技树可视化器
-│   │   ├── entityPreview.ts       # 3D 实体模型渲染器 (Three.js)
-│   │   └── svgIcons.ts         # 共享图标库
-│   └── test/                   # 测试
-│       ├── unit/               # 单元测试 (7 个测试文件)
-│       └── suite/              # 集成测试
-├── src/
-│   └── LSP/                    # F# 语言服务器
-├── submodules/
-│   └── cwtools/                # CWTools F# 库 (Git 子模块)
-├── .agents/
-│   ├── rules/                  # AI 编码指南
-│   └── workflows/              # 自动化工作流
-├── release/
-│   └── bin/                    # 编译输出
-├── rollup.config.mjs           # Webview 打包配置 (6 个入口)
-├── tsconfig.extension.json     # 扩展 TypeScript 配置
-├── tsconfig.webview-*.json     # 各 Webview 的 TypeScript 配置
-├── eslint.config.mjs           # ESLint 平面配置 (异步安全规则)
-└── global.json                 # .NET SDK 9.0 配置
+  client/
+    extension/
+      ai/
+        orchestrator/
+        tools/
+        agentRunner.ts
+        agentTools.ts
+        aiService.ts
+        promptBuilder.ts
+        providers.ts
+        types.ts
+      extension.ts
+      guiPanel.ts
+      solarSystemPanel.ts
+      eventChainPanel.ts
+      techTreePanel.ts
+      entityPanel.ts
+      codeActions.ts
+    webview/
+      chatPanel.ts
+      messageRenderer.ts
+      guiPreview.ts
+      solarSystemPreview.ts
+      eventChainPreview.ts
+      techTreePreview.ts
+      entityPreview.ts
+      meshWorker.ts
+      pdxMeshParser.ts
+      pdxShaders.ts
+    test/
+      unit/
+      suite/
+  src/
+    LSP/
+    Main/
+    Languages/
+    CSharpExtensions/
+  submodules/
+    cwtools/
+  .agents/
+    rules/
+    workflows/
+  release/
+    bin/
+  rollup.config.mjs
+  eslint.config.mjs
+  global.json
 ```
-
----
-
-## 支持的 AI 提供商
-
-| 提供商 | API 兼容性 | 视觉支持 | FIM | 备注 |
-|--------|-----------|---------|-----|------|
-| OpenAI | OpenAI 原生 | ✅ | ❌ | gpt-5.5 系列 |
-| Claude (Anthropic) | Anthropic Messages → 适配器 | ✅ | ❌ | 100 万 token 上下文 |
-| Google Gemini | OpenAI 兼容 | ✅ | ❌ | 104 万 token 上下文 |
-| DeepSeek | OpenAI 兼容 | ❌ | ✅ | V4 系列，支持 thinking |
-| MiniMax (按量) | OpenAI 兼容 | ❌ | ❌ | M2.7 系列 |
-| MiniMax (Token Plan) | Anthropic 兼容 | ❌ | ❌ | Token 套餐计费 |
-| GLM (智谱) | OpenAI 兼容 + JWT | 部分 | ❌ | 仅 -v 后缀模型支持视觉，支持 GLM-4.7+ |
-| Qwen (通义) | OpenAI 兼容 | 部分 | ❌ | 仅 VL 模型支持视觉 |
-| MiMo (小米) | OpenAI 兼容 | ✅ | ❌ | 100 万 token 上下文 |
-| MiMo Token Plan | OpenAI 兼容 | ✅ | ❌ | Token 套餐 |
-| Ollama | OpenAI 兼容 | 取决模型 | ✅ | 本地模型自动检测 |
-| SiliconFlow | OpenAI 兼容 | ❌ | ✅ | 硅基流动 |
-| OpenRouter | OpenAI 兼容 | ✅ | ✅ | 多模型路由 |
-| GitHub Models | OpenAI 兼容 | ✅ | ❌ | Azure 推理 |
-| Together AI | OpenAI 兼容 | ❌ | ✅ | |
-| DeepInfra | OpenAI 兼容 | ❌ | ✅ | |
-| OpenCode Zen | OpenAI 兼容 | ✅ | ❌ | 托管网关，含免费模型 |
-| 自定义 | OpenAI 兼容 | 可配 | 可配 | 用户自定义端点 |

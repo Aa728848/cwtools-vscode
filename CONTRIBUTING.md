@@ -1,69 +1,126 @@
 # 贡献指南
 
-感谢您对本项目的关注！本指南涵盖环境搭建、开发流程、调试方法和代码规范。
-
----
+感谢你关注 **Eddy's Stellaris CWTools**。本文档说明如何搭建环境、运行项目、提交改动和验证质量。
 
 ## 环境要求
 
-| 工具 | 版本 | 用途 |
-|------|------|------|
-| **Node.js** | ≥ 20.x | TypeScript 编译、Webview 打包 |
-| **npm** | ≥ 10.x | 包管理 |
-| **.NET SDK** | ≥ 9.0 | F# 语言服务器编译 |
-| **VS Code** | ≥ 1.90 | 扩展宿主运行时 |
-| **Git** | 最新版 | 源码管理 + 子模块 |
+| 工具 | 推荐版本 | 用途 |
+| --- | --- | --- |
+| Node.js | 20.x 或更高 | TypeScript 编译、Rollup Webview 打包 |
+| npm | 10.x 或更高 | 依赖安装和脚本运行 |
+| .NET SDK | 9.0.x | F# 语言服务器和 `CWTools Server` 构建 |
+| VS Code | 1.90 或更高 | 扩展开发宿主和测试 |
+| Git | 最新稳定版 | 源码和子模块管理 |
 
----
+仓库的 `global.json` 当前指定 .NET SDK `9.0.300`，并允许 `latestMinor` roll-forward。
 
-## 快速开始
-
-### 1. 克隆（含子模块）
+## 克隆和安装
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
 cd cwtools-vscode
+npm install
 ```
 
-已有仓库但缺少子模块：
+如果已经克隆但缺少子模块：
+
 ```bash
 git submodule update --init --recursive
 ```
 
-### 2. 安装依赖
+## 常用构建命令
 
 ```bash
-npm install
-```
-
-### 3. 构建 F# 语言服务器
-
-```bash
+npm run compile
+npm run lint
+npm run test:unit
+npm run test
 dotnet build src/LSP/
+dotnet build src/Main/
 ```
 
-或使用便捷脚本：
+`npm run compile` 会执行两步：
+
+1. `tsc -p ./tsconfig.extension.json`
+2. `rollup -c`
+
+Rollup 当前打包 6 个 Webview 入口：
+
+- `client/webview/chatPanel.ts`
+- `client/webview/guiPreview.ts`
+- `client/webview/solarSystemPreview.ts`
+- `client/webview/eventChainPreview.ts`
+- `client/webview/techTreePreview.ts`
+- `client/webview/entityPreview.ts`
+
+也可以使用根目录脚本：
+
 ```bash
 # Windows
 .\build.cmd
 
 # Linux / macOS
 ./build.sh
+
+# Nushell
+nu build.nu
 ```
 
-### 4. 构建 TypeScript 扩展
+这些脚本会恢复 dotnet tools、初始化子模块，并调用 `dotnet run --project build -- -t ...`。
 
-```bash
-npm run compile
+## 运行和调试扩展
+
+1. 用 VS Code 打开仓库根目录。
+2. 按 `F5` 或执行 “Run and Debug: Start Debugging”。
+3. VS Code 会启动新的 Extension Development Host 窗口。
+4. 修改代码后，重新运行调试会话或重载开发宿主。
+
+Webview 调试：
+
+1. 在 Extension Development Host 中打开相关面板。
+2. 运行命令 `Developer: Open Webview Developer Tools`。
+3. 在 DevTools 中查看 DOM、控制台、网络和断点。
+
+## 项目结构速览
+
+```text
+client/
+  extension/                  VS Code Extension Host
+    ai/                       AI assistant, providers, tools, orchestrator
+    extension.ts              activation and command registration
+    guiPanel.ts               GUI preview host
+    solarSystemPanel.ts       solar system preview host
+    eventChainPanel.ts        event chain visualizer host
+    techTreePanel.ts          tech tree visualizer host
+    entityPanel.ts            3D entity preview host
+    codeActions.ts            AI quick fixes
+  webview/                    browser-sandboxed Webview scripts
+    chatPanel.ts
+    messageRenderer.ts
+    guiPreview.ts
+    solarSystemPreview.ts
+    eventChainPreview.ts
+    techTreePreview.ts
+    entityPreview.ts
+  test/
+    unit/                     ts-mocha unit tests
+    suite/                    VS Code integration tests
+
+src/
+  LSP/                        reusable F# LSP layer
+  Main/                       CWTools Server executable
+  Languages/                  resource strings
+  CSharpExtensions/           helper project
+
+submodules/cwtools/           upstream CWTools F# library
 ```
 
-包含两步：
-1. `tsc -p ./tsconfig.extension.json` — 编译扩展上下文代码到 `release/bin/`
-2. `rollup -c` — 打包 6 个 Webview 脚本（`chatPanel`, `guiPreview`, `solarSystemPreview`, `eventChainPreview`, `techTreePreview`, `entityPreview`）到 `release/bin/client/webview/`
+更多细节见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
-### 5. 使用本地 CWTools F# 仓库
+## 本地 CWTools 开发
 
-如需针对本地 cwtools 仓库开发，创建 `cwtools.local.props`：
+默认构建使用 `submodules/cwtools`。如果需要指向本地 CWTools 仓库，在
+`src/Main/cwtools.local.props` 创建类似配置：
 
 ```xml
 <Project>
@@ -74,198 +131,131 @@ npm run compile
 </Project>
 ```
 
-调整 `<CwtoolsPath>` 指向你的本地仓库。
+把 `CwtoolsPath` 改成你本机的实际路径。
 
----
+## TypeScript 规范
 
-## 开发流程
+- 使用现有模块风格和本地 helper，不为小改动引入新抽象。
+- 生产代码避免无理由的 `any`，未知数据优先用 `unknown` 和类型守卫。
+- 关注 ESLint 9 的异步安全规则：
+  - `@typescript-eslint/no-floating-promises`
+  - `@typescript-eslint/no-misused-promises`
+  - `prefer-promise-reject-errors`
+- Extension/AI 错误报告优先使用 `ErrorReporter`，不要裸用 `console.error`。
+- 用户可见中文文本尽量集中到 `client/extension/ai/messages.ts`。
+- 修改大文件时优先做局部、可验证的变更。
 
-### 运行与调试
+## Webview 规范
 
-1. 在 VS Code 中打开本仓库
-2. 按 **F5**（或 运行 → 开始调试）
-3. 将启动新的 **扩展开发主机** 窗口，扩展已加载
-4. 修改代码后重启主机（Ctrl+Shift+F5）重新加载
+Webview 代码运行在浏览器沙盒中：
 
-### Webview 调试
+- 不要导入 `vscode`、`fs`、`path` 或任何 Node.js-only API。
+- 不要使用 `require()`。
+- 与扩展宿主通信必须通过 `postMessage`。
+- CSS 使用 VS Code 主题变量，例如 `var(--vscode-editor-background)`。
+- 动画应支持 `prefers-reduced-motion`。
+- Three.js/WebGL 面板必须在销毁时释放 renderer、geometry、material、texture、worker、事件监听器和动画循环。
 
-Webview 脚本（聊天面板、GUI 预览、星系预览、事件链、科技树、实体模型预览）在隔离浏览器沙盒中运行。调试方法：
+## AI Agent 修改规范
 
-1. 在扩展开发主机窗口中，打开命令面板（`Ctrl+Shift+P`）
-2. 执行：**Developer: Open Webview Developer Tools**
-3. 打开 Chrome DevTools — 可设置断点、检查 DOM 等
+新增或修改 AI 工具时，请同步维护：
 
-> ⚠️ **重要**：Webview 脚本无法访问 `require()`、`vscode` API 或 Node.js 模块。与扩展宿主的通信必须通过 `postMessage`。详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+1. `client/extension/ai/tools/definitions.ts`
+2. `client/extension/ai/agentTools.ts`
+3. `client/extension/ai/types.ts`
+4. `client/extension/ai/agentRunner.ts` 的 `WRITE_TOOLS`，如果该工具会写文件
 
-### 监视模式
+并发写入规则：
 
-快速迭代开发：
-```bash
-# 终端 1：监视 TypeScript
-npx tsc -p ./tsconfig.extension.json --watch
+- 写文件工具由 `PartitionedWriteQueue` 按文件路径串行化。
+- 多文件写入按路径字典序获取锁，避免死锁。
+- `todo_write` 是计划/UI 状态工具，必须继续排除在文件写锁之外。
+- `.yml` 本地化文件必须用 `write_localisation`，不要用 `write_file`、`apply_patch` 或通用替换工具直接写。
 
-# 终端 2：监视 Webview 打包
-npx rollup -c --watch
-```
+多 Agent 协作：
 
----
-
-## 构建脚本
-
-| 命令 | 描述 |
-|------|------|
-| `npm run compile` | 完整构建（扩展 + 6 个 Webview） |
-| `npm run lint` | ESLint 检查 `client/` |
-| `npm run test` | 编译 + VS Code 集成测试 |
-| `npm run test:unit` | 通过 `ts-mocha` 运行单元测试 |
-| `npm run test:coverage` | 带覆盖率报告的单元测试 |
-
----
-
-## 项目结构
-
-详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 获取完整模块地图。简要概览：
-
-```
-client/
-├── extension/              # 扩展上下文 (Node.js)
-│   ├── ai/                 # AI Agent 模块 (27+ 文件)
-│   │   ├── tools/          # 工具实现 (5 个文件)
-│   │   ├── agentRunner.ts  # 核心推理循环
-│   │   ├── aiService.ts    # 提供商 HTTP 客户端
-│   │   ├── chatPanel.ts    # Webview 宿主
-│   │   ├── providers.ts    # 16+ 提供商配置
-│   │   └── diffEngine.ts   # Myers diff 算法
-│   ├── extension.ts        # 主入口
-│   ├── guiPanel.ts         # GUI 预览宿主
-│   ├── solarSystemPanel.ts # 星系可视化器宿主
-│   ├── eventChainPanel.ts  # 事件链可视化器宿主
-│   ├── techTreePanel.ts    # 科技树可视化器宿主
-│   ├── entityPreviewPanel.ts # 3D 实体可视化器宿主
-│   └── codeActions.ts      # AI Quick Fix
-├── webview/                # Webview 脚本 (浏览器沙盒)
-│   ├── chatPanel.ts        # 聊天 UI + Markdown 渲染器
-│   ├── guiPreview.ts       # GUI Canvas 渲染器
-│   ├── solarSystemPreview.ts
-│   ├── eventChainPreview.ts    # Cytoscape.js 事件链图
-│   ├── techTreePreview.ts      # Cytoscape.js 科技树图
-│   └── entityPreview.ts        # Three.js 实体模型渲染器
-└── test/                   # 测试
-    ├── unit/               # 单元测试 (7 个文件)
-    └── suite/              # 集成测试
-
-src/LSP/                    # F# 语言服务器
-submodules/cwtools/         # CWTools F# 库 (Git 子模块)
-```
-
----
-
-## 代码规范
-
-### TypeScript
-
-- **严格模式**：所有 tsconfig 启用 `strict: true` + `noUncheckedIndexedAccess: true`
-- **禁用 `any`**：优先使用正确类型。类型真正未知时使用 `unknown` + 类型守卫
-- **命名**：`camelCase` 用于变量/函数，`PascalCase` 用于类型/接口，`UPPER_SNAKE_CASE` 用于常量
-- **导入排序**：(1) Node.js 内置模块, (2) VS Code API, (3) 本地模块
-- **错误处理**：使用 `ErrorReporter`（`ai/errorReporter.ts`）代替裸 `console.error`：
-  - `ErrorReporter.fatal(source, msg)` — 向用户显示通知
-  - `ErrorReporter.warn(source, msg)` — 状态栏显示
-  - `ErrorReporter.debug(source, msg)` — 仅输出通道
-- **UI 字符串**：所有用户可见中文文本应放在 `ai/messages.ts`，不要硬编码
-
-### AI 模块特定规范
-
-- **工具安全**：添加修改文件的新工具时，必须将其加入 `agentRunner.ts` 中的 `WRITE_TOOLS` 集合，确保并行子代理执行时的串行写入。特例：`todo_write` 必须排除在外以防规划期死锁。
-- **上下文隔离**：永远不要在 Webview 脚本中导入 `vscode`。永远不要在 Webview 代码中使用 `require()`
-- **内存安全**：对任何随使用增长的数据使用有界缓存（如 F# 端的 `inlayHintCache` 必须用 LRU，`lspTools.ts` 缓存也需设定 TTL）。对 Webview，尤其像 `entityPreview` 这样使用 WebGL / Three.js 的组件，必须在销毁时显式调用 `dispose()` 清理材质、几何体及事件监听器。
-- **Token 估算**：使用 `agentRunner.ts` 中的 `estimateTokenCount()` 进行所有 token 计算。自动选择快速 vs. 精确路径
-- **工具分发**：新增工具时需同步更新 `agentTools.ts`（路由）、`tools/definitions.ts`（Schema）和 `types.ts`（类型）
-
-### CSS
-
-- 使用 VS Code 主题 CSS 变量（如 `var(--vscode-editor-background)`），不硬编码颜色
-- 确保最低 4.5:1 对比度以满足无障碍要求
-- 动画支持 `prefers-reduced-motion`
-
-### ESLint 配置
-
-项目使用 ESLint 9 平面配置（`eslint.config.mjs`），关键规则：
-- `@typescript-eslint/no-floating-promises: error` — 防止未处理的 Promise
-- `@typescript-eslint/no-misused-promises: error` — 防止 Promise 误用
-- `prefer-promise-reject-errors: error` — 拒绝时使用 Error 对象
-
----
-
-## Pull Request 检查清单
-
-提交 PR 前请验证：
-
-- [ ] `npm run compile` 零错误通过
-- [ ] `npm run lint` 通过（或新警告有合理理由）
-- [ ] 现有注释和文档字符串已保留
-- [ ] 无未说明理由的 `any` 类型
-- [ ] UI 字符串在 `messages.ts` 中，未硬编码
-- [ ] 新写操作工具已加入 `WRITE_TOOLS` 锁守卫集合
-- [ ] 新 Webview 功能通过 `postMessage` 与扩展通信
-- [ ] 新工具同步更新了 `definitions.ts`、`agentTools.ts`、`types.ts`
-- [ ] 在扩展开发主机中测试通过：
-  - [ ] 聊天面板可打开并发送消息
-  - [ ] 模式切换正常（Build/Plan/Explore/General/Review/LocTranslator/LocWriter）
-  - [ ] GUI 预览可渲染（如有修改）
-  - [ ] 事件链/科技树可视化器正常（如有修改）
-  - [ ] Webview DevTools 无控制台错误
-
----
-
-## 打包
-
-构建 `.vsix` 分发包：
-
-```powershell
-# Windows — 构建全部 3 个平台
-.\package.ps1
-```
-
-产出平台特定包：
-- `cwtools-vscode-*-win32-x64.vsix`
-- `cwtools-vscode-*-linux-x64.vsix`
-- `cwtools-vscode-*-darwin-x64.vsix`
-
----
+- 当前协作模式使用 `dispatch_agents`、`query_blackboard`、`merge_results`。
+- 角色注册在 `client/extension/ai/orchestrator/agentRegistry.ts`。
+- 大上下文应通过 `contextFiles` 或 Blackboard key 传递，不要塞进子 Agent prompt。
 
 ## 测试
 
 ### 单元测试
 
-位于 `client/test/unit/`，覆盖核心模块：
+单元测试位于 `client/test/unit/`，由 `ts-mocha` 自动发现：
 
-| 测试文件 | 覆盖模块 |
-|---------|---------|
-| `contextBudget.test.ts` | Token 预算与压缩逻辑 |
-| `diffEngine.test.ts` | Myers diff 算法正确性 |
-| `editFileReplacer.test.ts` | 8 种模糊替换策略 |
-| `jsonRepair.test.ts` | JSON 修复逻辑 |
-| `pricing.test.ts` | 成本估算 |
-| `providers.test.ts` | 提供商配置与能力检测 |
-| `toolCallParser.test.ts` | 非标准工具调用解析 |
-
-运行单元测试：
 ```bash
 npm run test:unit
 ```
 
+当前包含的重点测试包括：
+
+- `agentToolSafety.test.ts`
+- `contextBudget.test.ts`
+- `diffEngine.test.ts`
+- `editFileReplacer.test.ts`
+- `jsonRepair.test.ts`
+- `messageRenderer.test.ts`
+- `orchestrator.test.ts`
+- `pricing.test.ts`
+- `promptBuilderSprite.test.ts`
+- `providers.test.ts`
+- `toolCallParser.test.ts`
+
 ### 集成测试
 
-位于 `client/test/suite/`，需要 VS Code 运行时：
+集成测试位于 `client/test/suite/`，需要 VS Code 测试运行时：
+
 ```bash
 npm run test
 ```
 
----
+## 验证建议
+
+根据改动范围选择验证：
+
+| 改动范围 | 建议验证 |
+| --- | --- |
+| 文档 | 检查链接、路径和命令是否存在 |
+| Extension TypeScript | `npm run compile`，必要时 `npm run test:unit` |
+| AI 工具/Prompt/Orchestrator | `npm run test:unit`，重点看工具安全和 orchestrator 测试 |
+| Webview | `npm run compile`，在开发宿主中打开对应面板检查控制台 |
+| F# LSP | `dotnet build src/LSP/` |
+| 服务端入口/发布 | `dotnet build src/Main/`，按打包流程验证 |
+
+## Pull Request 清单
+
+提交前请确认：
+
+- [ ] 相关构建或测试已运行，或在 PR 中说明未运行原因。
+- [ ] 新增用户可见文本已考虑中英双语或放入合适的消息文件。
+- [ ] Webview 变更没有引入 Node.js 或 VS Code API 直接访问。
+- [ ] 新 AI 工具同步更新了 schema、类型、路由和写锁配置。
+- [ ] 文件写入逻辑不会绕过 `PartitionedWriteQueue`。
+- [ ] 本地化写入使用 `write_localisation`。
+- [ ] WebGL/Three.js 资源有明确释放路径。
+- [ ] 大型缓存、索引、扫描结果有边界或清理策略。
+- [ ] 没有无关格式化、生成文件或大范围重排。
+
+## 打包
+
+打包流程见 `.agents/workflows/package.md`。当前 release 包从 `release/package.json`
+生成，准备好编译输出和三平台服务端后，在 `release/` 目录执行：
+
+```powershell
+npx @vscode/vsce package
+```
+
+生成的 VSIX 位于 `release/`，文件名类似：
+
+```text
+eddy-stellaris-cwt-<version>.vsix
+```
+
+注意：仓库根目录当前没有 `package.ps1`，不要把它写进新的流程说明。
 
 ## 获取帮助
 
-- **架构概览**：见 [ARCHITECTURE.md](./ARCHITECTURE.md)
-- **AI 编码指南**：见 [CLAUDE.md](./CLAUDE.md)（AI 助手工作指南）
-- **问题反馈**：提交 GitHub Issue
+- 架构概览：[ARCHITECTURE.md](./ARCHITECTURE.md)
+- AI 助手工作指南：[AGENTS.md](./AGENTS.md) / [CLAUDE.md](./CLAUDE.md)
+- 打包流程：`.agents/workflows/package.md`

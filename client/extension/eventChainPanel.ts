@@ -16,9 +16,12 @@ import { ErrorReporter } from './ai/errorReporter';
 import {
     parseEventFile,
     parseCommonFile,
+    parseTechFlagRequirements,
     mergeGraphs,
+    buildImplicitEdges,
     extractConnectedSubgraph,
     type EventGraph,
+    type TechFlagMap,
 } from './eventChainParser';
 
 // ─── Nonce generator ─────────────────────────────────────────────────────────
@@ -237,6 +240,13 @@ export class EventChainPanel {
                             namespace: `__${src.sourceType}__`,
                             isFireOnAction: src.sourceType === 'on_action',
                             isHidden: false,
+                            hasMTTH: false,
+                            flagsSet: [],
+                            flagsChecked: [],
+                            techsGranted: [],
+                            techsRequired: [],
+                            techsLastIncreased: [],
+                            firedOnActions: [],
                         });
                     }
                     if (graph.nodes.length > 0 || graph.edges.length > 0) {
@@ -248,10 +258,36 @@ export class EventChainPanel {
             }
         }
 
+        // ── Phase 1.5: 解析科技定义文件中的 flag 前置条件 ─────────────────
+        this._panel.webview.postMessage({ command: 'loading', text: '解析科技 flag 前置条件...' });
+        const techFlagMap: TechFlagMap = new Map();
+        const techPattern = new vscode.RelativePattern(wsRoot, '**/common/technology/**/*.txt');
+        const techFiles = await vscode.workspace.findFiles(techPattern, '**/node_modules/**', 200);
+        for (const fileUri of techFiles) {
+            try {
+                const doc = await vscode.workspace.openTextDocument(fileUri);
+                const content = doc.getText();
+                const fileMap = parseTechFlagRequirements(content);
+                for (const [tech, flags] of fileMap) {
+                    if (flags.length > 0) {
+                        techFlagMap.set(tech, flags);
+                    }
+                }
+            } catch {
+                // Skip
+            }
+        }
+
         // ── Phase 2: BFS-expand from seed events (shallow: depth 2) ───────────
         this._panel.webview.postMessage({ command: 'loading', text: '构建事件关系图...' });
 
         const eventsOnlyGraph = mergeGraphs(eventGraphs);
+
+        // 构建隐式连接边（flag/科技/on_action + 传递性 flag→tech→event）
+        this._panel.webview.postMessage({ command: 'loading', text: '构建隐式连接关系...' });
+        const implicitEdges = buildImplicitEdges(eventsOnlyGraph, techFlagMap);
+        eventsOnlyGraph.edges.push(...implicitEdges);
+
         // Depth 2: seed events → their direct targets → one more hop
         const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
 
@@ -397,12 +433,15 @@ export class EventChainPanel {
         <div id="legend">
             <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> 入口事件</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;"></span> 触发型事件</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#5d4037;border:1px dashed #8d6e63;"></span> MTTH 事件</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#e8c840;"></span> Option 边</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> Immediate 边</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ff9800;"></span> After 边</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ab47bc;"></span> Effect 边</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#e91e63;"></span> On_action</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#00bcd4;"></span> Decision</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> Flag 隐式连接</div>
+            <div class="legend-item"><span class="legend-swatch" style="background:#ec407a;border:1px dotted #ec407a;"></span> on_action 隐式</div>
         </div>
     </div>
 

@@ -13,6 +13,15 @@
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/**
+ * Flag 信息：包含 scope 类型和 flag 名称
+ * scope 用于严格匹配（set_country_flag 只匹配 has_country_flag）
+ */
+export interface FlagRef {
+    scope: string;  // 'country' | 'global' | 'planet' | 'star' | 'fleet' | 'ship' | 'pop' | 'species' | 'leader'
+    name: string;   // flag 名称
+}
+
 export interface EventNode {
     /** Fully qualified event ID, e.g. "crisis.100" */
     id: string;
@@ -34,6 +43,20 @@ export interface EventNode {
     isFireOnAction: boolean;
     /** Whether the event is hidden (no popup) */
     isHidden: boolean;
+    /** Whether this event uses mean_time_to_happen (probabilistic trigger) */
+    hasMTTH: boolean;
+    /** 该事件在 effect 中设置的 flags（scope+name） */
+    flagsSet: FlagRef[];
+    /** 该事件在 trigger 中检查的 flags（scope+name） */
+    flagsChecked: FlagRef[];
+    /** 该事件授予的科技 */
+    techsGranted: string[];
+    /** 该事件在 trigger 中要求的科技（has_technology） */
+    techsRequired: string[];
+    /** 该事件在 trigger 中检测刚研究完的科技（last_increased_tech） */
+    techsLastIncreased: string[];
+    /** 该事件触发的 on_action（fire_on_action 调用） */
+    firedOnActions: string[];
 }
 
 export interface EventEdge {
@@ -41,8 +64,8 @@ export interface EventEdge {
     source: string;
     /** Target event ID */
     target: string;
-    /** How the edge was created: option, immediate, after, mean_time_to_happen */
-    edgeType: 'option' | 'immediate' | 'after' | 'effect' | 'on_action' | 'decision' | 'scripted' | 'unknown';
+    /** 边类型：显式连接 + flag/on_action_implicit 隐式连接 */
+    edgeType: 'option' | 'immediate' | 'after' | 'effect' | 'on_action' | 'decision' | 'scripted' | 'flag' | 'on_action_implicit' | 'unknown';
     /** Label for the edge (option name, etc.) */
     label?: string;
 }
@@ -148,6 +171,12 @@ export function parseEventFile(content: string, filePath: string): EventGraph {
                 // Check is_hidden
                 const isHidden = /\bis_hidden\s*=\s*yes\b/.test(body) || /\bhide_window\s*=\s*yes\b/.test(body);
 
+                // 检测 mean_time_to_happen（概率触发事件）
+                const hasMTTH = /\bmean_time_to_happen\s*=\s*\{/.test(body);
+
+                // 提取隐式连接数据（flags、科技、fire_on_action）
+                const implicit = extractImplicitData(body);
+
                 const ns = eventId.includes('.') ? eventId.split('.')[0]! : currentNamespace;
 
                 nodes.push({
@@ -161,6 +190,13 @@ export function parseEventFile(content: string, filePath: string): EventGraph {
                     namespace: ns,
                     isFireOnAction,
                     isHidden,
+                    hasMTTH,
+                    flagsSet: implicit.flagsSet,
+                    flagsChecked: implicit.flagsChecked,
+                    techsGranted: implicit.techsGranted,
+                    techsRequired: implicit.techsRequired,
+                    techsLastIncreased: implicit.techsLastIncreased,
+                    firedOnActions: implicit.firedOnActions,
                 });
 
                 // Phase 3: Extract outgoing event references within this event body
@@ -593,6 +629,12 @@ export interface CommonFileResult {
     externalSources: ExternalSourceNode[];
 }
 
+/**
+ * 科技定义文件中的 flag 前置条件映射。
+ * key: 科技名称，value: 该科技在 potential 中要求的 flags。
+ */
+export type TechFlagMap = Map<string, FlagRef[]>;
+
 /** Helper: add edge if not duplicate */
 function addEdgeDedup(
     edges: EventEdge[], source: string, target: string,
@@ -602,6 +644,228 @@ function addEdgeDedup(
     if (!exists) {
         edges.push({ source, target, edgeType, label });
     }
+}
+
+/**
+ * 解析科技定义文件，提取每个科技在 potential 块中的 flag 前置条件。
+ * 用于构建 flag → tech → event 的传递性隐式链接。
+ */
+export function parseTechFlagRequirements(content: string): TechFlagMap {
+    const result: TechFlagMap = new Map();
+    const lines = content.split(/\r?\n/);
+    let currentTech = '';
+    let depth = 0;
+    let inPotential = false;
+    let potentialDepth = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i]!.trim();
+        if (trimmed.startsWith('#')) continue;
+
+        const prevDepth = depth;
+        for (const ch of trimmed.split('#')[0]!) {
+            if (ch === '{') depth++;
+            if (ch === '}') depth--;
+        }
+
+        // 顶层科技定义：tech_xxx = {
+        if (prevDepth === 0 && depth > 0) {
+            const blockMatch = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*\{/);
+            if (blockMatch && blockMatch[1]!.startsWith('tech_')) {
+                currentTech = blockMatch[1]!;
+                result.set(currentTech, []);
+            }
+        }
+
+        // 检测 potential 块
+        if (currentTech && !inPotential && /^potential\s*=\s*\{/.test(trimmed)) {
+            inPotential = true;
+            potentialDepth = 0;
+            for (const ch of trimmed) {
+                if (ch === '{') potentialDepth++;
+                if (ch === '}') potentialDepth--;
+            }
+            // 提取当行的 flag
+            extractFlagsFromLine(trimmed, currentTech, result);
+            if (potentialDepth <= 0) inPotential = false;
+            continue;
+        }
+
+        if (inPotential) {
+            for (const ch of trimmed) {
+                if (ch === '{') potentialDepth++;
+                if (ch === '}') potentialDepth--;
+            }
+            extractFlagsFromLine(trimmed, currentTech, result);
+            if (potentialDepth <= 0) inPotential = false;
+        }
+
+        // 科技定义结束
+        if (depth <= 0) {
+            currentTech = '';
+            inPotential = false;
+            depth = 0;
+        }
+    }
+
+    return result;
+}
+
+/** 从line中提取 has_*_flag 并添加到 techFlagMap */
+function extractFlagsFromLine(line: string, techName: string, map: TechFlagMap) {
+    const re = new RegExp(
+        `\\bhas_(${FLAG_SCOPES.join('|')})_flag\\s*=\\s*"?([a-zA-Z0-9_]+)"?`, 'g'
+    );
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+        const flags = map.get(techName);
+        if (flags) {
+            flags.push({ scope: m[1]!, name: m[2]! });
+        }
+    }
+}
+
+// ─── 隐式连接数据提取 ────────────────────────────────────────────────────────
+
+// 支持的所有 flag scope 类型
+const FLAG_SCOPES = ['country', 'global', 'planet', 'star', 'fleet', 'ship', 'pop', 'species', 'leader'] as const;
+
+// 构建 set/has flag 正则（带 scope 捕获）
+const SET_FLAG_RE = new RegExp(
+    `\\bset_(${FLAG_SCOPES.join('|')})_flag\\s*=\\s*(?:\\{\\s*flag\\s*=\\s*)?"?([a-zA-Z0-9_]+)"?`, 'g'
+);
+const HAS_FLAG_RE = new RegExp(
+    `\\bhas_(${FLAG_SCOPES.join('|')})_flag\\s*=\\s*"?([a-zA-Z0-9_]+)"?`, 'g'
+);
+// timed flag：set_timed_country_flag = { flag = xxx days = 30 }
+const SET_TIMED_FLAG_RE = new RegExp(
+    `\\bset_timed_(${FLAG_SCOPES.join('|')})_flag\\s*=\\s*\\{[^}]*flag\\s*=\\s*"?([a-zA-Z0-9_]+)"?`, 'g'
+);
+
+// 科技相关
+const GIVE_TECH_RE = /\bgive_technology\s*=\s*\{[^}]*tech\s*=\s*"?([a-zA-Z0-9_]+)"?/g;
+const ADD_RESEARCH_OPTION_RE = /\badd_research_option\s*=\s*"?([a-zA-Z0-9_]+)"?/g;
+const HAS_TECH_RE = /\bhas_technology\s*=\s*"?([a-zA-Z0-9_]+)"?/g;
+const LAST_INCREASED_TECH_RE = /\blast_increased_tech\s*=\s*"?([a-zA-Z0-9_]+)"?/g;
+
+// fire_on_action
+const FIRE_ON_ACTION_RE = /\bfire_on_action\s*=\s*\{[^}]*on_action\s*=\s*"?([a-zA-Z0-9_]+)"?/g;
+
+/**
+ * 从事件体中提取隐式连接数据。
+ * 区分 trigger 块（条件检查）和 effect 块（设置操作）。
+ */
+function extractImplicitData(body: string): {
+    flagsSet: FlagRef[];
+    flagsChecked: FlagRef[];
+    techsGranted: string[];
+    techsRequired: string[];
+    techsLastIncreased: string[];
+    firedOnActions: string[];
+} {
+    const flagsSet: FlagRef[] = [];
+    const flagsChecked: FlagRef[] = [];
+    const techsGranted: string[] = [];
+    const techsRequired: string[] = [];
+    const techsLastIncreased: string[] = [];
+    const firedOnActions: string[] = [];
+
+    // 分离 trigger 块和其余部分（effect 块）
+    // trigger 块通常是事件体内的顶层块
+    const { triggerText, effectText } = splitTriggerAndEffect(body);
+
+    // 从 effect 部分提取 set_*_flag（设置 flag）
+    let match: RegExpExecArray | null;
+    SET_FLAG_RE.lastIndex = 0;
+    while ((match = SET_FLAG_RE.exec(effectText)) !== null) {
+        flagsSet.push({ scope: match[1]!, name: match[2]! });
+    }
+    SET_TIMED_FLAG_RE.lastIndex = 0;
+    while ((match = SET_TIMED_FLAG_RE.exec(effectText)) !== null) {
+        flagsSet.push({ scope: match[1]!, name: match[2]! });
+    }
+
+    // 从 trigger 部分提取 has_*_flag（检查 flag）
+    HAS_FLAG_RE.lastIndex = 0;
+    while ((match = HAS_FLAG_RE.exec(triggerText)) !== null) {
+        flagsChecked.push({ scope: match[1]!, name: match[2]! });
+    }
+
+    // 从 effect 部分提取 give_technology / add_research_option（授予科技）
+    GIVE_TECH_RE.lastIndex = 0;
+    while ((match = GIVE_TECH_RE.exec(effectText)) !== null) {
+        techsGranted.push(match[1]!);
+    }
+    ADD_RESEARCH_OPTION_RE.lastIndex = 0;
+    while ((match = ADD_RESEARCH_OPTION_RE.exec(effectText)) !== null) {
+        techsGranted.push(match[1]!);
+    }
+
+    // 从 trigger 部分提取 has_technology（要求科技）
+    HAS_TECH_RE.lastIndex = 0;
+    while ((match = HAS_TECH_RE.exec(triggerText)) !== null) {
+        techsRequired.push(match[1]!);
+    }
+    LAST_INCREASED_TECH_RE.lastIndex = 0;
+    while ((match = LAST_INCREASED_TECH_RE.exec(triggerText)) !== null) {
+        techsLastIncreased.push(match[1]!);
+    }
+
+    // 从 effect 部分提取 fire_on_action
+    FIRE_ON_ACTION_RE.lastIndex = 0;
+    while ((match = FIRE_ON_ACTION_RE.exec(effectText)) !== null) {
+        firedOnActions.push(match[1]!);
+    }
+
+    return { flagsSet, flagsChecked, techsGranted, techsRequired, techsLastIncreased, firedOnActions };
+}
+
+/**
+ * 将事件体分离为 trigger 部分和 effect 部分。
+ * trigger 块内的条件用于 flagsChecked/techsRequired，
+ * 其余部分（option/immediate/after/mean_time_to_happen 的 modifier）用于 flagsSet/techsGranted。
+ */
+function splitTriggerAndEffect(body: string): { triggerText: string; effectText: string } {
+    const lines = body.split('\n');
+    const triggerLines: string[] = [];
+    const effectLines: string[] = [];
+    let inTrigger = false;
+    let triggerDepth = 0;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        // 跳过注释
+        if (trimmed.startsWith('#')) continue;
+
+        // 检测 trigger 块开始（事件体内的顶层 trigger = {）
+        if (!inTrigger && /^trigger\s*=\s*\{/.test(trimmed)) {
+            inTrigger = true;
+            triggerDepth = 0;
+            for (const ch of trimmed) {
+                if (ch === '{') triggerDepth++;
+                if (ch === '}') triggerDepth--;
+            }
+            triggerLines.push(trimmed);
+            if (triggerDepth <= 0) inTrigger = false;
+            continue;
+        }
+
+        if (inTrigger) {
+            for (const ch of trimmed) {
+                if (ch === '{') triggerDepth++;
+                if (ch === '}') triggerDepth--;
+            }
+            triggerLines.push(trimmed);
+            if (triggerDepth <= 0) inTrigger = false;
+        } else {
+            effectLines.push(trimmed);
+        }
+    }
+
+    return {
+        triggerText: triggerLines.join('\n'),
+        effectText: effectLines.join('\n'),
+    };
 }
 
 // ─── Graph merging ───────────────────────────────────────────────────────────
@@ -638,6 +902,195 @@ export function mergeGraphs(graphs: EventGraph[]): EventGraph {
         nodes: Array.from(nodeMap.values()),
         edges,
     };
+}
+
+/**
+ * 在所有事件解析并合并后，通过交叉匹配 flag/科技/on_action 创建隐式边。
+ * 这是全局后处理步骤，必须在 mergeGraphs 之后调用。
+ * @param techFlagMap 科技定义文件中的 flag 前置条件映射（可选）
+ */
+export function buildImplicitEdges(graph: EventGraph, techFlagMap?: TechFlagMap): EventEdge[] {
+    const implicitEdges: EventEdge[] = [];
+    const edgeSet = new Set<string>();
+
+    // 建立节点映射，便于检查 hasMTTH
+    const nodeMap = new Map<string, EventNode>();
+    for (const node of graph.nodes) {
+        nodeMap.set(node.id, node);
+    }
+
+    // 索引：按 scope+flag 名称建立 set→events 和 check→events 的映射
+    const flagSetters = new Map<string, string[]>();  // key: "scope:name" → eventIds[]
+    const flagCheckers = new Map<string, string[]>(); // key: "scope:name" → eventIds[]
+    const techGranters = new Map<string, string[]>(); // key: techName → eventIds[]
+    const techRequirers = new Map<string, string[]>(); // key: techName → eventIds[]
+    const techLastIncreased = new Map<string, string[]>(); // key: techName → eventIds[]
+    const onActionFirers = new Map<string, string[]>(); // key: onActionName → eventIds[]
+
+    for (const node of graph.nodes) {
+        // 跳过外部源节点（[on_action] xxx 等）
+        if (node.id.startsWith('[')) continue;
+
+        for (const flag of node.flagsSet) {
+            const key = `${flag.scope}:${flag.name}`;
+            if (!flagSetters.has(key)) flagSetters.set(key, []);
+            flagSetters.get(key)!.push(node.id);
+        }
+        for (const flag of node.flagsChecked) {
+            const key = `${flag.scope}:${flag.name}`;
+            if (!flagCheckers.has(key)) flagCheckers.set(key, []);
+            flagCheckers.get(key)!.push(node.id);
+        }
+        for (const tech of node.techsGranted) {
+            if (!techGranters.has(tech)) techGranters.set(tech, []);
+            techGranters.get(tech)!.push(node.id);
+        }
+        for (const tech of node.techsRequired) {
+            if (!techRequirers.has(tech)) techRequirers.set(tech, []);
+            techRequirers.get(tech)!.push(node.id);
+        }
+        for (const tech of node.techsLastIncreased) {
+            if (!techLastIncreased.has(tech)) techLastIncreased.set(tech, []);
+            techLastIncreased.get(tech)!.push(node.id);
+        }
+        for (const oa of node.firedOnActions) {
+            if (!onActionFirers.has(oa)) onActionFirers.set(oa, []);
+            onActionFirers.get(oa)!.push(node.id);
+        }
+    }
+
+    // Flag 隐式边：set_*_flag 事件 → has_*_flag 事件（同 scope+name 匹配）
+    for (const [flagKey, setterIds] of flagSetters) {
+        const checkerIds = flagCheckers.get(flagKey);
+        if (!checkerIds) continue;
+        const flagName = flagKey.split(':')[1] || flagKey;
+        for (const setterId of setterIds) {
+            for (const checkerId of checkerIds) {
+                if (setterId === checkerId) continue; // 不自引用
+                
+                // 【过滤规则】隐式连接线只针对带有 MTTH 的事件，不连接正常的显式链条事件
+                const checkerNode = nodeMap.get(checkerId);
+                if (checkerNode && !checkerNode.hasMTTH) continue;
+
+                const edgeKey = `${setterId}→${checkerId}→flag`;
+                if (!edgeSet.has(edgeKey)) {
+                    edgeSet.add(edgeKey);
+                    implicitEdges.push({
+                        source: setterId,
+                        target: checkerId,
+                        edgeType: 'flag',
+                        label: flagName,
+                    });
+                }
+            }
+        }
+    }
+
+    // 科技隐式边：give_technology 事件 → has_technology / last_increased_tech 事件
+    for (const [tech, granterIds] of techGranters) {
+        const requirerIds = techRequirers.get(tech) || [];
+        const lastIncIds = techLastIncreased.get(tech) || [];
+        const allTargetIds = Array.from(new Set([...requirerIds, ...lastIncIds]));
+        
+        if (allTargetIds.length === 0) continue;
+
+        for (const granterId of granterIds) {
+            for (const targetId of allTargetIds) {
+                if (granterId === targetId) continue;
+
+                const targetNode = nodeMap.get(targetId);
+                // 【过滤规则】如果是 has_technology（在 requirerIds 中），则必须要有 MTTH
+                // 如果是 last_increased_tech（在 lastIncIds 中），则豁免此规则（因为是在 on_action 中触发的）
+                if (targetNode && requirerIds.includes(targetId) && !lastIncIds.includes(targetId) && !targetNode.hasMTTH) {
+                    continue;
+                }
+
+                const edgeKey = `${granterId}→${targetId}→flag`;
+                if (!edgeSet.has(edgeKey)) {
+                    edgeSet.add(edgeKey);
+                    implicitEdges.push({
+                        source: granterId,
+                        target: targetId,
+                        edgeType: 'flag',
+                        label: tech,
+                    });
+                }
+            }
+        }
+    }
+
+    // on_action 隐式边：fire_on_action 事件 → [on_action] xxx 节点
+    for (const [oaName, firerIds] of onActionFirers) {
+        // 查找图中对应的 on_action 节点
+        const oaNodeId = `[on_action] ${oaName}`;
+        const oaNodeExists = graph.nodes.some(n => n.id === oaNodeId);
+        if (!oaNodeExists) continue;
+
+        for (const firerId of firerIds) {
+            const edgeKey = `${firerId}→${oaNodeId}→on_action_implicit`;
+            if (!edgeSet.has(edgeKey)) {
+                edgeSet.add(edgeKey);
+                implicitEdges.push({
+                    source: firerId,
+                    target: oaNodeId,
+                    edgeType: 'on_action_implicit',
+                });
+            }
+        }
+    }
+
+    // 传递性隐式链：flag → 科技 → 事件
+    // 场景：Event A set_flag → Tech potential has_flag → Event B trigger has_technology
+    if (techFlagMap && techFlagMap.size > 0) {
+        // 构建反向索引：flagKey → techs that require it
+        const flagToTechs = new Map<string, string[]>();
+        for (const [techName, flags] of techFlagMap) {
+            for (const flag of flags) {
+                const key = `${flag.scope}:${flag.name}`;
+                if (!flagToTechs.has(key)) flagToTechs.set(key, []);
+                flagToTechs.get(key)!.push(techName);
+            }
+        }
+
+        // 对每个 set_flag 的事件，查找哪些科技需要该 flag，再查找哪些事件需要该科技
+        for (const [flagKey, setterIds] of flagSetters) {
+            const techNames = flagToTechs.get(flagKey);
+            if (!techNames) continue;
+
+            for (const techName of techNames) {
+                const requirerIds = techRequirers.get(techName) || [];
+                const lastIncIds = techLastIncreased.get(techName) || [];
+                const allTargetIds = Array.from(new Set([...requirerIds, ...lastIncIds]));
+
+                if (allTargetIds.length === 0) continue;
+
+                for (const setterId of setterIds) {
+                    for (const targetId of allTargetIds) {
+                        if (setterId === targetId) continue;
+
+                        const targetNode = nodeMap.get(targetId);
+                        // 【过滤规则】同上，过滤掉正常的链条事件
+                        if (targetNode && requirerIds.includes(targetId) && !lastIncIds.includes(targetId) && !targetNode.hasMTTH) {
+                            continue;
+                        }
+
+                        const edgeKey = `${setterId}→${targetId}→flag`;
+                        if (!edgeSet.has(edgeKey)) {
+                            edgeSet.add(edgeKey);
+                            implicitEdges.push({
+                                source: setterId,
+                                target: targetId,
+                                edgeType: 'flag',
+                                label: `${flagKey.split(':')[1]} → ${techName}`,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return implicitEdges;
 }
 
 /**

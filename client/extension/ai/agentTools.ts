@@ -229,6 +229,13 @@ export class AgentToolExecutor {
                 message: 'git_ops is disabled for orchestrator sub-agents. Report the issue to the main agent instead of running git commands.',
             };
         }
+        if (context?.runnerOptions?.useSlimPrompt && toolName === 'run_command') {
+            return {
+                stdout: '',
+                stderr: 'run_command is disabled for orchestrator sub-agents. Report the need to the main agent instead of running shell commands or requesting permission.',
+                exitCode: 1,
+            };
+        }
 
         let timeout = TOOL_TIMEOUTS[toolName];
         if (timeout === undefined) {
@@ -876,8 +883,8 @@ export class AgentToolExecutor {
                 onStep: context?.onStep,
                 onBeforeFileWrite: runnerOpts?.onBeforeFileWrite,
                 onTodoUpdate: context?.onTodoUpdate || runnerOpts?.onTodoUpdate,
-                // 透传权限审批回调，使协调器子 Agent 的 run_command 等敏感操作能弹出审批卡片
-                onPermissionRequest: context?.onPermissionRequest || runnerOpts?.onPermissionRequest,
+                // Do not pass the parent permission callback into orchestrator workers.
+                // Sub-agents are non-interactive and install their own deny callback.
             };
 
             // 推送初始进度

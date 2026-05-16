@@ -110,7 +110,6 @@ Important current tool details:
 - Multi-file writes must acquire file locks in sorted path order.
 - `todo_write` is intentionally excluded from the global file-write lock path.
 - Generic write tools reject `.yml` localization writes; use `write_localisation`.
-- `ast_mutate` appears in the type/write-tool plumbing but is not currently defined in `tools/definitions.ts`; treat it as incomplete unless you are explicitly finishing that tool.
 - The active multi-agent tool is `dispatch_agents`, not the older `spawn_sub_agents` naming.
 
 ## Webview Rules

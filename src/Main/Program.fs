@@ -1461,7 +1461,7 @@ type Server(client: ILanguageClient) =
                                           "cwtools.exportTypes"
                                           "getFileTypes" ] }
                             inlayHintProvider = true
-                            renameProvider = false
+                            renameProvider = true
                             semanticTokensProvider =
                                 Some
                                     { legend =

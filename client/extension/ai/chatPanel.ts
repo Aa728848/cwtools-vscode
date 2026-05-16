@@ -225,6 +225,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'deleteTopic':
                 this.deleteTopic(msg.topicId);
                 break;
+            case 'renameTopic':
+                this.topicManager.renameTopic(msg.topicId, msg.title);
+                break;
             case 'forkTopic':
                 this.forkTopic(msg.topicId, msg.messageIndex);
                 break;
@@ -1473,6 +1476,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             resolver(false);
         }
         this.pendingPermissionResolvers.clear();
+        this.pendingPermissionModes.clear();
 
         // 清理所有挂起的文件写入确认 resolver
         for (const [id, resolver] of this.pendingWriteResolvers.entries()) {
@@ -1490,7 +1494,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.startNewTopic();
         } else if (cmd.startsWith('mode:') || cmd.startsWith('/mode:')) {
             const mode = cmd.split(':')[1] as AgentMode;
-            if (['build', 'plan', 'explore', 'general', 'review', 'orchestrator'].includes(mode)) {
+            if (mode === 'general') {
+                this.switchMode('utility');
+            } else if (['build', 'plan', 'explore', 'utility', 'review', 'orchestrator'].includes(mode)) {
                 this.switchMode(mode);
             }
         } else if (cmd === 'fork' || cmd === '/fork') {
@@ -1522,6 +1528,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // ─── Permission System (OpenCode-aligned) ────────────────────────────────────
 
     private pendingPermissionResolvers = new Map<string, (allowed: boolean) => void>();
+    private pendingPermissionModes = new Map<string, AgentMode>();
     private alwaysAllowRunCommand = false;
 
     /**
@@ -1534,25 +1541,40 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         description: string,
         command?: string
     ): Promise<boolean> {
-        if (tool === 'run_command' && this.alwaysAllowRunCommand) {
-            // Auto-approve if user clicked "Always Allow" in this session
-            return Promise.resolve(true);
+        const requestMode = this.currentMode;
+        if (tool === 'run_command' && requestMode === 'utility') {
+            const autoWriteMode = this.aiService.getConfig().agentFileWriteMode === 'auto';
+            const isEscalationRequest = /提权|高危|越过安全沙盒|escalation/i.test(description);
+            if (this.alwaysAllowRunCommand || (autoWriteMode && !isEscalationRequest)) {
+                // Auto-approve Utility mode commands when the session or global auto mode allows it.
+                return Promise.resolve(true);
+            }
         }
 
         return new Promise<boolean>((resolve) => {
             this.pendingPermissionResolvers.set(id, (allowed: boolean) => {
                 resolve(allowed);
             });
+            this.pendingPermissionModes.set(id, requestMode);
 
-            this.postMessage({ type: 'permissionRequest', permissionId: id, tool, description, command });
+            this.postMessage({
+                type: 'permissionRequest',
+                permissionId: id,
+                tool,
+                description,
+                command,
+                allowAlways: tool === 'run_command' && requestMode === 'utility',
+            });
         });
     }
 
     private resolvePermissionRequest(permissionId: string, allowed: boolean, alwaysAllow?: boolean): void {
         const resolver = this.pendingPermissionResolvers.get(permissionId);
         if (resolver) {
+            const requestMode = this.pendingPermissionModes.get(permissionId);
             this.pendingPermissionResolvers.delete(permissionId);
-            if (alwaysAllow && allowed) {
+            this.pendingPermissionModes.delete(permissionId);
+            if (alwaysAllow && allowed && requestMode === 'utility') {
                 this.alwaysAllowRunCommand = true;
             }
             resolver(allowed);

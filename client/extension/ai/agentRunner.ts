@@ -421,8 +421,11 @@ const EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'git_ops',
 ];
 
-/** General mode: all tools EXCEPT todo_write (research without task tracking) */
+/** General mode: legacy read-only Q&A mode. */
 const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
+
+/** Utility mode: full ordinary coding tools for non-PDX helper scripts/tools. */
+const UTILITY_EXCLUDED_TOOLS: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
 
 /** Review mode: same as explore, plus query_definition — read-only tools only */
 const REVIEW_MODE_TOOLS: AgentToolName[] = [
@@ -478,7 +481,7 @@ const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
 
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
-const WRITE_TOOLS = new Set(['write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'ast_mutate', 'deploy_mod_asset', 'write_localisation', 'write_design_blueprint', 'git_ops', 'edit_pdx_block']);
+const WRITE_TOOLS = new Set(['write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'deploy_mod_asset', 'write_localisation', 'write_design_blueprint', 'git_ops', 'edit_pdx_block']);
 export const SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS = new Set<string>(['write_file']);
 const READ_ONLY_TOOLS = new Set<string>([
     'read_file', 'list_directory', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
@@ -526,7 +529,6 @@ export function getAgentToolTargetFiles(
             add(args.TargetFile);
             break;
         case 'replace_lines':
-        case 'ast_mutate':
         case 'write_localisation':
             add(args.filePath);
             break;
@@ -998,6 +1000,7 @@ export class AgentRunner {
             plan: AGENT.MODE_PLAN,
             explore: AGENT.MODE_EXPLORE,
             general: AGENT.MODE_GENERAL,
+            utility: AGENT.MODE_UTILITY,
             review: AGENT.MODE_REVIEW,
             orchestrator: AGENT.MODE_ORCHESTRATOR,
         };
@@ -1024,7 +1027,7 @@ export class AgentRunner {
             const code = this.extractCode(finalMessage);
 
             // Plan / Explore / General / Review / Orchestrator mode — or no code generated — just an explanation
-            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'review' || mode === 'orchestrator') {
+            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator') {
                 return {
                     code: '',
                     explanation: finalMessage,
@@ -1370,6 +1373,8 @@ export class AgentRunner {
             availableTools = TOOL_DEFINITIONS.filter(t => REVIEW_MODE_TOOLS.includes(t.function.name as AgentToolName));
         } else if (mode === 'general') {
             availableTools = TOOL_DEFINITIONS.filter(t => !GENERAL_EXCLUDED_TOOLS.includes(t.function.name as AgentToolName));
+        } else if (mode === 'utility') {
+            availableTools = TOOL_DEFINITIONS.filter(t => !UTILITY_EXCLUDED_TOOLS.includes(t.function.name as AgentToolName));
         } else if (mode === 'loc_translator') {
             availableTools = TOOL_DEFINITIONS.filter(t => LOC_TRANSLATOR_TOOLS.includes(t.function.name as AgentToolName));
         } else if (mode === 'loc_writer') {

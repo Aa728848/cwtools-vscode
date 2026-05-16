@@ -123,7 +123,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <option value="build">构建模式</option>
                     <option value="plan">计划模式</option>
                     <option value="explore">分析模式</option>
-                    <option value="general">问答模式</option>
+                    <option value="utility">泛用模式</option>
                     <option value="review">审查模式</option>
                     <option value="orchestrator">协作模式</option>
                 </select>

@@ -9,13 +9,14 @@
  * - build:   Full tool access including file writes + validation loop (default)
  * - plan:    Read-only analysis, no writes, structured plan output
  * - explore: Parallel read-only exploration; focuses on understanding codebase, no validation
- * - general: Full tool access like build, but no todo_write; suited for research tasks
+ * - general: Legacy read-only Q&A mode kept for saved-topic compatibility.
+ * - utility: General-purpose workspace task mode for non-PDXScript scripts/tools.
  * - review:  Read-only mode focused on code review, finding issues, and providing feedback.
  * - loc_translator: Specialized for translating YML localisation files between languages.
  * - loc_writer: Specialized for writing new YML localisation entries from scratch.
  * - orchestrator: Multi-Agent coordinator mode — decomposes tasks and dispatches sub-agents.
  */
-export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator';
+export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator';
 
 // ─── MCP Settings ────────────────────────────────────────────────────────────
 
@@ -619,7 +620,6 @@ export type AgentToolName =
     | 'grep'
     | 'run_command'
     | 'apply_patch'
-    | 'ast_mutate'
     | 'analyze_diagnostic_error'
     | 'set_memory'
     | 'get_memory'
@@ -1096,6 +1096,7 @@ export type WebViewMessage =
     | { type: 'newTopic' }
     | { type: 'loadTopic'; topicId: string }
     | { type: 'deleteTopic'; topicId: string }
+    | { type: 'renameTopic'; topicId: string; title: string }
     | { type: 'forkTopic'; topicId: string; messageIndex: number }
     | { type: 'archiveTopic'; topicId: string }
     | { type: 'setShowArchived'; show: boolean }
@@ -1163,7 +1164,7 @@ export type HostMessage =
     | { type: 'autoWriteFile'; file: string; isNewFile: boolean }
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
-    | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string }
+    | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string; allowAlways?: boolean }
     /** Restore mode state after webview rebuild (panel visibility change) */
     | { type: 'setMode'; mode: AgentMode }
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */

@@ -17,6 +17,7 @@ export const AGENT = {
     MODE_PLAN: '分析中（Plan 模式 — 只读）...',
     MODE_EXPLORE: '探索代码库中（Explore 模式）...',
     MODE_GENERAL: '处理请求中（General 模式）...',
+    MODE_UTILITY: '处理泛用工程任务中（Utility 模式）...',
     MODE_REVIEW: '代码审查中（Review 模式）...',
     MODE_ORCHESTRATOR: '多 Agent 协调中（Orchestrator 模式）...',
     MODE_FALLBACK: '分析中...',

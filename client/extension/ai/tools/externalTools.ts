@@ -6,7 +6,7 @@
 import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import type { AgentMode, TodoItem, TodoWriteResult } from '../types';
+import type { TodoItem, TodoWriteResult } from '../types';
 
 // ─── Context type ────────────────────────────────────────────────────────────
 
@@ -306,15 +306,19 @@ export class ExternalToolHandler {
         exitCode: number;
         timedOut?: boolean;
     }> {
-        // Safety: deny obviously dangerous commands and pipe/chain operations
-        // P2-11 Fix: two-tier filter — destructive commands always blocked; pipe/redirect
-        // checked separately with a whitelist for known-safe tools.
-        const ALWAYS_BLOCKED = [
+        // Safety: deny obviously dangerous commands and shell control operators.
+        // Utility mode is intentionally broader for project tooling/scripts, so it
+        // may invoke PowerShell hosts; other modes still require escalation there.
+        const mode = context?.runnerOptions?.mode;
+        const isUtilityMode = mode === 'utility';
+        const DESTRUCTIVE_BLOCKED = [
             /\brm\s+-rf\b/i, /\bdel\s+\/[fqs]/i, /\bformat\b/i,
             /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
-            /\bpowershell\b/i, /\bpwsh\b/i, /\bnode\b\s+-e/i, /\bpython\b\s+-c/i,
+            /\bnode\b\s+-e/i, /\bpython\b\s+-c/i,
             /\bcurl\b.*\|\s*bash/i, /\bwget\b.*\|\s*sh/i,
         ];
+        const MODE_BLOCKED = isUtilityMode ? [] : [/\bpowershell\b/i, /\bpwsh\b/i];
+        const ALWAYS_BLOCKED = [...DESTRUCTIVE_BLOCKED, ...MODE_BLOCKED];
         const PIPE_REDIRECT_BLOCKED = [
             /\|/,               // pipe operator
             /&&/,               // command chaining
@@ -323,19 +327,41 @@ export class ExternalToolHandler {
             /</,                // input redirect
         ];
         // P2-11: Commands that are inherently read-only skip pipe/redirect checks
-        // (they still go through the user permission prompt)
+        // (complex safe commands still go through the user permission prompt)
         const SAFE_COMMAND_PREFIXES = [
-            'git log', 'git status', 'git diff', 'git show', 'git branch',
-            'git tag', 'git stash list', 'git remote', 'git rev-parse',
+            'git log', 'git status', 'git diff', 'git show',
+            'git stash list', 'git rev-parse',
             'dotnet --version', 'dotnet --info', 'node --version',
             'npm list', 'npm ls', 'npm --version', 'npx --version',
-            'cat ', 'type ', 'echo ', 'dir ', 'ls ', 'find ', 'grep ',
-            'wc ', 'head ', 'tail ', 'which ', 'where ', 'mmx ', 'mmx --version',
+            'cat', 'type', 'echo', 'dir', 'ls', 'grep', 'rg',
+            'wc', 'head', 'tail', 'which', 'where', 'mmx --version',
         ];
         const cmdLower = args.command.trim().toLowerCase();
-        const isSafePrefix = SAFE_COMMAND_PREFIXES.some(p => cmdLower.startsWith(p));
+        const startsWithCommandPrefix = (prefix: string) =>
+            cmdLower === prefix || cmdLower.startsWith(`${prefix} `);
+        const isSafePrefix = SAFE_COMMAND_PREFIXES.some(startsWithCommandPrefix);
+        const AUTO_APPROVE_CONTROL_BLOCKED = [
+            ...PIPE_REDIRECT_BLOCKED,
+            /(^|[^&])&(?!&)/, // cmd.exe single-ampersand chaining
+        ];
+        const hasShellControlOperator = AUTO_APPROVE_CONTROL_BLOCKED.some(pat => pat.test(args.command));
+        const SAFE_AUTO_APPROVE_PATTERNS = [
+            /^git\s+(?:log|status|diff|show|rev-parse)(?:\s|$)/i,
+            /^git\s+stash\s+list(?:\s|$)/i,
+            /^git\s+branch(?:\s+(?:--show-current|--list|-a|-r|-v|-vv|--verbose))?(?:\s|$)/i,
+            /^git\s+tag(?:\s+(?:--list|-l))?(?:\s|$)/i,
+            /^git\s+remote(?:\s+(?:-v|show))?(?:\s|$)/i,
+            /^dotnet\s+(?:--version|--info)$/i,
+            /^node\s+--version$/i,
+            /^npm\s+(?:list|ls|--version)(?:\s|$)/i,
+            /^npx\s+--version$/i,
+            /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where)(?:\s|$)/i,
+            /^mmx\s+--version$/i,
+        ];
+        const isAutoApproveSafeCommand = SAFE_AUTO_APPROVE_PATTERNS.some(pat => pat.test(cmdLower));
 
         const bypassSandbox = vs.workspace.getConfiguration('cwtools.ai.developer').get<boolean>('disableSecuritySandbox') === true;
+        const fileWriteMode = vs.workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
         let escalationReason = '';
 
         if (!bypassSandbox) {
@@ -375,7 +401,9 @@ export class ExternalToolHandler {
             return { stdout: '', stderr: `Blocked: Invalid working directory`, exitCode: 1 };
         }
 
-        const requiresPermission = true;
+        const safeAutoApprove = isAutoApproveSafeCommand && !hasShellControlOperator && !args.requestEscalation && !escalationReason;
+        const utilityAutoApprove = isUtilityMode && fileWriteMode === 'auto' && !args.requestEscalation && !escalationReason;
+        const requiresPermission = !(safeAutoApprove || utilityAutoApprove);
         const onPermissionRequest = context?.onPermissionRequest;
 
         if (requiresPermission && onPermissionRequest) {

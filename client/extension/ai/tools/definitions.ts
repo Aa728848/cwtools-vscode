@@ -475,7 +475,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'run_command',
-            description: '⚠️ PERMISSION REQUIRED — Run a shell command in the workspace directory. Every invocation ALWAYS requires explicit user approval regardless of the current mode, even for seemingly safe commands like "git status" or "npm run lint". You must explain in your chat output what the command does and why it is needed BEFORE calling this tool. Destructive commands (rm, del, format, shutdown) and pipe/chain operators (|, &&, ;, >, <) are permanently blocked. The user can deny any command.',
+            description: 'Run a shell command in the workspace directory. Read-only safe commands such as "git status", "git diff", version checks, and basic listing/search commands may run automatically. In Utility mode, when Agent file write mode is set to auto/direct-write, normal non-escalated commands are also auto-approved with no permission card. Other commands ask the user through the permission flow, and the user can choose one-time approval, denial, or Always Allow for this session. Utility mode permits broader project-tooling commands, including PowerShell/pwsh hosts, while non-Utility modes still require escalation for those shell hosts. Destructive commands (rm -rf, del /f, format, shutdown, reboot) and unsafe inline execution patterns remain sandboxed unless requestEscalation is explicitly used.',
             parameters: {
                 type: 'object',
                 properties: {

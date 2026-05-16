@@ -40,12 +40,13 @@ interface EventNode {
     namespace: string;
     isFireOnAction: boolean;
     isHidden: boolean;
+    hasMTTH: boolean;
 }
 
 interface EventEdge {
     source: string;
     target: string;
-    edgeType: 'option' | 'immediate' | 'after' | 'effect' | 'on_action' | 'decision' | 'scripted' | 'unknown';
+    edgeType: 'option' | 'immediate' | 'after' | 'effect' | 'on_action' | 'decision' | 'scripted' | 'flag' | 'on_action_implicit' | 'unknown';
     label?: string;
 }
 
@@ -132,6 +133,14 @@ const cy = cytoscape({
             },
         },
         {
+            selector: 'node[?hasMTTH]',
+            style: {
+                'background-color': '#5d4037',
+                'border-color': '#8d6e63',
+                'border-style': 'dashed' as any,
+            },
+        },
+        {
             selector: 'edge',
             style: {
                 'width': 1.5,
@@ -174,6 +183,14 @@ const cy = cytoscape({
         {
             selector: 'edge[edgeType="scripted"]',
             style: { 'line-color': '#009688', 'target-arrow-color': '#009688', 'line-style': 'dashed' as any },
+        },
+        {
+            selector: 'edge[edgeType="flag"]',
+            style: { 'line-color': '#ff7043', 'target-arrow-color': '#ff7043', 'line-style': 'dotted' as any, 'width': 1 },
+        },
+        {
+            selector: 'edge[edgeType="on_action_implicit"]',
+            style: { 'line-color': '#ec407a', 'target-arrow-color': '#ec407a', 'line-style': 'dotted' as any, 'width': 1 },
         },
         {
             selector: 'node[?isExternal]',
@@ -281,7 +298,7 @@ function showTooltip(node: cytoscape.NodeSingular) {
     tooltip.className = 'cy-tooltip';
     tooltip.innerHTML = `
         <div class="tt-id">${data.id}</div>
-        <div class="tt-type">${data.eventType}${data.isEntry ? ' (entry point)' : ''}${data.isTriggered ? ' (triggered only)' : ''}</div>
+        <div class="tt-type">${data.eventType}${data.isEntry ? ' (entry point)' : ''}${data.isTriggered ? ' (triggered only)' : ''}${data.hasMTTH ? ' (MTTH)' : ''}</div>
         ${data.title ? `<div style="margin-top:2px;">${data.title}</div>` : ''}
         <div class="tt-file">${data.file}:${data.line}</div>
     `;
@@ -391,6 +408,7 @@ function renderGraph() {
                 isEntry: isEntry || undefined,
                 isTriggered: node.isTriggeredOnly || undefined,
                 isHidden: node.isHidden || undefined,
+                hasMTTH: node.hasMTTH || undefined,
                 isOrphan: false,
             },
         });

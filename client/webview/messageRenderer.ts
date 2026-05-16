@@ -24,6 +24,7 @@ export interface RendererStep {
     stepIndex?: number;
     durationMs?: number;
     permissionId?: string;
+    allowAlways?: boolean;
     agentId?: string;
 }
 
@@ -314,7 +315,9 @@ export function buildToolPairHtml(
         html += `<div class="tp-perm-actions">`;
         html += `<button class="tp-perm-btn tp-perm-allow" data-perm="${escapeHtml(permId)}" data-action="allow">允许</button>`;
         html += `<button class="tp-perm-btn tp-perm-deny" data-perm="${escapeHtml(permId)}" data-action="deny">拒绝</button>`;
-        html += `<button class="tp-perm-btn tp-perm-always" data-perm="${escapeHtml(permId)}" data-action="always">始终允许</button>`;
+        if (callStep.allowAlways) {
+            html += `<button class="tp-perm-btn tp-perm-always" data-perm="${escapeHtml(permId)}" data-action="always">始终允许</button>`;
+        }
         html += `</div></div>`;
         return html;
     }

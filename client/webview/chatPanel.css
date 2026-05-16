@@ -343,6 +343,11 @@ body.general-mode .input-container:focus-within { border-color: #c792ea; box-sha
 body.general-mode .send-btn { background: #c792ea; }
 body.general-mode .token-usage-fill { background: #c792ea !important; }
 
+body.utility-mode .input-container { border-color: #4fb3a3; box-shadow: 0 0 0 1px rgba(79,179,163,0.3); }
+body.utility-mode .input-container:focus-within { border-color: #4fb3a3; box-shadow: 0 0 0 1px #4fb3a3, 0 0 8px rgba(79,179,163,0.2); }
+body.utility-mode .send-btn { background: #4fb3a3; }
+body.utility-mode .token-usage-fill { background: #4fb3a3 !important; }
+
 body.review-mode .input-container { border-color: #f48771; box-shadow: 0 0 0 1px rgba(244,135,113,0.3); }
 body.review-mode .input-container:focus-within { border-color: #f48771; box-shadow: 0 0 0 1px #f48771, 0 0 8px rgba(244,135,113,0.2); }
 body.review-mode .send-btn { background: #f48771; }
@@ -474,7 +479,7 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .retract-cancel { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }
 
 /* ── Floating Card Area ── */
-.floating-card-area { flex-shrink: 0; padding: 0 16px; display: flex; flex-direction: column; gap: 8px; z-index: 10; margin-bottom: 8px; }
+.floating-card-area { flex-shrink: 0; padding: 0 16px; display: flex; flex-direction: column; gap: 8px; z-index: 10; margin: 0 0 8px; }
 .floating-card-area:empty { display: none; }
 
 /* ── Permission request card ── */
@@ -595,6 +600,7 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .topic-action-btn { min-width: 24px; min-height: 24px; padding: 0 6px; font-size: 11px; border-radius: 6px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); cursor: pointer; color: var(--fg); opacity: 0.72; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .topic-action-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
 .topic-fork-btn:hover { color: cornflowerblue; }
+.topic-rename-btn:hover { color: #4fb3a3; }
 .topic-archive-btn:hover { color: var(--warning); }
 
 /* ── Mode indicator (replaces plan-indicator) ── */
@@ -602,10 +608,12 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 body.plan-mode .mode-indicator,
 body.explore-mode .mode-indicator,
 body.general-mode .mode-indicator,
+body.utility-mode .mode-indicator,
 body.review-mode .mode-indicator { display: block; }
 body.plan-mode .mode-indicator { color: cornflowerblue; }
 body.explore-mode .mode-indicator { color: #7dbb7d; }
 body.general-mode .mode-indicator { color: #c792ea; }
+body.utility-mode .mode-indicator { color: #4fb3a3; }
 body.review-mode .mode-indicator { color: #f48771; }
 
 /* ── Slash command popup ── */

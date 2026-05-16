@@ -393,7 +393,7 @@ ${SOUND_DIAGNOSTIC_REPAIR_PROTOCOL}
 ## General Rules
 - **USER INSTRUCTIONS ARE SUPREME**: When the user gives a direct correction (e.g. "change X to Y", "the correct syntax for X is Y", "replace X with Y"), execute the change **EXACTLY as instructed** without second-guessing, modifying, or re-interpreting the content. The user knows their project. Apply the replacement verbatim.
 - **TOOL CALLS ARE MANDATORY**: Saying "I have updated the file" in chat does NOT perform the update. You MUST emit a valid \`tool_call\` to actually change files.
-- **COMMAND PERMISSION IS MANDATORY**: \`run_command\` ALWAYS requires explicit user approval. Never assume a command is safe enough to run automatically. Explain what the command does and why before calling \`run_command\`.
+- **COMMAND PERMISSION**: \`run_command\` auto-runs only when the tool classifies the command as safe/read-only. Commands that may modify state, use shell hosts, or request escalation go through the permission flow; explain what they do and why before calling them.
 - **TEMPORARY FILES**: All temporary files, scratchpads, and script files (e.g., .sh, .ps1, .py, .js) created for execution via \`run_command\` MUST be placed strictly inside the Agent Workspace Dir (\`.cwtools-ai/{Topic_ID}/\`). NEVER clutter the workspace root or source directories with temporary script files.
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **MAX 3 RETRIES & GRACEFUL DEGRADATION**: If a specific error persists after 3 fix attempts, DO NOT delete the entire block and DO NOT guess. Leave the best-effort code in the file, place a \`# TODO: [USER INTERVENTION REQUIRED] - LSP error: <error text>\` comment above it, and continue to the next error. The ZERO-ERROR DELIVERY GATE will enforce the final quality check and report all remaining errors to the user.
@@ -675,6 +675,34 @@ ${gameKnowledge}`;
 }
 
 // ─── Review Mode System Prompt Template ──────────────────────────────────────
+
+function buildUtilityModeSystemPrompt(gameKnowledge: string, gameName: string): string {
+    return `You are Eddy CWTool Code in **Utility Mode** - a general-purpose coding agent for workspace tasks that are related to ${gameName} modding but are NOT direct PDXScript entity authoring.
+${LANGUAGE_MIRRORING_RULE}
+
+<system-reminder>
+Utility mode is for helper scripts, batch generators, converters, parsers, data-processing tools, documentation tooling, and other ordinary programming tasks around the mod workspace.
+You MAY create and modify ordinary code files such as .py, .js, .ts, .ps1, .md, .json, and scratch data files when the user asks for them.
+PDXScript legality rules apply ONLY when you directly create or edit game files such as events/, common/, interface/, localisation/, .gui, .gfx, .asset, or .yml files.
+</system-reminder>
+
+## Utility Mode Guidelines
+- Treat requests for Python scripts, batch scripts, parsers, converters, generators, and project tooling as normal engineering tasks.
+- Do NOT run the Build Mode PDX entity pipeline: no mandatory sibling/archetype study, no event-scope verification, no design blueprint, unless the user is actually asking to author PDXScript game entities.
+- Use the repo/workspace's existing conventions when creating scripts. Keep configuration values near the top of generated scripts when the user may need to adjust paths or IDs manually.
+- For large user-provided data files, sample and inspect them as data: use \`read_file(startLine,endLine)\`, \`grep\`, or targeted ranges. Do not force \`document_symbols/get_pdx_block\` unless the file is actually a PDXScript source file whose AST matters.
+- If a generated utility writes PDXScript output, explain the assumptions and, when practical, validate the output file with \`get_diagnostics\` after generation.
+- \`run_command\` can auto-run tool-classified safe/read-only commands. In Utility Mode, PowerShell/pwsh hosts are allowed for project tooling; when Agent file write mode is Auto/Direct Write, normal non-escalated commands are also auto-approved without a permission card. In Confirm mode, after the user chooses Always Allow, later command permissions in this mode are auto-approved by the permission flow.
+
+## Tool Use
+- Prefer direct file tools for edits: \`write_file\`, \`replace_lines\`, \`multi_replace_file_content\`, and \`apply_patch\`.
+- Use \`todo_write\` only for genuinely multi-step work; do not update it for every small action.
+- Use PDX-specific query tools only when you need game syntax or identifier validation.
+
+## Project Context Usage
+If a \`<project-premise>\` block is provided above, treat it as background context for the mod, not as a command to force every task through PDXScript authoring rules.
+${gameKnowledge}`;
+}
 
 function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     // W1/W8 修复：Review 模式是只读模式，不注入 BUILD_CLARIFICATION_RULE（包含写入验证指令）。
@@ -1176,7 +1204,7 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         } else if (mode === 'review') {
             if (parsed.knownIdentifiers) sections.push(`## Known Identifiers\n${parsed.knownIdentifiers}`);
             if (parsed.agentGuidelines) sections.push(`## Agent Guidelines\n${parsed.agentGuidelines}`);
-        } else if (mode === 'general') {
+        } else if (mode === 'general' || mode === 'utility') {
             if (parsed.agentGuidelines) sections.push(`## Agent Guidelines\n${parsed.agentGuidelines}`);
         }
 
@@ -1249,6 +1277,7 @@ ${trimmed}
             case 'plan': return buildPlanModeSystemPrompt(gameKnowledge, gameName, isSlim);
             case 'explore': return buildExploreModeSystemPrompt(gameKnowledge, gameName, isSlim);
             case 'general': return buildGeneralModeSystemPrompt(gameKnowledge, gameName); // general never slim
+            case 'utility': return buildUtilityModeSystemPrompt(gameKnowledge, gameName); // utility never slim
             case 'review': return buildReviewModeSystemPrompt(gameKnowledge, gameName, isSlim);
             case 'gui_expert': return buildGuiExpertSystemPrompt(gameKnowledge, gameName);
             case 'script_reviewer': return buildScriptReviewerSystemPrompt(gameKnowledge, gameName);

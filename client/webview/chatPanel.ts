@@ -391,7 +391,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             if (!isGenerating) sendMessage();
         } else if (e.key === 'Tab') {
             e.preventDefault();
-            const modes = ['build', 'plan', 'explore', 'general', 'review', 'orchestrator'];
+            const modes = ['build', 'plan', 'explore', 'utility', 'review', 'orchestrator'];
             const idx = modes.indexOf(currentMode);
             const cycleDir = e.shiftKey ? -1 : 1;
             const nextMode = modes[(idx + cycleDir + modes.length) % modes.length]!;
@@ -536,7 +536,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         { cmd: '/mode:build', desc: '切换到构建模式（生成代码）' },
         { cmd: '/mode:plan', desc: '切换到计划模式（单 Agent 只读规划）' },
         { cmd: '/mode:explore', desc: '切换到分析模式（探索代码库）' },
-        { cmd: '/mode:general', desc: '切换到问答模式（通用问答）' },
+        { cmd: '/mode:utility', desc: '切换到泛用模式（脚本、工具与非 PDXScript 工程任务）' },
         { cmd: '/mode:review', desc: '切换到审查模式（代码审查）' },
         { cmd: '/mode:orchestrator', desc: '切换到多 Agent 执行模式（DAG 分派与并行协作）' },
     ];
@@ -1117,7 +1117,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         build: { label: null, bodyClass: 'build-mode' },
         plan: { label: '计划模式 - 单 Agent 只读规划，不修改文件', bodyClass: 'plan-mode' },
         explore: { label: '分析模式 — 探索代码库结构', bodyClass: 'explore-mode' },
-        general: { label: '问答模式 — 通用问答', bodyClass: 'general-mode' },
+        general: { label: '泛用模式 — 脚本、工具与非 PDXScript 工程任务', bodyClass: 'utility-mode' },
+        utility: { label: '泛用模式 — 脚本、工具与非 PDXScript 工程任务', bodyClass: 'utility-mode' },
         review: { label: '审查模式 — 代码审查', bodyClass: 'review-mode' },
         loc_translator: { label: '翻译模式 — 本地化文件翻译（子代理专用）', bodyClass: 'build-mode' },
         loc_writer: { label: '写作模式 — 本地化内容创作（子代理专用）', bodyClass: 'build-mode' },
@@ -1130,6 +1131,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
      * fromUI=false → backend sent modeChanged message → only update UI (no echo back)
      */
     function switchMode(mode: string, fromUI?: boolean) {
+        if (mode === 'general') mode = 'utility';
         if (currentMode === mode && !fromUI) return; // avoid redundant update
         currentMode = mode;
         // Sync dropdown value without re-triggering change event
@@ -1138,7 +1140,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         // Only post to backend when user initiated (avoids ping-pong)
         if (fromUI) vscode.postMessage({ type: 'switchMode', mode });
         // Remove all mode body classes, add correct one
-        document.body.classList.remove('build-mode', 'plan-mode', 'explore-mode', 'general-mode', 'review-mode', 'orchestrator-mode');
+        document.body.classList.remove('build-mode', 'plan-mode', 'explore-mode', 'general-mode', 'utility-mode', 'review-mode', 'orchestrator-mode');
         const meta = MODE_META[mode as keyof typeof MODE_META];
         if (meta && meta.bodyClass) document.body.classList.add(meta.bodyClass);
         // Update inline mode indicator text
@@ -2581,6 +2583,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const permId = btn.dataset.perm;
         const action = btn.dataset.action;
         if (!permId || !action) return;
+        floatingPermissionIds.delete(permId);
+        document.querySelectorAll('.permission-card[data-perm-id]').forEach(el => {
+            if ((el as HTMLElement).dataset.permId === permId) dismissCard(el as HTMLElement, 0);
+        });
 
         // Disable all sibling buttons
         const parent = btn.closest('.tp-perm-actions');
@@ -2877,6 +2883,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     // ── Floating Card Queue ──────────────────────────────────────────────────
     let floatingCardQueue: HTMLElement[] = [];
     let isShowingFloatingCard = false;
+    const floatingPermissionIds = new Set<string>();
 
     function processFloatingCardQueue() {
         if (isShowingFloatingCard || floatingCardQueue.length === 0) return;
@@ -2892,7 +2899,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     // ── Permission request card ─────────────────────────────────────────────────
-    function showPermissionCard(permissionId: string, tool: string, description: string, command: string) {
+    function showPermissionCard(permissionId: string, tool: string, description: string, command: string, allowAlways?: boolean) {
+        if (!permissionId || floatingPermissionIds.has(permissionId)) return;
+        floatingPermissionIds.add(permissionId);
         const div = document.createElement('div');
         div.className = 'permission-card';
         div.dataset.permId = permissionId;
@@ -2902,7 +2911,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             `<button class="permission-allow-btn" data-permid="${safeId}">${svgIcon('check')}允许</button>` +
             `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}拒绝</button>`;
             
-        if (tool === 'run_command') {
+        if (tool === 'run_command' && allowAlways) {
             actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" style="margin-left:auto; font-size:0.8em; opacity:0.8" title="当前会话期间一直允许">${svgIcon('check')}一直允许</button>`;
         }
         actionsHtml += `</div>`;
@@ -2926,6 +2935,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             this.innerHTML = svgIcon('check') + '已允许';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true });
             dismissCard(div, 400, () => {
+                floatingPermissionIds.delete(permissionId);
                 isShowingFloatingCard = false;
                 processFloatingCardQueue();
             });
@@ -2941,6 +2951,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: false });
             dismissCard(div, 400, () => {
+                floatingPermissionIds.delete(permissionId);
                 isShowingFloatingCard = false;
                 processFloatingCardQueue();
             });
@@ -2958,6 +2969,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 this.innerHTML = svgIcon('check') + '已一直允许';
                 vscode.postMessage({ type: 'permissionResponse', permissionId, allowed: true, alwaysAllow: true });
                 dismissCard(div, 400, () => {
+                    floatingPermissionIds.delete(permissionId);
                     isShowingFloatingCard = false;
                     processFloatingCardQueue();
                 });
@@ -3003,6 +3015,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 
                 // Clear any unresolved interactive cards (permission, diff)
                 floatingCardQueue = [];
+                floatingPermissionIds.clear();
                 isShowingFloatingCard = false;
                 document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
@@ -3063,6 +3076,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 
                 // Clear any unresolved interactive cards
                 floatingCardQueue = [];
+                floatingPermissionIds.clear();
                 isShowingFloatingCard = false;
                 document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
@@ -3220,6 +3234,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                         content: msg.command || msg.description || '',
                         toolName: msg.tool || '',
                         permissionId: msg.permissionId,
+                        allowAlways: !!msg.allowAlways,
                         timestamp: Date.now(),
                     };
                     const stepIdx = state.liveToolTimeline.querySelectorAll('.tool-pair').length + 1;
@@ -3231,7 +3246,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     state.liveToolTimeline.appendChild(pairDiv);
                     scrollBottom();
                 }
-                // Floating card removed — inline timeline buttons are the only UI
+                showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways);
                 break;
             }
 
@@ -4304,6 +4319,18 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         forkBtn.title = '分叉话题';
         forkBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'forkTopic', topicId: topic.id, messageIndex: 999 }); });
 
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'topic-action-btn topic-rename-btn';
+        renameBtn.innerHTML = svgIconNoMargin('edit');
+        renameBtn.title = '重命名';
+        renameBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            const nextTitle = window.prompt('重命名话题', topic.title || '');
+            if (nextTitle && nextTitle.trim() && nextTitle.trim() !== topic.title) {
+                vscode.postMessage({ type: 'renameTopic', topicId: topic.id, title: nextTitle.trim() });
+            }
+        });
+
         const archBtn = document.createElement('button');
         archBtn.className = 'topic-action-btn topic-archive-btn';
         archBtn.innerHTML = topic.archived ? `${svgIconNoMargin('refresh')} 恢复` : svgIconNoMargin('bookmark');
@@ -4317,6 +4344,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         del.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'deleteTopic', topicId: topic.id }); });
 
         actions.appendChild(forkBtn);
+        actions.appendChild(renameBtn);
         actions.appendChild(archBtn);
         actions.appendChild(del);
         item.appendChild(main);

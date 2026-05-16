@@ -230,15 +230,77 @@ class LocRefDefinitionProvider implements vs.DefinitionProvider {
 }
 
 /**
- * Register all localization enhancement features
+ * 脚本文件中本地化 key 的定义跳转
+ * 支持 title = "xxx" / name = xxx / desc = xxx 等引用格式
+ */
+class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
+    async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
+        // 尝试匹配带引号和不带引号的字符串值
+        const range =
+            document.getWordRangeAtPosition(position, /"([A-Za-z_][A-Za-z0-9_.:-]+)"/) ||
+            document.getWordRangeAtPosition(position, /\b([A-Za-z_][A-Za-z0-9_.:-]+)\b/);
+        if (!range) return null;
+
+        let word = document.getText(range).replace(/^"|"$/g, '');
+        // 跳过明显非本地化 key 的情况（纯数字、yes/no、常见关键字等）
+        if (/^\d+$/.test(word) || /^(yes|no|none|root|prev|from|this|event_target|owner|capital_scope)$/i.test(word)) return null;
+
+        const locMap = await getLocMap();
+        const entry = locMap.get(word);
+        if (!entry) return null;
+
+        return new vs.Location(entry.uri, new vs.Position(entry.line, 0));
+    }
+}
+
+/**
+ * 脚本文件中本地化 key 的悬浮预览
+ * 在脚本文件中 hover loc key 时显示翻译文本
+ */
+class ScriptLocHoverProvider implements vs.HoverProvider {
+    async provideHover(document: vs.TextDocument, position: vs.Position): Promise<vs.Hover | null> {
+        const range =
+            document.getWordRangeAtPosition(position, /"([A-Za-z_][A-Za-z0-9_.:-]+)"/) ||
+            document.getWordRangeAtPosition(position, /\b([A-Za-z_][A-Za-z0-9_.:-]+)\b/);
+        if (!range) return null;
+
+        let word = document.getText(range).replace(/^"|"$/g, '');
+        if (/^\d+$/.test(word) || /^(yes|no|none|root|prev|from|this|event_target|owner|capital_scope)$/i.test(word)) return null;
+
+        const locMap = await getLocMap();
+        const entry = locMap.get(word);
+        if (!entry) return null;
+
+        // 去除 Paradox 颜色代码以便清晰显示
+        const cleanValue = entry.value.replace(/§[RGBYWHETLMSPr!]/g, '');
+
+        const md = new vs.MarkdownString();
+        md.appendMarkdown(`**🌐 ${word}**\n\n`);
+        md.appendMarkdown(`> ${cleanValue}\n\n`);
+        md.appendMarkdown(`*${vs.workspace.asRelativePath(entry.uri)}:${entry.line + 1}*`);
+
+        return new vs.Hover(md, range);
+    }
+}
+
+/**
+ * 注册所有本地化增强功能
  */
 export function registerLocalizationFeatures(context: vs.ExtensionContext): void {
-    // Register hover and definition providers for .yml files
+    // 注册 .yml 文件内 $REF$ 引用的 hover 和定义跳转
     const ymlSelector: vs.DocumentSelector = { scheme: 'file', pattern: '**/*.yml' };
 
+    // 游戏脚本语言选择器 — 用于脚本文件中 loc key 的跳转
+    const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
+    const scriptSelector: vs.DocumentSelector = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
+
     context.subscriptions.push(
+        // .yml 文件内部的 $REF$ 引用
         vs.languages.registerHoverProvider(ymlSelector, new LocRefHoverProvider()),
         vs.languages.registerDefinitionProvider(ymlSelector, new LocRefDefinitionProvider()),
+        // 脚本文件中 loc key 的 Ctrl+Click 跳转和 hover 预览
+        vs.languages.registerDefinitionProvider(scriptSelector, new ScriptLocDefinitionProvider()),
+        vs.languages.registerHoverProvider(scriptSelector, new ScriptLocHoverProvider()),
     );
 
     // Apply decorations on active editor change

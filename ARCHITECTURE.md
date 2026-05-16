@@ -143,7 +143,6 @@ sequenceDiagram
 - `todo_write` 是纯内存/UI 计划工具，故意不进入写文件锁。
 - `.yml` 本地化文件必须使用 `write_localisation`；通用写工具会拒绝本地化写入。
 - 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。
-- `ast_mutate` 仍出现在类型和写工具集合中，但没有当前 schema 定义；除非专门补齐该工具，否则不要依赖它。
 
 ### Orchestrator
 

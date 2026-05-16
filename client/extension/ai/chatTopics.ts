@@ -110,6 +110,21 @@ export class ChatTopicManager {
         return isCurrentDeleted;
     }
 
+    renameTopic(topicId: string, title: string): boolean {
+        const nextTitle = title.trim().replace(/\s+/g, ' ').substring(0, 120);
+        if (!nextTitle) return false;
+
+        const topic = this.topics.find(t => t.id === topicId);
+        if (!topic) return false;
+
+        topic.title = nextTitle;
+        topic.updatedAt = Date.now();
+        this.saveTopics();
+        this.sendTopicList();
+        this.postMessage({ type: 'topicTitleGenerated', topicId, title: nextTitle });
+        return true;
+    }
+
     /**
      * Fork a topic at a specific message index (OpenCode-style session fork).
      * Creates a new topic with messages[0..messageIndex], switches to it.

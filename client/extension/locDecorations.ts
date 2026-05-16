@@ -253,35 +253,6 @@ class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
     }
 }
 
-/**
- * 脚本文件中本地化 key 的悬浮预览
- * 在脚本文件中 hover loc key 时显示翻译文本
- */
-class ScriptLocHoverProvider implements vs.HoverProvider {
-    async provideHover(document: vs.TextDocument, position: vs.Position): Promise<vs.Hover | null> {
-        const range =
-            document.getWordRangeAtPosition(position, /"([A-Za-z_][A-Za-z0-9_.:-]+)"/) ||
-            document.getWordRangeAtPosition(position, /\b([A-Za-z_][A-Za-z0-9_.:-]+)\b/);
-        if (!range) return null;
-
-        let word = document.getText(range).replace(/^"|"$/g, '');
-        if (/^\d+$/.test(word) || /^(yes|no|none|root|prev|from|this|event_target|owner|capital_scope)$/i.test(word)) return null;
-
-        const locMap = await getLocMap();
-        const entry = locMap.get(word);
-        if (!entry) return null;
-
-        // 去除 Paradox 颜色代码以便清晰显示
-        const cleanValue = entry.value.replace(/§[RGBYWHETLMSPr!]/g, '');
-
-        const md = new vs.MarkdownString();
-        md.appendMarkdown(`**🌐 ${word}**\n\n`);
-        md.appendMarkdown(`> ${cleanValue}\n\n`);
-        md.appendMarkdown(`*${vs.workspace.asRelativePath(entry.uri)}:${entry.line + 1}*`);
-
-        return new vs.Hover(md, range);
-    }
-}
 
 /**
  * 注册所有本地化增强功能
@@ -298,9 +269,11 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
         // .yml 文件内部的 $REF$ 引用
         vs.languages.registerHoverProvider(ymlSelector, new LocRefHoverProvider()),
         vs.languages.registerDefinitionProvider(ymlSelector, new LocRefDefinitionProvider()),
-        // 脚本文件中 loc key 的 Ctrl+Click 跳转和 hover 预览
+        // 脚本文件中 loc key 的 Ctrl+Click 跳转
+        // 注意：不注册 ScriptLocHoverProvider，因为 F# CWTools 后端已经通过
+        // lochoverFromInfo 提供了脚本文件中 loc key 的本地化悬浮预览，
+        // 重复注册会导致 hover 弹窗中翻译文本出现两次。
         vs.languages.registerDefinitionProvider(scriptSelector, new ScriptLocDefinitionProvider()),
-        vs.languages.registerHoverProvider(scriptSelector, new ScriptLocHoverProvider()),
     );
 
     // Apply decorations on active editor change

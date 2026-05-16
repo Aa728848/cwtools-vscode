@@ -307,10 +307,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'permissionResponse':
                 this.resolvePermissionRequest(msg.permissionId, msg.allowed, msg.alwaysAllow);
                 break;
-            case 'openPlanFile':
-                // Open the plan markdown file in VS Code's Markdown Preview (rendered view)
-                vs.commands.executeCommand('markdown.showPreview', vs.Uri.file(msg.filePath));
+            case 'openPlanFile': {
+                // 打开计划文件——支持共享路径候选搜索
+                const planPath = this.resolveArtifactFilePath(msg.filePath);
+                if (planPath) {
+                    void vs.commands.executeCommand('markdown.showPreview', vs.Uri.file(planPath));
+                } else {
+                    vs.window.showWarningMessage(`无法找到计划文件: ${path.basename(msg.filePath)}`);
+                }
                 break;
+            }
             case 'openArtifact':
                 await this.openArtifact(msg.artifactId, msg.file);
                 break;
@@ -713,9 +719,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             );
 
             // ── Plan/Orchestrator mode: suppress explanation in chat, auto-open annotation panel ──
-            // If the AI is just asking clarification questions (indicated by :::question syntax),
-            // it shouldn't lock into an Implementation Plan yet. Treat it as a conversational turn.
-            const isJustAskingQuestions = result.explanation && result.explanation.includes(':::question');
+            // If the AI is just asking clarification questions (indicated by :::question syntax
+            // or heuristic question detection), it shouldn't lock into an Implementation Plan yet.
+            // Treat it as a conversational turn.
+            const isJustAskingQuestions = this.detectClarificationPhase(result);
             const usedDispatchAgents = result.steps.some(s => s.toolName === 'dispatch_agents');
 
             if ((this.currentMode === 'plan' || (this.currentMode === 'orchestrator' && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
@@ -1056,8 +1063,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         if (artifact.filePath) {
-            const uri = vs.Uri.file(artifact.filePath);
-            const ext = path.extname(artifact.filePath).toLowerCase();
+            // 共享路径兼容：如果存储的 filePath 不存在，尝试在候选位置查找
+            const resolvedPath = this.resolveArtifactFilePath(artifact.filePath);
+            if (!resolvedPath) {
+                vs.window.showWarningMessage(`无法找到文件: ${path.basename(artifact.filePath)}`);
+                return;
+            }
+            const uri = vs.Uri.file(resolvedPath);
+            const ext = path.extname(resolvedPath).toLowerCase();
             if (ext === '.md' || ext === '.markdown') {
                 await vs.commands.executeCommand('markdown.showPreview', uri);
             } else {
@@ -1085,6 +1098,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             vs.window.showWarningMessage('The requested file change is not available in this artifact.');
             return;
         }
+
+        // 清理旧的临时 diff 文件，防止每次点击都累积新文件
+        await this.cleanupArtifactDiffTempDir();
 
         const targets = file ? requested.slice(0, 1) : requested.slice(0, 8);
         for (let i = 0; i < targets.length; i++) {
@@ -1142,7 +1158,58 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private makeArtifactDiffTempPath(tmpDir: string, filePath: string, side: 'before' | 'after', index: number): string {
         const ext = path.extname(filePath) || '.txt';
         const name = (path.basename(filePath, ext) || 'artifact').replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
-        return path.join(tmpDir, `${Date.now()}_${index}_${name}_${side}${ext}`);
+        // 使用确定性命名（不含 Date.now()），重复点击同一 artifact 时覆盖旧文件而非累积
+        return path.join(tmpDir, `${index}_${name}_${side}${ext}`);
+    }
+
+    /**
+     * 清理 artifact diff 临时目录下的旧文件。
+     * 在每次打开 diff artifact 时调用，防止临时文件无限累积。
+     */
+    private async cleanupArtifactDiffTempDir(): Promise<void> {
+        const tmpDir = this.getArtifactDiffTempDir();
+        try {
+            if (!fs.existsSync(tmpDir)) return;
+            const entries = await fs.promises.readdir(tmpDir);
+            // 仅删除临时 diff 文件（匹配确定性命名格式或旧版 Date.now 格式）
+            for (const entry of entries) {
+                if (/_(before|after)\.[^.]+$/.test(entry)) {
+                    await fs.promises.unlink(path.join(tmpDir, entry)).catch(() => { /* 忽略 */ });
+                }
+            }
+        } catch {
+            // 目录不存在或无法读取时静默忽略
+        }
+    }
+
+    /**
+     * 解析 artifact 文件路径——兼容共享路径和多候选位置。
+     * 如果直接路径存在则使用，否则从文件名推断并在所有 topic 候选目录中查找。
+     */
+    private resolveArtifactFilePath(filePath: string): string | null {
+        // 优先检查直接路径
+        if (fs.existsSync(filePath)) return filePath;
+
+        // 从路径中提取文件名，在候选位置查找
+        const fileName = path.basename(filePath);
+        const topicId = this.topicManager.currentTopic?.id;
+
+        // 先尝试从当前 topic 的所有候选目录查找
+        if (topicId) {
+            const candidates = getTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
+            const found = candidates.find(c => fs.existsSync(c));
+            if (found) return found;
+        }
+
+        // 最后尝试从路径本身推断 topicId（可能与当前 topic 不同）
+        const parentName = path.basename(path.dirname(filePath));
+        if (parentName && parentName !== topicId) {
+            const candidates = getTopicFileCandidates(parentName, fileName, getProjectWorkspaceRoot());
+            const found = candidates.find(c => fs.existsSync(c));
+            if (found) return found;
+        }
+
+        return null;
     }
 
     private findGeneratedTopicFile(topicId: string, fileName: string): string | null {
@@ -1167,6 +1234,40 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         snapshots.push({ filePath, previousContent });
     }
 
+
+    /**
+     * 检测 Plan/Orchestrator 模式下 AI 的回复是否属于"澄清/提问阶段"。
+     *
+     * 仅使用确定性信号判断，不做启发式猜测：
+     * - 已存在计划文件 → 修订阶段（非澄清）
+     * - write_file 写入了计划 → 计划阶段（非澄清）
+     * - 包含 :::question 语法 → 澄清阶段
+     */
+    private detectClarificationPhase(result: { explanation: string; steps: any[] }): boolean {
+        if (!result.explanation) return false;
+
+        // 如果当前 topic 下已存在 Implementation_Plan.md，
+        // 说明用户已经批注过计划、AI 正在修订，不应判定为澄清阶段。
+        const topicId = this.topicManager.currentTopic?.id;
+        if (topicId) {
+            const candidates = getTopicFileCandidates(topicId, 'Implementation_Plan.md', getProjectWorkspaceRoot());
+            const planExists = candidates.some(c => fs.existsSync(c));
+            if (planExists) return false;
+        }
+
+        // 如果 AI 通过 write_file 工具写入了计划文件 → 计划阶段
+        const wroteImplementationPlan = result.steps.some(
+            (s: any) => (s.toolName === 'write_file') &&
+            typeof s.toolArgs?.file === 'string' &&
+            /implementation_plan|plan\.md/i.test(s.toolArgs.file)
+        );
+        if (wroteImplementationPlan) return false;
+
+        // 包含 :::question 语法 → 明确为提问阶段
+        if (result.explanation.includes(':::question')) return true;
+
+        return false;
+    }
 
     private async savePlanFile(planText: string, userPrompt: string, steps?: any[]): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────

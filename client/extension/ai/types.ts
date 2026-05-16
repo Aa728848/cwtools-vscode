@@ -961,6 +961,37 @@ export type AgentArtifactKind =
     | 'media'
     | 'blackboard';
 
+export type DiffFileStatus = 'created' | 'modified' | 'deleted';
+
+export interface DiffLine {
+    type: 'add' | 'remove' | 'context';
+    content: string;
+    oldLineNo?: number;
+    newLineNo?: number;
+}
+
+export interface DiffSummaryFile {
+    file: string;
+    status: DiffFileStatus;
+    diffPreview: string;
+    additions?: number;
+    deletions?: number;
+    diffLines?: DiffLine[];
+}
+
+export interface DiffArtifactFile extends DiffSummaryFile {
+    previousContent?: string | null;
+    currentContent?: string | null;
+    tooLarge?: boolean;
+    currentTooLarge?: boolean;
+}
+
+export interface DiffArtifactData {
+    files: DiffArtifactFile[];
+    additions: number;
+    deletions: number;
+}
+
 export interface AgentArtifact {
     id: string;
     kind: AgentArtifactKind;
@@ -968,6 +999,7 @@ export interface AgentArtifact {
     summary?: string;
     filePath?: string;
     relPath?: string;
+    action?: 'openFile' | 'openDiff' | 'preview';
     status?: 'pending' | 'running' | 'done' | 'failed';
     createdAt: number;
     updatedAt?: number;
@@ -1123,6 +1155,8 @@ export type WebViewMessage =
     | { type: 'approveWalkthrough' }
     /** Open the plan .md file in the VS Code editor */
     | { type: 'openPlanFile'; filePath: string }
+    /** Open an artifact action, such as a native diff for file-change artifacts */
+    | { type: 'openArtifact'; artifactId: string; file?: string }
     /** WebView is fully loaded and ready to receive messages */
     | { type: 'ready' }
     /** Request the list of workspace files for @ mention */
@@ -1149,7 +1183,7 @@ export type HostMessage =
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }
-    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null } }
+    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[] }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat' }
@@ -1182,9 +1216,9 @@ export type HostMessage =
     /** Token usage stats after generation completes */
     | { type: 'tokenUsage'; usage: TokenUsage; model: string }
     /** Emit a unified diff summary of all files changed in the message */
-    | { type: 'diffSummary'; files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string; additions?: number; deletions?: number; diffLines?: Array<{ type: 'add' | 'remove' | 'context'; content: string; oldLineNo?: number; newLineNo?: number }> }> }
+    | { type: 'diffSummary'; files: DiffSummaryFile[] }
     /** Topic search results */
-    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; matchContext?: string; score?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; query?: string; totalCount?: number; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null } }
+    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; matchContext?: string; score?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; query?: string; totalCount?: number; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
     /** Topic imported successfully */
     | { type: 'topicImported'; topicId: string; title: string }
     | { type: 'skillsList'; skills: string[] }

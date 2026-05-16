@@ -20,6 +20,9 @@ import type {
     AgentMode,
     AgentArtifact,
     AgentArtifactKind,
+    DiffArtifactData,
+    DiffArtifactFile,
+    DiffSummaryFile,
     GenerationResult,
 } from './types';
 import { AgentRunner } from './agentRunner';
@@ -32,6 +35,9 @@ import { ChatSettingsManager } from './chatSettings';
 import { ErrorReporter } from './errorReporter';
 import { UI, SOURCE } from './messages';
 import { ContextReferenceManager } from './contextReferences';
+
+type FileSnapshot = { filePath: string; previousContent: string | null; _tooLarge?: boolean };
+const MAX_ARTIFACT_DIFF_CONTENT = 500000;
 
 export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public static readonly viewType = 'cwtools.aiChat';
@@ -53,7 +59,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * since its indexing can diverge from topic.messages after fork/load).
      */
     private _messageFileSnapshots = new Map<number, {
-        files: Array<{ filePath: string; previousContent: string | null }>;
+        files: FileSnapshot[];
         convLength: number;
     }>();
     /**
@@ -61,7 +67,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Set in handleUserMessage, cleared in finally. Allows non-tool writes
      * (e.g. plan file) to register themselves into the same snapshot.
      */
-    private _currentMessageSnapshots: Array<{ filePath: string; previousContent: string | null }> | null = null;
+    private _currentMessageSnapshots: FileSnapshot[] | null = null;
 
     // ── Shared ContentProvider for insertCodeWithDiff (M5 fix) ───────────────
     // Lazily registered once and reused for all code-insert previews.
@@ -297,6 +303,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'openPlanFile':
                 // Open the plan markdown file in VS Code's Markdown Preview (rendered view)
                 vs.commands.executeCommand('markdown.showPreview', vs.Uri.file(msg.filePath));
+                break;
+            case 'openArtifact':
+                await this.openArtifact(msg.artifactId, msg.file);
                 break;
             case 'submitPlanAnnotations': {
                 let contextStr = '';
@@ -636,7 +645,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Collect file snapshots for retract/undo: wire up the tool executor callback
         // for the duration of this message exchange.
-        const messageSnapshots: Array<{ filePath: string; previousContent: string | null; _tooLarge?: boolean }> = [];
+        const messageSnapshots: FileSnapshot[] = [];
         // P1-6 Fix: capture conversation length BEFORE message exchange, so retract
         // can slice directly without the fragile `-2` hardcode.
         const convLengthBeforeExchange = this.conversationMessages.length;
@@ -930,41 +939,81 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Builds a summary of files changed during the current generation
      * and sends it to the WebView.
      */
-    private async sendDiffSummary(snapshots: Array<{ filePath: string; previousContent: string | null }>): Promise<void> {
+    private async sendDiffSummary(snapshots: FileSnapshot[]): Promise<void> {
         if (!snapshots || snapshots.length === 0) return;
 
         // Lazy-load diff engine to avoid startup cost
         const { computeLineDiff } = await import('./diffEngine');
 
-        const files: Array<{ file: string; status: 'created' | 'modified' | 'deleted'; diffPreview: string; additions?: number; deletions?: number; diffLines?: Array<{ type: 'add' | 'remove' | 'context'; content: string; oldLineNo?: number; newLineNo?: number }> }> = [];
+        const files: DiffSummaryFile[] = [];
+        const artifactFiles: DiffArtifactFile[] = [];
 
         for (const snap of snapshots) {
             const currentContentExists = fs.existsSync(snap.filePath);
-            const currentContent = currentContentExists ? await fs.promises.readFile(snap.filePath, 'utf-8').catch((e: any) => {
-                if (e.code !== 'ENOENT') console.debug('[cwtools] snapshot read failed:', snap.filePath, e?.message ?? e);
-                return null;
-            }) : null;
+            let currentContent: string | null = null;
+            let currentTooLarge = false;
+            if (currentContentExists) {
+                try {
+                    const stat = await fs.promises.stat(snap.filePath);
+                    if (stat.size > MAX_ARTIFACT_DIFF_CONTENT) {
+                        currentTooLarge = true;
+                    } else {
+                        currentContent = await fs.promises.readFile(snap.filePath, 'utf-8');
+                    }
+                } catch (e: any) {
+                    if (e.code !== 'ENOENT') console.debug('[cwtools] snapshot read failed:', snap.filePath, e?.message ?? e);
+                    currentContent = null;
+                }
+            }
 
-            if (snap.previousContent === null && currentContent !== null) {
-                files.push({
+            const pushFile = (file: DiffSummaryFile) => {
+                files.push(file);
+                artifactFiles.push({
+                    ...file,
+                    previousContent: snap._tooLarge ? null : snap.previousContent,
+                    currentContent: currentTooLarge ? null : currentContent,
+                    tooLarge: !!snap._tooLarge,
+                    currentTooLarge,
+                });
+            };
+
+            if (snap._tooLarge) {
+                pushFile({
                     file: snap.filePath,
-                    status: 'created',
-                    diffPreview: `+ ${currentContent.split('\n').length} lines added`,
-                    additions: currentContent.split('\n').length,
+                    status: currentContentExists ? 'modified' : 'deleted',
+                    diffPreview: 'Previous snapshot was too large to store',
+                    additions: 0,
                     deletions: 0,
                 });
-            } else if (snap.previousContent !== null && currentContent === null) {
-                files.push({
+            } else if (snap.previousContent === null && currentContentExists) {
+                const lineCount = currentContent === null ? undefined : currentContent.split('\n').length;
+                pushFile({
+                    file: snap.filePath,
+                    status: 'created',
+                    diffPreview: lineCount === undefined ? '+ file added' : `+ ${lineCount} lines added`,
+                    additions: lineCount,
+                    deletions: 0,
+                });
+            } else if (snap.previousContent !== null && !currentContentExists) {
+                pushFile({
                     file: snap.filePath,
                     status: 'deleted',
                     diffPreview: `- ${snap.previousContent.split('\n').length} lines removed`,
                     additions: 0,
                     deletions: snap.previousContent.split('\n').length,
                 });
-            } else if (snap.previousContent !== null && currentContent !== null) {
-                if (snap.previousContent !== currentContent) {
+            } else if (snap.previousContent !== null && currentContentExists) {
+                if (currentTooLarge || currentContent === null) {
+                    pushFile({
+                        file: snap.filePath,
+                        status: 'modified',
+                        diffPreview: currentTooLarge ? 'Current snapshot is too large to inline' : 'Current snapshot could not be read',
+                        additions: 0,
+                        deletions: 0,
+                    });
+                } else if (snap.previousContent !== currentContent) {
                     const diffResult = computeLineDiff(snap.previousContent, currentContent);
-                    files.push({
+                    pushFile({
                         file: snap.filePath,
                         status: 'modified',
                         diffPreview: `+${diffResult.additions} -${diffResult.deletions}${diffResult.truncated ? ' (truncated)' : ''}`,
@@ -980,13 +1029,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'diffSummary', files });
             const additions = files.reduce((sum, file) => sum + (file.additions ?? 0), 0);
             const deletions = files.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
+            const data: DiffArtifactData = { files: artifactFiles, additions, deletions };
             this.upsertArtifact({
                 id: this.artifactId('diff', String(Date.now())),
                 kind: 'diff',
-                title: 'Diff Summary',
+                title: 'File Changes',
                 summary: `${files.length} file(s), +${additions} -${deletions}`,
+                action: 'openDiff',
                 status: 'done',
-                data: files,
+                data,
             });
         }
     }
@@ -999,6 +1050,111 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * (e.g. savePlanFile). The file is treated as newly created (previousContent=null)
      * unless it already exists on disk, in which case its current content is captured.
      */
+    private async openArtifact(artifactId: string, file?: string): Promise<void> {
+        const artifact = this.artifacts.get(artifactId);
+        if (!artifact) {
+            vs.window.showWarningMessage('Artifact is not available in the current session.');
+            return;
+        }
+
+        if (artifact.kind === 'diff') {
+            await this.openDiffArtifact(artifact, file);
+            return;
+        }
+
+        if (artifact.filePath) {
+            const uri = vs.Uri.file(artifact.filePath);
+            const ext = path.extname(artifact.filePath).toLowerCase();
+            if (ext === '.md' || ext === '.markdown') {
+                await vs.commands.executeCommand('markdown.showPreview', uri);
+            } else {
+                await vs.commands.executeCommand('vscode.open', uri, { preview: true });
+            }
+        }
+    }
+
+    private getDiffArtifactFiles(artifact: AgentArtifact): DiffArtifactFile[] {
+        const data = artifact.data as DiffArtifactData | DiffArtifactFile[] | undefined;
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.files)) return data.files;
+        return [];
+    }
+
+    private async openDiffArtifact(artifact: AgentArtifact, file?: string): Promise<void> {
+        const files = this.getDiffArtifactFiles(artifact);
+        if (files.length === 0) {
+            vs.window.showWarningMessage('No file changes were recorded for this artifact.');
+            return;
+        }
+
+        const requested = file ? files.filter(f => f.file === file) : files;
+        if (requested.length === 0) {
+            vs.window.showWarningMessage('The requested file change is not available in this artifact.');
+            return;
+        }
+
+        const targets = file ? requested.slice(0, 1) : requested.slice(0, 8);
+        for (let i = 0; i < targets.length; i++) {
+            const target = targets[i];
+            if (target) await this.openDiffArtifactFile(target, i);
+        }
+        if (!file && requested.length > targets.length) {
+            vs.window.showInformationMessage(`Opened ${targets.length} of ${requested.length} recorded file changes.`);
+        }
+    }
+
+    private async openDiffArtifactFile(change: DiffArtifactFile, index: number): Promise<void> {
+        if (change.tooLarge && typeof change.previousContent !== 'string') {
+            if (change.status !== 'deleted' && fs.existsSync(change.file)) {
+                await vs.commands.executeCommand('vscode.open', vs.Uri.file(change.file), { preview: true });
+            }
+            vs.window.showWarningMessage(`Cannot show a full diff for ${path.basename(change.file)} because the previous snapshot was too large to store.`);
+            return;
+        }
+
+        const tmpDir = this.getArtifactDiffTempDir();
+        await fs.promises.mkdir(tmpDir, { recursive: true });
+
+        const beforeContent = typeof change.previousContent === 'string' ? change.previousContent : '';
+        const beforePath = this.makeArtifactDiffTempPath(tmpDir, change.file, 'before', index);
+        await fs.promises.writeFile(beforePath, beforeContent, 'utf-8');
+
+        let afterUri: vs.Uri;
+        if (change.status !== 'deleted' && typeof change.currentContent !== 'string' && fs.existsSync(change.file)) {
+            afterUri = vs.Uri.file(change.file);
+        } else {
+            const afterContent = change.status === 'deleted'
+                ? ''
+                : (typeof change.currentContent === 'string' ? change.currentContent : '');
+            const afterPath = this.makeArtifactDiffTempPath(tmpDir, change.file, 'after', index);
+            await fs.promises.writeFile(afterPath, afterContent, 'utf-8');
+            afterUri = vs.Uri.file(afterPath);
+        }
+
+        await vs.commands.executeCommand(
+            'vscode.diff',
+            vs.Uri.file(beforePath),
+            afterUri,
+            `AI Change: ${path.basename(change.file)}`,
+            { preview: false, viewColumn: vs.ViewColumn.Active }
+        );
+    }
+
+    private getArtifactDiffTempDir(): string {
+        const workspaceRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const topicId = (this.topicManager.currentTopic?.id || 'default').replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const baseDir = workspaceRoot
+            ? path.join(workspaceRoot, '.cwtools-ai')
+            : (this.storageUri?.fsPath ?? path.join(path.dirname(this.extensionUri.fsPath), '.cwtools-ai'));
+        return path.join(baseDir, topicId, 'tmp', 'artifacts');
+    }
+
+    private makeArtifactDiffTempPath(tmpDir: string, filePath: string, side: 'before' | 'after', index: number): string {
+        const ext = path.extname(filePath) || '.txt';
+        const name = (path.basename(filePath, ext) || 'artifact').replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
+        return path.join(tmpDir, `${Date.now()}_${index}_${name}_${side}${ext}`);
+    }
+
     private _recordFileSnapshot(filePath: string): void {
         const snapshots = this._currentMessageSnapshots;
         if (!snapshots) return;
@@ -1409,6 +1565,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this._messageFileSnapshots.clear();
             this._currentMessageSnapshots = null;
             this.clearArtifacts();
+        }
+
+        // 异步清理话题对应的磁盘文件夹（.cwtools-ai/{topicId}/），
+        // 包括 plan、walkthrough、task、scratch、media、tmp 等所有衍生文件
+        const wsRoot = vs.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (wsRoot) {
+            const topicDir = path.join(wsRoot, '.cwtools-ai', topicId);
+            fs.promises.rm(topicDir, { recursive: true, force: true }).catch(() => {
+                // 文件夹不存在或删除失败时静默忽略
+            });
         }
     }
 

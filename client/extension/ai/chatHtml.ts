@@ -38,6 +38,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
             <circle fill="#e8c840" cx="13" cy="3" r="1"/>
         </svg>
         <span class="brand-text">Eddy CWTool Code</span>
+        <div class="current-topic-chip" id="currentTopicChip" title="当前话题">
+            <button class="current-topic-title" id="currentTopicTitle" type="button">新话题</button>
+            <button class="current-topic-rename" id="currentTopicRename" type="button" title="重命名当前话题" aria-label="重命名当前话题">${svgIconNoMargin('edit')}</button>
+        </div>
     </div>
     <div class="header-actions">
         <button class="artifact-toggle" id="btnArtifacts" title="查看 Artifacts" aria-label="打开产物中心">
@@ -84,6 +88,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <button type="button" class="artifact-filter active" data-artifact-filter="all">全部</button>
         <button type="button" class="artifact-filter" data-artifact-filter="plan">计划</button>
         <button type="button" class="artifact-filter" data-artifact-filter="validation">验证</button>
+        <button type="button" class="artifact-filter" data-artifact-filter="diff">变更</button>
     </div>
     <div id="artifactList" class="artifact-list"></div>
 </aside>

@@ -70,6 +70,7 @@ export class ChatTopicManager {
             messages: [],
         };
         this.topics.unshift(this.currentTopic);
+        this.sendTopicList();
     }
 
     /**
@@ -96,6 +97,7 @@ export class ChatTopicManager {
 
         this.postMessage({ type: 'clearChat' });
         this.postMessage({ type: 'loadTopicMessages', messages: topic.messages });
+        this.sendTopicList();
         return conversationMessages;
     }
 
@@ -205,6 +207,7 @@ export class ChatTopicManager {
                 visible: visibleTopics.length,
                 archived: archivedCount,
                 currentTopicId: this.currentTopic?.id ?? null,
+                currentTopicTitle: this.currentTopic?.title ?? null,
             },
         });
     }
@@ -302,6 +305,7 @@ export class ChatTopicManager {
                 visible: results.length,
                 archived: this.topics.filter(t => t.archived).length,
                 currentTopicId: this.currentTopic?.id ?? null,
+                currentTopicTitle: this.currentTopic?.title ?? null,
             },
         });
     }

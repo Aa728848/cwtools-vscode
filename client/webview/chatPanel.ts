@@ -75,7 +75,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         visible: number;
         archived: number;
         currentTopicId?: string | null;
+        currentTopicTitle?: string | null;
     };
+    let currentTopicId: string | null = null;
+    let currentTopicTitle = '';
     let totalConversationTokens = 0;
     let contextLimit = 128000;
     /** Pending images (base64 data URLs) to attach to next sent message */
@@ -127,6 +130,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         summary?: string;
         filePath?: string;
         relPath?: string;
+        action?: 'openFile' | 'openDiff' | 'preview';
         status?: 'pending' | 'running' | 'done' | 'failed';
         createdAt: number;
         updatedAt?: number;
@@ -134,7 +138,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     };
     let activeContexts: ActiveContext[] = [];
     let artifacts: ArtifactRecord[] = [];
-    let artifactFilter: 'all' | 'plan' | 'validation' = 'all';
+    let artifactFilter: 'all' | 'plan' | 'validation' | 'diff' = 'all';
     const CONTEXT_TYPE_META: Record<ActiveContext['type'], { icon: keyof typeof Icons; label: string }> = {
         code_selection: { icon: 'file', label: 'selection' },
         diagnostics: { icon: 'stethoscope', label: 'diagnostics' },
@@ -434,13 +438,19 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     }
 
     bindBtn('btnNewTopic', () => vscode.postMessage({ type: 'newTopic' }));
+    bindBtn('currentTopicTitle', () => {
+        if (currentTopicId) startTopicRename(currentTopicId, currentTopicTitle, 'header');
+    });
+    bindBtn('currentTopicRename', () => {
+        if (currentTopicId) startTopicRename(currentTopicId, currentTopicTitle, 'header');
+    });
     bindBtn('btnArtifacts', toggleArtifactDrawer);
     bindBtn('btnCloseArtifacts', () => setArtifactDrawerOpen(false));
     bindBtn('artifactScrim', () => setArtifactDrawerOpen(false));
     document.querySelectorAll<HTMLElement>('[data-artifact-filter]').forEach(btn => {
         btn.addEventListener('click', () => {
             const next = btn.dataset.artifactFilter;
-            artifactFilter = (next === 'plan' || next === 'validation') ? next : 'all';
+            artifactFilter = (next === 'plan' || next === 'validation' || next === 'diff') ? next : 'all';
             renderArtifactPanel();
         });
     });
@@ -735,6 +745,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const visibleArtifacts = artifacts.filter(artifact => {
             if (artifactFilter === 'all') return true;
             if (artifactFilter === 'plan') return artifact.kind === 'plan' || artifact.kind === 'blueprint';
+            if (artifactFilter === 'diff') return artifact.kind === 'diff';
             return artifact.kind === 'validation' || artifact.kind === 'diagnostics';
         });
         if (visibleArtifacts.length === 0) {
@@ -794,7 +805,11 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 preview.textContent = JSON.stringify(artifact.data ?? fallback, null, 2).slice(0, 6000);
                 row.insertAdjacentElement('afterend', preview);
             };
-            if (artifact.filePath) {
+            if (artifact.kind === 'diff' || artifact.action === 'openDiff') {
+                row.addEventListener('click', () => {
+                    vscode.postMessage({ type: 'openArtifact', artifactId: artifact.id });
+                });
+            } else if (artifact.filePath) {
                 row.addEventListener('click', () => {
                     vscode.postMessage({ type: 'openPlanFile', filePath: artifact.filePath });
                 });
@@ -3115,11 +3130,22 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 totalConversationTokens = 0;
                 artifacts = [];
                 renderArtifactPanel();
+                updateCurrentTopicHeader(null, null);
                 { const bar = document.getElementById('tokenUsageBar'); if (bar) bar.style.display = 'none'; }
                 startPlaceholderRotation();
                 break;
 
-            case 'topicList': renderTopics(msg.topics, msg.stats); break;
+            case 'topicList': {
+                const currentFromList = msg.stats?.currentTopicId
+                    ? (msg.topics || []).find((t: TopicPanelItem) => t.id === msg.stats.currentTopicId)
+                    : undefined;
+                updateCurrentTopicHeader(
+                    msg.stats?.currentTopicId ?? null,
+                    msg.stats?.currentTopicTitle ?? currentFromList?.title ?? null
+                );
+                renderTopics(msg.topics, msg.stats);
+                break;
+            }
 
             case 'mentionSearchResults':
                 renderMentionMenu(msg.results);
@@ -3141,9 +3167,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 break;
 
             case 'topicTitleGenerated': {
+                if (msg.topicId === currentTopicId) {
+                    updateCurrentTopicHeader(msg.topicId, msg.title);
+                }
                 const list = document.getElementById('topicsList');
                 if (list) {
-                    for (const item of Array.from(list.querySelectorAll(`.topic-item[data-topic-id="${escapeHtml(msg.topicId)}"]`))) {
+                    for (const item of Array.from(list.querySelectorAll('.topic-item[data-topic-id]'))) {
+                        if ((item as HTMLElement).dataset.topicId !== msg.topicId) continue;
                         const span = item.querySelector('.topic-title');
                         if (span) span.textContent = msg.title;
                     }
@@ -3221,31 +3251,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             case 'pendingWriteFile': showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile); break;
 
             case 'permissionRequest': {
-                // Render inline permission step in the tool timeline
-                if (currentAssistantDiv) {
-                    const state = getStreamState(undefined);
-                    if (!state.liveToolTimeline) {
-                        state.liveToolTimeline = document.createElement('div');
-                        state.liveToolTimeline.className = 'tool-timeline';
-                        state.container?.appendChild(state.liveToolTimeline);
-                    }
-                    const permStep: RendererStep = {
-                        type: 'permission_request',
-                        content: msg.command || msg.description || '',
-                        toolName: msg.tool || '',
-                        permissionId: msg.permissionId,
-                        allowAlways: !!msg.allowAlways,
-                        timestamp: Date.now(),
-                    };
-                    const stepIdx = state.liveToolTimeline.querySelectorAll('.tool-pair').length + 1;
-                    const pairDiv = document.createElement('div');
-                    pairDiv.className = 'tool-pair';
-                    pairDiv.dataset.tool = msg.tool || '';
-                    pairDiv.dataset.permId = msg.permissionId || '';
-                    pairDiv.innerHTML = buildToolPairHtml(permStep, undefined, { stepIndex: stepIdx });
-                    state.liveToolTimeline.appendChild(pairDiv);
-                    scrollBottom();
-                }
                 showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways);
                 break;
             }
@@ -4180,6 +4185,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
 
             case 'topicSearchResults': {
+                const currentFromResults = msg.stats?.currentTopicId
+                    ? (msg.results || []).find((t: TopicPanelItem) => t.id === msg.stats.currentTopicId)
+                    : undefined;
+                updateCurrentTopicHeader(
+                    msg.stats?.currentTopicId ?? currentTopicId,
+                    msg.stats?.currentTopicTitle ?? currentFromResults?.title ?? currentTopicTitle
+                );
                 renderTopicSearchResults(msg.results || [], msg.query || '', msg.totalCount || (msg.results ? msg.results.length : 0), msg.stats);
                 break;
             }
@@ -4222,6 +4234,87 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         return `${dateLabel} ${formatTime(ts)}`;
     }
 
+    function updateCurrentTopicHeader(topicId?: string | null, title?: string | null) {
+        currentTopicId = topicId || null;
+        currentTopicTitle = title || '';
+        const titleBtn = document.getElementById('currentTopicTitle') as HTMLButtonElement | null;
+        const renameBtn = document.getElementById('currentTopicRename') as HTMLButtonElement | null;
+        const chip = document.getElementById('currentTopicChip') as HTMLElement | null;
+        const label = currentTopicTitle || '新话题';
+        if (titleBtn) {
+            titleBtn.textContent = label;
+            titleBtn.title = currentTopicId ? `重命名：${label}` : '发送第一条消息后创建话题';
+            titleBtn.disabled = !currentTopicId;
+        }
+        if (renameBtn) {
+            renameBtn.disabled = !currentTopicId;
+            renameBtn.style.display = currentTopicId ? '' : 'none';
+        }
+        if (chip) chip.classList.toggle('current-topic-empty', !currentTopicId);
+    }
+
+    function commitTopicRename(topicId: string, rawTitle: string, originalTitle: string) {
+        const nextTitle = rawTitle.trim().replace(/\s+/g, ' ');
+        if (!nextTitle || nextTitle === originalTitle) return false;
+        vscode.postMessage({ type: 'renameTopic', topicId, title: nextTitle });
+        return true;
+    }
+
+    function startTopicRename(topicId: string, title: string, source: 'header' | 'list', titleEl?: HTMLElement) {
+        if (!topicId) return;
+        const originalTitle = title || '';
+        const headerTitleBtn = source === 'header'
+            ? document.getElementById('currentTopicTitle') as HTMLButtonElement | null
+            : null;
+        const input = document.createElement('input');
+        input.className = 'topic-rename-input';
+        input.value = originalTitle;
+        input.maxLength = 120;
+        input.setAttribute('aria-label', '话题名称');
+
+        let cancelled = false;
+        const finish = (commit: boolean) => {
+            if (!input.isConnected) return;
+            const parent = input.parentElement;
+            if (commit && !cancelled) {
+                commitTopicRename(topicId, input.value, originalTitle);
+            }
+            if (source === 'header') {
+                if (headerTitleBtn && parent) {
+                    parent.replaceChild(headerTitleBtn, input);
+                }
+                updateCurrentTopicHeader(currentTopicId, currentTopicTitle);
+            } else if (titleEl && parent) {
+                parent.replaceChild(titleEl, input);
+            }
+        };
+
+        input.addEventListener('click', e => e.stopPropagation());
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                finish(true);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelled = true;
+                finish(false);
+            }
+        });
+        input.addEventListener('blur', () => finish(true));
+
+        if (source === 'header') {
+            if (!headerTitleBtn?.parentElement) return;
+            headerTitleBtn.replaceWith(input);
+        } else if (titleEl?.parentElement) {
+            titleEl.replaceWith(input);
+        }
+
+        requestAnimationFrame(() => {
+            input.focus();
+            input.select();
+        });
+    }
+
     function renderTopicPanelSummary(mode: 'list' | 'search', items: TopicPanelItem[], stats?: TopicPanelStats, query?: string, totalCount?: number) {
         const summary = document.getElementById('topicsPanelSummary');
         if (!summary) return;
@@ -4231,7 +4324,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const archivedCount = stats?.archived ?? items.filter(t => t.archived).length;
         const currentLabel = currentTopic
             ? `${currentTopic.archived ? '当前归档' : '当前'}：${shortenText(currentTopic.title, 18)}`
-            : (stats?.currentTopicId ? '当前：会话已隐藏' : '当前：无活动会话');
+            : (stats?.currentTopicId ? `当前：${shortenText(stats.currentTopicTitle || '会话已隐藏', 18)}` : '当前：无活动会话');
 
         summary.innerHTML = `
             <div class="topics-panel-summary-main">
@@ -4325,10 +4418,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         renameBtn.title = '重命名';
         renameBtn.addEventListener('click', e => {
             e.stopPropagation();
-            const nextTitle = window.prompt('重命名话题', topic.title || '');
-            if (nextTitle && nextTitle.trim() && nextTitle.trim() !== topic.title) {
-                vscode.postMessage({ type: 'renameTopic', topicId: topic.id, title: nextTitle.trim() });
-            }
+            startTopicRename(topic.id, topic.title || '', 'list', title);
         });
 
         const archBtn = document.createElement('button');

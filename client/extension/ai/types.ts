@@ -253,6 +253,7 @@ export interface QueryWorkspaceIndexArgs {
     kind?: string;
     category?: string;
     source?: 'script' | 'asset' | 'gui';
+    origin?: 'workspace' | 'vanilla' | 'both';
     directory?: string;
     prefix?: boolean;
     exact?: boolean;
@@ -269,6 +270,7 @@ export interface QueryWorkspaceIndexResult {
         file: string;
         line: number;
         source: 'script' | 'asset' | 'gui';
+        origin?: 'workspace' | 'vanilla';
         container?: string;
         category?: string;
         references?: Array<{

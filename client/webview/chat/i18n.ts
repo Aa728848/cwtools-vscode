@@ -21,6 +21,62 @@ export interface ChatI18nText {
         cancelGeneration: string;
         send: string;
     };
+    markdown: {
+        waitingForChoice: string;
+    };
+    settings: {
+        unselectedProvider: string;
+        unsetModel: string;
+        defaultEndpoint: string;
+        automatic: string;
+        localModel: string;
+        apiKeyConfigured: string;
+        apiKeyMissing: string;
+        inlinePrefix: string;
+        inlineSameProvider: string;
+        inlineOff: string;
+        writeAuto: string;
+        writeConfirm: string;
+        contextPrefix: string;
+        mcpUnit: string;
+        providerChip: string;
+        writeChip: string;
+        reasoningChip: string;
+    };
+    live: {
+        waitingForOutput: string;
+        thoughts: string;
+        tools: string;
+        text: string;
+        subtask: string;
+        starting: string;
+        back: string;
+        subagent: string;
+        realtimeProcess: string;
+        reads: string;
+        writes: string;
+        thinkingDetails: string;
+    };
+    annotations: {
+        plan: AnnotationI18nText;
+        orchestratorPlan: AnnotationI18nText;
+        walkthrough: AnnotationI18nText;
+        blueprint: AnnotationI18nText;
+    };
+}
+
+export interface AnnotationI18nText {
+    title: string;
+    hint: string;
+    approve: string;
+    approved: string;
+    submit: string;
+    submitted: string;
+    addTitle: string;
+    placeholder: string;
+    confirm: string;
+    cancel: string;
+    edit: string;
 }
 
 const EN: ChatI18nText = {
@@ -80,6 +136,96 @@ const EN: ChatI18nText = {
         cancelGeneration: 'Cancel generation (Esc)',
         send: 'Send',
     },
+    markdown: {
+        waitingForChoice: 'Waiting for your choice...',
+    },
+    settings: {
+        unselectedProvider: 'No provider selected',
+        unsetModel: 'No model configured',
+        defaultEndpoint: 'Default endpoint',
+        automatic: 'automatic',
+        localModel: 'Local model',
+        apiKeyConfigured: 'API key configured',
+        apiKeyMissing: 'API key missing',
+        inlinePrefix: 'Inline',
+        inlineSameProvider: 'same provider',
+        inlineOff: 'Inline: off',
+        writeAuto: 'Auto write',
+        writeConfirm: 'Confirm writes',
+        contextPrefix: 'context',
+        mcpUnit: 'MCP',
+        providerChip: 'Provider',
+        writeChip: 'Write',
+        reasoningChip: 'Reasoning',
+    },
+    live: {
+        waitingForOutput: 'Waiting for output',
+        thoughts: 'thoughts',
+        tools: 'tools',
+        text: 'text',
+        subtask: 'Subtask',
+        starting: 'Starting...',
+        back: 'Back',
+        subagent: 'Subagent',
+        realtimeProcess: 'Live process',
+        reads: 'reads',
+        writes: 'writes',
+        thinkingDetails: 'Thinking details',
+    },
+    annotations: {
+        plan: {
+            title: 'Inline annotations',
+            hint: 'Click a section to add annotations',
+            approve: 'Approve execution',
+            approved: 'Started...',
+            submit: 'Submit annotations',
+            submitted: 'Submitted',
+            addTitle: 'Add annotation',
+            placeholder: 'Enter annotation...',
+            confirm: 'Confirm',
+            cancel: 'Cancel',
+            edit: 'Edit',
+        },
+        orchestratorPlan: {
+            title: 'Multi-agent plan annotations',
+            hint: 'Approval starts DAG dispatch and parallel execution',
+            approve: 'Start multi-agent',
+            approved: 'Multi-agent started...',
+            submit: 'Submit annotations',
+            submitted: 'Submitted',
+            addTitle: 'Add annotation',
+            placeholder: 'Enter annotation...',
+            confirm: 'Confirm',
+            cancel: 'Cancel',
+            edit: 'Edit',
+        },
+        walkthrough: {
+            title: 'Walkthrough annotations',
+            hint: 'Click a section to request changes',
+            approve: 'Confirm complete',
+            approved: 'Confirmed',
+            submit: 'Request revision',
+            submitted: 'Submitted',
+            addTitle: 'Request changes',
+            placeholder: 'Tell the AI what needs to change...',
+            confirm: 'Confirm',
+            cancel: 'Cancel',
+            edit: 'Edit',
+        },
+        blueprint: {
+            title: 'Design blueprint annotations',
+            hint: 'Click a section to add annotations',
+            approve: 'Approve blueprint',
+            approved: 'Blueprint approved',
+            submit: 'Submit annotations',
+            submitted: 'Submitted',
+            addTitle: 'Add annotation',
+            placeholder: 'Enter annotation...',
+            confirm: 'Confirm',
+            cancel: 'Cancel',
+            edit: 'Edit',
+        },
+    },
 };
 
 const ZH_CN: ChatI18nText = {
@@ -138,6 +284,96 @@ const ZH_CN: ChatI18nText = {
     buttons: {
         cancelGeneration: '取消生成 (Esc)',
         send: '发送',
+    },
+    markdown: {
+        waitingForChoice: '等待你的选择...',
+    },
+    settings: {
+        unselectedProvider: '未选择 Provider',
+        unsetModel: '未设置模型',
+        defaultEndpoint: '默认端点',
+        automatic: '自动',
+        localModel: '本地模型',
+        apiKeyConfigured: 'API Key 已配置',
+        apiKeyMissing: 'API Key 未配置',
+        inlinePrefix: '补全',
+        inlineSameProvider: '同主模型',
+        inlineOff: '补全: 关闭',
+        writeAuto: '写入自动',
+        writeConfirm: '写入确认',
+        contextPrefix: '上下文',
+        mcpUnit: 'MCP',
+        providerChip: 'Provider',
+        writeChip: '写入',
+        reasoningChip: '推理',
+    },
+    live: {
+        waitingForOutput: '等待输出',
+        thoughts: '思考',
+        tools: '工具',
+        text: '文本',
+        subtask: '子任务',
+        starting: '正在启动...',
+        back: '返回',
+        subagent: '子代理',
+        realtimeProcess: '实时过程集中显示',
+        reads: '读取',
+        writes: '写入',
+        thinkingDetails: '思考详情',
+    },
+    annotations: {
+        plan: {
+            title: '在线批注',
+            hint: '点击段落添加批注',
+            approve: '同意执行',
+            approved: '已开始执行...',
+            submit: '提交批注',
+            submitted: '已提交',
+            addTitle: '添加批注',
+            placeholder: '输入批注内容...',
+            confirm: '确定',
+            cancel: '取消',
+            edit: '编辑',
+        },
+        orchestratorPlan: {
+            title: '多 Agent 计划批注',
+            hint: '确认后进入 DAG 分派与并行执行',
+            approve: '启动多 Agent',
+            approved: '已启动多 Agent...',
+            submit: '提交批注',
+            submitted: '已提交',
+            addTitle: '添加批注',
+            placeholder: '输入批注内容...',
+            confirm: '确定',
+            cancel: '取消',
+            edit: '编辑',
+        },
+        walkthrough: {
+            title: 'Walkthrough 批注',
+            hint: '点击段落添加批注要求',
+            approve: '确认完成',
+            approved: '已确认',
+            submit: '重新修改',
+            submitted: '已提交',
+            addTitle: '提出修改要求',
+            placeholder: '告诉 AI 哪里需要如何修改...',
+            confirm: '确定',
+            cancel: '取消',
+            edit: '编辑',
+        },
+        blueprint: {
+            title: '设计蓝图批注',
+            hint: '点击段落添加批注',
+            approve: '同意蓝图',
+            approved: '蓝图已批准',
+            submit: '提交批注',
+            submitted: '已提交',
+            addTitle: '添加批注',
+            placeholder: '输入批注内容...',
+            confirm: '确定',
+            cancel: '取消',
+            edit: '编辑',
+        },
     },
 };
 

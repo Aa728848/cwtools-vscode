@@ -1212,6 +1212,7 @@ export class LspToolHandler {
                 name: directName || (terms.length > 0 ? terms[0] : undefined),
                 kind: 'sprite',
                 source: 'asset',
+                origin: 'workspace',
                 includeReferences: true,
                 limit: limit * 5,
             }) ?? [];
@@ -1230,6 +1231,34 @@ export class LspToolHandler {
                     spriteType: entry.container,
                     score: score + 15,
                     matchedBy: uniqStrings([...matchedBy, 'workspace-index']),
+                });
+            }
+        }
+
+        if (ctxStr === 'vanilla' || ctxStr === 'both') {
+            const indexed = this.ctx.indexService?.queryWorkspaceSymbols({
+                name: directName || (terms.length > 0 ? terms[0] : undefined),
+                kind: 'sprite',
+                source: 'asset',
+                origin: 'vanilla',
+                includeReferences: true,
+                limit: limit * 5,
+            }) ?? [];
+            if (indexed.length > 0) {
+                searchedRoots.push('IndexService:vanillaSymbolIndex');
+            }
+            for (const entry of indexed) {
+                const textureFile = entry.references?.find(ref => /texturefile/i.test(ref.context))?.context;
+                const { score, matchedBy } = scoreCandidate(entry.name, textureFile, 'vanilla');
+                addCandidate({
+                    name: entry.name,
+                    source: 'vanilla',
+                    file: entry.file,
+                    line: entry.line,
+                    textureFile,
+                    spriteType: entry.container,
+                    score: score + 15,
+                    matchedBy: uniqStrings([...matchedBy, 'vanilla-index']),
                 });
             }
         }
@@ -1398,6 +1427,7 @@ export class LspToolHandler {
                 name: currentLower || (terms.length > 0 ? terms[0] : undefined),
                 kind: 'sound',
                 source: 'asset',
+                origin: 'workspace',
                 includeReferences: true,
                 limit: limit * 5,
             }) ?? [];
@@ -1416,6 +1446,34 @@ export class LspToolHandler {
                     fileRef,
                     score: score + 15,
                     matchedBy: uniqStrings([...matchedBy, 'workspace-index']),
+                });
+            }
+        }
+
+        if (ctxStr === 'vanilla' || ctxStr === 'both') {
+            const indexed = this.ctx.indexService?.queryWorkspaceSymbols({
+                name: currentLower || (terms.length > 0 ? terms[0] : undefined),
+                kind: 'sound',
+                source: 'asset',
+                origin: 'vanilla',
+                includeReferences: true,
+                limit: limit * 5,
+            }) ?? [];
+            if (indexed.length > 0) {
+                searchedRoots.push('IndexService:vanillaSymbolIndex');
+            }
+            for (const entry of indexed) {
+                const fileRef = entry.references?.find(ref => /\bfiles?\s*=/i.test(ref.context))?.context;
+                const { score, matchedBy } = scoreCandidate(entry.name, fileRef, entry.container, 'vanilla');
+                addCandidate({
+                    name: entry.name,
+                    source: 'vanilla',
+                    file: entry.file,
+                    line: entry.line,
+                    assetType: entry.container,
+                    fileRef,
+                    score: score + 15,
+                    matchedBy: uniqStrings([...matchedBy, 'vanilla-index']),
                 });
             }
         }

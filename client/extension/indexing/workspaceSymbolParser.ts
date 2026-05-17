@@ -1,4 +1,5 @@
 export type WorkspaceSymbolSource = 'script' | 'asset' | 'gui';
+export type WorkspaceSymbolOrigin = 'workspace' | 'vanilla';
 
 export interface WorkspaceSymbolEntry {
     name: string;
@@ -8,6 +9,7 @@ export interface WorkspaceSymbolEntry {
     source: WorkspaceSymbolSource;
     container?: string;
     category?: string;
+    origin?: WorkspaceSymbolOrigin;
     references?: WorkspaceSymbolReference[];
     updatedAt?: number;
     fileVersion?: number;
@@ -24,6 +26,7 @@ export interface WorkspaceSymbolQuery {
     kind?: string;
     category?: string;
     source?: WorkspaceSymbolSource;
+    origin?: WorkspaceSymbolOrigin | 'both';
     directory?: string;
     prefix?: boolean;
     exact?: boolean;
@@ -34,6 +37,7 @@ export interface WorkspaceSymbolQuery {
 export interface WorkspaceSymbolParseOptions {
     updatedAt?: number;
     fileVersion?: number;
+    origin?: WorkspaceSymbolOrigin;
     maxReferencesPerSymbol?: number;
 }
 
@@ -104,6 +108,7 @@ export function queryWorkspaceSymbolIndex(
     const kind = (query.kind ?? '').trim().toLowerCase();
     const category = (query.category ?? '').trim().toLowerCase();
     const source = query.source;
+    const origin = query.origin && query.origin !== 'both' ? query.origin : undefined;
     const directory = query.directory ? normalizePath(query.directory).toLowerCase().replace(/^\/+|\/+$/g, '') : '';
 
     const candidates = name && query.exact
@@ -123,6 +128,7 @@ export function queryWorkspaceSymbolIndex(
         if (kind && entry.kind.toLowerCase() !== kind) continue;
         if (category && (entry.category ?? '').toLowerCase() !== category) continue;
         if (source && entry.source !== source) continue;
+        if (origin && (entry.origin ?? 'workspace') !== origin) continue;
         if (directory && !normalizePath(entry.file).toLowerCase().includes(`/${directory}/`)) continue;
         results.push(query.includeReferences ? entry : { ...entry, references: undefined });
         if (results.length >= limit) break;
@@ -132,10 +138,24 @@ export function queryWorkspaceSymbolIndex(
 }
 
 function applyEntryMetadata(entries: WorkspaceSymbolEntry[], options: WorkspaceSymbolParseOptions): void {
-    if (options.updatedAt === undefined && options.fileVersion === undefined) return;
+    if (options.updatedAt === undefined && options.fileVersion === undefined && options.origin === undefined) return;
     for (const entry of entries) {
         if (options.updatedAt !== undefined) entry.updatedAt = options.updatedAt;
         if (options.fileVersion !== undefined) entry.fileVersion = options.fileVersion;
+        if (options.origin !== undefined) entry.origin = options.origin;
+    }
+}
+
+export function rebuildWorkspaceSymbolReferences(
+    index: Map<string, WorkspaceSymbolEntry[]>,
+    fileContents: Map<string, string>,
+    maxReferencesPerSymbol = 20
+): void {
+    if (maxReferencesPerSymbol <= 0) return;
+    for (const entries of index.values()) {
+        for (const entry of entries) {
+            entry.references = collectReferencesForEntry(entry, fileContents, maxReferencesPerSymbol);
+        }
     }
 }
 
@@ -146,13 +166,28 @@ function attachReferences(
     maxReferencesPerSymbol: number
 ): void {
     if (entries.length === 0 || maxReferencesPerSymbol <= 0) return;
-    const lines = content.split(/\r?\n/);
+    const fileContents = new Map<string, string>([[filePath, content]]);
     for (const entry of entries) {
-        const refs: WorkspaceSymbolReference[] = [];
-        const pattern = buildIdentifierRegex(entry.name);
+        const refs = collectReferencesForEntry(entry, fileContents, maxReferencesPerSymbol);
+        if (refs.length > 0) entry.references = refs;
+    }
+}
+
+function collectReferencesForEntry(
+    entry: WorkspaceSymbolEntry,
+    fileContents: Map<string, string>,
+    maxReferencesPerSymbol: number
+): WorkspaceSymbolReference[] {
+    const refs: WorkspaceSymbolReference[] = [];
+    if (maxReferencesPerSymbol <= 0) return refs;
+    const definitionFile = normalizePath(entry.file);
+    const pattern = buildIdentifierRegex(entry.name);
+    for (const [filePath, content] of fileContents.entries()) {
+        const lines = content.split(/\r?\n/);
         for (let i = 0; i < lines.length && refs.length < maxReferencesPerSymbol; i++) {
-            if (i + 1 === entry.line) continue;
+            if (normalizePath(filePath) === definitionFile && i + 1 === entry.line) continue;
             const stripped = stripComment(lines[i] ?? '');
+            pattern.lastIndex = 0;
             if (!pattern.test(stripped)) continue;
             refs.push({
                 file: filePath,
@@ -160,8 +195,9 @@ function attachReferences(
                 context: stripped.trim().slice(0, 240),
             });
         }
-        if (refs.length > 0) entry.references = refs;
+        if (refs.length >= maxReferencesPerSymbol) break;
     }
+    return refs;
 }
 
 function buildIdentifierRegex(name: string): RegExp {

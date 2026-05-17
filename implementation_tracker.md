@@ -347,6 +347,9 @@
 | `client/webview/chat/topicViews.ts` | 4 | Topic browser/search DOM 渲染模块 |
 | `client/webview/chat/settingsOverview.ts` | 4 | Settings overview 视图模型与渲染 helper |
 | `client/webview/chat/liveSteps.ts` | 4 | Live step/sub-agent 状态展示 helper |
+| `client/webview/chat/markdown.ts` | 4 | Chat Markdown/question-card/media link 渲染 helper |
+| `client/webview/chat/annotations.ts` | 4 | Plan/walkthrough/blueprint 批注卡通用渲染模块 |
+| `client/webview/chat/contextMentions.ts` | 4 | Mention/context 类型、元信息与 consumed mention 清理 helper |
 
 ## 修改文件清单
 
@@ -364,30 +367,31 @@
 | `client/extension/indexing/indexService.ts` | 本地化扫描/监听 glob 改为从 `GameProfile` 推导，并扩展 workspace symbol/asset 索引、刷新时间、文件版本 |
 | `client/extension/indexing/workspaceSymbolParser.ts` | 增加 `category` 过滤、更多 `common/` 实体类型识别、轻量引用与索引元信息 |
 | `client/extension/locDecorations.ts` | 迁移本地化 hover/definition 到共享 `IndexService` |
-| `client/webview/chatPanel.ts` | 内部 helper 继续迁移到 `chat/formatters.ts`、`chat/artifacts.ts`、`chat/topics.ts`、`chat/workflows.ts`、`chat/workflowSelector.ts`、`chat/i18n.ts`、`chat/modes.ts`、`chat/slashCommands.ts`、`chat/artifactDrawer.ts`、`chat/topicViews.ts`、`chat/settingsOverview.ts`、`chat/liveSteps.ts` |
+| `client/webview/chatPanel.ts` | 内部 helper 继续迁移到 `chat/formatters.ts`、`chat/artifacts.ts`、`chat/topics.ts`、`chat/workflows.ts`、`chat/workflowSelector.ts`、`chat/i18n.ts`、`chat/modes.ts`、`chat/slashCommands.ts`、`chat/artifactDrawer.ts`、`chat/topicViews.ts`、`chat/settingsOverview.ts`、`chat/liveSteps.ts`、`chat/markdown.ts`、`chat/annotations.ts`、`chat/contextMentions.ts` |
 | `package.json` | 新增 `check:release` + `verify` scripts |
 
-## 本轮追加完成项（2026-05-17）
+## 本轮追加完成项（2026-05-17，1-6 全量收口）
 
-针对上一轮列出的 5 个后续方向，本轮继续完成一批可编译、可测试的落地点：
+针对当前提出的 6 个目标，本轮继续完成可编译、可测试的落地点：
 
-1. `chatPanel.ts` 继续模块化：新增 `chat/artifactDrawer.ts`、`chat/topicViews.ts`、`chat/settingsOverview.ts`、`chat/liveSteps.ts`，并让 chat panel 消费 artifact drawer、topic panel、settings overview、live/sub-agent 状态 helper。
-2. Webview i18n/视图契约继续扩大：artifact 空状态/状态标签、settings 概览、live step/sub-agent 展示、slash command/mode helper 均有独立测试覆盖。
-3. `IndexService` workspace symbol 能力加深：`query_workspace_index` 支持 `category`、`includeReferences`，并返回 `indexedSymbolNames`、`indexUpdatedAt`、`fileVersion`、`updatedAt` 作为索引覆盖度/新鲜度提示。
-4. 更多消费者迁移到共享索引：`find_sprite_candidates` / `find_sound_candidates` 会优先消费 `IndexService` 的 workspace symbol 候选，再保留原有文件扫描兜底。
-5. 测试补强：新增 Webview 模块契约、artifact drawer HTML、settings overview、live step helper、workspace references/freshness、AI tool 返回结构、sprite 索引消费覆盖。
+1. Webview 视觉/浏览器回归基础：新增 webview smoke 视觉结构契约检查，覆盖聊天主壳、输入区、弹窗、artifact drawer、topic panel、sub-agent view、annotation card、markdown code block 等关键选择器与 DOM 入口；在不新增浏览器依赖的前提下形成稳定回归网。
+2. 继续拆分 `chatPanel.ts`：抽出 `chat/markdown.ts`、`chat/annotations.ts`、`chat/contextMentions.ts`，主文件改为消费独立 Markdown renderer、批注卡渲染器、mention/context 类型与清理 helper。
+3. 扩展 `IndexService` 知识层：`WorkspaceSymbolEntry` 增加 `origin`，支持 workspace/vanilla 来源；IndexService 保留被索引文件内容并重建跨文件轻量引用，引用数量有上限保护。
+4. 更多消费者迁移到 `IndexService`：`find_sprite_candidates` / `find_sound_candidates` 分别优先查询 workspace 与 vanilla 索引候选，再保留原有文件扫描兜底；`query_workspace_index` schema/result 透传 `origin`。
+5. i18n 系统化扩大：chat i18n 增加 markdown、settings、live/sub-agent、annotation card 文案分组；settings overview 与 live step helper 改为消费 i18n 文案，减少硬编码中英文混杂。
+6. 性能/大项目压力覆盖：workspace symbol reference rebuild 增加大量引用上限测试；webview bundle 非空、模块导出、视觉契约与 helper 单测共同覆盖大文件拆分后的回归风险。
 
 当前验证：
 
 - `npm run compile`：通过
-- `npm run test:unit`：452 passing, 0 failing
+- `npm run test:unit`：458 passing, 0 failing
 - `npm run lint`：通过，0 warnings
-- `npm run verify`：通过
+- `npm run verify`：通过（check:release 内部 compile/test 为预期 skip warning）
 
 ## 下一轮建议优先级
 
-1. 继续拆分 `chatPanel.ts` 中的 markdown renderer、mention/context tray、image/file attachment、annotation cards。
-2. 增加真正的 webview browser/visual regression 检测，覆盖中英文、workflow selector、slash popup、artifact drawer 等真实 DOM 状态。
-3. 继续将 previews/diagnostic repair 中的重复查询迁移到 `IndexService`，减少重复扫描与分散查询逻辑。
-4. 继续加深 `query_workspace_index`：补充跨文件引用图、AST 级 PDXScript block range、vanilla cache symbol 合并。
-5. 继续将 GameProfile 作为新增游戏能力入口，避免不同功能各自硬编码目录、语言和规则。
+1. 在现有 smoke 契约基础上接入真实 VS Code Webview / Electron 截图回归，覆盖中英文、workflow selector、slash popup、artifact drawer、annotation card 的真实交互状态。
+2. 继续拆分 image/file attachment、settings form、topic actions 等剩余 DOM 事件逻辑，让 `chatPanel.ts` 进一步靠近 bootstrap。
+3. 给 `IndexService` 增加 block range / definition range，并让 `get_pdx_block`、definition 查询、diagnostic repair 更系统地消费共享索引。
+4. 对 vanilla cache 索引增加可观测状态，例如 indexed vanilla roots、跳过文件数量、刷新耗时与查询命中来源统计。
+5. 继续把非 Stellaris 的真实 fixture 加进 GameProfile/IndexService 测试，验证多游戏路径、localisation 与 cache 配置差异。

@@ -18,13 +18,14 @@
 
 import * as vscode from 'vscode';
 import { ErrorReporter } from '../ai/errorReporter';
-import { getLocalisationDirectoryGlob } from '../gameProfiles';
+import { getAllProfiles, getLocalisationDirectoryGlob } from '../gameProfiles';
 import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex } from './locParser';
 import {
 	addSymbolsToIndex,
 	isWorkspaceSymbolFile,
 	parseWorkspaceSymbols,
 	queryWorkspaceSymbolIndex,
+	rebuildWorkspaceSymbolReferences,
 	removeFileFromSymbolIndex,
 	type WorkspaceSymbolEntry,
 	type WorkspaceSymbolQuery,
@@ -62,6 +63,7 @@ export class IndexService implements vscode.Disposable {
 	private _disposables: vscode.Disposable[] = [];
 	private _locIndex: Map<string, LocEntry[]> = new Map();
 	private _workspaceSymbolIndex: Map<string, WorkspaceSymbolEntry[]> = new Map();
+	private _workspaceSymbolFileContents: Map<string, string> = new Map();
 	private _workspaceSymbolFileVersions: Map<string, number> = new Map();
 	private _lastWorkspaceSymbolRefreshAt: number | undefined;
 	private _fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -166,9 +168,12 @@ export class IndexService implements vscode.Disposable {
 	 * Remove a file from the index.
 	 */
 	removeFile(uri: vscode.Uri): void {
+		const shouldRebuildReferences = isWorkspaceSymbolFile(uri.fsPath);
 		removeFileFromIndex(this._locIndex, uri.fsPath);
 		removeFileFromSymbolIndex(this._workspaceSymbolIndex, uri.fsPath);
+		this._workspaceSymbolFileContents.delete(uri.fsPath);
 		this._workspaceSymbolFileVersions.delete(uri.fsPath);
+		if (shouldRebuildReferences) this._rebuildWorkspaceSymbolReferences();
 	}
 
 	/**
@@ -212,6 +217,7 @@ export class IndexService implements vscode.Disposable {
 
 	private async _indexWorkspaceSymbolFiles(): Promise<void> {
 		this._workspaceSymbolIndex.clear();
+		this._workspaceSymbolFileContents.clear();
 		this._workspaceSymbolFileVersions.clear();
 
 		const files = await vscode.workspace.findFiles(
@@ -222,11 +228,13 @@ export class IndexService implements vscode.Disposable {
 
 		for (const uri of files) {
 			try {
-				await this._indexSingleWorkspaceSymbolFile(uri);
+				await this._indexSingleWorkspaceSymbolFile(uri, 'workspace', false);
 			} catch {
 				// Skip files that can't be parsed
 			}
 		}
+		await this._indexVanillaWorkspaceSymbolFiles();
+		this._rebuildWorkspaceSymbolReferences();
 		this._lastWorkspaceSymbolRefreshAt = Date.now();
 	}
 
@@ -245,22 +253,62 @@ export class IndexService implements vscode.Disposable {
 		}
 	}
 
-	private async _indexSingleWorkspaceSymbolFile(uri: vscode.Uri): Promise<void> {
+	private async _indexSingleWorkspaceSymbolFile(
+		uri: vscode.Uri,
+		origin: 'workspace' | 'vanilla' = 'workspace',
+		rebuildReferences = true
+	): Promise<void> {
 		const filePath = uri.fsPath;
+		const previousVersion = this._workspaceSymbolFileVersions.get(filePath) ?? 0;
 
-		this.removeFile(uri);
+		removeFileFromSymbolIndex(this._workspaceSymbolIndex, filePath);
+		this._workspaceSymbolFileContents.delete(filePath);
+		this._workspaceSymbolFileVersions.delete(filePath);
 
 		try {
 			const content = (await vscode.workspace.fs.readFile(uri)).toString();
-			const fileVersion = (this._workspaceSymbolFileVersions.get(filePath) ?? 0) + 1;
+			const fileVersion = previousVersion + 1;
 			this._workspaceSymbolFileVersions.set(filePath, fileVersion);
+			this._workspaceSymbolFileContents.set(filePath, content);
 			const updatedAt = Date.now();
-			const entries = parseWorkspaceSymbols(content, filePath, { updatedAt, fileVersion });
+			const entries = parseWorkspaceSymbols(content, filePath, { updatedAt, fileVersion, origin, maxReferencesPerSymbol: 0 });
 			addSymbolsToIndex(this._workspaceSymbolIndex, entries);
+			if (rebuildReferences) this._rebuildWorkspaceSymbolReferences();
 			this._lastWorkspaceSymbolRefreshAt = updatedAt;
 		} catch {
 			// File read error - skip
 		}
+	}
+
+	private async _indexVanillaWorkspaceSymbolFiles(): Promise<void> {
+		const roots = this._getConfiguredVanillaRoots();
+		for (const root of roots) {
+			const uri = vscode.Uri.file(root);
+			const pattern = new vscode.RelativePattern(uri, '**/*.{txt,gfx,asset,gui}');
+			const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools}/**', 3000);
+			for (const fileUri of files) {
+				try {
+					await this._indexSingleWorkspaceSymbolFile(fileUri, 'vanilla', false);
+				} catch {
+					// Skip unreadable vanilla files.
+				}
+			}
+		}
+	}
+
+	private _getConfiguredVanillaRoots(): string[] {
+		const roots = new Set<string>();
+		const config = vscode.workspace.getConfiguration('cwtools');
+		for (const profile of getAllProfiles()) {
+			const key = profile.cacheSettingKey.replace('cwtools.', '');
+			const configured = config.get<string>(key);
+			if (configured?.trim()) roots.add(configured.trim());
+		}
+		return Array.from(roots);
+	}
+
+	private _rebuildWorkspaceSymbolReferences(): void {
+		rebuildWorkspaceSymbolReferences(this._workspaceSymbolIndex, this._workspaceSymbolFileContents, 20);
 	}
 
 	// ─── File watcher handlers ───────────────────────────────────────────
@@ -294,6 +342,8 @@ export class IndexService implements vscode.Disposable {
 		this._disposables = [];
 		this._locIndex.clear();
 		this._workspaceSymbolIndex.clear();
+		this._workspaceSymbolFileContents.clear();
+		this._workspaceSymbolFileVersions.clear();
 		this._status = 'idle';
 	}
 }

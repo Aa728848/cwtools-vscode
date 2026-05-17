@@ -3,6 +3,7 @@ import {
     addSymbolsToIndex,
     parseWorkspaceSymbols,
     queryWorkspaceSymbolIndex,
+    rebuildWorkspaceSymbolReferences,
     removeFileFromSymbolIndex,
     type WorkspaceSymbolEntry,
 } from '../../extension/indexing/workspaceSymbolParser';
@@ -105,15 +106,46 @@ describe('Workspace Symbol Parser (indexing)', () => {
         addSymbolsToIndex(index, [
             { name: 'kuat.100', kind: 'event', category: 'event', source: 'script', file: '/mod/events/kuat.txt', line: 1, references: [{ file: '/mod/events/kuat.txt', line: 3, context: 'id = kuat.100' }] },
             { name: 'tech_kuat_reactor', kind: 'technology', category: 'game_entity', source: 'script', file: '/mod/common/technology/kuat.txt', line: 2 },
-            { name: 'GFX_evt_kuat_echo', kind: 'sprite', category: 'asset', source: 'asset', file: '/mod/interface/kuat.gfx', line: 3 },
+            { name: 'GFX_evt_kuat_echo', kind: 'sprite', category: 'asset', source: 'asset', origin: 'vanilla', file: '/mod/interface/kuat.gfx', line: 3 },
         ]);
 
         expect(queryWorkspaceSymbolIndex(index, { name: 'kuat', prefix: true })).to.have.lengthOf(1);
         expect(queryWorkspaceSymbolIndex(index, { name: 'kuat.100', exact: true })[0]!.references).to.equal(undefined);
         expect(queryWorkspaceSymbolIndex(index, { name: 'kuat.100', exact: true, includeReferences: true })[0]!.references).to.have.lengthOf(1);
         expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset' })[0]!.name).to.equal('GFX_evt_kuat_echo');
+        expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset', origin: 'workspace' })).to.have.lengthOf(0);
+        expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset', origin: 'vanilla' })[0]!.name).to.equal('GFX_evt_kuat_echo');
         expect(queryWorkspaceSymbolIndex(index, { category: 'game_entity' })[0]!.name).to.equal('tech_kuat_reactor');
         expect(queryWorkspaceSymbolIndex(index, { directory: 'common/technology' })[0]!.name).to.equal('tech_kuat_reactor');
+    });
+
+    it('rebuilds bounded cross-file references for indexed content', () => {
+        const index = new Map<string, WorkspaceSymbolEntry[]>();
+        addSymbolsToIndex(index, [
+            { name: 'kuat_effect', kind: 'scripted_effect', source: 'script', file: '/mod/common/scripted_effects/kuat.txt', line: 1 },
+        ]);
+        rebuildWorkspaceSymbolReferences(index, new Map([
+            ['/mod/common/scripted_effects/kuat.txt', 'kuat_effect = {\n}\n'],
+            ['/mod/events/kuat.txt', 'country_event = {\n    immediate = { kuat_effect = yes }\n}\n'],
+        ]), 5);
+
+        const entry = queryWorkspaceSymbolIndex(index, { name: 'kuat_effect', exact: true, includeReferences: true })[0]!;
+        expect(entry.references?.map(ref => `${ref.file}:${ref.line}`)).to.deep.equal(['/mod/events/kuat.txt:2']);
+    });
+
+    it('caps large reference sets during rebuild', () => {
+        const index = new Map<string, WorkspaceSymbolEntry[]>();
+        addSymbolsToIndex(index, [
+            { name: 'kuat_effect', kind: 'scripted_effect', source: 'script', file: '/mod/common/scripted_effects/kuat.txt', line: 1 },
+        ]);
+        const references = Array.from({ length: 500 }, () => 'kuat_effect = yes').join('\n');
+        rebuildWorkspaceSymbolReferences(index, new Map([
+            ['/mod/common/scripted_effects/kuat.txt', 'kuat_effect = {\n}\n'],
+            ['/mod/events/large.txt', references],
+        ]), 25);
+
+        const entry = queryWorkspaceSymbolIndex(index, { name: 'kuat_effect', exact: true, includeReferences: true })[0]!;
+        expect(entry.references).to.have.lengthOf(25);
     });
 
     it('removes stale symbols for a deleted file', () => {

@@ -41,9 +41,20 @@ import { applyModeUi } from './chat/modes';
 import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from './chat/slashCommands';
 import { type WorkflowUiLabels, type WorkflowView } from './chat/workflows';
 import { renderWorkflowSelector } from './chat/workflowSelector';
+import { createMarkdownRenderer } from './chat/markdown';
+import { createAnnotationCard } from './chat/annotations';
+import {
+    CONTEXT_TYPE_META,
+    generateContextId,
+    mentionResultToActiveContext,
+    stripConsumedMentionText,
+    type ActiveContext,
+    type MentionResult,
+} from './chat/contextMentions';
 
 (function () {
     const chatI18n = getChatI18n(document.documentElement.lang || navigator.language);
+    const renderMarkdown = createMarkdownRenderer(chatI18n.markdown);
     const vscode = acquireVsCodeApi();
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
     const input = document.getElementById('input') as HTMLTextAreaElement;
@@ -103,61 +114,12 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
     /** Pending files to attach */
     let pendingFiles: string[] = [];
     /** Pending structured references to attach to the next sent message */
-    type ActiveContext = {
-        id: string;
-        type: 'code_selection' | 'diagnostics' | 'file' | 'folder' | 'scope' | 'symbol' | 'vanilla' | 'blackboard';
-        label: string;
-        description?: string;
-        uri?: string;
-        startLine?: number;
-        endLine?: number;
-        line?: number;
-        column?: number;
-        name?: string;
-        kind?: string;
-        vanillaType?: string;
-        vanillaId?: string;
-        key?: string;
-        tokenEstimate?: number;
-        cacheStatus?: 'live' | 'disk' | 'cached' | 'large' | 'missing' | 'external' | 'unknown';
-    };
-    type MentionResult = {
-        type?: ActiveContext['type'];
-        uri?: string;
-        label: string;
-        desc: string;
-        startLine?: number;
-        endLine?: number;
-        line?: number;
-        column?: number;
-        name?: string;
-        kind?: string;
-        vanillaType?: string;
-        vanillaId?: string;
-        key?: string;
-        tokenEstimate?: number;
-        cacheStatus?: ActiveContext['cacheStatus'];
-    };
     let activeContexts: ActiveContext[] = [];
     let artifacts: ArtifactRecord[] = [];
     let artifactFilter: ArtifactFilter = 'all';
     let workflows: WorkflowView[] = [];
     let activeWorkflowId: string | null = null;
     let workflowLabels: WorkflowUiLabels | null = null;
-    const CONTEXT_TYPE_META: Record<ActiveContext['type'], { icon: keyof typeof Icons; label: string }> = {
-        code_selection: { icon: 'file', label: 'selection' },
-        diagnostics: { icon: 'stethoscope', label: 'diagnostics' },
-        file: { icon: 'file', label: 'file' },
-        folder: { icon: 'folder', label: 'folder' },
-        scope: { icon: 'ruler', label: 'scope' },
-        symbol: { icon: 'link', label: 'symbol' },
-        vanilla: { icon: 'package', label: 'vanilla' },
-        blackboard: { icon: 'clipboard', label: 'blackboard' },
-    };
-    
-    function generateContextId() {
-        return 'ctx_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-    }
     
     function renderContextTray() {
         let area = document.getElementById('referenceChipArea');
@@ -668,24 +630,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 closeAtPopup();
                 
                 // Track into Context Tray
-                activeContexts.push({
-                    id: generateContextId(),
-                    type,
-                    label: result.label,
-                    description: result.desc,
-                    uri: result.uri,
-                    startLine: result.startLine,
-                    endLine: result.endLine,
-                    line: result.line,
-                    column: result.column,
-                    name: result.name,
-                    kind: result.kind,
-                    vanillaType: result.vanillaType,
-                    vanillaId: result.vanillaId,
-                    key: result.key,
-                    tokenEstimate: result.tokenEstimate,
-                    cacheStatus: result.cacheStatus,
-                });
+                activeContexts.push(mentionResultToActiveContext(result));
                 renderContextTray();
 
                 // Replace the @partial in input with nothing (consume the mention)
@@ -959,21 +904,6 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
     const endpointInp = document.getElementById('settingsEndpoint');
     if (endpointInp) endpointInp.addEventListener('input', onEndpointChange);
 
-    function stripConsumedMentionText(raw: string, contexts: ActiveContext[]): string {
-        let text = raw;
-        for (const ctx of contexts) {
-            const labels = new Set<string>([ctx.label]);
-            if (ctx.uri) labels.add(ctx.uri.replace(/\\/g, '/').split('/').pop() || ctx.uri);
-            if (ctx.key) labels.add(`blackboard:${ctx.key}`);
-            if (ctx.vanillaType) labels.add(`vanilla::${ctx.vanillaType}${ctx.vanillaId ? `:${ctx.vanillaId}` : ''}`);
-            for (const label of labels) {
-                const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                text = text.replace(new RegExp(`(^|\\n)\\s*@${escaped}\\s*(?=\\n|$)`, 'gi'), '$1');
-            }
-        }
-        return text.trim();
-    }
-
     function sendMessage() {
         const rawText = input.value.trim();
         const text = activeContexts.length > 0 ? stripConsumedMentionText(rawText, activeContexts) : rawText;
@@ -1066,318 +996,6 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
     const formatNum = _fmtFormatNum;
     const formatTime = _fmtFormatTime;
     const escapeHtml = _fmtEscapeHtml;
-
-    // ── Markdown renderer ──────────────────────────────────────────────────────
-    function inlineMd(raw: string) {
-        const mediaBlocks: string[] = [];
-        let s = raw.replace(/<(video|audio)\s+([^>]+)>(?:<\/\1>)?/gi, (_: string, tag: string, attrs: string) => {
-            if (!/controls/i.test(attrs)) attrs += ' controls';
-            const style = tag.toLowerCase() === 'video' ? 'max-width:100%; border-radius:6px; margin:8px 0; display:block;' : 'width:100%; margin:8px 0; display:block;';
-            mediaBlocks.push(`<${tag.toLowerCase()} ${attrs} style="${style}"></${tag.toLowerCase()}>`);
-            return '\x01MEDIA' + (mediaBlocks.length - 1) + '\x01';
-        });
-
-        s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const codeBlocks: string[] = [];
-        s = s.replace(/`([^`]+)`/g, (_: string, c: string) => {
-            codeBlocks.push('<code>' + c.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') + '</code>');
-            return '\x01CODE' + (codeBlocks.length - 1) + '\x01';
-        });
-        s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
-        s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        s = s.replace(/(^|\W)__([^_\n]+)__(\W|$)/g, '$1<strong>$2</strong>$3');
-        s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-        s = s.replace(/(^|\W)_([^_\n]+)_(\W|$)/g, '$1<em>$2</em>$3');
-        s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
-        s = s.replace(/\[Option:\s*([^\]]+)\]/gi, '<button class="suggest-card ai-option-btn popup-option" data-suggest="$1" style="display:flex; margin:6px 0; width:fit-content; max-width:98%; text-align:left; word-wrap:break-word; white-space:normal; align-items:flex-start;"><span class="suggest-card-icon" style="margin-top:2px;">👉</span>$1</button>');
-        
-        // Media links detection
-        s = s.replace(/!?\[([^\]]*)\]\(([^)]+\.(?:mp3|wav|ogg|aac|m4a|flac)(?:\?[^)]*)?)\)/gi, '<audio src="$2" controls style="width:100%; margin: 8px 0; display: block;"></audio>');
-        s = s.replace(/!?\[([^\]]*)\]\(([^)]+\.(?:mp4|webm|ogv|mov)(?:\?[^)]*)?)\)/gi, '<video src="$2" controls style="max-width:100%; border-radius:6px; margin: 8px 0; display: block;"></video>');
-        
-        s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%; border-radius:6px; margin: 8px 0; display: block;" />');
-        s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-        
-        // eslint-disable-next-line no-control-regex
-        s = s.replace(/\x01CODE(\d+)\x01/g, (_: string, i: string) => codeBlocks[parseInt(i)]!);
-        // eslint-disable-next-line no-control-regex
-        s = s.replace(/\x01MEDIA(\d+)\x01/g, (_: string, i: string) => mediaBlocks[parseInt(i)]!);
-        return s;
-    }
-
-    function renderMarkdown(rawText: string): string {
-        if (!rawText) return '';
-
-        // Phase 1: extract fenced code blocks to avoid mis-parsing their content
-        const blocks: {lang: string; code: string; isCard?: boolean}[] = [];
-        let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
-            const i = blocks.length; blocks.push({ lang: lang.trim(), code }); return '\n\x00BLOCK' + i + '\x00\n';
-        });
-
-        // Phase 1.5: extract Question Cards (Highly resilient parser for smaller models)
-        let finalOutputText = "";
-        let questionCardIndex = 0;
-        let inQuestion = false;
-        let qTitle = '';
-        let qOptions: {text: string, desc: string}[] = [];
-
-        function flushQuestionCard() {
-            if (!inQuestion) return;
-            inQuestion = false;
-            if (qOptions.length > 0) {
-                const optionsHtml = qOptions.map(opt => `
-                    <button class="ai-option-btn popup-option" data-suggest="${escapeHtml(opt.text)}" style="display:flex; flex-direction:column; align-items:flex-start; text-align:left; width:100%; margin:3px 0; padding:8px 12px; line-height:1.4; cursor:pointer;">
-                        <span style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px;">${svgIcon('pointer')} ${escapeHtml(opt.text)}</span>
-                        ${opt.desc.trim() ? `<span style="font-size:11.5px; opacity:0.65; margin-top:3px; font-weight:normal; padding-left:22px;">${escapeHtml(opt.desc.trim())}</span>` : ''}
-                    </button>
-                `).join('');
-                
-                const displayStyle = questionCardIndex === 0 ? "block" : "none";
-                const qIndex = questionCardIndex++;
-                const cardHtml = `
-                <div class="permission-card question-card" data-qindex="${qIndex}" style="margin: 14px 0; display:${displayStyle};">
-                    <div class="permission-card-header">
-                        <span class="permission-card-icon" style="font-size:18px;">${svgIcon('question')}</span>
-                        <div class="permission-card-body">
-                            <div class="permission-card-title">${escapeHtml(qTitle)}</div>
-                            <div style="font-size:11px; opacity:0.5; margin-top:4px;">⏳ 等待你的选择…</div>
-                        </div>
-                    </div>
-                    <div class="permission-card-actions" style="display:flex; flex-direction:column; gap:3px; padding:6px 14px 14px; border-top:none;">
-                        ${optionsHtml}
-                    </div>
-                </div>`;
-                const bIdx = blocks.length;
-                blocks.push({ lang: 'html', code: cardHtml, isCard: true });
-                finalOutputText += '\n\x00BLOCK' + bIdx + '\x00\n';
-            } else {
-                // False alarm, wasn't a valid card or had no options
-                finalOutputText += `:::question ${qTitle}\n`;
-            }
-            qOptions = [];
-            qTitle = '';
-        }
-
-        const lines15 = text.split('\n');
-        for (let j = 0; j < lines15.length; j++) {
-            const line = (lines15[j] || '').trim();
-            // Start of a question block (allow optional leading bullet point)
-            const qStartMatch = line.match(/^(?:[-*+]\s+)?(?::::\s*)?question\s+(.+)$/i);
-            if (qStartMatch) {
-                flushQuestionCard(); // Flush previous if it wasn't gracefully closed
-                inQuestion = true;
-                qTitle = qStartMatch[1] || '';
-                continue;
-            }
-            
-            if (inQuestion) {
-                if (line.match(/^(?:[-*+]\s+)?:::\s*$/)) {
-                    flushQuestionCard();
-                    continue;
-                }
-                const optMatch = line.match(/^(?:[-*+]\s+|\d+\.\s+)?\[Option:\s*([^\]]+)\]\s*(.*)$/i);
-                if (optMatch) {
-                    qOptions.push({ text: optMatch[1] || '', desc: optMatch[2] || '' });
-                } else if (qOptions.length > 0 && line !== '') {
-                    // Accumulate broken newline descriptions
-                    qOptions[qOptions.length - 1]!.desc += ' ' + line;
-                } else if (line !== '') {
-                    // Plain text before any options? We can just append it safely to finalOutputText.
-                    finalOutputText += line + '\n';
-                }
-            } else {
-                // Not in question block, preserve raw text
-                finalOutputText += (lines15[j] || '') + '\n';
-            }
-        }
-        flushQuestionCard(); // Flush any trailing unclosed block
-        text = finalOutputText;
-
-        // Phase 2: line-by-line state machine — correctly handles ## headings at any position
-        const lines = text.split('\n');
-        const out: string[] = [];
-        let i = 0;
-
-        function flushPara(paraLines: string[]) {
-            if (!paraLines.length) return;
-            const lineHtml = paraLines.map(line => {
-                const t = line.trim();
-                // eslint-disable-next-line no-control-regex
-                if (/^\x00BLOCK\d+\x00$/.test(t)) {
-                    const block = blocks[+t.match(/\d+/)![0]!]!;
-                    if (block.isCard) return block.code;
-                    return '<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(block.lang) + '</div><code>' + escapeHtml(block.code) + '</code></div>';
-                }
-                return inlineMd(line);
-            });
-            out.push('<p>' + lineHtml.join('<br>') + '</p>');
-        }
-
-        let paraLines: string[] = [];
-
-        while (i < lines.length) {
-            const line = lines[i]!;
-            const trimmed = line.trim();
-
-            // Empty line: flush current paragraph
-            if (!trimmed) { flushPara(paraLines); paraLines = []; i++; continue; }
-
-            // Fenced code block placeholder (standalone line)
-            // eslint-disable-next-line no-control-regex
-            if (/^\x00BLOCK\d+\x00$/.test(trimmed)) {
-                flushPara(paraLines); paraLines = [];
-                const block = blocks[+trimmed.match(/\d+/)![0]!]!;
-                if (block.isCard) {
-                    out.push(block.code);
-                } else {
-                    out.push('<div class="md-codeblock"><div class="md-codeblock-lang">' + escapeHtml(block.lang) + '</div><code>' + escapeHtml(block.code) + '</code></div>');
-                }
-                i++; continue;
-            }
-
-            // ATX Heading — works at ANY line position (key fix: no lines.length===1 restriction)
-            const hdm = trimmed.match(/^(#{1,6})\s+(.+)$/);
-            if (hdm) {
-                flushPara(paraLines); paraLines = [];
-                const lv = hdm[1]!.length;
-                out.push('<h' + lv + '>' + inlineMd(hdm[2]!) + '</h' + lv + '>');
-                i++; continue;
-            }
-
-            // Horizontal rule
-            if (/^[-*_]{3,}$/.test(trimmed)) {
-                flushPara(paraLines); paraLines = [];
-                out.push('<hr>'); i++; continue;
-            }
-
-            // Blockquote — collect consecutive > lines
-            if (/^>/.test(trimmed)) {
-                flushPara(paraLines); paraLines = [];
-                const bqLines: string[] = [];
-                while (i < lines.length && /^>/.test(lines[i]!.trim())) {
-                    bqLines.push(lines[i]!.replace(/^>\s?/, '')); i++;
-                }
-                out.push('<blockquote>' + renderMarkdown(bqLines.join('\n')) + '</blockquote>');
-                continue;
-            }
-
-            // GFM Table — header row | separator row | data rows (all consecutive)
-            if (/^\|/.test(trimmed) && i + 1 < lines.length && /^[/|\s:-]+$/.test(lines[i + 1]!.trim())) {
-                flushPara(paraLines); paraLines = [];
-                const tblLines: string[] = [];
-                while (i < lines.length && /^\|/.test(lines[i]!.trim())) { tblLines.push(lines[i]!); i++; }
-                if (tblLines.length >= 2) {
-                    const headers = tblLines[0]!.split('|').map(c => c.trim()).filter(Boolean);
-                    const rows = tblLines.slice(2).map(r => r.split('|').map(c => c.trim()).filter(Boolean));
-                    let tbl = '<table><thead><tr>' + headers.map(h => '<th>' + inlineMd(h) + '</th>').join('') + '</tr></thead><tbody>';
-                    rows.forEach(r => { tbl += '<tr>' + r.map(c => '<td>' + inlineMd(c) + '</td>').join('') + '</tr>'; });
-                    out.push(tbl + '</tbody></table>');
-                }
-                continue;
-            }
-
-            // Unordered list — collect consecutive list items, supporting nested lists
-            if (/^[-*+]\s/.test(trimmed)) {
-                flushPara(paraLines); paraLines = [];
-                // Stack of { tag:'ul'|'ol', indent:number } for nesting
-                const stack: {tag: string; indent: number}[] = [];
-                const htmlParts: string[] = [];
-                const getIndent = (line: string) => { const m = line.match(/^(\s*)/); return m ? m[1]!.length : 0; };
-                const startList = (tag: string, indent: number) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
-                const closeList = () => { const item = stack.pop(); if (item) htmlParts.push('</' + item.tag + '>'); };
-
-                startList('ul', getIndent(lines[i]!));
-                while (i < lines.length) {
-                    const ll = lines[i]!, lt = ll.trim();
-                    if (!lt) { i++; break; }
-                    const indent = getIndent(ll);
-                    const ulMatch = lt.match(/^[-*+]\s+(.*)/);
-                    const olMatch = lt.match(/^\d+\.\s+(.*)/);
-                    if (ulMatch || olMatch) {
-                        const content = ulMatch ? ulMatch[1]! : olMatch![1]!;
-                        const listTag = ulMatch ? 'ul' : 'ol';
-                        // Close lists deeper than current indent
-                        while (stack.length > 1 && stack[stack.length - 1]!.indent >= indent) {
-                            htmlParts.push('</li>');
-                            closeList();
-                        }
-                        // Open new nested list if deeper
-                        if (stack.length > 0 && indent > stack[stack.length - 1]!.indent) {
-                            startList(listTag, indent);
-                        } else if (stack.length > 0 && htmlParts[htmlParts.length - 1] !== '<' + stack[stack.length - 1]!.tag + '>') {
-                            htmlParts.push('</li>');
-                        }
-                        htmlParts.push('<li>' + inlineMd(content));
-                        i++;
-                    } else if (/^\s{2,}/.test(ll) && stack.length > 0) {
-                        // Continuation line — append to current item
-                        htmlParts.push(' ' + lt);
-                        i++;
-                    } else {
-                        break;
-                    }
-                }
-                // Close all remaining open lists
-                while (stack.length > 0) {
-                    htmlParts.push('</li>');
-                    closeList();
-                }
-                out.push(htmlParts.join(''));
-                continue;
-            }
-
-            // Ordered list — collect consecutive numbered items with nesting
-            if (/^\d+\.\s/.test(trimmed)) {
-                flushPara(paraLines); paraLines = [];
-                const stack: {tag: string; indent: number}[] = [];
-                const htmlParts: string[] = [];
-                const getIndent = (line: string) => { const m = line.match(/^(\s*)/); return m ? m[1]!.length : 0; };
-                const startList = (tag: string, indent: number) => { stack.push({ tag, indent }); htmlParts.push('<' + tag + '>'); };
-                const closeList = () => { const item = stack.pop(); if (item) htmlParts.push('</' + item.tag + '>'); };
-
-                startList('ol', getIndent(lines[i]!));
-                while (i < lines.length) {
-                    const ll = lines[i]!, lt = ll.trim();
-                    if (!lt) { i++; break; }
-                    const indent = getIndent(ll);
-                    const olMatch = lt.match(/^\d+\.\s+(.*)/);
-                    const ulMatch = lt.match(/^[-*+]\s+(.*)/);
-                    if (olMatch || ulMatch) {
-                        const content = olMatch ? olMatch[1]! : ulMatch![1]!;
-                        const listTag = olMatch ? 'ol' : 'ul';
-                        while (stack.length > 1 && stack[stack.length - 1]!.indent >= indent) {
-                            htmlParts.push('</li>');
-                            closeList();
-                        }
-                        if (stack.length > 0 && indent > stack[stack.length - 1]!.indent) {
-                            startList(listTag, indent);
-                        } else if (stack.length > 0 && htmlParts[htmlParts.length - 1] !== '<' + stack[stack.length - 1]!.tag + '>') {
-                            htmlParts.push('</li>');
-                        }
-                        htmlParts.push('<li>' + inlineMd(content));
-                        i++;
-                    } else if (/^\s{2,}/.test(ll) && stack.length > 0) {
-                        htmlParts.push(' ' + lt);
-                        i++;
-                    } else {
-                        break;
-                    }
-                }
-                while (stack.length > 0) {
-                    htmlParts.push('</li>');
-                    closeList();
-                }
-                out.push(htmlParts.join(''));
-                continue;
-            }
-
-            // Default: accumulate into paragraph
-            paraLines.push(line); i++;
-        }
-
-        flushPara(paraLines);
-        return out.join('');
-    }
 
     let isUserScrolledUp = false;
     const jumpLatestBtn = document.createElement('button');
@@ -1935,7 +1553,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 // Card representation in the main timeline
                 const card = document.createElement('div');
                 card.className = 'orch-lane lane-running subagent-card';
-                card.innerHTML = buildSubagentCardHtml(agentId, uniqueId);
+                card.innerHTML = buildSubagentCardHtml(agentId, uniqueId, chatI18n);
                 card.dataset.targetId = uniqueId;
                 currentAssistantDiv.appendChild(card);
 
@@ -1943,7 +1561,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 const fullscreen = document.createElement('div');
                 fullscreen.id = uniqueId;
                 fullscreen.className = 'subagent-fullscreen-view';
-                fullscreen.innerHTML = buildSubagentFullscreenHtml(agentId, uniqueId);
+                fullscreen.innerHTML = buildSubagentFullscreenHtml(agentId, uniqueId, chatI18n);
                 currentAssistantDiv.appendChild(fullscreen);
                 
                 state.container = fullscreen.querySelector('.subagent-body') as HTMLElement;
@@ -1962,7 +1580,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         const now = Date.now();
         const summary = makeRunSummary(state.liveSteps, finalText);
         const idleMs = state.isComplete ? 0 : now - state.lastStepAt;
-        const toolName = latestLiveToolName(state.liveSteps);
+        const toolName = latestLiveToolName(state.liveSteps, chatI18n.live.waitingForOutput);
         const isBlocked = /澄清|clarification|blocked/i.test(finalText || summary.latestStatus || '');
         const hasProblem = isBlocked || summary.errorCount > 0 || summary.failedToolCount > 0 || /失败|错误|超时|中止|fail|error|timeout/i.test(finalText || '');
 
@@ -1988,7 +1606,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
 
         const meta = card.querySelector('.lane-live-meta') as HTMLElement | null;
         if (meta) {
-            meta.innerHTML = buildSubagentMetaHtml(state, summary, toolName, now);
+            meta.innerHTML = buildSubagentMetaHtml(state, summary, toolName, now, chatI18n);
         }
 
         const fullscreen = document.getElementById(state.fullscreenId);
@@ -1997,7 +1615,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
             if (subtitle) subtitle.textContent = summary.latestStatus;
             const metrics = fullscreen.querySelector('.subagent-header-metrics') as HTMLElement | null;
             if (metrics) {
-                metrics.innerHTML = buildSubagentHeaderMetricsHtml(state, summary, now);
+                metrics.innerHTML = buildSubagentHeaderMetricsHtml(state, summary, now, chatI18n);
             }
         }
     }
@@ -2018,7 +1636,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
             state.liveProcessPanel.className = 'agent-process-panel live-process-panel';
             state.liveProcessPanel.open = true;
             const summary = document.createElement('summary');
-            summary.innerHTML = buildLiveProcessSummaryHtml('layers', '探索过程', '实时更新');
+            summary.innerHTML = buildLiveProcessSummaryHtml('layers', chatI18n.live.realtimeProcess, '');
             state.liveProcessPanel.appendChild(summary);
             state.liveProcessBody = document.createElement('div');
             state.liveProcessBody.className = 'process-body';
@@ -2030,7 +1648,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
             }
         }
         const meta = state.liveProcessPanel.querySelector('.process-meta');
-        if (meta) meta.textContent = buildLiveProcessMeta(state.liveSteps);
+        if (meta) meta.textContent = buildLiveProcessMeta(state.liveSteps, chatI18n);
         return state.liveProcessBody;
     }
 
@@ -2168,7 +1786,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 }
                 state.liveThinkBody.innerHTML = renderMarkdown(state.liveThinkContent);
                 if (state.liveThinkSum) {
-                    state.liveThinkSum.innerHTML = buildThinkingSummaryHtml(state.liveThinkContent);
+                    state.liveThinkSum.innerHTML = buildThinkingSummaryHtml(state.liveThinkContent, chatI18n);
                 }
             }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
@@ -3325,152 +2943,20 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
             }
 
             case 'renderPlan': {
-                // Remove old plan cards when a new one arrives
                 document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
                 const isOrchestratorPlan = msg.mode === 'orchestrator';
-                
-                // ── Interactive inline annotation view ──────────────────────────
-                const annotations: {sectionIdx: number; section: string; note: string}[] = [];   // { sectionIdx, section, note }
-
-                const wrap = document.createElement('div');
-                wrap.className = `annotatable-plan plan-card-wrap ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`;
-
-                // Header row
-                const header = document.createElement('div');
-                header.className = 'ap-header';
-                header.innerHTML = `<span class="ap-header-title">${svgIcon(isOrchestratorPlan ? 'bot' : 'edit')}${isOrchestratorPlan ? '多 Agent 计划批注' : '在线批注'}</span>
-                    <span class="ap-header-hint">${isOrchestratorPlan ? '确认后进入 DAG 分派与并行执行' : '点击段落添加批注'}</span>
-                    <div style="display:flex; gap:6px;">
-                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">${svgIcon(isOrchestratorPlan ? 'zap' : 'check')}${isOrchestratorPlan ? '启动多 Agent' : '同意执行'}</button>
-                        <button class="ap-submit-btn" disabled>${svgIconNoMargin('upload')} 提交批注 (0)</button>
-                    </div>`;
-                wrap.appendChild(header);
-
-                const submitBtn = header.querySelector('.ap-submit-btn') as HTMLButtonElement;
-                const approveBtn = header.querySelector('.ap-approve-btn') as HTMLButtonElement;
-
-                function updateSubmitBtn() {
-                    submitBtn.innerHTML = `${svgIconNoMargin('upload')} 提交批注 (${annotations.length})`;
-                    submitBtn.disabled = annotations.length === 0;
-                }
-
-                approveBtn.addEventListener('click', () => {
-                    vscode.postMessage({
-                        type: 'submitPlanAnnotations',
-                        annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
-                    });
-                    approveBtn.innerHTML = svgIcon('check') + (isOrchestratorPlan ? '已启动多 Agent...' : '已开始执行...');
-                    approveBtn.disabled = true;
-                    submitBtn.disabled = true;
-                    dismissCard(wrap, 400);
+                const wrap = createAnnotationCard({
+                    className: `plan-card-wrap ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`,
+                    icon: isOrchestratorPlan ? 'bot' : 'edit',
+                    approveIcon: isOrchestratorPlan ? 'zap' : 'check',
+                    sections: msg.sections || [],
+                    labels: isOrchestratorPlan ? chatI18n.annotations.orchestratorPlan : chatI18n.annotations.plan,
+                    renderMarkdown,
+                    postMessage: message => vscode.postMessage(message),
+                    dismissCard: (element, delay = 0, done, removeFromDom) => dismissCard(element, delay, done, removeFromDom),
+                    approveMessageType: 'submitPlanAnnotations',
+                    reviseMessageType: 'revisePlanWithAnnotations',
                 });
-
-                submitBtn.addEventListener('click', () => {
-                    if (annotations.length === 0) return;
-                    vscode.postMessage({
-                        type: 'revisePlanWithAnnotations',
-                        annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
-                    });
-                    // Visual feedback
-                    submitBtn.innerHTML = svgIcon('check') + '已提交';
-                    submitBtn.disabled = true;
-                });
-
-                // Sections
-                const sectionsWrap = document.createElement('div');
-                sectionsWrap.className = 'ap-sections';
-
-                msg.sections.forEach((section: string, idx: number) => {
-                    const row = document.createElement('div');
-                    row.className = 'ap-row';
-                    row.dataset.idx = String(idx);
-
-                    // Section text (rendered using full markdown parser)
-                    const textDiv = document.createElement('div');
-                    textDiv.className = 'ap-section-text markdown-body msg-bubble';
-                    textDiv.innerHTML = renderMarkdown(section);
-
-                    // Add-comment button (shows on hover)
-                    const addBtn = document.createElement('button');
-                    addBtn.className = 'ap-add-btn';
-                    addBtn.title = '添加批注';
-                    addBtn.innerHTML = svgIconNoMargin('messageSquare');
-
-                    // Annotation bubble (hidden until annotated)
-                    const bubble = document.createElement('div');
-                    bubble.className = 'ap-bubble';
-                    bubble.style.display = 'none';
-
-                    // Inline input box (hidden until add-btn clicked)
-                    const inputBox = document.createElement('div');
-                    inputBox.className = 'ap-input-box';
-                    inputBox.style.display = 'none';
-                    inputBox.innerHTML = `
-                        <textarea class="ap-textarea" rows="3" placeholder="输入批注内容…"></textarea>
-                        <div class="ap-input-actions">
-                            <button class="ap-confirm-btn">确定</button>
-                            <button class="ap-cancel-btn">取消</button>
-                        </div>`;
-
-                    function openInput() {
-                        const existingEntry = annotations.find(a => a.sectionIdx === idx);
-                        const ta = inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement;
-                        ta.value = existingEntry ? existingEntry.note : '';
-                        inputBox.style.display = 'block';
-                        ta.focus();
-                        row.classList.add('ap-row-active');
-                    }
-
-                    function closeInput() {
-                        inputBox.style.display = 'none';
-                        row.classList.remove('ap-row-active');
-                    }
-
-                    function confirmAnnotation() {
-                        const val = (inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement).value.trim();
-                        closeInput();
-                        if (!val) {
-                            // Remove annotation if cleared
-                            const i = annotations.findIndex(a => a.sectionIdx === idx);
-                            if (i >= 0) annotations.splice(i, 1);
-                            bubble.style.display = 'none';
-                            row.classList.remove('ap-row-annotated');
-                        } else {
-                            const existing = annotations.find(a => a.sectionIdx === idx);
-                            if (existing) existing.note = val;
-                            else annotations.push({ sectionIdx: idx, section, note: val });
-                            bubble.innerHTML = `<span class="ap-bubble-icon">${svgIconNoMargin('messageSquare')}</span><span class="ap-bubble-text">${escapeHtml(val)}</span><button class="ap-bubble-edit">编辑</button>`;
-                            bubble.querySelector('.ap-bubble-edit')!.addEventListener('click', e => {
-                                e.stopPropagation(); openInput();
-                            });
-                            bubble.style.display = 'flex';
-                            row.classList.add('ap-row-annotated');
-                        }
-                        updateSubmitBtn();
-                    }
-
-                    addBtn.addEventListener('click', e => { e.stopPropagation(); openInput(); });
-                    row.addEventListener('click', () => {
-                        if (inputBox.style.display === 'none') openInput();
-                    });
-                    inputBox.querySelector('.ap-confirm-btn')!.addEventListener('click', confirmAnnotation);
-                    inputBox.querySelector('.ap-cancel-btn')!.addEventListener('click', closeInput);
-                    inputBox.querySelector('.ap-textarea')!.addEventListener('keydown', (e: Event) => {
-                        const ke = e as KeyboardEvent;
-                        if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)) confirmAnnotation();
-                        if (ke.key === 'Escape') closeInput();
-                    });
-                    // Prevent row click from triggering when clicking inside input
-                    inputBox.addEventListener('click', e => e.stopPropagation());
-
-                    row.appendChild(textDiv);
-                    row.appendChild(addBtn);
-                    row.appendChild(bubble);
-                    row.appendChild(inputBox);
-                    sectionsWrap.appendChild(row);
-                });
-
-                wrap.appendChild(sectionsWrap);
                 chatArea.appendChild(wrap);
                 scrollBottom();
                 break;
@@ -3517,280 +3003,36 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
             }
 
             case 'renderWalkthrough': {
-                // Remove old walkthrough cards when a new one arrives
                 document.querySelectorAll('.annotatable-plan.walkthrough-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
-
-                const annotations: {sectionIdx: number; section: string; note: string}[] = [];
-
-                const wrap = document.createElement('div');
-                wrap.className = 'annotatable-plan walkthrough-card-wrap';
-
-                const header = document.createElement('div');
-                header.className = 'ap-header';
-                header.innerHTML = `<span class="ap-header-title">${svgIcon('flag')}Walkthrough 批注</span>
-                    <span class="ap-header-hint">点击段落添加批注要求</span>
-                    <div style="display:flex; gap:6px;">
-                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">${svgIcon('check')}确认完成</button>
-                        <button class="ap-submit-btn" disabled>${svgIconNoMargin('upload')} 重新修改 (0)</button>
-                    </div>`;
-                wrap.appendChild(header);
-
-                const submitBtn = header.querySelector('.ap-submit-btn') as HTMLButtonElement;
-                const approveBtn = header.querySelector('.ap-approve-btn') as HTMLButtonElement;
-
-                function updateSubmitBtn() {
-                    submitBtn.innerHTML = `${svgIconNoMargin('upload')} 重新修改 (${annotations.length})`;
-                    submitBtn.disabled = annotations.length === 0;
-                }
-
-                approveBtn.addEventListener('click', () => {
-                    approveBtn.innerHTML = svgIcon('check') + '已确认';
-                    approveBtn.disabled = true;
-                    submitBtn.disabled = true;
-                    wrap.querySelectorAll('.ap-section').forEach(el => el.classList.remove('selected'));
-                    dismissCard(wrap, 400);
+                const wrap = createAnnotationCard({
+                    className: 'walkthrough-card-wrap',
+                    icon: 'flag',
+                    sections: msg.sections || [],
+                    labels: chatI18n.annotations.walkthrough,
+                    renderMarkdown,
+                    postMessage: message => vscode.postMessage(message),
+                    dismissCard: (element, delay = 0, done, removeFromDom) => dismissCard(element, delay, done, removeFromDom),
+                    reviseMessageType: 'reviseWalkthroughWithAnnotations',
+                    disableApproveOnSubmit: true,
                 });
-
-                submitBtn.addEventListener('click', () => {
-                    if (annotations.length === 0) return;
-                    vscode.postMessage({
-                        type: 'reviseWalkthroughWithAnnotations',
-                        annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
-                    });
-                    submitBtn.innerHTML = svgIcon('check') + '已提交';
-                    submitBtn.disabled = true;
-                    approveBtn.disabled = true;
-                });
-
-                const sectionsWrap = document.createElement('div');
-                sectionsWrap.className = 'ap-sections';
-
-                msg.sections.forEach((section: string, idx: number) => {
-                    const row = document.createElement('div');
-                    row.className = 'ap-row';
-                    row.dataset.idx = String(idx);
-
-                    const textDiv = document.createElement('div');
-                    textDiv.className = 'ap-section-text markdown-body msg-bubble';
-                    textDiv.innerHTML = renderMarkdown(section);
-
-                    const addBtn = document.createElement('button');
-                    addBtn.className = 'ap-add-btn';
-                    addBtn.title = '提出修改要求';
-                    addBtn.innerHTML = svgIconNoMargin('messageSquare');
-
-                    const bubble = document.createElement('div');
-                    bubble.className = 'ap-bubble';
-                    bubble.style.display = 'none';
-
-                    const inputBox = document.createElement('div');
-                    inputBox.className = 'ap-input-box';
-                    inputBox.style.display = 'none';
-                    inputBox.innerHTML = `
-                        <textarea class="ap-textarea" rows="3" placeholder="告诉 AI 哪里需要如何修改…"></textarea>
-                        <div class="ap-input-actions">
-                            <button class="ap-confirm-btn">确定</button>
-                            <button class="ap-cancel-btn">取消</button>
-                        </div>`;
-
-                    function openInput() {
-                        const existingEntry = annotations.find(a => a.sectionIdx === idx);
-                        const ta = inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement;
-                        ta.value = existingEntry ? existingEntry.note : '';
-                        inputBox.style.display = 'block';
-                        ta.focus();
-                        row.classList.add('ap-row-active');
-                    }
-
-                    function closeInput() {
-                        inputBox.style.display = 'none';
-                        row.classList.remove('ap-row-active');
-                    }
-
-                    function confirmAnnotation() {
-                        const val = (inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement).value.trim();
-                        closeInput();
-                        if (!val) {
-                            const i = annotations.findIndex(a => a.sectionIdx === idx);
-                            if (i >= 0) annotations.splice(i, 1);
-                            bubble.style.display = 'none';
-                            row.classList.remove('ap-row-annotated');
-                        } else {
-                            const existing = annotations.find(a => a.sectionIdx === idx);
-                            if (existing) existing.note = val;
-                            else annotations.push({ sectionIdx: idx, section, note: val });
-                            bubble.innerHTML = `<span class="ap-bubble-icon">${svgIconNoMargin('messageSquare')}</span><span class="ap-bubble-text">${escapeHtml(val)}</span><button class="ap-bubble-edit">编辑</button>`;
-                            bubble.querySelector('.ap-bubble-edit')!.addEventListener('click', e => {
-                                e.stopPropagation(); openInput();
-                            });
-                            bubble.style.display = 'flex';
-                            row.classList.add('ap-row-annotated');
-                        }
-                        updateSubmitBtn();
-                    }
-
-                    addBtn.addEventListener('click', e => { e.stopPropagation(); openInput(); });
-                    row.addEventListener('click', () => {
-                        if (inputBox.style.display === 'none') openInput();
-                    });
-                    inputBox.querySelector('.ap-confirm-btn')!.addEventListener('click', confirmAnnotation);
-                    inputBox.querySelector('.ap-cancel-btn')!.addEventListener('click', closeInput);
-                    inputBox.querySelector('.ap-textarea')!.addEventListener('keydown', (e: Event) => {
-                        const ke = e as KeyboardEvent;
-                        if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)) confirmAnnotation();
-                        if (ke.key === 'Escape') closeInput();
-                    });
-                    inputBox.addEventListener('click', e => e.stopPropagation());
-
-                    row.appendChild(textDiv);
-                    row.appendChild(addBtn);
-                    row.appendChild(bubble);
-                    row.appendChild(inputBox);
-                    sectionsWrap.appendChild(row);
-                });
-
-                wrap.appendChild(sectionsWrap);
                 chatArea.appendChild(wrap);
                 scrollBottom();
                 break;
             }
 
             case 'renderBlueprint': {
-                // Remove old blueprint cards when a new one arrives
                 document.querySelectorAll('.annotatable-plan.blueprint-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
-
-                const annotations: {sectionIdx: number; section: string; note: string}[] = [];
-
-                const wrap = document.createElement('div');
-                wrap.className = 'annotatable-plan blueprint-card-wrap';
-
-                const header = document.createElement('div');
-                header.className = 'ap-header';
-                header.innerHTML = `<span class="ap-header-title">${svgIcon('layers')}设计蓝图批注</span>
-                    <span class="ap-header-hint">点击段落添加批注</span>
-                    <div style="display:flex; gap:6px;">
-                        <button class="ap-approve-btn" style="background:var(--vscode-button-background); color:var(--vscode-button-foreground); border:none; padding:4px 10px; border-radius:2px; cursor:pointer; min-width:80px;">${svgIcon('check')}同意蓝图</button>
-                        <button class="ap-submit-btn" disabled>${svgIconNoMargin('upload')} 提交批注 (0)</button>
-                    </div>`;
-                wrap.appendChild(header);
-
-                const submitBtn = header.querySelector('.ap-submit-btn') as HTMLButtonElement;
-                const approveBtn = header.querySelector('.ap-approve-btn') as HTMLButtonElement;
-
-                function updateSubmitBtn() {
-                    submitBtn.innerHTML = `${svgIconNoMargin('upload')} 提交批注 (${annotations.length})`;
-                    submitBtn.disabled = annotations.length === 0;
-                }
-
-                approveBtn.addEventListener('click', () => {
-                    vscode.postMessage({
-                        type: 'submitPlanAnnotations',
-                        annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
-                    });
-                    approveBtn.innerHTML = svgIcon('check') + '蓝图已批准';
-                    approveBtn.disabled = true;
-                    submitBtn.disabled = true;
-                    dismissCard(wrap, 400);
+                const wrap = createAnnotationCard({
+                    className: 'blueprint-card-wrap',
+                    icon: 'layers',
+                    sections: msg.sections || [],
+                    labels: chatI18n.annotations.blueprint,
+                    renderMarkdown,
+                    postMessage: message => vscode.postMessage(message),
+                    dismissCard: (element, delay = 0, done, removeFromDom) => dismissCard(element, delay, done, removeFromDom),
+                    approveMessageType: 'submitPlanAnnotations',
+                    reviseMessageType: 'revisePlanWithAnnotations',
                 });
-
-                submitBtn.addEventListener('click', () => {
-                    if (annotations.length === 0) return;
-                    vscode.postMessage({
-                        type: 'revisePlanWithAnnotations',
-                        annotations: annotations.map((a: any) => ({ section: a.section, note: a.note }))
-                    });
-                    submitBtn.innerHTML = svgIcon('check') + '已提交';
-                    submitBtn.disabled = true;
-                });
-
-                const sectionsWrap = document.createElement('div');
-                sectionsWrap.className = 'ap-sections';
-
-                msg.sections.forEach((section: string, idx: number) => {
-                    const row = document.createElement('div');
-                    row.className = 'ap-row';
-                    row.dataset.idx = String(idx);
-
-                    const textDiv = document.createElement('div');
-                    textDiv.className = 'ap-section-text markdown-body msg-bubble';
-                    textDiv.innerHTML = renderMarkdown(section);
-
-                    const addBtn = document.createElement('button');
-                    addBtn.className = 'ap-add-btn';
-                    addBtn.title = '添加批注';
-                    addBtn.innerHTML = svgIconNoMargin('messageSquare');
-
-                    const bubble = document.createElement('div');
-                    bubble.className = 'ap-bubble';
-                    bubble.style.display = 'none';
-
-                    const inputBox = document.createElement('div');
-                    inputBox.className = 'ap-input-box';
-                    inputBox.style.display = 'none';
-                    inputBox.innerHTML = `
-                        <textarea class="ap-textarea" rows="3" placeholder="输入批注内容…"></textarea>
-                        <div class="ap-input-actions">
-                            <button class="ap-confirm-btn">确定</button>
-                            <button class="ap-cancel-btn">取消</button>
-                        </div>`;
-
-                    function openInput() {
-                        const existingEntry = annotations.find(a => a.sectionIdx === idx);
-                        const ta = inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement;
-                        ta.value = existingEntry ? existingEntry.note : '';
-                        inputBox.style.display = 'block';
-                        ta.focus();
-                        row.classList.add('ap-row-active');
-                    }
-
-                    function closeInput() {
-                        inputBox.style.display = 'none';
-                        row.classList.remove('ap-row-active');
-                    }
-
-                    function confirmAnnotation() {
-                        const val = (inputBox.querySelector('.ap-textarea') as HTMLTextAreaElement).value.trim();
-                        closeInput();
-                        if (!val) {
-                            const i = annotations.findIndex(a => a.sectionIdx === idx);
-                            if (i >= 0) annotations.splice(i, 1);
-                            bubble.style.display = 'none';
-                            row.classList.remove('ap-row-annotated');
-                        } else {
-                            const existing = annotations.find(a => a.sectionIdx === idx);
-                            if (existing) existing.note = val;
-                            else annotations.push({ sectionIdx: idx, section, note: val });
-                            bubble.innerHTML = `<span class="ap-bubble-icon">${svgIconNoMargin('messageSquare')}</span><span class="ap-bubble-text">${escapeHtml(val)}</span><button class="ap-bubble-edit">编辑</button>`;
-                            bubble.querySelector('.ap-bubble-edit')!.addEventListener('click', e => {
-                                e.stopPropagation(); openInput();
-                            });
-                            bubble.style.display = 'flex';
-                            row.classList.add('ap-row-annotated');
-                        }
-                        updateSubmitBtn();
-                    }
-
-                    addBtn.addEventListener('click', e => { e.stopPropagation(); openInput(); });
-                    row.addEventListener('click', () => {
-                        if (inputBox.style.display === 'none') openInput();
-                    });
-                    inputBox.querySelector('.ap-confirm-btn')!.addEventListener('click', confirmAnnotation);
-                    inputBox.querySelector('.ap-cancel-btn')!.addEventListener('click', closeInput);
-                    inputBox.querySelector('.ap-textarea')!.addEventListener('keydown', (e: Event) => {
-                        const ke = e as KeyboardEvent;
-                        if (ke.key === 'Enter' && (ke.ctrlKey || ke.metaKey)) confirmAnnotation();
-                        if (ke.key === 'Escape') closeInput();
-                    });
-                    inputBox.addEventListener('click', e => e.stopPropagation());
-
-                    row.appendChild(textDiv);
-                    row.appendChild(addBtn);
-                    row.appendChild(bubble);
-                    row.appendChild(inputBox);
-                    sectionsWrap.appendChild(row);
-                });
-
-                wrap.appendChild(sectionsWrap);
                 chatArea.appendChild(wrap);
                 scrollBottom();
                 break;

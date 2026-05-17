@@ -19,6 +19,8 @@ import { buildSubagentCardHtml, buildSubagentMetaHtml, latestLiveToolName } from
 import { buildSettingsOverviewModel } from '../../webview/chat/settingsOverview';
 import { getChatI18n } from '../../webview/chat/i18n';
 import { applyModeUi } from '../../webview/chat/modes';
+import { renderMarkdown } from '../../webview/chat/markdown';
+import { mentionResultToActiveContext, stripConsumedMentionText, type ActiveContext } from '../../webview/chat/contextMentions';
 import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from '../../webview/chat/slashCommands';
 import { buildWorkflowSummary, getWorkflowSlashCommand, normalizeWorkflowLabels, type WorkflowView } from '../../webview/chat/workflows';
 
@@ -181,6 +183,7 @@ describe('chat i18n and command helpers', () => {
 
 describe('chat view contract helpers', () => {
     it('builds settings overview copy without touching DOM', () => {
+        const i18n = getChatI18n('zh-cn');
         const model = buildSettingsOverviewModel({
             providers: [{ id: 'openai', name: 'OpenAI', defaultEndpoint: 'https://api.example', hasKey: true }],
             providerId: 'openai',
@@ -191,7 +194,7 @@ describe('chat view contract helpers', () => {
             mcpCount: 2,
             writeMode: 'auto',
             reasoningEffort: 'high',
-        });
+        }, i18n);
 
         expect(model.title).to.include('OpenAI');
         expect(model.subtitle).to.include('128k tokens');
@@ -206,10 +209,71 @@ describe('chat view contract helpers', () => {
             completedAt: 2500,
             isComplete: true,
         };
-        const html = buildSubagentMetaHtml(state, { toolCallCount: 1, readCount: 1, writeCount: 0 }, latestLiveToolName(state.liveSteps), 3000);
+        const html = buildSubagentMetaHtml(state, { toolCallCount: 1, readCount: 1, writeCount: 0 }, latestLiveToolName(state.liveSteps), 3000, getChatI18n('zh-cn'));
 
-        expect(buildSubagentCardHtml('agent-a', 'view-a')).to.include('子任务');
+        expect(buildSubagentCardHtml('agent-a', 'view-a', getChatI18n('zh-cn'))).to.include('子任务');
         expect(html).to.include('read_file');
         expect(html).to.include('读取');
+    });
+});
+
+describe('chat markdown and mention helpers', () => {
+    it('renders markdown headings, lists, tables, and code blocks from an extracted module', () => {
+        const html = renderMarkdown([
+            '# Title',
+            '',
+            '- first',
+            '- **second**',
+            '',
+            '| A | B |',
+            '|---|---|',
+            '| 1 | `two` |',
+            '',
+            '```txt',
+            'a < b',
+            '```',
+        ].join('\n'));
+
+        expect(html).to.include('<h1>Title</h1>');
+        expect(html).to.include('<ul>');
+        expect(html).to.include('<strong>second</strong>');
+        expect(html).to.include('<table>');
+        expect(html).to.include('&lt; b');
+    });
+
+    it('renders question cards and media links with escaped labels', () => {
+        const html = renderMarkdown([
+            ':::question Pick <one>',
+            '[Option: Safe] Use this',
+            '[Option: Risky] Avoid this',
+            ':::',
+            '',
+            '[clip](demo.mp4)',
+        ].join('\n'), { waitingForChoice: 'wait' });
+
+        expect(html).to.include('question-card');
+        expect(html).to.include('Pick &lt;one&gt;');
+        expect(html).to.include('data-suggest="Safe"');
+        expect(html).to.include('<video src="demo.mp4"');
+    });
+
+    it('converts mention results and strips consumed mention-only lines', () => {
+        const ctx = mentionResultToActiveContext({
+            type: 'file',
+            label: 'events.txt',
+            desc: 'events/events.txt',
+            uri: '/mod/events/events.txt',
+            cacheStatus: 'disk',
+        });
+        const blackboard: ActiveContext = {
+            id: 'b',
+            type: 'blackboard',
+            label: 'blackboard:task',
+            key: 'task',
+        };
+
+        expect(ctx.type).to.equal('file');
+        expect(ctx.cacheStatus).to.equal('disk');
+        expect(stripConsumedMentionText('@events.txt\nDo work\n@blackboard:task', [ctx, blackboard])).to.equal('Do work');
     });
 });

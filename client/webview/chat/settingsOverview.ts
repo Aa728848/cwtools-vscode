@@ -1,5 +1,5 @@
 import { escapeHtml, formatNum } from './formatters';
-import type { ChatI18nText } from './i18n';
+import { getChatI18n, type ChatI18nText } from './i18n';
 
 export interface SettingsProviderView {
     id: string;
@@ -29,33 +29,34 @@ export interface SettingsOverviewModel {
     chipsHtml: string;
 }
 
-export function buildSettingsOverviewModel(input: SettingsOverviewInput, _i18n?: ChatI18nText): SettingsOverviewModel {
+export function buildSettingsOverviewModel(input: SettingsOverviewInput, i18n: ChatI18nText = getChatI18n('zh-cn')): SettingsOverviewModel {
+    const labels = i18n.settings;
     const provider = input.providers.find(providerView => providerView.id === input.providerId);
-    const providerName = provider?.name || input.providerId || '未选择 Provider';
-    const model = input.model?.trim() || provider?.defaultModel || '未设置模型';
-    const endpoint = input.endpoint?.trim() || provider?.defaultEndpoint || '默认端点';
+    const providerName = provider?.name || input.providerId || labels.unselectedProvider;
+    const model = input.model?.trim() || provider?.defaultModel || labels.unsetModel;
+    const endpoint = input.endpoint?.trim() || provider?.defaultEndpoint || labels.defaultEndpoint;
     const contextTokens = input.contextTokens || 0;
-    const contextLabel = contextTokens > 0 ? `${formatNum(contextTokens)} tokens` : '自动';
+    const contextLabel = contextTokens > 0 ? `${formatNum(contextTokens)} tokens` : labels.automatic;
     const apiState = input.providerId === 'ollama'
-        ? '本地模型'
-        : (provider?.hasKey ? 'API Key 已配置' : 'API Key 未配置');
+        ? labels.localModel
+        : (provider?.hasKey ? labels.apiKeyConfigured : labels.apiKeyMissing);
     const inlineState = input.inlineEnabled
-        ? `补全: ${input.inlineProviderName || '同主模型'}`
-        : '补全: 关闭';
+        ? `${labels.inlinePrefix}: ${input.inlineProviderName || labels.inlineSameProvider}`
+        : labels.inlineOff;
     const mcpCount = input.mcpCount ?? 0;
-    const writeMode = input.writeMode === 'auto' ? '写入自动' : '写入确认';
+    const writeMode = input.writeMode === 'auto' ? labels.writeAuto : labels.writeConfirm;
     const reasoning = input.reasoningEffort || 'high';
 
     return {
         title: `${providerName} · ${model}`,
-        subtitle: `${endpoint} · 上下文 ${contextLabel} · ${apiState}`,
-        headerSubtitle: `${apiState} · ${mcpCount} 个 MCP · ${writeMode}`,
+        subtitle: `${endpoint} · ${labels.contextPrefix} ${contextLabel} · ${apiState}`,
+        headerSubtitle: `${apiState} · ${mcpCount} ${labels.mcpUnit} · ${writeMode}`,
         chipsHtml: [
-            `<span class="settings-overview-chip">Provider <strong>${escapeHtml(providerName)}</strong></span>`,
-            `<span class="settings-overview-chip">MCP <strong>${mcpCount}</strong></span>`,
+            `<span class="settings-overview-chip">${escapeHtml(labels.providerChip)} <strong>${escapeHtml(providerName)}</strong></span>`,
+            `<span class="settings-overview-chip">${escapeHtml(labels.mcpUnit)} <strong>${mcpCount}</strong></span>`,
             `<span class="settings-overview-chip">${escapeHtml(inlineState)}</span>`,
-            `<span class="settings-overview-chip">写入 <strong>${escapeHtml(writeMode)}</strong></span>`,
-            `<span class="settings-overview-chip">推理 <strong>${escapeHtml(reasoning)}</strong></span>`,
+            `<span class="settings-overview-chip">${escapeHtml(labels.writeChip)} <strong>${escapeHtml(writeMode)}</strong></span>`,
+            `<span class="settings-overview-chip">${escapeHtml(labels.reasoningChip)} <strong>${escapeHtml(reasoning)}</strong></span>`,
         ].join(''),
     };
 }

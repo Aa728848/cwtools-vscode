@@ -274,9 +274,9 @@ export class LspToolHandler {
                         for (const line of lines) {
                             const match = line.match(/\|\s*(\w+)\s*\|\s*(\w+)\s*\|/);
                             if (match) {
-                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                 
                                 const ctx = match[1]!;
-                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                 
                                 const scope = match[2]!;
                                 if (ctx === 'ROOT') result.root = scope;
                                 else if (ctx === 'THIS') {
@@ -466,7 +466,7 @@ export class LspToolHandler {
                             const keyPattern = /^(\w[\w.-]*)\s*=/gm;
                             let match;
                             while ((match = keyPattern.exec(content)) !== null && instances.length < limit) {
-                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                 
                                 const id = match[1]!;
                                 if (!args.filter || id.includes(args.filter)) {
                                     instances.push({ id, file: path.relative(this.ctx.workspaceRoot, file) });
@@ -708,12 +708,12 @@ export class LspToolHandler {
             let currentDesc = '';
 
             for (let i = 0; i < lines.length; i++) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 const line = lines[i]!.trim();
 
                 const scopeMatch = line.match(aliasPattern);
                 if (scopeMatch) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     currentScopes = scopeMatch[1]!.split(/\s+/).filter(s => s.length > 0);
                     continue;
                 }
@@ -725,9 +725,9 @@ export class LspToolHandler {
 
                 const nameMatch = line.match(namePattern);
                 if (nameMatch) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const name = nameMatch[1]!;
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const syntax = nameMatch[2]!;
                     
                     let scopes = [...currentScopes];

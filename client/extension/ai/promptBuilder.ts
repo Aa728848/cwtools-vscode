@@ -1170,7 +1170,7 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
             // Extract namespaces list
             const nsMatch = content.match(/### Event Namespaces\n([\s\S]*?)(?=\n### |\n## |$)/);
             if (nsMatch) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 parsed.namespaces = (nsMatch[1]!.match(/`([^`]+)`/g) || []).map(s => s.replace(/`/g, ''));
             }
 
@@ -1516,17 +1516,17 @@ ${trimmed}
         let blockStart = cursorLine;
 
         for (let i = cursorLine; i >= 0; i--) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const line = lines[i]!;
             for (let c = line.length - 1; c >= 0; c--) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 if (line[c]! === '}') braceDepth++;
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 if (line[c]! === '{') braceDepth--;
             }
             if (braceDepth <= 0 && i < cursorLine) {
                 // Check if this line looks like a block opener (e.g. "country_event = {")
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 const trimmed = lines[i]!.trim();
                 if (trimmed.match(/^[\w.]+\s*=\s*\{/) || trimmed.match(/^[\w.]+\s*=\s*$/)) {
                     blockStart = i;
@@ -1544,7 +1544,7 @@ ${trimmed}
         braceDepth = 0;
         let blockEnd = cursorLine;
         for (let i = blockStart; i < lines.length; i++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const line = lines[i]!;
             for (const ch of line) {
                 if (ch === '{') braceDepth++;
@@ -1565,7 +1565,7 @@ ${trimmed}
 
 
     // W6 fix: no longer inject complete code blocks repeatedly (AI has already seen its own generated code in the previous round).
-    //Only list the error lines and guide the AI ​​to use replace_lines for directed repair to avoid wasting thousands of tokens on large files.
+    //Only list the error lines and guide the AI   to use replace_lines for directed repair to avoid wasting thousands of tokens on large files.
     buildValidationRetryMessage(code: string, errors: Array<{ message: string; line: number }>): ChatMessage {
         const errorList = errors.map(e => `  - Line ${e.line}: ${e.message}`).join('\n');
         const hasSpriteError = errors.some(e => /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(e.message));

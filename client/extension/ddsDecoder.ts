@@ -43,7 +43,7 @@ function encodePng(w: number, h: number, rgba: Uint8Array): Buffer {
         raw[y * (rowBytes + 1)] = 0; // filter: None
         const srcOff = y * rowBytes;
         for (let i = 0; i < rowBytes; i++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             raw[y * (rowBytes + 1) + 1 + i] = rgba[srcOff + i]!;
         }
     }
@@ -75,7 +75,7 @@ for (let n = 0; n < 256; n++) {
 }
 function crc32(buf: Buffer): number {
     let c = 0xFFFFFFFF;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     for (let i = 0; i < buf.length; i++) c = crcT[(c ^ buf[i]!) & 0xFF]! ^ (c >>> 8);
     return c ^ 0xFFFFFFFF;
 }
@@ -119,7 +119,7 @@ function decodeDxt1(view: DataView, off: number, out: Uint8Array, ox: number, oy
             const px = ox + c;
             if (px >= w) continue;
             const idx = (bits >> (2 * (4 * r + c))) & 3;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             putPx(out, (py * w + px) * 4, pal[idx]![0], pal[idx]![1], pal[idx]![2], pal[idx]![3]);
         }
     }
@@ -154,7 +154,7 @@ function decodeDxt5(view: DataView, off: number, out: Uint8Array, ox: number, oy
             const pi = 4 * r + c;
             const ci = (bits >> (2 * pi)) & 3;
             const ai = Number((aBits >> BigInt(pi * 3)) & 7n);
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             putPx(out, (py * w + px) * 4, pal[ci]![0], pal[ci]![1], pal[ci]![2], aLut[ai]!);
         }
     }
@@ -181,7 +181,7 @@ function decodeDxt3(view: DataView, off: number, out: Uint8Array, ox: number, oy
             if (px >= w) continue;
             const pi = 4 * r + c;
             const ci = (bits >> (2 * pi)) & 3;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             putPx(out, (py * w + px) * 4, pal[ci]![0], pal[ci]![1], pal[ci]![2], alphas[pi]!);
         }
     }
@@ -205,7 +205,7 @@ function decodeAlphaBlock(view: DataView, off: number): number[] {
     const values: number[] = [];
     for (let i = 0; i < 16; i++) {
         const idx = Number((aBits >> BigInt(i * 3)) & 7n);
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         values.push(lut[idx]!);
     }
     return values;
@@ -219,7 +219,7 @@ function decodeBc4Block(view: DataView, off: number, out: Uint8Array, ox: number
         for (let c = 0; c < 4; c++) {
             const px = ox + c;
             if (px >= w) continue;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const v = values[r * 4 + c]!;
             putPx(out, (py * w + px) * 4, v, v, v, 255);
         }
@@ -236,9 +236,9 @@ function decodeBc5Block(view: DataView, off: number, out: Uint8Array, ox: number
             const px = ox + c;
             if (px >= w) continue;
             const pi = r * 4 + c;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const rv = redValues[pi]!;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const gv = greenValues[pi]!;
             // Reconstruct blue for normal maps: b = sqrt(1 - r² - g²)
             const nx = (rv / 255) * 2 - 1;
@@ -345,25 +345,25 @@ function decodeBc7Block(view: DataView, off: number, out: Uint8Array, ox: number
         [2, 6, 0, 0, 5, 5, 1, 2, 0],  // mode 7
     ];
 
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const md = MODES[mode]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const numSubsets = md[0]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const partBits = md[1]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const rotBits = md[2]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const idxSelBit = md[3]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const colorBits = md[4]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const alphaBits = md[5]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const hasPBits = md[6]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const idxBits1 = md[7]!;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     const idxBits2 = md[8]!;
     const hasAlpha = alphaBits > 0;
 
@@ -391,11 +391,11 @@ function decodeBc7Block(view: DataView, off: number, out: Uint8Array, ox: number
                 const pb = reader.read(1);
                 for (let e = 0; e < 2; e++) {
                     const idx = s * 2 + e;
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     endR[idx] = (endR[idx]! << 1) | pb;
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     endG[idx] = (endG[idx]! << 1) | pb;
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     endB[idx] = (endB[idx]! << 1) | pb;
                     if (hasAlpha) endA[idx] = (endA[idx]! << 1) | pb;
                 }
@@ -416,14 +416,14 @@ function decodeBc7Block(view: DataView, off: number, out: Uint8Array, ox: number
     const cPrec = colorBits + (hasPBits ? 1 : 0);
     const aPrec = (hasAlpha ? alphaBits : colorBits) + (hasPBits ? 1 : 0);
     for (let i = 0; i < numEndpoints; i++) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         endR[i] = (endR[i]! << (8 - cPrec)) | (endR[i]! >> (2 * cPrec - 8));
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         endG[i] = (endG[i]! << (8 - cPrec)) | (endG[i]! >> (2 * cPrec - 8));
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         endB[i] = (endB[i]! << (8 - cPrec)) | (endB[i]! >> (2 * cPrec - 8));
         endA[i] = hasAlpha
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             ? (endA[i]! << (8 - aPrec)) | (endA[i]! >> (2 * aPrec - 8))
             : 255;
     }
@@ -472,12 +472,12 @@ function decodeBc7Block(view: DataView, off: number, out: Uint8Array, ox: number
         for (let px = 0; px < 4; px++) {
             if (ox + px >= w) continue;
             const pi = py * 4 + px;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const subset = partTable ? partTable[pi]! : 0;
 
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const cIdx = (useIdx2 && idxSel) ? indices2[pi]! : indices1[pi]!;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const aIdx = (useIdx2 && !idxSel) ? indices2[pi]! : indices1[pi]!;
 
             const ep0 = subset * 2;
@@ -485,13 +485,13 @@ function decodeBc7Block(view: DataView, off: number, out: Uint8Array, ox: number
             const cw = cWeights[cIdx] ?? 0;
             const aw = aWeights[aIdx] ?? 0;
 
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             let r = ((64 - cw) * endR[ep0]! + cw * endR[ep1]! + 32) >> 6;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             let g = ((64 - cw) * endG[ep0]! + cw * endG[ep1]! + 32) >> 6;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             let b = ((64 - cw) * endB[ep0]! + cw * endB[ep1]! + 32) >> 6;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             let a = ((64 - aw) * endA[ep0]! + aw * endA[ep1]! + 32) >> 6;
 
             // Apply rotation
@@ -519,7 +519,7 @@ function getAnchors(numSubsets: number, partition: number): number[] {
         15,15, 6, 8, 2, 8,15,15, 2, 8, 2, 2, 2,15,15, 6,
         6, 2, 6, 8,15,15, 2, 2,15,15,15,15, 3, 6, 6, 8,
     ];
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+     
     return [0, ANCHOR2[partition % 64]!];
 }
 
@@ -533,7 +533,7 @@ function downscale(rgba: Uint8Array, w: number, h: number, tw: number, th: numbe
         for (let x = 0; x < tw; x++) {
             const sx = Math.min(Math.floor(x * xr), w - 1);
             const si = (sy * w + sx) * 4, di = (y * tw + x) * 4;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             out[di] = rgba[si]!; out[di + 1] = rgba[si + 1]!; out[di + 2] = rgba[si + 2]!; out[di + 3] = rgba[si + 3]!;
         }
     }
@@ -599,7 +599,7 @@ export function decodeDds(filePath: string): DdsResult | null {
                             const o = dx10DataOff + (yr * bx + xr) * 16;
                             if (o + 16 <= buf.length) decodeBc7Block(view, o, bc7Rgba, xr * 4, yr * 4, width, height);
                         }
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     for (let i = 0; i < bc7Rgba.length; i++) rgba[i] = bc7Rgba[i]!;
                     decoded = true;
                 } else if (dxgiFormat === DXGI_FORMAT_BC4_UNORM || dxgiFormat === DXGI_FORMAT_BC4_SNORM) {
@@ -638,18 +638,18 @@ export function decodeDds(filePath: string): DdsResult | null {
                     
                     if (bpp === 32 || bpp === 24) {
                         if (isBGRA) {
-                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                             
                             rgba[dst] = buf[src + 2]!; rgba[dst + 1] = buf[src + 1]!; rgba[dst + 2] = buf[src]!;
                         } else {
-                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                             
                             rgba[dst] = buf[src]!; rgba[dst + 1] = buf[src + 1]!; rgba[dst + 2] = buf[src + 2]!;
                         }
                         // Always use alpha channel for 32bpp, some editors miss the ALPHAPIXELS flag
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         rgba[dst + 3] = (bpp === 32) ? buf[src + 3]! : 255;
                     } else if (bpp === 8) {
                         // 8bpp Luminance/Alpha mask: map white to visible, black to hidden
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         const val = buf[src]!;
                         rgba[dst] = 255; rgba[dst + 1] = 255; rgba[dst + 2] = 255;
                         rgba[dst + 3] = val; // White is displayed, black is not
@@ -692,15 +692,15 @@ export function decodeTga(filePath: string): DdsResult | null {
         const buf = fs.readFileSync(filePath);
         if (buf.length < 18) return null;
 
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const idLen = buf[0]!;
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const imgType = buf[2]!; // 2=uncompressed, 10=RLE
         const width = buf.readUInt16LE(12);
         const height = buf.readUInt16LE(14);
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const bpp = buf[16]!; // bits per pixel (24 or 32)
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const descriptor = buf[17]!;
 
         if ((imgType !== 2 && imgType !== 10) || (bpp !== 24 && bpp !== 32)) return null;
@@ -715,13 +715,13 @@ export function decodeTga(filePath: string): DdsResult | null {
             // Uncompressed
             for (let i = 0; i < pixelCount; i++) {
                 const off = dataOffset + i * bytesPerPixel;
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 rgba[i * 4]     = buf[off + 2]!; // R
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 rgba[i * 4 + 1] = buf[off + 1]!; // G
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 rgba[i * 4 + 2] = buf[off]!;     // B
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 rgba[i * 4 + 3] = bpp === 32 ? buf[off + 3]! : 255; // A
             }
         } else {
@@ -729,14 +729,14 @@ export function decodeTga(filePath: string): DdsResult | null {
             let pixIdx = 0;
             let pos = dataOffset;
             while (pixIdx < pixelCount && pos < buf.length) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 const header = buf[pos++]!;
                 const count = (header & 0x7F) + 1;
                 if (header & 0x80) {
                     // RLE packet: one pixel repeated
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const b = buf[pos]!, g = buf[pos + 1]!, r = buf[pos + 2]!;
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const a = bpp === 32 ? buf[pos + 3]! : 255;
                     pos += bytesPerPixel;
                     for (let j = 0; j < count && pixIdx < pixelCount; j++, pixIdx++) {
@@ -748,13 +748,13 @@ export function decodeTga(filePath: string): DdsResult | null {
                 } else {
                     // Raw packet
                     for (let j = 0; j < count && pixIdx < pixelCount; j++, pixIdx++) {
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         rgba[pixIdx * 4]     = buf[pos + 2]!; // R
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         rgba[pixIdx * 4 + 1] = buf[pos + 1]!; // G
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         rgba[pixIdx * 4 + 2] = buf[pos]!;     // B
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         rgba[pixIdx * 4 + 3] = bpp === 32 ? buf[pos + 3]! : 255;
                         pos += bytesPerPixel;
                     }

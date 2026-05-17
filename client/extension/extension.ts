@@ -149,9 +149,9 @@ export async function activate(context: ExtensionContext) {
 						for (let j = 0; j < text.length; j++) { if (text[j] === '\n') { offs.push(j + 1); } }
 						const posAt = (o: number): vs.Position => {
 							let lv = 0, hv = offs.length - 1;
-							while (lv < hv) { const mid = Math.ceil((lv + hv) / 2); // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+							while (lv < hv) { const mid = Math.ceil((lv + hv) / 2);  
  if (offs[mid]! <= o) { lv = mid; } else { hv = mid - 1; } }
-							// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+							 
 							return new vs.Position(lv, o - offs[lv]!);
 						};
 						wordBoundary.lastIndex = 0;
@@ -877,7 +877,7 @@ export async function activate(context: ExtensionContext) {
 			});
 			if (!uri) return;
 
-			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+			 
 			const directory = uri[0]!;
 			const gameFolder = path.basename(directory.fsPath)
 			let dir = directory.fsPath
@@ -1042,7 +1042,7 @@ export async function activate(context: ExtensionContext) {
 	const getLanguageIdFallback = async function () {
 		const markerFiles = await workspace.findFiles("**/*.txt", null, 1);
 		if (markerFiles.length == 1) {
-			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+			 
 			return (await workspace.openTextDocument(markerFiles[0]!)).languageId;
 		}
 		return null;
@@ -1063,7 +1063,7 @@ export async function activate(context: ExtensionContext) {
 			return [];
 		}
 
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+		 
 		const root = workspace.workspaceFolders[0]!;
 		const isWin = os.platform() === "win32";
 		const ext = isWin ? "*.exe" : "*";
@@ -1092,9 +1092,9 @@ export async function activate(context: ExtensionContext) {
 	let isVanillaFolder = false;
 
 	for (let i = 0; i < results.length; i++) {
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+		 
 		const { id } = games[i]!;
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+		 
 		if (results[i]!.length > 0 && (languageId === null || languageId === id)) {
 			isVanillaFolder = true;
 			languageId = id;
@@ -1104,7 +1104,7 @@ export async function activate(context: ExtensionContext) {
 	if (
 		workspace.workspaceFolders &&
 		workspace.workspaceFolders.length > 0 &&
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+		 
 		path.basename(workspace.workspaceFolders[0]!.uri.fsPath) === "game"
 	) {
 		isVanillaFolder = true;

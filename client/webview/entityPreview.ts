@@ -1503,7 +1503,7 @@ async function fetchTexture(uri: string): Promise<THREE.Texture | null> {
             if (v.lastUsed < oldestTime) { oldestTime = v.lastUsed; oldestKey = k; }
         }
         if (oldestKey) {
-            textureCache.get(oldestKey)?.promise.then(t => t?.dispose());
+            void textureCache.get(oldestKey)?.promise.then(t => t?.dispose());
             textureCache.delete(oldestKey);
         }
     }
@@ -1939,7 +1939,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         modelGroup.rotation.y = Math.PI;
 
         // Build skeleton + GPU skinning
-        let submeshIndex = 0;
+        const submeshIndex = 0;
         let sharedBoneRoot: THREE.Bone | null = null;
         let sharedSkeleton: THREE.Skeleton | null = null;
         const firstSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
@@ -2025,6 +2025,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         const rootBBox = new THREE.Box3();
         modelGroup.traverse(obj => { if ((obj as THREE.Mesh).isMesh) { (obj as THREE.Mesh).geometry.computeBoundingBox(); rootBBox.expandByObject(obj); } });
         if (!rootBBox.isEmpty()) {
+            // bounding box computed — no additional debug action needed
         }
 
         // ── Locator Visualization ────────────────────────────────────
@@ -2203,7 +2204,7 @@ async function loadAttachChildren(
 
                 // Apply pdxmesh scale (from .gfx definition)
                 const childMeshScale = child.meshScale ?? 1.0;
-                let childMeshParent: THREE.Object3D = childGroup;
+                const childMeshParent: THREE.Object3D = childGroup;
 
 
                 // Build skeleton for child entity.
@@ -3156,7 +3157,7 @@ function disposeAll() {
     resizeObserver.disconnect();
 
     for (const [k, v] of textureCache) {
-        v.promise.then(t => t?.dispose());
+        void v.promise.then(t => t?.dispose());
     }
     textureCache.clear();
 

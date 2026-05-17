@@ -3126,7 +3126,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 break;
             }
 
-            case 'generationError':
+            case 'generationError': {
                 setGenerating(false);
                 streamStates.clear();
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
@@ -3160,6 +3160,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 chatArea.appendChild(errNode);
                 scrollBottom(true);
                 break;
+            }
 
             case 'clearChat':
                 while (chatArea.firstChild) chatArea.removeChild(chatArea.firstChild);

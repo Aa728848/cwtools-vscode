@@ -36,7 +36,7 @@ import * as vscode from 'vscode';
             let ptr = tree;
 
             for (let i = 0; i < splitpath.length; i++) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 const segment = splitpath[i]!;
                 const isLastSegment = i === splitpath.length - 1;
 

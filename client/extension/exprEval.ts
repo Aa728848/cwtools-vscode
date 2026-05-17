@@ -4,7 +4,7 @@ export function safeEval(expr: string): number {
     function factor(): number {
         skipWs();
         if (expr[i] === '(') { i++; const v = exprLoop(); skipWs(); i++; return v; }
-        let start = i;
+        const start = i;
         if (expr[i] === '-') i++;
         while (i < expr.length && /[0-9.]/.test(expr[i]!)) i++;
         return parseFloat(expr.slice(start, i));

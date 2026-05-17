@@ -274,13 +274,13 @@ export class SolarSystemPanel {
                                         const q = v * (1 - f * s);
                                         const t = v * (1 - (1 - f) * s);
                                         switch (i % 6) {
-                                            case 0: r = v, g = t, b = p; break;
-                                            case 1: r = q, g = v, b = p; break;
-                                            case 2: r = p, g = v, b = t; break;
-                                            case 3: r = p, g = q, b = v; break;
-                                            case 4: r = t, g = p, b = v; break;
-                                            case 5: r = v, g = p, b = q; break;
-                                            default: r = v, g = v, b = v; break;
+                                            case 0: r = v; g = t; b = p; break;
+                                            case 1: r = q; g = v; b = p; break;
+                                            case 2: r = p; g = v; b = t; break;
+                                            case 3: r = p; g = q; b = v; break;
+                                            case 4: r = t; g = p; b = v; break;
+                                            case 5: r = v; g = p; b = q; break;
+                                            default: r = v; g = v; b = v; break;
                                         }
                                         r *= 255; g *= 255; b *= 255;
                                     } else {
@@ -640,9 +640,9 @@ export class SolarSystemPanel {
             );
             const match = propPattern.exec(lineText);
             if (match) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 const startCol = match.index + match[1]!.length;
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 const endCol = startCol + match[2]!.length;
                 const range = new vscode.Range(
                     new vscode.Position(i, startCol),
@@ -671,7 +671,7 @@ export class SolarSystemPanel {
                         break;
                     }
                 }
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 const startCol = multiMatch.index + multiMatch[1]!.length;
                 const endLine = doc.lineAt(endLineIdx);
                 const closeBraceCol = endLine.text.indexOf('}') + 1;
@@ -1011,9 +1011,9 @@ export class SolarSystemPanel {
                     const distPattern = /(orbit_distance\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
                     const m = distPattern.exec(lineText);
                     if (m) {
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         const startCol = m.index + m[1]!.length;
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), distStr);
                         foundDist = true;
                         anyFound = true;
@@ -1023,9 +1023,9 @@ export class SolarSystemPanel {
                     const anglePattern = /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
                     const m = anglePattern.exec(lineText);
                     if (m) {
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         const startCol = m.index + m[1]!.length;
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                         
                         edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), angleStr);
                         foundAngle = true;
                         anyFound = true;
@@ -1067,9 +1067,9 @@ export class SolarSystemPanel {
                 const anglePattern = /(orbit_angle\s*=\s*)(\{[^}]*\}|"[^"]*"|\S+)/;
                 const m = anglePattern.exec(lineText);
                 if (m) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const startCol = m.index + m[1]!.length;
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     edit.replace(doc.uri, new vscode.Range(i, startCol, i, startCol + m[2]!.length), angleStr);
                     found = true;
                 }
@@ -1179,7 +1179,7 @@ export class SolarSystemPanel {
             const content = doc.getText();
             const lines = content.split(/\r?\n/);
             const changeOrbitIdx = msg.ringChangeOrbitLine - 1;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const oldLine = lines[changeOrbitIdx]!;
             log.appendLine(`  RING: changeOrbitLine=${msg.ringChangeOrbitLine} oldLine="${oldLine}"`);
 
@@ -1208,7 +1208,7 @@ export class SolarSystemPanel {
             // Parse old change_orbit value and compute new
             const match = oldLine.match(/change_orbit\s*=\s*(-?\d+)/);
             if (match) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 const oldValue = parseInt(match[1]!);
                 const newValue = oldValue + Math.round(delta);
                 const newLine = oldLine.replace(/change_orbit\s*=\s*-?\d+/, `change_orbit = ${newValue}`);
@@ -1227,9 +1227,9 @@ export class SolarSystemPanel {
                     //    Must search all lines within each segment's block (multi-line planets)
                     for (const seg of ringGroup.segments) {
                         for (let li = seg.line - 1; li < seg.endLine && li < lines.length; li++) {
-                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                             
                             if (/orbit_angle\s*=/.test(lines[li]!)) {
-                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                 
                                 lines[li] = lines[li]!.replace(
                                     /orbit_angle\s*=\s*\S+/,
                                     `orbit_angle = ${newAngle}`,
@@ -1271,9 +1271,9 @@ export class SolarSystemPanel {
                     for (let si = 0; si < targetSegCount; si++) {
                         const seg = ringGroup.segments[si];
                         for (let li = seg.line - 1; li < seg.endLine && li < lines.length; li++) {
-                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                             
                             if (/orbit_angle\s*=/.test(lines[li]!)) {
-                                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                                 
                                 lines[li] = lines[li]!.replace(
                                     /orbit_angle\s*=\s*\S+/,
                                     `orbit_angle = ${newAngle}`,

@@ -16,7 +16,8 @@
 
 import cytoscape from 'cytoscape';
 import { svgIconNoMargin } from './svgIcons';
-// @ts-ignore
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore -- cytoscape-elk has no TS declarations
 import elk from 'cytoscape-elk';
 
 cytoscape.use(elk);

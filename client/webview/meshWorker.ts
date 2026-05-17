@@ -11,7 +11,7 @@
 
 import { parsePdxMesh, type ParsedMeshFile } from './pdxMeshParser';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 declare const self: { onmessage: ((e: MessageEvent) => void) | null; postMessage(msg: any): void };
 
 self.onmessage = (e: MessageEvent) => {

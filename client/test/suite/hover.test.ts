@@ -154,12 +154,12 @@ suite('LSP Hover Tests', function () {
                 position
             );
 
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const hover = hovers[0]!;
             assert.ok(hover.contents.length > 0, 'Hover should contain content');
 
             // Check if the hover content is meaningful
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const content = hover.contents[0]!;
             if (content instanceof vscode.MarkdownString) {
                 assert.ok(content.value.length > 0, 'Hover content should not be empty');
@@ -182,12 +182,12 @@ suite('LSP Hover Tests', function () {
                 position
             );
 
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const hover = hovers[0]!;
             assert.ok(hover.contents.length > 0, 'Hover should contain content');
 
             // Check if the hover content is meaningful
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const content = hover.contents[0]!;
             if (content instanceof vscode.MarkdownString) {
                 assert.ok(content.value.length > 0, 'Hover content should not be empty');
@@ -220,12 +220,12 @@ suite('LSP Hover Tests', function () {
 
 
 
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const hover = hovers[0]!;
             assert.ok(hover.contents.length > 0, 'Hover should contain content');
 
             // Check if the hover content is meaningful
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const content = hover.contents[0]!;
             if (content instanceof vscode.MarkdownString) {
                 assert.ok(content.value.length > 0, 'Hover content should not be empty');

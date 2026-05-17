@@ -126,7 +126,7 @@ export class MemoryParser {
             const memoryPath = this.memoryFilePath;
             if (!fs.existsSync(memoryPath)) return;
 
-            let content = fs.readFileSync(memoryPath, 'utf8');
+            const content = fs.readFileSync(memoryPath, 'utf8');
             if (content.length <= MemoryParser.MAX_MEMORY_CHARS) return;
 
             // Parse sections by ## headings

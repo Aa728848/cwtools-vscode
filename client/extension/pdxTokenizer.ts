@@ -26,7 +26,7 @@ export function tokenize(input: string, opts: TokenizeOptions = {}): Token[] {
     let line = 1;
 
     while (i < input.length) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const ch = input[i]!;
 
         if (ch === '\n') { line++; i++; continue; }
@@ -54,11 +54,11 @@ export function tokenize(input: string, opts: TokenizeOptions = {}): Token[] {
         }
 
         // Numbers
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         if ((ch >= '0' && ch <= '9') || ((ch === '-' || ch === '+') && i + 1 < input.length && input[i + 1]! >= '0' && input[i + 1]! <= '9')) {
             const start = i;
             if (ch === '-' || ch === '+') i++;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             while (i < input.length && ((input[i]! >= '0' && input[i]! <= '9') || input[i]! === '.')) i++;
             if (handlePercent && i < input.length && input[i] === '%') i++;
             tokens.push({ type: TokenType.Number, value: input.slice(start, i), line });
@@ -83,7 +83,7 @@ export function tokenize(input: string, opts: TokenizeOptions = {}): Token[] {
         // Identifiers
         if (isIdentStart(ch)) {
             const start = i;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             while (i < input.length && isIdentCont(input[i]!)) i++;
             tokens.push({ type: TokenType.Identifier, value: input.slice(start, i), line });
             continue;

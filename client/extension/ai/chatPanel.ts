@@ -233,7 +233,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.startNewTopic();
                 break;
             case 'loadTopic':
-                this.loadTopic(msg.topicId);
+                void this.loadTopic(msg.topicId);
                 break;
             case 'deleteTopic':
                 this.deleteTopic(msg.topicId);
@@ -1250,7 +1250,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (!result.explanation) return false;
 
         // If Implementation_Plan.md already exists under the current topic,
-        // This indicates that the user has already commented on the plan and the AI ​​is revising it, so it should not be judged to be in the clarification stage.
+        // This indicates that the user has already commented on the plan and the AI is revising it, so it should not be judged to be in the clarification stage.
         const topicId = this.topicManager.currentTopic?.id;
         if (topicId) {
             const candidates = getTopicFileCandidates(topicId, 'Implementation_Plan.md', getProjectWorkspaceRoot());

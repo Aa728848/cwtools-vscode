@@ -157,7 +157,7 @@ export class AgentToolExecutor {
         this.externalHandler = new ExternalToolHandler(this);
 
         // Initialize the enhanced blackboard (replacing the old sharedMemory)
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
+         
         const { Blackboard } = require('./orchestrator/blackboard') as typeof import('./orchestrator/blackboard');
         this.blackboard = new Blackboard();
 
@@ -191,11 +191,11 @@ export class AgentToolExecutor {
     }
 
     suspendLsp = (): void => {
-        try { this.client.sendNotification('cwtools/suspendIndexing'); } catch { /* ignore */ }
+        try { void this.client.sendNotification('cwtools/suspendIndexing'); } catch { /* ignore */ }
     }
 
     resumeLsp = (): void => {
-        try { this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
+        try { void this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
     }
 
     /** Enhanced Blackboard - Shared knowledge storage between multiple Agents. 

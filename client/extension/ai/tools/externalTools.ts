@@ -579,7 +579,9 @@ export class ExternalToolHandler {
                 return;
             }
             let settled = false;
+            // eslint-disable-next-line prefer-const -- deferred initialization
             let timer: ReturnType<typeof setTimeout> | undefined;
+            // eslint-disable-next-line prefer-const -- deferred initialization
             let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
             const abortSignal = context?.runnerOptions?.abortSignal;
 
@@ -771,25 +773,25 @@ export class ExternalToolHandler {
             const snippets: string[] = [];
             let m: RegExpExecArray | null;
             while ((m = linkRe.exec(html)) !== null && links.length < maxResults) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 let url = m[1]!;
                 if (url.startsWith('/l/?uddg=')) {
                     try { url = decodeURIComponent(url.replace('/l/?uddg=', '')); } catch { /* keep */ }
                 }
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 links.push({ url, title: m[2]!.trim() });
             }
             while ((m = snippetRe.exec(html)) !== null && snippets.length < maxResults) {
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 snippets.push(m[1]!.trim());
             }
             for (let i = 0; i < links.length; i++) {
                 results.push({
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     title: links[i]!.title,
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     url: links[i]!.url,
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     description: snippets[i]! ?? '',
                 });
             }

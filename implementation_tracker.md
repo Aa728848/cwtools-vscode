@@ -17,7 +17,7 @@
 | 2 | [AI Workflow System](docs/02-ai-workflow-system-plan.md) | ✅ 核心达成 | 5 个 workflow 注册表 + runner 实际消费 (toolPolicy + promptSupplement) | 18 个 |
 | 3 | [Incremental Index and Knowledge Layer](docs/03-incremental-index-knowledge-layer-plan.md) | ✅ 本轮达成 | `IndexService` + `locParser` 纯逻辑提取，解析/索引/查询/删除全链路 | 24 个 |
 | 4 | [Webview Modularization](docs/04-webview-modularization-plan.md) | ✅ 阶段性达成 | chat 消息类型契约 + 格式化 helper 抽取 + chatPanel 实际消费 | 28 个 |
-| 5 | [Test and Release Quality Gate](docs/05-test-and-release-quality-gate-plan.md) | ✅ 可用 | `check:release` 全绿 + `verify` 综合命令 + ESLint 测试免豁 | 通过脚本执行 |
+| 5 | [Test and Release Quality Gate](docs/05-test-and-release-quality-gate-plan.md) | ✅ 达成 | `check:release` 全绿 + `verify` 综合命令 + ESLint 测试免豁 | 通过脚本执行 |
 
 本轮新增/修复测试共 99 个：`gameProfiles` 25、`workflowRegistry` 18、`chatFormatters` 28、`indexService` 24、`pricing` 4（修复）。
 
@@ -295,7 +295,7 @@
 
 ### 注意事项
 
-- 当前 root `package.json` (2.1.21) 与 `release/package.json` (2.1.23) 版本不同步。发版前需运行版本同步。
+- 当前 root `package.json` 与 `release/package.json` 已同步为 `2.1.23`。
 - `client/extension/ai/aiService.ts` 中包含 `localhost` 地址，这是 Ollama 本地提供者的合理默认值。
 
 ### 后续项
@@ -310,9 +310,9 @@
 | --- | --- |
 | `npm run compile` | ✅ 通过 |
 | `npm run test:unit` | ✅ **412 passing, 0 failing** |
-| `node tools/check-release.js` | ✅ 通过（1 warning: root/release 版本待同步） |
+| `node tools/check-release.js` | ✅ 通过 |
 | `npx eslint client/test/` | ✅ 通过（仅 warning） |
-| `npm run lint`（全量） | ⚠️ ~50 个既有 error，属于独立历史债清理项 |
+| `npm run lint`（全量） | ✅ 通过（0 errors, 116 warnings） |
 
 ## 新增文件清单
 
@@ -342,9 +342,8 @@
 
 ## 下一轮建议优先级
 
-1. **版本同步**：同步 root `package.json` 与 `release/package.json` 版本，消除 release gate 的最后一个 warning。
-2. **全量 lint 历史债清理**：单独开一轮清理 ~50 个既有 eslint error，让 `npm run verify` 完全绿。
-3. 将 `locDecorations.ts` 等现有消费者迁移到 `IndexService`。
-4. 继续拆分 `chatPanel.ts` 为 settings/topics/liveSteps/artifacts 子模块。
-5. 增加 GitHub Actions CI 或本地 CI 脚本。
-6. 继续将 GameProfile 作为新增游戏能力的唯一入口。
+1. **全量 lint 警告收敛**：继续清理 116 个 warnings，让基础代码面更干净。
+2. 将 `locDecorations.ts` 等现有消费者迁移到 `IndexService`。
+3. 继续拆分 `chatPanel.ts` 为 settings/topics/liveSteps/artifacts 子模块。
+4. 增加 GitHub Actions CI 或本地 CI 脚本。
+5. 继续将 GameProfile 作为新增游戏能力的唯一入口。

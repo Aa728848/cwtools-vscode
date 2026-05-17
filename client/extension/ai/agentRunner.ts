@@ -831,7 +831,7 @@ export class AgentRunner {
             if (resumeState) {
                 messages = resumeState.messages;
                 if (resumeState.todos && resumeState.todos.length > 0) {
-                    this.toolExecutor.getExternalToolHandler().todoWrite({ todos: resumeState.todos });
+                    void this.toolExecutor.getExternalToolHandler().todoWrite({ todos: resumeState.todos });
                 }
                 emitStep({
                     type: 'thinking',

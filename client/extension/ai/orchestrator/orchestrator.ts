@@ -501,7 +501,7 @@ export class Orchestrator {
             const err = new Error('Sub-Agent execution absolute timeout exceeded (20 minutes).');
             err.name = 'TimeoutError';
             subAgentController.abort(err);
-        }, SUB_AGENT_ABSOLUTE_TIMEOUT_MS);  // W7 fix: actual values ​​consistent with comments/error messages (20 min)
+        }, SUB_AGENT_ABSOLUTE_TIMEOUT_MS);  // W7 fix: actual values   consistent with comments/error messages (20 min)
 
         subAgentIdleIntervalId = setInterval(() => {
             if (subAgentController.signal.aborted) return;

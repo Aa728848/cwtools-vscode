@@ -73,7 +73,9 @@ export class MCPClient {
             const client = url.protocol === 'https:' ? https : http;
             let settled = false;
             let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            // eslint-disable-next-line prefer-const -- deferred initialization
             let onAbort: (() => void) | undefined;
+            // eslint-disable-next-line prefer-const -- deferred initialization
             let req: http.ClientRequest | undefined;
 
             const clearGuards = () => {
@@ -226,7 +228,9 @@ export class MCPClient {
 
             const id = ++this.messageId;
             let settled = false;
+            // eslint-disable-next-line prefer-const -- deferred initialization
             let abortListener: (() => void) | undefined;
+            // eslint-disable-next-line prefer-const -- deferred initialization
             let timer: ReturnType<typeof setTimeout>;
             let postRequest: http.ClientRequest | undefined;
 

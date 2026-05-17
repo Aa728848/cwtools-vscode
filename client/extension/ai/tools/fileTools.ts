@@ -459,7 +459,7 @@ export class FileToolHandler {
             const stat = await fs.promises.stat(filePath);
             const fileSize = stat.size;
 
-            let metadata: any = { type: 'image_metadata', ext, fileSize };
+            const metadata: any = { type: 'image_metadata', ext, fileSize };
 
             if (ext === '.dds') {
                 const fd = await fs.promises.open(filePath, 'r');
@@ -947,7 +947,7 @@ export class FileToolHandler {
         let i = 0;
 
         while (i < lines.length) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const line = lines[i]!;
             if (line.startsWith('--- ')) {
                 const nextLine = lines[i + 1] ?? '';
@@ -975,7 +975,7 @@ export class FileToolHandler {
                 const oldLines: string[] = [];
                 const newLines: string[] = [];
                 while (i < lines.length && !lines[i]!.startsWith('@@') && !lines[i]!.startsWith('--- ')) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const hunkLine = lines[i]!;
                     if (hunkLine.startsWith('-')) {
                         oldLines.push(hunkLine.slice(1));
@@ -1271,6 +1271,7 @@ return { files: [], total: 0 };
             await new Promise<void>((resolve) => {
                 let settled = false;
                 let debounce: ReturnType<typeof setTimeout> | null = null;
+                // eslint-disable-next-line prefer-const -- deferred initialization
                 let sub: vs.Disposable | undefined;
                 const finish = () => {
                     if (settled) return;
@@ -1374,7 +1375,7 @@ return { files: [], total: 0 };
                 // Build a map of existing keys → line index for O(1) lookup
                 const keyLineMap = new Map<string, number>();
                 // Match any Stellaris loc key: leading space, key chars, colon, optional digits, then space or quote
-                const keyRegex = /^\s+([\w.\-]+):\d*\s*(?:"|$)/;
+                const keyRegex = /^\s+([\w.-]+):\d*\s*(?:"|$)/;
                 for (let i = 0; i < lines.length; i++) {
                     const m = lines[i]!.match(keyRegex);
                     if (m) keyLineMap.set(m[1]!, i);

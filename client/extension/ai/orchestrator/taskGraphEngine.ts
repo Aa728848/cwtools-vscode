@@ -36,7 +36,7 @@ export class TaskGraphEngine {
         const completed = new Set<string>();
 
         //Continuously extract nodes with in-degree 0 until all nodes are allocated
-        let remaining = new Set(graph.nodes.keys());
+        const remaining = new Set(graph.nodes.keys());
         while (remaining.size > 0) {
             const layer: TaskNode[] = [];
             for (const nodeId of remaining) {

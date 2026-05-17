@@ -319,7 +319,7 @@ const locMap = new Map<string, string>();
 
 // Get configured validation languages, prioritize Chinese if present
 const config = vscode.workspace.getConfiguration('cwtools');
-let locLangs = config.get<string[]>('localisation.languages') || ['English'];
+const locLangs = config.get<string[]>('localisation.languages') || ['English'];
 
 let targetLangs = locLangs.map(l => l.toLowerCase());
 if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {

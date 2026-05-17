@@ -62,10 +62,10 @@ function parseYmlContent(uri: vs.Uri, text: string) {
     const locPattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; i++) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const match = locPattern.exec(lines[i]!);
         if (match) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             fileLocs.set(match[1]!, { value: match[2]!, uri, line: i });
         }
     }
@@ -132,7 +132,7 @@ function updateColorDecorations(editor: vs.TextEditor) {
     // Parse each line for color codes
     const lines = text.split('\n');
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const line = lines[lineIdx]!;
 
         // Find all color markers in this line
@@ -141,9 +141,9 @@ function updateColorDecorations(editor: vs.TextEditor) {
         const linePattern = /§([RGBYWHETLMSPr!])/g;
 
         while ((match = linePattern.exec(line)) !== null) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const code = '\u00A7' + match[1]!;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             markers.push({ code, offset: match.index! });
 
             // Mark the §X itself as dim
@@ -154,13 +154,13 @@ function updateColorDecorations(editor: vs.TextEditor) {
 
         // Apply color ranges between markers
         for (let i = 0; i < markers.length; i++) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const marker = markers[i]!;
             if (marker.code === '\u00A7!') continue; // Reset marker, skip
 
             const startOffset = marker.offset + 2; // After \u00A7X
             const endOffset = i + 1 < markers.length
-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                 
                 ? markers[i + 1]!.offset
                 : line.length;
 
@@ -241,7 +241,7 @@ class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
             document.getWordRangeAtPosition(position, /\b([A-Za-z_][A-Za-z0-9_.:-]+)\b/);
         if (!range) return null;
 
-        let word = document.getText(range).replace(/^"|"$/g, '');
+        const word = document.getText(range).replace(/^"|"$/g, '');
         // Skip obvious non-localized key cases (pure numbers, yes/no, common keywords, etc.)
         if (/^\d+$/.test(word) || /^(yes|no|none|root|prev|from|this|event_target|owner|capital_scope)$/i.test(word)) return null;
 
@@ -286,7 +286,7 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
     // Update LocMap on document changes (active unsaved typing)
     context.subscriptions.push(
         vs.workspace.onDidChangeTextDocument(event => {
-            if (/localisation[^/\\]*[\/\\].*\.yml$/.test(event.document.fileName)) {
+            if (/localisation[^/\\]*[/\\].*\.yml$/.test(event.document.fileName)) {
                 parseYmlContent(event.document.uri, event.document.getText());
             }
             const editor = vs.window.activeTextEditor;

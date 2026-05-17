@@ -87,7 +87,7 @@ class Parser {
     }
 
     private advance(): Token {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         return this.tokens[this.pos++]!;
     }
 
@@ -486,7 +486,7 @@ export function parseGuiFile(content: string, spriteIndex: Map<string, SpriteInf
     const templates = new Map<string, GuiElement>();
     function extractTemplates(els: GuiElement[]) {
         for (let i = els.length - 1; i >= 0; i--) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             const el = els[i]!;
             if (el.type === 'scrollbarType' || el.type === 'extendedScrollbarType') {
                 templates.set(el.name, el);
@@ -540,7 +540,7 @@ export function parseGuiFile(content: string, spriteIndex: Map<string, SpriteInf
     // These are list-item templates used by listBoxType elements
     const optionTemplates: GuiElement[] = [];
     for (let i = elements.length - 1; i >= 0; i--) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const el = elements[i]!;
         if ((el.type === 'containerWindowType' || el.type === 'windowType')
             && el.children.some(c => c.name === 'option_button')) {

@@ -281,7 +281,7 @@ function extractEdges(sourceId: string, body: string, edges: EventEdge[]) {
         if (genericIdMatch) {
             const targetId = genericIdMatch[1]!;
             if (targetId !== sourceId) {
-                let edgeType: EventEdge['edgeType'] = inOption ? 'option' : inImmediate ? 'immediate' : inAfter ? 'after' : 'effect';
+                const edgeType: EventEdge['edgeType'] = inOption ? 'option' : inImmediate ? 'immediate' : inAfter ? 'after' : 'effect';
                 addEdgeDedup(edges, sourceId, targetId, edgeType, inOption ? optionName : undefined);
             }
         }
@@ -291,7 +291,7 @@ function extractEdges(sourceId: string, body: string, edges: EventEdge[]) {
         if (randomMatch) {
             const targetId = randomMatch[1]!;
             if (targetId !== '0' && targetId !== sourceId && !/^\d+$/.test(targetId)) {
-                let edgeType: EventEdge['edgeType'] = inOption ? 'option' : inImmediate ? 'immediate' : inAfter ? 'after' : 'effect';
+                const edgeType: EventEdge['edgeType'] = inOption ? 'option' : inImmediate ? 'immediate' : inAfter ? 'after' : 'effect';
                 addEdgeDedup(edges, sourceId, targetId, edgeType, inOption ? optionName : undefined);
             }
         }

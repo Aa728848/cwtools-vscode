@@ -129,9 +129,9 @@ export class UsageTracker {
             if (!byProvider[r.provider]) {
                 byProvider[r.provider] = { tokens: 0, costCny: 0 };
             }
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             byProvider[r.provider]!.tokens += r.totalTokens;
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+             
             byProvider[r.provider]!.costCny += r.costCny;
 
             // By day

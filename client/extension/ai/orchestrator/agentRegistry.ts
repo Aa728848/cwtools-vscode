@@ -3,7 +3,7 @@
 * 
 * Define the default configuration (mode, tool budget, iteration limit) for each Agent role. 
 * Model selection inherits the supplier/model configured by the user in the settings panel by default. 
-* suggestedModel / suggestedProvider are only suggested values ​​and can be overridden by TaskNode. 
+* suggestedModel / suggestedProvider are only suggested values   and can be overridden by TaskNode. 
 */
 
 import type { AgentProfile, ToolBudget } from './types';
@@ -111,7 +111,7 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
 };
 
 // W10 fix: alias mapping of AgentMode to registry keys.
-// Orchestrator uses AgentMode values ​​(such as 'explore', 'build') to query the configuration,
+// Orchestrator uses AgentMode values   (such as 'explore', 'build') to query the configuration,
 // But the registry key uses the role name (such as 'explorer', 'builder').
 // This mapping ensures that the two naming systems are correctly connected.
 const MODE_TO_ROLE_ALIAS: Record<string, string> = {
@@ -166,7 +166,7 @@ export function applyUserModelOverrides(overrides: Record<string, { provider: st
         if (config.provider && config.provider !== '__inherit__') {
             profile.suggestedProvider = config.provider;
         } else {
-            // Clear the recommended values ​​and fall back to inheriting the user's main settings
+            // Clear the recommended values   and fall back to inheriting the user's main settings
             profile.suggestedProvider = undefined;
         }
         if (config.model && config.model !== '__inherit__') {

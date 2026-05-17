@@ -14,7 +14,8 @@ export function tryRepairJson(badJson: string | undefined): Record<string, unkno
     let s = badJson.trim();
 
     // Strategy 0: Fix unescaped backslashes and literal control characters (e.g. Windows paths, raw newlines)
-    s = s.replace(/\\(?!["\\\/bfnrtu])/g, '\\\\');
+    s = s.replace(/\\(?!["\\bfnrtu/])/g, '\\\\');
+    // eslint-disable-next-line no-control-regex
     s = s.replace(/[\u0000-\u001F]/g, (match) => {
         if (match === '\n') return '\\n';
         if (match === '\r') return '\\r';

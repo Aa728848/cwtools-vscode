@@ -289,7 +289,7 @@ export class GuiPanel {
                         const regex = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{/gm;
                         let m;
                         while ((m = regex.exec(content)) !== null) {
-                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                             
                             names.add(m[1]!);
                         }
                     } catch { /* skip unreadable */ }
@@ -828,7 +828,7 @@ export class GuiPanel {
         const childIndent = parentIndent + '\t';
 
         // Detect current indentation of the element
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const currentIndent = sourceLines[0]!.match(/^(\s*)/)?.[1] ?? '';
 
         // Re-indent all lines
@@ -848,9 +848,9 @@ export class GuiPanel {
                 const xMatch = posMatch[0].match(/x\s*=\s*(-?[\d.]+)/);
                 const yMatch = posMatch[0].match(/y\s*=\s*(-?[\d.]+)/);
                 if (xMatch && yMatch) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const newX = Math.round(parseFloat(xMatch[1]!) + msg.positionAdjust.dx);
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const newY = Math.round(parseFloat(yMatch[1]!) + msg.positionAdjust.dy);
                     block = block.replace(posRegex, `position = { x = ${newX} y = ${newY} }`);
                 }
@@ -894,7 +894,7 @@ export class GuiPanel {
         }
 
         // Adjust indentation: remove one level of indentation
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         
         const currentIndent = sourceLines[0]!.match(/^(\s*)/)?.[1] ?? '';
         const newIndent = currentIndent.length > 0
             ? currentIndent.replace(/\t$/, '').replace(/ {4}$/, '')  // remove one tab or 4 spaces
@@ -915,9 +915,9 @@ export class GuiPanel {
                 const xMatch = posMatch[0].match(/x\s*=\s*(-?[\d.]+)/);
                 const yMatch = posMatch[0].match(/y\s*=\s*(-?[\d.]+)/);
                 if (xMatch && yMatch) {
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const newX = Math.round(parseFloat(xMatch[1]!) + msg.positionAdjust.dx);
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                     
                     const newY = Math.round(parseFloat(yMatch[1]!) + msg.positionAdjust.dy);
                     block = block.replace(posRegex, `position = { x = ${newX} y = ${newY} }`);
                 }

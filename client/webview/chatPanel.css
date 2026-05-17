@@ -13,6 +13,8 @@
     --thinking-bg: rgba(100,149,237,0.06);
     --thinking-border: rgba(100,149,237,0.25);
     --focus-ring: var(--vscode-focusBorder, #007fd4);
+    --chat-column-width: 760px;
+    --chat-column-half-width: 380px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
@@ -158,6 +160,7 @@ body.artifact-drawer-open .artifact-drawer { transform: translateX(0); }
 
 .chat-area { flex: 1; overflow-y: auto; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 14px; min-height: 0; transition: opacity 0.22s ease; }
 .chat-area.is-empty { pointer-events: none; }
+.chat-area > *:not(.empty-state) { width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin-left: auto; margin-right: auto; align-self: center; }
 .chat-area > *:not(.empty-state):last-child { margin-bottom: 80px !important; }
 .jump-latest-btn { position: fixed; right: 14px; bottom: 92px; z-index: 80; display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(100,166,255,0.32); background: color-mix(in srgb, var(--bg) 82%, #406aa8); color: var(--fg); border-radius: 999px; padding: 6px 10px; font-size: 11px; font-family: inherit; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.24); opacity: 0; pointer-events: none; transform: translateY(6px); transition: opacity 0.15s, transform 0.15s, background 0.15s; }
 .jump-latest-btn.show { opacity: 0.96; pointer-events: auto; transform: translateY(0); }
@@ -322,10 +325,10 @@ body.artifact-drawer-open .artifact-drawer { transform: translateX(0); }
 .ap-dropdown-item { padding: 5px 8px; cursor: pointer; color: var(--vscode-foreground); font-size: 12px; }
 .ap-dropdown-item:hover { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .input-wrapper { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 10px 12px 12px; flex-shrink: 0; transform: translateY(0); transition: bottom 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), padding 0.34s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.input-container { background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; overflow: visible; transition: all 0.15s; display: flex; flex-direction: column; max-height: 50vh; }
+.input-container { width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin: 0 auto; background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; overflow: visible; transition: all 0.15s; display: flex; flex-direction: column; max-height: 50vh; }
 body.chat-empty .input-wrapper { bottom: calc(50% - 20px); transform: translateY(50%); padding-left: 30px; padding-right: 30px; }
-body.chat-empty .input-wrapper::before { content: 'cwtools-vscode'; display: block; width: min(100%, 760px); margin: 0 auto 8px; color: var(--fg); font-size: 18px; font-weight: 700; letter-spacing: 0; }
-body.chat-empty .input-container { width: min(100%, 760px); margin: 0 auto; box-shadow: 0 18px 42px rgba(0,0,0,0.18); }
+body.chat-empty .input-wrapper::before { content: 'cwtools-vscode'; display: block; width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin: 0 auto 8px; color: var(--fg); font-size: 18px; font-weight: 700; letter-spacing: 0; }
+body.chat-empty .input-container { box-shadow: 0 18px 42px rgba(0,0,0,0.18); }
 /* ── 附件/引用区域高度约束：防止大量附件导致输入框无限增长 ── */
 #fileBadgeArea { display: none; }
 #imagePreviewArea { display: flex; flex-wrap: wrap; gap: 8px; max-height: 74px; overflow-y: auto; flex-shrink: 0; padding: 12px 16px 8px; }
@@ -387,7 +390,7 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .composer-chip-icon { display: inline-flex; align-items: center; line-height: 0; opacity: 0.62; flex-shrink: 0; }
 .workflow-chip { max-width: 220px; }
 .hidden-composer-select, .hidden-composer-action { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.composer-menu, .model-menu { position: absolute; left: 22px; bottom: calc(100% - 4px); z-index: 230; display: none; min-width: 152px; max-width: calc(100vw - 44px); padding: 6px; background: rgba(27,27,30,0.98); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.36); }
+.composer-menu, .model-menu { position: absolute; left: max(22px, calc(50% - var(--chat-column-half-width) + 10px)); bottom: calc(100% - 4px); z-index: 230; display: none; min-width: 152px; max-width: calc(100vw - 44px); padding: 6px; background: rgba(27,27,30,0.98); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.36); }
 body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6px); bottom: auto; }
 .composer-menu.show, .model-menu.show { display: block; }
 .composer-menu-section { display: flex; flex-direction: column; gap: 2px; }
@@ -396,7 +399,7 @@ body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6
 .composer-menu-item:hover, .composer-menu-item.active, .model-menu-item:hover, .model-menu-item.active { opacity: 1; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.12); }
 .composer-menu-item.active, .model-menu-item.active { border-color: var(--accent); }
 .composer-menu-item svg { flex-shrink: 0; opacity: 0.82; }
-.model-menu { left: 64px; min-width: 260px; max-width: min(430px, calc(100vw - 92px)); padding: 10px 0; }
+.model-menu { left: max(64px, calc(50% - var(--chat-column-half-width) + 52px)); min-width: 260px; max-width: min(430px, calc(100vw - 92px)); padding: 10px 0; }
 .model-menu-title { padding: 0 12px 7px; color: var(--fg); opacity: 0.64; font-size: 12px; }
 .model-menu-list { max-height: 290px; overflow-y: auto; padding: 0 1px; }
 .model-menu-item { border-radius: 0; padding: 9px 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

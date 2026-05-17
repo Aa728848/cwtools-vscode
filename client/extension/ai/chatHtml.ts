@@ -104,7 +104,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 
 <div id="floatingCardArea" class="floating-card-area"></div>
 
-<div class="input-wrapper" style="position:relative">
+<div class="input-wrapper">
     <div id="slashPopup" class="slash-popup"></div>
     <div id="composerMenu" class="composer-menu" aria-hidden="true">
         <div class="composer-menu-section">

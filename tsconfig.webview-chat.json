@@ -8,6 +8,9 @@
     "extends": "./tsconfig.json",
     "include": [
         "client/webview/chatPanel.ts",
+        "client/webview/artifactPanelModel.ts",
+        "client/webview/messageRenderer.ts",
+        "client/webview/svgIcons.ts",
         "client/webview/vscode.d.ts"
     ],
     "exclude": [

@@ -765,7 +765,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // ── Send token usage stats to UI ────────────────────────────────────
             if (result.tokenUsage && result.tokenUsage.total > 0) {
                 const config = this.aiService.getConfig();
-                this.usageTracker.addUsage(config.provider, config.model || 'unknown', result.tokenUsage);
+                this.usageTracker.addUsage(config.provider, config.model || 'unknown', result.tokenUsage, {
+                    toolCalls: result.runMetrics?.toolCallsByName,
+                    topicId: this.topicManager.currentTopic?.id,
+                });
                 this.postMessage({
                     type: 'tokenUsage',
                     usage: result.tokenUsage,

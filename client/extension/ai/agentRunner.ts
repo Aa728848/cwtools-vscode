@@ -19,6 +19,7 @@ import type {
     ChatCompletionResponse,
     ContentPart,
     TokenUsage,
+    AgentRunMetrics,
 } from './types';
 import { contentToString } from './types';
 import * as vs from 'vscode';
@@ -37,15 +38,15 @@ import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compa
 import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
 import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from './workspacePaths';
+import { filterToolDefinitionsForMode, resolveMaxToolIterations } from './runnerPolicy';
 
-// Base fallback tool iterations (dynamically scaled in reasoningLoop)
-const MAX_TOOL_ITERATIONS_BASE = 150;
 // Doom-loop detection: two-phase approach.
 // Phase 1 — signature-pair tracking: (prevSig, currSig) pairs. Same pair ≥ PAIR_THRESHOLD triggers Phase 2.
 // Phase 2 — normalized result hash: compare hashes of adjacent same-name tool results.
 //   Same hash = "spinning in place" → confirmed doom-loop → stop.
 //   Different hash = "making progress" → reset pair counter and continue.
-const DOOM_LOOP_PAIR_THRESHOLD = 14;
+const DOOM_LOOP_SOFT_THRESHOLD = 4;
+const DOOM_LOOP_PAIR_THRESHOLD = 6;
 
 // Lightweight 32-bit FNV-1a hash for normalized tool result comparison.
 function fnv32a(str: string): number {
@@ -306,12 +307,12 @@ const COMPACTION_KEEP_LAST_N = 8;
 // Mid-loop compaction: check every N iterations within reasoningLoop
 const MID_LOOP_COMPACTION_INTERVAL = 3;
 // Mid-loop compaction triggers at this fraction of context limit
-const MID_LOOP_COMPACTION_RATIO = 0.95;
+const MID_LOOP_COMPACTION_RATIO = 0.78;
 
 // Minimum tool result budget (even for tiny context windows)
 const TOOL_RESULT_BUDGET_MIN = 3000;
 // Maximum tool result budget (even for huge context windows like 1M)
-const TOOL_RESULT_BUDGET_MAX = 30000;
+const TOOL_RESULT_BUDGET_MAX = 18000;
 
 // ─── Batch 2.3: Checkpoint mechanism ─────────────────────────────────────────
 // Save a lightweight progress checkpoint every N iterations within the reasoning loop.
@@ -334,6 +335,13 @@ const PROVIDER_FALLBACK: Record<string, { providerId: string; model: string }[]>
     minimax:    [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
 };
 
+export function isFallbackEligibleApiError(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message : String(error);
+    return /\b(5\d{2})\b/.test(msg) ||          // 5xx server errors
+           /timeout|timed out|ETIMEDOUT|ECONNRESET/i.test(msg) ||  // Network failures
+           /overloaded|capacity|unavailable/i.test(msg); // Capacity issues
+}
+
 export interface AgentRunnerOptions {
     /** Override provider for this run */
     providerId?: string;
@@ -341,6 +349,8 @@ export interface AgentRunnerOptions {
     model?: string;
     /** Dynamic maximum context tokens for this run */
     maxContextTokens?: number;
+    /** Override the reasoning-loop iteration limit. Used by orchestrator role budgets. */
+    maxIterations?: number;
     /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
     mode?: AgentMode;
     /** Callback for real-time step updates (for UI) */
@@ -765,10 +775,7 @@ export class AgentRunner {
      * Returns true for 5xx server errors, network timeouts, and exhausted rate limits.
      */
     private isFallbackEligibleError(error: unknown): boolean {
-        const msg = error instanceof Error ? error.message : String(error);
-        return /\b(5\d{2})\b/.test(msg) ||          // 5xx server errors
-               /timeout|ETIMEDOUT|ECONNRESET/.test(msg) ||  // Network failures
-               /overloaded|capacity|unavailable/i.test(msg); // Capacity issues
+        return isFallbackEligibleApiError(error);
     }
 
     /**
@@ -834,6 +841,15 @@ export class AgentRunner {
         // Accumulate token usage across all API calls in this generation
         // (declared here so compaction call and sub-agent dispatch can also contribute to the total)
         const tokenAccumulator: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
+        const runMetrics: AgentRunMetrics = {
+            iterations: 0,
+            maxIterations: 0,
+            toolCallCount: 0,
+            toolCallsByName: {},
+            repeatedToolSignatureCount: 0,
+            maxToolResultChars: 0,
+            finalPromptTokens: 0,
+        };
 
         // Context object to be passed to tool executor (replaces old global assignment)
         const agentToolContext: import('./types').AgentToolContext = {
@@ -1023,7 +1039,8 @@ export class AgentRunner {
             }
 
             // Phase 1: Agent reasoning loop (with tool calls)
-            const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator);
+            const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator, undefined, runMetrics);
+            runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
 
             // Auto-mark remaining in-progress todos as done on successful completion
             this.autoCompleteTodos();
@@ -1041,6 +1058,7 @@ export class AgentRunner {
                     retryCount: 0,
                     steps,
                     tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
+                    runMetrics,
                 };
             }
 
@@ -1057,6 +1075,7 @@ export class AgentRunner {
                     retryCount: 0,
                     steps,
                     tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
+                    runMetrics,
                 };
             }
 
@@ -1070,6 +1089,7 @@ export class AgentRunner {
                 explanation: this.extractExplanation(finalMessage),
                 steps,
                 tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
+                runMetrics,
             };
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
@@ -1083,6 +1103,7 @@ export class AgentRunner {
             if (context.topicId) {
                 await this.saveResumeState(context.topicId, messages, mode);
             }
+            runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
 
             return {
                 code: '',
@@ -1092,6 +1113,7 @@ export class AgentRunner {
                 retryCount: 0,
                 steps,
                 tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
+                runMetrics,
             };
         }
     }
@@ -1343,7 +1365,8 @@ export class AgentRunner {
         mode: AgentMode,
         options?: AgentRunnerOptions,
         tokenAccumulator?: TokenUsage,
-        onFileWrite?: (filePath: string, prevContent: string | null) => void
+        onFileWrite?: (filePath: string, prevContent: string | null) => void,
+        runMetrics?: AgentRunMetrics
     ): Promise<string> {
         let iteration = 0;
         
@@ -1358,48 +1381,46 @@ export class AgentRunner {
         };
 
         // Two-phase doom-loop detection:
-        // phase1: track (prevSig → currSig) pair frequency
+        // phase1: track (prevSig -currSig) pair frequency
         // phase2: compare normalized result hashes for same-name calls
         const pairFrequency = new Map<string, number>();
-        const lastResultHash = new Map<string, number>(); // sig → fnv32a(normalized result)
+        const lastResultHash = new Map<string, number>(); // sig -fnv32a(normalized result)
         let prevCallSignature = '';
         let consecutiveErrorCount = 0;
         // Flag set to true when we need to exit the outer while loop
         let forceStop = false;
+        const updateFinalPromptMetric = () => {
+            if (!runMetrics) return;
+            runMetrics.finalPromptTokens = messages.reduce((s, m) => {
+                if (Array.isArray(m.content)) {
+                    return s + m.content.reduce((inner, part) => {
+                        if (part.type === 'text') return inner + estimateTokenCount(part.text);
+                        if (part.type === 'image_url') return inner + Math.ceil(part.image_url.url.length / 3 / CHARS_PER_TOKEN);
+                        return inner;
+                    }, 0);
+                }
+                return s + estimateTokenCount(contentToString(m.content));
+            }, 0);
+        };
+
+        const measureToolResultChars = (result: unknown): number => {
+            if (typeof result === 'string') return result.length;
+            try {
+                return JSON.stringify(result)?.length ?? String(result).length;
+            } catch {
+                return String(result).length;
+            }
+        };
+
         // Track files confirmed-written this session
         const confirmedWrittenFiles = new Set<string>();
-        // Filter tools by mode
-        let availableTools: typeof TOOL_DEFINITIONS;
-        if (mode === 'plan') {
-            availableTools = TOOL_DEFINITIONS.filter(t => PLAN_MODE_TOOLS.includes(t.function.name as AgentToolName));
-        } else if (mode === 'explore') {
-            availableTools = TOOL_DEFINITIONS.filter(t => EXPLORE_MODE_TOOLS.includes(t.function.name as AgentToolName));
-        } else if (mode === 'review') {
-            availableTools = TOOL_DEFINITIONS.filter(t => REVIEW_MODE_TOOLS.includes(t.function.name as AgentToolName));
-        } else if (mode === 'general') {
-            availableTools = TOOL_DEFINITIONS.filter(t => !GENERAL_EXCLUDED_TOOLS.includes(t.function.name as AgentToolName));
-        } else if (mode === 'utility') {
-            availableTools = TOOL_DEFINITIONS.filter(t => !UTILITY_EXCLUDED_TOOLS.includes(t.function.name as AgentToolName));
-        } else if (mode === 'loc_translator') {
-            availableTools = TOOL_DEFINITIONS.filter(t => LOC_TRANSLATOR_TOOLS.includes(t.function.name as AgentToolName));
-        } else if (mode === 'loc_writer') {
-            availableTools = TOOL_DEFINITIONS.filter(t => LOC_WRITER_TOOLS.includes(t.function.name as AgentToolName));
-        } else if (mode === 'orchestrator') {
-            availableTools = TOOL_DEFINITIONS.filter(t => ORCHESTRATOR_MODE_TOOLS.includes(t.function.name as AgentToolName));
-        } else {
-            // W10 修复：兜底分支（涵盖 build, gui_expert 等）必须源头切断，严禁任何子代理越权调用 Orchestrator 专属工具
-            availableTools = TOOL_DEFINITIONS.filter(t => !['dispatch_agents', 'query_blackboard', 'merge_results'].includes(t.function.name));
-        }
-
-        if (options?.useSlimPrompt) {
-            availableTools = availableTools.filter(t => t.function.name !== 'git_ops');
-        }
-
-        // 子 Agent 工具排除：根据 excludeTools 过滤掉不适合子 Agent 自主使用的工具
-        if (options?.excludeTools && options.excludeTools.length > 0) {
-            const excluded = new Set(options.excludeTools);
-            availableTools = availableTools.filter(t => !excluded.has(t.function.name));
-        }
+        const performanceConfig = vs.workspace.getConfiguration('cwtools.ai.performance');
+        const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
+        const availableTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
+            useSlimPrompt: options?.useSlimPrompt,
+            excludeTools: options?.excludeTools,
+            legacyFullToolset,
+        });
 
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
         // imported at the top of this file; dynamic import added latency for nothing.
@@ -1425,15 +1446,13 @@ export class AgentRunner {
             Math.max(TOOL_RESULT_BUDGET_MIN, Math.floor(TOOL_RESULT_BUDGET_BASE * (baseContextLimit / DEFAULT_CONTEXT_LIMIT)))
         );
 
-        // Dynamic iteration limit based on context scale
-        // 128K → 50, 200K → ~78→cap80, 1M → cap80.  Min 30, Max 80. (In bypass mode: cap 10000)
-        const maxToolIterations = bypassSandbox ? 10000 : Math.min(
-            80, // Cap: beyond 80 iterations, compaction overhead dominates
-            Math.max(
-                30, // Absolute minimum iterations
-                Math.floor(MAX_TOOL_ITERATIONS_BASE * (baseContextLimit / DEFAULT_CONTEXT_LIMIT))
-            )
-        );
+        const maxToolIterations = resolveMaxToolIterations({
+            mode,
+            baseContextLimit,
+            bypassSandbox,
+            override: options?.maxIterations,
+        });
+        if (runMetrics) runMetrics.maxIterations = maxToolIterations;
 
         // Global tool call counter for timeline step indexing (Phase 4)
         let globalToolCallIndex = 0;
@@ -1441,6 +1460,7 @@ export class AgentRunner {
         while (iteration < maxToolIterations) {
             options?.abortSignal?.throwIfAborted();
             iteration++;
+            if (runMetrics) runMetrics.iterations = iteration;
 
             // Batch 2.3: Periodic checkpoint save for crash recovery
             if (iteration > 1 && iteration % CHECKPOINT_INTERVAL === 0) {
@@ -1719,10 +1739,24 @@ export class AgentRunner {
             // ≥ DOOM_LOOP_PAIR_THRESHOLD times, flag for phase-2 hash check.
             const callSignature = toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`).join('|');
             let needsHashValidation = false;
+            let softLoopGuidancePending = false;
+            let currentPairKey: string | undefined;
             if (prevCallSignature) {
-                const pairKey = `${prevCallSignature}→${callSignature}`;
+                const pairKey = `${prevCallSignature}->${callSignature}`;
+                currentPairKey = pairKey;
                 const pairFreq = (pairFrequency.get(pairKey) || 0) + 1;
                 pairFrequency.set(pairKey, pairFreq);
+                if (runMetrics && pairFreq > 1) {
+                    runMetrics.repeatedToolSignatureCount++;
+                }
+                if (pairFreq === DOOM_LOOP_SOFT_THRESHOLD) {
+                    emitStep({
+                        type: 'validation',
+                        content: 'Repeated tool-call pattern detected; prompting the agent to switch strategy.',
+                        timestamp: Date.now(),
+                    });
+                    softLoopGuidancePending = true;
+                }
                 if (pairFreq >= DOOM_LOOP_PAIR_THRESHOLD) needsHashValidation = true;
             }
             prevCallSignature = callSignature;
@@ -1753,6 +1787,10 @@ export class AgentRunner {
             for (const toolCall of toolCalls) {
                 options?.abortSignal?.throwIfAborted();
                 const toolName = toolCall.function.name as AgentToolName;
+                if (runMetrics) {
+                    runMetrics.toolCallCount++;
+                    runMetrics.toolCallsByName[toolName] = (runMetrics.toolCallsByName[toolName] ?? 0) + 1;
+                }
                 let toolArgs: Record<string, unknown>;
                 let toolArgsParseError: string | undefined;
                 try { 
@@ -1926,8 +1964,7 @@ export class AgentRunner {
                     if (prevHash !== undefined && prevHash !== resultHash) {
                         // Hash differs — meaningful progress, not a doom-loop.
                         // Reset the pair counter for this pair.
-                        const pairKey = `${prevCallSignature}→${callSignature}`;
-                        pairFrequency.set(pairKey, 0);
+                        if (currentPairKey) pairFrequency.set(currentPairKey, 0);
                         allHashesMatch = false;
                     }
                     lastResultHash.set(sig, resultHash);
@@ -1935,7 +1972,7 @@ export class AgentRunner {
                 if (allHashesMatch) {
                     emitStep({
                         type: 'error',
-                        content: '检测到死循环 (Doom-Loop): 签名对重复且工具返回结果未变化，已强制停止',
+                        content: 'Doom-loop detected: repeated tool-call signature and unchanged tool results; stopping execution.',
                         timestamp: Date.now(),
                     });
                     forceStop = true;
@@ -1972,6 +2009,12 @@ export class AgentRunner {
                 // Fix #10: use _prefix for intentionally unused destructured vars
                 const { toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j]!;  
                 const toolResult = toolResults[j];
+                if (runMetrics) {
+                    runMetrics.maxToolResultChars = Math.max(
+                        runMetrics.maxToolResultChars,
+                        measureToolResultChars(toolResult)
+                    );
+                }
 
                 emitStep({ type: 'tool_result', content: `${AGENT.TOOL_RESULT_PREFIX}: ${toolName}`, toolName, toolResult, timestamp: Date.now() });
 
@@ -1981,7 +2024,7 @@ export class AgentRunner {
                     consecutiveErrorCount++;
                     const errorLimit = bypassSandbox ? 100 : 10;
                     if (consecutiveErrorCount >= errorLimit) {
-                        emitStep({ type: 'error', content: `工具连续失败 ${errorLimit} 次，已强制停止`, timestamp: Date.now() });
+                        emitStep({ type: 'error', content: `Tool failures reached ${errorLimit}; stopping execution.`, timestamp: Date.now() });
                         forceStop = true;
                         break; // break inner for-loop; forceStop will exit the outer while
                     }
@@ -1996,7 +2039,7 @@ export class AgentRunner {
                 if (useDsmlToolRole) {
                     messages.push({
                         role: 'user',
-                        content: `[Tool Result for ${toolCall.function.name} (id=${toolCall.id})]:\n${budgetedResult}`,
+                        content: "[Tool Result for " + toolCall.function.name + " (id=" + toolCall.id + ")]:\n" + budgetedResult,
                     });
                 } else {
                     messages.push({
@@ -2008,13 +2051,20 @@ export class AgentRunner {
                 }
             }
 
+            if (softLoopGuidancePending && !forceStop) {
+                messages.push({
+                    role: 'user',
+                    content: '[SYSTEM] Repeated tool-call pattern detected. Change strategy, avoid identical arguments, narrow the next action, or answer if enough information is available.',
+                });
+            }
+
             // If forceStop was set in the emit-results loop, exit outer while now
             if (forceStop) break;
         }
 
         // C2 Fix: check abort signal BEFORE the final over-iteration API call.
-        // If the user cancelled, skip this call — it would produce charges and
-        // stale UI state ("已取消" already emitted but a new request fires anyway).
+        // If the user cancelled, skip this call -it would produce charges and
+        // stale UI state after cancellation.
         options?.abortSignal?.throwIfAborted();
 
         // If we force-stopped due to critical errors (e.g., Doom-Loop or consecutive errors),
@@ -2022,20 +2072,25 @@ export class AgentRunner {
         // assistant message were not fully appended, which would result in an API 400 error:
         // "No tool output found for function call...".
         if (forceStop) {
+            updateFinalPromptMetric();
             return '[Agent Execution Terminated]: Tool execution failed consecutively or doom-loop detected.';
         }
 
-        // Max iterations reached — notify user and try to get a final summary
+        // Max iterations reached -notify user and try to get a final summary
         emitStep({
             type: 'error',
-            content: `⚠ 执行循环已达到最大迭代次数 (${iteration}/${maxToolIterations})。任务可能未完成。请发送"继续"以从断点恢复。`,
+            content: "Max tool iterations reached (" + iteration + "/" + maxToolIterations + "). The task may be incomplete; send continue to resume.",
             timestamp: Date.now(),
         });
 
         // Inject a system hint so the final response summarizes progress
         messages.push({
             role: 'user',
-            content: `[SYSTEM] You have reached the maximum iteration limit (${iteration} iterations). Your task is NOT complete. Please:\n1. Summarize what you have completed so far (files written, entities created)\n2. List what remains to be done\n3. Save your progress in todo_write if you haven't already\nThe user can send "继续" to resume from this point.`,
+            content: "[SYSTEM] Maximum iteration limit reached. Summarize completed work, list remaining work, and save progress in todo_write if needed. The user can send continue to resume.",
+
+
+
+
         });
 
         const finalResponse = await this.aiService.chatCompletion(messages, {
@@ -2044,6 +2099,7 @@ export class AgentRunner {
         });
 
         const finalContent = contentToString(finalResponse.choices[0]?.message?.content);
+        updateFinalPromptMetric();
         return this.cleanFinalContent(finalContent);
     }
 
@@ -2107,8 +2163,8 @@ export class AgentRunner {
             emitStep({
                 type: 'validation',
                 content: retryCount === 0
-                    ? '验证生成的代码...'
-                    : `第 ${retryCount} 次修正验证...`,
+                    ? 'Running validation diagnostics...'
+                    : "Retrying validation fix " + retryCount + "...",
                 timestamp: Date.now(),
             });
 
@@ -2147,7 +2203,7 @@ export class AgentRunner {
             if (result.isValid) {
                 emitStep({
                     type: 'validation',
-                    content: `✓ 验证通过`,
+                    content: 'Validation passed.',
                     timestamp: Date.now(),
                 });
 
@@ -2163,7 +2219,7 @@ export class AgentRunner {
             if (retryCount >= MAX_VALIDATION_RETRIES) {
                 emitStep({
                     type: 'validation',
-                    content: `⚠ ${MAX_VALIDATION_RETRIES} 次修正后仍有错误`,
+                    content: `Validation still failed after ${MAX_VALIDATION_RETRIES} retries.`,
                     timestamp: Date.now(),
                 });
                 break;
@@ -2178,7 +2234,7 @@ export class AgentRunner {
 
             emitStep({
                 type: 'validation',
-                content: `✗ 发现 ${result.errors.filter(e => e.severity === 'error').length} 个错误，正在修正 (第 ${retryCount}/${MAX_VALIDATION_RETRIES} 次)...`,
+                content: "Found " + result.errors.filter(e => e.severity === "error").length + " validation error(s); requesting a focused fix (" + retryCount + "/" + MAX_VALIDATION_RETRIES + ").",
                 timestamp: Date.now(),
             });
 
@@ -2209,7 +2265,7 @@ export class AgentRunner {
                     currentCode = fixedCode;
                     emitStep({
                         type: 'code_generated',
-                        content: '已生成修正后的代码',
+                        content: 'Generated corrected code after validation.',
                         timestamp: Date.now(),
                     });
                 } else {

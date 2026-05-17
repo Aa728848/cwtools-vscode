@@ -86,6 +86,8 @@ export interface AIUserConfig {
     /** Legacy plaintext key — only read for migration; write via SecretStorage */
     apiKey: string;
     maxRetries: number;
+    /** Absolute wall-clock timeout for one chat completion request. */
+    requestTimeoutMs: number;
     /** User override for context window size (0 = use provider default) */
     maxContextTokens: number;
     /** Agent file write mode */
@@ -864,6 +866,23 @@ export interface TokenUsage {
     contextWindowTokens?: number;
 }
 
+export interface AgentRunMetrics {
+    /** Number of reasoning loop iterations used by this generation. */
+    iterations: number;
+    /** Maximum reasoning loop iterations allowed for this generation. */
+    maxIterations: number;
+    /** Total tool calls emitted by the model. */
+    toolCallCount: number;
+    /** Tool call counts grouped by tool name. */
+    toolCallsByName: Record<string, number>;
+    /** Number of repeated adjacent tool-call signature pairs observed. */
+    repeatedToolSignatureCount: number;
+    /** Largest serialized tool result seen before budgeting. */
+    maxToolResultChars: number;
+    /** Final estimated tokens in the active message window. */
+    finalPromptTokens: number;
+}
+
 // ─── Tool Result Types (Batch 2.1) ──────────────────────────────────────────
 
 
@@ -1015,6 +1034,8 @@ export interface GenerationResult {
     steps: AgentStep[];
     /** Token usage accumulated across all API calls in this generation */
     tokenUsage?: TokenUsage;
+    /** Lightweight run metrics used for performance diagnostics. */
+    runMetrics?: AgentRunMetrics;
 }
 
 // ─── Chat History ────────────────────────────────────────────────────────────

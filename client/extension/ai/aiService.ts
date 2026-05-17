@@ -32,6 +32,27 @@ import { SOURCE } from './messages';
 
 /** Providers that reject the `detail` sub-field inside `image_url` objects. */
 const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
+const DEFAULT_CHAT_COMPLETION_TIMEOUT_MS = 20 * 60 * 1000;
+const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
+const MAX_CHAT_COMPLETION_TIMEOUT_MS = 60 * 60 * 1000;
+
+export function normalizeChatCompletionTimeoutMs(value: unknown): number {
+    const raw = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_CHAT_COMPLETION_TIMEOUT_MS;
+    return Math.min(MAX_CHAT_COMPLETION_TIMEOUT_MS, Math.max(MIN_CHAT_COMPLETION_TIMEOUT_MS, Math.floor(raw)));
+}
+
+function formatDuration(ms: number): string {
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    const minutes = Math.floor(ms / 60_000);
+    const seconds = Math.round((ms % 60_000) / 1000);
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function errorFromReason(reason: unknown, fallback: string): Error {
+    if (reason instanceof Error) return reason;
+    return new Error(reason === undefined || reason === null ? fallback : String(reason));
+}
 
 // ─── API Key Management ──────────────────────────────────────────────────────
 
@@ -128,6 +149,7 @@ export class AIService {
             endpoint: cfg.get<string>('endpoint', ''),
             apiKey: '',
             maxRetries: Math.max(1, cfg.get<number>('maxRetries') || 3),
+            requestTimeoutMs: normalizeChatCompletionTimeoutMs(cfg.get<number>('requestTimeoutMs')),
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm'),
             forcedThinkingMode: cfg.get<boolean>('forcedThinkingMode', false),
@@ -207,6 +229,8 @@ export class AIService {
             onToolCallDelta?: (toolName: string, argsBuf: string) => void;
             /** External AbortSignal for caller-controlled cancellation */
             abortSignal?: AbortSignal;
+            /** Absolute wall-clock timeout for a single chat completion call. */
+            requestTimeoutMs?: number;
             /**
              * Disable thinking/reasoning for this call (used by inline completion).
              * Per-provider implementation:
@@ -311,6 +335,7 @@ export class AIService {
 
         // C1 Fix: create a per-call controller; register it so cancel() can abort it.
         const controller = new AbortController();
+        let timedOutError: Error | undefined;
         // Also link any external abort signal so the caller can cancel this specific call.
         const externalSignal = (options as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
         const linkAbort = () => controller.abort(externalSignal?.reason);
@@ -320,6 +345,14 @@ export class AIService {
             externalSignal?.addEventListener('abort', linkAbort);
         }
         this.activeControllers.add(controller);
+        const requestTimeoutMs = normalizeChatCompletionTimeoutMs(options?.requestTimeoutMs ?? config.requestTimeoutMs);
+        const timeoutId = setTimeout(() => {
+            timedOutError = new Error(
+                `${provider.name} API request timed out after ${formatDuration(requestTimeoutMs)}. The upstream provider did not complete the chat completion in time.`
+            );
+            timedOutError.name = 'TimeoutError';
+            controller.abort(timedOutError);
+        }, requestTimeoutMs);
 
         try {
             // MiniMax Token Plan uses Anthropic Messages API format
@@ -334,7 +367,11 @@ export class AIService {
             } else {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
             }
+        } catch (err) {
+            if (timedOutError) throw timedOutError;
+            throw err;
         } finally {
+            clearTimeout(timeoutId);
             this.activeControllers.delete(controller);
             externalSignal?.removeEventListener('abort', linkAbort);
         }
@@ -585,6 +622,33 @@ export class AIService {
 
     // ─── Fetch with Exponential Backoff ──────────────────────────────────────
 
+    private async abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+        if (signal?.aborted) throw errorFromReason(signal.reason, 'Aborted');
+        await new Promise<void>((resolve, reject) => {
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            let abortListener: (() => void) | undefined;
+            const cleanup = () => {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = undefined;
+                }
+                if (signal && abortListener) {
+                    signal.removeEventListener('abort', abortListener);
+                    abortListener = undefined;
+                }
+            };
+            abortListener = () => {
+                cleanup();
+                reject(errorFromReason(signal?.reason, 'Aborted'));
+            };
+            timeoutId = setTimeout(() => {
+                cleanup();
+                resolve();
+            }, ms);
+            signal?.addEventListener('abort', abortListener, { once: true });
+        });
+    }
+
     /**
      * Executes fetch with exponential backoff for 429 Too Many Requests.
      * Prevents multi-agent swarms from crashing API limits.
@@ -596,7 +660,8 @@ export class AIService {
 
         while (true) {
             let fetchTimeoutId: NodeJS.Timeout | undefined;
-            const originalSignal = init.signal;
+            let fetchTimeoutError: Error | undefined;
+            const originalSignal = init.signal ?? undefined;
             const fetchController = new AbortController();
             
             const linkAbort = () => fetchController.abort(originalSignal?.reason);
@@ -607,9 +672,9 @@ export class AIService {
 
             // Hard timeout for the connection/headers phase (300s)
             fetchTimeoutId = setTimeout(() => {
-                const err = new Error('Fetch connection timeout');
-                err.name = 'TimeoutError';
-                fetchController.abort(err);
+                fetchTimeoutError = new Error('Fetch connection timeout');
+                fetchTimeoutError.name = 'TimeoutError';
+                fetchController.abort(fetchTimeoutError);
             }, 300000);
 
             try {
@@ -625,7 +690,20 @@ export class AIService {
                     const jitter = Math.floor(Math.random() * delays[retries]! * 0.25);
                     const delay = delays[retries]! + jitter;
                     ErrorReporter.debug(SOURCE.AI_SERVICE, `429 Rate Limit hit for ${providerId}. Retrying in ${delay}ms...`);
-                    await new Promise(r => setTimeout(r, delay));
+                    try { await response.body?.cancel(); } catch { /* ignore */ }
+                    originalSignal?.removeEventListener('abort', linkAbort);
+                    await this.abortableDelay(delay, originalSignal);
+                    retries++;
+                    continue;
+                }
+
+                if (response.status >= 500 && response.status < 600 && retries < maxRetries) {
+                    const jitter = Math.floor(Math.random() * delays[retries]! * 0.25);
+                    const delay = delays[retries]! + jitter;
+                    ErrorReporter.warn(SOURCE.AI_SERVICE, `${providerId} API returned ${response.status}. Retrying in ${delay}ms...`);
+                    try { await response.body?.cancel(); } catch { /* ignore */ }
+                    originalSignal?.removeEventListener('abort', linkAbort);
+                    await this.abortableDelay(delay, originalSignal);
                     retries++;
                     continue;
                 }
@@ -635,21 +713,23 @@ export class AIService {
                 return response;
             } catch (err: any) {
                 if (fetchTimeoutId) clearTimeout(fetchTimeoutId);
+                const effectiveError = fetchTimeoutError ?? err;
                 
                 // If the user explicitly aborted, do not retry
                 if (originalSignal?.aborted) {
-                    throw err;
+                    throw errorFromReason(originalSignal.reason, 'Aborted');
                 }
 
                 // Retry on timeout or network errors
-                if ((err.name === 'TimeoutError' || err.message?.includes('timeout') || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT') && retries < maxRetries) {
+                if ((effectiveError.name === 'TimeoutError' || effectiveError.message?.includes('timeout') || effectiveError.code === 'ECONNRESET' || effectiveError.code === 'ETIMEDOUT') && retries < maxRetries) {
                     const delay = delays[retries]! + 1000;
-                    ErrorReporter.warn(SOURCE.AI_SERVICE, `Network error/timeout for ${providerId}: ${err.message}. Retrying in ${delay}ms...`);
-                    await new Promise(r => setTimeout(r, delay));
+                    ErrorReporter.warn(SOURCE.AI_SERVICE, `Network error/timeout for ${providerId}: ${effectiveError.message}. Retrying in ${delay}ms...`);
+                    originalSignal?.removeEventListener('abort', linkAbort);
+                    await this.abortableDelay(delay, originalSignal);
                     retries++;
                     continue;
                 }
-                throw err;
+                throw effectiveError;
             }
         }
     }
@@ -664,6 +744,7 @@ export class AIService {
         timeoutMs: number
     ): Promise<ReadableStreamReadResult<T>> {
         let timeoutId: NodeJS.Timeout | undefined;
+        let abortListener: (() => void) | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => {
                 const err = new Error(`Stream idle timeout: no data received for ${timeoutMs}ms`);
@@ -672,11 +753,20 @@ export class AIService {
                 reject(err);
             }, timeoutMs);
         });
+        const abortPromise = new Promise<never>((_, reject) => {
+            abortListener = () => reject(errorFromReason(controller.signal.reason, 'Stream read aborted'));
+            if (controller.signal.aborted) {
+                abortListener();
+            } else {
+                controller.signal.addEventListener('abort', abortListener, { once: true });
+            }
+        });
 
         try {
-            return await Promise.race([reader.read(), timeoutPromise]);
+            return await Promise.race([reader.read(), timeoutPromise, abortPromise]);
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
+            if (abortListener) controller.signal.removeEventListener('abort', abortListener);
         }
     }
 

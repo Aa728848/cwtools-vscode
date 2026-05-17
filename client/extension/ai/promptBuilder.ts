@@ -1183,6 +1183,11 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         }
     }
 
+    private truncateProjectRuleSection(content: string, maxChars: number): string {
+        if (content.length <= maxChars) return content;
+        return content.slice(0, maxChars).trimEnd() + '\n...[truncated; read CWTOOLS.md for the full project rules]';
+    }
+
     /**
      * Build mode-aware project rules prompt.
      * Different modes include different subsets of CWTOOLS.md to optimize context usage.
@@ -1191,9 +1196,23 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         const parsed = this.parseProjectRules();
         if (!parsed) return '';
 
-        // Build mode gets full content; other modes get selective sections
+        // Build mode uses a compact summary by default. Full CWTOOLS.md injection is
+        // still available through cwtools.ai.performance.fullProjectRulesInBuild.
         if (mode === 'build' || !mode) {
-            return `<project-premise>\n# MANDATORY PROJECT RULES & CONTEXT (From CWTOOLS.md)\nYou MUST strictly read and follow these rules before attempting any task. These project-specific rules supersede all general instructions:\n\n${parsed.raw}\n</project-premise>\n`;
+            const fullBuildRules = vs.workspace.getConfiguration('cwtools.ai.performance')
+                .get<boolean>('fullProjectRulesInBuild') === true;
+            if (fullBuildRules) {
+                return `<project-premise>\n# MANDATORY PROJECT RULES & CONTEXT (From CWTOOLS.md)\nYou MUST strictly read and follow these rules before attempting any task. These project-specific rules supersede all general instructions:\n\n${parsed.raw}\n</project-premise>\n`;
+            }
+
+            const buildSections: string[] = [];
+            if (parsed.modInfo) buildSections.push(`## Mod Info\n${this.truncateProjectRuleSection(parsed.modInfo, 1200)}`);
+            if (parsed.projectStructure) buildSections.push(`## Project Structure\n${this.truncateProjectRuleSection(parsed.projectStructure, 1800)}`);
+            if (parsed.namespaces?.length) buildSections.push(`### Event Namespaces\n${parsed.namespaces.slice(0, 80).map(ns => `- \`${ns}\``).join('\n')}`);
+            if (parsed.agentGuidelines) buildSections.push(`## Agent Guidelines\n${this.truncateProjectRuleSection(parsed.agentGuidelines, 2600)}`);
+            if (parsed.customRules) buildSections.push(`## Custom Rules\n${this.truncateProjectRuleSection(parsed.customRules, 2200)}`);
+            if (buildSections.length === 0) return '';
+            return `<project-premise>\n# PROJECT RULES SUMMARY (From CWTOOLS.md)\nFollow these project-specific rules. If the task depends on omitted details or the user explicitly asks for full project policy, read CWTOOLS.md before editing.\n\n${buildSections.join('\n\n')}\n</project-premise>\n`;
         }
 
         const sections: string[] = [];
@@ -1391,8 +1410,8 @@ ${trimmed}
      * These are injected before the user's message.
      *
      * Uses smart context windowing:
-     * - Small files (<100 lines): include entire file content
-     * - Large files: attempt to find the enclosing semantic block, fall back to ±15 lines
+     * - Small files: include header + current block unless the compatibility setting asks for full content
+     * - Large files: attempt to find the enclosing semantic block, fall back to +/-15 lines
      */
     buildContextMessages(options: {
         activeFile?: string;
@@ -1440,19 +1459,29 @@ ${trimmed}
         if (options.fileContent && options.cursorLine !== undefined) {
             const lines = options.fileContent.split('\n');
             const totalLines = lines.length;
+            const includeFullSmallFiles = vs.workspace.getConfiguration('cwtools.ai.performance')
+                .get<boolean>('includeFullSmallFiles') === true;
 
-            if (totalLines <= 100) {
-                // Small file: include entire content
+            if (totalLines <= 100 && includeFullSmallFiles) {
                 if (options.fileContent.trim().length > 0) {
                     contextParts.push(`\n**Full file content** (${totalLines} lines):\n\`\`\`pdx\n${options.fileContent}\n\`\`\``);
                 }
             } else {
-                // Large file: find enclosing semantic block or use ±15 lines
+                if (totalLines <= 100) {
+                    const headerEnd = Math.min(20, totalLines);
+                    const headerCode = lines.slice(0, headerEnd).join('\n');
+                    if (headerCode.trim().length > 0) {
+                        contextParts.push(`\n**File header excerpt** (lines 1-${headerEnd} of ${totalLines}):\n\`\`\`pdx\n${headerCode}\n\`\`\``);
+                    }
+                }
+
                 const blockRange = this.findEnclosingBlock(lines, options.cursorLine);
-                const startLine = blockRange ? blockRange[0] : Math.max(0, options.cursorLine - 15);
+                const radius = totalLines <= 100 ? 12 : 15;
+                const maxBlockLines = totalLines <= 100 ? 45 : 80;
+                const startLine = blockRange ? blockRange[0] : Math.max(0, options.cursorLine - radius);
                 const endLine = blockRange
-                    ? Math.min(blockRange[1], startLine + 80)  // cap at 80 lines for a block
-                    : Math.min(lines.length - 1, options.cursorLine + 15);
+                    ? Math.min(blockRange[1], startLine + maxBlockLines)
+                    : Math.min(lines.length - 1, options.cursorLine + radius);
                 const contextCode = lines.slice(startLine, endLine + 1).join('\n');
 
                 if (contextCode.trim().length > 0) {

@@ -1006,6 +1006,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                                     description: '(可选) 包含详细设计蓝图或上下文的文件路径或 Blackboard Key。**严禁在 prompt 中直接粘贴数百字的蓝图文本**，请将文件路径写在这里，系统会自动预读并注入给子 Agent。',
                                 },
                                 priority: { type: 'string', enum: ['critical', 'normal', 'low'], description: 'Task priority (default: normal)' },
+                                maxIterations: { type: 'integer', minimum: 1, maximum: 100, description: 'Optional per-agent reasoning-loop cap. Leave unset to use the role default.' },
                             },
                             required: ['id', 'agentType', 'prompt'],
                         },

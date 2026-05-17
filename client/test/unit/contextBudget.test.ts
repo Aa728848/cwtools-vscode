@@ -5,8 +5,8 @@ import type { ChatMessage } from '../../extension/ai/types';
 // ─── TOOL_RESULT_BUDGET_BASE constant ────────────────────────────────────────
 
 describe('TOOL_RESULT_BUDGET_BASE', () => {
-    it('is exported and equals 15000', () => {
-        expect(TOOL_RESULT_BUDGET_BASE).to.equal(15000);
+    it('is exported and equals 12000', () => {
+        expect(TOOL_RESULT_BUDGET_BASE).to.equal(12000);
     });
 });
 

@@ -569,6 +569,14 @@
 					"maximum": 5,
 					"description": "%configuration.cwtools.ai.maxRetries.description%"
 				},
+				"cwtools.ai.requestTimeoutMs": {
+					"scope": "window",
+					"type": "integer",
+					"default": 1200000,
+					"minimum": 60000,
+					"maximum": 3600000,
+					"description": "%configuration.cwtools.ai.requestTimeoutMs.description%"
+				},
 				"cwtools.ai.reasoningEffort": {
 					"scope": "window",
 					"type": "string",
@@ -722,6 +730,24 @@
 							"model": { "type": "string" }
 						}
 					}
+				},
+				"cwtools.ai.performance.legacyFullToolset": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.cwtools.ai.performance.legacyFullToolset.description%"
+				},
+				"cwtools.ai.performance.fullProjectRulesInBuild": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.cwtools.ai.performance.fullProjectRulesInBuild.description%"
+				},
+				"cwtools.ai.performance.includeFullSmallFiles": {
+					"scope": "window",
+					"type": "boolean",
+					"default": false,
+					"description": "%configuration.cwtools.ai.performance.includeFullSmallFiles.description%"
 				},
 				"cwtools.vanillaCompare.showGutterDecorations": {
 					"scope": "window",

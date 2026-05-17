@@ -342,6 +342,7 @@ export class Orchestrator {
             topicId: orchestratorOptions.topicId,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
             useSlimPrompt: true,
+            maxIterations: taskNode.maxIterations ?? profile.maxIterations,
             // 子代理跳过内置 validation loop —— Orchestrator 有独立的 QualityGate 机制，
             // 不需要子代理重复验证。同时避免推理结束后 validation loop 继续产生步骤，
             // 导致外部判断卡片已标记完成但内部仍在运行的 UI 状态不一致。

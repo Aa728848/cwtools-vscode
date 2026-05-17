@@ -29,7 +29,7 @@ import { getTopicStorageDir } from './workspacePaths';
  * handles context-aware dedup/segmentation. This threshold must be >= TOOL_RESULT_BUDGET_MAX
  * so the intelligent budgeting layer gets first crack at the data.
  */
-const MAX_TOOL_RESULT_CHARS = 30000;
+const MAX_TOOL_RESULT_CHARS = 18000;
 
 // Tool execution timeouts (ms) — prevents hangs on network filesystems or LSP deadlocks
 const TOOL_TIMEOUTS: Record<string, number> = {
@@ -811,6 +811,7 @@ export class AgentToolExecutor {
             prompt: string;
             contextFiles?: string[];
             dependencies?: string[];
+            maxIterations?: number;
             modelOverride?: string;
             providerOverride?: string;
         }> | undefined;
@@ -859,6 +860,7 @@ export class AgentToolExecutor {
                     {
                         contextFiles: task.contextFiles,
                         dependencies: task.dependencies || [],
+                        maxIterations: task.maxIterations,
                         modelOverride: task.modelOverride,
                         providerOverride: task.providerOverride,
                     },

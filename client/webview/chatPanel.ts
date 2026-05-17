@@ -1,5 +1,6 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 import { routeLiveStep, buildToolPairHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
+import { getDiffArtifactFilesForWebview, type DiffArtifactFileView } from './artifactPanelModel';
 
 /** Type-safe getElementById with generic cast */
 function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -136,6 +137,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         updatedAt?: number;
         data?: unknown;
     };
+    type DiffArtifactFileRecord = DiffArtifactFileView;
     let activeContexts: ActiveContext[] = [];
     let artifacts: ArtifactRecord[] = [];
     let artifactFilter: 'all' | 'plan' | 'validation' | 'diff' = 'all';
@@ -806,9 +808,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 row.insertAdjacentElement('afterend', preview);
             };
             if (artifact.kind === 'diff' || artifact.action === 'openDiff') {
-                row.addEventListener('click', () => {
-                    vscode.postMessage({ type: 'openArtifact', artifactId: artifact.id });
-                });
+                row.addEventListener('click', () => toggleDiffArtifactDetails(row, artifact));
             } else if (artifact.filePath) {
                 row.addEventListener('click', () => {
                     vscode.postMessage({ type: 'openPlanFile', filePath: artifact.filePath });
@@ -818,6 +818,75 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             }
             list.appendChild(row);
         }
+    }
+
+    const getDiffArtifactFiles = getDiffArtifactFilesForWebview;
+
+    function fileBaseName(file: string): string {
+        return file.split(/[\\/]/).pop() || file;
+    }
+
+    function formatArtifactFileStats(file: DiffArtifactFileRecord): string {
+        const parts: string[] = [];
+        if (file.status) parts.push(file.status);
+        if (file.additions !== undefined || file.deletions !== undefined) {
+            parts.push(`+${file.additions ?? 0} -${file.deletions ?? 0}`);
+        } else if (file.diffPreview) {
+            parts.push(file.diffPreview);
+        }
+        return parts.join(' | ');
+    }
+
+    function toggleDiffArtifactDetails(row: HTMLElement, artifact: ArtifactRecord) {
+        const next = row.nextElementSibling as HTMLElement | null;
+        if (next?.classList.contains('artifact-file-list')) {
+            next.remove();
+            row.classList.remove('expanded');
+            return;
+        }
+
+        document.querySelectorAll('.artifact-file-list').forEach(el => el.remove());
+        document.querySelectorAll('.artifact-row.expanded').forEach(el => el.classList.remove('expanded'));
+
+        const files = getDiffArtifactFiles(artifact);
+        const details = document.createElement('div');
+        details.className = 'artifact-file-list';
+        if (files.length === 0) {
+            details.innerHTML = `<div class="artifact-file-empty">No file changes recorded.</div>`;
+        } else {
+            const header = document.createElement('div');
+            header.className = 'artifact-file-list-header';
+            header.innerHTML = `<span>${files.length} file${files.length === 1 ? '' : 's'}</span>`;
+            const openAll = document.createElement('button');
+            openAll.type = 'button';
+            openAll.className = 'artifact-open-all';
+            openAll.textContent = 'Open all';
+            openAll.addEventListener('click', event => {
+                event.stopPropagation();
+                vscode.postMessage({ type: 'openArtifact', artifactId: artifact.id });
+            });
+            header.appendChild(openAll);
+            details.appendChild(header);
+
+            for (const file of files) {
+                const fileRow = document.createElement('button');
+                fileRow.type = 'button';
+                fileRow.className = 'artifact-file-row';
+                const stats = formatArtifactFileStats(file);
+                fileRow.innerHTML = `
+                    <span class="artifact-file-name" title="${escapeHtml(file.file)}">${escapeHtml(fileBaseName(file.file))}</span>
+                    <span class="artifact-file-path">${escapeHtml(file.file)}</span>
+                    ${stats ? `<span class="artifact-file-stats">${escapeHtml(stats)}</span>` : ''}
+                `;
+                fileRow.addEventListener('click', event => {
+                    event.stopPropagation();
+                    vscode.postMessage({ type: 'openArtifact', artifactId: artifact.id, file: file.file });
+                });
+                details.appendChild(fileRow);
+            }
+        }
+        row.insertAdjacentElement('afterend', details);
+        row.classList.add('expanded');
     }
 
     function restoreArtifactsFromMessages(messages: any[]) {

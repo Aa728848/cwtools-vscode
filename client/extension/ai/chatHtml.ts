@@ -116,6 +116,23 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 
 <div class="input-wrapper" style="position:relative">
     <div id="slashPopup" class="slash-popup"></div>
+    <div id="composerMenu" class="composer-menu" aria-hidden="true">
+        <div class="composer-menu-section">
+            <button class="composer-menu-item" data-mode="plan">${svgIconNoMargin('clipboard')}<span>Plan</span></button>
+            <button class="composer-menu-item" data-mode="explore">${svgIconNoMargin('telescope')}<span>Explore</span></button>
+            <button class="composer-menu-item" data-mode="utility">${svgIconNoMargin('zap')}<span>Utility</span></button>
+            <button class="composer-menu-item" data-mode="review">${svgIconNoMargin('shield')}<span>Review</span></button>
+            <button class="composer-menu-item" data-mode="orchestrator">${svgIconNoMargin('gitBranch')}<span>Orchestrator</span></button>
+        </div>
+        <div class="composer-menu-divider"></div>
+        <button class="composer-menu-item" data-composer-action="media">${svgIconNoMargin('upload')}<span>Media</span></button>
+        <button class="composer-menu-item" data-composer-action="mentions">${svgIconNoMargin('tag')}<span>Mentions</span></button>
+        <button class="composer-menu-item" data-composer-action="workflows">${svgIconNoMargin('sparkles')}<span>Workflows</span></button>
+    </div>
+    <div id="modelMenu" class="model-menu" aria-hidden="true">
+        <div class="model-menu-title">Model</div>
+        <div id="modelMenuList" class="model-menu-list"></div>
+    </div>
     <div class="input-container">
         <div class="file-badge-area" id="fileBadgeArea"></div>
         <div class="image-preview-area" id="imagePreviewArea"></div>
@@ -123,8 +140,14 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
             <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1" aria-label="向 AI 发送消息"></textarea>
         </div>
         <div class="input-controls">
-            <div class="ctrl-group">
-                <select class="mode-select" id="modeSel" title="切换模式">
+            <div class="composer-toolbar">
+                <button class="composer-add-btn" id="composerAddBtn" title="Add context or mode" aria-label="Add context or mode">${svgIconNoMargin('plus')}</button>
+                <button class="composer-model-trigger" id="quickModelTrigger" title="Select model" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="quickModelLabel">Model</span>
+                    <span class="composer-chevron" aria-hidden="true">v</span>
+                </button>
+                <div class="composer-chip-row" id="composerChipRow"></div>
+                <select class="hidden-composer-select" id="modeSel" title="切换模式" aria-hidden="true" tabindex="-1">
                     <option value="build">构建模式</option>
                     <option value="plan">计划模式</option>
                     <option value="explore">分析模式</option>
@@ -132,11 +155,8 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <option value="review">审查模式</option>
                     <option value="orchestrator">协作模式</option>
                 </select>
-                <select class="workflow-selector" id="workflowSel" title="AI Workflow">
-                    <option value="">Workflow</option>
-                </select>
-                <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
-                <button class="img-pick-btn" id="imgPickBtn" title="上传图片">${svgIconNoMargin('plus')}</button>
+                <select class="hidden-composer-select" id="quickModelSelect" title="当前模型" aria-hidden="true" tabindex="-1"></select>
+                <button class="hidden-composer-action" id="imgPickBtn" title="上传图片" aria-hidden="true" tabindex="-1"></button>
             </div>
             <button class="send-btn" id="sendBtn" title="发送 (Enter)" aria-label="发送消息">↑</button>
         </div>

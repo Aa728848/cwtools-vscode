@@ -11,10 +11,12 @@ describe('webview smoke checks', () => {
 
         expect(html).to.include('id="chatArea"');
         expect(html).to.include('id="modeSel"');
-        expect(html).to.include('id="workflowSel"');
+        expect(html).to.include('id="composerAddBtn"');
+        expect(html).to.include('id="quickModelTrigger"');
+        expect(html).to.include('data-composer-action="workflows"');
         expect(html).to.include('id="artifactDrawer"');
         expect(script).to.include("case 'workflowList'");
-        expect(script).to.include('renderWorkflowSelector');
+        expect(script).to.include('renderComposerChips');
         expect(script).to.include('renderArtifactPanel');
         expect(script).to.include('renderTopics');
         expect(script).to.include('renderArtifactDrawer');
@@ -51,6 +53,8 @@ describe('webview smoke checks', () => {
             '.message.assistant',
             '.msg-bubble',
             '.input-wrapper',
+            '.composer-menu',
+            '.model-menu',
             '.slash-popup',
             '.artifact-drawer',
             '.topics-panel',

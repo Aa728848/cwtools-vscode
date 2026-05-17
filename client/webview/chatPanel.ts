@@ -39,8 +39,7 @@ import {
 import { getChatI18n } from './chat/i18n';
 import { applyModeUi } from './chat/modes';
 import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from './chat/slashCommands';
-import { type WorkflowUiLabels, type WorkflowView } from './chat/workflows';
-import { renderWorkflowSelector } from './chat/workflowSelector';
+import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
 import { createAnnotationCard } from './chat/annotations';
 import {
@@ -119,7 +118,8 @@ import {
     let artifactFilter: ArtifactFilter = 'all';
     let workflows: WorkflowView[] = [];
     let activeWorkflowId: string | null = null;
-    let workflowLabels: WorkflowUiLabels | null = null;
+    let quickModelOptions: string[] = [];
+    let quickModelCurrent = '';
     
     function renderContextTray() {
         let area = document.getElementById('referenceChipArea');
@@ -384,12 +384,201 @@ import {
         setArtifactDrawerOpen(nextOpen);
     }
 
+    function getModeChipLabel(mode: string): string {
+        const labels: Record<string, string> = {
+            build: 'Build',
+            plan: 'Plan',
+            explore: 'Explore',
+            utility: 'Utility',
+            review: 'Review',
+            orchestrator: 'Orchestrator',
+        };
+        return labels[mode === 'general' ? 'utility' : mode] || mode;
+    }
+
+    function closeComposerMenus() {
+        const composerMenu = document.getElementById('composerMenu');
+        const modelMenu = document.getElementById('modelMenu');
+        const composerAddBtn = document.getElementById('composerAddBtn');
+        const quickModelTrigger = document.getElementById('quickModelTrigger');
+        composerMenu?.classList.remove('show');
+        composerMenu?.setAttribute('aria-hidden', 'true');
+        modelMenu?.classList.remove('show');
+        modelMenu?.setAttribute('aria-hidden', 'true');
+        composerAddBtn?.classList.remove('active');
+        quickModelTrigger?.classList.remove('active');
+        quickModelTrigger?.setAttribute('aria-expanded', 'false');
+    }
+
+    function setComposerMenuOpen(open: boolean) {
+        const composerMenu = document.getElementById('composerMenu');
+        const modelMenu = document.getElementById('modelMenu');
+        const composerAddBtn = document.getElementById('composerAddBtn');
+        const quickModelTrigger = document.getElementById('quickModelTrigger');
+        composerMenu?.classList.toggle('show', open);
+        composerMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
+        composerAddBtn?.classList.toggle('active', open);
+        if (open) {
+            modelMenu?.classList.remove('show');
+            modelMenu?.setAttribute('aria-hidden', 'true');
+            quickModelTrigger?.classList.remove('active');
+            quickModelTrigger?.setAttribute('aria-expanded', 'false');
+        }
+    }
+
+    function setModelMenuOpen(open: boolean) {
+        const composerMenu = document.getElementById('composerMenu');
+        const modelMenu = document.getElementById('modelMenu');
+        const composerAddBtn = document.getElementById('composerAddBtn');
+        const quickModelTrigger = document.getElementById('quickModelTrigger');
+        modelMenu?.classList.toggle('show', open);
+        modelMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
+        quickModelTrigger?.classList.toggle('active', open);
+        quickModelTrigger?.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+            composerMenu?.classList.remove('show');
+            composerMenu?.setAttribute('aria-hidden', 'true');
+            composerAddBtn?.classList.remove('active');
+        }
+    }
+
+    function renderComposerChips() {
+        const chipRow = document.getElementById('composerChipRow');
+        if (!chipRow) return;
+        chipRow.innerHTML = '';
+
+        if (currentMode !== 'build') {
+            const modeChip = document.createElement('button');
+            modeChip.className = 'composer-chip';
+            modeChip.type = 'button';
+            modeChip.title = 'Clear mode';
+            const modeIcon = document.createElement('span');
+            modeIcon.className = 'composer-chip-icon';
+            modeIcon.innerHTML = Icons.x;
+            const modeText = document.createElement('span');
+            modeText.textContent = getModeChipLabel(currentMode);
+            modeChip.append(modeIcon, modeText);
+            modeChip.addEventListener('click', e => {
+                e.stopPropagation();
+                switchMode('build', true);
+            });
+            chipRow.appendChild(modeChip);
+        }
+
+        if (activeWorkflowId) {
+            const activeWorkflow = workflows.find(workflow => workflow.id === activeWorkflowId);
+            const workflowChip = document.createElement('button');
+            workflowChip.className = 'composer-chip workflow-chip';
+            workflowChip.type = 'button';
+            workflowChip.title = 'Turn off workflow';
+            const label = activeWorkflow?.title || activeWorkflowId;
+            const workflowIcon = document.createElement('span');
+            workflowIcon.className = 'composer-chip-icon';
+            workflowIcon.innerHTML = Icons.x;
+            const workflowText = document.createElement('span');
+            workflowText.textContent = label;
+            workflowChip.append(workflowIcon, workflowText);
+            workflowChip.addEventListener('click', e => {
+                e.stopPropagation();
+                vscode.postMessage({ type: 'switchWorkflow', workflowId: null });
+            });
+            chipRow.appendChild(workflowChip);
+        }
+
+        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-mode]').forEach(item => {
+            item.classList.toggle('active', item.dataset.mode === currentMode);
+        });
+    }
+
+    function renderQuickModelMenu() {
+        const label = document.getElementById('quickModelLabel');
+        const list = document.getElementById('modelMenuList');
+        const trigger = document.getElementById('quickModelTrigger');
+        if (label) label.textContent = quickModelCurrent || 'Model';
+        if (trigger) trigger.title = quickModelCurrent ? `Model: ${quickModelCurrent}` : 'Select model';
+        if (!list) return;
+        list.innerHTML = '';
+
+        if (!quickModelOptions.length) {
+            const empty = document.createElement('div');
+            empty.className = 'model-menu-empty';
+            empty.textContent = 'No models available';
+            list.appendChild(empty);
+            return;
+        }
+
+        for (const model of quickModelOptions) {
+            const btn = document.createElement('button');
+            btn.className = 'model-menu-item';
+            btn.type = 'button';
+            btn.textContent = model;
+            btn.classList.toggle('active', model === quickModelCurrent);
+            btn.addEventListener('click', () => {
+                const qms = document.getElementById('quickModelSelect') as HTMLSelectElement | null;
+                if (qms) qms.value = model;
+                quickModelCurrent = model;
+                renderQuickModelMenu();
+                setModelMenuOpen(false);
+                vscode.postMessage({ type: 'quickChangeModel', model });
+            });
+            list.appendChild(btn);
+        }
+    }
+
     const quickModelSel = document.getElementById('quickModelSelect');
     if (quickModelSel) {
         quickModelSel.addEventListener('change', () => {
-            vscode.postMessage({ type: 'quickChangeModel', model: (quickModelSel as HTMLSelectElement).value });
+            quickModelCurrent = (quickModelSel as HTMLSelectElement).value;
+            renderQuickModelMenu();
+            vscode.postMessage({ type: 'quickChangeModel', model: quickModelCurrent });
         });
     }
+
+    const composerAddBtn = document.getElementById('composerAddBtn');
+    const quickModelTrigger = document.getElementById('quickModelTrigger');
+    composerAddBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        const composerMenu = document.getElementById('composerMenu');
+        setComposerMenuOpen(!composerMenu?.classList.contains('show'));
+    });
+    quickModelTrigger?.addEventListener('click', e => {
+        e.stopPropagation();
+        const modelMenu = document.getElementById('modelMenu');
+        setModelMenuOpen(!modelMenu?.classList.contains('show'));
+    });
+    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-mode]').forEach(item => {
+        item.addEventListener('click', () => {
+            const mode = item.dataset.mode;
+            if (mode) switchMode(mode, true);
+            setComposerMenuOpen(false);
+        });
+    });
+    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-composer-action]').forEach(item => {
+        item.addEventListener('click', () => {
+            const action = item.dataset.composerAction;
+            setComposerMenuOpen(false);
+            if (action === 'media') {
+                document.getElementById('imgPickBtn')?.click();
+            } else if (action === 'mentions') {
+                input.value = '@';
+                input.focus();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            } else if (action === 'workflows') {
+                input.value = '/workflow:';
+                input.focus();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        });
+    });
+    document.addEventListener('click', e => {
+        const target = e.target as Element | null;
+        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger')) {
+            closeComposerMenus();
+        }
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeComposerMenus();
+    });
 
     bindBtn('btnNewTopic', () => vscode.postMessage({ type: 'newTopic' }));
     bindBtn('currentTopicTitle', () => {
@@ -488,13 +677,6 @@ import {
     if (modeSel) {
         modeSel.addEventListener('change', () => {
             switchMode(modeSel.value, /* fromUI */ true);
-        });
-    }
-
-    const workflowSel = document.getElementById('workflowSel') as HTMLSelectElement | null;
-    if (workflowSel) {
-        workflowSel.addEventListener('change', () => {
-            vscode.postMessage({ type: 'switchWorkflow', workflowId: workflowSel.value || null });
         });
     }
 
@@ -959,10 +1141,12 @@ import {
             document.getElementById('modeSel') as HTMLSelectElement | null,
             document.getElementById('modeIndicator')
         );
+        renderComposerChips();
     }
     
     // Give initial mode its body class
     document.body.classList.add('build-mode');
+    renderComposerChips();
 
     function setGenerating(val: boolean) {
         isGenerating = val;
@@ -2597,17 +2781,15 @@ import {
             case 'workflowList':
                 workflows = (msg.workflows || []) as WorkflowView[];
                 activeWorkflowId = msg.currentWorkflowId || null;
-                workflowLabels = (msg.labels || null) as WorkflowUiLabels | null;
-                updateWorkflowSelector();
+                renderComposerChips();
                 break;
 
             case 'workflowChanged':
                 activeWorkflowId = msg.workflowId || null;
-                workflowLabels = (msg.labels || workflowLabels || null) as WorkflowUiLabels | null;
                 if (msg.workflow && !workflows.some(workflow => workflow.id === msg.workflow.id)) {
                     workflows = [...workflows, msg.workflow as WorkflowView];
                 }
-                updateWorkflowSelector();
+                renderComposerChips();
                 break;
 
             case 'replaySteps': {
@@ -3306,15 +3488,13 @@ import {
         if (!qms) return;
         const provider = providers.find((p: any) => p.id === current.provider);
         const models: string[] = current.provider === 'ollama' ? (ollamaModels || []).map((m: any) => m.name) : (provider ? provider.models : []);
+        quickModelOptions = models.length > 0 ? models : (current.model ? [current.model] : []);
+        quickModelCurrent = current.model || quickModelOptions[0] || '';
         qms.innerHTML = '';
         if (models.length > 0) {
             for (const m of models) { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; opt.selected = m === current.model; qms.appendChild(opt); }
         } else { const opt = document.createElement('option'); opt.value = current.model || ''; opt.textContent = current.model || '(未设置)'; qms.appendChild(opt); }
-    }
-
-    function updateWorkflowSelector() {
-        const sel = document.getElementById('workflowSel') as HTMLSelectElement | null;
-        renderWorkflowSelector(sel, { workflows, activeWorkflowId, labels: workflowLabels });
+        renderQuickModelMenu();
     }
 
     function refreshSettingsOverview() {

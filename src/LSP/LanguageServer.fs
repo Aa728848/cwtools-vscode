@@ -1,4 +1,4 @@
-﻿module LSP.LanguageServer
+module LSP.LanguageServer
 
 open LSP.Log
 open System
@@ -325,6 +325,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "cwtools.ai.getEntityInfo"
                 | "cwtools.ai.queryStaticModifiers"
                 | "cwtools.ai.queryVariables"
+                | "cwtools.ai.getDiagnosticsFresh"
+                | "cwtools.ai.waitDiagnosticsFresh"
+                | "cwtools.ai.getValidationStatus"
+                | "cwtools.ai.parseFragment"
                 | "cwtools.exportTypes"
                 | "typeGraphInfo"
                 | "getFileTypes"

@@ -395,7 +395,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_diagnostics',
-            description: 'Get validation errors and warnings for workspace files DIRECTLY from the CWTools language server \u2014 the same diagnostics shown in the VSCode Problems panel. No file writing required. Use this to: (1) count/list errors in the current project, (2) check if a specific file has errors, (3) understand what the validator complains about before generating fixes. Filter by severity or file path prefix.',
+            description: 'Get validation errors and warnings for workspace files DIRECTLY from the CWTools language server \u2014 the same diagnostics shown in the VSCode Problems panel. No file writing required. Returns a freshness field: `fresh` = all validations complete, `pending` = syntax OK but global checks (types/localisation) still running, `stale` = not yet validated. When freshness is pending, zero errors does NOT mean no errors \u2014 global validation is still in progress. Use this to: (1) count/list errors, (2) check file errors, (3) understand validator state before fixes.',
             parameters: {
                 type: 'object',
                 properties: {

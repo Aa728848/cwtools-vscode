@@ -219,6 +219,23 @@ let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) 
             prevChar <- col
         data |> Seq.toArray
 
+// ── 诊断新鲜度状态机 ──────────────────────────────────────────────────────────
+// AI 写入文件后，通过 epoch + freshness 判断当前诊断是否对应最新文件版本
+type DiagnosticFreshness =
+    | Fresh      // 语法 + 规则 + 全局验证均已完成
+    | Pending    // 单文件验证完成，全局验证（types/localisation）仍在排队
+    | Stale      // 尚未对此版本运行过任何验证
+
+type FileDiagnosticState =
+    { version: int option             // 文档版本（来自 DidChange）
+      epoch: int64                     // 递增计数器，lint 每次 +1
+      updatedAtUnixMs: int64           // Unix 毫秒时间戳
+      freshness: DiagnosticFreshness   // 当前状态
+      pendingGlobalKinds: string list  // 例如 ["localisation"; "types"]
+      errorCount: int                  // 轻量计数，不存储完整 Diagnostic 列表
+      diagnostics: Diagnostic list
+      warningCount: int }
+
 type Server(client: ILanguageClient) =
     do setupLogger client
     let docs = DocumentStore()
@@ -236,6 +253,34 @@ type Server(client: ILanguageClient) =
     let mutable vic3GameObj: option<IGame<VIC3ComputedData>> = None
     let mutable eu5GameObj: option<IGame<EU5ComputedData>> = None
     let mutable customGameObj: option<IGame<JominiComputedData>> = None
+
+    // ── 诊断新鲜度状态表 ──────────────────────────────────────────────────────
+    /// 全局诊断 epoch：每次 lint 完成后递增，用于客户端判断诊断是否更新
+    let diagnosticEpoch = ref 0L
+    /// 每文件的诊断元数据（freshness/epoch/counts），由 lint 和 delayedAnalyze 维护
+    let fileDiagnosticStates =
+        System.Collections.Concurrent.ConcurrentDictionary<string, FileDiagnosticState>()
+
+    // ── PerfCounters 性能观测 ────────────────────────────────────────────────
+    // 轻量指标聚合，周期性输出到 log，用于长会话性能分析
+    let mutable perfLintCount = 0
+    let mutable perfRefreshCachesCount = 0
+    let mutable perfRefreshLocCount = 0
+    let mutable perfCompletionCount = 0
+    let mutable perfLastReportTime = DateTime.UtcNow
+    let perfReportIntervalSeconds = 30.0
+    let mutable getPerfCacheSnapshot: unit -> string = fun () -> ""
+
+    /// 每次操作后检查是否需要输出性能汇总日志
+    let maybePerfReport (operationName: string) =
+        let now = DateTime.UtcNow
+        let totalOps = perfLintCount + perfRefreshCachesCount + perfRefreshLocCount + perfCompletionCount
+        if (now - perfLastReportTime).TotalSeconds >= perfReportIntervalSeconds || totalOps % 100 = 0 then
+            let heapMB = GC.GetTotalMemory(false) / 1048576L
+            let allocMB = GC.GetTotalAllocatedBytes(false) / 1048576L
+            let sm = CWTools.Utilities.StringResource.stringManager
+            logInfo $"[PerfCounters] last={operationName} lint={perfLintCount} refresh={perfRefreshCachesCount} refreshLoc={perfRefreshLocCount} completion={perfCompletionCount} heap={heapMB}MB alloc={allocMB}MB strings={sm.StringCount} ints={sm.IntCount} diagFiles={fileDiagnosticStates.Count}{getPerfCacheSnapshot()}"
+            perfLastReportTime <- now
 
     let gameDispatcher =
         { new IGameDispatcher with
@@ -341,6 +386,43 @@ type Server(client: ILanguageClient) =
     /// InlayHint cache: filePath -> (contentHash, hints)
     let inlayHintCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * InlayHint list>()
 
+    /// Short-lived same-position completion list cache.
+    let completionListTtlMs = 500.0
+    let completionListCacheMaxEntries = 128
+    let completionListCache =
+        System.Collections.Concurrent.ConcurrentDictionary<string, DateTime * CompletionList option>()
+
+    let normaliseCachePath (filePath: string) =
+        try FileInfo(filePath).FullName.Replace('\\', '/').ToLowerInvariant()
+        with _ -> filePath.Replace('\\', '/').ToLowerInvariant()
+
+    let completionListCacheKey filePath textHash line character debugMode supportsInsertReplaceEdit =
+        $"{normaliseCachePath filePath}|{textHash}|{line}|{character}|{debugMode}|{supportsInsertReplaceEdit}"
+
+    let clearCompletionListCacheForFile (filePath: string) =
+        let prefix = normaliseCachePath filePath + "|"
+        for key in completionListCache.Keys |> Seq.toArray do
+            if key.StartsWith(prefix, StringComparison.Ordinal) then
+                completionListCache.TryRemove(key) |> ignore
+
+    let evictCompletionListCacheIfNeeded () =
+        if completionListCache.Count > completionListCacheMaxEntries then
+            let now = DateTime.UtcNow
+            for kvp in completionListCache |> Seq.toArray do
+                if (now - fst kvp.Value).TotalMilliseconds > completionListTtlMs then
+                    completionListCache.TryRemove(kvp.Key) |> ignore
+            if completionListCache.Count > completionListCacheMaxEntries then
+                let overflow = completionListCache.Count - completionListCacheMaxEntries
+                completionListCache
+                |> Seq.sortBy (fun kvp -> fst kvp.Value)
+                |> Seq.truncate overflow
+                |> Seq.iter (fun kvp -> completionListCache.TryRemove(kvp.Key) |> ignore)
+
+    do
+        getPerfCacheSnapshot <-
+            fun () ->
+                $" caches[semantic={semanticTokensCache.Count} codeLens={codeLensCache.Count} inlay={inlayHintCache.Count} loc={locCache.Count} completionTTL={completionListCache.Count}]"
+
     /// Cached type-index: filePath -> (typeName, id, TypeDefInfo) list.
     /// Built lazily from game.Types(), cleared on delayedAnalyze alongside codeLensCache.
     /// Avoids repeated O(all-types) scans in CodeLens handler and precaching.
@@ -372,6 +454,36 @@ type Server(client: ILanguageClient) =
     let clearTypeIndexCache () =
         cachedGroupedTypes <- None
 
+    // ── 缓存分区清理函数 ──────────────────────────────────────────────────────
+    // 精确失效策略：避免全局清理带来的不必要性能开销
+
+    /// 清理单个文件的内容相关缓存（semanticTokens/codeLens/inlayHint）
+    let clearFileCaches (filePath: string) =
+        let fullPath = try FileInfo(filePath).FullName with _ -> filePath
+        for key in [ filePath; fullPath ] do
+            (semanticTokensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
+            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
+            (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
+            clearCompletionListCacheForFile key
+
+    /// 清理类型索引相关缓存（type-defining 文件变化后调用）
+    let clearTypeCaches () =
+        clearTypeIndexCache ()
+        completionListCache.Clear()
+        codeLensCache.Clear()  // CodeLens 依赖 type index
+
+    /// 清理本地化相关缓存（.yml 变化后调用）
+    let clearLocalisationCaches () =
+        locCache.Clear()
+        cachedLocMap <- None
+
+    /// 清理所有衍生缓存（全量刷新后调用）
+    let clearAllDerivedCaches () =
+        codeLensCache.Clear()
+        inlayHintCache.Clear()
+        clearTypeIndexCache ()
+        completionListCache.Clear()
+
     /// Maximum entries before eviction.  512 files covers even very large mods;
     /// each entry is small (hash + delta-encoded int list / CodeLens list).
     let cacheMaxEntries = 512
@@ -379,6 +491,11 @@ type Server(client: ILanguageClient) =
     /// Write-time tracking for LRU eviction.  Updated on every cache write so
     /// evictIfNeeded can remove the least-recently-written entries first.
     let cacheWriteTimes = System.Collections.Concurrent.ConcurrentDictionary<string, int64>()
+
+    let clearCacheWriteTimesForFile (filePath: string) =
+        let fullPath = try FileInfo(filePath).FullName with _ -> filePath
+        for key in [ filePath; fullPath ] do
+            cacheWriteTimes.TryRemove(key) |> ignore
 
     /// Evict ~25% of the least-recently-written entries when a cache exceeds cacheMaxEntries.
     let evictIfNeeded (cache: System.Collections.Concurrent.ConcurrentDictionary<'K, 'V>) =
@@ -399,6 +516,10 @@ type Server(client: ILanguageClient) =
     let cachePut (cache: System.Collections.Concurrent.ConcurrentDictionary<string, 'V>) (key: string) (value: 'V) =
         cache.[key] <- value
         cacheWriteTimes.[key] <- DateTime.UtcNow.Ticks
+
+    let forgetFileCaches filePath =
+        clearFileCaches filePath
+        clearCacheWriteTimesForFile filePath
 
     /// Compute a SemanticTokens delta between two encoded int arrays.
     /// Each token occupies 5 ints (deltaLine, deltaChar, length, tokenType, tokenModifiers).
@@ -556,20 +677,138 @@ type Server(client: ILanguageClient) =
     /// Maximum consecutive skips before forcing a full refresh
     let maxRefreshSkipCount = 10
 
+    let markFileStale filePath reason =
+        let currentEpoch = diagnosticEpoch.Value
+        let pendingKinds =
+            match reason with
+            | "localisation" -> [ "localisation" ]
+            | "types" -> [ "types" ]
+            | _ -> []
+        let state =
+            { version = docs.GetVersionByPath(filePath)
+              epoch = currentEpoch
+              updatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+              freshness = Stale
+              pendingGlobalKinds = pendingKinds
+              errorCount = 0
+              diagnostics = []
+              warningCount = 0 }
+        fileDiagnosticStates.[filePath] <- state
+
+    // ── 轻量括号扫描器 ──────────────────────────────────────────────────────
+    // 在 parser 失败时提供精确的括号错误定位
+    // O(n) 单遍扫描，跳过行注释 (#) 和双引号字符串
+    let scanBraceIssues (text: string) (filePath: string) =
+        let lines = text.Split('\n')
+        let stack = System.Collections.Generic.Stack<int * int>()  // (lineIdx, col)
+        let issues = ResizeArray<string * Severity * string * string * range * int * (CWRelatedError list) option>()
+        for lineIdx in 0 .. lines.Length - 1 do
+            let line = lines.[lineIdx]
+            let mutable col = 0
+            let mutable inString = false
+            while col < line.Length do
+                let ch = line.[col]
+                match ch with
+                | '#' when not inString ->
+                    col <- line.Length   // 跳过行尾注释
+                | '"' ->
+                    inString <- not inString
+                    col <- col + 1
+                | '{' when not inString ->
+                    stack.Push(lineIdx, col)
+                    col <- col + 1
+                | '}' when not inString ->
+                    if stack.Count = 0 then
+                        let pos = mkRange filePath (mkPos (lineIdx + 1) col) (mkPos (lineIdx + 1) (col + 1))
+                        issues.Add("CW001_UNMATCHED_CLOSE_BRACE", Severity.Error, filePath,
+                            sprintf "Unmatched '}' — no matching '{' found", pos, 1, None)
+                    else
+                        stack.Pop() |> ignore
+                    col <- col + 1
+                | _ ->
+                    col <- col + 1
+        // 未关闭的左括号
+        while stack.Count > 0 do
+            let openLine, openCol = stack.Pop()
+            let pos = mkRange filePath (mkPos (openLine + 1) openCol) (mkPos (openLine + 1) (openCol + 1))
+            issues.Add("CW001_MISSING_CLOSE_BRACE", Severity.Error, filePath,
+                sprintf "Missing '}' for '{' opened at line %d col %d" (openLine + 1) (openCol + 1),
+                pos, 1, None)
+        issues |> Seq.toList
+
+    let splitTopLevelFragments (text: string) =
+        let lines = text.Split('\n')
+        let fragments = ResizeArray<int * int * string>()
+        let mutable depth = 0
+        let mutable startLine = 0
+        let mutable inString = false
+        let mutable brokenDepth = false
+        for lineIdx in 0 .. lines.Length - 1 do
+            let line = lines.[lineIdx]
+            let mutable col = 0
+            while col < line.Length do
+                match line.[col] with
+                | '#' when not inString -> col <- line.Length
+                | '"' ->
+                    inString <- not inString
+                    col <- col + 1
+                | '{' when not inString ->
+                    depth <- depth + 1
+                    col <- col + 1
+                | '}' when not inString ->
+                    if depth = 0 then brokenDepth <- true
+                    else depth <- depth - 1
+                    col <- col + 1
+                | _ -> col <- col + 1
+            if depth = 0 && not brokenDepth then
+                let fragmentText = String.Join("\n", lines.[startLine .. lineIdx]).Trim()
+                if fragmentText.Length > 0 then
+                    fragments.Add(startLine + 1, lineIdx + 1, fragmentText)
+                startLine <- lineIdx + 1
+        if startLine < lines.Length then
+            let fragmentText = String.Join("\n", lines.[startLine .. lines.Length - 1]).Trim()
+            if fragmentText.Length > 0 then
+                fragments.Add(startLine + 1, lines.Length, fragmentText)
+        fragments |> Seq.toList
+
+    let scanRecoveryIssues (text: string) (filePath: string) =
+        let fragments = splitTopLevelFragments text
+        let mutable parsedHealthy = 0
+        let issues = ResizeArray<string * Severity * string * string * range * int * (CWRelatedError list) option>()
+        for (startLine, endLine, fragmentText) in fragments do
+            if scanBraceIssues fragmentText filePath |> List.isEmpty then
+                match CKParser.parseString fragmentText filePath with
+                | Success _ -> parsedHealthy <- parsedHealthy + 1
+                | Failure(msg, p, _) ->
+                    let line = startLine + int p.Position.Line - 1
+                    let col = int p.Position.Column
+                    let pos = mkRange filePath (mkPos line col) (mkPos line (col + 1))
+                    issues.Add("CW001_RECOVERY_SKIPPED_BLOCK", Severity.Warning, filePath,
+                        sprintf "Skipped structurally invalid top-level block around lines %d-%d: %s" startLine endLine msg,
+                        pos, 1, None)
+        if parsedHealthy > 0 then
+            let pos = mkRange filePath (mkPos 1 0) (mkPos 1 1)
+            issues.Add("CW001_STRUCTURAL_RECOVERY", Severity.Information, filePath,
+                sprintf "Parser recovery parsed %d healthy top-level block(s); rule diagnostics may be stale until the syntax error is fixed." parsedHealthy,
+                pos, 1, None)
+        issues |> Seq.toList
+
     let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) : Async<unit> =
         async {
             let name = getPathFromDoc doc
             // Invalidate codelens cache for THIS file only
-            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(doc.LocalPath) |> ignore
+            forgetFileCaches name
 
             if name.EndsWith(".yml") then
                 delayedLocUpdate <- true
-            else
-                ()
+                clearLocalisationCaches ()
+                markFileStale name "localisation"
 
             // Mark type refresh needed if edited file is in a type-defining directory
             if isTypeDefiningPath name then
                 needsTypeRefresh <- true
+                clearTypeCaches ()
+                markFileStale name "types"
 
             // 优化：只获取一次文件文本，避免重复 GetText 调用
             let filetext =
@@ -592,7 +831,12 @@ type Server(client: ILanguageClient) =
                     | x, _ when x.EndsWith(".yml") -> []
                     | _, Success _ -> []
                     | _, Failure(msg, p, _) ->
-                        [ ("CW001", Severity.Error, name, msg, (getRange p.Position p.Position), 0, None) ]
+                        let parserDiag =
+                            [ ("CW001", Severity.Error, name, msg, (getRange p.Position p.Position), 0, None) ]
+                        // Parser 失败时运行括号扫描器提供更精确的诊断
+                        let braceIssues = scanBraceIssues t name
+                        let recoveryIssues = scanRecoveryIssues t name
+                        parserDiag @ braceIssues @ recoveryIssues
 
             let locErrors =
                 match locCache.TryGetValue(doc.LocalPath) with
@@ -623,9 +867,46 @@ type Server(client: ILanguageClient) =
                     else
                         parserErrors @ locErrors @ astErrors
 
-            match errors with
+            // ── 发布诊断并更新新鲜度状态 ────────────────────────────────────────
+            let diagnosticsList =
+                match errors with
+                | [] -> []
+                | x -> x |> List.map parserErrorToDiagnostics
+
+            // 发布到 VS Code Problems 面板
+            match diagnosticsList with
             | [] -> client.PublishDiagnostics { uri = doc; diagnostics = [] }
-            | x -> x |> List.map parserErrorToDiagnostics |> sendDiagnostics
+            | x -> x |> sendDiagnostics
+
+            // 更新诊断新鲜度状态表
+            let newEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
+            let pendingKinds =
+                [ if delayedLocUpdate then yield "localisation"
+                  if needsTypeRefresh then yield "types" ]
+            let freshness =
+                if pendingKinds.IsEmpty then Fresh else Pending
+            let allDiags = diagnosticsList |> List.map snd
+            let errCount =
+                allDiags
+                |> List.filter (fun d -> d.severity = Some(sevToDiagSev Severity.Error))
+                |> List.length
+            let warnCount =
+                allDiags
+                |> List.filter (fun d -> d.severity = Some(sevToDiagSev Severity.Warning))
+                |> List.length
+            let docVersion = docs.GetVersionByPath(name)
+            let state =
+                { version = docVersion
+                  epoch = newEpoch
+                  updatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                  freshness = freshness
+                  pendingGlobalKinds = pendingKinds
+                  errorCount = errCount
+                  diagnostics = allDiags
+                  warningCount = warnCount }
+            fileDiagnosticStates.[name] <- state
+            perfLintCount <- perfLintCount + 1
+            maybePerfReport "lint"
         }
 
     let mutable delayTime = TimeSpan(0, 0, 5)
@@ -644,6 +925,7 @@ type Server(client: ILanguageClient) =
                     game.RefreshCaches()
                     let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
                     logInfo $"[MemDiag:RefreshCaches] +{(allocAfterRefresh - allocBefore) / 1048576L}MB (forced={not needsTypeRefresh})"
+                    perfRefreshCachesCount <- perfRefreshCachesCount + 1
                     // Force blocking Gen2 GC after RefreshCaches: old RuleValidationService/InfoService
                     // instances are dead, reclaim their large memoization dictionaries immediately.
                     GC.Collect(2, GCCollectionMode.Default, true, true)
@@ -674,15 +956,29 @@ type Server(client: ILanguageClient) =
                 evictIfNeeded locCache
                 let allocAfterLoc = GC.GetTotalAllocatedBytes(false)
                 logInfo $"[MemDiag:LocErrors] +{(allocAfterLoc - allocBeforeLoc) / 1048576L}MB"
+                perfRefreshLocCount <- perfRefreshLocCount + 1
+                if allocAfterLoc - allocBeforeLoc > gcThresholdBytes then
+                    GC.Collect(2, GCCollectionMode.Optimized, false, false)
 
                 // Effect/trigger sets may have changed invalidate all semantic caches.
                 // Unlike the old Clear() which caused VSCode to lose all highlighting,
                 // we now keep stale entries: SemanticTokensFull will return cached data
                 // when the entity is not yet rebuilt, then VSCode re-requests once the
                 // AST is ready. We clear codeLens because it's cheaper to recompute.
-                codeLensCache.Clear()
-                inlayHintCache.Clear()
-                clearTypeIndexCache ()
+                clearAllDerivedCaches ()
+
+                // ── 将所有文件的诊断状态更新为 Fresh ─────────────────────────────
+                // delayedAnalyze 完成全局刷新后，清除 pending 标记
+                let freshEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
+                let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                for kvp in fileDiagnosticStates do
+                    if kvp.Value.freshness <> Fresh then
+                        fileDiagnosticStates.[kvp.Key] <-
+                            { kvp.Value with
+                                epoch = freshEpoch
+                                updatedAtUnixMs = nowMs
+                                freshness = Fresh
+                                pendingGlobalKinds = [] }
             finally
                 gameStateLock.ExitWriteLock()
 
@@ -706,6 +1002,12 @@ type Server(client: ILanguageClient) =
                         filePath |> Option.map (fun f -> try FileInfo(f).FullName with _ -> f))
                     |> Set.ofList
                 game.CleanupCache existingFiles
+                let existingNormalised =
+                    existingFiles
+                    |> Seq.map normaliseCachePath
+                    |> Set.ofSeq
+                for staleKey in fileDiagnosticStates.Keys |> Seq.filter (fun f -> not (existingNormalised.Contains(normaliseCachePath f))) |> Seq.toArray do
+                    fileDiagnosticStates.TryRemove(staleKey) |> ignore
             with e ->
                 logDiag $"CleanupCache failed: {e.Message}"
             
@@ -718,6 +1020,7 @@ type Server(client: ILanguageClient) =
             let allocTotal = GC.GetTotalAllocatedBytes(false)
             let sm = CWTools.Utilities.StringResource.stringManager
             logInfo $"[MemDiag] heap={heapBytes / 1048576L}MB alloc={allocTotal / 1048576L}MB cycle=+{(allocTotal - allocBefore) / 1048576L}MB strings={sm.StringCount} ints={sm.IntCount}"
+            maybePerfReport "delayedAnalyze"
         | None -> ()
 
 
@@ -1145,6 +1448,11 @@ type Server(client: ILanguageClient) =
                     | None -> ()
                     // 清除所有旧的类型特定引用
                     gameFieldClearers |> List.iter (fun f -> f())
+                    fileDiagnosticStates.Clear()
+                    locCache.Clear()
+                    semanticTokensCache.Clear()
+                    clearAllDerivedCaches ()
+                    cacheWriteTimes.Clear()
 
                 let game =
                     match activeGame with
@@ -1682,6 +1990,9 @@ type Server(client: ILanguageClient) =
         member this.DidChangeTextDocument(p: DidChangeTextDocumentParams) =
             async {
                 docs.Change p
+                let path = getPathFromDoc p.textDocument.uri
+                forgetFileCaches path
+                markFileStale path "edit"
 
                 // Use debounce agent instead of immediate lint.
                 // Lint will fire after 1.5s of typing inactivity.
@@ -1726,14 +2037,9 @@ type Server(client: ILanguageClient) =
             let localPath = p.textDocument.uri.LocalPath
             let fullPath = try FileInfo(localPath).FullName with _ -> localPath
             // Clean all file-level caches to prevent memory leaks from closed files
-            (semanticTokensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
-            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(fullPath) |> ignore
-            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
-            (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(fullPath) |> ignore
-            (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
+            forgetFileCaches localPath
+            forgetFileCaches fullPath
             (locCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
-            cacheWriteTimes.TryRemove(localPath) |> ignore
-            cacheWriteTimes.TryRemove(fullPath) |> ignore
             clearRangeCache ()
         }
 
@@ -1742,12 +2048,39 @@ type Server(client: ILanguageClient) =
                 for change in p.changes do
                     match change.``type`` with
                     | FileChangeType.Created -> lintAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, true))
-                    | FileChangeType.Deleted -> client.PublishDiagnostics { uri = change.uri; diagnostics = [] }
+                    | FileChangeType.Deleted ->
+                        let path = getPathFromDoc change.uri
+                        client.PublishDiagnostics { uri = change.uri; diagnostics = [] }
+                        forgetFileCaches path
+                        fileDiagnosticStates.TryRemove(path) |> ignore
                     | _ -> ()
             }
 
         member this.Completion(p: CompletionParams) =
-            async { return completion gameObj p docs debugMode clientSupportsInsertReplaceEdit }
+            async {
+                let sw = Stopwatch.StartNew()
+                let filePath = getPathFromDoc p.textDocument.uri
+                let fileText = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
+                let hash = contentHash fileText
+                let cacheKey = completionListCacheKey filePath hash p.position.line p.position.character debugMode clientSupportsInsertReplaceEdit
+                let now = DateTime.UtcNow
+                match completionListCache.TryGetValue(cacheKey) with
+                | true, (createdAt, cached) when (now - createdAt).TotalMilliseconds <= completionListTtlMs ->
+                    logInfo $"[CompletionCache] ttl-hit {filePath}:{p.position.line}:{p.position.character}"
+                    perfCompletionCount <- perfCompletionCount + 1
+                    maybePerfReport "completion-cache-hit"
+                    return cached
+                | _ ->
+                    let result = completion gameObj p docs debugMode clientSupportsInsertReplaceEdit
+                    completionListCache.[cacheKey] <- (now, result)
+                    evictCompletionListCacheIfNeeded ()
+                    sw.Stop()
+                    let count = result |> Option.map (fun r -> r.items.Length) |> Option.defaultValue 0
+                    logInfo $"[Perf:Completion] file={filePath} line={p.position.line} char={p.position.character} items={count} elapsed={sw.ElapsedMilliseconds}ms"
+                    perfCompletionCount <- perfCompletionCount + 1
+                    maybePerfReport "completion"
+                    return result
+            }
             |> catchError None
 
         member this.Hover(p: TextDocumentPositionParams) =
@@ -3373,6 +3706,132 @@ type Server(client: ILanguageClient) =
                                                "error", JsonValue.String $"No entity found for file: {filePath}" |]
                             Some result
 
+                        // ── cwtools.ai.getDiagnosticsFresh ───────────────────────────────────────
+                        // 立即返回某文件的诊断新鲜度状态（不阻塞）
+                        | { command = cmd
+                            arguments = uriArg :: _ } when
+                                cmd = "cwtools.ai.getDiagnosticsFresh"
+                                || cmd = "cwtools.ai.waitDiagnosticsFresh" ->
+                            let filePath =
+                                let raw = uriArg.AsString()
+                                getPathFromDoc (Uri(raw))
+                            let result =
+                                match fileDiagnosticStates.TryGetValue(filePath) with
+                                | true, state ->
+                                    let freshnessStr =
+                                        match state.freshness with
+                                        | Fresh -> "fresh" | Pending -> "pending" | Stale -> "stale"
+                                    let diagnosticsJson =
+                                        state.diagnostics
+                                        |> List.map (fun d ->
+                                            JsonValue.Record
+                                                [| "code", JsonValue.String (d.code |> Option.defaultValue "")
+                                                   "message", JsonValue.String d.message
+                                                   "severity", JsonValue.String (match d.severity with Some DiagnosticSeverity.Error -> "error" | Some DiagnosticSeverity.Warning -> "warning" | Some DiagnosticSeverity.Information -> "info" | Some DiagnosticSeverity.Hint -> "hint" | _ -> "info")
+                                                   "line", JsonValue.Number(decimal d.range.start.line)
+                                                   "column", JsonValue.Number(decimal d.range.start.character) |])
+                                        |> Array.ofList
+                                    JsonValue.Record
+                                        [| "ok",                 JsonValue.Boolean true
+                                           "file",              JsonValue.String (filePath.Replace('\\', '/'))
+                                           "epoch",             JsonValue.Number(decimal state.epoch)
+                                           "version",           JsonValue.Number(decimal (state.version |> Option.defaultValue -1))
+                                           "updatedAtUnixMs",   JsonValue.Number(decimal state.updatedAtUnixMs)
+                                           "freshness",         JsonValue.String freshnessStr
+                                           "pendingGlobalKinds",JsonValue.Array(state.pendingGlobalKinds |> List.map JsonValue.String |> Array.ofList)
+                                           "diagnostics",       JsonValue.Array diagnosticsJson
+                                           "errorCount",        JsonValue.Number(decimal state.errorCount)
+                                           "warningCount",      JsonValue.Number(decimal state.warningCount) |]
+                                | false, _ ->
+                                    JsonValue.Record
+                                        [| "ok",        JsonValue.Boolean true
+                                           "file",      JsonValue.String (filePath.Replace('\\', '/'))
+                                           "freshness", JsonValue.String "stale"
+                                           "epoch",     JsonValue.Number 0m
+                                           "errorCount",JsonValue.Number 0m
+                                           "warningCount", JsonValue.Number 0m |]
+                            Some result
+
+                        // waitDiagnosticsFresh is kept as a non-blocking compatibility alias.
+                        // Actual waiting stays client-side to avoid holding an LSP read lock.
+
+                        // ── cwtools.ai.getValidationStatus ──────────────────────────────────────
+                        // 返回全局验证状态摘要：当前 epoch、pending 文件数、总文件数
+                        | { command = "cwtools.ai.getValidationStatus" } ->
+                            let currentEpoch = diagnosticEpoch.Value
+                            let totalFiles = fileDiagnosticStates.Count
+                            let pendingFiles =
+                                fileDiagnosticStates.Values
+                                |> Seq.filter (fun s -> s.freshness <> Fresh)
+                                |> Seq.length
+                            let allPendingKinds =
+                                fileDiagnosticStates.Values
+                                |> Seq.collect (fun s -> s.pendingGlobalKinds)
+                                |> Seq.distinct
+                                |> Seq.toArray
+                            let freshness =
+                                if pendingFiles = 0 then "fresh"
+                                elif pendingFiles < totalFiles then "pending"
+                                else "stale"
+                            let result =
+                                JsonValue.Record
+                                    [| "ok",                 JsonValue.Boolean true
+                                       "epoch",             JsonValue.Number(decimal currentEpoch)
+                                       "freshness",         JsonValue.String freshness
+                                       "totalFiles",        JsonValue.Number(decimal totalFiles)
+                                       "pendingFiles",      JsonValue.Number(decimal pendingFiles)
+                                       "pendingGlobalKinds",JsonValue.Array(allPendingKinds |> Array.map JsonValue.String) |]
+                            Some result
+
+                        // ── cwtools.ai.parseFragment ─────────────────────────────────────────
+                        // 片段解析：接受代码片段文本，返回语法错误（不写入文件）
+                        | { command = "cwtools.ai.parseFragment"
+                            arguments = codeArg :: _ } ->
+                            let code = codeArg.AsString()
+                            let virtualPath = "fragment://virtual.txt"
+
+                            // 1. 尝试 CKParser 解析
+                            let parsed = CKParser.parseString code virtualPath
+                            let parserErrors =
+                                match parsed with
+                                | Success _ -> []
+                                | Failure(msg, p, _) ->
+                                    [ {| line = int p.Position.Line
+                                         col = int p.Position.Column
+                                         message = msg |} ]
+
+                            // 2. 括号扫描
+                            let braceIssues = scanBraceIssues code virtualPath
+                            let braceErrors =
+                                braceIssues
+                                |> List.map (fun (_, _, _, msg, rng, _, _) ->
+                                    {| line = int rng.StartLine
+                                       col = int rng.StartColumn
+                                       message = msg |})
+                            let recoveryIssues = scanRecoveryIssues code virtualPath
+                            let recoveryErrors =
+                                recoveryIssues
+                                |> List.map (fun (code, _, _, msg, rng, _, _) ->
+                                    {| line = int rng.StartLine
+                                       col = int rng.StartColumn
+                                       message = sprintf "%s: %s" code msg |})
+
+                            let allErrors = parserErrors @ braceErrors @ recoveryErrors
+                            let fragments = splitTopLevelFragments code
+                            let result =
+                                JsonValue.Record
+                                    [| "ok",       JsonValue.Boolean true
+                                       "valid",    JsonValue.Boolean (allErrors.IsEmpty)
+                                       "fragments", JsonValue.Number(decimal fragments.Length)
+                                       "errors",   JsonValue.Array(
+                                                        allErrors
+                                                        |> List.map (fun e ->
+                                                            JsonValue.Record
+                                                                [| "line",    JsonValue.Number(decimal e.line)
+                                                                   "col",     JsonValue.Number(decimal e.col)
+                                                                   "message", JsonValue.String e.message |])
+                                                        |> Array.ofList) |]
+                            Some result
 
                         | _ -> None
 

@@ -689,6 +689,10 @@ export interface WriteFileArgs {
 export interface WriteFileResult {
     success: boolean;
     message: string;
+    /** LSP diagnostics detected after the write */
+    diagnostics?: ValidationError[];
+    freshness?: 'fresh' | 'pending' | 'stale';
+    pendingGlobalKinds?: string[];
     /** If agentFileWriteMode === 'confirm', this is a pending diff, not yet applied */
     pendingDiff?: string;
 }
@@ -712,6 +716,12 @@ export interface EditFileResult {
     diff?: string;
     /** LSP diagnostics detected after the edit */
     diagnostics?: ValidationError[];
+    freshness?: 'fresh' | 'pending' | 'stale';
+    pendingGlobalKinds?: string[];
+    fileSyntaxFresh?: boolean;
+    localKeyIndexed?: boolean;
+    globalLocalisationFresh?: boolean;
+    stats?: { linesAdded: number; linesRemoved: number };
     /** If agentFileWriteMode === 'confirm', write was queued, not yet applied */
     pendingDiff?: string;
 }
@@ -752,6 +762,8 @@ export interface ReplaceLinesResult {
     diff?: string;
     /** LSP diagnostics detected after the edit */
     diagnostics?: ValidationError[];
+    freshness?: 'fresh' | 'pending' | 'stale';
+    pendingGlobalKinds?: string[];
     /** If agentFileWriteMode === 'confirm', write was queued, not yet applied */
     pendingDiff?: string;
 }
@@ -849,6 +861,12 @@ export interface GetDiagnosticsResult {
     /** Total number of matching diagnostics before truncation */
     totalDiagnosticCount: number;
     truncated: boolean;
+    /** 全局诊断新鲜度：fresh=全部验证完成, pending=全局验证进行中, stale=未验证 */
+    freshness?: 'fresh' | 'pending' | 'stale';
+    /** 当前未完成的全局验证类型，如 ["localisation", "types"] */
+    pendingGlobalKinds?: string[];
+    /** 全局诊断 epoch 计数器 */
+    lastEpoch?: number;
 }
 
 // ─── Token Usage & Cost ──────────────────────────────────────────────────────

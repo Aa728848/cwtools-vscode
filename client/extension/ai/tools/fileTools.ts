@@ -61,6 +61,8 @@ export interface FileToolContext {
     vfsLocks?: Map<string, Promise<void>>;
     /** Step callback for real-time UI events (Fallback, overwritten by AgentToolContext) */
     onStep?: (step: import('../types').AgentStep) => void;
+    /** 可选：获取 LSP LanguageClient，用于诊断新鲜度查询 */
+    client?: import('vscode-languageclient/node').LanguageClient;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -519,8 +521,16 @@ export class FileToolHandler {
                     this.ctx.onAutoWritten(args.file, isNewFile);
                 }
 
+                const preWriteEpoch = (await this.queryDiagnosticsFresh(args.file))?.epoch ?? 0;
                 this.writeTextFile(args.file, args.content, hasBom, args.encoding, context);
-                return { success: true, message: `File written: ${args.file}` };
+                const freshResult = await this.getLspDiagnosticsForFileFresh(args.file, preWriteEpoch);
+                return {
+                    success: true,
+                    message: `File written: ${args.file}. Freshness: ${freshResult.freshness}`,
+                    diagnostics: freshResult.diagnostics,
+                    freshness: freshResult.freshness,
+                    pendingGlobalKinds: freshResult.pendingGlobalKinds,
+                };
             } catch (e) {
                 return { success: false, message: `Write failed: ${String(e)}` };
             }
@@ -633,19 +643,23 @@ export class FileToolHandler {
             this.ctx.onAutoWritten(filePath, false);
         }
 
+        const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
         try {
             this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
         } catch (e) {
             return { success: false, message: `Write failed: ${String(e)}` };
         }
 
-            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+            const diagnostics = freshResult.diagnostics;
             return {
                 success: true,
                 nodeFound: true,
                 message: `AST surgery successful (${args.action} on ${args.targetPath.join(' -> ')}). File updated: ${path.basename(filePath)}`,
                 diff,
-                diagnostics
+                diagnostics,
+                freshness: freshResult.freshness,
+                pendingGlobalKinds: freshResult.pendingGlobalKinds,
             };
         });
     }
@@ -743,6 +757,7 @@ export class FileToolHandler {
                 this.ctx.onAutoWritten(filePath, false);
             }
 
+            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
             try {
                 this.writeTextFile(filePath, content, hasBom, args.encoding, context);
             } catch (e) {
@@ -750,7 +765,8 @@ export class FileToolHandler {
             }
 
             this.editFailCount.delete(filePath);
-            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+            const diagnostics = freshResult.diagnostics;
             
             let message = `multi_replace_file_content: ${chunks.length} replacement(s) applied to ${path.basename(filePath)}`;
             const errorsDiags = diagnostics.filter((d: any) => d.severity === 'error');
@@ -761,6 +777,8 @@ export class FileToolHandler {
 
             return {
                 success: true, message, diff, diagnostics: diagnostics,
+                freshness: freshResult.freshness,
+                pendingGlobalKinds: freshResult.pendingGlobalKinds,
             } as any;
         });
     }
@@ -852,6 +870,7 @@ export class FileToolHandler {
                 this.ctx.onAutoWritten(filePath, false);
             }
 
+            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
             (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent || null);
             try {
                 this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
@@ -860,7 +879,8 @@ export class FileToolHandler {
             }
 
             this.editFailCount.delete(filePath);
-            const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+            const diagnostics = freshResult.diagnostics;
             let message = `replace_lines: replaced lines ${startLine}-${endLine} in ${path.basename(filePath)}`;
             const errorsDiags = diagnostics.filter((d: any) => d.severity === 'error');
             if (errorsDiags.length > 0) {
@@ -868,7 +888,14 @@ export class FileToolHandler {
                     errorsDiags.slice(0, 5).map((e: any) => `  Line ${e.line + 1}: ${e.message}`).join('\n');
             }
 
-            return { success: true, message, diff, diagnostics };
+            return {
+                success: true,
+                message,
+                diff,
+                diagnostics,
+                freshness: freshResult.freshness,
+                pendingGlobalKinds: freshResult.pendingGlobalKinds,
+            };
         });
     }
 
@@ -876,6 +903,12 @@ export class FileToolHandler {
         success: boolean;
         filesChanged: string[];
         errors: string[];
+        diagnostics?: Array<{
+            file: string;
+            diagnostics: ValidationError[];
+            freshness: 'fresh' | 'pending' | 'stale';
+            pendingGlobalKinds: string[];
+        }>;
     }> {
         const cwd = args.cwd ?? this.ctx.workspaceRoot;
 
@@ -994,6 +1027,7 @@ export class FileToolHandler {
         }
 
         const filesChanged: string[] = [];
+        const preWriteEpochs = new Map<string, number>();
         if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
             for (const { filePath, newContent } of pendingWrites) {
                 const messageId = `patch_${crypto.randomUUID()}`;
@@ -1013,6 +1047,7 @@ export class FileToolHandler {
         }
         for (const { filePath, newContent, hasBom } of pendingWrites) {
             (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContents.get(filePath) ?? null);
+            preWriteEpochs.set(filePath, (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0);
             try {
                 this.writeTextFile(filePath, newContent, hasBom);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
@@ -1021,10 +1056,23 @@ export class FileToolHandler {
             }
         }
 
+        const diagnostics: Array<{ file: string; diagnostics: ValidationError[]; freshness: 'fresh' | 'pending' | 'stale'; pendingGlobalKinds: string[] }> = [];
+        for (const filePath of filesChanged) {
+            const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(this.ctx.workspaceRoot, filePath);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(absolutePath, preWriteEpochs.get(absolutePath) ?? 0);
+            diagnostics.push({
+                file: filePath,
+                diagnostics: freshResult.diagnostics,
+                freshness: freshResult.freshness,
+                pendingGlobalKinds: freshResult.pendingGlobalKinds,
+            });
+        }
+
         return {
             success: errors.length === 0,
             filesChanged,
             errors,
+            diagnostics,
         };
     }
 
@@ -1088,7 +1136,115 @@ export class FileToolHandler {
 
     // ─── getLspDiagnosticsForFile ─────────────────────────────────────────────
 
-    /** Wait (up to 2s) for LSP to process a file, then return its diagnostics */
+    /** 从 Problems 面板提取诊断并格式化 */
+    private static mapDiagnostics(uri: vs.Uri): ValidationError[] {
+        return vs.languages.getDiagnostics(uri).map(d => ({
+            code: String(d.code ?? ''),
+            severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                    : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+            message: d.message,
+            line: d.range.start.line,
+            column: d.range.start.character,
+        } as ValidationError));
+    }
+
+
+    /**
+     * 向 LSP 查询文件的当前诊断状态（即时返回，不阻塞）。
+     * 返回 null 表示 LSP 不可用。
+     */
+    private async queryDiagnosticsFresh(filePath: string): Promise<{
+        freshness: 'fresh' | 'pending' | 'stale';
+        epoch: number;
+        pendingGlobalKinds: string[];
+        diagnostics?: ValidationError[];
+    } | null> {
+        try {
+            const client = (this.ctx as any).client;
+            if (!client) return null;
+            const uri = vs.Uri.file(filePath);
+            const result = await client.sendRequest('workspace/executeCommand', {
+                command: 'cwtools.ai.getDiagnosticsFresh',
+                arguments: [uri.toString()],
+            }) as Record<string, unknown> | null;
+            if (result && typeof result === 'object' && 'freshness' in result) {
+                return {
+                    freshness: String(result.freshness) as 'fresh' | 'pending' | 'stale',
+                    epoch: typeof result.epoch === 'number' ? result.epoch : 0,
+                    pendingGlobalKinds: Array.isArray(result.pendingGlobalKinds)
+                        ? (result.pendingGlobalKinds as string[]) : [],
+                    diagnostics: Array.isArray(result.diagnostics)
+                        ? (result.diagnostics as ValidationError[]) : undefined,
+                };
+            }
+        } catch { /* LSP 不可用 */ }
+        return null;
+    }
+
+    /**
+     * 客户端侧轮询 getDiagnosticsFresh，等待 epoch > minEpoch（即新的 lint 已完成）。
+     * 不持有任何服务端锁，避免死锁。最多等待 timeoutMs（默认 3000ms）。
+     *
+     * @param minEpoch 写入前的 epoch 值，等待 epoch > minEpoch 表示 lint 已处理本次写入
+     */
+    async getLspDiagnosticsForFileFresh(filePath: string, minEpoch = 0): Promise<{
+        diagnostics: ValidationError[];
+        freshness: 'fresh' | 'pending' | 'stale';
+        pendingGlobalKinds: string[];
+        epoch: number;
+        timedOut?: boolean;
+    }> {
+        const timeoutMs = 3000;
+        const pollIntervalMs = 100;
+        const uri = vs.Uri.file(filePath);
+        try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
+
+        // 客户端侧轮询 getDiagnosticsFresh（即时返回，不持锁）
+        let elapsed = 0;
+        let lastState: Awaited<ReturnType<typeof this.queryDiagnosticsFresh>> = null;
+        while (elapsed < timeoutMs) {
+            lastState = await this.queryDiagnosticsFresh(filePath);
+            if (lastState) {
+                // 等待条件：epoch > minEpoch（说明新 lint 已完成），且 freshness != stale
+                if (lastState.epoch > minEpoch && lastState.freshness !== 'stale') {
+                    return {
+                        diagnostics: lastState.diagnostics ?? FileToolHandler.mapDiagnostics(uri),
+                        freshness: lastState.freshness,
+                        pendingGlobalKinds: lastState.pendingGlobalKinds,
+                        epoch: lastState.epoch,
+                        timedOut: false,
+                    };
+                }
+            } else {
+                break; // LSP 不可用，走 fallback
+            }
+            await new Promise(r => setTimeout(r, pollIntervalMs));
+            elapsed += pollIntervalMs;
+        }
+
+        // 超时但 LSP 可用 — 返回当前状态 + timedOut
+        if (lastState) {
+            return {
+                diagnostics: lastState.diagnostics ?? FileToolHandler.mapDiagnostics(uri),
+                freshness: lastState.freshness,
+                pendingGlobalKinds: lastState.pendingGlobalKinds,
+                epoch: lastState.epoch,
+                timedOut: true,
+            };
+        }
+
+        // Fallback：LSP 不可用，使用旧的 Problems 面板 debounce 等待
+        const diagnostics = await this.getLspDiagnosticsForFile(filePath);
+        return {
+            diagnostics,
+            freshness: 'pending',
+            pendingGlobalKinds: [],
+            epoch: 0,
+        };
+    }
+
+    /** Wait (up to 2s) for LSP to process a file, then return its diagnostics (fallback) */
     async getLspDiagnosticsForFile(filePath: string): Promise<ValidationError[]> {
         try {
             const uri = vs.Uri.file(filePath);
@@ -1269,6 +1425,8 @@ export class FileToolHandler {
                     }
                 }
 
+                const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
+
                 // Write
                 if (vfsOverlay) {
                     vfsOverlay.set(filePath, withBom);
@@ -1283,10 +1441,28 @@ export class FileToolHandler {
 
                 const diff = this.buildUnifiedDiff(filePath, originalContent, withBom);
 
+                // 获取本地化写入后的诊断新鲜度
+                const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+                const diagnostics = freshResult.diagnostics;
+                const finalKeySet = new Set<string>();
+                for (const line of finalContent.split(/\r?\n/)) {
+                    const m = line.match(keyRegex);
+                    if (m) finalKeySet.add(m[1]!);
+                }
+                const localKeyIndexed = args.entries.every(entry => finalKeySet.has(entry.key));
+                const fileSyntaxFresh = !diagnostics.some(d => d.severity === 'error' && /^CW001/.test(d.code));
+                const globalLocalisationFresh = freshResult.freshness === 'fresh' && !freshResult.pendingGlobalKinds.includes('localisation');
+
                 return {
                     success: true,
-                    message: `Localisation updated: ${added} added, ${updated} updated. Total entries: ${args.entries.length}`,
+                    message: `Localisation updated: ${added} added, ${updated} updated. Total entries: ${args.entries.length}. Freshness: ${freshResult.freshness}`,
                     diff,
+                    diagnostics,
+                    freshness: freshResult.freshness,
+                    pendingGlobalKinds: freshResult.pendingGlobalKinds,
+                    fileSyntaxFresh,
+                    localKeyIndexed,
+                    globalLocalisationFresh,
                     stats: { linesAdded: added, linesRemoved: 0 },
                 };
             } catch (e) {

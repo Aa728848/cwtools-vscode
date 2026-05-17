@@ -897,12 +897,35 @@ export class LspToolHandler {
             });
         }
 
+        // 查询全局诊断新鲜度状态
+        let freshness: 'fresh' | 'pending' | 'stale' = 'pending';
+        let pendingGlobalKinds: string[] = [];
+        let lastEpoch = 0;
+        try {
+            const client = this.clientGetter();
+            if (client) {
+                const statusResult = await client.sendRequest('workspace/executeCommand', {
+                    command: 'cwtools.ai.getValidationStatus',
+                    arguments: [],
+                }) as Record<string, unknown> | null;
+                if (statusResult && typeof statusResult === 'object') {
+                    freshness = (statusResult.freshness as any) || 'pending';
+                    pendingGlobalKinds = Array.isArray(statusResult.pendingGlobalKinds)
+                        ? statusResult.pendingGlobalKinds as string[] : [];
+                    lastEpoch = typeof statusResult.epoch === 'number' ? statusResult.epoch : 0;
+                }
+            }
+        } catch { /* LSP 命令不可用，保持默认 pending */ }
+
         return {
             summary,
             diagnostics: entries,
             totalFiles: filesWithDiags.size,
             totalDiagnosticCount: totalDiagCount,
             truncated: totalDiagCount > limit,
+            freshness,
+            pendingGlobalKinds,
+            lastEpoch,
         };
     }
 

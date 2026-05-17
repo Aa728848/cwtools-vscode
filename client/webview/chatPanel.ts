@@ -121,14 +121,38 @@ import {
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
     
+    function hasConversationContent(): boolean {
+        return Array.from(chatArea.children).some(child => child !== emptyState && !(child as HTMLElement).classList.contains('empty-state'));
+    }
+
+    function setChatEmptyState(isEmpty = !hasConversationContent()) {
+        document.body.classList.toggle('chat-empty', isEmpty);
+        chatArea.classList.toggle('is-empty', isEmpty);
+    }
+
+    const chatContentObserver = new MutationObserver(() => setChatEmptyState());
+    chatContentObserver.observe(chatArea, { childList: true });
+    setChatEmptyState();
+
+    function getReferenceInitial(ctx: ActiveContext, fallback: string): string {
+        if (ctx.type === 'file') {
+            const ext = ctx.label.split('.').pop();
+            if (ext && ext !== ctx.label && ext.length <= 4) return ext.toUpperCase();
+        }
+        if (ctx.type === 'folder') return 'DIR';
+        if (ctx.type === 'code_selection') return 'SEL';
+        if (ctx.type === 'diagnostics') return 'ERR';
+        return fallback.slice(0, 2).toUpperCase();
+    }
+
     function renderContextTray() {
         let area = document.getElementById('referenceChipArea');
         if (!area) {
             area = document.createElement('div');
             area.id = 'referenceChipArea';
             const container = document.querySelector('.input-container');
-            const inputRow = container?.querySelector('.input-row');
-            if (container && inputRow) container.insertBefore(area, inputRow);
+            const inputControls = container?.querySelector('.input-controls');
+            if (container && inputControls) container.insertBefore(area, inputControls);
             else inputWrapper?.prepend(area);
         }
         
@@ -171,7 +195,7 @@ import {
             chip.className = `reference-chip ref-${ctx.type}`;
             chip.innerHTML = `
                 ${svgIconNoMargin(meta.icon)}
-                <span class="ref-kind">${mrEscapeHtml(meta.label)}</span>
+                <span class="ref-kind">${mrEscapeHtml(getReferenceInitial(ctx, meta.label))}</span>
                 <span class="ref-text" title="${mrEscapeHtml(title)}">${mrEscapeHtml(ctx.label)}${range}</span>
                 ${metaBits ? `<span class="ref-meta">${mrEscapeHtml(metaBits)}</span>` : ''}
                 <button class="remove-ctx-btn" data-id="${ctx.id}" aria-label="Remove reference">&times;</button>
@@ -1053,7 +1077,7 @@ import {
         if (!area) {
             area = document.createElement('div');
             area.id = 'imagePreviewArea';
-            area.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px 0;';
+            area.style.cssText = '';
             //Before inserting into input-container inside input-row, make sure the image preview is within the rounded corner of the input box
             const container = document.querySelector('.input-container');
             const inputRow = container?.querySelector('.input-row');
@@ -1061,17 +1085,17 @@ import {
             else inputWrapper?.prepend(area);
         }
         const wrap = document.createElement('div');
-        wrap.style.cssText = 'position:relative;display:inline-block;width:64px;height:64px;flex-shrink:0;';
+        wrap.style.cssText = 'position:relative;display:inline-block;width:48px;height:48px;flex-shrink:0;';
         const img = document.createElement('img');
         img.src = dataUrl;
-        img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:6px;border:1px solid rgba(255,255,255,0.1);cursor:zoom-in;transition:transform 0.15s;display:block;';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:8px;border:1px solid rgba(255,255,255,0.1);cursor:zoom-in;transition:transform 0.15s;display:block;';
         img.title = '点击放大';
         img.addEventListener('click', () => showImageLightbox(dataUrl));
         img.addEventListener('mouseenter', () => { img.style.transform = 'scale(1.07)'; });
         img.addEventListener('mouseleave', () => { img.style.transform = ''; });
         const del = document.createElement('button');
         del.textContent = '✕';
-        del.style.cssText = 'position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:#444;color:#fff;border:none;cursor:pointer;font-size:10px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;';
+        del.style.cssText = 'position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:rgba(38,38,40,0.96);color:#fff;border:1px solid rgba(255,255,255,0.18);cursor:pointer;font-size:11px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;';
         del.addEventListener('click', () => {
             pendingImages = pendingImages.filter(u => u !== dataUrl);
             wrap.remove();
@@ -1090,6 +1114,7 @@ import {
         const rawText = input.value.trim();
         const text = activeContexts.length > 0 ? stripConsumedMentionText(rawText, activeContexts) : rawText;
         if (!text && pendingImages.length === 0 && activeContexts.length === 0) return;
+        setChatEmptyState(false);
         
         if (activeContexts.length > 0) {
             vscode.postMessage({
@@ -2648,6 +2673,7 @@ import {
                 renderArtifactPanel();
                 updateCurrentTopicHeader(null, null);
                 { const bar = document.getElementById('tokenUsageBar'); if (bar) bar.style.display = 'none'; }
+                setChatEmptyState(true);
                 startPlaceholderRotation();
                 break;
 

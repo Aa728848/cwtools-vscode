@@ -6,7 +6,7 @@
  */
 
 import * as vs from 'vscode';
-import { Icons, svgIcon, svgIconNoMargin } from '../../webview/svgIcons';
+import { svgIcon, svgIconNoMargin } from '../../webview/svgIcons';
 
 /**
  * Build the full HTML document for the chat panel WebView.
@@ -30,7 +30,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 <title>Eddy CWTool Code</title>
 <link rel="stylesheet" href="${cssUri}">
 </head>
-<body>
+<body class="chat-empty">
 <div class="header" role="banner">
     <div class="header-title">
         <svg class="header-brand-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
@@ -94,17 +94,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 </aside>
 
 <div class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="AI 对话消息区">
-    <div class="empty-state" id="emptyState">
-        <div class="empty-icon"><svg width="40" height="40" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path fill="#e8c840" d="M8 1L9.2 6.8 15 8l-5.8 1.2L8 15l-1.2-5.8L1 8l5.8-1.2z"/><circle fill="#e8c840" cx="13" cy="3" r="1"/></svg></div>
-        <div style="font-size:13px;font-family:Georgia,serif;">Eddy CWTool Code Assistant</div>
-        <div class="empty-tagline">描述你的需求，AI 将生成并验证 Paradox 脚本</div>
-        <div class="suggest-cards">
-            <button class="suggest-card" data-suggest="检查当前文件的 LSP 错误并修复"><span class="suggest-card-icon">${Icons.search}</span>检查 LSP 错误</button>
-            <button class="suggest-card" data-suggest="解释 from、root、prev 这三个作用域的区别和用法"><span class="suggest-card-icon">${Icons.book}</span>作用域解释</button>
-            <button class="suggest-card" data-suggest="为当前触发器添加详细注释说明其逻辑"><span class="suggest-card-icon">${Icons.edit}</span>添加注释</button>
-            <button class="suggest-card" data-suggest="分析当前文件并列出潜在的语法和逻辑问题"><span class="suggest-card-icon">${Icons.shield}</span>代码审查</button>
-        </div>
-    </div>
+    <div class="empty-state" id="emptyState" aria-hidden="true"></div>
 </div>
 
 <div id="tokenUsageBar" style="display:none">

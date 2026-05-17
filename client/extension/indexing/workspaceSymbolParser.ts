@@ -45,6 +45,8 @@ interface OpenBlock {
     name: string;
     kind: string;
     source: WorkspaceSymbolSource;
+    references?: WorkspaceSymbolReference[];
+    entry?: WorkspaceSymbolEntry;
 }
 
 const SCRIPT_EXTENSIONS = new Set(['.txt']);
@@ -111,27 +113,29 @@ export function queryWorkspaceSymbolIndex(
     const origin = query.origin && query.origin !== 'both' ? query.origin : undefined;
     const directory = query.directory ? normalizePath(query.directory).toLowerCase().replace(/^\/+|\/+$/g, '') : '';
 
-    const candidates = name && query.exact
-        ? (index.get(name) ?? [])
-        : Array.from(index.values()).flat();
-
     const nameLower = name.toLowerCase();
     const results: WorkspaceSymbolEntry[] = [];
 
-    for (const entry of candidates) {
-        if (nameLower) {
-            const entryName = entry.name.toLowerCase();
-            if (query.exact && entryName !== nameLower) continue;
-            if (query.prefix && !entryName.startsWith(nameLower)) continue;
-            if (!query.exact && !query.prefix && !entryName.includes(nameLower)) continue;
+    const buckets: Iterable<WorkspaceSymbolEntry[]> = name && query.exact
+        ? [index.get(name) ?? []]
+        : index.values();
+
+    for (const entries of buckets) {
+        for (const entry of entries) {
+            if (nameLower) {
+                const entryName = entry.name.toLowerCase();
+                if (query.exact && entryName !== nameLower) continue;
+                if (query.prefix && !entryName.startsWith(nameLower)) continue;
+                if (!query.exact && !query.prefix && !entryName.includes(nameLower)) continue;
+            }
+            if (kind && entry.kind.toLowerCase() !== kind) continue;
+            if (category && (entry.category ?? '').toLowerCase() !== category) continue;
+            if (source && entry.source !== source) continue;
+            if (origin && (entry.origin ?? 'workspace') !== origin) continue;
+            if (directory && !normalizePath(entry.file).toLowerCase().includes(`/${directory}/`)) continue;
+            results.push(query.includeReferences ? entry : { ...entry, references: undefined });
+            if (results.length >= limit) return results;
         }
-        if (kind && entry.kind.toLowerCase() !== kind) continue;
-        if (category && (entry.category ?? '').toLowerCase() !== category) continue;
-        if (source && entry.source !== source) continue;
-        if (origin && (entry.origin ?? 'workspace') !== origin) continue;
-        if (directory && !normalizePath(entry.file).toLowerCase().includes(`/${directory}/`)) continue;
-        results.push(query.includeReferences ? entry : { ...entry, references: undefined });
-        if (results.length >= limit) break;
     }
 
     return results;
@@ -154,7 +158,11 @@ export function rebuildWorkspaceSymbolReferences(
     if (maxReferencesPerSymbol <= 0) return;
     for (const entries of index.values()) {
         for (const entry of entries) {
-            entry.references = collectReferencesForEntry(entry, fileContents, maxReferencesPerSymbol);
+            entry.references = mergeReferences(
+                entry.references,
+                collectReferencesForEntry(entry, fileContents, maxReferencesPerSymbol),
+                maxReferencesPerSymbol
+            );
         }
     }
 }
@@ -169,8 +177,25 @@ function attachReferences(
     const fileContents = new Map<string, string>([[filePath, content]]);
     for (const entry of entries) {
         const refs = collectReferencesForEntry(entry, fileContents, maxReferencesPerSymbol);
-        if (refs.length > 0) entry.references = refs;
+        entry.references = mergeReferences(entry.references, refs, maxReferencesPerSymbol);
     }
+}
+
+function mergeReferences(
+    existing: WorkspaceSymbolReference[] | undefined,
+    additions: WorkspaceSymbolReference[],
+    maxReferences: number
+): WorkspaceSymbolReference[] | undefined {
+    const merged: WorkspaceSymbolReference[] = [];
+    const seen = new Set<string>();
+    for (const ref of [...(existing ?? []), ...additions]) {
+        const key = `${normalizePath(ref.file)}:${ref.line}:${ref.context}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(ref);
+        if (merged.length >= maxReferences) break;
+    }
+    return merged.length > 0 ? merged : undefined;
 }
 
 function collectReferencesForEntry(
@@ -295,12 +320,21 @@ function parseNamedBlockSymbols(
                 name: blockName,
                 kind: source === 'gui' ? inferGuiKind(blockName) : inferAssetKind(blockName),
                 source,
+                references: [],
             };
         } else if (openBlock && beforeDepth > 0) {
+            const assetRef = toAssetPropertyReference(line, filePath, i + 1);
+            if (assetRef && openBlock.references) {
+                openBlock.references.push(assetRef);
+                if (openBlock.entry) {
+                    openBlock.entry.references = openBlock.references.slice(0, 12);
+                }
+            }
+
             const nameMatch = line.match(/^\s*name\s*=\s*"?([^"#\r\n]+)"?/);
             const rawName = nameMatch?.[1]?.trim();
             if (rawName) {
-                entries.push({
+                const entry: WorkspaceSymbolEntry = {
                     name: rawName,
                     kind: openBlock.kind,
                     file: filePath,
@@ -308,7 +342,10 @@ function parseNamedBlockSymbols(
                     source,
                     container: openBlock.name,
                     category: source === 'gui' ? 'gui' : 'asset',
-                });
+                    references: openBlock.references?.slice(0, 12),
+                };
+                openBlock.entry = entry;
+                entries.push(entry);
             }
         }
 
@@ -320,6 +357,15 @@ function parseNamedBlockSymbols(
     }
 
     return entries;
+}
+
+function toAssetPropertyReference(line: string, filePath: string, lineNumber: number): WorkspaceSymbolReference | undefined {
+    if (!/^\s*(texturefile|textureFile|file|files?)\s*=/i.test(line)) return undefined;
+    return {
+        file: filePath,
+        line: lineNumber,
+        context: line.trim().slice(0, 240),
+    };
 }
 
 function inferScriptClassification(normalizedFile: string, blockName: string): { kind: string; category: string } {

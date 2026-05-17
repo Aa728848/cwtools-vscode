@@ -326,15 +326,13 @@ body.artifact-drawer-open .artifact-drawer { transform: translateX(0); }
 .suggest-card { background: var(--input-bg); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px 14px; cursor: pointer; text-align: left; font-size: 12.5px; color: var(--fg); opacity: 0.85; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); line-height: 1.4; font-family: inherit; box-shadow: 0 4px 12px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.05); }
 .suggest-card:hover { opacity: 1; border-color: rgba(255,255,255,0.2); background: var(--btn-hover); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08); }
 .suggest-card-icon { font-size: 18px; display: block; margin-bottom: 6px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2)); }
-.mode-select { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: all 0.15s; flex-shrink: 0; max-width: 160px; }
-.mode-select:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
-.mode-select option { background: var(--input-bg); color: var(--fg); }
-.workflow-selector { flex-shrink: 0; max-width: 170px; background: rgba(100,166,255,0.08); border: 1px solid rgba(100,166,255,0.22); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: all 0.15s; }
-.workflow-selector:hover, .workflow-selector.active { background: rgba(100,166,255,0.14); border-color: rgba(100,166,255,0.38); }
-.workflow-selector option { background: var(--input-bg); color: var(--fg); }
-.model-selector { flex: 1; min-width: 0; max-width: 170px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: all 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-selector:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
-.model-selector option { background: var(--input-bg); color: var(--fg); }
+.mode-select, .workflow-selector, .model-selector { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: background 0.15s, border-color 0.15s, box-shadow 0.15s; }
+.mode-select:hover, .workflow-selector:hover, .model-selector:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
+.mode-select option, .workflow-selector option, .model-selector option { background: var(--input-bg); color: var(--fg); }
+.mode-select { flex-shrink: 0; max-width: 160px; }
+.workflow-selector { flex-shrink: 0; max-width: 170px; }
+.workflow-selector.active { background: rgba(255,255,255,0.075); border-color: rgba(255,255,255,0.2); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06); }
+.model-selector { flex: 1; min-width: 0; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .input-wrapper { padding: 10px 12px 12px; flex-shrink: 0; }
 .input-container { background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; overflow: hidden; transition: all 0.15s; display: flex; flex-direction: column; max-height: 50vh; }

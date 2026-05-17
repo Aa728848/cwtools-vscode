@@ -67,6 +67,10 @@ export interface TaskNode {
     prompt: string;
     /** 注入上下文的文件路径或 Blackboard Key 列表 */
     contextFiles?: string[];
+    /** Agent 声明要修改的文件列表（用于防冲突） */
+    plannedFiles?: string[];
+    /** Agent 声明要修改的实体列表（用于防冲突） */
+    plannedEntities?: string[];
     /** 前置依赖任务 ID 列表 — 全部完成后本节点才可执行 */
     dependencies: string[];
     /** 任务优先级 */
@@ -230,4 +234,29 @@ export interface OrchestratorOptions {
     onTodoUpdate?: (todos: import('../types').TodoItem[]) => void;
     /** 权限审批回调，子 Agent 通过此回调向用户请求执行敏感操作的权限 */
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
+}
+
+/** 质量门检测结果 */
+export interface QualityGateResult {
+    passed: boolean;
+    diagnosticErrors: number;
+    logicIssues: number;
+    filesChecked: string[];
+    reviewReport: string;
+    fixSuggestions?: string[];
+}
+
+/** Agent 运行的排障追踪数据 */
+export interface AgentRunTrace {
+    runId: string;
+    agentId: string;
+    type: AgentMode;
+    status: AgentInstanceStatus;
+    totalTimeMs: number;
+    tokenUsage: TokenUsage;
+    writtenFiles: string[];
+    toolCalls: { name: string; timestamp: number; durationMs: number; error?: string }[];
+    error?: string;
+    retryCount: number;
+    compactionCount: number;
 }

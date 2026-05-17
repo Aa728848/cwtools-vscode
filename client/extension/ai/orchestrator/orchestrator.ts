@@ -30,7 +30,7 @@ import { ParallelExecutor, type SubAgentExecutor } from './parallelExecutor';
 import { QualityGate } from './qualityGate';
 import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
-import { SOURCE } from '../messages';
+import { SOURCE, ORCHESTRATOR_MSG } from '../messages';
 
 // AgentRunner 和 AgentToolExecutor 的类型引用（避免循环依赖，使用 import type）
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
@@ -109,14 +109,14 @@ export class Orchestrator {
 
         emitStep({
             type: 'thinking',
-            content: `🎯 协调器启动: ${taskGraph.nodes.size} 个子任务`,
+            content: ORCHESTRATOR_MSG.START(taskGraph.nodes.size),
             timestamp: Date.now(),
         });
 
         // 验证任务图
         const cycles = this.graphEngine.detectCycles(taskGraph);
         if (cycles) {
-            const errMsg = `任务图存在循环依赖: ${cycles.map(c => c.join(' → ')).join('; ')}`;
+            const errMsg = ORCHESTRATOR_MSG.CYCLE_ERROR(cycles.map(c => c.join(' → ')).join('; '));
             emitStep({ type: 'error', content: errMsg, timestamp: Date.now() });
             return {
                 success: false,
@@ -157,7 +157,7 @@ export class Orchestrator {
                 // --- 本地化收尾清扫阶段 (Loc Sweep Phase) ---
                 emitStep({
                     type: 'orchestrator_progress',
-                    content: '$(globe) 正在执行本地化遗漏清扫 (Loc Sweep Phase)...',
+                    content: ORCHESTRATOR_MSG.LOC_SWEEP_START,
                     timestamp: Date.now(),
                 });
 
@@ -215,14 +215,14 @@ export class Orchestrator {
                         allWrittenFiles.push(...sweepResult.writtenFiles);
                         emitStep({
                             type: 'orchestrator_progress',
-                            content: `$(check) 本地化清扫完成，补全了 ${sweepResult.writtenFiles.length} 个文件。`,
+                            content: ORCHESTRATOR_MSG.LOC_SWEEP_DONE(sweepResult.writtenFiles.length),
                             timestamp: Date.now(),
                         });
                     }
                 } catch (e) {
                     emitStep({
                         type: 'error',
-                        content: `$(warning) 本地化清扫遇到异常，已跳过: ${e instanceof Error ? e.message : String(e)}`,
+                        content: ORCHESTRATOR_MSG.LOC_SWEEP_ERROR(e instanceof Error ? e.message : String(e)),
                         timestamp: Date.now(),
                     });
                 }
@@ -230,7 +230,7 @@ export class Orchestrator {
 
                 emitStep({
                     type: 'validation',
-                    content: `质量门: ${allWrittenFiles.length} 个文件待审查`,
+                    content: ORCHESTRATOR_MSG.QG_START(allWrittenFiles.length),
                     timestamp: Date.now(),
                 });
 
@@ -242,13 +242,13 @@ export class Orchestrator {
                 );
 
                 if (reviewResult.passed) {
-                    emitStep({ type: 'orchestrator_progress', content: '$(check) 质量门审查通过！', timestamp: Date.now() });
+                    emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.QG_PASS, timestamp: Date.now() });
                 } else {
-                    emitStep({ type: 'error', content: `$(x) 质量门审查未通过，发现 ${reviewResult.remainingIssues} 个问题。`, timestamp: Date.now() });
+                    emitStep({ type: 'error', content: ORCHESTRATOR_MSG.QG_FAIL(reviewResult.logicIssues), timestamp: Date.now() });
                     const config = this.qualityGate.getConfig();
                     
                     if (config.autoFix) {
-                        emitStep({ type: 'orchestrator_progress', content: '$(gear) 正在调度自动修复...', timestamp: Date.now() });
+                        emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_START, timestamp: Date.now() });
                         
                         const fixPrompt = this.qualityGate.buildFixPrompt(reviewResult.reviewReport, allWrittenFiles);
                         const fixResult = await this.agentRunner.run(
@@ -269,10 +269,10 @@ export class Orchestrator {
                         );
 
                         if (fixResult.isValid) {
-                            emitStep({ type: 'orchestrator_progress', content: '$(check) 自动修复完成。', timestamp: Date.now() });
+                            emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_DONE, timestamp: Date.now() });
                             // 这里可以递归或再次触发审查，但在简单的实现中先只执行一次 autoFix
                         } else {
-                            emitStep({ type: 'error', content: '$(x) 自动修复失败。', timestamp: Date.now() });
+                            emitStep({ type: 'error', content: ORCHESTRATOR_MSG.AUTOFIX_FAIL, timestamp: Date.now() });
                         }
                     }
                 }
@@ -512,7 +512,7 @@ export class Orchestrator {
                 err.name = 'TimeoutError';
                 forwardStep({
                     type: 'error',
-                    content: `子任务 ${taskNode.id} 长时间无新输出，已自动中止以避免假死 (${formatDurationMs(idleMs)})`,
+                    content: ORCHESTRATOR_MSG.SUB_TIMEOUT(taskNode.id, formatDurationMs(idleMs)),
                     timestamp: now,
                 }, false);
                 subAgentController.abort(err);
@@ -522,7 +522,7 @@ export class Orchestrator {
                 lastIdleNoticeAt = now;
                 forwardStep({
                     type: 'orchestrator_progress',
-                    content: `$(warning) 子任务 ${taskNode.id} 已 ${formatDurationMs(idleMs)} 没有新输出，仍在等待模型或工具返回。`,
+                    content: ORCHESTRATOR_MSG.SUB_IDLE(taskNode.id, formatDurationMs(idleMs)),
                     timestamp: now,
                 }, false);
             }

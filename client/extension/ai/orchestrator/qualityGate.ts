@@ -8,17 +8,7 @@
 import type { SubAgentResult, TaskNode } from './types';
 import type { AgentStep } from '../types';
 
-/** 质量门审查结果 */
-export interface QualityGateResult {
-    /** 是否通过质量门 */
-    passed: boolean;
-    /** 审查报告 */
-    reviewReport: string;
-    /** 修复循环次数 */
-    fixCycles: number;
-    /** 最终剩余的未修复问题数 */
-    remainingIssues: number;
-}
+import type { QualityGateResult } from './types';
 
 /** 质量门配置 */
 export interface QualityGateConfig {
@@ -91,10 +81,9 @@ export class QualityGate {
             ? `\n## Pre-fetched LSP Diagnostics (ALREADY RETRIEVED — DO NOT call get_diagnostics again):\n${preFetchedDiagnostics}\n` 
             : '';
 
-        // W3 修复：根据是否有预取诊断，动态生成审查步骤
         const step1 = preFetchedDiagnostics
-            ? '1. Review the pre-fetched diagnostics above. DO NOT call `get_diagnostics` again — the diagnostics have already been fetched and are provided above. You MUST resolve ALL LSP red errors!'
-            : '1. Call `get_diagnostics` for each file to check for LSP errors. You MUST resolve ALL LSP red errors!';
+            ? '1. Review the pre-fetched diagnostics above.'
+            : '1. Diagnostics were not pre-fetched. You may call `get_diagnostics` if needed.';
 
         const hasSpriteDiagnostics = /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(preFetchedDiagnostics ?? '');
         const hasSoundDiagnostics = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(preFetchedDiagnostics ?? '');
@@ -116,9 +105,15 @@ export class QualityGate {
             '4. Verify the correctness of the scope chain.',
             '5. Check file structure integrity (Refer to Rule 3b).',
             '',
-            'Output Format:',
-            '- If all files have zero errors and no logic conflicts: Output "PASSED: All files passed quality checks."',
-            '- If there are errors or logic conflicts: Output "FAILED: N issues need to be fixed", and list the specific issues and fix suggestions in detail.',
+            'Output Format (You MUST output EXACTLY this JSON format in a markdown code block):',
+            '```json',
+            '{',
+            '  "logicIssuesCount": <number>,',
+            '  "logicIssues": ["<issue 1>", "<issue 2>"],',
+            '  "fixSuggestions": ["<suggestion 1>", "<suggestion 2>"]',
+            '}',
+            '```',
+            'IMPORTANT: Do not output PASSED or FAILED. The system will automatically fail the quality gate if any LSP errors exist. You only need to report semantic or logic issues.',
         ].join('\n');
     }
 
@@ -132,17 +127,28 @@ export class QualityGate {
         options: Partial<import('../agentRunner').AgentRunnerOptions>,
     ): Promise<QualityGateResult> {
         if (writtenFiles.length === 0) {
-            return { passed: true, reviewReport: '无文件修改', fixCycles: 0, remainingIssues: 0 };
+            return {
+                passed: true,
+                diagnosticErrors: 0,
+                logicIssues: 0,
+                filesChecked: [],
+                reviewReport: '无文件修改',
+            };
         }
 
         let preFetchedDiagnostics = '';
+        let diagnosticErrorCount = 0;
         try {
             const diagResults: string[] = [];
             for (const file of writtenFiles) {
                 if (!file.endsWith('.txt') && !file.endsWith('.gui')) continue;
                 const res = await agentRunner.toolExecutor.execute('get_diagnostics', { file, severity: 'error' });
-                if (res && typeof res === 'object' && (res as any).totalDiagnosticCount > 0) {
-                    diagResults.push(`File: ${file}\n${JSON.stringify((res as any).diagnostics, null, 2)}`);
+                if (res && typeof res === 'object') {
+                    const count = (res as any).totalDiagnosticCount || 0;
+                    if (count > 0) {
+                        diagnosticErrorCount += count;
+                        diagResults.push(`File: ${file}\n${JSON.stringify((res as any).diagnostics, null, 2)}`);
+                    }
                 }
             }
             if (diagResults.length > 0) {
@@ -166,12 +172,17 @@ export class QualityGate {
         );
 
         const parsed = this.parseReviewResult(reviewResult.explanation);
+        const totalLogicIssues = parsed.logicIssuesCount || 0;
         
+        const passed = diagnosticErrorCount === 0 && totalLogicIssues === 0;
+
         return {
-            passed: parsed.passed,
+            passed,
+            diagnosticErrors: diagnosticErrorCount,
+            logicIssues: totalLogicIssues,
+            filesChecked: writtenFiles,
             reviewReport: reviewResult.explanation,
-            fixCycles: 0,
-            remainingIssues: parsed.issueCount,
+            fixSuggestions: parsed.fixSuggestions,
         };
     }
 
@@ -214,15 +225,24 @@ export class QualityGate {
     /**
      * 解析审查报告，判断是否通过。
      */
-    parseReviewResult(reviewOutput: string): { passed: boolean; issueCount: number } {
-        const upper = reviewOutput.toUpperCase();
-        if (upper.includes('PASSED') || upper.includes('通过')) {
-            return { passed: true, issueCount: 0 };
+    parseReviewResult(reviewOutput: string): { logicIssuesCount: number; fixSuggestions: string[] } {
+        try {
+            // Try extracting JSON block
+            const jsonMatch = reviewOutput.match(/```json\s*(\{[\s\S]*?\})\s*```/);
+            if (jsonMatch && jsonMatch[1]) {
+                const parsed = JSON.parse(jsonMatch[1]);
+                return {
+                    logicIssuesCount: parsed.logicIssuesCount || 0,
+                    fixSuggestions: Array.isArray(parsed.fixSuggestions) ? parsed.fixSuggestions : []
+                };
+            }
+            // Fallback for non-JSON formatted but contains logic issues count
+            const match = reviewOutput.match(/(\d+)\s*(?:个|issues?|problems?|errors?)/i);
+            const logicIssuesCount = match ? parseInt(match[1]!, 10) : 0;
+            return { logicIssuesCount, fixSuggestions: [] };
+        } catch (e) {
+            return { logicIssuesCount: 0, fixSuggestions: [] };
         }
-        // 尝试提取问题数量
-        const match = reviewOutput.match(/(\d+)\s*(?:个|issues?|problems?|errors?)/i);
-        const issueCount = match ? parseInt(match[1]!, 10) : 1;
-        return { passed: false, issueCount };
     }
 
     /** 获取配置 */

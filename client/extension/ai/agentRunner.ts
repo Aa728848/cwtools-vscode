@@ -39,6 +39,10 @@ import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
 import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from './workspacePaths';
 import { filterToolDefinitionsForMode, resolveMaxToolIterations } from './runnerPolicy';
+import { WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
+import { PartitionedWriteQueue } from './runner/writeCoordinator';
+import { saveResumeState, loadResumeState, hasResumeState, clearResumeState } from './runner/checkpoint';
+import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT } from './runner/compaction';
 
 // Doom-loop detection: two-phase approach.
 // Phase 1 — signature-pair tracking: (prevSig, currSig) pairs. Same pair ≥ PAIR_THRESHOLD triggers Phase 2.
@@ -157,157 +161,24 @@ function estimateTokensPrecise(text: string): number {
  * Uses fast path for short text, precise path for longer text
  * (compaction decisions, context window calculations).
  */
-function estimateTokenCount(text: string): number {
+export function estimateTokenCount(text: string): number {
     if (text.length < PRECISE_TOKEN_THRESHOLD) {
         return estimateTokensFast(text);
     }
     return estimateTokensPrecise(text);
 }
 
-const COMPACTION_SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
----
-## Goal
-- [single-sentence task summary]
 
-## Constraints & Preferences
-- [user constraints, preferences, specs, or "(none)"]
 
-## Progress
-### Done
-- [completed work or "(none)"]
 
-### In Progress
-- [current work or "(none)"]
-
-### Blocked
-- [blockers or "(none)"]
-
-## Key Decisions
-- [decision and why, or "(none)"]
-
-## Next Steps
-- [ordered next actions or "(none)"]
-
-## Critical Context
-- [important technical facts, errors, open questions, or "(none)"]
-
-## Relevant Files
-- [file or directory path: why it matters, or "(none)"]
----
-
-Rules:
-- Keep every section, even when empty.
-- Use terse bullets, not prose paragraphs.
-- Preserve exact file paths, commands, error strings, and identifiers when known.
-- Do not mention the summary process or that context was compacted.`;
-
-// WriteQueue: serializes write operations to prevent race conditions on AST/file state.
-// Each AgentRunner owns one; sub-agents get their own instance for isolated tracking.
-class WriteQueue {
-    private queue: Promise<void> = Promise.resolve();
-    /** Incremented on every enqueue; used by PartitionedWriteQueue to detect idle queues. */
-    lastUsedSeq = 0;
-
-    enqueue<T>(fn: () => Promise<T>): Promise<T> {
-        return new Promise((resolve, reject) => {
-            this.queue = this.queue
-                .then(() => fn().then(resolve, reject))
-                .catch((err) => { ErrorReporter.warn(SOURCE.AGENT_RUNNER, 'WriteQueue: swallowed rejected write to keep queue alive', err); });
-        });
-    }
-}
-
-// PartitionedWriteQueue: per-file-path write serialization.
-// Replaces the global single WriteQueue to allow parallel writes to different files
-// while preserving per-file ordering. Multi-file operations acquire all path locks
-// in sorted order (lexicographic) to prevent AB/BA deadlocks.
-// Idle queues are cleaned up after 30s of inactivity to prevent unbounded Map growth.
-class PartitionedWriteQueue {
-    private queues = new Map<string, WriteQueue>();
-    private static readonly IDLE_CLEANUP_MS = 30_000;
-
-    enqueue(
-        files: string[],
-        fn: () => Promise<void>,
-        options?: { waitTimeoutMs?: number; timeoutMessage?: string }
-    ): Promise<void> {
-        const sorted = [...new Set(files)].sort();
-        const seq = Date.now();
-        let started = false;
-        let cancelledBeforeStart = false;
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        // Mark all involved queues as active
-        for (const f of sorted) this.getQueue(f).lastUsedSeq = seq;
-        const acquire = (idx: number): Promise<void> => {
-            if (idx >= sorted.length) {
-                if (cancelledBeforeStart) return Promise.resolve();
-                started = true;
-                if (timeoutId) {
-                    clearTimeout(timeoutId);
-                    timeoutId = undefined;
-                }
-                return fn(); // all locks held, execute write
-            }
-            return this.getQueue(sorted[idx]!).enqueue(() => acquire(idx + 1));
-        };
-        const result = acquire(0);
-        // After all writes complete, schedule cleanup check for each path
-        void result.then(() => {
-            for (const f of sorted) this.scheduleCleanup(f, seq);
-        });
-        const waitTimeoutMs = options?.waitTimeoutMs;
-        if (!waitTimeoutMs || waitTimeoutMs <= 0) {
-            return result;
-        }
-
-        return new Promise<void>((resolve, reject) => {
-            timeoutId = setTimeout(() => {
-                if (started) return;
-                cancelledBeforeStart = true;
-                reject(new Error(options?.timeoutMessage ?? `Write queue wait timed out after ${waitTimeoutMs}ms.`));
-            }, waitTimeoutMs);
-
-            result.then(resolve, reject).finally(() => {
-                if (timeoutId) {
-                    clearTimeout(timeoutId);
-                    timeoutId = undefined;
-                }
-            });
-        });
-    }
-
-    private getQueue(filePath: string): WriteQueue {
-        let q = this.queues.get(filePath);
-        if (!q) {
-            q = new WriteQueue();
-            this.queues.set(filePath, q);
-        }
-        return q;
-    }
-
-    private scheduleCleanup(filePath: string, seqAtEnqueue: number): void {
-        setTimeout(() => {
-            const q = this.queues.get(filePath);
-            // Only remove if the queue hasn't been used since we enqueued
-            if (q && q.lastUsedSeq === seqAtEnqueue) {
-                this.queues.delete(filePath);
-            }
-        }, PartitionedWriteQueue.IDLE_CLEANUP_MS);
-    }
-}
 
 // Backward-compat alias for non-text token estimation (images etc.)
-const CHARS_PER_TOKEN = 4;
+export const CHARS_PER_TOKEN = 4;
 // Compact when conversation exceeds this fraction of provider context
-const COMPACTION_THRESHOLD_RATIO = 0.95;
 // Default context limit if unknown
-const DEFAULT_CONTEXT_LIMIT = 128000;
 // How many recent messages to keep un-compressed during compaction
-const COMPACTION_KEEP_LAST_N = 8;
 // Mid-loop compaction: check every N iterations within reasoningLoop
-const MID_LOOP_COMPACTION_INTERVAL = 3;
 // Mid-loop compaction triggers at this fraction of context limit
-const MID_LOOP_COMPACTION_RATIO = 0.78;
 
 // Minimum tool result budget (even for tiny context windows)
 const TOOL_RESULT_BUDGET_MIN = 3000;
@@ -492,27 +363,7 @@ const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
 
 
 // Fix #9: module-level constants — no need to recreate on every loop iteration
-const WRITE_TOOLS = new Set(['write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'deploy_mod_asset', 'write_localisation', 'write_design_blueprint', 'git_ops', 'edit_pdx_block']);
 export const SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS = new Set<string>(['write_file']);
-const READ_ONLY_TOOLS = new Set<string>([
-    'read_file', 'list_directory', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
-    'get_file_context', 'document_symbols', 'workspace_symbols', 'verify_pdx_identifier',
-    'query_scope', 'query_types', 'query_rules', 'query_references',
-    'get_diagnostics', 'get_completion_at',
-    // Newly added Deep API tools for parallel execution
-    'query_definition', 'query_definition_by_name',
-    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_static_modifiers', 'query_variables', 'glob_files', 'codesearch',
-    // 黑板和记忆工具（安全并发执行）
-    'set_memory', 'get_memory', 'search_memory', 'query_blackboard',
-    // todo_write 是纯内存操作（更新 currentTodos 数组 + 触发 UI 回调），
-    // 不涉及任何文件 IO，不应走 PartitionedWriteQueue 的 __global__ 锁路径，
-    // 否则在多 Agent 并发场景中会与其他写操作竞争全局锁导致死锁。
-    'todo_write'
-    // Long-running orchestrator tools intentionally stay out of both
-    // READ_ONLY_TOOLS and WRITE_TOOLS: they execute serially without holding
-    // the file-write queue.
-]);
 
 export function getAgentToolTargetFiles(
     toolName: string,
@@ -711,41 +562,17 @@ export class AgentRunner {
     /**
      * 读取指定 topicId 下的断点续传状态。
      */
+    /** Checkpoint proxy */
     public async loadResumeState(topicId: string): Promise<import('./types').AgentResumeState | null> {
-        try {
-            const fs = await import('fs');
-            const pathModule = await import('path');
-            const wsRoot = getProjectWorkspaceRoot();
-
-            const resumePath = getTopicStorageDirCandidates(topicId, wsRoot)
-                .map(dir => pathModule.join(dir, 'resume_state.json'))
-                .find(candidate => fs.existsSync(candidate));
-            if (!resumePath) return null;
-
-            const raw = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
-            if (!raw || !raw.messages || !Array.isArray(raw.messages)) return null;
-
-            return raw as import('./types').AgentResumeState;
-        } catch {
-            return null;
-        }
+        return loadResumeState(topicId);
     }
 
     /**
      * 判断是否存在断点续传状态。
      */
+    /** Checkpoint proxy */
     public async hasResumeState(topicId: string): Promise<boolean> {
-        if (!topicId) return false;
-        try {
-            const fs = await import('fs');
-            const pathModule = await import('path');
-            const wsRoot = getProjectWorkspaceRoot();
-            return getTopicStorageDirCandidates(topicId, wsRoot)
-                .map(dir => pathModule.join(dir, 'resume_state.json'))
-                .some(candidate => fs.existsSync(candidate));
-        } catch {
-            return false;
-        }
+        return hasResumeState(topicId);
     }
 
     /**
@@ -1149,205 +976,12 @@ export class AgentRunner {
      * summarize older messages into a compact system message.
      */
     private async maybeCompactHistory(
-        history: ChatMessage[],
-        emitStep: (step: AgentStep) => void,
-        options?: AgentRunnerOptions,
-        tokenAccumulator?: TokenUsage
-    ): Promise<ChatMessage[]> {
-        // No early-return based on message count alone — a single large message (e.g. with
-        // images) can exceed the context limit. Let the token estimate decide.
-
-        // Estimate total token usage using CJK-aware estimation.
-        // For ContentPart[] messages, also add image token overhead:
-        // a typical 512×512 screenshot in base64 ≈ 800 tokens; we use the data URL byte length
-        // divided by ~3 (base64 overhead factor) divided by CHARS_PER_TOKEN as a rough estimate.
-        const estimatedTokens = history.reduce((sum, m) => {
-            if (typeof m.content === 'string') return sum + estimateTokenCount(m.content);
-            if (Array.isArray(m.content)) {
-                return sum + (m.content as import('./types').ContentPart[]).reduce((s, part) => {
-                    if (part.type === 'text') return s + estimateTokenCount(part.text);
-                    if (part.type === 'image_url') {
-                        // base64 data URL byte length / 3 ≈ raw bytes; divide by 4 chars/token
-                        const urlLen = part.image_url.url.length;
-                        return s + Math.ceil(urlLen / 3 / CHARS_PER_TOKEN);
-                    }
-                    return s;
-                }, 0);
-            }
-            return sum;
-        }, 0);
-
-        // Get provider context limit (user override takes precedence)
-        const config = this.aiService.getConfig();
-        const providerId = options?.providerId ?? config.provider;
-        const provider = getProvider(providerId);
-        const contextLimit = config.maxContextTokens > 0
-            ? config.maxContextTokens
-            : (provider.maxContextTokens || DEFAULT_CONTEXT_LIMIT);
-        const threshold = Math.floor(contextLimit * COMPACTION_THRESHOLD_RATIO);
-
-        if (estimatedTokens < threshold) return history;
-
-        // Need to compact!
-        emitStep({
-            type: 'compaction',
-            content: AGENT.COMPACTION_START(estimatedTokens, threshold),
-            timestamp: Date.now(),
-        });
-
-        try {
-            // Keep the most recent messages intact
-            const recentCount = Math.min(COMPACTION_KEEP_LAST_N, history.length);
-            const recentMessages = history.slice(history.length - recentCount);
-
-            // ── Incremental compaction: detect existing summary and merge ──
-            // If history already contains a compacted summary (from a previous
-            // compaction round), merge it with the new older messages instead of
-            // discarding it. This preserves L2 (cold archive) knowledge.
-            const existingSummaryIdx = history.findIndex(
-                m => m.role === 'system' && contentToString(m.content).startsWith('## Conversation Summary')
-            );
-            let existingSummaryText = '';
-            let olderMessages: ChatMessage[];
-            if (existingSummaryIdx >= 0 && existingSummaryIdx < history.length - recentCount) {
-                // Extract existing summary content (strip the header)
-                existingSummaryText = contentToString(history[existingSummaryIdx]!.content)  
-                    .replace(/^## Conversation Summary \(compacted\)\n?/, '').trim();
-                // New L1 messages = everything between the old summary and the recent window
-                olderMessages = history.slice(existingSummaryIdx + 1, history.length - recentCount);
-            } else {
-                olderMessages = history.slice(0, history.length - recentCount);
-            }
-
-            // Build compaction prompt
-            // L3 Fix: exclude system messages (they'd be mapped as 'Assistant', misleading the summarizer).
-            // M4 Fix: use a larger char limit for tool/assistant messages which carry technical detail.
-            
-            // Enhancement: Extract pinned context — critical entities that must survive compaction.
-            // These include file paths modified, scope chains established, and key entity names.
-            const pinnedContext: string[] = [];
-            const seenFiles = new Set<string>();
-            for (const m of olderMessages) {
-                const text = contentToString(m.content);
-                // Extract file paths from tool calls (read_file, write_file, multi_replace_file_content)
-                const fileMatches = text.match(/(?:filePath|file|path)["']?\s*[:=]\s*["']([^"'\n]+)/gi);
-                if (fileMatches) {
-                    for (const fm of fileMatches) {
-                        const fp = fm.replace(/.*?["']([^"']+)["']?$/, '$1').trim();
-                        if (fp && fp.includes('/') && !seenFiles.has(fp)) {
-                            seenFiles.add(fp);
-                            pinnedContext.push(`• File: ${fp}`);
-                        }
-                    }
-                }
-                // Extract scope chains (common in Stellaris modding context)
-                const scopeMatches = text.match(/scope\s*[:=]\s*\w+/gi);
-                if (scopeMatches) {
-                    for (const sm of scopeMatches.slice(0, 5)) {
-                        pinnedContext.push(`• ${sm}`);
-                    }
-                }
-            }
-            const pinnedSection = pinnedContext.length > 0
-                ? `\n\n## Pinned Context (do NOT omit):\n${[...new Set(pinnedContext)].slice(0, 30).join('\n')}`
-                : '';
-
-             // Build structured message context for the compaction AI call.
-            // Tool results preserve file path + success/error as dense metadata.
-            const messageContext = olderMessages
-                .filter(m => m.role !== 'system')
-                .map(m => {
-                    const role = m.role === 'user' ? 'User' : m.role === 'tool' ? 'Tool' : 'Assistant';
-                    if (m.role === 'tool') {
-                        const content = contentToString(m.content);
-                        const successMatch = content.match(/"success"\s*:\s*(true|false)/);
-                        const fileMatch = content.match(/"(?:file|filePath)"\s*:\s*"([^"]+)"/);
-                        const errorMatch = content.match(/"(?:error|message)"\s*:\s*"([^"]{0,200})"/);
-                        const summary = [
-                            fileMatch ? `file=${fileMatch[1]}` : null,
-                            successMatch ? `success=${successMatch[1]}` : null,
-                            errorMatch && successMatch?.[1] === 'false' ? `error=${errorMatch[1]}` : null,
-                        ].filter(Boolean).join(' ');
-                        return `<${role}>: ${summary || content.substring(0, 500)}`;
-                    }
-                    const maxLen = m.role === 'user' ? 500 : 2000;
-                    const content = contentToString(m.content).substring(0, maxLen);
-                    return `<${role}>: ${content}`;
-                }).join('\n');
-
-            // Build compaction instruction with the structured template.
-            // Incremental merge: prepend existing summary as <previous-summary>.
-            const compactionSystemPrompt = existingSummaryText
-                ? [
-                    `Update the anchored summary below using the conversation history above.`,
-                    `Preserve still-true details, remove stale details, and merge in the new facts.`,
-                    `<previous-summary>`,
-                    existingSummaryText,
-                    `</previous-summary>`,
-                  ].join('\n')
-                : `Create a new anchored summary from the conversation history above.`;
-
-            const compactionInstruction = [
-                compactionSystemPrompt,
-                COMPACTION_SUMMARY_TEMPLATE,
-                pinnedSection,
-                messageContext,
-            ].filter(Boolean).join('\n\n');
-
-            const compactionMessages: ChatMessage[] = [
-                { role: 'system', content: this.promptBuilder.buildCompactionPrompt() },
-                { role: 'user', content: compactionInstruction },
-            ];
-
-            const compactionResponse = await this.aiService.chatCompletion(compactionMessages, {
-                temperature: 0.1,
-                maxTokens: 2048,
-                providerId: options?.providerId,
-                model: options?.model,
-            });
-
-            // Account for compaction call's token usage in the parent accumulator
-            if (tokenAccumulator && compactionResponse.usage) {
-                const pricing = getModelPricing(compactionResponse.model ?? options?.model ?? '');
-                tokenAccumulator.input += compactionResponse.usage.prompt_tokens;
-                tokenAccumulator.output += compactionResponse.usage.completion_tokens;
-                tokenAccumulator.total += compactionResponse.usage.total_tokens;
-                tokenAccumulator.estimatedCostCny +=
-                    (compactionResponse.usage.prompt_tokens / 1_000_000) * pricing[0] +
-                    (compactionResponse.usage.completion_tokens / 1_000_000) * pricing[1];
-            }
-
-            const summary = compactionResponse.choices?.[0]?.message?.content ?? '';
-
-            if (summary.length > 0) {
-                const compactionType = existingSummaryText ? AGENT.COMPACTION_INCREMENTAL : AGENT.COMPACTION_INITIAL;
-                emitStep({
-                    type: 'compaction',
-                    content: AGENT.COMPACTION_DONE(compactionType, olderMessages.length, summary.length, pinnedContext.length),
-                    timestamp: Date.now(),
-                });
-
-                // Return compacted history: summary (with pinned context) + recent messages
-                return [
-                    {
-                        role: 'system',
-                        content: `## Conversation Summary (compacted)\n${summary}${pinnedSection}`,
-                    },
-                    ...recentMessages,
-                ];
-            }
-        } catch (e) {
-            // If compaction fails, just truncate to recent messages
-            emitStep({
-                type: 'error',
-                content: AGENT.COMPACTION_FAILED(e instanceof Error ? e.message : String(e)),
-                timestamp: Date.now(),
-            });
-        }
-
-        // Fallback: keep only recent messages
-        const fallbackCount = Math.min(6, history.length);
-        return history.slice(history.length - fallbackCount);
+        history: import('./types').ChatMessage[],
+        emitStep: (step: import('./types').AgentStep) => void,
+        options?: import('./agentRunner').AgentRunnerOptions,
+        tokenAccumulator?: import('./types').TokenUsage
+    ): Promise<import('./types').ChatMessage[]> {
+        return _maybeCompactHistory(history, emitStep, { aiService: this.aiService, promptBuilder: this.promptBuilder }, options, tokenAccumulator);
     }
 
     /**

@@ -21,6 +21,7 @@ export type {
     ToolBudget,
     OrchestratorResult,
     OrchestratorOptions,
+    QualityGateResult,
 } from './types';
 
 // 黑板系统
@@ -39,7 +40,7 @@ export type { ConflictResult } from './conflictDetector';
 
 // 质量门
 export { QualityGate } from './qualityGate';
-export type { QualityGateResult, QualityGateConfig } from './qualityGate';
+export type { QualityGateConfig } from './qualityGate';
 
 // 并行执行器
 export { ParallelExecutor } from './parallelExecutor';

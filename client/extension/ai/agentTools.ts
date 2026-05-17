@@ -810,6 +810,8 @@ export class AgentToolExecutor {
             agentType: string;
             prompt: string;
             contextFiles?: string[];
+            plannedFiles?: string[];
+            plannedEntities?: string[];
             dependencies?: string[];
             maxIterations?: number;
             modelOverride?: string;
@@ -859,6 +861,8 @@ export class AgentToolExecutor {
                     task.prompt,
                     {
                         contextFiles: task.contextFiles,
+                        plannedFiles: task.plannedFiles,
+                        plannedEntities: task.plannedEntities,
                         dependencies: task.dependencies || [],
                         maxIterations: task.maxIterations,
                         modelOverride: task.modelOverride,

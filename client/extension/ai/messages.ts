@@ -52,6 +52,25 @@ export const AGENT = {
     TOOL_RESULT_PREFIX: '工具结果',
 };
 
+// ─── Orchestrator Messages ──────────────────────────────────────────────────
+
+export const ORCHESTRATOR_MSG = {
+    START: (nodeCount: number) => `🎯 协调器启动: ${nodeCount} 个子任务`,
+    CYCLE_ERROR: (cycles: string) => `任务图存在循环依赖: ${cycles}`,
+    CONFLICT_ERROR: (conflicts: string) => `任务图存在并发写入冲突: ${conflicts}。请调整依赖关系使其串行。`,
+    LOC_SWEEP_START: '$(globe) 正在执行本地化遗漏清扫 (Loc Sweep Phase)...',
+    LOC_SWEEP_DONE: (count: number) => `$(check) 本地化清扫完成，补全了 ${count} 个文件。`,
+    LOC_SWEEP_ERROR: (err: string) => `$(warning) 本地化清扫遇到异常，已跳过: ${err}`,
+    QG_START: (fileCount: number) => `质量门: ${fileCount} 个文件待审查`,
+    QG_PASS: '$(check) 质量门审查通过！',
+    QG_FAIL: (issues: number) => `$(x) 质量门审查未通过，发现 ${issues} 个问题。`,
+    AUTOFIX_START: '$(gear) 正在调度自动修复...',
+    AUTOFIX_DONE: '$(check) 自动修复完成。',
+    AUTOFIX_FAIL: '$(x) 自动修复失败。',
+    SUB_TIMEOUT: (id: string, ms: string) => `子任务 ${id} 长时间无新输出，已自动中止以避免假死 (${ms})`,
+    SUB_IDLE: (id: string, ms: string) => `$(warning) 子任务 ${id} 已 ${ms} 没有新输出，仍在等待模型或工具返回。`,
+};
+
 // ─── Context Budget Messages ────────────────────────────────────────────────
 
 export const BUDGET = {

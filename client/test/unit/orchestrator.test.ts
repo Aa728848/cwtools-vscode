@@ -7,6 +7,33 @@
 
 import { expect } from 'chai';
 
+const vscodeStub = {
+    workspace: {
+        workspaceFolders: [],
+        getConfiguration: () => ({
+            get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue,
+        }),
+    },
+    commands: {
+        executeCommand: async () => undefined,
+    },
+    window: {
+        createOutputChannel: () => ({
+            appendLine: () => undefined,
+            show: () => undefined,
+            clear: () => undefined,
+            dispose: () => undefined,
+        }),
+    },
+};
+
+const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+const originalLoad = moduleLoader._load;
+moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+    if (request === 'vscode') return vscodeStub;
+    return originalLoad.apply(this, [request, ...args]);
+};
+
 // ── Blackboard ────────────────────────────────────────────────────────────────
 
 describe('Blackboard', () => {
@@ -271,6 +298,17 @@ describe('TaskGraphEngine', () => {
         expect(summary.running).to.equal(1);
         expect(summary.pending).to.equal(2);
     });
+
+    it('addNode: stores planned write targets for conflict-aware scheduling', () => {
+        const graph = TaskGraphEngine.createGraph('planned targets');
+        const node = TaskGraphEngine.addNode(graph, 'A', 'build', 'build', {
+            plannedFiles: ['events/shared.txt'],
+            plannedEntities: ['event:foo.1'],
+        });
+
+        expect(node.plannedFiles).to.deep.equal(['events/shared.txt']);
+        expect(node.plannedEntities).to.deep.equal(['event:foo.1']);
+    });
 });
 
 // ── ConflictDetector ──────────────────────────────────────────────────────────
@@ -331,6 +369,57 @@ describe('ConflictDetector', () => {
 
 // ── ParallelExecutor / Orchestrator Runtime Safety ───────────────────────────
 
+// -- dispatch_agents wiring ---------------------------------------------------
+
+describe('dispatch_agents tool wiring', () => {
+    it('passes planned write targets from task args into TaskGraph nodes', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+        executor.parentAgentRunner = { run: async () => undefined } as any;
+
+        let capturedGraph: import('../../extension/ai/orchestrator/types').TaskGraph | undefined;
+        const originalExecute = Orchestrator.prototype.execute;
+        (Orchestrator.prototype as any).execute = async (graph: import('../../extension/ai/orchestrator/types').TaskGraph) => {
+            capturedGraph = graph;
+            return {
+                success: true,
+                summary: 'ok',
+                agentResults: new Map(),
+                totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                failedNodes: [],
+                cancelledNodes: [],
+            };
+        };
+
+        try {
+            const result = await executor.execute('dispatch_agents', {
+                userPrompt: 'planned target pass-through',
+                tasks: [{
+                    id: 'build_events',
+                    agentType: 'build',
+                    prompt: 'update event script',
+                    plannedFiles: ['events/shared.txt'],
+                    plannedEntities: ['event:foo.1'],
+                }],
+            }, {
+                runnerOptions: { abortSignal: new AbortController().signal },
+                onStep: () => undefined,
+            } as any) as any;
+
+            expect(result.success).to.equal(true);
+            const node = capturedGraph?.nodes.get('build_events');
+            expect(node?.plannedFiles).to.deep.equal(['events/shared.txt']);
+            expect(node?.plannedEntities).to.deep.equal(['event:foo.1']);
+        } finally {
+            (Orchestrator.prototype as any).execute = originalExecute;
+        }
+    });
+});
+
 describe('Orchestrator runtime safety', () => {
     let ParallelExecutor: typeof import('../../extension/ai/orchestrator/parallelExecutor').ParallelExecutor;
     let Orchestrator: typeof import('../../extension/ai/orchestrator/orchestrator').Orchestrator;
@@ -360,7 +449,7 @@ describe('Orchestrator runtime safety', () => {
 
         expect(result.success).to.equal(false);
         expect(result.failedNodes).to.deep.equal(['A']);
-        expect(result.summary).to.include('不存在的依赖');
+        expect(result.summary).to.include('missing dependencies');
     });
 
     it('executeGraph: does not retry timeout-like sub-agent failures', async () => {
@@ -390,6 +479,94 @@ describe('Orchestrator runtime safety', () => {
         expect(calls).to.equal(1);
         expect(result.success).to.equal(false);
         expect(result.failedNodes).to.deep.equal(['A']);
+    });
+
+    it('executeGraph: serializes ready nodes that declare the same planned file', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 2 });
+        const graph = TaskGraphEngine.createGraph('file conflict');
+        TaskGraphEngine.addNode(graph, 'A', 'build', 'build A', { plannedFiles: ['events/shared.txt'] });
+        TaskGraphEngine.addNode(graph, 'B', 'build', 'build B', { plannedFiles: ['events/shared.txt'] });
+        const order: string[] = [];
+
+        const result = await executor.executeGraph(
+            graph,
+            new Blackboard(),
+            async (node) => {
+                order.push(node.id);
+                return {
+                    nodeId: node.id,
+                    success: true,
+                    output: 'ok',
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: [],
+                    stepCount: 1,
+                };
+            },
+            {},
+        );
+
+        expect(result.success).to.equal(true);
+        expect(order).to.deep.equal(['A', 'B']);
+    });
+
+    it('executeGraph: keeps non-conflicting planned files in the same batch', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 2 });
+        const graph = TaskGraphEngine.createGraph('no file conflict');
+        TaskGraphEngine.addNode(graph, 'A', 'build', 'build A', { plannedFiles: ['events/a.txt'] });
+        TaskGraphEngine.addNode(graph, 'B', 'build', 'build B', { plannedFiles: ['events/b.txt'] });
+        let active = 0;
+        let maxActive = 0;
+
+        const result = await executor.executeGraph(
+            graph,
+            new Blackboard(),
+            async (node) => {
+                active++;
+                maxActive = Math.max(maxActive, active);
+                await Promise.resolve();
+                active--;
+                return {
+                    nodeId: node.id,
+                    success: true,
+                    output: 'ok',
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: [],
+                    stepCount: 1,
+                };
+            },
+            {},
+        );
+
+        expect(result.success).to.equal(true);
+        expect(maxActive).to.equal(2);
+    });
+
+    it('executeGraph: serializes ready nodes that declare the same planned entity', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 2 });
+        const graph = TaskGraphEngine.createGraph('entity conflict');
+        TaskGraphEngine.addNode(graph, 'A', 'build', 'build A', { plannedEntities: ['event:foo.1'] });
+        TaskGraphEngine.addNode(graph, 'B', 'build', 'build B', { plannedEntities: ['event:foo.1'] });
+        const order: string[] = [];
+
+        const result = await executor.executeGraph(
+            graph,
+            new Blackboard(),
+            async (node) => {
+                order.push(node.id);
+                return {
+                    nodeId: node.id,
+                    success: true,
+                    output: 'ok',
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: [],
+                    stepCount: 1,
+                };
+            },
+            {},
+        );
+
+        expect(result.success).to.equal(true);
+        expect(order).to.deep.equal(['A', 'B']);
     });
 
     it('executeSubAgent: returns on abort even if AgentRunner.run never settles', async () => {
@@ -457,15 +634,13 @@ describe('QualityGate', () => {
     it('parseReviewResult: 识别通过结果', () => {
         const qg = new QualityGate();
         const result = qg.parseReviewResult('PASSED: All checks passed, code is clean.');
-        expect(result.passed).to.be.true;
-        expect(result.issueCount).to.equal(0);
+        expect(result.logicIssuesCount).to.equal(0);
     });
 
     it('parseReviewResult: 识别失败结果', () => {
         const qg = new QualityGate();
         const result = qg.parseReviewResult('FAILED: 3 issues need fixing.');
-        expect(result.passed).to.be.false;
-        expect(result.issueCount).to.equal(3);
+        expect(result.logicIssuesCount).to.equal(3);
     });
 
     it('buildFixPrompt: 包含审查报告和文件列表', () => {

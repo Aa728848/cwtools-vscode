@@ -1,8 +1,8 @@
 /**
- * Eddy CWTool Code — 并行执行器
+ * Eddy CWTool Code - Parallel Executor
  *
- * 管理多个 Agent 实例的并行执行，控制并发上限和全局 Token 预算。
- * 按 DAG 层级调度：同层节点并行，层间流水线。
+ * Schedules multiple agent nodes with bounded concurrency, token-budget checks,
+ * retry/cascade behavior, and planned write-target conflict avoidance.
  */
 
 import * as os from 'os';
@@ -12,17 +12,15 @@ import type {
     SubAgentResult,
     OrchestratorResult,
     OrchestratorOptions,
-    AgentInstance,
 } from './types';
-import type { TokenUsage, AgentStep, AgentMode } from '../types';
+import type { TokenUsage, AgentStep } from '../types';
 import { TaskGraphEngine } from './taskGraphEngine';
 import { Blackboard } from './blackboard';
 import { ConflictDetector } from './conflictDetector';
-import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE } from '../messages';
 
-/** 子 Agent 执行函数签名 — 由 Orchestrator 注入具体的 AgentRunner.run 调用 */
+/** Sub-agent executor injected by Orchestrator. */
 export type SubAgentExecutor = (
     taskNode: TaskNode,
     blackboard: Blackboard,
@@ -32,53 +30,27 @@ export type SubAgentExecutor = (
 ) => Promise<SubAgentResult>;
 
 function isTimeoutLikeError(error?: string): boolean {
-    return !!error && /timeout|timed out|idle timeout|absolute timeout|超时/i.test(error);
+    return !!error && /timeout|timed out|idle timeout|absolute timeout|\u8d85\u65f6/i.test(error);
 }
 
-/**
- * 并行执行器。
- *
- * 功能：
- * 1. 按 DAG 拓扑层级调度 Agent 执行
- * 2. 同层节点限制并发数（防止事件循环阻塞）
- * 3. 监控全局 Token 预算，超限时降级为串行
- * 4. 通过 ConflictDetector 管理写入意图
- * 5. 支持失败重试和级联取消
- */
 export class ParallelExecutor {
-    /** 最大并发 Agent 数 */
     private readonly maxConcurrency: number;
-    /** 全局 Token 预算上限（0 = 无限制） */
     private globalTokenBudget: number;
-    /** 已消耗的 Token 总量 */
     private consumedTokens: TokenUsage;
-    /** 冲突检测器 */
     private conflictDetector: ConflictDetector;
-    /** DAG 引擎 */
     private graphEngine: TaskGraphEngine;
 
     constructor(options?: {
         maxConcurrency?: number;
         globalTokenBudget?: number;
     }) {
-        // 默认并发数 = min(4, CPU核心数)
-        this.maxConcurrency = options?.maxConcurrency ??
-            Math.min(4, os.cpus().length || 2);
+        this.maxConcurrency = options?.maxConcurrency ?? Math.min(4, os.cpus().length || 2);
         this.globalTokenBudget = options?.globalTokenBudget ?? 0;
         this.consumedTokens = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
         this.conflictDetector = new ConflictDetector();
         this.graphEngine = new TaskGraphEngine();
     }
 
-    /**
-     * 执行完整的任务图。
-     *
-     * 按层级调度：
-     * 1. 拓扑排序得到执行层级
-     * 2. 每层内并行执行（受并发上限限制）
-     * 3. 层完成后检查是否有新的就绪节点
-     * 4. 直到所有节点完成或全部失败/取消
-     */
     async executeGraph(
         graph: TaskGraph,
         blackboard: Blackboard,
@@ -89,12 +61,11 @@ export class ParallelExecutor {
         const totalTokenUsage: TokenUsage = { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
         const emitStep = options.onStep ?? (() => {});
 
-        // 验证图的合法性
         const cycles = this.graphEngine.detectCycles(graph);
         if (cycles) {
             return {
                 success: false,
-                summary: `任务图存在循环依赖: ${cycles.map(c => c.join(' → ')).join('; ')}`,
+                summary: `Task graph contains cyclic dependencies: ${cycles.map(c => c.join(' -> ')).join('; ')}`,
                 agentResults,
                 totalTokenUsage,
                 failedNodes: [],
@@ -111,7 +82,7 @@ export class ParallelExecutor {
             }
         }
         if (missingDependencies.length > 0) {
-            const summary = `任务图存在不存在的依赖: ${missingDependencies.map(d => `${d.nodeId} -> ${d.dependencyId}`).join('; ')}`;
+            const summary = `Task graph contains missing dependencies: ${missingDependencies.map(d => `${d.nodeId} -> ${d.dependencyId}`).join('; ')}`;
             emitStep({ type: 'error', content: summary, timestamp: Date.now() });
             return {
                 success: false,
@@ -125,17 +96,16 @@ export class ParallelExecutor {
 
         emitStep({
             type: 'orchestrator_progress',
-            content: `$(chart) 任务图调度开始: ${graph.nodes.size} 个节点, 最大并发 ${this.maxConcurrency}`,
+            content: `$(chart) Task graph scheduling started: ${graph.nodes.size} nodes, max concurrency ${this.maxConcurrency}`,
             timestamp: Date.now(),
         });
 
-        // 主调度循环
         while (!this.graphEngine.isComplete(graph)) {
             options.abortSignal?.throwIfAborted();
 
             const readyNodes = this.graphEngine.getReadyNodes(graph);
             if (readyNodes.length === 0) {
-                const summary = `任务图调度停滞: 没有可执行节点，但仍有未完成节点。`;
+                const summary = 'Task graph stalled: no executable nodes remain, but the graph is incomplete.';
                 emitStep({ type: 'error', content: summary, timestamp: Date.now() });
                 return {
                     success: false,
@@ -147,39 +117,39 @@ export class ParallelExecutor {
                 };
             }
 
-            // 检查 Token 预算
-            if (this.globalTokenBudget > 0 &&
-                this.consumedTokens.total > this.globalTokenBudget) {
+            if (this.globalTokenBudget > 0 && this.consumedTokens.total > this.globalTokenBudget) {
                 emitStep({
                     type: 'error',
-                    content: `⚠ 全局 Token 预算超限 (${this.consumedTokens.total}/${this.globalTokenBudget})，降级为串行执行`,
+                    content: `Global token budget exceeded (${this.consumedTokens.total}/${this.globalTokenBudget}); falling back to serial execution`,
                     timestamp: Date.now(),
                 });
-                // 降级：只取第一个就绪节点串行执行
                 readyNodes.splice(1);
             }
 
-            // 按并发上限分批执行
-            const batch = readyNodes.slice(0, this.maxConcurrency);
+            const { batch, deferred } = this.selectConflictAwareBatch(readyNodes);
+            if (deferred.length > 0) {
+                emitStep({
+                    type: 'orchestrator_progress',
+                    content: `Deferred conflict nodes to a later batch: ${deferred.join('; ')}`,
+                    timestamp: Date.now(),
+                });
+            }
 
             emitStep({
                 type: 'orchestrator_progress',
-                content: `$(zap) 执行批次: ${batch.map(n => `${n.id}(${n.agentType})`).join(', ')}`,
+                content: `$(zap) Executing batch: ${batch.map(n => `${n.id}(${n.agentType})`).join(', ')}`,
                 timestamp: Date.now(),
             });
 
-            // 并行执行本批次
             const batchResults = await this.executeBatch(
                 batch, graph, blackboard, executor, totalTokenUsage, options
             );
 
-            // 合并结果
             for (const [nodeId, result] of batchResults) {
                 agentResults.set(nodeId, result);
             }
         }
 
-        // 汇总
         const progress = this.graphEngine.getProgressSummary(graph);
         const failedNodes = [...graph.nodes.values()]
             .filter(n => n.status === 'failed')
@@ -191,12 +161,12 @@ export class ParallelExecutor {
         const success = failedNodes.length === 0 && cancelledNodes.length === 0;
 
         const summary = [
-            `## 执行完成`,
-            `- 总节点: ${progress.total}`,
-            `- 成功: ${progress.done}`,
-            `- 失败: ${progress.failed}`,
-            `- 取消: ${progress.cancelled}`,
-            `- Token 消耗: ${totalTokenUsage.total} (约 ¥${totalTokenUsage.estimatedCostCny.toFixed(4)})`,
+            '## Execution Complete',
+            `- Total nodes: ${progress.total}`,
+            `- Succeeded: ${progress.done}`,
+            `- Failed: ${progress.failed}`,
+            `- Cancelled: ${progress.cancelled}`,
+            `- Tokens: ${totalTokenUsage.total} (about CNY ${totalTokenUsage.estimatedCostCny.toFixed(4)})`,
         ].join('\n');
 
         return {
@@ -209,9 +179,6 @@ export class ParallelExecutor {
         };
     }
 
-    /**
-     * 执行一批无依赖的节点（并行）。
-     */
     private async executeBatch(
         nodes: TaskNode[],
         graph: TaskGraph,
@@ -222,17 +189,14 @@ export class ParallelExecutor {
     ): Promise<Map<string, SubAgentResult>> {
         const results = new Map<string, SubAgentResult>();
 
-        // 标记所有节点为运行中
         for (const node of nodes) {
             this.graphEngine.markRunning(graph, node.id);
         }
 
-        // 并行执行
         const promises = nodes.map(async (node) => {
             const agentId = `agent_${node.id}_${Date.now().toString(36)}`;
 
             try {
-                // 步骤回调加上 agentId 标签
                 const taggedStep = (step: AgentStep) => {
                     options.onStep?.({
                         ...step,
@@ -240,7 +204,6 @@ export class ParallelExecutor {
                     });
                 };
 
-                // 使用子 Agent Token 累加器
                 const nodeAccumulator: TokenUsage = {
                     total: 0, input: 0, output: 0, estimatedCostCny: 0,
                 };
@@ -253,66 +216,54 @@ export class ParallelExecutor {
                     taggedStep,
                 );
 
-                // 合并 Token 消耗
                 totalTokenUsage.total += result.tokenUsage.total;
                 totalTokenUsage.input += result.tokenUsage.input;
                 totalTokenUsage.output += result.tokenUsage.output;
                 totalTokenUsage.estimatedCostCny += result.tokenUsage.estimatedCostCny;
                 this.consumedTokens.total += result.tokenUsage.total;
 
-                // 更新节点状态
                 node.tokenUsage = result.tokenUsage;
 
                 if (result.success) {
                     this.graphEngine.markComplete(graph, node.id, result.output);
-
-                    // 写入成功后清除写入意图
                     this.conflictDetector.clearIntent(agentId, blackboard);
                 } else {
-                    // 检查是否是被用户手动取消
                     if (options.abortSignal?.aborted || result.error === 'User cancelled') {
                         node.status = 'cancelled';
-                    }
-                    // 子 Agent 需要主 Agent 澄清时不要重试；重试只会再次生成同一个问题。
-                    else if (result.needsClarification) {
+                    } else if (result.needsClarification) {
                         const cancelled = this.graphEngine.markFailed(
                             graph,
                             node.id,
-                            result.error ?? result.clarification ?? '子任务需要主 Agent 澄清'
+                            result.error ?? result.clarification ?? 'Sub-task needs parent-agent clarification'
                         );
                         options.onStep?.({
                             type: 'error',
-                            content: `节点 ${node.id} 需要主 Agent 澄清，已暂停下游节点${cancelled.length ? `: ${cancelled.join(', ')}` : ''}`,
+                            content: `Node ${node.id} needs parent-agent clarification; downstream nodes paused${cancelled.length ? `: ${cancelled.join(', ')}` : ''}`,
                             timestamp: Date.now(),
                         });
-                    }
-                    // Timeout/idle aborts are usually environmental stalls, not useful model mistakes.
-                    // Retrying them silently makes collaboration feel frozen for much longer.
-                    else if (isTimeoutLikeError(result.error)) {
+                    } else if (isTimeoutLikeError(result.error)) {
                         const cancelled = this.graphEngine.markFailed(
                             graph,
                             node.id,
-                            result.error ?? '子任务超时'
+                            result.error ?? 'Sub-task timed out'
                         );
                         options.onStep?.({
                             type: 'error',
-                            content: `节点 ${node.id} 超时终止，已停止重试${cancelled.length ? `，并取消下游节点: ${cancelled.join(', ')}` : ''}`,
+                            content: `Node ${node.id} timed out; retries stopped${cancelled.length ? ` and downstream nodes cancelled: ${cancelled.join(', ')}` : ''}`,
                             timestamp: Date.now(),
                         });
-                    }
-                    // 检查是否可重试
-                    else if (node.retryCount < node.maxRetries) {
+                    } else if (node.retryCount < node.maxRetries) {
                         node.retryCount++;
-                        node.status = 'pending'; // 重置为待执行
-                        ErrorReporter.debug(SOURCE.ORCHESTRATOR, `节点 ${node.id} 执行失败，重试 ${node.retryCount}/${node.maxRetries}`);
+                        node.status = 'pending';
+                        ErrorReporter.debug(SOURCE.ORCHESTRATOR, `Node ${node.id} failed, retry ${node.retryCount}/${node.maxRetries}`);
                     } else {
                         const cancelled = this.graphEngine.markFailed(
-                            graph, node.id, result.error ?? '未知错误'
+                            graph, node.id, result.error ?? 'Unknown error'
                         );
                         if (cancelled.length > 0) {
                             options.onStep?.({
                                 type: 'error',
-                                content: `节点 ${node.id} 失败，已取消下游节点: ${cancelled.join(', ')}`,
+                                content: `Node ${node.id} failed; downstream nodes cancelled: ${cancelled.join(', ')}`,
                                 timestamp: Date.now(),
                             });
                         }
@@ -333,17 +284,14 @@ export class ParallelExecutor {
                 };
                 results.set(node.id, failResult);
 
-                // Check if this was a user cancellation
                 if (options.abortSignal?.aborted) {
                     node.status = 'cancelled';
                 } else if (isTimeoutLikeError(error)) {
                     this.graphEngine.markFailed(graph, node.id, error);
                 } else if (node.retryCount < node.maxRetries) {
-                    // 重试
                     node.retryCount++;
                     node.status = 'pending';
                 } else {
-                    // 级联失败
                     this.graphEngine.markFailed(graph, node.id, error);
                 }
 
@@ -355,7 +303,61 @@ export class ParallelExecutor {
         return results;
     }
 
-    /** 获取当前已消耗的 Token 总量 */
+    private selectConflictAwareBatch(readyNodes: TaskNode[]): { batch: TaskNode[]; deferred: string[] } {
+        const batch: TaskNode[] = [];
+        const deferred: string[] = [];
+        const fileOwners = new Map<string, string>();
+        const entityOwners = new Map<string, string>();
+
+        for (const node of readyNodes) {
+            if (batch.length >= this.maxConcurrency) break;
+
+            const conflict = this.findPlannedTargetConflict(node, fileOwners, entityOwners);
+            if (conflict) {
+                deferred.push(`${node.id} (${conflict})`);
+                continue;
+            }
+
+            batch.push(node);
+            for (const file of node.plannedFiles ?? []) {
+                const key = this.normalizeFileTarget(file);
+                if (key) fileOwners.set(key, node.id);
+            }
+            for (const entity of node.plannedEntities ?? []) {
+                const key = this.normalizeEntityTarget(entity);
+                if (key) entityOwners.set(key, node.id);
+            }
+        }
+
+        return { batch, deferred };
+    }
+
+    private findPlannedTargetConflict(
+        node: TaskNode,
+        fileOwners: Map<string, string>,
+        entityOwners: Map<string, string>,
+    ): string | undefined {
+        for (const file of node.plannedFiles ?? []) {
+            const key = this.normalizeFileTarget(file);
+            const owner = key ? fileOwners.get(key) : undefined;
+            if (owner) return `file ${file} already planned by ${owner}`;
+        }
+        for (const entity of node.plannedEntities ?? []) {
+            const key = this.normalizeEntityTarget(entity);
+            const owner = key ? entityOwners.get(key) : undefined;
+            if (owner) return `entity ${entity} already planned by ${owner}`;
+        }
+        return undefined;
+    }
+
+    private normalizeFileTarget(filePath: string): string {
+        return filePath.trim().replace(/\\/g, '/').toLowerCase();
+    }
+
+    private normalizeEntityTarget(entity: string): string {
+        return entity.trim();
+    }
+
     getConsumedTokens(): TokenUsage {
         return { ...this.consumedTokens };
     }

@@ -1208,6 +1208,7 @@ export class LspToolHandler {
         };
 
         if (ctxStr === 'mod' || ctxStr === 'both') {
+            await this.ctx.indexService?.ensureWorkspaceSymbolsReady?.({ includeVanilla: false });
             const indexed = this.ctx.indexService?.queryWorkspaceSymbols({
                 name: directName || (terms.length > 0 ? terms[0] : undefined),
                 kind: 'sprite',
@@ -1236,6 +1237,7 @@ export class LspToolHandler {
         }
 
         if (ctxStr === 'vanilla' || ctxStr === 'both') {
+            await this.ctx.indexService?.ensureWorkspaceSymbolsReady?.({ includeVanilla: true });
             const indexed = this.ctx.indexService?.queryWorkspaceSymbols({
                 name: directName || (terms.length > 0 ? terms[0] : undefined),
                 kind: 'sprite',
@@ -1423,6 +1425,7 @@ export class LspToolHandler {
         };
 
         if (ctxStr === 'mod' || ctxStr === 'both') {
+            await this.ctx.indexService?.ensureWorkspaceSymbolsReady?.({ includeVanilla: false });
             const indexed = this.ctx.indexService?.queryWorkspaceSymbols({
                 name: currentLower || (terms.length > 0 ? terms[0] : undefined),
                 kind: 'sound',
@@ -1451,6 +1454,7 @@ export class LspToolHandler {
         }
 
         if (ctxStr === 'vanilla' || ctxStr === 'both') {
+            await this.ctx.indexService?.ensureWorkspaceSymbolsReady?.({ includeVanilla: true });
             const indexed = this.ctx.indexService?.queryWorkspaceSymbols({
                 name: currentLower || (terms.length > 0 ? terms[0] : undefined),
                 kind: 'sound',

@@ -75,6 +75,7 @@ describe('Workspace Symbol Parser (indexing)', () => {
             container: 'spriteType',
             category: 'asset',
         });
+        expect(entries.find(entry => entry.name === 'GFX_evt_kuat_echo')?.references?.[0]?.context).to.include('texturefile');
         expect(entries.find(entry => entry.name === 'kuat_force_echo')).to.deep.include({
             kind: 'sound',
             source: 'asset',

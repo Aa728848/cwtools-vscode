@@ -429,8 +429,12 @@ describe('agent sprite candidate tool contract', () => {
     });
 
     it('queries the shared workspace symbol index when IndexService is provided', async () => {
+        let ensureArgs: any;
         const fakeIndexService = {
             status: 'ready',
+            ensureWorkspaceSymbolsReady: async (args: any) => {
+                ensureArgs = args;
+            },
             queryWorkspaceSymbols: (query: any) => [{
                 name: query.name,
                 kind: query.kind || 'event',
@@ -463,6 +467,7 @@ describe('agent sprite candidate tool contract', () => {
         expect(result.entries[0].fileVersion).to.equal(7);
         expect(result.indexedSymbolNames).to.equal(42);
         expect(result.indexUpdatedAt).to.equal(2000);
+        expect(ensureArgs).to.deep.equal({ includeVanilla: true });
     });
 
     it('returns unavailable workspace index result without IndexService', async () => {

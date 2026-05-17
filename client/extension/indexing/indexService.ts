@@ -20,8 +20,8 @@
  *   - Workspace symbol index is built LAZILY — only when an AI tool or consumer calls
  *     ensureWorkspaceSymbolsReady(). This keeps the extension host free for CodeLens,
  *     semantic highlighting, and completions during startup.
- *   - File contents are NOT held in memory after parsing. Cross-file reference rebuilding
- *     is deferred and optional, not run on every single-file update.
+ *   - File contents are NOT held in memory after parsing. Runtime indexing captures
+ *     lightweight in-block asset references and deliberately skips cross-file scans.
  *   - Index building yields to the event loop between batches to avoid starving
  *     other extension host consumers.
  */
@@ -35,7 +35,6 @@ import {
 	isWorkspaceSymbolFile,
 	parseWorkspaceSymbols,
 	queryWorkspaceSymbolIndex,
-	rebuildWorkspaceSymbolReferences,
 	removeFileFromSymbolIndex,
 	type WorkspaceSymbolEntry,
 	type WorkspaceSymbolQuery,
@@ -75,16 +74,11 @@ export class IndexService implements vscode.Disposable {
 	private _locIndex: Map<string, LocEntry[]> = new Map();
 	private _workspaceSymbolIndex: Map<string, WorkspaceSymbolEntry[]> = new Map();
 	private _workspaceSymbolFileVersions: Map<string, number> = new Map();
-	private _workspaceSymbolNamesByFile: Map<string, Set<string>> = new Map();
 	private _lastWorkspaceSymbolRefreshAt: number | undefined;
 	private _workspaceSymbolsIncludeVanilla = false;
 	private _workspaceSymbolBuildPromise: Promise<void> | undefined;
-
-	/**
-	 * Transient file content map — populated only during cross-file reference rebuilds,
-	 * then cleared immediately. **Not** held in memory permanently.
-	 */
-	private _workspaceSymbolFileContents: Map<string, string> = new Map();
+	private _lastSymbolQueryAt = 0;
+	private _idleEvictionTimer: ReturnType<typeof setTimeout> | undefined;
 
 	private _fileWatcher: vscode.FileSystemWatcher | undefined;
 	private _symbolFileWatcher: vscode.FileSystemWatcher | undefined;
@@ -97,6 +91,8 @@ export class IndexService implements vscode.Disposable {
 	/** Number of files to parse between event-loop yields during bulk indexing. */
 	private static readonly INDEX_BATCH_SIZE = 40;
 	private static readonly UPDATE_BATCH_SIZE = 25;
+	/** Evict workspace symbol index after this many ms of inactivity to reclaim memory. */
+	private static readonly IDLE_EVICTION_MS = 10 * 60 * 1000; // 10 minutes
 	private readonly _locDirectoryGlob = getLocalisationDirectoryGlob();
 
 	/** Current index status. */
@@ -229,7 +225,6 @@ export class IndexService implements vscode.Disposable {
 	removeFile(uri: vscode.Uri): void {
 		removeFileFromIndex(this._locIndex, uri.fsPath);
 		this._removeWorkspaceSymbolFile(uri.fsPath);
-		this._workspaceSymbolFileVersions.delete(uri.fsPath);
 	}
 
 	/**
@@ -246,6 +241,7 @@ export class IndexService implements vscode.Disposable {
 		if (this._workspaceSymbolStatus === 'idle') {
 			void this.ensureWorkspaceSymbolsReady({ includeVanilla: query.origin !== 'workspace' });
 		}
+		this._touchSymbolQuery();
 		return queryWorkspaceSymbolIndex(this._workspaceSymbolIndex, query);
 	}
 
@@ -284,7 +280,7 @@ export class IndexService implements vscode.Disposable {
 		let batchCount = 0;
 		for (const uri of files) {
 			try {
-				await this._indexSingleWorkspaceSymbolFile(uri, 'workspace', false);
+				await this._indexSingleWorkspaceSymbolFile(uri, 'workspace');
 			} catch {
 				// Skip files that can't be parsed
 			}
@@ -300,8 +296,8 @@ export class IndexService implements vscode.Disposable {
 	private async _indexSingleLocFile(uri: vscode.Uri): Promise<void> {
 		const filePath = uri.fsPath;
 
-		// Remove existing entries for this file before re-indexing
-		this.removeFile(uri);
+		// Remove existing localisation entries for this file before re-indexing.
+		removeFileFromIndex(this._locIndex, filePath);
 
 		try {
 			const content = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
@@ -314,21 +310,19 @@ export class IndexService implements vscode.Disposable {
 
 	private async _indexSingleWorkspaceSymbolFile(
 		uri: vscode.Uri,
-		origin: 'workspace' | 'vanilla' = 'workspace',
-		rebuildReferences = false
+		origin: 'workspace' | 'vanilla' = 'workspace'
 	): Promise<void> {
 		const filePath = uri.fsPath;
 		const previousVersion = this._workspaceSymbolFileVersions.get(filePath) ?? 0;
 
-		removeFileFromSymbolIndex(this._workspaceSymbolIndex, filePath);
-		this._workspaceSymbolFileVersions.delete(filePath);
+		this._removeWorkspaceSymbolFile(filePath);
 
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
 			// Guard against oversized files that would bloat the extension host.
 			if (raw.byteLength > IndexService.MAX_SYMBOL_FILE_BYTES) return;
 
-			const content = raw.toString();
+			const content = Buffer.from(raw).toString('utf8');
 			const fileVersion = previousVersion + 1;
 			this._workspaceSymbolFileVersions.set(filePath, fileVersion);
 			const updatedAt = Date.now();
@@ -342,14 +336,6 @@ export class IndexService implements vscode.Disposable {
 				maxReferencesPerSymbol: 8,
 			});
 			addSymbolsToIndex(this._workspaceSymbolIndex, entries);
-
-			// DO NOT hold file content in memory — it was only needed for parsing.
-			// Cross-file reference rebuilding is an explicit, optional operation.
-			if (rebuildReferences) {
-				// For single-file incremental updates we skip cross-file rebuild
-				// to avoid the expensive O(symbols × files) scan on every save.
-				this._rebuildWorkspaceSymbolReferences();
-			}
 			this._lastWorkspaceSymbolRefreshAt = updatedAt;
 		} catch {
 			// File read error - skip
@@ -362,10 +348,10 @@ export class IndexService implements vscode.Disposable {
 		for (const root of roots) {
 			const uri = vscode.Uri.file(root);
 			const pattern = new vscode.RelativePattern(uri, '**/*.{txt,gfx,asset,gui}');
-			const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools}/**', 3000);
+			const files = await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools}/**', IndexService.VANILLA_SYMBOL_FILE_LIMIT);
 			for (const fileUri of files) {
 				try {
-					await this._indexSingleWorkspaceSymbolFile(fileUri, 'vanilla', false);
+					await this._indexSingleWorkspaceSymbolFile(fileUri, 'vanilla');
 				} catch {
 					// Skip unreadable vanilla files.
 				}
@@ -388,24 +374,6 @@ export class IndexService implements vscode.Disposable {
 	}
 
 	/**
-	 * Rebuild cross-file references for all indexed symbols.
-	 *
-	 * This is intentionally expensive — it reads every indexed file's content,
-	 * runs a regex for each symbol name, and stores reference locations.
-	 *
-	 * It should only be called:
-	 * - After a full index build (with force flag)
-	 * - On explicit user/AI request
-	 *
-	 * **Never** on every single-file save.
-	 */
-	private _rebuildWorkspaceSymbolReferences(): void {
-		// Only rebuild if we have a populated content map (set externally during bulk builds).
-		if (this._workspaceSymbolFileContents.size === 0) return;
-		rebuildWorkspaceSymbolReferences(this._workspaceSymbolIndex, this._workspaceSymbolFileContents, 20);
-	}
-
-	/**
 	 * Build the full workspace symbol index. Called lazily by ensureWorkspaceSymbolsReady().
 	 * Yields to the event loop between batches to avoid starving CodeLens, semantic tokens,
 	 * and completions.
@@ -416,18 +384,18 @@ export class IndexService implements vscode.Disposable {
 			// Clear previous index
 			this._workspaceSymbolIndex.clear();
 			this._workspaceSymbolFileVersions.clear();
-			this._workspaceSymbolFileContents.clear();
+			this._workspaceSymbolsIncludeVanilla = false;
 
 			await this._indexWorkspaceSymbolFiles();
 
 			if (includeVanilla) {
 				await this._indexVanillaWorkspaceSymbolFiles();
-				this._workspaceSymbolsIncludeVanilla = true;
 			}
+			this._workspaceSymbolsIncludeVanilla = includeVanilla;
 
-			// Cross-file reference rebuild is skipped entirely during initial build
-			// to keep the extension host responsive. AI tools that need references
-			// can trigger an explicit rebuild via ensureWorkspaceSymbolsReady({ force: true }).
+			// Cross-file reference rebuilding is deliberately skipped. The parser still
+			// captures cheap in-block asset references, while avoiding the expensive
+			// O(symbols x files) scan that caused editor responsiveness regressions.
 
 			this._workspaceSymbolStatus = 'ready';
 			ErrorReporter.debug(
@@ -446,7 +414,7 @@ export class IndexService implements vscode.Disposable {
 	 */
 	private _removeWorkspaceSymbolFile(filePath: string): void {
 		removeFileFromSymbolIndex(this._workspaceSymbolIndex, filePath);
-		this._workspaceSymbolFileContents.delete(filePath);
+		this._workspaceSymbolFileVersions.delete(filePath);
 	}
 
 	// ─── File watcher handlers ───────────────────────────────────────────
@@ -505,20 +473,55 @@ export class IndexService implements vscode.Disposable {
 		return new Promise(resolve => setTimeout(resolve, 0));
 	}
 
+	/**
+	 * Record that a symbol query just happened and (re-)schedule idle eviction.
+	 * After IDLE_EVICTION_MS of silence the symbol index is released to reclaim
+	 * memory — the next query will lazily rebuild it.
+	 */
+	private _touchSymbolQuery(): void {
+		this._lastSymbolQueryAt = Date.now();
+		if (this._idleEvictionTimer) clearTimeout(this._idleEvictionTimer);
+		this._idleEvictionTimer = setTimeout(() => {
+			this._evictWorkspaceSymbolsIfIdle();
+		}, IndexService.IDLE_EVICTION_MS);
+	}
+
+	/**
+	 * Release the workspace symbol index if it hasn't been queried recently.
+	 * The index will be lazily rebuilt on the next queryWorkspaceSymbols() call.
+	 */
+	private _evictWorkspaceSymbolsIfIdle(): void {
+		if (this._workspaceSymbolStatus !== 'ready') return;
+		const idleMs = Date.now() - this._lastSymbolQueryAt;
+		if (idleMs < IndexService.IDLE_EVICTION_MS) return;
+
+		const evictedSymbols = this._workspaceSymbolIndex.size;
+		this._workspaceSymbolIndex.clear();
+		this._workspaceSymbolFileVersions.clear();
+		this._workspaceSymbolStatus = 'idle';
+		this._workspaceSymbolsIncludeVanilla = false;
+		ErrorReporter.debug(
+			'IndexService',
+			`Evicted ${evictedSymbols} workspace symbols after ${Math.round(idleMs / 1000)}s idle`
+		);
+	}
+
 	// ─── Disposal ────────────────────────────────────────────────────────
 
 	dispose(): void {
-		if (this._debounceTimer) {
-			clearTimeout(this._debounceTimer);
-		}
+		if (this._debounceTimer) clearTimeout(this._debounceTimer);
+		if (this._idleEvictionTimer) clearTimeout(this._idleEvictionTimer);
 		for (const d of this._disposables) {
 			d.dispose();
 		}
 		this._disposables = [];
 		this._locIndex.clear();
 		this._workspaceSymbolIndex.clear();
-		this._workspaceSymbolFileContents.clear();
 		this._workspaceSymbolFileVersions.clear();
+		this._pendingUpdateUris.clear();
 		this._status = 'idle';
+		this._workspaceSymbolStatus = 'idle';
+		this._workspaceSymbolsIncludeVanilla = false;
+		this._workspaceSymbolBuildPromise = undefined;
 	}
 }

@@ -230,7 +230,7 @@ export class AgentToolExecutor {
         };
     }
 
-    private queryWorkspaceIndex(args: import('./types').QueryWorkspaceIndexArgs): import('./types').QueryWorkspaceIndexResult {
+    private async queryWorkspaceIndex(args: import('./types').QueryWorkspaceIndexArgs): Promise<import('./types').QueryWorkspaceIndexResult> {
         if (!this.indexService) {
             return {
                 status: 'unavailable',
@@ -241,6 +241,9 @@ export class AgentToolExecutor {
         }
 
         const limit = Math.max(1, Math.min(Number(args.limit ?? 50) || 50, 200));
+        await this.indexService.ensureWorkspaceSymbolsReady?.({
+            includeVanilla: args.origin !== 'workspace',
+        });
         const entries = this.indexService.queryWorkspaceSymbols({
             name: args.name,
             kind: args.kind,
@@ -441,7 +444,7 @@ export class AgentToolExecutor {
             case 'query_localisation_index':
                 result = this.queryLocalisationIndex(args as any); break;
             case 'query_workspace_index':
-                result = this.queryWorkspaceIndex(args as any); break;
+                result = await this.queryWorkspaceIndex(args as any); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_references':

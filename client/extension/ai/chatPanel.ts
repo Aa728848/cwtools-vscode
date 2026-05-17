@@ -35,6 +35,8 @@ import { ChatSettingsManager } from './chatSettings';
 import { ErrorReporter } from './errorReporter';
 import { UI, SOURCE } from './messages';
 import { ContextReferenceManager } from './contextReferences';
+import { getAllWorkflows, getWorkflow } from './workflowRegistry';
+import { toWorkflowViewModel } from './workflowViewModel';
 import {
     getAiStorageRoot,
     getProjectWorkspaceRoot,
@@ -54,6 +56,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private abortController: AbortController | null = null;
     private currentMode: AgentMode = 'build';
     private previousMode: AgentMode = 'build';
+    private currentWorkflowId: string | null = null;
     /** Live snapshot of agent steps emitted during the current generation */
     private _liveSteps: AgentStep[] = [];
     /** Whether an AI generation is currently running */
@@ -193,6 +196,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this.artifacts.size > 0) {
             this.postMessage({ type: 'artifactList', artifacts: [...this.artifacts.values()] });
         }
+        this.sendWorkflowState();
         // 4. Restore model lists and settings bindings
         void this.settingsManager.buildAndSendSettingsData();
     }
@@ -281,6 +285,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'switchMode':
                 this.switchMode(msg.mode);
+                break;
+            case 'switchWorkflow':
+                this.switchWorkflow(msg.workflowId);
                 break;
             case 'retractMessage':
                 // Fix #3: retractMessage is async — must await to catch errors
@@ -695,6 +702,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         this.requestPermission(id, tool, description, command),
                     onTodoUpdate: (todos) => this.sendTodoUpdate(todos),
                     resumeFromState,
+                    workflowId: this.currentWorkflowId ?? undefined,
                 },
                 images  // pass images to build ContentPart[] user turn
             );
@@ -1765,6 +1773,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             } else if (['build', 'plan', 'explore', 'utility', 'review', 'orchestrator'].includes(mode)) {
                 this.switchMode(mode);
             }
+        } else if (cmd === 'workflow:none' || cmd === '/workflow:none' || cmd === 'workflow:off' || cmd === '/workflow:off') {
+            this.switchWorkflow(null);
+        } else if (cmd === 'workflow:list' || cmd === '/workflow:list') {
+            this.sendWorkflowState();
+        } else if (cmd.startsWith('workflow:') || cmd.startsWith('/workflow:')) {
+            this.switchWorkflow(cmd.split(':')[1]);
         } else if (cmd === 'fork' || cmd === '/fork') {
             if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
                 this.forkTopic(this.topicManager.currentTopic.id, this.topicManager.currentTopic.messages.length - 1);
@@ -1853,6 +1867,40 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this.currentMode !== mode) this.previousMode = this.currentMode;
         this.currentMode = mode;
         this.postMessage({ type: 'modeChanged', mode });
+    }
+
+    private switchWorkflow(workflowId?: string | null): void {
+        const normalized = (workflowId || '').trim();
+        if (!normalized) {
+            this.currentWorkflowId = null;
+            this.sendWorkflowState();
+            return;
+        }
+
+        const workflow = getWorkflow(normalized);
+        if (!workflow) {
+            vs.window.showWarningMessage(`Unknown AI workflow: ${normalized}`);
+            this.sendWorkflowState();
+            return;
+        }
+
+        this.currentWorkflowId = workflow.id;
+        this.switchMode(workflow.mode);
+        this.sendWorkflowState();
+    }
+
+    private sendWorkflowState(): void {
+        const workflows = getAllWorkflows().map(toWorkflowViewModel);
+        this.postMessage({
+            type: 'workflowList',
+            workflows,
+            currentWorkflowId: this.currentWorkflowId,
+        });
+        this.postMessage({
+            type: 'workflowChanged',
+            workflowId: this.currentWorkflowId,
+            workflow: this.currentWorkflowId ? workflows.find(w => w.id === this.currentWorkflowId) : undefined,
+        });
     }
 
 

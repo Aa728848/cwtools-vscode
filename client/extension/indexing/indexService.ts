@@ -17,6 +17,7 @@
 
 import * as vscode from 'vscode';
 import { ErrorReporter } from '../ai/errorReporter';
+import { getLocalisationDirectoryGlob } from '../gameProfiles';
 import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex } from './locParser';
 
 // ─── Index status ────────────────────────────────────────────────────────────
@@ -51,6 +52,7 @@ export class IndexService implements vscode.Disposable {
 	private _fileWatcher: vscode.FileSystemWatcher | undefined;
 	private _debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	private static readonly DEBOUNCE_MS = 300;
+	private readonly _locDirectoryGlob = getLocalisationDirectoryGlob();
 
 	/** Current index status. */
 	get status(): IndexStatus {
@@ -73,7 +75,7 @@ export class IndexService implements vscode.Disposable {
 		try {
 			// Set up file watcher for localisation files
 			this._fileWatcher = vscode.workspace.createFileSystemWatcher(
-				'**/{localisation,localisation_synced,localization}/**/*.yml'
+				`**/${this._locDirectoryGlob}/**/*.yml`
 			);
 
 			this._fileWatcher.onDidChange(uri => this._onFileChanged(uri));
@@ -148,7 +150,7 @@ export class IndexService implements vscode.Disposable {
 		this._locIndex.clear();
 
 		const files = await vscode.workspace.findFiles(
-			'**/{localisation,localisation_synced,localization}/**/*.yml',
+			`**/${this._locDirectoryGlob}/**/*.yml`,
 			'**/node_modules/**',
 			5000
 		);

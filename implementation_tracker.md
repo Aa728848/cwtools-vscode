@@ -308,7 +308,7 @@
 | 检查项 | 结果 |
 | --- | --- |
 | `npm run compile` | ✅ 通过 |
-| `npm run test:unit` | ✅ **412 passing, 0 failing** |
+| `npm run test:unit` | ✅ **431 passing, 0 failing** |
 | `node tools/check-release.js` | ✅ 通过 |
 | `npx eslint client/test/` | ✅ 通过（0 warnings） |
 | `npm run lint`（全量） | ✅ 通过（0 errors, 0 warnings） |
@@ -329,6 +329,13 @@
 | `client/test/unit/chatFormatters.test.ts` | 4 | Chat helper 单元测试 |
 | `tools/check-release.js` | 5 | Release quality gate 脚本（10 项检查） |
 | `.github/workflows/ci.yml` | 5 | GitHub Actions CI，执行 `npm run verify` |
+| `client/webview/chat/artifacts.ts` | 4 | Chat artifact drawer 纯模型/helper |
+| `client/webview/chat/topics.ts` | 4 | Chat topic panel 纯模型/helper |
+| `client/webview/chat/workflows.ts` | 2/4 | Webview workflow selector/helper |
+| `client/extension/ai/workflowViewModel.ts` | 2 | Host → Webview workflow 视图模型 |
+| `client/test/unit/chatModels.test.ts` | 4/5 | Chat topics/artifacts/workflows 模型测试 |
+| `client/test/unit/workflowViewModel.test.ts` | 2 | Workflow 视图模型测试 |
+| `client/test/unit/webviewSmoke.test.ts` | 5 | Chat webview smoke 检查 |
 
 ## 修改文件清单
 
@@ -337,9 +344,32 @@
 | `client/extension/extension.ts` | 使用 GameProfile 替代硬编码游戏配置 |
 | `client/extension/ai/gameKnowledge.ts` | `getGameDisplayName()` 委托到 GameProfile |
 | `client/extension/ai/agentRunner.ts` | 新增 `workflowId` 选项 |
+| `client/extension/ai/agentTools.ts` | 新增 `query_localisation_index`，通过共享 `IndexService` 查询本地化索引 |
+| `client/extension/ai/chatPanel.ts` | 新增 workflow 状态下发、切换入口与 active workflow 传递 |
+| `client/extension/ai/chatHtml.ts` | 新增 workflow selector |
+| `client/extension/ai/tools/definitions.ts` | 新增 `query_localisation_index` 工具 schema |
+| `client/extension/ai/tools/registry.ts` | 将 `query_localisation_index` 注册为只读工具 |
+| `client/extension/gameProfiles.ts` | 新增本地化目录推导 helper |
+| `client/extension/indexing/indexService.ts` | 本地化扫描/监听 glob 改为从 `GameProfile` 推导 |
 | `client/extension/locDecorations.ts` | 迁移本地化 hover/definition 到共享 `IndexService` |
-| `client/webview/chatPanel.ts` | 内部 helper 替换为 `chat/formatters.ts` 导入委托 |
+| `client/webview/chatPanel.ts` | 内部 helper 继续迁移到 `chat/formatters.ts`、`chat/artifacts.ts`、`chat/topics.ts`、`chat/workflows.ts` |
 | `package.json` | 新增 `check:release` + `verify` scripts |
+
+## 本轮追加完成项（2026-05-17）
+
+针对上一轮列出的 5 个后续方向，本轮已完成一批可编译、可测试的落地点：
+
+1. `chatPanel.ts` 继续模块化：新增 artifacts/topics/workflows 纯模型模块，并让 chat panel 消费。
+2. `IndexService` 扩大消费入口：新增 AI 工具 `query_localisation_index`。
+3. AI Workflow 可见化入口：新增 workflow selector、`switchWorkflow`、`/workflow:<id>`、`/workflow:off`，并把 active workflow 传入 `AgentRunner.run()`。
+4. `GameProfile` 继续成为游戏能力入口：本地化扫描/监听目录由 profile 推导。
+5. Webview 质量门补强：新增 chat webview smoke 检查。
+
+当前验证：
+
+- `npm run compile`：通过
+- `npm run test:unit`：431 passing, 0 failing
+- `npm run lint`：通过，0 warnings
 
 ## 下一轮建议优先级
 

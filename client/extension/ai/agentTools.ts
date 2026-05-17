@@ -21,6 +21,7 @@ import { FileToolHandler, findFiles } from './tools/fileTools';
 import { LspToolHandler } from './tools/lspTools';
 import { ExternalToolHandler } from './tools/externalTools';
 import { getTopicStorageDir } from './workspacePaths';
+import type { IndexService } from '../indexing/indexService';
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     // LSP / CWTools query tools — 45s (LSP can be queued behind heavy indexing)
     query_scope: 45_000,
     query_types: 45_000,
+    query_localisation_index: 10_000,
     query_rules: 45_000,
     query_references: 45_000,
     // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
@@ -140,12 +142,15 @@ export class AgentToolExecutor {
 
     private readonly clientGetter: () => LanguageClient;
     public readonly workspaceRoot: string;
+    private readonly indexService?: IndexService;
 
     constructor(
         clientOrGetter: LanguageClient | (() => LanguageClient),
-        workspaceRoot: string
+        workspaceRoot: string,
+        indexService?: IndexService
     ) {
         this.workspaceRoot = workspaceRoot;
+        this.indexService = indexService;
         this.clientGetter = typeof clientOrGetter === 'function'
             ? clientOrGetter
             : () => clientOrGetter;
@@ -188,6 +193,40 @@ export class AgentToolExecutor {
 
     get client(): LanguageClient {
         return this.clientGetter();
+    }
+
+    private queryLocalisationIndex(args: import('./types').QueryLocalisationIndexArgs): import('./types').QueryLocalisationIndexResult {
+        if (!this.indexService) {
+            return {
+                status: 'unavailable',
+                totalCount: 0,
+                entries: [],
+                _hint: 'The shared IndexService is not available in this extension host.',
+            };
+        }
+
+        const limit = Math.max(1, Math.min(Number(args.limit ?? 20) || 20, 100));
+        const entries = this.indexService.queryLocalisation({
+            key: args.key,
+            language: args.language,
+            prefix: !!args.prefix,
+            limit,
+        });
+
+        return {
+            status: this.indexService.status,
+            totalCount: entries.length,
+            entries: entries.map(entry => ({
+                key: entry.key,
+                value: entry.value,
+                file: entry.file,
+                line: entry.line,
+                language: entry.language,
+            })),
+            _hint: this.indexService.status === 'ready'
+                ? undefined
+                : 'Index may still be building; retry after the initial refresh completes.',
+        };
     }
 
     suspendLsp = (): void => {
@@ -350,6 +389,8 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.queryScope(args as any); break;
             case 'query_types':
                 result = await this.lspHandler.queryTypes(args as any); break;
+            case 'query_localisation_index':
+                result = this.queryLocalisationIndex(args as any); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_references':

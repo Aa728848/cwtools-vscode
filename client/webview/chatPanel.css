@@ -329,6 +329,9 @@ body.artifact-drawer-open .artifact-drawer { transform: translateX(0); }
 .mode-select { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: all 0.15s; flex-shrink: 0; max-width: 160px; }
 .mode-select:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
 .mode-select option { background: var(--input-bg); color: var(--fg); }
+.workflow-selector { flex-shrink: 0; max-width: 170px; background: rgba(100,166,255,0.08); border: 1px solid rgba(100,166,255,0.22); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: all 0.15s; }
+.workflow-selector:hover, .workflow-selector.active { background: rgba(100,166,255,0.14); border-color: rgba(100,166,255,0.38); }
+.workflow-selector option { background: var(--input-bg); color: var(--fg); }
 .model-selector { flex: 1; min-width: 0; max-width: 170px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: var(--fg); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 6px; outline: none; font-family: inherit; transition: all 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-selector:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); }
 .model-selector option { background: var(--input-bg); color: var(--fg); }

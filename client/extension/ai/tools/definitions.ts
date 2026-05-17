@@ -42,6 +42,23 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'query_localisation_index',
+            description: 'Query the shared incremental localisation index for mod YML keys without scanning files. Use this before creating or updating localisation keys, and when checking whether a key already exists.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    key: { type: 'string', description: 'Exact key or prefix to search for.' },
+                    language: { type: 'string', description: 'Optional localisation language tag, e.g. l_english or l_simp_chinese.' },
+                    prefix: { type: 'boolean', description: 'If true, key is treated as a prefix. Default false.' },
+                    limit: { type: 'number', description: 'Maximum entries to return. Default 20, max 100.' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'query_rules',
             description: 'Query syntax rules for triggers, effects, scope changes, or modifiers. Returns valid syntax, parameters, and scopes. Fuzzy-matches if exact name not found.',
             parameters: {

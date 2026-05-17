@@ -132,6 +132,9 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
                     <option value="review">审查模式</option>
                     <option value="orchestrator">协作模式</option>
                 </select>
+                <select class="workflow-selector" id="workflowSel" title="AI Workflow">
+                    <option value="">Workflow</option>
+                </select>
                 <select class="model-selector" id="quickModelSelect" title="当前模型"></select>
                 <button class="img-pick-btn" id="imgPickBtn" title="上传图片">${svgIconNoMargin('plus')}</button>
             </div>

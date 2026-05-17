@@ -228,6 +228,26 @@ export interface QueryTypesResult {
     totalCount: number;
 }
 
+export interface QueryLocalisationIndexArgs {
+    key?: string;
+    language?: string;
+    prefix?: boolean;
+    limit?: number;
+}
+
+export interface QueryLocalisationIndexResult {
+    status: 'ready' | 'indexing' | 'idle' | 'error' | 'unavailable';
+    totalCount: number;
+    entries: Array<{
+        key: string;
+        value: string;
+        file: string;
+        line: number;
+        language: string;
+    }>;
+    _hint?: string;
+}
+
 export interface QueryRulesArgs {
     category: 'trigger' | 'effect' | 'scope_change' | 'modifier';
     name?: string;
@@ -543,6 +563,7 @@ export interface AgentToolContext {
 export type ToolArgs =
     | QueryScopeArgs
     | QueryTypesArgs
+    | QueryLocalisationIndexArgs
     | QueryRulesArgs
     | QueryReferencesArgs
     | GetFileContextArgs
@@ -570,6 +591,7 @@ export type ToolArgs =
 export type ToolResult =
     | QueryScopeResult
     | QueryTypesResult
+    | QueryLocalisationIndexResult
     | QueryRulesResult
     | QueryReferencesResult
     | GetFileContextResult
@@ -596,6 +618,7 @@ export type ToolResult =
 export type AgentToolName =
     | 'query_scope'
     | 'query_types'
+    | 'query_localisation_index'
     | 'query_rules'
     | 'query_references'
     // validate_code — REMOVED: replaced by get_diagnostics + multi_replace_file_content inline diagnostics
@@ -1174,6 +1197,7 @@ export type WebViewMessage =
     | { type: 'configureProvider' }
     | { type: 'cancelGeneration' }
     | { type: 'switchMode'; mode: AgentMode }
+    | { type: 'switchWorkflow'; workflowId?: string | null }
     | { type: 'openSettings' }
     | { type: 'saveSettings'; settings: PanelSettings }
     | { type: 'detectOllamaModels'; endpoint: string }
@@ -1227,6 +1251,8 @@ export type HostMessage =
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat' }
     | { type: 'modeChanged'; mode: AgentMode; label?: string }
+    | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null }
+    | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> } }
     | { type: 'todoUpdate'; todos: TodoItem[] }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[] }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }

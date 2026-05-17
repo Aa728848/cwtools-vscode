@@ -378,6 +378,46 @@ describe('agent sprite candidate tool contract', () => {
         expect(definition.function.parameters.properties).to.have.property('searchContext');
     });
 
+    it('registers query_localisation_index as a first-class read-only tool', () => {
+        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'query_localisation_index');
+        if (!definition) {
+            throw new Error('query_localisation_index tool definition is missing');
+        }
+        expect(definition.function.description).to.include('shared incremental localisation index');
+        expect(definition.function.parameters.properties).to.have.property('prefix');
+    });
+
+    it('queries the shared localisation index when IndexService is provided', async () => {
+        const fakeIndexService = {
+            status: 'ready',
+            queryLocalisation: (query: any) => [{
+                key: query.key,
+                value: 'Hello',
+                file: path.join('localisation', 'test_l_english.yml'),
+                line: 2,
+                language: query.language || 'l_english',
+            }],
+        };
+        const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
+
+        const result = await executor.execute('query_localisation_index', {
+            key: 'my_key',
+            language: 'l_english',
+        }) as any;
+
+        expect(result.status).to.equal('ready');
+        expect(result.totalCount).to.equal(1);
+        expect(result.entries[0].key).to.equal('my_key');
+    });
+
+    it('returns unavailable localisation index result without IndexService', async () => {
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const result = await executor.execute('query_localisation_index', { key: 'my_key' }) as any;
+
+        expect(result.status).to.equal('unavailable');
+        expect(result.entries).to.deep.equal([]);
+    });
+
     it('parses project .gfx spriteType candidates and ranks event pictures', async () => {
         const lspTools = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
         const interfaceDir = path.join(workspaceRoot, 'interface');

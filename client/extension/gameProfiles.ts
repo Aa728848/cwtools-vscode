@@ -432,6 +432,29 @@ export function getAllProfiles(): GameProfile[] {
 }
 
 /**
+ * Returns all localisation directory names across registered profiles.
+ * Consumers should use this when watching/scanning localisation files instead
+ * of hard-coding localisation/localization spellings.
+ */
+export function getAllLocalisationDirectoryNames(): string[] {
+	const names = new Set<string>();
+	for (const profile of PROFILES.values()) {
+		for (const dir of profile.localisation.directories) {
+			names.add(dir);
+		}
+	}
+	return Array.from(names);
+}
+
+/**
+ * Builds a VS Code glob fragment for all known localisation directories.
+ */
+export function getLocalisationDirectoryGlob(): string {
+	const names = getAllLocalisationDirectoryNames();
+	return names.length === 1 ? names[0]! : `{${names.join(',')}}`;
+}
+
+/**
  * Returns all registered language IDs (game IDs).
  */
 export function getAllLanguageIds(): string[] {

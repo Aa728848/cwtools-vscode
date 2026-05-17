@@ -1,6 +1,5 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 import { routeLiveStep, buildToolPairHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
-import { getDiffArtifactFilesForWebview, type DiffArtifactFileView } from './artifactPanelModel';
 import {
     escapeHtml as _fmtEscapeHtml,
     formatNum as _fmtFormatNum,
@@ -14,6 +13,26 @@ import {
     ORCHESTRATOR_TOOL_NAMES as _fmtOrchestratorTools,
     type RunSummary as _FmtRunSummary,
 } from './chat/formatters';
+import {
+    artifactPreviewPayload,
+    filterArtifacts,
+    fileBaseName,
+    formatArtifactFileStats,
+    getDiffArtifactFiles,
+    restoreArtifactsFromMessages as restoreArtifactsFromHistory,
+    sortArtifactsByNewest,
+    type ArtifactFilter,
+    type ArtifactRecord,
+} from './chat/artifacts';
+import {
+    buildTopicSummaryModel,
+    formatTopicMoment as formatTopicMomentModel,
+    groupTopicsByDate as groupTopicsByDateModel,
+    shortenText as shortenTopicText,
+    type TopicPanelItem,
+    type TopicPanelStats,
+} from './chat/topics';
+import { buildWorkflowSummary, getWorkflowSlashCommand, type WorkflowView } from './chat/workflows';
 
 (function () {
     const vscode = acquireVsCodeApi();
@@ -66,25 +85,6 @@ import {
     let settingsModelContextTokens: Record<string, number> = {};
     /** Thinking model prefixes — these models are excluded from inline completion selectors */
     let settingsThinkingPrefixes: string[] = [];
-    type TopicPanelItem = {
-        id: string;
-        title: string;
-        updatedAt: number;
-        createdAt?: number;
-        archived?: boolean;
-        messageCount?: number;
-        matchContext?: string;
-        score?: number;
-        parentTopicId?: string;
-        forkedFromMessageIndex?: number;
-    };
-    type TopicPanelStats = {
-        total: number;
-        visible: number;
-        archived: number;
-        currentTopicId?: string | null;
-        currentTopicTitle?: string | null;
-    };
     let currentTopicId: string | null = null;
     let currentTopicTitle = '';
     let totalConversationTokens = 0;
@@ -129,23 +129,11 @@ import {
         tokenEstimate?: number;
         cacheStatus?: ActiveContext['cacheStatus'];
     };
-    type ArtifactRecord = {
-        id: string;
-        kind: 'plan' | 'blueprint' | 'walkthrough' | 'diff' | 'diagnostics' | 'validation' | 'media' | 'blackboard';
-        title: string;
-        summary?: string;
-        filePath?: string;
-        relPath?: string;
-        action?: 'openFile' | 'openDiff' | 'preview';
-        status?: 'pending' | 'running' | 'done' | 'failed';
-        createdAt: number;
-        updatedAt?: number;
-        data?: unknown;
-    };
-    type DiffArtifactFileRecord = DiffArtifactFileView;
     let activeContexts: ActiveContext[] = [];
     let artifacts: ArtifactRecord[] = [];
-    let artifactFilter: 'all' | 'plan' | 'validation' | 'diff' = 'all';
+    let artifactFilter: ArtifactFilter = 'all';
+    let workflows: WorkflowView[] = [];
+    let activeWorkflowId: string | null = null;
     const CONTEXT_TYPE_META: Record<ActiveContext['type'], { icon: keyof typeof Icons; label: string }> = {
         code_selection: { icon: 'file', label: 'selection' },
         diagnostics: { icon: 'stethoscope', label: 'diagnostics' },
@@ -544,12 +532,21 @@ import {
         });
     }
 
+    const workflowSel = document.getElementById('workflowSel') as HTMLSelectElement | null;
+    if (workflowSel) {
+        workflowSel.addEventListener('change', () => {
+            vscode.postMessage({ type: 'switchWorkflow', workflowId: workflowSel.value || null });
+        });
+    }
+
     // ── Slash command popup ────────────────────────────────────────────────────
     const SLASH_COMMANDS = [
         { cmd: '/init', desc: '扫描项目，生成 CWTOOLS.md 规则文件（类 OpenCode /init）' },
         { cmd: '/clear', desc: '清空当前对话，开始新话题' },
         { cmd: '/fork', desc: '从当前位置分叉对话' },
         { cmd: '/archive', desc: '归档当前话题' },
+        { cmd: '/workflow:list', desc: '列出可用 AI 工作流' },
+        { cmd: '/workflow:off', desc: '关闭当前 AI 工作流' },
         { cmd: '/mode:build', desc: '切换到构建模式（生成代码）' },
         { cmd: '/mode:plan', desc: '切换到计划模式（单 Agent 只读规划）' },
         { cmd: '/mode:explore', desc: '切换到分析模式（探索代码库）' },
@@ -562,7 +559,11 @@ import {
     function showSlashPopup(filter: string) {
         if (!slashPopup) return;
         const q = filter.toLowerCase();
-        const matches = SLASH_COMMANDS.filter(c => c.cmd.includes(q));
+        const workflowCommands = workflows.map(workflow => ({
+            cmd: getWorkflowSlashCommand(workflow.id),
+            desc: workflow.description || workflow.title,
+        }));
+        const matches = [...SLASH_COMMANDS, ...workflowCommands].filter(c => c.cmd.includes(q));
         if (!matches.length) { slashPopup.classList.remove('show'); return; }
         slashPopup.innerHTML = matches.map(c =>
             `<div class="slash-popup-item" data-cmd="${c.cmd}"><span class="slash-popup-cmd">${c.cmd}</span><span class="slash-popup-desc">${c.desc}</span></div>`
@@ -749,12 +750,7 @@ import {
             return;
         }
 
-        const visibleArtifacts = artifacts.filter(artifact => {
-            if (artifactFilter === 'all') return true;
-            if (artifactFilter === 'plan') return artifact.kind === 'plan' || artifact.kind === 'blueprint';
-            if (artifactFilter === 'diff') return artifact.kind === 'diff';
-            return artifact.kind === 'validation' || artifact.kind === 'diagnostics';
-        });
+        const visibleArtifacts = filterArtifacts(artifacts, artifactFilter);
         if (visibleArtifacts.length === 0) {
             list.innerHTML = `
                 <div class="artifact-empty">
@@ -803,13 +799,7 @@ import {
                 }
                 const preview = document.createElement('pre');
                 preview.className = 'artifact-preview';
-                const fallback = {
-                    title: artifact.title,
-                    summary: artifact.summary,
-                    relPath: artifact.relPath,
-                    status: artifact.status || 'done',
-                };
-                preview.textContent = JSON.stringify(artifact.data ?? fallback, null, 2).slice(0, 6000);
+                preview.textContent = JSON.stringify(artifactPreviewPayload(artifact), null, 2).slice(0, 6000);
                 row.insertAdjacentElement('afterend', preview);
             };
             if (artifact.kind === 'diff' || artifact.action === 'openDiff') {
@@ -823,23 +813,6 @@ import {
             }
             list.appendChild(row);
         }
-    }
-
-    const getDiffArtifactFiles = getDiffArtifactFilesForWebview;
-
-    function fileBaseName(file: string): string {
-        return file.split(/[\\/]/).pop() || file;
-    }
-
-    function formatArtifactFileStats(file: DiffArtifactFileRecord): string {
-        const parts: string[] = [];
-        if (file.status) parts.push(file.status);
-        if (file.additions !== undefined || file.deletions !== undefined) {
-            parts.push(`+${file.additions ?? 0} -${file.deletions ?? 0}`);
-        } else if (file.diffPreview) {
-            parts.push(file.diffPreview);
-        }
-        return parts.join(' | ');
     }
 
     function toggleDiffArtifactDetails(row: HTMLElement, artifact: ArtifactRecord) {
@@ -959,7 +932,7 @@ import {
                 }
             }
         }
-        artifacts = restored.sort((a, b) => b.createdAt - a.createdAt);
+        artifacts = restoreArtifactsFromHistory(messages);
         renderArtifactPanel();
     }
 
@@ -3107,7 +3080,7 @@ import {
                 break;
 
             case 'artifactList':
-                artifacts = (msg.artifacts || []).slice().sort((a: ArtifactRecord, b: ArtifactRecord) => b.createdAt - a.createdAt);
+                artifacts = sortArtifactsByNewest(msg.artifacts || []);
                 renderArtifactPanel();
                 break;
 
@@ -3207,6 +3180,20 @@ import {
             case 'setMode':
                 // Restore mode selector state after panel rebuild (no backend call needed)
                 switchMode(msg.mode, /* fromUI */ false);
+                break;
+
+            case 'workflowList':
+                workflows = (msg.workflows || []) as WorkflowView[];
+                activeWorkflowId = msg.currentWorkflowId || null;
+                updateWorkflowSelector();
+                break;
+
+            case 'workflowChanged':
+                activeWorkflowId = msg.workflowId || null;
+                if (msg.workflow && !workflows.some(workflow => workflow.id === msg.workflow.id)) {
+                    workflows = [...workflows, msg.workflow as WorkflowView];
+                }
+                updateWorkflowSelector();
                 break;
 
             case 'replaySteps': {
@@ -4145,16 +4132,7 @@ import {
 
     // ── Topic list with date groups ────────────────────────────────────────────
     function groupTopicsByDate(topics: any[]) {
-        const now = Date.now(); const DAY = 86400000;
-        const groups: {label: string; items: any[]}[] = [{ label: '今天', items: [] }, { label: '昨天', items: [] }, { label: '本周', items: [] }, { label: '更早', items: [] }];
-        for (const t of topics) {
-            const age = now - (t.updatedAt || 0);
-            if (age < DAY) groups[0]!.items.push(t);
-            else if (age < DAY * 2) groups[1]!.items.push(t);
-            else if (age < DAY * 7) groups[2]!.items.push(t);
-            else groups[3]!.items.push(t);
-        }
-        return groups.filter(g => g.items.length > 0);
+        return groupTopicsByDateModel(topics);
     }
 
     const showArchivedCb = document.getElementById('showArchivedCb') as HTMLInputElement;
@@ -4165,18 +4143,11 @@ import {
     }
 
     function shortenText(text: string, maxLen: number) {
-        const value = String(text ?? '');
-        if (value.length <= maxLen) return value;
-        return value.slice(0, Math.max(0, maxLen - 1)).trimEnd() + '…';
+        return shortenTopicText(text, maxLen);
     }
 
     function formatTopicMoment(ts?: number) {
-        if (!ts) return '未知时间';
-        const d = new Date(ts);
-        const now = new Date();
-        const isSameDay = d.toDateString() === now.toDateString();
-        const dateLabel = isSameDay ? '今天' : d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
-        return `${dateLabel} ${formatTime(ts)}`;
+        return formatTopicMomentModel(ts, formatTime);
     }
 
     function updateCurrentTopicHeader(topicId?: string | null, title?: string | null) {
@@ -4263,6 +4234,8 @@ import {
     function renderTopicPanelSummary(mode: 'list' | 'search', items: TopicPanelItem[], stats?: TopicPanelStats, query?: string, totalCount?: number) {
         const summary = document.getElementById('topicsPanelSummary');
         if (!summary) return;
+        const summaryModel = buildTopicSummaryModel(mode, items, stats, query, totalCount);
+        summary.dataset.summaryTitle = summaryModel.title;
 
         const currentTopic = stats?.currentTopicId ? items.find(t => t.id === stats.currentTopicId) : undefined;
         const visibleCount = stats?.visible ?? items.length;
@@ -4452,6 +4425,28 @@ import {
         if (models.length > 0) {
             for (const m of models) { const opt = document.createElement('option'); opt.value = m; opt.textContent = m; opt.selected = m === current.model; qms.appendChild(opt); }
         } else { const opt = document.createElement('option'); opt.value = current.model || ''; opt.textContent = current.model || '(未设置)'; qms.appendChild(opt); }
+    }
+
+    function updateWorkflowSelector() {
+        const sel = document.getElementById('workflowSel') as HTMLSelectElement | null;
+        if (!sel) return;
+        const activeWorkflow = workflows.find(workflow => workflow.id === activeWorkflowId);
+        sel.innerHTML = '';
+        const off = document.createElement('option');
+        off.value = '';
+        off.textContent = 'Workflow';
+        off.title = 'No workflow selected';
+        sel.appendChild(off);
+        for (const workflow of workflows) {
+            const opt = document.createElement('option');
+            opt.value = workflow.id;
+            opt.textContent = workflow.title;
+            opt.title = buildWorkflowSummary(workflow);
+            opt.selected = workflow.id === activeWorkflowId;
+            sel.appendChild(opt);
+        }
+        sel.classList.toggle('active', !!activeWorkflow);
+        sel.title = buildWorkflowSummary(activeWorkflow);
     }
 
     function refreshSettingsOverview() {

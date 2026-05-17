@@ -1,0 +1,138 @@
+import { getDiffArtifactFilesForWebview, type DiffArtifactFileView } from '../artifactPanelModel';
+
+export type ArtifactKind =
+    | 'plan'
+    | 'blueprint'
+    | 'walkthrough'
+    | 'diff'
+    | 'diagnostics'
+    | 'validation'
+    | 'media'
+    | 'blackboard';
+
+export type ArtifactStatus = 'pending' | 'running' | 'done' | 'failed';
+export type ArtifactFilter = 'all' | 'plan' | 'validation' | 'diff';
+
+export interface ArtifactRecord {
+    id: string;
+    kind: ArtifactKind;
+    title: string;
+    summary?: string;
+    filePath?: string;
+    relPath?: string;
+    action?: 'openFile' | 'openDiff' | 'preview';
+    status?: ArtifactStatus;
+    createdAt: number;
+    updatedAt?: number;
+    data?: unknown;
+}
+
+export type DiffArtifactFileRecord = DiffArtifactFileView;
+
+export function filterArtifacts(artifacts: ArtifactRecord[], filter: ArtifactFilter): ArtifactRecord[] {
+    if (filter === 'all') return artifacts;
+    if (filter === 'plan') return artifacts.filter(artifact => artifact.kind === 'plan' || artifact.kind === 'blueprint');
+    if (filter === 'diff') return artifacts.filter(artifact => artifact.kind === 'diff');
+    return artifacts.filter(artifact => artifact.kind === 'validation' || artifact.kind === 'diagnostics');
+}
+
+export function sortArtifactsByNewest(artifacts: ArtifactRecord[]): ArtifactRecord[] {
+    return artifacts.slice().sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function artifactPreviewPayload(artifact: ArtifactRecord): unknown {
+    return artifact.data ?? {
+        title: artifact.title,
+        summary: artifact.summary,
+        relPath: artifact.relPath,
+        status: artifact.status || 'done',
+    };
+}
+
+export function fileBaseName(file: string): string {
+    return file.split(/[\\/]/).pop() || file;
+}
+
+export function formatArtifactFileStats(file: DiffArtifactFileRecord): string {
+    const parts: string[] = [];
+    if (file.status) parts.push(file.status);
+    if (file.additions !== undefined || file.deletions !== undefined) {
+        parts.push(`+${file.additions ?? 0} -${file.deletions ?? 0}`);
+    } else if (file.diffPreview) {
+        parts.push(file.diffPreview);
+    }
+    return parts.join(' | ');
+}
+
+export const getDiffArtifactFiles = getDiffArtifactFilesForWebview;
+
+export function restoreArtifactsFromMessages(messages: any[], now = Date.now()): ArtifactRecord[] {
+    const restored: ArtifactRecord[] = [];
+    const pushUnique = (artifact: ArtifactRecord) => {
+        if (!restored.some(a => a.id === artifact.id)) restored.push(artifact);
+    };
+
+    for (const message of messages) {
+        if (!message?.steps) continue;
+        for (const step of message.steps) {
+            const stamp = step.timestamp || message.timestamp || now;
+            if (step.type === 'plan_card') {
+                pushUnique({
+                    id: `restored:plan:${step.content}`,
+                    kind: 'plan',
+                    title: step.mode === 'orchestrator' ? 'Orchestrator Plan' : 'Implementation Plan',
+                    summary: 'Restored from chat history.',
+                    filePath: step.content,
+                    relPath: step.content,
+                    status: 'pending',
+                    createdAt: stamp,
+                });
+            } else if (step.type === 'blueprint_card') {
+                pushUnique({
+                    id: `restored:blueprint:${step.content}`,
+                    kind: 'blueprint',
+                    title: 'Design Blueprint',
+                    summary: 'Restored from chat history.',
+                    filePath: step.content,
+                    relPath: step.content,
+                    status: 'pending',
+                    createdAt: stamp,
+                });
+            } else if (step.type === 'walkthrough_card') {
+                pushUnique({
+                    id: `restored:walkthrough:${step.content}`,
+                    kind: 'walkthrough',
+                    title: 'Walkthrough Report',
+                    summary: 'Full task walkthrough restored from chat history.',
+                    filePath: step.content,
+                    relPath: step.content,
+                    status: 'done',
+                    createdAt: stamp,
+                });
+            } else if (step.type === 'validation') {
+                const content = String(step.content || '');
+                pushUnique({
+                    id: `restored:validation:${stamp}`,
+                    kind: 'validation',
+                    title: 'Validation Result',
+                    summary: content || 'Validation step restored from history.',
+                    status: /error|failed|failure/i.test(content) ? 'failed' : 'done',
+                    createdAt: stamp,
+                    data: step.toolResult,
+                });
+            } else if (step.toolName === 'get_diagnostics') {
+                pushUnique({
+                    id: `restored:diagnostics:${stamp}`,
+                    kind: 'diagnostics',
+                    title: 'Diagnostics Report',
+                    summary: 'Restored get_diagnostics result.',
+                    status: 'done',
+                    createdAt: stamp,
+                    data: step.toolResult,
+                });
+            }
+        }
+    }
+
+    return sortArtifactsByNewest(restored);
+}

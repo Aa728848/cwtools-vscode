@@ -4,6 +4,8 @@ import {
     getDefaultProfile,
     getAllLanguageIds,
     getAllProfiles,
+    getAllLocalisationDirectoryNames,
+    getLocalisationDirectoryGlob,
     getRulesRemoteUrl,
     getCacheSettingKey,
     isPreviewAvailable,
@@ -66,6 +68,20 @@ describe('GameProfile Registry', () => {
             expect(profile.localisation.encoding, `${profile.id}.loc.encoding`).to.be.a('string');
             expect(profile.localisation.defaultLanguageTag, `${profile.id}.loc.defaultLanguageTag`).to.be.a('string');
         }
+    });
+
+    it('derives localisation directory names from all profiles', () => {
+        const names = getAllLocalisationDirectoryNames();
+        expect(names).to.include('localisation');
+        expect(names).to.include('localisation_synced');
+        expect(names).to.include('localization');
+        expect(new Set(names).size).to.equal(names.length);
+    });
+
+    it('builds a localisation glob fragment from all profiles', () => {
+        const glob = getLocalisationDirectoryGlob();
+        expect(glob).to.include('localisation');
+        expect(glob).to.include('localization');
     });
 
     // ── Rules remote URL ───────────────────────────────────────────────

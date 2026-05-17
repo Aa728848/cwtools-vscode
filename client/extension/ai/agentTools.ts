@@ -559,7 +559,7 @@ export class AgentToolExecutor {
                                 ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
                                 : content;
                             result = { found: true, value: truncated, _sourceFile: filePath, _fullLength: content.length };
-                        } catch (e) {
+                        } catch {
                             result = { found: false, error: `File not found: ${filePath}` };
                         }
                     } else {
@@ -612,7 +612,7 @@ export class AgentToolExecutor {
                                 ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
                                 : content;
                             return { ...entry, value: truncated, _sourceFile: filePath, _fullLength: content.length };
-                        } catch (e) {
+                        } catch {
                             return entry;
                         }
                     }
@@ -839,9 +839,6 @@ export class AgentToolExecutor {
             const { Orchestrator } = await import('./orchestrator/orchestrator');
             const { TaskGraphEngine } = await import('./orchestrator/taskGraphEngine');
             const { applyUserModelOverrides } = await import('./orchestrator/agentRegistry');
-            const { ErrorReporter } = await import('./errorReporter');
-            const { SOURCE } = await import('./messages');
-
             //Apply user's child Agent model configuration (read from VS Code settings)
             const cfg = vs.workspace.getConfiguration('cwtools.ai');
             const agentModels = cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels');

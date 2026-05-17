@@ -15,11 +15,6 @@ import {
     type RunSummary as _FmtRunSummary,
 } from './chat/formatters';
 
-/** Type-safe getElementById with generic cast */
-function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
-    return document.getElementById(id) as T | null;
-}
-
 (function () {
     const vscode = acquireVsCodeApi();
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
@@ -30,7 +25,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     const settingsPage = document.getElementById('settingsPage') as HTMLDivElement;
     const chatHeader = document.querySelector('.header') as HTMLElement;
     const inputWrapper = document.querySelector('.input-wrapper') as HTMLElement;
-    const planIndicator = document.getElementById('planIndicator') as HTMLDivElement;
     const todoPanel = document.getElementById('todoPanel') as HTMLDivElement;
 
     let isGenerating = false;
@@ -99,8 +93,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
     let pendingImages: string[] = [];
     /** Pending files to attach */
     let pendingFiles: string[] = [];
-    /** Available workspace files received from host for @ popup */
-    let workspaceFiles: string[] = [];
     /** Pending structured references to attach to the next sent message */
     type ActiveContext = {
         id: string;
@@ -988,28 +980,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         }
     }
 
-    function addFileBadge(file: string) {
-        let area = document.getElementById('fileBadgeArea');
-        if (!area) {
-            area = document.createElement('div');
-            area.id = 'fileBadgeArea';
-            area.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 0;';
-            //Before inserting into input-container inside input-row, make sure the attachment area is within the rounded corner of the input box
-            const container = document.querySelector('.input-container');
-            const inputRow = container?.querySelector('.input-row');
-            if (container && inputRow) container.insertBefore(area, inputRow);
-            else inputWrapper?.prepend(area);
-        }
-        const badge = document.createElement('span');
-        badge.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:rgba(100,120,255,0.15);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:11px;';
-        badge.innerHTML = `${svgIconNoMargin('file')} ${escapeHtml(file.split('/').pop())} <button style="background:none;border:none;cursor:pointer;color:inherit;padding:0;font-size:10px;" data-file="${escapeHtml(file)}">✕</button>`;
-        badge.querySelector('button')!.addEventListener('click', () => {
-            pendingFiles = pendingFiles.filter(f => f !== file);
-            badge.remove();
-        });
-        area.appendChild(badge);
-    }
-
     // ── Image compression helper ───────────────────────────────────────────────
     // Unifies all image input (paste / drag / file picker) to a clean JPEG data URL.
     // Max dimension: 1024px  |  JPEG quality: 0.85  |  Output: single-line string.
@@ -1695,15 +1665,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         el.setAttribute('aria-label', role === 'user' ? 'User message' : 'AI response');
     }
 
-    // ── OpenCode-style step rendering ─────────────────────────────────────────
-    // Tool step icons — minimal, professional
-    const TOOL_ICONS = {
-        read_file: Icons.file, write_file: Icons.save, edit_file: Icons.edit,
-        list_directory: Icons.folder, search_mod_files: Icons.search, validate_code: Icons.check,
-        get_file_context: Icons.file, get_diagnostics: Icons.stethoscope, get_completion_at: Icons.lightbulb,
-        document_symbols: Icons.bookmark, workspace_symbols: Icons.bookmark, query_scope: Icons.telescope,
-        query_types: Icons.ruler, query_rules: Icons.ruler, query_references: Icons.link, todo_write: Icons.clipboard,
-    };
     // Delegated to chat/formatters.ts
     const WRITE_TOOL_NAMES = _fmtWriteTools;
     const READ_TOOL_NAMES = _fmtReadTools;
@@ -1949,53 +1910,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
         panel.appendChild(body);
         return panel;
-    }
-
-    /**
-     * Build ONE tool-pair <div class="tool-pair"> that shows:
-     *   ┌─ ToolIcon  tool_name → file.txt
-     *   └─ (result summary, only when toolResult is present)
-     */
-    function buildToolPair(callStep: any, resultStep?: any) {
-        const toolName: string = callStep.toolName || '';
-        const args = callStep.toolArgs || {};
-        const icon = TOOL_ICONS[toolName as keyof typeof TOOL_ICONS] || '⚙';
-        const fp = args.filePath || args.file || args.path || args.directory || '';
-        const fname = fp ? String(fp).split(/[\\/]/).pop() : '';
-
-        let callHtml = `<span class="tp-icon">${icon}</span>`;
-        callHtml += `<span class="tp-name">${escapeHtml(toolName)}</span>`;
-        
-        let summaryText = fname;
-        if (toolName === 'run_command' && args.command) {
-            summaryText = String(args.command).substring(0, 30) + (String(args.command).length > 30 ? '...' : '');
-        } else if ((toolName === 'search_web' || toolName === 'codesearch') && args.query) {
-            summaryText = String(args.query).substring(0, 30);
-        } else if (toolName === 'todo_write') {
-            const todos = Array.isArray(args.todos) ? args.todos : [];
-            summaryText = `${todos.length} items`;
-        }
-        
-        if (summaryText) callHtml += ` <span class="tp-file">${escapeHtml(summaryText)}</span>`;
-
-        let resultHtml = '';
-        if (resultStep && resultStep.toolResult) {
-            const r = resultStep.toolResult;
-            if (r && r.success === true) {
-                const added = r.stats ? r.stats.linesAdded || 0 : 0;
-                const removed = r.stats ? r.stats.linesRemoved || 0 : 0;
-                const diffStr = (added || removed) ? ` +${added}/-${removed}` : '';
-                resultHtml = `<div class="tp-result ok">✓${escapeHtml(diffStr)}</div>`;
-            } else if (r && r.success === false) {
-                resultHtml = `<div class="tp-result err">✗ ${escapeHtml(r.message || r.error || '')}</div>`;
-            } else if (r && r.error) {
-                resultHtml = `<div class="tp-result err">✗ ${escapeHtml(r.error)}</div>`;
-            } else if (r && r.skipped) {
-                resultHtml = `<div class="tp-result skip">— skipped</div>`;
-            }
-        }
-
-        return `<div class="tool-pair"><div class="tp-call">${callHtml}</div>${resultHtml}</div>`;
     }
 
     // ── OpenCode-style: build complete assistant message DOM ────────────────────
@@ -2377,16 +2291,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         div.appendChild(summary);
 
         return div;
-    }
-
-    function ensureLiveTextBubble(state: AgentStreamState) {
-        if (!state.container) return null;
-        if (!state.liveTextBubble) {
-            state.liveTextBubble = document.createElement('div');
-            state.liveTextBubble.className = 'msg-bubble stream-cursor';
-            state.container.appendChild(state.liveTextBubble);
-        }
-        return state.liveTextBubble;
     }
 
     function flushLiveText(state: AgentStreamState) {
@@ -3194,8 +3098,6 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 renderMentionMenu(msg.results);
                 break;
             case 'fileList':
-                // Cache workspace files for @ mention popup
-                workspaceFiles = msg.files || [];
                 // If @ popup is open, refresh it
                 if (_atPopupVisible) {
                     const v = input.value;

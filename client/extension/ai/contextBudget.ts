@@ -6,7 +6,7 @@
  * and in-place compaction of conversation histories.
  */
 
-import type { ChatMessage, ContentPart } from './types';
+import type { ChatMessage } from './types';
 import { contentToString } from './types';
 import { BUDGET } from './messages';
 

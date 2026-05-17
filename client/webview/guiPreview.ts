@@ -916,7 +916,6 @@ function setupControls() {
 
 // ─── Layers Panel ────────────────────────────────────────────────────────────
 
-let activeLayerLine: number | null = null;
 
 function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 0) {
     for (const el of elements) {
@@ -1021,13 +1020,10 @@ function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 
                     // Plain click: single select
                     selectElement(entry.el, entry.div);
                 }
-                activeLayerLine = el.line;
             } else {
                 // Preview mode: highlight + jump to line
                 document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
-                activeLayerLine = el.line;
-
                 document.querySelectorAll('.el.layer-highlight').forEach(i => i.classList.remove('layer-highlight'));
                 const elDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement;
                 if (elDiv) {
@@ -1929,7 +1925,6 @@ function updatePropertiesPanel() {
         const bgSprite = bgChild?.spriteKey ?? '';
         html += `<div class="prop-row"><span class="prop-label">背景</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(bgSprite)}" placeholder="输入或选择背景贴图..." autocomplete="off" /></div></div>`;
     } else {
-        const spriteAttr = el.spriteAttr ?? 'spriteType';
         const currentSprite = el.spriteKey ?? '';
         html += `<div class="prop-row"><span class="prop-label">贴图</span><div class="sprite-picker" style="position:relative;flex:1;min-width:0"><input class="prop-input" id="sprite-search" data-prop="sprite-select" value="${escHtml(currentSprite)}" placeholder="输入或选择贴图..." autocomplete="off" /></div></div>`;
     }
@@ -2352,7 +2347,6 @@ function reparentSelectedInto(targetContainer: GuiElement) {
     if (currentParent?.line === targetContainer.line) return;
 
     // Compute position adjustment to preserve visual location
-    const elPos = getElementCanvasPos(sel!.el);
     const targetPos = getElementCanvasPos(targetContainer);
     const dx = -(targetPos.x - (currentParent ? getElementCanvasPos(currentParent).x : 0));
     const dy = -(targetPos.y - (currentParent ? getElementCanvasPos(currentParent).y : 0));

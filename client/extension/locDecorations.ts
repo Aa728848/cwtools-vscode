@@ -5,6 +5,8 @@
  * - Provides Go to Definition for $REF$ references
  */
 import * as vs from 'vscode';
+import type { IndexService, LocEntry } from './indexing/indexService';
+import { parseLocFile } from './indexing/locParser';
 
 // Paradox color code mapping
 const COLOR_MAP: Record<string, string> = {
@@ -41,77 +43,52 @@ const markerDecorationType = vs.window.createTextEditorDecorationType({
     fontStyle: 'italic',
 });
 
-// Pattern to match §X...§! or §X...end-of-value
-const colorPattern = /§([RGBYWHETLMSPr!])/g;
+type LocLookupEntry = { value: string; uri: vs.Uri; line: number };
 
-// Pattern to match $REF$ references
-const refPattern = /\$([A-Za-z_][A-Za-z0-9_.:]*)\$/g;
+const openDocumentLocCache = new Map<string, Map<string, LocLookupEntry>>();
 
-/**
- * Cached localization map — rebuilt incrementally on document/file changes.
- */
-const documentLocCache = new Map<string, Map<string, { value: string; uri: vs.Uri; line: number }>>();
-let initialScanPromise: Promise<void> | null = null;
-
-// Cached flat map to avoid rebuilding on every hover/definition request
-let cachedFlatMap: Map<string, { value: string; uri: vs.Uri; line: number }> | null = null;
-let flatMapDirty = true;
-
-function parseYmlContent(uri: vs.Uri, text: string) {
-    const fileLocs = new Map<string, { value: string; uri: vs.Uri; line: number }>();
-    const locPattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;
-    const lines = text.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-         
-        const match = locPattern.exec(lines[i]!);
-        if (match) {
-             
-            fileLocs.set(match[1]!, { value: match[2]!, uri, line: i });
-        }
-    }
-    documentLocCache.set(uri.toString(), fileLocs);
-    flatMapDirty = true;
+function isYmlDocument(document: vs.TextDocument): boolean {
+    return document.uri.scheme === 'file' && document.fileName.endsWith('.yml');
 }
 
-async function performInitialScan(batchSize = 50) {
-    try {
-        const uris = await vs.workspace.findFiles('**/*.yml');
-        for (let i = 0; i < uris.length; i += batchSize) {
-            const batch = uris.slice(i, i + batchSize);
-            await Promise.all(batch.map(async (uri) => {
-                try {
-                    const stat = await vs.workspace.fs.stat(uri);
-                    if (stat.size > 512 * 1024) return;
-                    const data = await vs.workspace.fs.readFile(uri);
-                    const text = new TextDecoder('utf-8').decode(data);
-                    parseYmlContent(uri, text);
-                } catch {
-                    // Ignore read errors on individual files
-                }
-            }));
-        }
-    } catch {
-        // Ignore search errors
+function cacheOpenDocumentLocalisation(document: vs.TextDocument): void {
+    if (!isYmlDocument(document)) return;
+
+    const entries = parseLocFile(document.getText(), document.uri.fsPath);
+    const fileLocs = new Map<string, LocLookupEntry>();
+    for (const entry of entries) {
+        fileLocs.set(entry.key, {
+            value: entry.value,
+            uri: document.uri,
+            line: Math.max(0, entry.line - 1),
+        });
     }
+    openDocumentLocCache.set(document.uri.toString(), fileLocs);
 }
 
-async function getLocMap(): Promise<Map<string, { value: string; uri: vs.Uri; line: number }>> {
-    if (!initialScanPromise) {
-        initialScanPromise = performInitialScan();
-    }
-    await initialScanPromise;
+function fromIndexedEntry(entry: LocEntry): LocLookupEntry {
+    return {
+        value: entry.value,
+        uri: vs.Uri.file(entry.file),
+        line: Math.max(0, entry.line - 1),
+    };
+}
 
-    if (!flatMapDirty && cachedFlatMap) return cachedFlatMap;
+function findLocEntry(
+    key: string,
+    preferredDocument: vs.TextDocument,
+    indexService?: IndexService,
+): LocLookupEntry | undefined {
+    const preferred = openDocumentLocCache.get(preferredDocument.uri.toString())?.get(key);
+    if (preferred) return preferred;
 
-    const flatMap = new Map<string, { value: string; uri: vs.Uri; line: number }>();
-    for (const fileLocs of documentLocCache.values()) {
-        for (const [k, v] of fileLocs.entries()) {
-            flatMap.set(k, v);
-        }
+    for (const fileLocs of openDocumentLocCache.values()) {
+        const entry = fileLocs.get(key);
+        if (entry) return entry;
     }
-    cachedFlatMap = flatMap;
-    flatMapDirty = false;
-    return flatMap;
+
+    const indexedEntry = indexService?.queryLocalisation({ key, limit: 1 })[0];
+    return indexedEntry ? fromIndexedEntry(indexedEntry) : undefined;
 }
 
 /**
@@ -141,9 +118,7 @@ function updateColorDecorations(editor: vs.TextEditor) {
         const linePattern = /§([RGBYWHETLMSPr!])/g;
 
         while ((match = linePattern.exec(line)) !== null) {
-             
             const code = '\u00A7' + match[1]!;
-             
             markers.push({ code, offset: match.index! });
 
             // Mark the §X itself as dim
@@ -154,13 +129,11 @@ function updateColorDecorations(editor: vs.TextEditor) {
 
         // Apply color ranges between markers
         for (let i = 0; i < markers.length; i++) {
-             
             const marker = markers[i]!;
             if (marker.code === '\u00A7!') continue; // Reset marker, skip
 
             const startOffset = marker.offset + 2; // After \u00A7X
             const endOffset = i + 1 < markers.length
-                 
                 ? markers[i + 1]!.offset
                 : line.length;
 
@@ -187,6 +160,8 @@ function updateColorDecorations(editor: vs.TextEditor) {
  * Hover provider for $REF$ references in .yml files
  */
 class LocRefHoverProvider implements vs.HoverProvider {
+    constructor(private readonly indexService: IndexService) {}
+
     async provideHover(document: vs.TextDocument, position: vs.Position): Promise<vs.Hover | null> {
         const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:-]*\$/);
         if (!range) return null;
@@ -194,8 +169,7 @@ class LocRefHoverProvider implements vs.HoverProvider {
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const locMap = await getLocMap();
-        const entry = locMap.get(refName);
+        const entry = findLocEntry(refName, document, this.indexService);
         if (!entry) return null;
 
         // Strip color codes for display
@@ -214,6 +188,8 @@ class LocRefHoverProvider implements vs.HoverProvider {
  * Definition provider for $REF$ references in .yml files
  */
 class LocRefDefinitionProvider implements vs.DefinitionProvider {
+    constructor(private readonly indexService: IndexService) {}
+
     async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
         const range = document.getWordRangeAtPosition(position, /\$[A-Za-z_][A-Za-z0-9_.:-]*\$/);
         if (!range) return null;
@@ -221,8 +197,7 @@ class LocRefDefinitionProvider implements vs.DefinitionProvider {
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const locMap = await getLocMap();
-        const entry = locMap.get(refName);
+        const entry = findLocEntry(refName, document, this.indexService);
         if (!entry) return null;
 
         return new vs.Location(entry.uri, new vs.Position(entry.line, 0));
@@ -234,6 +209,8 @@ class LocRefDefinitionProvider implements vs.DefinitionProvider {
 * Support title = "xxx" / name = xxx / desc = xxx and other reference formats 
 */
 class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
+    constructor(private readonly indexService: IndexService) {}
+
     async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
         //Try to match quoted and unquoted string values
         const range =
@@ -245,8 +222,7 @@ class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
         // Skip obvious non-localized key cases (pure numbers, yes/no, common keywords, etc.)
         if (/^\d+$/.test(word) || /^(yes|no|none|root|prev|from|this|event_target|owner|capital_scope)$/i.test(word)) return null;
 
-        const locMap = await getLocMap();
-        const entry = locMap.get(word);
+        const entry = findLocEntry(word, document, this.indexService);
         if (!entry) return null;
 
         return new vs.Location(entry.uri, new vs.Position(entry.line, 0));
@@ -257,7 +233,7 @@ class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
 /** 
 * Register all localization enhancements 
 */
-export function registerLocalizationFeatures(context: vs.ExtensionContext): void {
+export function registerLocalizationFeatures(context: vs.ExtensionContext, indexService: IndexService): void {
     // Register the hover and definition jump referenced by $REF$ in the .yml file
     const ymlSelector: vs.DocumentSelector = { scheme: 'file', pattern: '**/*.yml' };
 
@@ -267,13 +243,13 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
 
     context.subscriptions.push(
         // $REF$ reference inside .yml file
-        vs.languages.registerHoverProvider(ymlSelector, new LocRefHoverProvider()),
-        vs.languages.registerDefinitionProvider(ymlSelector, new LocRefDefinitionProvider()),
+        vs.languages.registerHoverProvider(ymlSelector, new LocRefHoverProvider(indexService)),
+        vs.languages.registerDefinitionProvider(ymlSelector, new LocRefDefinitionProvider(indexService)),
         //Ctrl+Click jump of loc key in script file
         // Note: ScriptLocHoverProvider is not registered because the F# CWTools backend already passes
         // lochoverFromInfo provides a localized floating preview of the loc key in the script file.
         // Repeated registration will cause the translated text to appear twice in the hover pop-up window.
-        vs.languages.registerDefinitionProvider(scriptSelector, new ScriptLocDefinitionProvider()),
+        vs.languages.registerDefinitionProvider(scriptSelector, new ScriptLocDefinitionProvider(indexService)),
     );
 
     // Apply decorations on active editor change
@@ -286,8 +262,8 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
     // Update LocMap on document changes (active unsaved typing)
     context.subscriptions.push(
         vs.workspace.onDidChangeTextDocument(event => {
-            if (/localisation[^/\\]*[/\\].*\.yml$/.test(event.document.fileName)) {
-                parseYmlContent(event.document.uri, event.document.getText());
+            if (isYmlDocument(event.document)) {
+                cacheOpenDocumentLocalisation(event.document);
             }
             const editor = vs.window.activeTextEditor;
             if (editor && event.document === editor.document) {
@@ -298,37 +274,9 @@ export function registerLocalizationFeatures(context: vs.ExtensionContext): void
 
     // Initial parse of any already open .yml files
     for (const doc of vs.workspace.textDocuments) {
-        if (doc.fileName.endsWith('.yml')) {
-            parseYmlContent(doc.uri, doc.getText());
+        if (isYmlDocument(doc)) {
+            cacheOpenDocumentLocalisation(doc);
         }
-    }
-
-    // Set up file system watchers for background tracking of .yml files
-    const watcher = vs.workspace.createFileSystemWatcher('**/{localisation,localisation_synced,localization}/**/*.yml');
-    context.subscriptions.push(watcher);
-
-    watcher.onDidChange(async uri => {
-        try {
-            const data = await vs.workspace.fs.readFile(uri);
-            const text = new TextDecoder('utf-8').decode(data);
-            parseYmlContent(uri, text);
-        } catch { }
-    });
-    watcher.onDidCreate(async uri => {
-        try {
-            const data = await vs.workspace.fs.readFile(uri);
-            const text = new TextDecoder('utf-8').decode(data);
-            parseYmlContent(uri, text);
-        } catch { }
-    });
-    watcher.onDidDelete(uri => {
-        documentLocCache.delete(uri.toString());
-        flatMapDirty = true;
-    });
-
-    // Fire off the background scan
-    if (!initialScanPromise) {
-        initialScanPromise = performInitialScan();
     }
 
     // Apply decorations on startup for the current editor

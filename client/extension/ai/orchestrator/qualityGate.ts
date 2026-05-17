@@ -5,8 +5,7 @@
 * Supports multiple rounds of repair cycles (up to 3 rounds) to ensure code quality. 
 */
 
-import type { SubAgentResult, TaskNode } from './types';
-import type { AgentStep } from '../types';
+import type { SubAgentResult } from './types';
 
 import type { QualityGateResult } from './types';
 
@@ -154,7 +153,7 @@ export class QualityGate {
             if (diagResults.length > 0) {
                 preFetchedDiagnostics = diagResults.join('\n\n');
             }
-        } catch (e) {
+        } catch {
             // ignore
         }
 
@@ -240,7 +239,7 @@ export class QualityGate {
             const match = reviewOutput.match(/(\d+)\s*(?:个|issues?|problems?|errors?)/i);
             const logicIssuesCount = match ? parseInt(match[1]!, 10) : 0;
             return { logicIssuesCount, fixSuggestions: [] };
-        } catch (e) {
+        } catch {
             return { logicIssuesCount: 0, fixSuggestions: [] };
         }
     }

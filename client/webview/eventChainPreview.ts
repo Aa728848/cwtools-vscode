@@ -65,15 +65,6 @@ const statsBar = document.getElementById('stats-bar')!;
 const nsSelect = document.getElementById('ns-filter') as HTMLSelectElement;
 const searchInput = document.getElementById('search-input') as HTMLInputElement;
 
-// Edge color map
-const EDGE_COLORS: Record<string, string> = {
-    option: '#e8c840',
-    immediate: '#4caf50',
-    after: '#ff9800',
-    effect: '#ab47bc',
-    unknown: '#888',
-};
-
 const cy = cytoscape({
     container,
     style: [

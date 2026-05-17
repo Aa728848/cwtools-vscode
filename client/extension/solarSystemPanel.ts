@@ -4,7 +4,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { parseSolarSystemFile, resolveValue, type SolarSystem, type CelestialBody, type ValueOrRange } from './solarSystemParser';
+import { parseSolarSystemFile, resolveValue, type SolarSystem, type CelestialBody } from './solarSystemParser';
 import { decodeDds, decodeTga } from './ddsDecoder';
 import { buildSpriteIndex, type SpriteInfo } from './guiParser';
 

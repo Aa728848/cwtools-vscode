@@ -1,6 +1,4 @@
 import * as cp from 'child_process';
-import * as vs from 'vscode';
-import * as path from 'path';
 import * as http from 'http';
 import * as https from 'https';
 import { URL } from 'url';
@@ -372,7 +370,7 @@ export class MCPClient {
     }
 
     private cleanup() {
-        for (const [id, req] of this.pendingRequests.entries()) {
+        for (const req of this.pendingRequests.values()) {
             req.reject(new Error('Connection closed'));
         }
         this.pendingRequests.clear();

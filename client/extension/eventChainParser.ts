@@ -1129,7 +1129,6 @@ export function extractConnectedSubgraph(
 
     // Filter graph
     const nodes = fullGraph.nodes.filter(n => visited.has(n.id));
-    const nodeIds = new Set(nodes.map(n => n.id));
     // Include edges where BOTH endpoints are in our visited set
     const edges = fullGraph.edges.filter(e => visited.has(e.source) || visited.has(e.target));
 

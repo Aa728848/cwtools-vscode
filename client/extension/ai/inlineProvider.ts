@@ -15,13 +15,11 @@
  */
 
 import * as vs from 'vscode';
-import type { ChatCompletionResponse } from './types';
 import { AIService } from './aiService';
 import { PromptBuilder } from './promptBuilder';
-import { getProvider, getEffectiveModel, ALWAYS_THINKING_PREFIXES, BUILTIN_PROVIDERS } from './providers';
+import { getEffectiveModel, ALWAYS_THINKING_PREFIXES, BUILTIN_PROVIDERS } from './providers';
 import { MCPClient } from './mcpClient';
 import { UsageTracker } from './usageTracker';
-import { getModelPricing } from './pricing';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
 

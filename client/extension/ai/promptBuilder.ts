@@ -804,7 +804,7 @@ ${gameKnowledge}`;
 }
 
 function buildScriptReviewerSystemPrompt(gameKnowledge: string, gameName: string): string {
-    return `You are Eddy CWTool Code in **Script Reviewer Mode** — a rigorous static analysis agent.
+    return `You are Eddy CWTool Code in **Script Reviewer Mode** — a rigorous static analysis agent for ${gameName} mods.
 ${LANGUAGE_MIRRORING_RULE}
 
 <system-reminder>

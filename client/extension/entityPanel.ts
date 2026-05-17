@@ -5,7 +5,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { buildEntityGraph, type EntityDefinition, type EntityGraph, type MeshDefinition } from './entityAssetParser';
+import { buildEntityGraph, type EntityDefinition, type EntityGraph } from './entityAssetParser';
 
 // ── WebView message types ──────────────────────────────────────────────────────
 type EntityPanelMessage =

@@ -142,7 +142,7 @@ export class FileToolHandler {
         return resolveWorkspacePathInput(normalizedInput, this.ctx.workspaceRoot, { preferExistingAiPath });
     }
 
-    private resolveAndAssertInWorkspace(filePath: string, context?: import('../types').AgentToolContext): string {
+    private resolveAndAssertInWorkspace(filePath: string, _context?: import('../types').AgentToolContext): string {
         const resolution = this.resolveWorkspacePath(filePath, true);
         if (isSecuritySandboxDisabled() || resolution.isWithinAnyWorkspace) {
             return resolution.resolved;
@@ -377,8 +377,6 @@ export class FileToolHandler {
                 }
             } catch { /* stat may fail; skip cache */ }
             
-            const end = args.endLine ? Math.min(totalLines, args.endLine) : totalLines;
-
             if (totalLines > threshold && !args.startLine && !args.endLine) {
                 const headLines = slice.slice(0, 80);
                 const tailLines = slice.slice(-20);
@@ -1107,7 +1105,7 @@ export class FileToolHandler {
             this.listDirRecursive(dirPath, dirPath, entries, args.recursive ?? false, 0, 3);
 
             return { entries: entries.slice(0, 200), path: dirPath };
-        } catch (e) {
+        } catch {
             return { entries: [], path: args.directory };
         }
     }
@@ -1146,7 +1144,7 @@ export class FileToolHandler {
             const uris = await vs.workspace.findFiles(args.pattern, '**/node_modules/**', limit); 
 const files = uris.map(u => u.fsPath); 
 return { files, total: files.length }; 
-} catch (e) { 
+} catch { 
 return { files: [], total: 0 }; 
 } 
 } 

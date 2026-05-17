@@ -5,7 +5,7 @@
 * This is the scheduling core of the multi-Agent collaboration system. 
 */
 
-import type { TaskGraph, TaskNode, TaskNodeStatus, TaskPriority } from './types';
+import type { TaskGraph, TaskNode, TaskPriority } from './types';
 
 /** 
 * DAG task graph engine. 

@@ -290,7 +290,7 @@ export class ExternalToolHandler {
             const vs = await import('vscode');
             const ignored = vs.workspace.getConfiguration('cwtools.ai').get<string[]>('ignoredDiagnostics', []);
             return { success: true, count: ignored.length, ignoredKeys: ignored };
-        } catch (e) {
+        } catch {
             return { success: false, count: 0, ignoredKeys: [] };
         }
     }
@@ -503,7 +503,7 @@ export class ExternalToolHandler {
                     return { stdout: '', stderr: 'Blocked: Working directory must be within the workspace root or another workspace folder. If this is required, retry with "requestEscalation": true to ask the user for a one-time privilege override.', exitCode: 1 };
                 }
             }
-        } catch (e) {
+        } catch {
             return { stdout: '', stderr: `Blocked: Invalid working directory`, exitCode: 1 };
         }
 
@@ -796,7 +796,7 @@ export class ExternalToolHandler {
                 });
             }
             return { results, source: 'duckduckgo', query };
-        } catch (e) {
+        } catch {
             return { results: [], source: 'duckduckgo', query };
         }
     }

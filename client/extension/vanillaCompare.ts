@@ -142,7 +142,7 @@ function extractBlockField(tokens: Token[], lbraceIndex: number, fieldName: stri
     return null;
 }
 
-function findTopLevelBlocks(text: string, idKeys: Set<string> = new Set()): PdxBlock[] {
+function findTopLevelBlocks(text: string, _idKeys: Set<string> = new Set()): PdxBlock[] {
     const tokens = tokenize(text, { comments: false, percent: false });
     const blocks: PdxBlock[] = [];
     const lines = text.split('\n');
@@ -395,7 +395,6 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 // by building a full vanilla mirror of the mod file
                 const vanillaFullLines: string[] = [];
                 let lastEndLine = 0;
-                let blockIdx = 0;
                 for (const modBlock of modBlocks) {
                     // Preserve inter-block content (comments, whitespace)
                     if (modBlock.startLine > lastEndLine) {
@@ -412,7 +411,6 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                         vanillaFullLines.push(modBlock.content);
                     }
                     lastEndLine = modBlock.endLine + 1;
-                    blockIdx++;
                 }
                 // Trailing content after the last block
                 for (let i = lastEndLine; i < allModLines.length; i++) {

@@ -174,7 +174,6 @@ let currentModel: THREE.Group | null = null;
 let locatorHelpers: THREE.Group | null = null;
 let animationFrameId = 0;
 let selectedLocator: THREE.Object3D | null = null;
-let selectedLocatorEditable = true;
 let currentEntity: EntityData | null = null;
 let lastParsedMeshFile: ParsedMeshFile | null = null;
 let skeletonHelper: THREE.SkeletonHelper | null = null;
@@ -667,8 +666,6 @@ function selectLocator(obj: THREE.Object3D, editable = true) {
     }
 
     selectedLocator = obj;
-    selectedLocatorEditable = editable;
-
     // Determine if this locator is inside a submodel structure
     let ownerEntity = '';
     let p = obj.parent;
@@ -753,7 +750,6 @@ function deselectLocator() {
             label.style.fontWeight = 'normal';
         }
         selectedLocator = null;
-        selectedLocatorEditable = true;
         selectedLocatorSnapshot = null;
         transformCtrl.detach();
         propsPanel.classList.add('hidden');
@@ -1134,7 +1130,7 @@ function initAnimations(animBuffers: Map<string, ArrayBuffer>) {
             const parsed = parsePdxAnim(buffer);
             const clip = pdxAnimToClip(parsed, animName, boneNameMap);
             animationClips.set(animName, clip);
-        } catch (err) {
+        } catch {
         }
     }
 
@@ -1284,8 +1280,6 @@ function decodeDDSToRGBA(buffer: ArrayBuffer, width: number, height: number): TH
     const fourCC = view.getUint32(84, true);
     const rgbBitCount = view.getUint32(88, true);
     const rMask = view.getUint32(92, true);
-    const gMask = view.getUint32(96, true);
-    const bMask = view.getUint32(100, true);
     const aMask = view.getUint32(104, true);
 
     // DX10 extended header adds 20 bytes
@@ -1939,7 +1933,6 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
         modelGroup.rotation.y = Math.PI;
 
         // Build skeleton + GPU skinning
-        const submeshIndex = 0;
         let sharedBoneRoot: THREE.Bone | null = null;
         let sharedSkeleton: THREE.Skeleton | null = null;
         const firstSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
@@ -2094,7 +2087,7 @@ async function loadModel(entity: EntityData, meshBuffer: ArrayBuffer | undefined
                 skeletonHelper.renderOrder = 999;
                 scene.add(skeletonHelper);
             }
-        } catch (skelErr) {
+        } catch {
             skeletonHelper = null;
         }
 
@@ -2204,15 +2197,11 @@ async function loadAttachChildren(
 
                 // Apply pdxmesh scale (from .gfx definition)
                 const childMeshScale = child.meshScale ?? 1.0;
-                const childMeshParent: THREE.Object3D = childGroup;
-
-
                 // Build skeleton for child entity.
                 // Prefix child bone names with entity name to avoid collisions
                 // with parent bones (e.g., both having a bone named "root").
                 // This prevents the parent's AnimationMixer from accidentally
                 // binding its animation tracks to child bones.
-                let childSkeleton: THREE.Skeleton | null = null;
                 const childBonePrefix = `${child.entityName}__`;
                 const firstChildSkelShape = parsed.shapes.find(s => s.skeleton.length > 0);
                 if (firstChildSkelShape) {
@@ -2223,21 +2212,7 @@ async function loadAttachChildren(
                             bone.name = `${childBonePrefix}${bone.name}`;
                         }
                         childGroup.add(childSkelResult.root);
-                        childSkeleton = new THREE.Skeleton(childSkelResult.orderedBones);
                     }
-                }
-
-                // Find leaf bone for default skin weights
-                let childLeafBone = 0;
-                if (childSkeleton) {
-                    let cur = childSkeleton.bones[0];
-                    while (cur) {
-                        let next: THREE.Bone | null = null;
-                        for (const c of cur.children) { if (c instanceof THREE.Bone) { next = c; break; } }
-                        if (!next) break;
-                        cur = next;
-                    }
-                    if (cur) childLeafBone = Math.max(0, childSkeleton.bones.indexOf(cur));
                 }
 
                 // Build geometry and materials for child
@@ -2382,7 +2357,7 @@ async function loadAttachChildren(
                         for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
                         const clip = pdxAnimToClip(parsePdxAnim(buf.buffer), animEntry.animName, childBoneNameMap);
                         clipMap.set(animEntry.stateName, clip);
-                    } catch (err) {
+                    } catch {
                     }
                 }
 
@@ -2583,7 +2558,7 @@ function buildEntityTree() {
     }
 }
 
-function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
+function updateEntityTree(_entity: EntityData, _parsed?: ParsedMeshFile) {
     // SVG icons (imported from svgIcons.ts)
     const svgIconEntity = Icons.entity;
     const svgIconBone = Icons.bone;
@@ -3156,7 +3131,7 @@ function disposeAll() {
     document.removeEventListener('click', handleAutocompleteClickOutside);
     resizeObserver.disconnect();
 
-    for (const [k, v] of textureCache) {
+    for (const [, v] of textureCache) {
         void v.promise.then(t => t?.dispose());
     }
     textureCache.clear();

@@ -10,7 +10,6 @@
 
 import type {
     ChatMessage,
-    ToolCall,
     AgentStep,
     GenerationResult,
     ValidationError,
@@ -42,7 +41,7 @@ import { filterToolDefinitionsForMode, resolveMaxToolIterations } from './runner
 import { getWorkflow } from './workflowRegistry';
 import { WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
-import { saveResumeState, loadResumeState, hasResumeState, clearResumeState } from './runner/checkpoint';
+import { loadResumeState, hasResumeState } from './runner/checkpoint';
 import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT } from './runner/compaction';
 
 // Doom-loop detection: two-phase approach.
@@ -277,7 +276,7 @@ export interface AgentRunnerOptions {
 }
 
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
-const PLAN_MODE_TOOLS: AgentToolName[] = [
+const _PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'todo_write',
@@ -296,7 +295,7 @@ const PLAN_MODE_TOOLS: AgentToolName[] = [
 ];
 
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
-const EXPLORE_MODE_TOOLS: AgentToolName[] = [
+const _EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
@@ -310,13 +309,13 @@ const EXPLORE_MODE_TOOLS: AgentToolName[] = [
 ];
 
 /** General mode: legacy read-only Q&A mode. */
-const GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
+const _GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
 
 /** Utility mode: full ordinary coding tools for non-PDX helper scripts/tools. */
-const UTILITY_EXCLUDED_TOOLS: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
+const _UTILITY_EXCLUDED_TOOLS: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
 
 /** Review mode: same as explore, plus query_definition — read-only tools only */
-const REVIEW_MODE_TOOLS: AgentToolName[] = [
+const _REVIEW_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
@@ -329,7 +328,7 @@ const REVIEW_MODE_TOOLS: AgentToolName[] = [
 ];
 
 /** Loc Translator mode: read localisation files, write translated output */
-const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
+const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
@@ -339,7 +338,7 @@ const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
 ];
 
 /** Loc Writer mode: create new localisation entries from scratch */
-const LOC_WRITER_TOOLS: AgentToolName[] = [
+const _LOC_WRITER_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
@@ -350,7 +349,7 @@ const LOC_WRITER_TOOLS: AgentToolName[] = [
 ];
 
 /** Orchestrator mode: read-only tools + coordinator-specific tools (dispatch_agents, query_blackboard, merge_results) */
-const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
+const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     //Read-only information collection
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
@@ -685,7 +684,7 @@ export class AgentRunner {
         };
 
         // Context object to be passed to tool executor (replaces old global assignment)
-        const agentToolContext: import('./types').AgentToolContext = {
+        const _agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
             agentRunner: this,
             tokenAccumulator: tokenAccumulator,
@@ -779,7 +778,7 @@ export class AgentRunner {
                     effectiveUserMessage += visionText;
                     minimaxCliUsed = true;
                     effectiveImages = undefined;
-                } catch (e) {
+                } catch {
                     // mmx not installed or error, fall through to default unsupported message
                 }
             }
@@ -1500,7 +1499,7 @@ export class AgentRunner {
             for (let i = 0; i < parsedCalls.length; i++) {
                 options?.abortSignal?.throwIfAborted();
                 const ci = parsedCalls[i]!;
-                const { toolName, toolArgs, toolCall } = ci;
+                const { toolName, toolArgs } = ci;
 
                 if (ci.toolArgsParseError) {
                     let errMsg = `Tool argument JSON parse failed — ${ci.toolArgsParseError}. Please retry with valid JSON arguments.`;
@@ -1618,7 +1617,7 @@ export class AgentRunner {
             if (needsHashValidation) {
                 let allHashesMatch = true;
                 for (let j = 0; j < parsedCalls.length; j++) {
-                    const { toolName, toolArgs, toolCall } = parsedCalls[j]!;
+                    const { toolName, toolCall } = parsedCalls[j]!;
                     const sig = `${toolCall.function.name}:${toolCall.function.arguments}`;
                     const resultHash = fnv32a(normalizeToolResultHash(toolName, toolResults[j]));
                     const prevHash = lastResultHash.get(sig);
@@ -1888,11 +1887,6 @@ export class AgentRunner {
 
             //Retry: send error list back to AI for correction
             retryCount++;
-            const errorSummary = result.errors
-                .filter(e => e.severity === 'error')
-                .map(e => `Line ${e.line}: ${e.message}`)
-                .join('\n');
-
             emitStep({
                 type: 'validation',
                 content: "Found " + result.errors.filter(e => e.severity === "error").length + " validation error(s); requesting a focused fix (" + retryCount + "/" + MAX_VALIDATION_RETRIES + ").",

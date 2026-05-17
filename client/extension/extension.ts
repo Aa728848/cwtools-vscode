@@ -8,8 +8,8 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as vs from 'vscode';
-import { workspace, ExtensionContext, window, Disposable, Uri, WorkspaceEdit, TextEdit, Range, commands, env } from 'vscode';
-import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, NotificationType, ExecuteCommandRequest, ExecuteCommandParams, RevealOutputChannelOn } from 'vscode-languageclient/node';
+import { workspace, ExtensionContext, window, Disposable, Uri, WorkspaceEdit, TextEdit, Range, commands } from 'vscode';
+import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind, NotificationType, RevealOutputChannelOn } from 'vscode-languageclient/node';
 
 import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
@@ -29,6 +29,7 @@ import { registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getRulesRemoteUrl, getGameInfoMap, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
+import { IndexService } from './indexing/indexService';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -38,7 +39,7 @@ const registeredCommands = new Map<string, Disposable>();
 function safeRegisterCommand(context: ExtensionContext, commandId: string, handler: (...args: any[]) => any): void {
 	const existing = registeredCommands.get(commandId);
 	if (existing) {
-		try { existing.dispose(); } catch (_) { /* ignore */ }
+		try { existing.dispose(); } catch { /* ignore */ }
 	}
 	const disposable = commands.registerCommand(commandId, handler);
 	registeredCommands.set(commandId, disposable);
@@ -50,8 +51,12 @@ export async function activate(context: ExtensionContext) {
 	// Background check for extension updates
 	await checkForUpdates(context).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
 
+	const indexService = new IndexService();
+	context.subscriptions.push(indexService);
+	void indexService.start();
+
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
-	registerLocalizationFeatures(context);
+	registerLocalizationFeatures(context, indexService);
 
 	// Register completion provider for @ constants in .gui, .asset, .gfx files
 	context.subscriptions.push(
@@ -211,7 +216,6 @@ export async function activate(context: ExtensionContext) {
 		}
 	}
 
-	const isDevDir = context.extensionMode === vs.ExtensionMode.Development
 	// Ensure the cache is always generated in the globalStorage path to avoid permission issues and path-encoding issues
 	// common when extensions are installed in Program Files or Chinese User directories.
 	const cacheDir = path.join(context.globalStorageUri.fsPath, '.cwtools');
@@ -337,7 +341,7 @@ export async function activate(context: ExtensionContext) {
 		const allDiagnostics = vs.languages.getDiagnostics();
 		const candidatesByCode = new Map<string, Set<string>>();
 
-		for (const [uri, diags] of allDiagnostics) {
+		for (const [, diags] of allDiagnostics) {
 			for (const diag of diags) {
 				if (diag.severity !== vs.DiagnosticSeverity.Error) {
 					continue;
@@ -567,7 +571,6 @@ export async function activate(context: ExtensionContext) {
 		const relPath = vs.workspace.asRelativePath(editor.document.uri);
 		const startLine = editor.selection.start.line + 1;
 		const endLine = editor.selection.end.line + 1;
-		const selectedText = editor.document.getText(editor.selection);
 		await chatPanelProvider.sendSelectionReference(relPath, startLine, endLine);
 	});
 
@@ -1009,18 +1012,18 @@ export async function activate(context: ExtensionContext) {
 		safeRegisterCommand(context, "cwtools.reloadExtension", async () => {
 			// Stop the language server client first
 			if (defaultClient) {
-				try { await defaultClient.stop(); } catch (_) { /* ignore */ }
+				try { await defaultClient.stop(); } catch { /* ignore */ }
 			}
 			// Dispose GUI panel if open
 			if (GuiPanel.currentPanel) {
-				try { GuiPanel.currentPanel.dispose(); } catch (_) { /* ignore */ }
+				try { GuiPanel.currentPanel.dispose(); } catch { /* ignore */ }
 			}
 			if (EntityPanel.currentPanel) {
-				try { EntityPanel.currentPanel.dispose(); } catch (_) { /* ignore */ }
+				try { EntityPanel.currentPanel.dispose(); } catch { /* ignore */ }
 			}
 			// L7 Fix: dispose the chat panel provider before re-activating so its
 			// WebView is closed and callbacks don't reference a stale agentRunner.
-			try { chatPanelProvider.dispose(); } catch (_) { /* ignore */ }
+			try { chatPanelProvider.dispose(); } catch { /* ignore */ }
 			// Dispose all subscriptions
 			for (const sub of context.subscriptions) {
 				try {

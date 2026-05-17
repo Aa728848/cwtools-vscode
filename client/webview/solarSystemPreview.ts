@@ -4,7 +4,7 @@
  */
 
 const vscode = acquireVsCodeApi();
-import { Icons, svgIcon } from './svgIcons';
+import { svgIcon } from './svgIcons';
 
 // ─── Types (mirrors parser output) ──────────────────────────────────────────
 
@@ -233,7 +233,6 @@ let dragParentY = 0;
 let dragMoved = false; // tracks whether mouse actually moved during drag
 let dragStartX = 0; // mouse position at drag start (for threshold)
 let dragStartY = 0;
-let dragCumulativeOffset = 0; // cumulative orbit offset from change_orbit at drag start
 let dragRingGroup: RingGroup | null = null; // set when dragging a ring world group
 
 // Rendered body positions (screen space) for hit testing
@@ -248,7 +247,6 @@ interface RenderedBody {
 let renderedBodies: RenderedBody[] = [];
 
 // Animation
-let animFrame = 0;
 let starPulse = 0;
 
 // ─── 3D Projection ─────────────────────────────────────────────────────────
@@ -383,7 +381,6 @@ function render() {
         }
     }
 
-    animFrame++;
     requestAnimationFrame(render);
 }
 
@@ -423,50 +420,13 @@ function drawOrbitEllipse(
     ctx.restore();
 }
 
-function drawRangeArc(
-    ctx: CanvasRenderingContext2D,
-    centerWorldX: number,
-    centerWorldY: number,
-    radius: number,
-    angleStart: number,
-    angleEnd: number,
-    color: string,
-) {
-    if (radius <= 0) return;
-
-    const startRad = (angleStart * Math.PI) / 180;
-    const endRad = (angleEnd * Math.PI) / 180;
-    const steps = 40;
-
-    ctx.save();
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.15;
-
-    ctx.beginPath();
-    // Center point
-    const cp = project(centerWorldX, centerWorldY, 0);
-    ctx.moveTo(cp.x, cp.y);
-
-    for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const angle = startRad + (endRad - startRad) * t;
-        const wx = centerWorldX + Math.cos(angle) * radius;
-        const wy = centerWorldY + Math.sin(angle) * radius;
-        const p = project(wx, wy, 0);
-        ctx.lineTo(p.x, p.y);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-}
-
 /** Draw a ring world as colored arc bands around the parent */
 function drawRingWorld(
     ctx: CanvasRenderingContext2D,
     ringGroup: RingGroup,
     parentWorldX: number,
     parentWorldY: number,
-    anchorBody: CelestialBody,
+    _anchorBody: CelestialBody,
 ) {
     const orbitR = ringGroup.orbitRadius;
     const bandWidth = Math.max(4, orbitR * 0.08); // ring band thickness in world units
@@ -863,10 +823,6 @@ function lightenColor(hex: string, amount: number): string {
     return `rgb(${clamp(rgb.r + amount)}, ${clamp(rgb.g + amount)}, ${clamp(rgb.b + amount)})`;
 }
 
-function darkenColor(hex: string, amount: number): string {
-    return lightenColor(hex, -amount);
-}
-
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
     const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     if (!m) return null;
@@ -1191,11 +1147,6 @@ function setupControls() {
                 dragMoved = false;
                 dragStartX = e.clientX;
                 dragStartY = e.clientY;
-                const od = body.orbitDistance;
-                const rawDist = od.type === 'fixed' ? od.value
-                    : od.type === 'range' ? ((od as any).min + (od as any).max) / 2
-                    : 0;
-                dragCumulativeOffset = body.resolvedOrbitRadius - (rawDist || 0);
                 lastMX = e.clientX;
                 lastMY = e.clientY;
                 canvas.setPointerCapture(e.pointerId);

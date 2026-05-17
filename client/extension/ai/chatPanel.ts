@@ -595,7 +595,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return text.slice(0, Math.max(0, maxLength - 3)).trimEnd() + '...';
     }
 
-    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
+    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
         if (text.trim().startsWith('/')) {
@@ -1738,14 +1738,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.aiService.cancel();
 
         // Clean up all pending permission approval resolvers to prevent orphaned Promise and UI residual cards
-        for (const [id, resolver] of this.pendingPermissionResolvers.entries()) {
+        for (const resolver of this.pendingPermissionResolvers.values()) {
             resolver(false);
         }
         this.pendingPermissionResolvers.clear();
         this.pendingPermissionModes.clear();
 
         // Clean up any pending file write confirmations resolver
-        for (const [id, resolver] of this.pendingWriteResolvers.entries()) {
+        for (const resolver of this.pendingWriteResolvers.values()) {
             resolver(false);
         }
         this.pendingWriteResolvers.clear();

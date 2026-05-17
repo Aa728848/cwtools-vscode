@@ -6,7 +6,7 @@
 * suggestedModel / suggestedProvider are only suggested values   and can be overridden by TaskNode. 
 */
 
-import type { AgentProfile, ToolBudget } from './types';
+import type { AgentProfile } from './types';
 
 /** 
 * Agent role registry. 

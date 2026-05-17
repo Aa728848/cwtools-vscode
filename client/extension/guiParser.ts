@@ -59,7 +59,7 @@ export interface SpriteInfo {
     default_frame?: number;
 }
 
-import { TokenType, Token, tokenize, isIdentStart, isIdentCont } from './pdxTokenizer';
+import { TokenType, Token, tokenize } from './pdxTokenizer';
 
 // ─── Parser ─────────────────────────────────────────────────────────────────
 

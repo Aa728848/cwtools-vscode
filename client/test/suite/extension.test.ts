@@ -5,18 +5,12 @@
 
 // The module 'assert' provides assertion methods from node
 import * as assert from 'assert';
-import path from 'path';
 
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
-import { activate, retryAsync, wait } from '../utils';
+import { activate, wait } from '../utils';
 import { it, describe } from 'mocha';
-import * as gp from '../../extension/guiPanel';
-import sinon from 'sinon';
-import * as fs from "node:fs";
-import * as os from "node:os";
-const root = path.resolve(__dirname, '../../../../client/test/sample');  // Assumes tests are one level deep in 'test/'
 
 // Defines a Mocha test suite to group tests of similar kind together
 suite("Extension Tests", () => {

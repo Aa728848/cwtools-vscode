@@ -344,7 +344,7 @@ export class ChatSettingsManager {
             const dirs = await fs.promises.readdir(skillsDir, { withFileTypes: true });
             const skills = dirs.filter(d => d.isDirectory()).map(d => d.name);
             this.postMessage({ type: 'skillsList', skills });
-        } catch (e) {
+        } catch {
             this.postMessage({ type: 'skillsList', skills: [] });
         }
     }

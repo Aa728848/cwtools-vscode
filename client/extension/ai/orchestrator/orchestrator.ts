@@ -21,7 +21,6 @@ import type {
     AgentMode,
     AgentStep,
     TokenUsage,
-    ChatMessage,
     GenerationResult,
 } from '../types';
 import { TaskGraphEngine } from './taskGraphEngine';

@@ -196,7 +196,7 @@
 | 文件变化可增量更新 | 已完成本地化文件路径 |
 | 本地化 key 可查询 | 已完成 |
 | symbol/asset/event/tech 索引 | 待后续 |
-| AI/previews 消费共享索引 | 待后续 |
+| AI/previews 消费共享索引 | 已完成第一批：`locDecorations.ts` 通过 `IndexService` 查询本地化 key |
 | stale-file removal | 已完成并有测试覆盖 |
 | 纯逻辑可单元测试 | 已完成 |
 
@@ -207,7 +207,7 @@
 
 ### 后续项
 
-- 将 `locDecorations.ts` 等现有消费者迁移到 `IndexService`。
+- 继续将更多 AI tools/previews 消费者迁移到 `IndexService`。
 - 增加 top-level PDXScript symbol 索引。
 - 增加 sprite/asset/event/technology 查询。
 - 将索引 freshness/status 暴露给 AI tools。
@@ -291,7 +291,7 @@
 | compile/test 串入 gate | 已完成 |
 | NLS key 检查 | 已完成（en↔zh 双向 + manifest %key% 引用） |
 | webview bundle/server output 检查 | 已完成（6 个 bundle + 3 个平台） |
-| CI | 待后续 |
+| CI | 已完成：新增 GitHub Actions `npm run verify` 工作流 |
 
 ### 注意事项
 
@@ -301,7 +301,6 @@
 ### 后续项
 
 - 增加版本同步命令（自动更新 root 和 release manifest）。
-- 增加 GitHub Actions 或本地 CI 脚本。
 - 增加 webview visual regression 检测。
 
 ## 编译与测试状态（最终复核 2026-05-17）
@@ -311,8 +310,8 @@
 | `npm run compile` | ✅ 通过 |
 | `npm run test:unit` | ✅ **412 passing, 0 failing** |
 | `node tools/check-release.js` | ✅ 通过 |
-| `npx eslint client/test/` | ✅ 通过（仅 warning） |
-| `npm run lint`（全量） | ✅ 通过（0 errors, 116 warnings） |
+| `npx eslint client/test/` | ✅ 通过（0 warnings） |
+| `npm run lint`（全量） | ✅ 通过（0 errors, 0 warnings） |
 
 ## 新增文件清单
 
@@ -329,6 +328,7 @@
 | `client/webview/chat/formatters.ts` | 4 | Chat 格式化 helper |
 | `client/test/unit/chatFormatters.test.ts` | 4 | Chat helper 单元测试 |
 | `tools/check-release.js` | 5 | Release quality gate 脚本（10 项检查） |
+| `.github/workflows/ci.yml` | 5 | GitHub Actions CI，执行 `npm run verify` |
 
 ## 修改文件清单
 
@@ -337,13 +337,14 @@
 | `client/extension/extension.ts` | 使用 GameProfile 替代硬编码游戏配置 |
 | `client/extension/ai/gameKnowledge.ts` | `getGameDisplayName()` 委托到 GameProfile |
 | `client/extension/ai/agentRunner.ts` | 新增 `workflowId` 选项 |
+| `client/extension/locDecorations.ts` | 迁移本地化 hover/definition 到共享 `IndexService` |
 | `client/webview/chatPanel.ts` | 内部 helper 替换为 `chat/formatters.ts` 导入委托 |
 | `package.json` | 新增 `check:release` + `verify` scripts |
 
 ## 下一轮建议优先级
 
-1. **全量 lint 警告收敛**：继续清理 116 个 warnings，让基础代码面更干净。
-2. 将 `locDecorations.ts` 等现有消费者迁移到 `IndexService`。
-3. 继续拆分 `chatPanel.ts` 为 settings/topics/liveSteps/artifacts 子模块。
-4. 增加 GitHub Actions CI 或本地 CI 脚本。
+1. 继续拆分 `chatPanel.ts` 为 settings/topics/liveSteps/artifacts 子模块。
+2. 增加 webview smoke/visual regression 检测。
+3. 继续将更多 AI tools/previews 消费者迁移到 `IndexService`。
+4. 增加 top-level PDXScript symbol、sprite/asset/event/technology 索引。
 5. 继续将 GameProfile 作为新增游戏能力的唯一入口。

@@ -47,7 +47,7 @@ const MEMORY: AgentToolName[] = ['todo_write', 'set_memory', 'get_memory', 'sear
 const NETWORK: AgentToolName[] = ['web_fetch', 'search_web', 'codesearch'];
 const UTILITY: AgentToolName[] = ['run_command', 'git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech', 'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
-const MCP: AgentToolName[] = ['mcp_call'];
+const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);

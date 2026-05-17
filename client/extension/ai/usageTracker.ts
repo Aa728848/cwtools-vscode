@@ -138,7 +138,7 @@ export class UsageTracker {
             let day = 'unknown';
             try {
                 if (r.timestamp) day = new Date(r.timestamp).toISOString().slice(0, 10);
-            } catch (e) { /* ignore invalid dates */ }
+            } catch { /* ignore invalid dates */ }
             const d = dailyMap.get(day) ?? { tokens: 0, costCny: 0, callCount: 0 };
             d.tokens += r.totalTokens;
             d.costCny += r.costCny;
@@ -218,7 +218,7 @@ export class UsageTracker {
             let day = 'unknown';
             try {
                 if (r.timestamp) day = new Date(r.timestamp).toISOString().slice(0, 10);
-            } catch (e) { /* ignore invalid dates */ }
+            } catch { /* ignore invalid dates */ }
             const d = dailyMap.get(day) ?? { tokens: 0, costCny: 0, callCount: 0 };
             d.tokens += r.totalTokens;
             d.costCny += r.costCny;
@@ -292,7 +292,7 @@ export class UsageTracker {
         const headers = ['timestamp', 'date', 'provider', 'model', 'inputTokens', 'outputTokens', 'totalTokens', 'costCny', 'durationMs', 'topicId', 'toolCalls'];
         const rows = records.map(r => [
             r.timestamp,
-            (function(){ try { return new Date(r.timestamp).toISOString(); } catch(e) { return 'unknown'; } })(),
+            (function(){ try { return new Date(r.timestamp).toISOString(); } catch { return 'unknown'; } })(),
             r.provider,
             r.model,
             r.inputTokens,

@@ -15,7 +15,6 @@ import type {
     QueryRulesResult,
     QueryReferencesResult,
     GetFileContextResult,
-    SearchModFilesResult,
     GetCompletionAtResult,
     DocumentSymbolsResult,
     DocumentSymbolInfo,
@@ -292,7 +291,7 @@ export class LspToolHandler {
             }
 
             return result;
-        } catch (e) {
+        } catch {
             return unknown;
         }
     }
@@ -482,7 +481,7 @@ export class LspToolHandler {
                 instances: instances.slice(0, limit),
                 totalCount: instances.length,
             };
-        } catch (e) {
+        } catch {
             return { typeName: args.typeName, instances: [], totalCount: 0 };
         }
     }
@@ -1065,7 +1064,7 @@ export class LspToolHandler {
             }
             try {
                 exactRegex = new RegExp(finalPattern, args.caseSensitive ? '' : 'i');
-            } catch (e) {
+            } catch {
                 exactRegex = new RegExp(escapeRegex(args.query), 'i');
             }
 
@@ -1180,7 +1179,6 @@ export class LspToolHandler {
         };
 
         const scoreCandidate = (name: string, textureFile: string | undefined, source: 'mod' | 'vanilla'): { score: number; matchedBy: string[] } => {
-            const haystack = `${name} ${textureFile ?? ''}`.toLowerCase();
             const matchedBy: string[] = [];
             let score = source === 'mod' ? 40 : 20;
             if (directName && name.toLowerCase() === directName.toLowerCase()) {

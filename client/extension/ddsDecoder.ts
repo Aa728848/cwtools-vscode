@@ -9,9 +9,6 @@ import * as zlib from 'zlib';
 
 const DDS_MAGIC = 0x20534444;
 const DDPF_FOURCC = 0x4;
-const DDPF_RGB = 0x40;
-const DDPF_ALPHAPIXELS = 0x1;
-
 const FOURCC_DXT1 = 0x31545844;
 const FOURCC_DXT3 = 0x33545844;
 const FOURCC_DXT5 = 0x35545844;
@@ -622,7 +619,6 @@ export function decodeDds(filePath: string): DdsResult | null {
 
         // Uncompressed 32bpp, 24bpp, 8bpp
         if (!decoded && (bpp === 32 || bpp === 24 || bpp === 8)) {
-            const hasAlpha = (pfFlags & DDPF_ALPHAPIXELS) !== 0;
             const isBGRA = rMask === 0x00FF0000;
             const bytesPerPx = bpp / 8;
             // Use pitch from header if available, otherwise calculate

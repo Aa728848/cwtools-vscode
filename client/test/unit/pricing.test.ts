@@ -32,7 +32,7 @@ describe('getModelPricing', () => {
     });
 
     it('all pricing entries are valid tuples', () => {
-        for (const [key, val] of Object.entries(MODEL_PRICING)) {
+        for (const val of Object.values(MODEL_PRICING)) {
             expect(val).to.be.an('array').with.lengthOf(2);
             expect(val[0]).to.be.a('number');
             expect(val[1]).to.be.a('number');

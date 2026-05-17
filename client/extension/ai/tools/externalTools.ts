@@ -50,7 +50,29 @@ export class ExternalToolHandler {
 
     private quoteCommandPath(filePath: string, alreadyQuoted: boolean): string {
         if (alreadyQuoted) return filePath;
-        return /[\s&()]/.test(filePath) ? `"${filePath.replace(/"/g, '\\"')}"` : filePath;
+        return /[\s&()!^%;,]/.test(filePath) ? `"${filePath.replace(/"/g, '\\"')}"` : filePath;
+    }
+
+    private relativizeCommandPathsForCwd(command: string, cwd: string): string {
+        const rewritePath = (rawPath: string): string => {
+            if (!path.isAbsolute(rawPath) || !isPathInsideOrEqual(rawPath, cwd)) {
+                return rawPath;
+            }
+            const relPath = path.relative(cwd, rawPath);
+            return (relPath || '.').replace(/\\/g, '/');
+        };
+
+        const quotedPattern = /(["'])([A-Za-z]:[\\/][^"']+)\1/g;
+        const withQuotedPaths = command.replace(quotedPattern, (match: string, _quote: string, rawPath: string) => {
+            const rewritten = rewritePath(rawPath);
+            return rewritten === rawPath ? match : `"${rewritten.replace(/"/g, '\\"')}"`;
+        });
+
+        const barePattern = /(^|[\s(])([A-Za-z]:[\\/][^\s"';&|<>]+)/g;
+        return withQuotedPaths.replace(barePattern, (match: string, prefix: string, rawPath: string) => {
+            const rewritten = rewritePath(rawPath);
+            return rewritten === rawPath ? match : `${prefix}${this.quoteCommandPath(rewritten, false)}`;
+        });
     }
 
     private normalizeAgentWorkspaceCommand(command: string, topicId: string): string {
@@ -478,12 +500,14 @@ export class ExternalToolHandler {
                 } else if (args.requestEscalation) {
                     escalationReason = escalationReason || '工作目录越界访问';
                 } else {
-                    return { stdout: '', stderr: `Blocked: Working directory points outside the workspace roots. If this is required, retry with "requestEscalation": true to ask the user for a one-time privilege override.`, exitCode: 1 };
+                    return { stdout: '', stderr: 'Blocked: Working directory must be within the workspace root or another workspace folder. If this is required, retry with "requestEscalation": true to ask the user for a one-time privilege override.', exitCode: 1 };
                 }
             }
         } catch (e) {
             return { stdout: '', stderr: `Blocked: Invalid working directory`, exitCode: 1 };
         }
+
+        args.command = this.relativizeCommandPathsForCwd(args.command, cwd);
 
         if (crossWorkspacePathAccess && !isAutoApproveSafeCommand && !bypassSandbox) {
             escalationReason = escalationReason || '跨工作区路径访问';
@@ -515,8 +539,14 @@ export class ExternalToolHandler {
 
         // Parse command into binary + args on the platform shell
         const isWindows = process.platform === 'win32';
-        const shell = isWindows ? 'cmd.exe' : '/bin/sh';
-        const shellArgs = isWindows ? ['/c', args.command] : ['-c', args.command];
+        const shell = isWindows
+            ? (isUtilityMode ? 'powershell.exe' : 'cmd.exe')
+            : '/bin/sh';
+        const shellArgs = isWindows
+            ? (isUtilityMode
+                ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', args.command]
+                : ['/d', '/v:off', '/c', args.command])
+            : ['-c', args.command];
         const agentWorkspaceDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
         const scratchDir = getScratchDir(this.ctx.workspaceRoot);
         try {

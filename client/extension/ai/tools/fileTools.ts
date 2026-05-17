@@ -120,6 +120,23 @@ export class FileToolHandler {
         return filePath;
     }
 
+    private normalizeAgentWorkspaceWritePath(filePath: string, context?: import('../types').AgentToolContext): string {
+        const topicId = context?.runnerOptions?.topicId;
+        if (!topicId) return filePath;
+
+        const normalized = filePath.trim().replace(/\\/g, '/');
+        const match = normalized.match(/^\.cwtools-ai(?:\/(.*))?$/i);
+        if (!match) return filePath;
+
+        const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const rest = (match[1] ?? '').split('/').filter(Boolean);
+        if (rest[0]?.toLowerCase() === safeTopicId.toLowerCase()) {
+            return filePath;
+        }
+
+        return path.posix.join('.cwtools-ai', safeTopicId, ...rest);
+    }
+
     private resolveWorkspacePath(filePath: string, preferExistingAiPath: boolean): WorkspacePathResolution {
         const normalizedInput = this.normalizeAgentWorkspacePath(filePath);
         return resolveWorkspacePathInput(normalizedInput, this.ctx.workspaceRoot, { preferExistingAiPath });
@@ -165,7 +182,7 @@ export class FileToolHandler {
     }
 
     private async resolveAndAuthorizeWrite(filePath: string, toolName: string, context?: import('../types').AgentToolContext): Promise<string> {
-        const resolution = this.resolveWorkspacePath(filePath, false);
+        const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), false);
         if (isSecuritySandboxDisabled()) {
             return resolution.resolved;
         }

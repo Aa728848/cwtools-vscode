@@ -49,4 +49,14 @@ describe('PromptBuilder context budgeting', () => {
         expect(content).to.include('File header excerpt');
         expect(content).to.not.include('Full file content');
     });
+
+    it('tells utility mode to run existing scripts directly instead of creating wrappers', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSystemPromptForMode('utility');
+
+        expect(prompt).to.include('edit that script directly');
+        expect(prompt).to.include('execute it with `run_command` from the project root');
+        expect(prompt).to.include('Prefer `python "relative/path/to/script.py"` over wrapper files');
+    });
 });

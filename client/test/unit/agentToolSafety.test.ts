@@ -479,6 +479,32 @@ describe('agent tool topic artifacts', () => {
         expect(result.stderr).to.include('Working directory must be within the workspace root');
     });
 
+    it('relativizes quoted workspace script paths before running commands', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const scriptDir = path.join(workspaceRoot, '!!! WIP', 'tools');
+        const scriptPath = path.join(scriptDir, 'TRTE_btn_gen.js');
+        fs.mkdirSync(scriptDir, { recursive: true });
+        fs.writeFileSync(scriptPath, 'console.log("ran script");\n', 'utf8');
+
+        const result = await handler.runCommand({
+            command: `node "${scriptPath}"`,
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(result.exitCode).to.equal(0);
+        expect(result.stdout).to.include('ran script');
+    });
+
     it('rejects media deployment targets outside the workspace boundary', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const sourcePath = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media', 'source.png');

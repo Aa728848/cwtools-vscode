@@ -60,12 +60,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_workspace_index',
-            description: 'Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search when looking for event IDs, scripted triggers/effects, technologies, buildings, sprites, sounds, GUI elements, or other named project symbols.',
+            description: 'Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search when looking for event IDs, scripted triggers/effects, technologies, buildings, sprites, sounds, GUI elements, or other named project symbols. The result also reports indexedSymbolNames for freshness/coverage awareness.',
             parameters: {
                 type: 'object',
                 properties: {
                     name: { type: 'string', description: 'Exact, prefix, or substring symbol/asset name to search for.' },
                     kind: { type: 'string', description: 'Optional kind filter, e.g. event, namespace, scripted_trigger, scripted_effect, technology, building, sprite, sound, asset, gui.' },
+                    category: { type: 'string', description: 'Optional broad category filter, e.g. event, game_entity, asset, gui, script.' },
                     source: { type: 'string', enum: ['script', 'asset', 'gui'], description: 'Optional source filter. script=.txt, asset=.gfx/.asset, gui=.gui.' },
                     directory: { type: 'string', description: 'Optional path fragment filter, e.g. events, common/scripted_triggers, interface, gfx.' },
                     prefix: { type: 'boolean', description: 'If true, name is treated as a prefix. Default false.' },

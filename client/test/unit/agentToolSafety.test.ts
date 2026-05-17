@@ -434,11 +434,13 @@ describe('agent sprite candidate tool contract', () => {
             queryWorkspaceSymbols: (query: any) => [{
                 name: query.name,
                 kind: query.kind || 'event',
+                category: query.category || 'event',
                 file: path.join('events', 'test.txt'),
                 line: 3,
                 source: query.source || 'script',
                 container: 'country_event',
             }],
+            workspaceSymbolCount: 42,
         };
         const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
 
@@ -451,6 +453,8 @@ describe('agent sprite candidate tool contract', () => {
         expect(result.status).to.equal('ready');
         expect(result.totalCount).to.equal(1);
         expect(result.entries[0].name).to.equal('kuat.100');
+        expect(result.entries[0].category).to.equal('event');
+        expect(result.indexedSymbolNames).to.equal(42);
     });
 
     it('returns unavailable workspace index result without IndexService', async () => {

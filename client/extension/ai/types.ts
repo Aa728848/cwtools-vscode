@@ -251,6 +251,7 @@ export interface QueryLocalisationIndexResult {
 export interface QueryWorkspaceIndexArgs {
     name?: string;
     kind?: string;
+    category?: string;
     source?: 'script' | 'asset' | 'gui';
     directory?: string;
     prefix?: boolean;
@@ -268,7 +269,9 @@ export interface QueryWorkspaceIndexResult {
         line: number;
         source: 'script' | 'asset' | 'gui';
         container?: string;
+        category?: string;
     }>;
+    indexedSymbolNames?: number;
     _hint?: string;
 }
 

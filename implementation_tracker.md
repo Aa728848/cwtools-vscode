@@ -308,7 +308,7 @@
 | 检查项 | 结果 |
 | --- | --- |
 | `npm run compile` | ✅ 通过 |
-| `npm run test:unit` | ✅ **442 passing, 0 failing** |
+| `npm run test:unit` | ✅ **446 passing, 0 failing** |
 | `node tools/check-release.js` | ✅ 通过 |
 | `npx eslint client/test/` | ✅ 通过（0 warnings） |
 | `npm run lint`（全量） | ✅ 通过（0 errors, 0 warnings） |
@@ -340,6 +340,9 @@
 | `client/webview/chat/workflowSelector.ts` | 4 | Workflow selector DOM 渲染模块 |
 | `client/extension/indexing/workspaceSymbolParser.ts` | 3 | Workspace symbol/asset 纯解析与查询 helper |
 | `client/test/unit/workspaceSymbolParser.test.ts` | 3/5 | Workspace symbol/asset 索引单元测试 |
+| `client/webview/chat/i18n.ts` | 4 | Chat Webview 中英文文案、模式提示与 artifact 状态标签 |
+| `client/webview/chat/modes.ts` | 4 | Chat 模式 UI 状态切换 helper |
+| `client/webview/chat/slashCommands.ts` | 4 | Slash command 列表、过滤与渲染 helper |
 
 ## 修改文件清单
 
@@ -355,30 +358,32 @@
 | `client/extension/ai/tools/registry.ts` | 将 `query_localisation_index` / `query_workspace_index` 注册为只读工具 |
 | `client/extension/gameProfiles.ts` | 新增本地化目录推导 helper |
 | `client/extension/indexing/indexService.ts` | 本地化扫描/监听 glob 改为从 `GameProfile` 推导，并扩展 workspace symbol/asset 索引 |
+| `client/extension/indexing/workspaceSymbolParser.ts` | 增加 `category` 过滤与更多 `common/` 实体类型识别 |
 | `client/extension/locDecorations.ts` | 迁移本地化 hover/definition 到共享 `IndexService` |
-| `client/webview/chatPanel.ts` | 内部 helper 继续迁移到 `chat/formatters.ts`、`chat/artifacts.ts`、`chat/topics.ts`、`chat/workflows.ts`、`chat/workflowSelector.ts` |
+| `client/webview/chatPanel.ts` | 内部 helper 继续迁移到 `chat/formatters.ts`、`chat/artifacts.ts`、`chat/topics.ts`、`chat/workflows.ts`、`chat/workflowSelector.ts`、`chat/i18n.ts`、`chat/modes.ts`、`chat/slashCommands.ts` |
 | `package.json` | 新增 `check:release` + `verify` scripts |
 
 ## 本轮追加完成项（2026-05-17）
 
-针对上一轮列出的 5 个后续方向，本轮已完成一批可编译、可测试的落地点：
+针对上一轮列出的 5 个后续方向，本轮继续完成一批可编译、可测试的落地点：
 
-1. `chatPanel.ts` 继续模块化：新增 artifacts/topics/workflows 纯模型模块，并让 chat panel 消费。
-2. `IndexService` 扩大消费入口：新增 AI 工具 `query_localisation_index`。
-3. AI Workflow 可见化入口：新增 workflow selector、`switchWorkflow`、`/workflow:<id>`、`/workflow:off`，并把 active workflow 传入 `AgentRunner.run()`。
-4. `GameProfile` 继续成为游戏能力入口：本地化扫描/监听目录由 profile 推导。
-5. Webview 质量门补强：新增 chat webview smoke 检查。
+1. `chatPanel.ts` 继续模块化：新增 `chat/i18n.ts`、`chat/modes.ts`、`chat/slashCommands.ts`，并让 chat panel 消费中英文文案、模式 UI helper 与 slash command helper。
+2. Webview i18n 覆盖扩大：prompt 示例、slash command 描述、模式提示、artifact 空状态/状态标签、发送/取消按钮标题已支持中英文切换。
+3. `IndexService` workspace symbol 能力加深：`query_workspace_index` 支持 `category` 过滤，并返回 `indexedSymbolNames` 作为索引覆盖度/新鲜度提示。
+4. workspace symbol 类型识别扩大：新增更多 `common/` 游戏实体类型映射，并为 event、game_entity、asset、gui、script 写入统一 `category`。
+5. 测试补强：新增 Webview i18n、slash command、mode helper、workspace category 查询、AI tool 返回结构覆盖。
 
 当前验证：
 
 - `npm run compile`：通过
-- `npm run test:unit`：442 passing, 0 failing
+- `npm run test:unit`：446 passing, 0 failing
 - `npm run lint`：通过，0 warnings
+- `npm run verify`：通过
 
 ## 下一轮建议优先级
 
-1. 继续拆分 `chatPanel.ts` 为 settings/topics/liveSteps/artifacts 子模块。
-2. 增加 webview smoke/visual regression 检测。
-3. 继续将更多 AI tools/previews 消费者迁移到 `IndexService`。
-4. 增加 top-level PDXScript symbol、sprite/asset/event/technology 索引。
-5. 继续将 GameProfile 作为新增游戏能力的唯一入口。
+1. 继续拆分 `chatPanel.ts` 中仍偏重的 settings、liveSteps、artifact drawer DOM 渲染与状态同步模块。
+2. 增加 webview browser/visual regression 检测，覆盖中英文、workflow selector、slash popup、artifact drawer 等真实 DOM 状态。
+3. 继续将更多 AI tools/previews 消费者迁移到 `IndexService`，减少重复扫描与分散查询逻辑。
+4. 继续加深 `query_workspace_index`：补充引用关系、索引刷新时间、文件版本信息与 AST 级 PDXScript symbol。
+5. 继续将 GameProfile 作为新增游戏能力入口，避免不同功能各自硬编码目录、语言和规则。

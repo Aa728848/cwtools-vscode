@@ -14,6 +14,9 @@ import {
     shortenText,
     type TopicPanelItem,
 } from '../../webview/chat/topics';
+import { getChatI18n } from '../../webview/chat/i18n';
+import { applyModeUi } from '../../webview/chat/modes';
+import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from '../../webview/chat/slashCommands';
 import { buildWorkflowSummary, getWorkflowSlashCommand, normalizeWorkflowLabels, type WorkflowView } from '../../webview/chat/workflows';
 
 describe('chat artifact model helpers', () => {
@@ -117,5 +120,49 @@ describe('chat workflow model helpers', () => {
         expect(buildWorkflowSummary(undefined, labels)).to.equal('未选择工作流');
         expect(buildWorkflowSummary(workflow, labels)).to.include('1 阶段');
         expect(buildWorkflowSummary(workflow, labels)).to.include('1 必需检查');
+    });
+});
+
+describe('chat i18n and command helpers', () => {
+    it('returns localized chat text', () => {
+        expect(getChatI18n('zh-cn').slashDescriptions['/workflow:off']).to.equal('关闭当前 AI 工作流');
+        expect(getChatI18n('en').buttons.send).to.equal('Send');
+    });
+
+    it('builds slash commands with localized workflow descriptions', () => {
+        const workflow: WorkflowView = {
+            id: 'diagnostic-fix',
+            title: '诊断修复',
+            description: '自动修复诊断',
+            mode: 'build',
+            phases: [],
+            verification: [],
+        };
+        const commands = buildSlashCommands(getChatI18n('zh-cn').slashDescriptions, [workflow]);
+
+        expect(commands.find(command => command.cmd === '/workflow:off')!.desc).to.equal('关闭当前 AI 工作流');
+        expect(commands.find(command => command.cmd === '/workflow:diagnostic-fix')!.desc).to.equal('自动修复诊断');
+        expect(filterSlashCommands(commands, '/workflow')).to.have.length.greaterThan(1);
+        expect(renderSlashCommandItems(commands)).to.include('/workflow:diagnostic-fix');
+    });
+
+    it('applies mode UI state without reimplementing it in chatPanel', () => {
+        const classSet = new Set<string>();
+        const body = {
+            classList: {
+                add: (...classes: string[]) => classes.forEach(cls => classSet.add(cls)),
+                remove: (...classes: string[]) => classes.forEach(cls => classSet.delete(cls)),
+                contains: (cls: string) => classSet.has(cls),
+            },
+        } as unknown as HTMLElement;
+        const selector = { value: 'plan' } as HTMLSelectElement;
+        const indicator = { textContent: '' } as HTMLElement;
+
+        const normalized = applyModeUi('general', getChatI18n('en').modeLabels, body, selector, indicator);
+
+        expect(normalized).to.equal('utility');
+        expect(classSet.has('utility-mode')).to.equal(true);
+        expect(selector.value).to.equal('utility');
+        expect(indicator.textContent).to.include('Utility Mode');
     });
 });

@@ -244,6 +244,7 @@ export class AgentToolExecutor {
         const entries = this.indexService.queryWorkspaceSymbols({
             name: args.name,
             kind: args.kind,
+            category: args.category,
             source: args.source,
             directory: args.directory,
             prefix: !!args.prefix,
@@ -261,7 +262,9 @@ export class AgentToolExecutor {
                 line: entry.line,
                 source: entry.source,
                 container: entry.container,
+                category: entry.category,
             })),
+            indexedSymbolNames: this.indexService.workspaceSymbolCount,
             _hint: this.indexService.status === 'ready'
                 ? undefined
                 : 'Index may still be building; retry after the initial refresh completes.',

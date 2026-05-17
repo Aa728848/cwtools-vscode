@@ -32,10 +32,14 @@ import {
     type TopicPanelItem,
     type TopicPanelStats,
 } from './chat/topics';
-import { getWorkflowSlashCommand, type WorkflowUiLabels, type WorkflowView } from './chat/workflows';
+import { getChatI18n } from './chat/i18n';
+import { applyModeUi } from './chat/modes';
+import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from './chat/slashCommands';
+import { type WorkflowUiLabels, type WorkflowView } from './chat/workflows';
 import { renderWorkflowSelector } from './chat/workflowSelector';
 
 (function () {
+    const chatI18n = getChatI18n(document.documentElement.lang || navigator.language);
     const vscode = acquireVsCodeApi();
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
     const input = document.getElementById('input') as HTMLTextAreaElement;
@@ -222,20 +226,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
     vscode.postMessage({ type: 'ready' });
 
     // ── Placeholder rotation ───────────────────────────────────────────────────
-    const PROMPT_EXAMPLES = [
-        '检查当前文件的 LSP 错误并修复',
-        '为 scripted_trigger 添加检查星球所有者特性的条件',
-        '解释 from、root、prev 这三个作用域的区别',
-        '创建一个每月给舰队补充护卫舰的 on_action',
-        '在 common/buildings 中添加一个需要矿物的新建筑',
-        '修复当前效果块中的作用域错误',
-        '分析当前文件并列出潜在的语法问题',
-        '给这个 scripted_effect 添加错误检测逻辑',
-        '为当前事件添加 immediate 触发器初始化变量',
-        '解释 scripted_trigger 和 limit 的区别',
-        '帮我优化这个循环检查所有星球的触发器',
-        '创建一个基于帝国科技等级的 modifier 公式',
-    ];
+    const PROMPT_EXAMPLES = chatI18n.promptExamples;
     let placeholderIdx = Math.floor(Math.random() * PROMPT_EXAMPLES.length);
     let placeholderTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -542,34 +533,16 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
     }
 
     // ── Slash command popup ────────────────────────────────────────────────────
-    const SLASH_COMMANDS = [
-        { cmd: '/init', desc: '扫描项目，生成 CWTOOLS.md 规则文件（类 OpenCode /init）' },
-        { cmd: '/clear', desc: '清空当前对话，开始新话题' },
-        { cmd: '/fork', desc: '从当前位置分叉对话' },
-        { cmd: '/archive', desc: '归档当前话题' },
-        { cmd: '/workflow:list', desc: '列出可用 AI 工作流' },
-        { cmd: '/workflow:off', desc: '关闭当前 AI 工作流' },
-        { cmd: '/mode:build', desc: '切换到构建模式（生成代码）' },
-        { cmd: '/mode:plan', desc: '切换到计划模式（单 Agent 只读规划）' },
-        { cmd: '/mode:explore', desc: '切换到分析模式（探索代码库）' },
-        { cmd: '/mode:utility', desc: '切换到泛用模式（脚本、工具与非 PDXScript 工程任务）' },
-        { cmd: '/mode:review', desc: '切换到审查模式（代码审查）' },
-        { cmd: '/mode:orchestrator', desc: '切换到多 Agent 执行模式（DAG 分派与并行协作）' },
-    ];
     const slashPopup = document.getElementById('slashPopup');
 
     function showSlashPopup(filter: string) {
         if (!slashPopup) return;
-        const q = filter.toLowerCase();
-        const workflowCommands = workflows.map(workflow => ({
-            cmd: getWorkflowSlashCommand(workflow.id),
-            desc: workflow.description || workflow.title,
-        }));
-        const matches = [...SLASH_COMMANDS, ...workflowCommands].filter(c => c.cmd.includes(q));
+        const matches = filterSlashCommands(
+            buildSlashCommands(chatI18n.slashDescriptions, workflows),
+            filter
+        );
         if (!matches.length) { slashPopup.classList.remove('show'); return; }
-        slashPopup.innerHTML = matches.map(c =>
-            `<div class="slash-popup-item" data-cmd="${c.cmd}"><span class="slash-popup-cmd">${c.cmd}</span><span class="slash-popup-desc">${c.desc}</span></div>`
-        ).join('');
+        slashPopup.innerHTML = renderSlashCommandItems(matches);
         slashPopup.querySelectorAll('.slash-popup-item').forEach(el => {
             el.addEventListener('click', () => {
                 const cmd = (el as HTMLElement).dataset.cmd;
@@ -745,8 +718,8 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         if (artifacts.length === 0) {
             list.innerHTML = `
                 <div class="artifact-empty">
-                    <div class="artifact-empty-title">暂无 Artifacts</div>
-                    <div class="artifact-empty-subtitle">计划、蓝图、诊断、Diff 和 Walkthrough 会在这里集中出现。</div>
+                    <div class="artifact-empty-title">${escapeHtml(chatI18n.artifact.emptyTitle)}</div>
+                    <div class="artifact-empty-subtitle">${escapeHtml(chatI18n.artifact.emptySubtitle)}</div>
                 </div>
             `;
             return;
@@ -756,8 +729,8 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         if (visibleArtifacts.length === 0) {
             list.innerHTML = `
                 <div class="artifact-empty">
-                    <div class="artifact-empty-title">当前筛选无内容</div>
-                    <div class="artifact-empty-subtitle">切回“全部”查看其他 Artifacts。</div>
+                    <div class="artifact-empty-title">${escapeHtml(chatI18n.artifact.emptyFilterTitle)}</div>
+                    <div class="artifact-empty-subtitle">${escapeHtml(chatI18n.artifact.emptyFilterSubtitle)}</div>
                 </div>
             `;
             return;
@@ -773,12 +746,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
             media: 'sparkles',
             blackboard: 'bookmark',
         };
-        const statusLabel: Record<string, string> = {
-            pending: 'pending',
-            running: 'running',
-            done: 'done',
-            failed: 'failed',
-        };
+        const statusLabel = chatI18n.artifact.status;
 
         list.innerHTML = '';
         for (const artifact of visibleArtifacts) {
@@ -1155,18 +1123,6 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         if (fileBadges) fileBadges.innerHTML = '';
     }
 
-    const MODE_META: Record<string, { label: string | null; bodyClass: string }> = {
-        build: { label: null, bodyClass: 'build-mode' },
-        plan: { label: '计划模式 - 单 Agent 只读规划，不修改文件', bodyClass: 'plan-mode' },
-        explore: { label: '分析模式 — 探索代码库结构', bodyClass: 'explore-mode' },
-        general: { label: '泛用模式 — 脚本、工具与非 PDXScript 工程任务', bodyClass: 'utility-mode' },
-        utility: { label: '泛用模式 — 脚本、工具与非 PDXScript 工程任务', bodyClass: 'utility-mode' },
-        review: { label: '审查模式 — 代码审查', bodyClass: 'review-mode' },
-        loc_translator: { label: '翻译模式 — 本地化文件翻译（子代理专用）', bodyClass: 'build-mode' },
-        loc_writer: { label: '写作模式 — 本地化内容创作（子代理专用）', bodyClass: 'build-mode' },
-        orchestrator: { label: '多 Agent 执行 - DAG 分派与并行协作', bodyClass: 'orchestrator-mode' },
-    };
-
     /**
      * switchMode(mode, fromUI)
      * fromUI=true  → user clicked dropdown → send message to backend + update UI
@@ -1175,19 +1131,15 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
     function switchMode(mode: string, fromUI?: boolean) {
         if (mode === 'general') mode = 'utility';
         if (currentMode === mode && !fromUI) return; // avoid redundant update
-        currentMode = mode;
-        // Sync dropdown value without re-triggering change event
-        const sel = document.getElementById('modeSel') as HTMLSelectElement | null;
-        if (sel && sel.value !== mode) sel.value = mode;
         // Only post to backend when user initiated (avoids ping-pong)
         if (fromUI) vscode.postMessage({ type: 'switchMode', mode });
-        // Remove all mode body classes, add correct one
-        document.body.classList.remove('build-mode', 'plan-mode', 'explore-mode', 'general-mode', 'utility-mode', 'review-mode', 'orchestrator-mode');
-        const meta = MODE_META[mode as keyof typeof MODE_META];
-        if (meta && meta.bodyClass) document.body.classList.add(meta.bodyClass);
-        // Update inline mode indicator text
-        const ind = document.getElementById('modeIndicator');
-        if (ind) ind.textContent = meta && meta.label ? meta.label : '';
+        currentMode = applyModeUi(
+            mode,
+            chatI18n.modeLabels,
+            document.body,
+            document.getElementById('modeSel') as HTMLSelectElement | null,
+            document.getElementById('modeIndicator')
+        );
     }
     
     // Give initial mode its body class
@@ -1197,11 +1149,11 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         isGenerating = val;
         if (val) {
             sendBtn.innerHTML = '<span class="stop-icon"></span>';
-            sendBtn.title = '取消生成 (Esc)';
+            sendBtn.title = chatI18n.buttons.cancelGeneration;
             sendBtn.className = 'send-btn cancel-mode';
         } else {
             sendBtn.innerHTML = '<span class="send-icon">↑</span>';
-            sendBtn.title = '发送 (Enter)';
+            sendBtn.title = `${chatI18n.buttons.send} (Enter)`;
             sendBtn.className = 'send-btn';
             if (input.value.trim() === '') startPlaceholderRotation();
         }

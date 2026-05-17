@@ -7,11 +7,13 @@ export interface WorkspaceSymbolEntry {
     line: number;
     source: WorkspaceSymbolSource;
     container?: string;
+    category?: string;
 }
 
 export interface WorkspaceSymbolQuery {
     name?: string;
     kind?: string;
+    category?: string;
     source?: WorkspaceSymbolSource;
     directory?: string;
     prefix?: boolean;
@@ -74,6 +76,7 @@ export function queryWorkspaceSymbolIndex(
     const limit = Math.max(1, Math.min(Number(query.limit ?? 50) || 50, 200));
     const name = (query.name ?? '').trim();
     const kind = (query.kind ?? '').trim().toLowerCase();
+    const category = (query.category ?? '').trim().toLowerCase();
     const source = query.source;
     const directory = query.directory ? normalizePath(query.directory).toLowerCase().replace(/^\/+|\/+$/g, '') : '';
 
@@ -92,6 +95,7 @@ export function queryWorkspaceSymbolIndex(
             if (!query.exact && !query.prefix && !entryName.includes(nameLower)) continue;
         }
         if (kind && entry.kind.toLowerCase() !== kind) continue;
+        if (category && (entry.category ?? '').toLowerCase() !== category) continue;
         if (source && entry.source !== source) continue;
         if (directory && !normalizePath(entry.file).toLowerCase().includes(`/${directory}/`)) continue;
         results.push(entry);
@@ -130,7 +134,8 @@ function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolE
             : null;
         if (topBlockMatch?.[1]) {
             const blockName = topBlockMatch[1];
-            const kind = inferScriptKind(normalizedFile, blockName);
+            const classification = inferScriptClassification(normalizedFile, blockName);
+            const kind = classification.kind;
             openBlock = { name: blockName, kind, source: 'script' };
             if (kind !== 'event_block') {
                 entries.push({
@@ -139,6 +144,7 @@ function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolE
                     file: filePath,
                     line: i + 1,
                     source: 'script',
+                    category: classification.category,
                 });
             }
         } else if (openBlock?.kind === 'event_block') {
@@ -151,6 +157,7 @@ function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolE
                     line: i + 1,
                     source: 'script',
                     container: openBlock.name,
+                    category: 'event',
                 });
             }
         }
@@ -200,6 +207,7 @@ function parseNamedBlockSymbols(
                     line: i + 1,
                     source,
                     container: openBlock.name,
+                    category: source === 'gui' ? 'gui' : 'asset',
                 });
             }
         }
@@ -214,26 +222,57 @@ function parseNamedBlockSymbols(
     return entries;
 }
 
-function inferScriptKind(normalizedFile: string, blockName: string): string {
+function inferScriptClassification(normalizedFile: string, blockName: string): { kind: string; category: string } {
     const lower = normalizedFile.toLowerCase();
     const blockLower = blockName.toLowerCase();
-    if (blockLower.endsWith('_event')) return 'event_block';
-    if (lower.includes('/events/')) return 'event_block';
-    if (lower.includes('/common/scripted_triggers/')) return 'scripted_trigger';
-    if (lower.includes('/common/scripted_effects/')) return 'scripted_effect';
-    if (lower.includes('/common/technology/') || lower.includes('/common/technologies/')) return 'technology';
-    if (lower.includes('/common/buildings/')) return 'building';
-    if (lower.includes('/common/traits/')) return 'trait';
-    if (lower.includes('/common/static_modifiers/')) return 'static_modifier';
-    if (lower.includes('/common/deposits/')) return 'deposit';
-    if (lower.includes('/common/edicts/')) return 'edict';
-    if (lower.includes('/common/decisions/')) return 'decision';
-    if (lower.includes('/common/on_actions/')) return 'on_action';
-    if (lower.includes('/common/situations/')) return 'situation_type';
-    if (lower.includes('/common/relics/')) return 'relic';
-    if (lower.includes('/common/archaeological_site_types/')) return 'archaeological_site_type';
-    return 'pdx_block';
+    if (blockLower.endsWith('_event')) return { kind: 'event_block', category: 'event' };
+    if (lower.includes('/events/')) return { kind: 'event_block', category: 'event' };
+
+    const commonMatch = lower.match(/\/common\/([^/]+)\//);
+    const commonDir = commonMatch?.[1] ?? '';
+    const mapped = COMMON_DIR_KIND[commonDir];
+    if (mapped) return { kind: mapped, category: 'game_entity' };
+
+    return { kind: 'pdx_block', category: 'script' };
 }
+
+const COMMON_DIR_KIND: Record<string, string> = {
+    scripted_triggers: 'scripted_trigger',
+    scripted_effects: 'scripted_effect',
+    technology: 'technology',
+    technologies: 'technology',
+    buildings: 'building',
+    traits: 'trait',
+    static_modifiers: 'static_modifier',
+    deposits: 'deposit',
+    edicts: 'edict',
+    decisions: 'decision',
+    on_actions: 'on_action',
+    situations: 'situation_type',
+    relics: 'relic',
+    archaeological_site_types: 'archaeological_site_type',
+    special_projects: 'special_project',
+    event_chains: 'event_chain',
+    ascension_perks: 'ascension_perk',
+    traditions: 'tradition',
+    tradition_categories: 'tradition_category',
+    civics: 'civic',
+    governments: 'government',
+    authorities: 'authority',
+    ethics: 'ethic',
+    species_classes: 'species_class',
+    species_names: 'species_name',
+    solar_system_initializers: 'solar_system_initializer',
+    star_classes: 'star_class',
+    planet_classes: 'planet_class',
+    pop_jobs: 'pop_job',
+    districts: 'district',
+    ship_sizes: 'ship_size',
+    component_templates: 'component_template',
+    section_templates: 'section_template',
+    policies: 'policy',
+    agendas: 'agenda',
+};
 
 function inferAssetKind(blockName: string): string {
     switch (blockName) {

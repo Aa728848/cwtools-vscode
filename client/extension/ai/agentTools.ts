@@ -143,7 +143,7 @@ export class AgentToolExecutor {
 
     private readonly clientGetter: () => LanguageClient;
     public readonly workspaceRoot: string;
-    private readonly indexService?: IndexService;
+    public readonly indexService?: IndexService;
 
     constructor(
         clientOrGetter: LanguageClient | (() => LanguageClient),
@@ -249,6 +249,7 @@ export class AgentToolExecutor {
             directory: args.directory,
             prefix: !!args.prefix,
             exact: !!args.exact,
+            includeReferences: !!args.includeReferences,
             limit,
         });
 
@@ -263,8 +264,12 @@ export class AgentToolExecutor {
                 source: entry.source,
                 container: entry.container,
                 category: entry.category,
+                references: args.includeReferences ? entry.references : undefined,
+                updatedAt: entry.updatedAt,
+                fileVersion: entry.fileVersion,
             })),
             indexedSymbolNames: this.indexService.workspaceSymbolCount,
+            indexUpdatedAt: this.indexService.workspaceSymbolUpdatedAt,
             _hint: this.indexService.status === 'ready'
                 ? undefined
                 : 'Index may still be building; retry after the initial refresh completes.',

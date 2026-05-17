@@ -82,15 +82,35 @@ describe('Workspace Symbol Parser (indexing)', () => {
         });
     });
 
+    it('attaches metadata and lightweight same-file references', () => {
+        const entries = parseWorkspaceSymbols([
+            'kuat_effect = {',
+            '    add_modifier = kuat_effect',
+            '}',
+            'other_effect = {',
+            '    kuat_effect = yes',
+            '}',
+        ].join('\n'), '/mod/common/scripted_effects/kuat.txt', {
+            updatedAt: 1234,
+            fileVersion: 2,
+        });
+
+        const effect = entries.find(entry => entry.name === 'kuat_effect');
+        expect(effect).to.deep.include({ updatedAt: 1234, fileVersion: 2 });
+        expect(effect?.references?.map(ref => ref.line)).to.deep.equal([2, 5]);
+    });
+
     it('queries indexed symbols by prefix, kind, source, and directory', () => {
         const index = new Map<string, WorkspaceSymbolEntry[]>();
         addSymbolsToIndex(index, [
-            { name: 'kuat.100', kind: 'event', category: 'event', source: 'script', file: '/mod/events/kuat.txt', line: 1 },
+            { name: 'kuat.100', kind: 'event', category: 'event', source: 'script', file: '/mod/events/kuat.txt', line: 1, references: [{ file: '/mod/events/kuat.txt', line: 3, context: 'id = kuat.100' }] },
             { name: 'tech_kuat_reactor', kind: 'technology', category: 'game_entity', source: 'script', file: '/mod/common/technology/kuat.txt', line: 2 },
             { name: 'GFX_evt_kuat_echo', kind: 'sprite', category: 'asset', source: 'asset', file: '/mod/interface/kuat.gfx', line: 3 },
         ]);
 
         expect(queryWorkspaceSymbolIndex(index, { name: 'kuat', prefix: true })).to.have.lengthOf(1);
+        expect(queryWorkspaceSymbolIndex(index, { name: 'kuat.100', exact: true })[0]!.references).to.equal(undefined);
+        expect(queryWorkspaceSymbolIndex(index, { name: 'kuat.100', exact: true, includeReferences: true })[0]!.references).to.have.lengthOf(1);
         expect(queryWorkspaceSymbolIndex(index, { kind: 'sprite', source: 'asset' })[0]!.name).to.equal('GFX_evt_kuat_echo');
         expect(queryWorkspaceSymbolIndex(index, { category: 'game_entity' })[0]!.name).to.equal('tech_kuat_reactor');
         expect(queryWorkspaceSymbolIndex(index, { directory: 'common/technology' })[0]!.name).to.equal('tech_kuat_reactor');

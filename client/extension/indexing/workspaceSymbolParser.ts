@@ -8,6 +8,15 @@ export interface WorkspaceSymbolEntry {
     source: WorkspaceSymbolSource;
     container?: string;
     category?: string;
+    references?: WorkspaceSymbolReference[];
+    updatedAt?: number;
+    fileVersion?: number;
+}
+
+export interface WorkspaceSymbolReference {
+    file: string;
+    line: number;
+    context: string;
 }
 
 export interface WorkspaceSymbolQuery {
@@ -18,7 +27,14 @@ export interface WorkspaceSymbolQuery {
     directory?: string;
     prefix?: boolean;
     exact?: boolean;
+    includeReferences?: boolean;
     limit?: number;
+}
+
+export interface WorkspaceSymbolParseOptions {
+    updatedAt?: number;
+    fileVersion?: number;
+    maxReferencesPerSymbol?: number;
 }
 
 interface OpenBlock {
@@ -35,15 +51,25 @@ export function isWorkspaceSymbolFile(filePath: string): boolean {
     return SCRIPT_EXTENSIONS.has(ext) || NAMED_BLOCK_EXTENSIONS.has(ext);
 }
 
-export function parseWorkspaceSymbols(content: string, filePath: string): WorkspaceSymbolEntry[] {
+export function parseWorkspaceSymbols(
+    content: string,
+    filePath: string,
+    options: WorkspaceSymbolParseOptions = {}
+): WorkspaceSymbolEntry[] {
     const ext = getExtension(filePath);
+    let entries: WorkspaceSymbolEntry[];
     if (SCRIPT_EXTENSIONS.has(ext)) {
-        return parseScriptSymbols(content, filePath);
+        entries = parseScriptSymbols(content, filePath);
+    } else if (NAMED_BLOCK_EXTENSIONS.has(ext)) {
+        entries = parseNamedBlockSymbols(content, filePath, ext === '.gui' ? 'gui' : 'asset');
+    } else {
+        return [];
     }
-    if (NAMED_BLOCK_EXTENSIONS.has(ext)) {
-        return parseNamedBlockSymbols(content, filePath, ext === '.gui' ? 'gui' : 'asset');
+    applyEntryMetadata(entries, options);
+    if (options.maxReferencesPerSymbol !== 0) {
+        attachReferences(entries, content, filePath, options.maxReferencesPerSymbol ?? 20);
     }
-    return [];
+    return entries;
 }
 
 export function addSymbolsToIndex(
@@ -98,11 +124,49 @@ export function queryWorkspaceSymbolIndex(
         if (category && (entry.category ?? '').toLowerCase() !== category) continue;
         if (source && entry.source !== source) continue;
         if (directory && !normalizePath(entry.file).toLowerCase().includes(`/${directory}/`)) continue;
-        results.push(entry);
+        results.push(query.includeReferences ? entry : { ...entry, references: undefined });
         if (results.length >= limit) break;
     }
 
     return results;
+}
+
+function applyEntryMetadata(entries: WorkspaceSymbolEntry[], options: WorkspaceSymbolParseOptions): void {
+    if (options.updatedAt === undefined && options.fileVersion === undefined) return;
+    for (const entry of entries) {
+        if (options.updatedAt !== undefined) entry.updatedAt = options.updatedAt;
+        if (options.fileVersion !== undefined) entry.fileVersion = options.fileVersion;
+    }
+}
+
+function attachReferences(
+    entries: WorkspaceSymbolEntry[],
+    content: string,
+    filePath: string,
+    maxReferencesPerSymbol: number
+): void {
+    if (entries.length === 0 || maxReferencesPerSymbol <= 0) return;
+    const lines = content.split(/\r?\n/);
+    for (const entry of entries) {
+        const refs: WorkspaceSymbolReference[] = [];
+        const pattern = buildIdentifierRegex(entry.name);
+        for (let i = 0; i < lines.length && refs.length < maxReferencesPerSymbol; i++) {
+            if (i + 1 === entry.line) continue;
+            const stripped = stripComment(lines[i] ?? '');
+            if (!pattern.test(stripped)) continue;
+            refs.push({
+                file: filePath,
+                line: i + 1,
+                context: stripped.trim().slice(0, 240),
+            });
+        }
+        if (refs.length > 0) entry.references = refs;
+    }
+}
+
+function buildIdentifierRegex(name: string): RegExp {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^A-Za-z0-9_.:-])${escaped}([^A-Za-z0-9_.:-]|$)`, 'i');
 }
 
 function parseScriptSymbols(content: string, filePath: string): WorkspaceSymbolEntry[] {

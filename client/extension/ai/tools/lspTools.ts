@@ -40,6 +40,7 @@ function uniqStrings(values: string[]): string[] {
 /** Structural type for the properties LspToolHandler reads from the executor. */
 export interface LspToolContext {
     readonly workspaceRoot: string;
+    readonly indexService?: import('../../indexing/indexService').IndexService;
     /** Agent file write mode from config ('confirm' or 'auto') */
     fileWriteMode?: 'confirm' | 'auto';
     /** Callback when a file write needs user confirmation (confirm mode). */
@@ -1206,6 +1207,33 @@ export class LspToolHandler {
             return { score, matchedBy: uniqStrings(matchedBy) };
         };
 
+        if (ctxStr === 'mod' || ctxStr === 'both') {
+            const indexed = this.ctx.indexService?.queryWorkspaceSymbols({
+                name: directName || (terms.length > 0 ? terms[0] : undefined),
+                kind: 'sprite',
+                source: 'asset',
+                includeReferences: true,
+                limit: limit * 5,
+            }) ?? [];
+            if (indexed.length > 0) {
+                searchedRoots.push('IndexService:workspaceSymbolIndex');
+            }
+            for (const entry of indexed) {
+                const textureFile = entry.references?.find(ref => /texturefile/i.test(ref.context))?.context;
+                const { score, matchedBy } = scoreCandidate(entry.name, textureFile, 'mod');
+                addCandidate({
+                    name: entry.name,
+                    source: 'mod',
+                    file: path.relative(this.ctx.workspaceRoot, entry.file).replace(/\\/g, '/'),
+                    line: entry.line,
+                    textureFile,
+                    spriteType: entry.container,
+                    score: score + 15,
+                    matchedBy: uniqStrings([...matchedBy, 'workspace-index']),
+                });
+            }
+        }
+
         const extractSprites = (content: string, file: string, source: 'mod' | 'vanilla', root: string) => {
             const blockRegex = /\b([A-Za-z0-9_]*spriteType)\s*=\s*\{([\s\S]*?)\n\s*\}/gi;
             let match: RegExpExecArray | null;
@@ -1364,6 +1392,33 @@ export class LspToolHandler {
             seen.add(key);
             candidates.push(candidate);
         };
+
+        if (ctxStr === 'mod' || ctxStr === 'both') {
+            const indexed = this.ctx.indexService?.queryWorkspaceSymbols({
+                name: currentLower || (terms.length > 0 ? terms[0] : undefined),
+                kind: 'sound',
+                source: 'asset',
+                includeReferences: true,
+                limit: limit * 5,
+            }) ?? [];
+            if (indexed.length > 0) {
+                searchedRoots.push('IndexService:workspaceSymbolIndex');
+            }
+            for (const entry of indexed) {
+                const fileRef = entry.references?.find(ref => /\bfiles?\s*=/i.test(ref.context))?.context;
+                const { score, matchedBy } = scoreCandidate(entry.name, fileRef, entry.container, 'mod');
+                addCandidate({
+                    name: entry.name,
+                    source: 'mod',
+                    file: path.relative(this.ctx.workspaceRoot, entry.file).replace(/\\/g, '/'),
+                    line: entry.line,
+                    assetType: entry.container,
+                    fileRef,
+                    score: score + 15,
+                    matchedBy: uniqStrings([...matchedBy, 'workspace-index']),
+                });
+            }
+        }
 
         const extractAssets = (content: string, file: string, source: 'mod' | 'vanilla', root: string) => {
             const blockRegex = /\b([A-Za-z0-9_]*(?:sound|music)[A-Za-z0-9_]*|soundeffect|soundEffect)\s*=\s*\{([\s\S]*?)\n\s*\}/gi;

@@ -62,6 +62,8 @@ export class IndexService implements vscode.Disposable {
 	private _disposables: vscode.Disposable[] = [];
 	private _locIndex: Map<string, LocEntry[]> = new Map();
 	private _workspaceSymbolIndex: Map<string, WorkspaceSymbolEntry[]> = new Map();
+	private _workspaceSymbolFileVersions: Map<string, number> = new Map();
+	private _lastWorkspaceSymbolRefreshAt: number | undefined;
 	private _fileWatcher: vscode.FileSystemWatcher | undefined;
 	private _symbolFileWatcher: vscode.FileSystemWatcher | undefined;
 	private _debounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -81,6 +83,11 @@ export class IndexService implements vscode.Disposable {
 	/** Number of indexed workspace symbol names. */
 	get workspaceSymbolCount(): number {
 		return this._workspaceSymbolIndex.size;
+	}
+
+	/** Last successful workspace-symbol refresh/update timestamp. */
+	get workspaceSymbolUpdatedAt(): number | undefined {
+		return this._lastWorkspaceSymbolRefreshAt;
 	}
 
 	/**
@@ -161,6 +168,7 @@ export class IndexService implements vscode.Disposable {
 	removeFile(uri: vscode.Uri): void {
 		removeFileFromIndex(this._locIndex, uri.fsPath);
 		removeFileFromSymbolIndex(this._workspaceSymbolIndex, uri.fsPath);
+		this._workspaceSymbolFileVersions.delete(uri.fsPath);
 	}
 
 	/**
@@ -204,6 +212,7 @@ export class IndexService implements vscode.Disposable {
 
 	private async _indexWorkspaceSymbolFiles(): Promise<void> {
 		this._workspaceSymbolIndex.clear();
+		this._workspaceSymbolFileVersions.clear();
 
 		const files = await vscode.workspace.findFiles(
 			'**/*.{txt,gfx,asset,gui}',
@@ -218,6 +227,7 @@ export class IndexService implements vscode.Disposable {
 				// Skip files that can't be parsed
 			}
 		}
+		this._lastWorkspaceSymbolRefreshAt = Date.now();
 	}
 
 	private async _indexSingleLocFile(uri: vscode.Uri): Promise<void> {
@@ -242,8 +252,12 @@ export class IndexService implements vscode.Disposable {
 
 		try {
 			const content = (await vscode.workspace.fs.readFile(uri)).toString();
-			const entries = parseWorkspaceSymbols(content, filePath);
+			const fileVersion = (this._workspaceSymbolFileVersions.get(filePath) ?? 0) + 1;
+			this._workspaceSymbolFileVersions.set(filePath, fileVersion);
+			const updatedAt = Date.now();
+			const entries = parseWorkspaceSymbols(content, filePath, { updatedAt, fileVersion });
 			addSymbolsToIndex(this._workspaceSymbolIndex, entries);
+			this._lastWorkspaceSymbolRefreshAt = updatedAt;
 		} catch {
 			// File read error - skip
 		}

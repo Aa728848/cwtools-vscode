@@ -7,6 +7,7 @@ import {
     sortArtifactsByNewest,
     type ArtifactRecord,
 } from '../../webview/chat/artifacts';
+import { renderArtifactEmpty, renderArtifactRowHtml } from '../../webview/chat/artifactDrawer';
 import {
     buildTopicSummaryModel,
     formatTopicMoment,
@@ -14,6 +15,8 @@ import {
     shortenText,
     type TopicPanelItem,
 } from '../../webview/chat/topics';
+import { buildSubagentCardHtml, buildSubagentMetaHtml, latestLiveToolName } from '../../webview/chat/liveSteps';
+import { buildSettingsOverviewModel } from '../../webview/chat/settingsOverview';
 import { getChatI18n } from '../../webview/chat/i18n';
 import { applyModeUi } from '../../webview/chat/modes';
 import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from '../../webview/chat/slashCommands';
@@ -57,6 +60,15 @@ describe('chat artifact model helpers', () => {
             },
         ]);
         expect(restored.map(a => a.kind)).to.deep.equal(['diagnostics', 'plan']);
+    });
+
+    it('renders artifact drawer HTML with localized states', () => {
+        const i18n = getChatI18n('en');
+        const row = renderArtifactRowHtml({ id: 'diff', kind: 'diff', title: '<Diff>', status: 'done', createdAt: 1 }, i18n);
+
+        expect(renderArtifactEmpty('None', 'Later')).to.include('artifact-empty-title');
+        expect(row).to.include('&lt;Diff&gt;');
+        expect(row).to.include('done');
     });
 });
 
@@ -164,5 +176,40 @@ describe('chat i18n and command helpers', () => {
         expect(classSet.has('utility-mode')).to.equal(true);
         expect(selector.value).to.equal('utility');
         expect(indicator.textContent).to.include('Utility Mode');
+    });
+});
+
+describe('chat view contract helpers', () => {
+    it('builds settings overview copy without touching DOM', () => {
+        const model = buildSettingsOverviewModel({
+            providers: [{ id: 'openai', name: 'OpenAI', defaultEndpoint: 'https://api.example', hasKey: true }],
+            providerId: 'openai',
+            model: 'gpt-test',
+            contextTokens: 128000,
+            inlineEnabled: true,
+            inlineProviderName: 'OpenAI',
+            mcpCount: 2,
+            writeMode: 'auto',
+            reasoningEffort: 'high',
+        });
+
+        expect(model.title).to.include('OpenAI');
+        expect(model.subtitle).to.include('128k tokens');
+        expect(model.chipsHtml).to.include('写入自动');
+    });
+
+    it('builds live subagent status HTML', () => {
+        const state = {
+            liveSteps: [{ type: 'tool_call', toolName: 'read_file' }],
+            startedAt: 1000,
+            lastStepAt: 1100,
+            completedAt: 2500,
+            isComplete: true,
+        };
+        const html = buildSubagentMetaHtml(state, { toolCallCount: 1, readCount: 1, writeCount: 0 }, latestLiveToolName(state.liveSteps), 3000);
+
+        expect(buildSubagentCardHtml('agent-a', 'view-a')).to.include('子任务');
+        expect(html).to.include('read_file');
+        expect(html).to.include('读取');
     });
 });

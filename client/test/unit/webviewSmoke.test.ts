@@ -17,6 +17,26 @@ describe('webview smoke checks', () => {
         expect(script).to.include('renderWorkflowSelector');
         expect(script).to.include('renderArtifactPanel');
         expect(script).to.include('renderTopics');
+        expect(script).to.include('renderArtifactDrawer');
+        expect(script).to.include('renderTopicsView');
+        expect(script).to.include('buildSettingsOverviewModel');
+    });
+
+    it('chat webview modules expose split UI contracts', () => {
+        const modules = [
+            'artifactDrawer.ts',
+            'topicViews.ts',
+            'settingsOverview.ts',
+            'liveSteps.ts',
+            'i18n.ts',
+            'modes.ts',
+            'slashCommands.ts',
+        ];
+
+        for (const moduleName of modules) {
+            const source = fs.readFileSync(path.join(root, 'client/webview/chat', moduleName), 'utf8');
+            expect(source).to.match(/export (function|interface|type|const)/);
+        }
     });
 
     it('release bundle exists and is non-empty after compile', () => {

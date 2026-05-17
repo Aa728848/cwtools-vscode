@@ -256,6 +256,7 @@ export interface QueryWorkspaceIndexArgs {
     directory?: string;
     prefix?: boolean;
     exact?: boolean;
+    includeReferences?: boolean;
     limit?: number;
 }
 
@@ -270,8 +271,16 @@ export interface QueryWorkspaceIndexResult {
         source: 'script' | 'asset' | 'gui';
         container?: string;
         category?: string;
+        references?: Array<{
+            file: string;
+            line: number;
+            context: string;
+        }>;
+        updatedAt?: number;
+        fileVersion?: number;
     }>;
     indexedSymbolNames?: number;
+    indexUpdatedAt?: number;
     _hint?: string;
 }
 

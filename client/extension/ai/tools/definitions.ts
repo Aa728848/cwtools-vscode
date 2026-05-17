@@ -60,7 +60,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_workspace_index',
-            description: 'Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search when looking for event IDs, scripted triggers/effects, technologies, buildings, sprites, sounds, GUI elements, or other named project symbols. The result also reports indexedSymbolNames for freshness/coverage awareness.',
+            description: 'Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search when looking for event IDs, scripted triggers/effects, technologies, buildings, sprites, sounds, GUI elements, or other named project symbols. Results report indexedSymbolNames, indexUpdatedAt, fileVersion, and optional lightweight references for freshness/coverage awareness.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -71,6 +71,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     directory: { type: 'string', description: 'Optional path fragment filter, e.g. events, common/scripted_triggers, interface, gfx.' },
                     prefix: { type: 'boolean', description: 'If true, name is treated as a prefix. Default false.' },
                     exact: { type: 'boolean', description: 'If true, name must match exactly. Default false.' },
+                    includeReferences: { type: 'boolean', description: 'If true, include lightweight same-file reference contexts captured by the index. Default false.' },
                     limit: { type: 'number', description: 'Maximum entries to return. Default 50, max 200.' },
                 },
                 required: [],

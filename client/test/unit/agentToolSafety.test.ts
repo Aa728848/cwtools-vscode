@@ -439,8 +439,12 @@ describe('agent sprite candidate tool contract', () => {
                 line: 3,
                 source: query.source || 'script',
                 container: 'country_event',
+                references: query.includeReferences ? [{ file: path.join('events', 'test.txt'), line: 8, context: 'fire_only_once = yes' }] : undefined,
+                updatedAt: 1000,
+                fileVersion: 7,
             }],
             workspaceSymbolCount: 42,
+            workspaceSymbolUpdatedAt: 2000,
         };
         const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
 
@@ -448,13 +452,17 @@ describe('agent sprite candidate tool contract', () => {
             name: 'kuat.100',
             kind: 'event',
             exact: true,
+            includeReferences: true,
         }) as any;
 
         expect(result.status).to.equal('ready');
         expect(result.totalCount).to.equal(1);
         expect(result.entries[0].name).to.equal('kuat.100');
         expect(result.entries[0].category).to.equal('event');
+        expect(result.entries[0].references).to.have.lengthOf(1);
+        expect(result.entries[0].fileVersion).to.equal(7);
         expect(result.indexedSymbolNames).to.equal(42);
+        expect(result.indexUpdatedAt).to.equal(2000);
     });
 
     it('returns unavailable workspace index result without IndexService', async () => {
@@ -498,6 +506,39 @@ describe('agent sprite candidate tool contract', () => {
         expect(result.candidates.map(c => c.name)).to.include('GFX_evt_kuat_force_echo');
         expect(result.candidates[0]!.name).to.equal('GFX_evt_kuat_force_echo');
         expect(result.candidates[0]!.textureFile).to.include('event_pictures');
+    });
+
+    it('uses IndexService sprite candidates before falling back to file scans', async () => {
+        const lspTools = require('../../extension/ai/tools/lspTools') as typeof import('../../extension/ai/tools/lspTools');
+        const handler = new lspTools.LspToolHandler(
+            {
+                workspaceRoot,
+                indexService: {
+                    queryWorkspaceSymbols: () => [{
+                        name: 'GFX_evt_indexed_force_echo',
+                        kind: 'sprite',
+                        category: 'asset',
+                        source: 'asset',
+                        file: path.join(workspaceRoot, 'interface', 'indexed.gfx'),
+                        line: 4,
+                        container: 'spriteType',
+                        references: [{ file: 'indexed.gfx', line: 5, context: 'texturefile = "gfx/event_pictures/indexed_force_echo.dds"' }],
+                    }],
+                },
+            } as any,
+            () => ({}) as any,
+            () => [],
+        );
+        const result = await handler.findSpriteCandidates({
+            query: 'indexed force echo',
+            fieldName: 'picture',
+            searchContext: 'mod',
+            limit: 5,
+        });
+
+        expect(result.candidates[0]!.name).to.equal('GFX_evt_indexed_force_echo');
+        expect(result.candidates[0]!.matchedBy).to.include('workspace-index');
+        expect(result.searchedRoots).to.include('IndexService:workspaceSymbolIndex');
     });
 
     it('parses project .asset sound candidates for show_sound repairs', async () => {

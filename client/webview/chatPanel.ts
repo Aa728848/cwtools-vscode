@@ -14,24 +14,28 @@ import {
     type RunSummary as _FmtRunSummary,
 } from './chat/formatters';
 import {
-    artifactPreviewPayload,
-    filterArtifacts,
-    fileBaseName,
-    formatArtifactFileStats,
-    getDiffArtifactFiles,
     restoreArtifactsFromMessages as restoreArtifactsFromHistory,
     sortArtifactsByNewest,
     type ArtifactFilter,
     type ArtifactRecord,
 } from './chat/artifacts';
+import { renderArtifactDrawer } from './chat/artifactDrawer';
+import { type TopicPanelItem, type TopicPanelStats } from './chat/topics';
 import {
-    buildTopicSummaryModel,
-    formatTopicMoment as formatTopicMomentModel,
-    groupTopicsByDate as groupTopicsByDateModel,
-    shortenText as shortenTopicText,
-    type TopicPanelItem,
-    type TopicPanelStats,
-} from './chat/topics';
+    buildLiveProcessMeta,
+    buildLiveProcessSummaryHtml,
+    buildSubagentCardHtml,
+    buildSubagentFullscreenHtml,
+    buildSubagentHeaderMetricsHtml,
+    buildSubagentMetaHtml,
+    buildThinkingSummaryHtml,
+    latestLiveToolName,
+} from './chat/liveSteps';
+import { applySettingsOverview, buildSettingsOverviewModel } from './chat/settingsOverview';
+import {
+    renderTopicSearchResults as renderTopicSearchResultsView,
+    renderTopics as renderTopicsView,
+} from './chat/topicViews';
 import { getChatI18n } from './chat/i18n';
 import { applyModeUi } from './chat/modes';
 import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from './chat/slashCommands';
@@ -705,136 +709,21 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
     }
 
     function renderArtifactPanel() {
-        const list = document.getElementById('artifactList');
-        const count = document.getElementById('artifactCount');
-        const toggle = document.getElementById('btnArtifacts');
-        if (!list || !count) return;
-
-        document.querySelectorAll<HTMLElement>('[data-artifact-filter]').forEach(btn => {
-            btn.classList.toggle('active', (btn.dataset.artifactFilter || 'all') === artifactFilter);
-        });
-        count.textContent = String(artifacts.length);
-        toggle?.classList.toggle('has-artifacts', artifacts.length > 0);
-        if (artifacts.length === 0) {
-            list.innerHTML = `
-                <div class="artifact-empty">
-                    <div class="artifact-empty-title">${escapeHtml(chatI18n.artifact.emptyTitle)}</div>
-                    <div class="artifact-empty-subtitle">${escapeHtml(chatI18n.artifact.emptySubtitle)}</div>
-                </div>
-            `;
-            return;
-        }
-
-        const visibleArtifacts = filterArtifacts(artifacts, artifactFilter);
-        if (visibleArtifacts.length === 0) {
-            list.innerHTML = `
-                <div class="artifact-empty">
-                    <div class="artifact-empty-title">${escapeHtml(chatI18n.artifact.emptyFilterTitle)}</div>
-                    <div class="artifact-empty-subtitle">${escapeHtml(chatI18n.artifact.emptyFilterSubtitle)}</div>
-                </div>
-            `;
-            return;
-        }
-
-        const iconFor: Record<ArtifactRecord['kind'], keyof typeof Icons> = {
-            plan: 'clipboard',
-            blueprint: 'layers',
-            walkthrough: 'flag',
-            diff: 'edit',
-            diagnostics: 'stethoscope',
-            validation: 'check',
-            media: 'sparkles',
-            blackboard: 'bookmark',
-        };
-        const statusLabel = chatI18n.artifact.status;
-
-        list.innerHTML = '';
-        for (const artifact of visibleArtifacts) {
-            const row = document.createElement('button');
-            row.type = 'button';
-            row.className = `artifact-row artifact-${artifact.kind} artifact-${artifact.status || 'done'}`;
-            row.innerHTML = `
-                <span class="artifact-icon">${svgIconNoMargin(iconFor[artifact.kind] || 'file')}</span>
-                <span class="artifact-main">
-                    <span class="artifact-title">${escapeHtml(artifact.title)}</span>
-                    <span class="artifact-summary">${escapeHtml(artifact.summary || artifact.relPath || artifact.kind)}</span>
-                </span>
-                <span class="artifact-status">${escapeHtml(statusLabel[artifact.status || 'done'] || 'done')}</span>
-            `;
-            const togglePreview = () => {
-                const next = row.nextElementSibling as HTMLElement | null;
-                if (next?.classList.contains('artifact-preview')) {
-                    next.remove();
-                    return;
-                }
-                const preview = document.createElement('pre');
-                preview.className = 'artifact-preview';
-                preview.textContent = JSON.stringify(artifactPreviewPayload(artifact), null, 2).slice(0, 6000);
-                row.insertAdjacentElement('afterend', preview);
-            };
-            if (artifact.kind === 'diff' || artifact.action === 'openDiff') {
-                row.addEventListener('click', () => toggleDiffArtifactDetails(row, artifact));
-            } else if (artifact.filePath) {
-                row.addEventListener('click', () => {
-                    vscode.postMessage({ type: 'openPlanFile', filePath: artifact.filePath });
-                });
-            } else {
-                row.addEventListener('click', togglePreview);
-            }
-            list.appendChild(row);
-        }
-    }
-
-    function toggleDiffArtifactDetails(row: HTMLElement, artifact: ArtifactRecord) {
-        const next = row.nextElementSibling as HTMLElement | null;
-        if (next?.classList.contains('artifact-file-list')) {
-            next.remove();
-            row.classList.remove('expanded');
-            return;
-        }
-
-        document.querySelectorAll('.artifact-file-list').forEach(el => el.remove());
-        document.querySelectorAll('.artifact-row.expanded').forEach(el => el.classList.remove('expanded'));
-
-        const files = getDiffArtifactFiles(artifact);
-        const details = document.createElement('div');
-        details.className = 'artifact-file-list';
-        if (files.length === 0) {
-            details.innerHTML = `<div class="artifact-file-empty">No file changes recorded.</div>`;
-        } else {
-            const header = document.createElement('div');
-            header.className = 'artifact-file-list-header';
-            header.innerHTML = `<span>${files.length} file${files.length === 1 ? '' : 's'}</span>`;
-            const openAll = document.createElement('button');
-            openAll.type = 'button';
-            openAll.className = 'artifact-open-all';
-            openAll.textContent = 'Open all';
-            openAll.addEventListener('click', event => {
-                event.stopPropagation();
-                vscode.postMessage({ type: 'openArtifact', artifactId: artifact.id });
-            });
-            header.appendChild(openAll);
-            details.appendChild(header);
-
-            for (const file of files) {
-                const fileRow = document.createElement('button');
-                fileRow.type = 'button';
-                fileRow.className = 'artifact-file-row';
-                const stats = formatArtifactFileStats(file);
-                fileRow.innerHTML = `
-                    <span class="artifact-file-name" title="${escapeHtml(file.file)}">${escapeHtml(fileBaseName(file.file))}</span>
-                    <span class="artifact-file-path">${escapeHtml(file.file)}</span>
-                    ${stats ? `<span class="artifact-file-stats">${escapeHtml(stats)}</span>` : ''}
-                `;
-                fileRow.addEventListener('click', event => {
-                    event.stopPropagation();
-                    vscode.postMessage({ type: 'openArtifact', artifactId: artifact.id, file: file.file });
-                });
-                details.appendChild(fileRow);
-            }
-        }
-        row.insertAdjacentElement('afterend', details);
-        row.classList.add('expanded');
+        renderArtifactDrawer(
+            {
+                list: document.getElementById('artifactList'),
+                count: document.getElementById('artifactCount'),
+                toggle: document.getElementById('btnArtifacts'),
+                filterButtons: document.querySelectorAll<HTMLElement>('[data-artifact-filter]'),
+            },
+            artifacts,
+            artifactFilter,
+            chatI18n,
+            {
+                openPlanFile: filePath => vscode.postMessage({ type: 'openPlanFile', filePath }),
+                openArtifact: (artifactId, file) => vscode.postMessage({ type: 'openArtifact', artifactId, file }),
+            },
+        );
     }
 
     function restoreArtifactsFromMessages(messages: any[]) {
@@ -2046,18 +1935,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 // Card representation in the main timeline
                 const card = document.createElement('div');
                 card.className = 'orch-lane lane-running subagent-card';
-                card.innerHTML = `
-                    <div class="lane-header">
-                        <span class="lane-icon">${svgIconNoMargin('bot')}</span>
-                        <span class="lane-role">子任务: ${escapeHtml(agentId)}</span>
-                        <span class="lane-status" style="margin-left:auto;">›</span>
-                    </div>
-                    <div class="lane-status-text">正在启动...</div>
-                    <div class="lane-meta lane-live-meta">
-                        <span data-lane-elapsed>0s</span>
-                        <span data-lane-tool>等待输出</span>
-                    </div>
-                `;
+                card.innerHTML = buildSubagentCardHtml(agentId, uniqueId);
                 card.dataset.targetId = uniqueId;
                 currentAssistantDiv.appendChild(card);
 
@@ -2065,20 +1943,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 const fullscreen = document.createElement('div');
                 fullscreen.id = uniqueId;
                 fullscreen.className = 'subagent-fullscreen-view';
-                fullscreen.innerHTML = `
-                    <div class="subagent-header">
-                        <button class="subagent-back-btn" data-target-id="${uniqueId}">‹ 返回</button>
-                        <div class="subagent-title-wrap">
-                            <span class="subagent-title">子代理: ${escapeHtml(agentId)}</span>
-                            <span class="subagent-subtitle">实时过程集中显示</span>
-                        </div>
-                        <div class="subagent-header-metrics">
-                            <span>0s</span>
-                            <span>0 工具</span>
-                        </div>
-                    </div>
-                    <div class="subagent-body"></div>
-                `;
+                fullscreen.innerHTML = buildSubagentFullscreenHtml(agentId, uniqueId);
                 currentAssistantDiv.appendChild(fullscreen);
                 
                 state.container = fullscreen.querySelector('.subagent-body') as HTMLElement;
@@ -2089,15 +1954,6 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         return state;
     }
 
-    function latestToolName(steps: any[]): string {
-        for (let i = steps.length - 1; i >= 0; i--) {
-            const step = steps[i];
-            if (step?.type === 'tool_call' && step.toolName) return String(step.toolName);
-            if (step?.type === 'tool_result' && step.toolName) return String(step.toolName);
-        }
-        return '等待输出';
-    }
-
     function updateSubagentCard(state: AgentStreamState, finalText?: string) {
         if (!state.fullscreenId) return;
         const card = document.querySelector(`.subagent-card[data-target-id="${state.fullscreenId}"]`) as HTMLElement | null;
@@ -2105,9 +1961,8 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
 
         const now = Date.now();
         const summary = makeRunSummary(state.liveSteps, finalText);
-        const elapsedMs = (state.completedAt || now) - state.startedAt;
         const idleMs = state.isComplete ? 0 : now - state.lastStepAt;
-        const toolName = latestToolName(state.liveSteps);
+        const toolName = latestLiveToolName(state.liveSteps);
         const isBlocked = /澄清|clarification|blocked/i.test(finalText || summary.latestStatus || '');
         const hasProblem = isBlocked || summary.errorCount > 0 || summary.failedToolCount > 0 || /失败|错误|超时|中止|fail|error|timeout/i.test(finalText || '');
 
@@ -2133,13 +1988,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
 
         const meta = card.querySelector('.lane-live-meta') as HTMLElement | null;
         if (meta) {
-            meta.innerHTML = `
-                <span data-lane-elapsed>${escapeHtml(formatDuration(Math.max(0, elapsedMs)))}</span>
-                <span data-lane-tool>${escapeHtml(toolName)}</span>
-                <span>${summary.toolCallCount} 工具</span>
-                ${summary.readCount ? `<span>${summary.readCount} 读取</span>` : ''}
-                ${summary.writeCount ? `<span>${summary.writeCount} 写入</span>` : ''}
-            `;
+            meta.innerHTML = buildSubagentMetaHtml(state, summary, toolName, now);
         }
 
         const fullscreen = document.getElementById(state.fullscreenId);
@@ -2148,12 +1997,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
             if (subtitle) subtitle.textContent = summary.latestStatus;
             const metrics = fullscreen.querySelector('.subagent-header-metrics') as HTMLElement | null;
             if (metrics) {
-                metrics.innerHTML = `
-                    <span>${escapeHtml(formatDuration(Math.max(0, elapsedMs)))}</span>
-                    <span>${summary.toolCallCount} 工具</span>
-                    <span>${summary.readCount} 读</span>
-                    <span>${summary.writeCount} 写</span>
-                `;
+                metrics.innerHTML = buildSubagentHeaderMetricsHtml(state, summary, now);
             }
         }
     }
@@ -2174,7 +2018,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
             state.liveProcessPanel.className = 'agent-process-panel live-process-panel';
             state.liveProcessPanel.open = true;
             const summary = document.createElement('summary');
-            summary.innerHTML = `${svgIconNoMargin('layers')} <span class="process-title">探索过程</span><span class="process-meta">实时更新</span>`;
+            summary.innerHTML = buildLiveProcessSummaryHtml('layers', '探索过程', '实时更新');
             state.liveProcessPanel.appendChild(summary);
             state.liveProcessBody = document.createElement('div');
             state.liveProcessBody.className = 'process-body';
@@ -2185,11 +2029,8 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 state.container.appendChild(state.liveProcessPanel);
             }
         }
-        const toolCount = state.liveSteps.filter(s => s.type === 'tool_call').length;
-        const thinkingCount = state.liveSteps.filter(s => s.type === 'thinking' || s.type === 'thinking_content').length;
-        const textCount = state.liveSteps.filter(s => s.type === 'text_delta').length;
         const meta = state.liveProcessPanel.querySelector('.process-meta');
-        if (meta) meta.textContent = `${thinkingCount} 思考 · ${toolCount} 工具 · ${textCount} 文本`;
+        if (meta) meta.textContent = buildLiveProcessMeta(state.liveSteps);
         return state.liveProcessBody;
     }
 
@@ -2327,8 +2168,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 }
                 state.liveThinkBody.innerHTML = renderMarkdown(state.liveThinkContent);
                 if (state.liveThinkSum) {
-                    const est = Math.ceil(state.liveThinkContent.length / 4);
-                    state.liveThinkSum.innerHTML = '<span class="think-pulse spinning"></span>思考详情 &nbsp;<span class="think-tokens">~' + formatNum(est) + ' tokens</span>';
+                    state.liveThinkSum.innerHTML = buildThinkingSummaryHtml(state.liveThinkContent);
                 }
             }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
@@ -2345,7 +2185,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 const section = document.createElement('details');
                 section.className = 'process-section process-text live-process-text';
                 section.open = false;
-                section.innerHTML = `${'<summary>'}${svgIconNoMargin('file')} 过程文本 <span>streaming</span></summary>`;
+                section.innerHTML = buildLiveProcessSummaryHtml('file', '过程文本', 'streaming');
                 state.liveTextProcessBody = document.createElement('div');
                 state.liveTextProcessBody.className = 'process-text-body markdown-body stream-cursor';
                 section.appendChild(state.liveTextProcessBody);
@@ -2369,7 +2209,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
                 const toolSection = document.createElement('details');
                 toolSection.className = 'process-section process-tools live-process-tools';
                 toolSection.open = false;
-                toolSection.innerHTML = `${'<summary>'}${svgIconNoMargin('gear')} 工具详情 <span>实时调用</span></summary>`;
+                toolSection.innerHTML = buildLiveProcessSummaryHtml('gear', '工具详情', '实时调用');
                 state.liveToolTimeline = document.createElement('div');
                 state.liveToolTimeline.className = 'tool-timeline';
                 toolSection.appendChild(state.liveToolTimeline);
@@ -4087,23 +3927,11 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
     });
 
     // ── Topic list with date groups ────────────────────────────────────────────
-    function groupTopicsByDate(topics: any[]) {
-        return groupTopicsByDateModel(topics);
-    }
-
     const showArchivedCb = document.getElementById('showArchivedCb') as HTMLInputElement;
     if (showArchivedCb) {
         showArchivedCb.addEventListener('change', (e) => {
             vscode.postMessage({ type: 'setShowArchived', show: (e.target as HTMLInputElement).checked });
         });
-    }
-
-    function shortenText(text: string, maxLen: number) {
-        return shortenTopicText(text, maxLen);
-    }
-
-    function formatTopicMoment(ts?: number) {
-        return formatTopicMomentModel(ts, formatTime);
     }
 
     function updateCurrentTopicHeader(topicId?: string | null, title?: string | null) {
@@ -4132,7 +3960,7 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         return true;
     }
 
-    function startTopicRename(topicId: string, title: string, source: 'header' | 'list', titleEl?: HTMLElement) {
+    function startTopicRename(topicId: string, title: string, source: 'header' | 'list' | 'search', titleEl?: HTMLElement) {
         if (!topicId) return;
         const originalTitle = title || '';
         const headerTitleBtn = source === 'header'
@@ -4187,179 +4015,38 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         });
     }
 
-    function renderTopicPanelSummary(mode: 'list' | 'search', items: TopicPanelItem[], stats?: TopicPanelStats, query?: string, totalCount?: number) {
-        const summary = document.getElementById('topicsPanelSummary');
-        if (!summary) return;
-        const summaryModel = buildTopicSummaryModel(mode, items, stats, query, totalCount);
-        summary.dataset.summaryTitle = summaryModel.title;
-
-        const currentTopic = stats?.currentTopicId ? items.find(t => t.id === stats.currentTopicId) : undefined;
-        const visibleCount = stats?.visible ?? items.length;
-        const archivedCount = stats?.archived ?? items.filter(t => t.archived).length;
-        const currentLabel = currentTopic
-            ? `${currentTopic.archived ? '当前归档' : '当前'}：${shortenText(currentTopic.title, 18)}`
-            : (stats?.currentTopicId ? `当前：${shortenText(stats.currentTopicTitle || '会话已隐藏', 18)}` : '当前：无活动会话');
-
-        summary.innerHTML = `
-            <div class="topics-panel-summary-main">
-                <div class="topics-panel-summary-title">${mode === 'search' ? '搜索结果' : '话题浏览器'}</div>
-                <div class="topics-panel-summary-subtitle">${
-                    mode === 'search'
-                        ? `关键词 ${escapeHtml(query || '空')} · ${totalCount ?? visibleCount} 条结果`
-                        : '按更新时间自动分组，支持分叉、归档和导出'
-                }</div>
-            </div>
-            <div class="topics-panel-summary-chips">
-                <span class="topics-summary-chip"><strong>${visibleCount}</strong> ${mode === 'search' ? '命中' : '显示'}</span>
-                <span class="topics-summary-chip"><strong>${archivedCount}</strong> 归档</span>
-                <span class="topics-summary-chip">${escapeHtml(currentLabel)}</span>
-            </div>
-        `;
-    }
-
-    function buildTopicItem(topic: TopicPanelItem, currentTopicId?: string | null, mode: 'list' | 'search' = 'list') {
-        const item = document.createElement('div');
-        item.className = 'topic-item';
-        item.dataset.topicId = topic.id;
-        if (topic.id === currentTopicId) item.classList.add('topic-item-active');
-        if (topic.archived) item.classList.add('topic-item-archived');
-
-        const main = document.createElement('div');
-        main.className = 'topic-main';
-
-        const head = document.createElement('div');
-        head.className = 'topic-head';
-
-        const title = document.createElement('span');
-        title.className = 'topic-title';
-        title.textContent = topic.archived ? `[已归档] ${topic.title}` : topic.title;
-        head.appendChild(title);
-
-        if (topic.id === currentTopicId) {
-            const state = document.createElement('span');
-            state.className = 'topic-state topic-state-current';
-            state.textContent = '当前';
-            head.appendChild(state);
-        } else if (topic.archived) {
-            const state = document.createElement('span');
-            state.className = 'topic-state topic-state-archived';
-            state.textContent = '归档';
-            head.appendChild(state);
-        } else if (topic.parentTopicId) {
-            const state = document.createElement('span');
-            state.className = 'topic-state topic-state-forked';
-            state.textContent = '分支';
-            head.appendChild(state);
-        }
-
-        const metaRow = document.createElement('div');
-        metaRow.className = 'topic-meta-row';
-        const metaBits = [
-            `消息 ${topic.messageCount ?? 0}`,
-            `更新 ${formatTopicMoment(topic.updatedAt)}`,
-        ];
-        if (topic.createdAt) metaBits.push(`创建 ${formatTopicMoment(topic.createdAt)}`);
-        if (topic.parentTopicId && topic.forkedFromMessageIndex != null) {
-            metaBits.push(`分叉于 #${topic.forkedFromMessageIndex + 1}`);
-        } else if (topic.parentTopicId) {
-            metaBits.push('分叉来源');
-        }
-        if (topic.score != null) metaBits.push(`相关度 ${Math.round(topic.score)}`);
-        metaRow.innerHTML = metaBits.map(bit => `<span class="topic-meta-chip">${escapeHtml(bit)}</span>`).join('');
-
-        main.appendChild(head);
-        main.appendChild(metaRow);
-
-        if (mode === 'search' && topic.matchContext) {
-            const summary = document.createElement('div');
-            summary.className = 'topic-summary';
-            summary.textContent = topic.matchContext;
-            main.appendChild(summary);
-        }
-
-        const actions = document.createElement('div');
-        actions.className = 'topic-actions';
-
-        const forkBtn = document.createElement('button');
-        forkBtn.className = 'topic-action-btn topic-fork-btn';
-        forkBtn.innerHTML = svgIconNoMargin('link');
-        forkBtn.title = '分叉话题';
-        forkBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'forkTopic', topicId: topic.id, messageIndex: 999 }); });
-
-        const renameBtn = document.createElement('button');
-        renameBtn.className = 'topic-action-btn topic-rename-btn';
-        renameBtn.innerHTML = svgIconNoMargin('edit');
-        renameBtn.title = '重命名';
-        renameBtn.addEventListener('click', e => {
-            e.stopPropagation();
-            startTopicRename(topic.id, topic.title || '', 'list', title);
-        });
-
-        const archBtn = document.createElement('button');
-        archBtn.className = 'topic-action-btn topic-archive-btn';
-        archBtn.innerHTML = topic.archived ? `${svgIconNoMargin('refresh')} 恢复` : svgIconNoMargin('bookmark');
-        archBtn.title = topic.archived ? '取消归档' : '归档';
-        archBtn.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'archiveTopic', topicId: topic.id }); });
-
-        const del = document.createElement('button');
-        del.className = 'topic-action-btn topic-delete';
-        del.innerHTML = svgIconNoMargin('trash');
-        del.title = '删除';
-        del.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'deleteTopic', topicId: topic.id }); });
-
-        actions.appendChild(forkBtn);
-        actions.appendChild(renameBtn);
-        actions.appendChild(archBtn);
-        actions.appendChild(del);
-        item.appendChild(main);
-        item.appendChild(actions);
-        item.addEventListener('click', () => { vscode.postMessage({ type: 'loadTopic', topicId: topic.id }); topicsPanel.classList.remove('show'); });
-        return item;
-    }
-
     function renderTopics(topics: TopicPanelItem[], stats?: TopicPanelStats) {
-        const list = document.getElementById('topicsList')!;
-        renderTopicPanelSummary('list', topics, stats);
-        if (!topics.length) {
-            list.innerHTML = `
-                <div class="topic-empty-state">
-                    <div class="topic-empty-title">暂无历史话题</div>
-                    <div class="topic-empty-subtitle">创建一个新会话，或用搜索快速回到旧会话。</div>
-                </div>`;
-            return;
-        }
-        list.innerHTML = '';
-        const groups = groupTopicsByDate(topics);
-        for (const group of groups) {
-            const header = document.createElement('div');
-            header.className = 'topic-date-group';
-            header.textContent = group.label;
-            list.appendChild(header);
-            for (const t of group.items) {
-                list.appendChild(buildTopicItem(t, stats?.currentTopicId, 'list'));
-            }
-        }
+        renderTopicsView(
+            { list: document.getElementById('topicsList'), summary: document.getElementById('topicsPanelSummary'), panel: topicsPanel },
+            topics,
+            stats,
+            {
+                postMessage: message => {
+                    vscode.postMessage(message);
+                    if ((message as any)?.type === 'loadTopic') topicsPanel.classList.remove('show');
+                },
+                startRename: (topicId, title, source, titleElement) => startTopicRename(topicId, title, source, titleElement),
+                formatTime,
+            },
+        );
     }
 
     function renderTopicSearchResults(results: TopicPanelItem[], query: string, totalCount: number, stats?: TopicPanelStats) {
-        const list = document.getElementById('topicsList')!;
-        renderTopicPanelSummary('search', results, stats, query, totalCount);
-        if (!results.length) {
-            list.innerHTML = `
-                <div class="topic-empty-state">
-                    <div class="topic-empty-title">没有找到匹配结果</div>
-                    <div class="topic-empty-subtitle">试试更短的关键词，或者切回完整话题列表。</div>
-                </div>`;
-            return;
-        }
-        list.innerHTML = '';
-        const header = document.createElement('div');
-        header.className = 'topic-date-group';
-        header.textContent = query ? `搜索结果 · ${shortenText(query, 18)}` : '搜索结果';
-        list.appendChild(header);
-        for (const t of results) {
-            list.appendChild(buildTopicItem(t, stats?.currentTopicId, 'search'));
-        }
+        renderTopicSearchResultsView(
+            { list: document.getElementById('topicsList'), summary: document.getElementById('topicsPanelSummary'), panel: topicsPanel },
+            results,
+            query,
+            totalCount,
+            stats,
+            {
+                postMessage: message => {
+                    vscode.postMessage(message);
+                    if ((message as any)?.type === 'loadTopic') topicsPanel.classList.remove('show');
+                },
+                startRename: (topicId, title, source, titleElement) => startTopicRename(topicId, title, source, titleElement),
+                formatTime,
+            },
+        );
     }
 
     function renderTodos(todos: any[]) {
@@ -4404,34 +4091,29 @@ import { renderWorkflowSelector } from './chat/workflowSelector';
         const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement | null;
         const agentModeSel = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
         const reasoningSel = document.getElementById('settingsReasoningEffort') as HTMLSelectElement | null;
-
-        const model = modelInput?.value.trim() || provider?.defaultModel || '未设置模型';
-        const endpoint = endpointInput?.value.trim() || provider?.defaultEndpoint || '默认端点';
-        const ctxValue = parseInt(ctxInput?.value || '0', 10) || 0;
-        const ctxLabel = ctxValue > 0 ? `${formatNum(ctxValue)} tokens` : '自动';
-        const apiState = providerId === 'ollama'
-            ? '本地模型'
-            : (provider?.hasKey ? 'API Key 已配置' : 'API Key 未配置');
-        const inlineState = inlineEnabled?.checked
-            ? `补全: ${inlineProviderSel?.value ? (settingsProviders.find((p: any) => p.id === inlineProviderSel.value)?.name || inlineProviderSel.value) : '同主模型'}`
-            : '补全: 关闭';
-        const mcpCount = document.querySelectorAll('#mcpServersList .mcp-server-block').length;
-        const writeMode = agentModeSel?.value === 'auto' ? '写入自动' : '写入确认';
-        const reasoning = reasoningSel?.value || 'high';
-        const headerSubtitle = document.getElementById('settingsHeaderSubtitle');
-
-        titleEl.textContent = `${provider?.name || providerId || '未选择 Provider'} · ${model}`;
-        subtitleEl.textContent = `${endpoint} · 上下文 ${ctxLabel} · ${apiState}`;
-        if (headerSubtitle) {
-            headerSubtitle.textContent = `${apiState} · ${mcpCount} 个 MCP · ${writeMode}`;
-        }
-        chipsEl.innerHTML = [
-            `<span class="settings-overview-chip">Provider <strong>${escapeHtml(provider?.name || providerId || '未选')}</strong></span>`,
-            `<span class="settings-overview-chip">MCP <strong>${mcpCount}</strong></span>`,
-            `<span class="settings-overview-chip">${escapeHtml(inlineState)}</span>`,
-            `<span class="settings-overview-chip">写入 <strong>${escapeHtml(writeMode)}</strong></span>`,
-            `<span class="settings-overview-chip">推理 <strong>${escapeHtml(reasoning)}</strong></span>`,
-        ].join('');
+        const inlineProviderName = inlineProviderSel?.value
+            ? (settingsProviders.find((p: any) => p.id === inlineProviderSel.value)?.name || inlineProviderSel.value)
+            : undefined;
+        applySettingsOverview(
+            {
+                title: titleEl,
+                subtitle: subtitleEl,
+                chips: chipsEl,
+                headerSubtitle: document.getElementById('settingsHeaderSubtitle'),
+            },
+            buildSettingsOverviewModel({
+                providers: settingsProviders,
+                providerId,
+                model: modelInput?.value.trim() || provider?.defaultModel,
+                endpoint: endpointInput?.value.trim() || provider?.defaultEndpoint,
+                contextTokens: parseInt(ctxInput?.value || '0', 10) || 0,
+                inlineEnabled: !!inlineEnabled?.checked,
+                inlineProviderName,
+                mcpCount: document.querySelectorAll('#mcpServersList .mcp-server-block').length,
+                writeMode: agentModeSel?.value || 'confirm',
+                reasoningEffort: reasoningSel?.value || 'high',
+            }, chatI18n),
+        );
     }
 
     function showSettingsPage(providers: any[], current: any, ollamaModels: any[]) {

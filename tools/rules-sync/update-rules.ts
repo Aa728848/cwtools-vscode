@@ -9,6 +9,7 @@ type ReportAction =
     | 'skipped_existing'
     | 'conflict'
     | 'manual_review'
+    | 'common_missing_rule'
     | 'definition_added'
     | 'definition_changed'
     | 'definition_removed';
@@ -28,6 +29,7 @@ interface GeneratedRule {
     logicalPath?: string;
     contentHash?: string;
     blockKind?: string;
+    definitionPath?: string;
 }
 
 interface RulesGenerated {
@@ -50,6 +52,7 @@ interface ReportEntry {
     logicalPath?: string;
     contentHash?: string;
     previousHash?: string;
+    definitionPath?: string;
 }
 
 interface UpdateReport {
@@ -172,6 +175,7 @@ function createReport(generatedJson: string, existingRulesDir: string, checkOnly
             skipped_existing: 0,
             conflict: 0,
             manual_review: 0,
+            common_missing_rule: 0,
             definition_added: 0,
             definition_changed: 0,
             definition_removed: 0,
@@ -245,6 +249,7 @@ function run(generatedJson: string, existingRulesDir: string, outDir: string, ch
     const generatedDir = path.join(outDir, 'generated');
 
     recordDefinitionChanges(report, previousRules, rules);
+    recordCommonCoverage(report, rules, existingRulesDir);
 
     for (const rule of candidateRules(rules)) {
         if (rule.kind === 'common_definition') continue;
@@ -315,6 +320,49 @@ function run(generatedJson: string, existingRulesDir: string, outDir: string, ch
     return report;
 }
 
+function recordCommonCoverage(report: UpdateReport, rules: RulesGenerated, existingRulesDir: string) {
+    const vanillaPaths = new Map<string, GeneratedRule>();
+    const cwtPaths = scanExistingCommonPaths(existingRulesDir);
+
+    for (const rule of safeRules(rules.commonDefinitions)) {
+        if (!rule.definitionPath) continue;
+        const definitionPath = normalizeCommonPath(rule.definitionPath);
+        if (rule.sourceKind === 'common') {
+            vanillaPaths.set(definitionPath, rule);
+        }
+    }
+
+    for (const [definitionPath, rule] of Array.from(vanillaPaths).sort(([a], [b]) => a.localeCompare(b))) {
+        if (cwtPaths.has(definitionPath)) continue;
+        record(report, {
+            kind: 'common_definition',
+            name: `folder:${definitionPath}`,
+            action: 'common_missing_rule',
+            reason: 'Vanilla common folder has .txt files but no matching CWT type path.',
+            source: rule.source,
+            sourceLine: rule.sourceLine,
+            logicalPath: rule.logicalPath,
+            contentHash: rule.contentHash,
+            definitionPath,
+        });
+    }
+}
+
+function scanExistingCommonPaths(dir: string): Set<string> {
+    const paths = new Set<string>();
+    for (const file of walkCwtFiles(dir)) {
+        const content = fs.readFileSync(file, 'utf-8');
+        for (const match of content.matchAll(/path\s*=\s*"game\/common\/([^"]+)"/g)) {
+            paths.add(normalizeCommonPath(match[1]!));
+        }
+    }
+    return paths;
+}
+
+function normalizeCommonPath(value: string): string {
+    return value.replace(/\\/g, '/').replace(/^game\/common\//i, '').replace(/^\/+|\/+$/g, '').toLowerCase();
+}
+
 function isGeneratableRuleKind(kind: RuleKind): kind is GeneratableRuleKind {
     return kind === 'effect' || kind === 'trigger';
 }
@@ -336,7 +384,7 @@ function parseArgs(argv: string[]) {
 }
 
 function hasCheckDrift(report: UpdateReport): boolean {
-    return ['added', 'definition_added', 'definition_changed', 'definition_removed']
+    return ['added', 'common_missing_rule', 'definition_added', 'definition_changed', 'definition_removed']
         .some(action => (report.summary[action] ?? 0) > 0);
 }
 

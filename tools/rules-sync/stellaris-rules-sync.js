@@ -22,8 +22,9 @@ Options:
   --out <path>               Output directory. Defaults to .rules-sync/stellaris.
   --version <value>          Version label written into rules.generated.json.
   --previous <path>          Previous rules.generated.json for definition diffs.
-  --include-vanilla-common   Also inventory vanilla Stellaris common/ definitions.
+  --include-vanilla-common   Inventory vanilla Stellaris common/ definitions. Enabled by default.
   --vanilla-common <path>    Vanilla Stellaris common directory.
+  --no-vanilla-common        Do not inventory vanilla Stellaris common/ definitions.
   --no-config-common         Do not inventory config/common CWT definitions.
   --no-cwt                   Do not emit generated CWT candidate files during scan.
   --ci                       Preserve check exit code 2 when drift is found.
@@ -46,7 +47,7 @@ function parseArgs(argv) {
         out: path.join(repoRoot, '.rules-sync', 'stellaris'),
         version: 'local',
         previous: '',
-        includeVanillaCommon: false,
+        includeVanillaCommon: true,
         vanillaCommon: '',
         includeConfigCommon: true,
         emitCwt: true,
@@ -77,6 +78,9 @@ function parseArgs(argv) {
             case '--vanilla-common':
                 opts.includeVanillaCommon = true;
                 opts.vanillaCommon = path.resolve(args[++i] || '');
+                break;
+            case '--no-vanilla-common':
+                opts.includeVanillaCommon = false;
                 break;
             case '--no-config-common':
                 opts.includeConfigCommon = false;

@@ -22,6 +22,7 @@ npm run rules:stellaris:update
 Default inputs:
 
 - Script documentation: `%USERPROFILE%\Documents\Paradox Interactive\Stellaris\logs\script_documentation`
+- Vanilla common: auto-detected from `D:\Steam\steamapps\common\Stellaris\common` or `STELLARIS_COMMON`
 - CWT config: `submodules\cwtools-stellaris-config\config`
 - Output: `.rules-sync\stellaris`
 
@@ -32,5 +33,7 @@ Modes:
 - `update` scans and writes append-only generated candidates under `update\generated` for review.
 
 Only effects and triggers are converted into generated CWT candidates. Modifiers and scopes stay in `rules.generated.json` because they are loaded from the game logs directly.
+
+Vanilla `common/` is scanned by default. The check report includes `common_missing_rule` entries when a vanilla common folder has `.txt` files but no matching CWT `type[...] path = "game/common/..."` coverage.
 
 Use `--ci` if a check with drift should exit with code `2`.

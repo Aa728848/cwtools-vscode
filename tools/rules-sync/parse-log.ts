@@ -23,6 +23,7 @@ interface GeneratedRule {
     logicalPath?: string;
     contentHash?: string;
     blockKind?: string;
+    definitionPath?: string;
 }
 
 interface RulesGenerated {
@@ -66,6 +67,7 @@ const SCRIPT_COMMON_CONTENT_FOLDERS = new Set([
     'scripted_variables',
     'script_values',
     'static_modifiers',
+    'inline_scripts',
 ]);
 
 function readText(filePath: string): string {
@@ -362,6 +364,10 @@ function parseCommonFile(input: CommonInputFile, map: Map<string, GeneratedRule>
     const blockKind = inferBlockKind(input, relPath);
     if (input.sourceKind === 'common' && shouldSkipCommonContentFolder(blockKind)) return;
 
+    if (input.sourceKind === 'common') {
+        addCommonFolderRule(input, relPath, map);
+    }
+
     if (input.sourceKind === 'cwt') {
         for (const block of extractBlocks(content, TOP_LEVEL_CWT_PATTERN, true)) {
             if (block.rawKey === 'types') continue;
@@ -379,12 +385,37 @@ function parseCommonFile(input: CommonInputFile, map: Map<string, GeneratedRule>
     }
 }
 
+function addCommonFolderRule(input: CommonInputFile, relPath: string, map: Map<string, GeneratedRule>) {
+    const folderPath = normalizeCommonPath(path.dirname(relPath));
+    if (!folderPath || folderPath === '.') return;
+    const logicalPath = `${folderPath}/`;
+    addRule(map, {
+        name: `folder:${folderPath}`,
+        kind: 'common_definition',
+        scopes: [],
+        targetScopes: [],
+        parameters: [],
+        description: `Vanilla common folder ${folderPath}`,
+        source: relPath,
+        sourceLine: 1,
+        confidence: 'high',
+        needsManualReview: true,
+        occurrences: 1,
+        sourceKind: input.sourceKind,
+        logicalPath,
+        contentHash: hashDefinition(logicalPath),
+        blockKind: folderPath.split('/')[0] ?? folderPath,
+        definitionPath: folderPath,
+    });
+}
+
 function addCommonBlockRule(input: CommonInputFile, relPath: string, block: ParsedBlock, map: Map<string, GeneratedRule>) {
     const alias = parseAliasKey(block.rawKey);
     const blockKind = inferBlockKind(input, relPath);
     const kind = inferCommonRuleKind();
     const logicalPath = `${relPath}#${block.rawKey}`;
     const hash = hashDefinition(block.text);
+    const definitionPath = input.sourceKind === 'cwt' ? extractGameCommonPath(block.text) : undefined;
     const commonDefinitionName = alias
         ? `alias:${alias.kind}:${alias.name}`
         : block.rawKey.startsWith('type[')
@@ -411,6 +442,7 @@ function addCommonBlockRule(input: CommonInputFile, relPath: string, block: Pars
         logicalPath,
         contentHash: hash,
         blockKind,
+        definitionPath,
     });
 }
 
@@ -430,6 +462,16 @@ function inferBlockKind(input: CommonInputFile, relPath: string): string {
     if (input.sourceKind === 'cwt' && parts.length === 1) return path.basename(parts[0]!, path.extname(parts[0]!)).toLowerCase();
     if (parts.length > 1) return parts[0]!.toLowerCase();
     return path.basename(path.dirname(input.filePath)).toLowerCase();
+}
+
+function extractGameCommonPath(text: string): string | undefined {
+    const match = text.match(/path\s*=\s*"game\/common\/([^"]+)"/);
+    if (!match) return undefined;
+    return normalizeCommonPath(match[1]!);
+}
+
+function normalizeCommonPath(value: string): string {
+    return value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase();
 }
 
 function parseAliasKey(rawKey: string): { kind: Extract<RuleKind, 'effect' | 'trigger' | 'modifier'>; name: string } | undefined {
@@ -647,6 +689,7 @@ function renderCommonDefinitionInventory(rules: GeneratedRule[]): string {
         lines.push(`### ${rule.name}`);
         lines.push(`## source = ${rule.source}:${rule.sourceLine}`);
         if (rule.logicalPath) lines.push(`## logical_path = ${rule.logicalPath}`);
+        if (rule.definitionPath) lines.push(`## definition_path = ${rule.definitionPath}`);
         if (rule.contentHash) lines.push(`## content_hash = ${rule.contentHash}`);
         lines.push('# TODO: review this common definition block and update the matching stable CWT file if needed.');
         lines.push('');

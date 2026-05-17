@@ -14,6 +14,7 @@
     "lint": "eslint client/"
   },
   "dependencies": {
+    "google-translate-api-x": "^10.7.2",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {

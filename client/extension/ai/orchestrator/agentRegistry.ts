@@ -1,52 +1,52 @@
-/**
- * Eddy CWTool Code — Agent 角色注册表
- *
- * 定义每种 Agent 角色的默认配置（模式、工具预算、迭代上限）。
- * 模型选择默认继承用户在设置面板中配置的供应商/模型。
- * suggestedModel / suggestedProvider 仅作为建议值，可被 TaskNode 覆盖。
- */
+/** 
+* Eddy CWTool Code — Agent role registration form 
+* 
+* Define the default configuration (mode, tool budget, iteration limit) for each Agent role. 
+* Model selection inherits the supplier/model configured by the user in the settings panel by default. 
+* suggestedModel / suggestedProvider are only suggested values ​​and can be overridden by TaskNode. 
+*/
 
 import type { AgentProfile, ToolBudget } from './types';
 
-/**
- * Agent 角色注册表。
- *
- * 每个角色定义了其职责边界和资源限制：
- * - mode: 映射到 AgentRunner 的 AgentMode，决定系统提示词和工具集
- * - suggestedModel/Provider: 建议的模型（undefined = 继承用户设置）
- * - maxIterations: 推理循环最大迭代次数
- * - toolBudget: 工具权限等级
- * - description: 角色描述，供 Orchestrator 在任务分解时参考
- */
+/** 
+* Agent role registry. 
+* 
+* Each role defines its responsibility boundaries and resource limits: 
+* - mode: AgentMode mapped to AgentRunner, which determines the system prompt words and tool set 
+* - suggestedModel/Provider: suggested model (undefined = inherit user settings) 
+* - maxIterations: the maximum number of iterations of the inference loop 
+* - toolBudget: tool permission level 
+* - description: role description for Orchestrator to refer to when decomposing tasks 
+*/
 export const AGENT_REGISTRY: Record<string, AgentProfile> = {
-    /**
-     * 探索者 — 项目结构扫描、依赖图绘制、上下文收集。
-     * 只读操作，适合用轻量模型快速执行。
-     */
+    /** 
+* Explorer - project structure scanning, dependency graph drawing, context collection. 
+* Read-only operation, suitable for fast execution with lightweight models. 
+*/
     explorer: {
         mode: 'explore',
-        // 继承用户配置的供应商/模型（不指定 suggestedModel）
+        // Inherit user-configured provider/model (without specifying suggestedModel)
         maxIterations: 20,
         toolBudget: 'read_only',
         description: '扫描项目结构、收集文件和实体信息、构建依赖图。只读操作，不会修改任何文件。',
     },
 
-    /**
-     * 架构师 — 实体蓝图设计、事件链编排、实施计划制定。
-     * 需要较强的推理能力进行复杂规划。
-     */
+    /** 
+* Architect - entity blueprint design, event chain orchestration, and implementation plan formulation. 
+* Requires strong reasoning skills for complex planning. 
+*/
     architect: {
         mode: 'plan',
-        // 建议使用更强的模型进行规划（用户可覆盖）
+        // It is recommended to use a stronger model for planning (user can override)
         maxIterations: 15,
         toolBudget: 'plan',
         description: '分析需求、设计实体蓝图、规划事件链和文件依赖。只读 + 蓝图输出，不写代码。',
     },
 
-    /**
-     * 构建者 — 代码生成、文件写入、错误修复。
-     * 核心执行角色，需要全部工具权限。
-     */
+    /** 
+* Builder - code generation, file writing, bug fixing. 
+* Core execution role, requires full tool permissions. 
+*/
     builder: {
         mode: 'build',
         maxIterations: 40,
@@ -54,10 +54,10 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
         description: '根据蓝图或指令生成 PDXScript 代码、写入文件、修复 LSP 错误。全功能 Agent。',
     },
 
-    /**
-     * 本地化编写者 — 多语言本地化文件创建和翻译。
-     * 模板化任务，适合轻量模型。
-     */
+    /** 
+* Localization Writer - Multi-language localization file creation and translation. 
+* Template tasks, suitable for lightweight models. 
+*/
     locWriter: {
         mode: 'loc_writer',
         maxIterations: 20,
@@ -65,10 +65,10 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
         description: '创建和翻译 YML 本地化文件。专注于文本质量和格式合规。',
     },
 
-    /**
-     * 审查者 — 代码审查、诊断验证、质量把关。
-     * 只读操作，专注于发现问题。
-     */
+    /** 
+* Reviewer - code review, diagnostic verification, quality control. 
+* Read-only operation, focus on finding problems. 
+*/
     reviewer: {
         mode: 'review',
         maxIterations: 15,
@@ -76,10 +76,10 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
         description: '审查代码质量、验证 LSP 诊断、检查作用域链和跨文件引用一致性。只读操作。',
     },
 
-    /**
-     * 资产选择者 — 从原版游戏和项目文件中搜索、选择合适的媒体资产。
-     * 受限的 build 模式，不使用生成/转换/部署工具，仅通过搜索和文件引用完成资产选择。
-     */
+    /** 
+* Asset Selector - Search and select suitable media assets from original game and project files. 
+* Restricted build mode, no build/conversion/deployment tools are used, asset selection is done only via search and file references. 
+*/
     assetGen: {
         mode: 'build',
         maxIterations: 10,
@@ -87,10 +87,10 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
         description: '从原版游戏文件和项目已有资源中搜索、选择合适的图标/音效等媒体资产，通过文件引用或复制完成资产配置。不生成新资产，不调用外部工具。',
     },
 
-    /**
-     * GUI 专家 — 处理 Stellaris 或其他 P 社游戏的复杂 UI 界面排版计算。
-     * 需要极强的像素计算和图层推演能力。
-     */
+    /** 
+* GUI Expert - handles complex UI interface layout calculations for Stellaris or other Paradox games. 
+* Requires extremely strong pixel calculation and layer deduction capabilities. 
+*/
     guiExpert: {
         mode: 'gui_expert',
         maxIterations: 30,
@@ -98,10 +98,10 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
         description: '编辑 .gui 界面文件，处理复杂的 UI 坐标、锚点与容器排版。',
     },
 
-    /**
-     * 本地化翻译者 — 专注于跨语言的严格格式翻译。
-     * 仅在明确指示为【翻译】任务时使用，区别于从零创作的 locWriter。
-     */
+    /** 
+* Localization translator - specializes in strict format translation across languages. 
+* Only used when explicitly indicated as a [Translation] task, which is different from locWriter created from scratch. 
+*/
     locTranslator: {
         mode: 'loc_translator',
         maxIterations: 20,
@@ -110,10 +110,10 @@ export const AGENT_REGISTRY: Record<string, AgentProfile> = {
     },
 };
 
-// W10 修复：AgentMode 与注册表 key 的别名映射。
-// Orchestrator 使用 AgentMode 值（如 'explore', 'build'）查询配置，
-// 但注册表 key 使用的是角色名（如 'explorer', 'builder'）。
-// 此映射确保两套命名体系正确对接。
+// W10 fix: alias mapping of AgentMode to registry keys.
+// Orchestrator uses AgentMode values ​​(such as 'explore', 'build') to query the configuration,
+// But the registry key uses the role name (such as 'explorer', 'builder').
+// This mapping ensures that the two naming systems are correctly connected.
 const MODE_TO_ROLE_ALIAS: Record<string, string> = {
     'explore': 'explorer',
     'build': 'builder',
@@ -124,41 +124,41 @@ const MODE_TO_ROLE_ALIAS: Record<string, string> = {
     'gui_expert': 'guiExpert',
 };
 
-/**
- * 获取 Agent 角色配置。
- * 支持通过角色名（explorer）或模式名（explore）查询。
- * 如果都不存在于注册表中，返回默认的 builder 配置。
- */
+/** 
+* Get Agent role configuration. 
+* Supports querying by role name (explorer) or schema name (explore). 
+* If neither exists in the registry, return the default builder configuration. 
+*/
 export function getAgentProfile(role: string): AgentProfile {
     return AGENT_REGISTRY[role]
         ?? AGENT_REGISTRY[MODE_TO_ROLE_ALIAS[role] ?? '']
         ?? AGENT_REGISTRY['builder']!;
 }
 
-/**
- * 获取所有可用的 Agent 角色名称列表。
- * 供 Orchestrator 在任务分解时参考。
- */
+/** 
+* Get a list of all available Agent role names. 
+* For Orchestrator's reference when decomposing tasks. 
+*/
 export function getAvailableRoles(): string[] {
     return Object.keys(AGENT_REGISTRY);
 }
 
-/**
- * 生成角色描述摘要（供 Orchestrator 系统提示词使用）。
- * 格式：每行一个 "- role: description"
- */
+/** 
+* Generate role description summaries (for use by Orchestrator system prompts). 
+* Format: one "- role: description" per line 
+*/
 export function getRoleDescriptions(): string {
     return Object.entries(AGENT_REGISTRY)
         .map(([role, profile]) => `- **${role}** (${profile.mode}): ${profile.description}`)
         .join('\n');
 }
 
-/**
- * 应用用户在设置面板中配置的子 Agent 模型覆盖。
- * 将用户指定的 provider/model 写入对应角色的 suggestedProvider/suggestedModel。
- *
- * @param overrides 角色名 → { provider, model } 的映射
- */
+/** 
+* Apply child Agent model overrides configured by the user in the settings panel. 
+* Write the user-specified provider/model into suggestedProvider/suggestedModel of the corresponding role. 
+* 
+* @param overrides role name → mapping of { provider, model } 
+*/
 export function applyUserModelOverrides(overrides: Record<string, { provider: string; model: string }>): void {
     for (const [role, config] of Object.entries(overrides)) {
         const profile = AGENT_REGISTRY[role];
@@ -166,7 +166,7 @@ export function applyUserModelOverrides(overrides: Record<string, { provider: st
         if (config.provider && config.provider !== '__inherit__') {
             profile.suggestedProvider = config.provider;
         } else {
-            // 清除建议值，回退到继承用户主设置
+            // Clear the recommended values ​​and fall back to inheriting the user's main settings
             profile.suggestedProvider = undefined;
         }
         if (config.model && config.model !== '__inherit__') {

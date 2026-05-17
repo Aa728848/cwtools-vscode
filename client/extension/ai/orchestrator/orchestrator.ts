@@ -1,12 +1,12 @@
-/**
- * Eddy CWTool Code — 协调器核心 (Orchestrator)
- *
- * 多 Agent 协作系统的顶层入口。接收用户请求，判断复杂度，
- * 简单请求直接走单 Agent，复杂请求生成 TaskGraph 并通过
- * ParallelExecutor 调度多个专家 Agent 协作完成。
- *
- * 模型选择策略：默认继承用户在设置面板配置的供应商/模型。
- */
+/** 
+* Eddy CWTool Code — Orchestrator 
+* 
+* Top-level entrance to multi-Agent collaboration system. Receive user requests and determine complexity, 
+* Simple requests can go directly to the agent, and complex requests can generate TaskGraph and pass it through. 
+* ParallelExecutor schedules multiple expert Agents to complete the task collaboratively. 
+* 
+* Model selection strategy: By default, the supplier/model configured by the user in the settings panel will be inherited. 
+*/
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -32,7 +32,7 @@ import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG } from '../messages';
 
-// AgentRunner 和 AgentToolExecutor 的类型引用（避免循环依赖，使用 import type）
+// Type references of AgentRunner and AgentToolExecutor (to avoid circular dependencies, use import type)
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
 
 const SUB_AGENT_ABSOLUTE_TIMEOUT_MS = 20 * 60 * 1000;
@@ -57,16 +57,16 @@ function normalizeClarificationText(text: string): string {
         .trim();
 }
 
-/**
- * 协调器 — 多 Agent 团队的指挥中心。
- *
- * 职责：
- * 1. 请求分析：判断是否需要多 Agent 协作
- * 2. 任务分解：将复杂请求分解为 TaskGraph（DAG）
- * 3. 调度执行：通过 ParallelExecutor 管理 Agent 生命周期
- * 4. 结果综合：汇总各 Agent 输出为最终交付物
- * 5. 质量把关：Builder 完成后触发 Reviewer 审查
- */
+/** 
+* Coordinator - the command center for multi-Agent teams. 
+* 
+* Responsibilities: 
+* 1. Request analysis: determine whether multi-Agent collaboration is required 
+* 2. Task decomposition: Decompose complex requests into TaskGraph (DAG) 
+* 3. Scheduling execution: Manage Agent life cycle through ParallelExecutor 
+* 4. Result synthesis: Summarize the output of each Agent into the final deliverable 
+* 5. Quality control: Reviewer triggers review after Builder is completed 
+*/
 export class Orchestrator {
     private blackboard: Blackboard;
     private executor: ParallelExecutor;
@@ -89,18 +89,18 @@ export class Orchestrator {
         this.graphEngine = new TaskGraphEngine();
     }
 
-    /** 获取黑板实例（供外部模块读取 Agent 间共享数据） */
+    /** Obtain the blackboard instance (for external modules to read shared data between Agents) */
     getBlackboard(): Blackboard {
         return this.blackboard;
     }
 
-    /**
-     * 主入口：执行多 Agent 协作任务。
-     *
-     * @param taskGraph 预构建的任务图（由 LLM 分解或手动构建）
-     * @param options 协调器选项
-     * @returns 协作执行结果
-     */
+    /** 
+* Main entrance: perform multi-Agent collaboration tasks. 
+* 
+* @param taskGraph pre-built task graph (decomposed by LLM or built manually) 
+* @param options coordinator options 
+* @returns collaborative execution results 
+*/
     async execute(
         taskGraph: TaskGraph,
         options: OrchestratorOptions,
@@ -113,7 +113,7 @@ export class Orchestrator {
             timestamp: Date.now(),
         });
 
-        // 验证任务图
+        // Verify task graph
         const cycles = this.graphEngine.detectCycles(taskGraph);
         if (cycles) {
             const errMsg = ORCHESTRATOR_MSG.CYCLE_ERROR(cycles.map(c => c.join(' → ')).join('; '));
@@ -128,7 +128,7 @@ export class Orchestrator {
             };
         }
 
-        // 构建子 Agent 执行器（闭包捕获 agentRunner 和配置）
+        // Build child Agent executor (closure captures agentRunner and configuration)
         const subAgentExecutor: SubAgentExecutor = async (
             taskNode, blackboard, parentAccumulator, abortSignal, onStep,
         ) => {
@@ -137,12 +137,12 @@ export class Orchestrator {
             );
         };
 
-        // 通过并行执行器调度
+        // Scheduling via parallel executors
         const result = await this.executor.executeGraph(
             taskGraph, this.blackboard, subAgentExecutor, options,
         );
 
-        // 质量门：对所有成功的 Builder 节点触发审查
+        // Quality gate: Trigger review on all successful Builder nodes
         if (result.success && this.shouldRunQualityGate(taskGraph)) {
             emitStep({
                 type: 'orchestrator_progress',
@@ -154,7 +154,7 @@ export class Orchestrator {
                 allWrittenFiles.push(...agentResult.writtenFiles);
             }
             if (allWrittenFiles.length > 0) {
-                // --- 本地化收尾清扫阶段 (Loc Sweep Phase) ---
+                // --- Localization Sweep Phase (Loc Sweep Phase) ---
                 emitStep({
                     type: 'orchestrator_progress',
                     content: ORCHESTRATOR_MSG.LOC_SWEEP_START,
@@ -234,7 +234,7 @@ export class Orchestrator {
                     timestamp: Date.now(),
                 });
 
-                // 启动 Reviewer Agent
+                // Start Reviewer Agent
                 const reviewResult = await this.qualityGate.reviewOutput(
                     this.agentRunner,
                     allWrittenFiles,
@@ -257,9 +257,9 @@ export class Orchestrator {
                             [], // conversationHistory
                             {
                                 ...options,
-                                mode: 'build', // 强制使用构建模式进行修复
-                                skipValidation: true, // Orchestrator 已有独立的 QualityGate，无需重复验证
-                                excludeTools: [ // 与正常子代理保持一致的安全约束
+                                mode: 'build', // Force use of build mode for repair
+                                skipValidation: true, // Orchestrator already has an independent QualityGate, no need to repeat verification
+                                excludeTools: [ // Maintain consistent security constraints with normal subagents
                                     'web_fetch', 'search_web', 'codesearch',
                                     'run_command', 'git_ops',
                                     'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
@@ -270,7 +270,7 @@ export class Orchestrator {
 
                         if (fixResult.isValid) {
                             emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_DONE, timestamp: Date.now() });
-                            // 这里可以递归或再次触发审查，但在简单的实现中先只执行一次 autoFix
+                            // Here you can recurse or trigger the review again, but in a simple implementation only execute autoFix once
                         } else {
                             emitStep({ type: 'error', content: ORCHESTRATOR_MSG.AUTOFIX_FAIL, timestamp: Date.now() });
                         }
@@ -279,7 +279,7 @@ export class Orchestrator {
             }
         }
 
-        // 最终报告
+        // final report
         emitStep({
             type: 'orchestrator_progress',
             content: result.summary,
@@ -305,12 +305,12 @@ export class Orchestrator {
         return undefined;
     }
 
-    /**
-     * 执行单个子 Agent。
-     *
-     * 将 TaskNode 转换为 AgentRunner.run() 调用，
-     * 模型选择优先级：TaskNode.modelOverride > AgentProfile.suggestedModel > 用户设置
-     */
+    /** 
+* Execute a single sub-Agent. 
+* 
+* Convert TaskNode to AgentRunner.run() call, 
+* Model selection priority: TaskNode.modelOverride > AgentProfile.suggestedModel > User settings 
+*/
     private async executeSubAgent(
         taskNode: TaskNode,
         _blackboard: Blackboard,
@@ -321,10 +321,10 @@ export class Orchestrator {
     ): Promise<SubAgentResult> {
         const profile = getAgentProfile(taskNode.agentType);
 
-        // 模型选择优先级链：
-        // 1. TaskNode 显式覆盖
-        // 2. AgentProfile 建议值
-        // 3. Orchestrator 选项（来自用户设置）
+        // Model selection priority chain:
+        // 1. TaskNode explicit override
+        // 2. AgentProfile recommended value
+        // 3. Orchestrator options (from user settings)
         const providerId = taskNode.providerOverride
             ?? profile.suggestedProvider
             ?? orchestratorOptions.providerId;
@@ -337,23 +337,23 @@ export class Orchestrator {
             model,
             mode: profile.mode,
             onStep,
-            abortSignal, // 稍后会被带有超时的 child controller 覆盖
-            streaming: true, // 启用流式输出，使得深思进度可视化
+            abortSignal, // Will be overwritten later by the child controller with timeout
+            streaming: true, // Enable streaming output to visualize the progress of deep thinking
             topicId: orchestratorOptions.topicId,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
             useSlimPrompt: true,
             maxIterations: taskNode.maxIterations ?? profile.maxIterations,
-            // 子代理跳过内置 validation loop —— Orchestrator 有独立的 QualityGate 机制，
-            // 不需要子代理重复验证。同时避免推理结束后 validation loop 继续产生步骤，
-            // 导致外部判断卡片已标记完成但内部仍在运行的 UI 状态不一致。
+            // The subagent skips the built-in validation loop - Orchestrator has an independent QualityGate mechanism,
+            // No need for sub-agent to re-verify. At the same time, it prevents the validation loop from continuing to generate steps after the inference is completed.
+            // Leading to an inconsistent UI state where the external judgment card is marked as completed but the internal one is still running.
             skipValidation: true,
             forceAutoApplyWrites: true,
             writeQueueWaitTimeoutMs: 60_000,
-            // 🔴 子 Agent 禁用特定工具：
-            // 1. 网络搜索容易导致无意义的重复搜索循环（doom loop）
-            // 2. run_command / mmx_* / convert_* / deploy_mod_asset 需要用户权限审批或涉及外部创建，
-            //    子 Agent 不应向用户弹出交互卡片，资产应从原版游戏文件和项目文件中选择
-            // 3. 如果子任务需要网络信息，应由 Orchestrator 在分派前搜索并通过 contextFiles 注入
+            // 🔴 Sub-Agent disables specific tools:
+            // 1. Internet searches can easily lead to meaningless repetitive search loops (doom loops)
+            // 2. run_command / mmx_* / convert_* / deploy_mod_asset requires user permission approval or involves external creation.
+            // The child Agent should not pop up interactive cards to the user, and the assets should be selected from the original game files and project files.
+            // 3. If the subtask requires network information, it should be searched by Orchestrator and injected through contextFiles before dispatching.
             excludeTools: [
                 'web_fetch', 'search_web', 'codesearch', 
                 'run_command', 'git_ops',
@@ -368,14 +368,14 @@ export class Orchestrator {
         let lastActivityAt = Date.now();
         let lastIdleNoticeAt = 0;
 
-        // 监听步骤计数和文件写入
+        //Listen to step count and file writing
         const forwardStep = (step: AgentStep, marksActivity = true) => {
             stepCount++;
             if (marksActivity) {
                 lastActivityAt = Date.now();
             }
-            step.agentId = taskNode.id; // 添加子代理 ID 标识
-            // 从 tool_result 中提取写入的文件路径
+            step.agentId = taskNode.id; //Add subagent ID
+            //Extract the written file path from tool_result
             if (step.type === 'tool_result' && step.toolResult) {
                 const result = step.toolResult as Record<string, unknown>;
                 if (result.success && typeof result.filePath === 'string') {
@@ -396,29 +396,29 @@ export class Orchestrator {
             return false;
         };
         
-        // 记录文件快照
+        // Record file snapshot
         runnerOptions.onBeforeFileWrite = (filePath, prevContent) => {
             if (!fileSnapshots.has(filePath)) {
                 fileSnapshots.set(filePath, prevContent);
             }
-            // 向上传递给父级 UI 撤回系统
+            // Pass up to the parent UI withdrawal system
             orchestratorOptions.onBeforeFileWrite?.(filePath, prevContent);
         };
 
-        // 预读并注入 contextFiles
+        // Pre-read and inject contextFiles
         let effectivePrompt = taskNode.prompt;
         if (taskNode.contextFiles && taskNode.contextFiles.length > 0) {
             let injectedContext = '';
             for (const contextRef of taskNode.contextFiles) {
                 try {
-                    // 1. 尝试从 Blackboard 读取
+                    // 1. Try to read from Blackboard
                     const bbValue = _blackboard.read(contextRef);
                     if (bbValue) {
                         injectedContext += `\n--- Context from Blackboard: ${contextRef} ---\n${bbValue.value}\n`;
                         continue;
                     }
 
-                    // 2. 尝试作为物理文件读取
+                    // 2. Try to read as a physical file
                     let targetPath = contextRef;
                     if (!path.isAbsolute(targetPath)) {
                         const vs = require('vscode');
@@ -496,12 +496,12 @@ export class Orchestrator {
             }
         };
 
-        // 设定绝对超时：20 分钟 (1,200,000 ms)
+        // Set absolute timeout: 20 minutes (1,200,000 ms)
         subAgentTimeoutId = setTimeout(() => {
             const err = new Error('Sub-Agent execution absolute timeout exceeded (20 minutes).');
             err.name = 'TimeoutError';
             subAgentController.abort(err);
-        }, SUB_AGENT_ABSOLUTE_TIMEOUT_MS);  // W7 修复：实际值与注释/错误消息保持一致（20 分钟）
+        }, SUB_AGENT_ABSOLUTE_TIMEOUT_MS);  // W7 fix: actual values ​​consistent with comments/error messages (20 min)
 
         subAgentIdleIntervalId = setInterval(() => {
             if (subAgentController.signal.aborted) return;
@@ -541,7 +541,7 @@ export class Orchestrator {
             const runPromise = this.agentRunner.run(
                 effectivePrompt,
                 { topicId: orchestratorOptions.topicId },
-                [], // 空对话历史 — 子 Agent 从头开始
+                [], // Empty conversation history - child Agent starts from scratch
                 runnerOptions,
             );
             const result: GenerationResult = await Promise.race([runPromise, subAgentAbortPromise]);
@@ -581,14 +581,14 @@ export class Orchestrator {
                 };
             }
 
-            // 任务结束，通知前端更新状态
+            // When the task ends, notify the front end to update the status
             wrappedOnStep({
                 type: 'subtask_complete',
                 content: result.isValid ? '完成' : '未通过',
                 timestamp: Date.now(),
             });
 
-            // 如果执行失败，回滚文件
+            //If execution fails, roll back the file
             if (!result.isValid || (result as any).success === false) {
                 await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
                 const actualError = result.explanation || '';
@@ -634,10 +634,10 @@ export class Orchestrator {
         }
     }
 
-    /**
-     * 判断是否需要触发质量门审查。
-     * 条件：任务图中包含 builder 类型的节点。
-     */
+    /** 
+* Determine whether quality gate review needs to be triggered. 
+* Condition: The task graph contains nodes of builder type. 
+*/
     private shouldRunQualityGate(graph: TaskGraph): boolean {
         for (const node of graph.nodes.values()) {
             if (node.agentType === 'build' && node.status === 'done') {
@@ -647,10 +647,10 @@ export class Orchestrator {
         return false;
     }
 
-    /**
-     * 文件写入回滚机制。
-     * 当子 Agent 执行失败时，恢复所有已修改的文件到原始状态。
-     */
+    /** 
+* File write rollback mechanism. 
+* When the sub-Agent fails to execute, restore all modified files to their original state. 
+*/
     private async rollbackSnapshots(
         snapshots: Map<string, string | null>,
         onStep: (step: AgentStep) => void
@@ -661,7 +661,7 @@ export class Orchestrator {
             const fs = await import('fs');
             for (const [filePath, prevContent] of snapshots.entries()) {
                 if (prevContent === null) {
-                    // 文件原本不存在，说明是新创建的，需要删除
+                    //The file does not exist originally, indicating that it is newly created and needs to be deleted.
                     if (fs.existsSync(filePath)) {
                         fs.unlinkSync(filePath);
                         onStep({
@@ -671,7 +671,7 @@ export class Orchestrator {
                         });
                     }
                 } else {
-                    // 恢复旧内容（prevContent 是 UTF-8 原始文本）
+                    // Restore old content (prevContent is UTF-8 raw text)
                     fs.writeFileSync(filePath, prevContent, 'utf-8');
                     onStep({
                         type: 'thinking',
@@ -685,21 +685,21 @@ export class Orchestrator {
         }
     }
 
-    // ─── 便捷工厂方法 ────────────────────────────────────────────────────────
+    // ─── Convenience factory method ───────────────────────────────────────────────────
 
-    /**
-     * 快速创建一个简单的流水线任务图。
-     *
-     * 示例用法（Explorer → Builder → LocWriter → Reviewer）：
-     * ```typescript
-     * const graph = Orchestrator.createPipeline('创建考古遗址', [
-     *     { id: 'explore', agentType: 'explore', prompt: '扫描项目结构...' },
-     *     { id: 'build',   agentType: 'build',   prompt: '创建考古遗址文件...' },
-     *     { id: 'loc',     agentType: 'loc_writer', prompt: '生成本地化...' },
-     *     { id: 'review',  agentType: 'review',  prompt: '审查代码质量...' },
-     * ]);
-     * ```
-     */
+    /** 
+* Quickly create a simple pipeline task diagram. 
+* 
+* Example usage (Explorer → Builder → LocWriter → Reviewer): 
+* ```typescript 
+* const graph = Orchestrator.createPipeline('Create archaeological site', [ 
+* { id: 'explore', agentType: 'explore', prompt: 'Scan project structure...' }, 
+* { id: 'build', agentType: 'build', prompt: 'Create archaeological site file...' }, 
+* { id: 'loc', agentType: 'loc_writer', prompt: 'Generate localization...' }, 
+* { id: 'review', agentType: 'review', prompt: 'Review code quality...' }, 
+* ]); 
+* ``` 
+*/
     static createPipeline(
         userPrompt: string,
         stages: Array<{ id: string; agentType: AgentMode; prompt: string }>,
@@ -717,18 +717,18 @@ export class Orchestrator {
         return graph;
     }
 
-    /**
-     * 创建并行分支任务图（多个节点共享相同的前置依赖）。
-     *
-     * 示例用法：
-     * ```typescript
-     * const graph = Orchestrator.createFanOut('翻译本地化', 'explore_1', [
-     *     { id: 'loc_en',   agentType: 'loc_writer', prompt: '生成英文本地化' },
-     *     { id: 'loc_zh',   agentType: 'loc_writer', prompt: '生成中文本地化' },
-     *     { id: 'loc_fr',   agentType: 'loc_writer', prompt: '生成法文本地化' },
-     * ]);
-     * ```
-     */
+    /** 
+* Create a parallel branch task graph (multiple nodes share the same pre-dependency). 
+* 
+* Example usage: 
+* ```typescript 
+* const graph = Orchestrator.createFanOut('Translation Localization', 'explore_1', [ 
+* { id: 'loc_en', agentType: 'loc_writer', prompt: 'Generate English localization' }, 
+* { id: 'loc_zh', agentType: 'loc_writer', prompt: 'Generate Chinese localization' }, 
+* { id: 'loc_fr', agentType: 'loc_writer', prompt: 'Generate French localization' }, 
+* ]); 
+* ``` 
+*/
     static createFanOut(
         userPrompt: string,
         sharedDependency: string,

@@ -187,11 +187,11 @@ export class ChatSettingsManager {
             await cfg.update('mcp.servers', settings.mcp.servers, vs.ConfigurationTarget.Global);
         }
 
-        // 协调模式子 Agent 模型配置持久化
+        //Coordination mode sub-Agent model configuration persistence
         if (settings.orchestrator?.agentModels) {
             await cfg.update('orchestrator.agentModels', settings.orchestrator.agentModels, vs.ConfigurationTarget.Global);
         } else {
-            // 清除已有配置（用户恢复为全部继承）
+            //Clear existing configurations (users revert to all inheritance)
             await cfg.update('orchestrator.agentModels', undefined, vs.ConfigurationTarget.Global);
         }
 

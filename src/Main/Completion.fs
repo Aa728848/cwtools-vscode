@@ -12,7 +12,7 @@ open LSP
 open LSP.Types
 open CWTools.Utilities.Utils
 
-// 预编译正则表达式（避免每次补全/resolve 时重新编译）
+// Precompile regular expressions (avoid recompiling every time completion/resolve)
 let private varExtractPattern =
     System.Text.RegularExpressions.Regex(
         @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
@@ -293,7 +293,7 @@ let optimiseCompletion (completionList: CompletionItem seq) =
         completionCache.Clear()
         completionCacheKey <- 0
 
-    // 优化：使用 Array 替代 Seq 避免多次遍历
+    // Optimization: Use Array instead of Seq to avoid multiple traversals
     let arr = completionList |> Seq.toArray
 
     logInfo $"[CompletionCache] items={arr.Length} cacheEntries={completionCache.Count}"

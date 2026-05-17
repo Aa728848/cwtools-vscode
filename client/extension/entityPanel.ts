@@ -535,17 +535,17 @@ export class EntityPanel {
         await doc.save();
         console.log(`[EntityPanel] Updated attach for "${msg.locatorName}" on "${targetEntityName}" → "${msg.entityName || '(removed)'}"`);
 
-        // 跨文件修改时：同一子实体可能在多个位置被引用，增量更新无法同步所有实例。
-        // 必须触发完整的 _loadAndRender 重载以确保所有引用点都刷新。
-        // 直接编辑当前根实体的 attach 时，使用增量更新以提升交互体验。
+        // When modifying across files: the same subentity may be referenced in multiple locations, and incremental updates cannot synchronize all instances.
+        // A full _loadAndRender overload must be triggered to ensure all reference points are refreshed.
+        // When directly editing the attach of the current root entity, use incremental updates to improve the interactive experience.
         this._entityGraph = null;
         if (isCrossFile) {
-            // 跨文件修改 — 完整重载整个实体层级
+            // Cross-file modification - complete reload of the entire entity hierarchy
             if (this._document) {
                 await this._loadAndRender(this._document, this._currentEntityIndex);
             }
         } else if (msg.entityName) {
-            // 当前文件内修改 — 增量加载
+            // Modifications in the current file - incremental loading
             await this._sendAttachEntityData(msg.locatorName, msg.entityName);
         } else {
             // Entity removed — tell webview to remove the attached model

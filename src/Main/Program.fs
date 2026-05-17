@@ -26,7 +26,7 @@ open CWTools.Utilities.Utils
 open CWTools.Localisation
 open LSP.LanguageServer   // brings gameStateLock into scope
 
-// 预编译正则，避免 InlayHint / precache 热路径上每次分配
+// Precompile regular to avoid InlayHint / precache allocation every time on the hot path
 let private inlayLocalVarPattern =
     System.Text.RegularExpressions.Regex(
         @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
@@ -219,20 +219,20 @@ let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) 
             prevChar <- col
         data |> Seq.toArray
 
-// ── 诊断新鲜度状态机 ──────────────────────────────────────────────────────────
-// AI 写入文件后，通过 epoch + freshness 判断当前诊断是否对应最新文件版本
+//──Diagnostic freshness state machine──────────────────────────────────────────────────────
+// After AI writes the file, it uses epoch + freshness to determine whether the current diagnosis corresponds to the latest file version
 type DiagnosticFreshness =
-    | Fresh      // 语法 + 规则 + 全局验证均已完成
-    | Pending    // 单文件验证完成，全局验证（types/localisation）仍在排队
-    | Stale      // 尚未对此版本运行过任何验证
+    | Fresh      // Grammar + rules + global verification are completed
+    | Pending    // Single file verification completed, global verification (types/localisation) is still queued
+    | Stale      // No verification has been run on this version yet
 
 type FileDiagnosticState =
-    { version: int option             // 文档版本（来自 DidChange）
-      epoch: int64                     // 递增计数器，lint 每次 +1
-      updatedAtUnixMs: int64           // Unix 毫秒时间戳
-      freshness: DiagnosticFreshness   // 当前状态
-      pendingGlobalKinds: string list  // 例如 ["localisation"; "types"]
-      errorCount: int                  // 轻量计数，不存储完整 Diagnostic 列表
+    { version: int option             // Document version (from DidChange)
+      epoch: int64                     // Increment the counter, lint +1 each time
+      updatedAtUnixMs: int64           //Unix millisecond timestamp
+      freshness: DiagnosticFreshness   // current status
+      pendingGlobalKinds: string list  // For example ["localisation"; "types"]
+      errorCount: int                  //Lightweight counting, does not store the complete Diagnostic list
       diagnostics: Diagnostic list
       warningCount: int }
 
@@ -254,15 +254,15 @@ type Server(client: ILanguageClient) =
     let mutable eu5GameObj: option<IGame<EU5ComputedData>> = None
     let mutable customGameObj: option<IGame<JominiComputedData>> = None
 
-    // ── 诊断新鲜度状态表 ──────────────────────────────────────────────────────
-    /// 全局诊断 epoch：每次 lint 完成后递增，用于客户端判断诊断是否更新
+    //──Diagnostic freshness status table───────────────────────────────────────────────────
+    /// Global diagnostic epoch: incremented each time lint is completed, used by the client to determine whether the diagnosis has been updated
     let diagnosticEpoch = ref 0L
-    /// 每文件的诊断元数据（freshness/epoch/counts），由 lint 和 delayedAnalyze 维护
+    /// Per-file diagnostic metadata (freshness/epoch/counts), maintained by lint and delayedAnalyze
     let fileDiagnosticStates =
         System.Collections.Concurrent.ConcurrentDictionary<string, FileDiagnosticState>()
 
-    // ── PerfCounters 性能观测 ────────────────────────────────────────────────
-    // 轻量指标聚合，周期性输出到 log，用于长会话性能分析
+    //──PerfCounters performance observation──────────────────────────────────────────────
+    //Lightweight indicator aggregation, periodically output to log, used for long session performance analysis
     let mutable perfLintCount = 0
     let mutable perfRefreshCachesCount = 0
     let mutable perfRefreshLocCount = 0
@@ -271,7 +271,7 @@ type Server(client: ILanguageClient) =
     let perfReportIntervalSeconds = 30.0
     let mutable getPerfCacheSnapshot: unit -> string = fun () -> ""
 
-    /// 每次操作后检查是否需要输出性能汇总日志
+    /// Check whether the performance summary log needs to be output after each operation
     let maybePerfReport (operationName: string) =
         let now = DateTime.UtcNow
         let totalOps = perfLintCount + perfRefreshCachesCount + perfRefreshLocCount + perfCompletionCount
@@ -360,7 +360,7 @@ type Server(client: ILanguageClient) =
     let mutable ignoreCodes: string array = [||]
     let mutable ignoreFiles: string array = [||]
     let mutable dontLoadPatterns: string array = [||]
-    /// key: FileName (使用 ConcurrentDictionary 替代不可变的 Map 以减少 GC 压力)
+    /// key: FileName (use ConcurrentDictionary instead of immutable Map to reduce GC pressure)
     let locCache = System.Collections.Concurrent.ConcurrentDictionary<string, CWError list>()
 
     /// Cached References().Localisation result — invalidated on RefreshLocalisationCaches.
@@ -454,10 +454,10 @@ type Server(client: ILanguageClient) =
     let clearTypeIndexCache () =
         cachedGroupedTypes <- None
 
-    // ── 缓存分区清理函数 ──────────────────────────────────────────────────────
-    // 精确失效策略：避免全局清理带来的不必要性能开销
+    //── Cache partition cleaning function ────────────────────────────────────────────────────
+    // Precise invalidation strategy: avoid unnecessary performance overhead caused by global cleanup
 
-    /// 清理单个文件的内容相关缓存（semanticTokens/codeLens/inlayHint）
+    /// Clear the content-related cache of a single file (semanticTokens/codeLens/inlayHint)
     let clearFileCaches (filePath: string) =
         let fullPath = try FileInfo(filePath).FullName with _ -> filePath
         for key in [ filePath; fullPath ] do
@@ -466,18 +466,18 @@ type Server(client: ILanguageClient) =
             (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
             clearCompletionListCacheForFile key
 
-    /// 清理类型索引相关缓存（type-defining 文件变化后调用）
+    /// Clear the type index related cache (called after the type-defining file changes)
     let clearTypeCaches () =
         clearTypeIndexCache ()
         completionListCache.Clear()
-        codeLensCache.Clear()  // CodeLens 依赖 type index
+        codeLensCache.Clear()  // CodeLens depends on type index
 
-    /// 清理本地化相关缓存（.yml 变化后调用）
+    /// Clean localization related cache (called after .yml changes)
     let clearLocalisationCaches () =
         locCache.Clear()
         cachedLocMap <- None
 
-    /// 清理所有衍生缓存（全量刷新后调用）
+    /// Clear all derived caches (called after full refresh)
     let clearAllDerivedCaches () =
         codeLensCache.Clear()
         inlayHintCache.Clear()
@@ -695,9 +695,9 @@ type Server(client: ILanguageClient) =
               warningCount = 0 }
         fileDiagnosticStates.[filePath] <- state
 
-    // ── 轻量括号扫描器 ──────────────────────────────────────────────────────
-    // 在 parser 失败时提供精确的括号错误定位
-    // O(n) 单遍扫描，跳过行注释 (#) 和双引号字符串
+    //──Lightweight bracket scanner ───────────────────────────────────────────────────
+    // Provide precise bracket error location when parser fails
+    // O(n) single pass, skipping line comments (#) and double-quoted strings
     let scanBraceIssues (text: string) (filePath: string) =
         let lines = text.Split('\n')
         let stack = System.Collections.Generic.Stack<int * int>()  // (lineIdx, col)
@@ -710,7 +710,7 @@ type Server(client: ILanguageClient) =
                 let ch = line.[col]
                 match ch with
                 | '#' when not inString ->
-                    col <- line.Length   // 跳过行尾注释
+                    col <- line.Length   // Skip end-of-line comments
                 | '"' ->
                     inString <- not inString
                     col <- col + 1
@@ -727,7 +727,7 @@ type Server(client: ILanguageClient) =
                     col <- col + 1
                 | _ ->
                     col <- col + 1
-        // 未关闭的左括号
+        // Unclosed left bracket
         while stack.Count > 0 do
             let openLine, openCol = stack.Pop()
             let pos = mkRange filePath (mkPos (openLine + 1) openCol) (mkPos (openLine + 1) (openCol + 1))
@@ -810,7 +810,7 @@ type Server(client: ILanguageClient) =
                 clearTypeCaches ()
                 markFileStale name "types"
 
-            // 优化：只获取一次文件文本，避免重复 GetText 调用
+            // Optimization: only obtain the file text once to avoid repeated GetText calls
             let filetext =
                 if forceDisk then None
                 else docs.GetText(FileInfo(doc.LocalPath))
@@ -833,7 +833,7 @@ type Server(client: ILanguageClient) =
                     | _, Failure(msg, p, _) ->
                         let parserDiag =
                             [ ("CW001", Severity.Error, name, msg, (getRange p.Position p.Position), 0, None) ]
-                        // Parser 失败时运行括号扫描器提供更精确的诊断
+                        // Run the bracket scanner when Parser fails to provide more precise diagnostics
                         let braceIssues = scanBraceIssues t name
                         let recoveryIssues = scanRecoveryIssues t name
                         parserDiag @ braceIssues @ recoveryIssues
@@ -867,25 +867,25 @@ type Server(client: ILanguageClient) =
                     else
                         parserErrors @ locErrors @ astErrors
 
-            // ── 发布诊断并更新新鲜度状态 ────────────────────────────────────────
+            //──Publish diagnosis and update freshness status──────────────────────────────────────
             let diagnosticsList =
                 match errors with
                 | [] -> []
                 | x -> x |> List.map parserErrorToDiagnostics
 
-            // 发布到 VS Code Problems 面板
-            // 重要：必须确保当前编辑文件始终收到诊断更新，
-            // 即使 diagnosticsList 中没有该文件的条目（错误已全部修复）
+            // Publish to VS Code Problems panel
+            // IMPORTANT: You must ensure that the currently edited file always receives diagnostic updates,
+            // Even though there is no entry for this file in diagnosticsList (bugs all fixed)
             match diagnosticsList with
             | [] -> client.PublishDiagnostics { uri = doc; diagnostics = [] }
             | x ->
                 x |> sendDiagnostics
-                // 如果当前文件不在 diagnosticsList 中，补发空诊断清除旧错误
+                // If the current file is not in diagnosticsList, reissue empty diagnostics to clear old errors
                 let currentFileDiags = x |> List.filter (fun (f, _) -> f = name)
                 if currentFileDiags.IsEmpty then
                     client.PublishDiagnostics { uri = doc; diagnostics = [] }
 
-            // 更新诊断新鲜度状态表
+            //Update diagnostic freshness status table
             let newEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
             let pendingKinds =
                 [ if delayedLocUpdate then yield "localisation"
@@ -950,7 +950,7 @@ type Server(client: ILanguageClient) =
                     cachedLocMap <- None  // invalidate cached loc entries
                     delayedLocUpdate <- false
 
-                    // 使用 Dictionary: 清空后重新填
+                    // Use Dictionary: Clear and refill
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
@@ -974,8 +974,8 @@ type Server(client: ILanguageClient) =
                 // AST is ready. We clear codeLens because it's cheaper to recompute.
                 clearAllDerivedCaches ()
 
-                // ── 将所有文件的诊断状态更新为 Fresh ─────────────────────────────
-                // delayedAnalyze 完成全局刷新后，清除 pending 标记
+                // ── Update the diagnostic status of all files to Fresh ──────────────────────────────
+                //After delayedAnalyze completes the global refresh, clear the pending mark
                 let freshEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
                 let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 for kvp in fileDiagnosticStates do
@@ -994,9 +994,9 @@ type Server(client: ILanguageClient) =
             delayTime <-
                 TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 1, 500).Ticks, 2L * time.Ticks)))
             
-            // 定期清理不存在文件的缓存，防止内存泄漏
-            // 使用 game.AllFiles() 获取所有工作区已知文件，而非 docs.OpenFiles()
-            // 这样只会清理真正不存在的文件缓存，而不是简单地清理未打开的文件
+            // Regularly clean the cache of non-existing files to prevent memory leaks
+            // Use game.AllFiles() to get all files known to the workspace instead of docs.OpenFiles()
+            // This will only clear the cache of files that really don't exist, rather than simply clearing unopened files
             try
                 let existingFiles = 
                     game.AllFiles() 
@@ -1444,7 +1444,7 @@ type Server(client: ILanguageClient) =
                       maxFileSize = maxFileSize
                       stlVanillaPath = stlVanillaPath }
 
-                // 加载新游戏前，清理旧的游戏对象引用释放内
+                // Before loading a new game, clean up the old game object references and release them
                 let cleanupOldGame () =
                     match gameObj with
                     | Some oldGame ->
@@ -1453,7 +1453,7 @@ type Server(client: ILanguageClient) =
                             oldGame.CleanupCache existingFiles
                         with e -> logDiag $"CleanupCache error on reload: {e.Message}"
                     | None -> ()
-                    // 清除所有旧的类型特定引用
+                    // Clear all old type-specific references
                     gameFieldClearers |> List.iter (fun f -> f())
                     fileDiagnosticStates.Clear()
                     locCache.Clear()
@@ -1999,7 +1999,7 @@ type Server(client: ILanguageClient) =
                 docs.Change p
                 let path = getPathFromDoc p.textDocument.uri
                 forgetFileCaches path
-                // 清除该文件的深度验证缓存，确保 shallow lint 不会返回修复前的旧错误
+                // Clear the deep validation cache for this file to ensure that shallow lint does not return the old errors before the fix
                 match gameObj with
                 | Some game -> game.InvalidateFileCache path
                 | None -> ()
@@ -2013,7 +2013,7 @@ type Server(client: ILanguageClient) =
                     UpdateRequest(
                         { uri = p.textDocument.uri
                           version = p.textDocument.version },
-                        true  // 强制 deep lint，确保错误和警告都基于最新文件内容
+                        true  // Force deep lint to ensure errors and warnings are based on the latest file content
                     )
                 )
             }
@@ -3718,7 +3718,7 @@ type Server(client: ILanguageClient) =
                             Some result
 
                         // ── cwtools.ai.getDiagnosticsFresh ───────────────────────────────────────
-                        // 立即返回某文件的诊断新鲜度状态（不阻塞）
+                        // Immediately return the diagnostic freshness status of a file (without blocking)
                         | { command = cmd
                             arguments = uriArg :: _ } when
                                 cmd = "cwtools.ai.getDiagnosticsFresh"
@@ -3767,7 +3767,7 @@ type Server(client: ILanguageClient) =
                         // Actual waiting stays client-side to avoid holding an LSP read lock.
 
                         // ── cwtools.ai.getValidationStatus ──────────────────────────────────────
-                        // 返回全局验证状态摘要：当前 epoch、pending 文件数、总文件数
+                        // Return global verification status summary: current epoch, number of pending files, total number of files
                         | { command = "cwtools.ai.getValidationStatus" } ->
                             let currentEpoch = diagnosticEpoch.Value
                             let totalFiles = fileDiagnosticStates.Count
@@ -3795,13 +3795,13 @@ type Server(client: ILanguageClient) =
                             Some result
 
                         // ── cwtools.ai.parseFragment ─────────────────────────────────────────
-                        // 片段解析：接受代码片段文本，返回语法错误（不写入文件）
+                        // Fragment parsing: accepts code fragment text and returns syntax error (does not write to file)
                         | { command = "cwtools.ai.parseFragment"
                             arguments = codeArg :: _ } ->
                             let code = codeArg.AsString()
                             let virtualPath = "fragment://virtual.txt"
 
-                            // 1. 尝试 CKParser 解析
+                            // 1. Try CKParser parsing
                             let parsed = CKParser.parseString code virtualPath
                             let parserErrors =
                                 match parsed with
@@ -3811,7 +3811,7 @@ type Server(client: ILanguageClient) =
                                          col = int p.Position.Column
                                          message = msg |} ]
 
-                            // 2. 括号扫描
+                            // 2. Bracket scanning
                             let braceIssues = scanBraceIssues code virtualPath
                             let braceErrors =
                                 braceIssues

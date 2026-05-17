@@ -17,7 +17,7 @@ module LanguageServerFeatures =
     type IGameDispatcher =
         abstract Dispatch<'R> : IGameVisitor<'R> -> 'R option
 
-    /// 预编译的正则表达式，避免每次 hover 时重新编译
+    /// Precompiled regular expressions to avoid recompiling every time you hover
     let private scriptedVarPattern =
         System.Text.RegularExpressions.Regex(
             @"^\s*(@[A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\n\r#]+)",
@@ -37,7 +37,7 @@ module LanguageServerFeatures =
             { line = max 0 (int range.EndLine - 1)
               character = (int range.EndColumn) } }
 
-    /// Windows URI 路径修正工具函数（消除重复代码）
+    /// Windows URI path correction tool function (eliminate duplicate code)
     let getPathFromDoc (doc: Uri) =
         let p = doc.LocalPath
         if RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && p.Length > 0 && p.[0] = '/' then
@@ -97,7 +97,7 @@ module LanguageServerFeatures =
             let path = getPathFromDoc doc
 
             let hoverFunction (game: IGame<_>) =
-                // 优化：只获取一次文件文本，所有后续操作共享同一引用
+                // Optimization: only obtain the file text once, all subsequent operations share the same reference
                 let fileContent = docs.GetText(FileInfo(doc.LocalPath)) |> Option.defaultValue ""
 
                 let symbolInfo = game.InfoAtPos position path fileContent
@@ -108,7 +108,7 @@ module LanguageServerFeatures =
                 let hovered =
                     allEffects |> List.tryFind (fun e -> e.Name.GetString() = unescapedWord)
 
-                // 使用模块级预编译正则提取变量
+                // Use module-level precompiled regular expressions to extract variables
                 let extractVarsFromFile (content: string) =
                     [ for m in scriptedVarPattern.Matches(content) ->
                         let name = m.Groups.[1].Value.Trim()

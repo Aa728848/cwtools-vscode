@@ -1,13 +1,13 @@
-/**
- * PDX（Paradox）游戏引擎的 GLSL 着色器片段。
- * 用于在 Three.js MeshStandardMaterial 的 onBeforeCompile 中注入自定义着色逻辑，
- * 使 Stellaris 的 DDS 贴图（法线 RRxG 编码、specular alpha、自发光遮罩）正确渲染。
- */
+/** 
+* GLSL shader fragment for the PDX (Paradox) game engine. 
+* Used to inject custom coloring logic in onBeforeCompile of Three.js MeshStandardMaterial, 
+* Made Stellaris' DDS maps (normal RRxG encoding, specular alpha, emissive mask) render correctly. 
+*/
 
-// ── 顶部辅助函数（注入到 fragmentShader 最前面） ─────────────────────────────
+// ── Top auxiliary function (injected into the front of fragmentShader) ──────────────────────────────
 export const pdxHelperFunctions = `
-// PDX RRxG 法线解包辅助函数
-// 参照 standardfuncsgfx.fxh 中的 UnpackRRxGNormal
+// PDX RRxG normal unpacking auxiliary function
+// Refer to UnpackRRxGNormal in standardfuncsgfx.fxh
 vec3 unpackPdxRRxGNormal(sampler2D nmap, vec2 uv) {
     vec4 pdx = texture2D(nmap, uv);
     float nx = pdx.g * 2.0 - 1.0;
@@ -15,15 +15,15 @@ vec3 unpackPdxRRxGNormal(sampler2D nmap, vec2 uv) {
     float nz = sqrt(max(0.0, 1.0 - nx * nx - ny * ny));
     return vec3(nx, ny, nz);
 }
-// 从法线贴图 B 通道提取自发光遮罩
+// Extract the self-illumination mask from the normal map B channel
 float getPdxEmissive(sampler2D nmap, vec2 uv) {
     return texture2D(nmap, uv).b;
 }
 `;
 
-// ── 法线贴图替换片段（替换 #include <normal_fragment_maps>） ──────────────────
+// ── Normal map replacement fragments (replaces #include <normal_fragment_maps>) ──────────────────
 export const pdxNormalFragmentMaps = `
-// PDX 法线贴图解包（替换 Three.js 默认法线贴图处理）
+// PDX normal map unpacking (replacing Three.js default normal map processing)
 #ifdef USE_NORMALMAP_OBJECTSPACE
     normal = unpackPdxRRxGNormal(normalMap, vNormalMapUv);
     #ifdef FLIP_SIDED
@@ -42,7 +42,7 @@ export const pdxNormalFragmentMaps = `
 #endif
 `;
 
-// ── 粗糙度替换片段（替换 #include <roughnessmap_fragment>） ───────────────────
+// ── Roughness replacement fragment (replaces #include <roughnessmap_fragment>) ───────────────────
 export const pdxRoughnessFragment = `
 float roughnessFactor = roughness;
 #ifdef USE_ROUGHNESSMAP
@@ -51,7 +51,7 @@ float roughnessFactor = roughness;
 #endif
 `;
 
-// ── 金属度替换片段（替换 #include <metalnessmap_fragment>） ───────────────────
+// ── Metalness replacement fragment (replaces #include <metalnessmap_fragment>) ───────────────────
 export const pdxMetalnessFragment = `
 float metalnessFactor = metalness;
 #ifdef USE_METALNESSMAP
@@ -62,9 +62,9 @@ float metalnessFactor = metalness;
 #endif
 `;
 
-// ── 自发光替换片段（替换 #include <emissivemap_fragment>） ────────────────────
+// ── Emissive replacement fragment (replaces #include <emissivemap_fragment>) ────────────────────
 export const pdxEmissiveFragment = `
-// PDX 自发光：法线贴图 B 通道作为遮罩
+// PDX self-illumination: normal map B channel as mask
 float pdxEmissiveMask = getPdxEmissive(normalMap, vNormalMapUv);
 #ifdef USE_MAP
     vec4 pdxDiffuseForEmissive = texture2D(map, vMapUv);

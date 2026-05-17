@@ -1,242 +1,242 @@
-/**
- * Eddy CWTool Code — 多 Agent 协作系统类型定义
- *
- * 定义了任务图、黑板条目、Agent 实例和协调器所需的全部类型。
- * 模型选择继承用户在设置面板中配置的供应商/模型，支持按角色覆盖。
- */
+/** 
+* Eddy CWTool Code — Multi-Agent collaboration system type definition 
+* 
+* Defines all types required for task graphs, blackboard entries, Agent instances and coordinators. 
+* Model selection inherits the supplier/model configured by the user in the settings panel and supports override by role. 
+*/
 
 import type { AgentMode, TokenUsage, AgentStep } from '../types';
 
-// ─── Blackboard 条目类型 ─────────────────────────────────────────────────────
+// ─── Blackboard entry type ──────────────────────────────────────────────────
 
-/** 黑板条目的数据类型标签 */
+/** Data type tag of blackboard entry */
 export type BlackboardEntryType =
-    | 'file_snapshot'      // 文件快照（路径、内容摘要）
-    | 'scope_info'         // 作用域信息（来自 query_scope）
-    | 'diag_result'        // 诊断结果（来自 get_diagnostics）
-    | 'entity_registry'    // 实体注册表（已创建的 ID → 创建者 Agent）
-    | 'write_intent'       // 写入意图声明（Agent 声明即将写入的文件）
-    | 'free_text';         // 自由文本（通用 KV 存储）
+    | 'file_snapshot'      //File snapshot (path, content summary)
+    | 'scope_info'         // Scope information (from query_scope)
+    | 'diag_result'        // Diagnostic results (from get_diagnostics)
+    | 'entity_registry'    // Entity Registry (Created ID → Creator Agent)
+    | 'write_intent'       // Write intent statement (Agent declares the file to be written)
+    | 'free_text';         // Free text (generic KV storage)
 
-/** 黑板中的一个条目 */
+/** An entry in the blackboard */
 export interface BlackboardEntry {
-    /** 条目的唯一键 */
+    /** The unique key of the entry */
     key: string;
-    /** 条目的值（序列化为字符串） */
+    /** Value of entry (serialized to string) */
     value: string;
-    /** 条目的数据类型标签 */
+    /** The data type label of the entry */
     type: BlackboardEntryType;
-    /** 乐观锁版本号 — 每次写入递增 */
+    /** Optimistic lock version number - incremented for each write */
     version: number;
-    /** 写入该条目的 Agent ID */
+    /** Write the Agent ID of this entry */
     authorAgentId: string;
-    /** 写入时间戳 (Date.now()) */
+    /** Write timestamp (Date.now()) */
     timestamp: number;
 }
 
-/** 黑板写入结果 */
+/** Blackboard writing result */
 export interface BlackboardWriteResult {
     success: boolean;
-    /** 写入后的新版本号 */
+    /** New version number after writing */
     newVersion?: number;
-    /** 失败原因（版本冲突等） */
+    /** Reason for failure (version conflict, etc.) */
     conflict?: string;
 }
 
-/** 序列化后的黑板快照（用于检查点） */
+/** Serialized blackboard snapshot (for checkpoint) */
 export interface SerializedBlackboard {
     entries: Array<[string, BlackboardEntry]>;
     timestamp: number;
 }
 
-// ─── 任务图类型 ───────────────────────────────────────────────────────────────
+// ─── Task graph type ───────────────────────────────────────────────────────────
 
-/** 任务节点状态 */
+/** Task node status */
 export type TaskNodeStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
-/** 任务优先级 */
+/** Task priority */
 export type TaskPriority = 'critical' | 'normal' | 'low';
 
-/** DAG 中的一个任务节点 */
+/** A task node in DAG */
 export interface TaskNode {
-    /** 节点唯一 ID (如 "explore_1", "build_events") */
+    /** Unique node ID (such as "explore_1", "build_events") */
     id: string;
-    /** 执行该任务的 Agent 模式 */
+    /** Agent mode to perform this task */
     agentType: AgentMode;
-    /** 子任务描述（作为 Agent 的用户消息） */
+    /** Subtask description (user message as Agent) */
     prompt: string;
-    /** 注入上下文的文件路径或 Blackboard Key 列表 */
+    /** File path or Blackboard Key list of injected context */
     contextFiles?: string[];
-    /** Agent 声明要修改的文件列表（用于防冲突） */
+    /** Agent declares a list of files to be modified (for anti-conflict) */
     plannedFiles?: string[];
-    /** Agent 声明要修改的实体列表（用于防冲突） */
+    /** Agent declares the list of entities to be modified (for anti-collision) */
     plannedEntities?: string[];
-    /** 前置依赖任务 ID 列表 — 全部完成后本节点才可执行 */
+    /** Pre-dependent task ID list - this node can only be executed after all are completed */
     dependencies: string[];
-    /** 任务优先级 */
+    /** Task priority */
     priority: TaskPriority;
-    /** 当前状态 */
+    /** Current status */
     status: TaskNodeStatus;
-    /** 执行结果（Agent 最终输出） */
+    /** Execution result (Agent final output) */
     result?: string;
-    /** 失败时的错误信息 */
+    /** Error message on failure */
     error?: string;
 
-    // ── 资源控制 ──
-    /** 覆盖模型选择（留空则继承用户配置的供应商/模型） */
+    // ── Resource control ──
+    /** Override model selection (leave blank to inherit the user-configured supplier/model) */
     modelOverride?: string;
-    /** 覆盖供应商选择（留空则继承用户配置） */
+    /** Override supplier selection (leave blank to inherit user configuration) */
     providerOverride?: string;
-    /** 最大推理循环迭代次数 */
+    /** Maximum number of inference loop iterations */
     maxIterations?: number;
-    /** 重试计数 */
+    /** Retry count */
     retryCount: number;
-    /** 最大重试次数 */
+    /** Maximum number of retries */
     maxRetries: number;
 
-    // ── 运行时元数据 ──
-    /** 开始执行时间 */
+    // ── Runtime metadata ──
+    /** Start execution time */
     startedAt?: number;
-    /** 完成时间 */
+    /** Completion time */
     completedAt?: number;
-    /** 该节点消耗的 Token */
+    /** Token consumed by this node */
     tokenUsage?: TokenUsage;
 }
 
-/** 任务图（DAG） */
+/** Task graph (DAG) */
 export interface TaskGraph {
-    /** 图的唯一 ID */
+    /** Unique ID of the image */
     id: string;
-    /** 节点集合 */
+    /** Node collection */
     nodes: Map<string, TaskNode>;
-    /** 元数据 */
+    /** Metadata */
     metadata: {
-        /** 原始用户请求 */
+        /** Original user request */
         userPrompt: string;
-        /** 创建时间 */
+        /** Creation time */
         createdAt: number;
     };
 }
 
-// ─── Agent 实例类型 ───────────────────────────────────────────────────────────
+// ───Agent instance type ───────────────────────────────────────────────────────
 
-/** Agent 实例运行时状态 */
+/** Agent instance running status */
 export type AgentInstanceStatus = 'idle' | 'running' | 'done' | 'failed';
 
-/** 一个运行中的 Agent 实例描述 */
+/** Description of a running Agent instance */
 export interface AgentInstance {
-    /** 实例唯一 ID (如 "agent_explore_1_abc123") */
+    /** Instance unique ID (such as "agent_explore_1_abc123") */
     id: string;
-    /** Agent 模式 */
+    /** Agent mode */
     type: AgentMode;
-    /** 对应的任务节点 ID */
+    /** Corresponding task node ID */
     taskNodeId: string;
-    /** 实例状态 */
+    /** Instance status */
     status: AgentInstanceStatus;
-    /** Token 消耗 */
+    /** Token consumption */
     tokenUsage: TokenUsage;
-    /** 步骤日志 */
+    /** Step log */
     steps: AgentStep[];
 }
 
-/** 子 Agent 执行结果 */
+/** Sub-Agent execution results */
 export interface SubAgentResult {
-    /** 对应的任务节点 ID */
+    /** Corresponding task node ID */
     nodeId: string;
-    /** 是否成功 */
+    /** Whether it was successful */
     success: boolean;
-    /** Agent 最终输出文本 */
+    /** Agent final output text */
     output: string;
-    /** 失败时的错误 */
+    /** Error on failure */
     error?: string;
-    /** Token 消耗 */
+    /** Token consumption */
     tokenUsage: TokenUsage;
-    /** 该 Agent 写入的文件列表 */
+    /** List of files written by this Agent */
     writtenFiles: string[];
-    /** 执行步骤数 */
+    /** Number of execution steps */
     stepCount: number;
-    /** 子 Agent 是否因为需要主 Agent/用户澄清而提前停止 */
+    /** Whether the sub-Agent is stopped early because it needs clarification from the main Agent/user */
     needsClarification?: boolean;
-    /** 需要主 Agent 处理的澄清内容 */
+    /** Clarification content that needs to be processed by the main Agent */
     clarification?: string;
 }
 
-// ─── Agent 注册表类型 ─────────────────────────────────────────────────────────
+// ───Agent registry type ─────────────────────────────────────────────────────
 
-/** Agent 角色的工具预算等级 */
+/** Agent role’s tool budget level */
 export type ToolBudget =
-    | 'full'         // 全部工具
-    | 'read_only'    // 只读工具
-    | 'plan'         // 规划工具（只读 + todo + blueprint）
-    | 'loc'          // 本地化工具（读写 + 搜索）
-    | 'media_only';  // 媒体工具（mmx + convert + deploy）
+    | 'full'         // All tools
+    | 'read_only'    // read-only tool
+    | 'plan'         // Planning tools (read-only + todo + blueprint)
+    | 'loc'          // Localization tools (read and write + search)
+    | 'media_only';  // Media tools (mmx + convert + deploy)
 
-/** Agent 角色配置描述 */
+/** Agent role configuration description */
 export interface AgentProfile {
-    /** 映射到的 AgentMode */
+    /** AgentMode mapped to */
     mode: AgentMode;
-    /**
-     * 建议使用的模型 — 仅作为默认值。
-     * 如果为 undefined，则继承用户在设置面板配置的模型。
-     * 用户可在 TaskNode.modelOverride 中显式覆盖。
-     */
+    /** 
+* Recommended model—default only. 
+* If it is undefined, the model configured by the user in the settings panel will be inherited. 
+* Users can explicitly override in TaskNode.modelOverride. 
+*/
     suggestedModel?: string;
-    /**
-     * 建议使用的供应商 — 仅作为默认值。
-     * 如果为 undefined，则继承用户在设置面板配置的供应商。
-     */
+    /** 
+* Recommended vendor - default only. 
+* If undefined, the provider configured by the user in the settings panel will be inherited. 
+*/
     suggestedProvider?: string;
-    /** 最大推理循环迭代次数 */
+    /** Maximum number of inference loop iterations */
     maxIterations: number;
-    /** 工具预算等级 */
+    /** Tool budget level */
     toolBudget: ToolBudget;
-    /** 角色描述（用于 Orchestrator 的任务分解提示词） */
+    /** Role description (task decomposition prompt word for Orchestrator) */
     description: string;
 }
 
-// ─── Orchestrator 类型 ────────────────────────────────────────────────────────
+// ─── Orchestrator type ────────────────────────────────────────────────────
 
-/** Orchestrator 执行结果 */
+/** Orchestrator execution results */
 export interface OrchestratorResult {
-    /** 是否全部成功 */
+    /** Whether all are successful */
     success: boolean;
-    /** 汇总输出 */
+    /** Summary output */
     summary: string;
-    /** 各子 Agent 的结果 */
+    /** Results of each sub-Agent */
     agentResults: Map<string, SubAgentResult>;
-    /** 总 Token 消耗 */
+    /** Total Token consumption */
     totalTokenUsage: TokenUsage;
-    /** 失败的节点 ID 列表 */
+    /** List of failed node IDs */
     failedNodes: string[];
-    /** 被取消的节点 ID 列表 */
+    /** List of canceled node IDs */
     cancelledNodes: string[];
 }
 
-/** Orchestrator 配置选项 */
+/** Orchestrator configuration options */
 export interface OrchestratorOptions {
-    /** 最大并发 Agent 数（默认 4） */
+    /** Maximum number of concurrent Agents (default 4) */
     maxConcurrency?: number;
-    /** 全局 Token 预算上限（超限后降级为串行） */
+    /** Global Token budget upper limit (downgraded to serial after exceeding the limit) */
     globalTokenBudget?: number;
-    /** 用户配置的供应商 ID（继承自设置面板） */
+    /** User-configured vendor ID (inherited from settings panel) */
     providerId?: string;
-    /** 用户配置的模型（继承自设置面板） */
+    /** User configured model (inherited from settings panel) */
     model?: string;
-    /** 中止信号 */
+    /** Abort signal */
     abortSignal?: AbortSignal;
-    /** 话题 ID（用于检查点和工作目录） */
+    /** Topic ID (used for checkpoints and working directories) */
     topicId?: string;
-    /** 步骤回调 */
+    /** Step callback */
     onStep?: (step: AgentStep) => void;
-    /** 文件写入前的快照回调，用于向上传递给撤回系统 */
+    /** Snapshot callback before file writing, used to pass upward to the recall system */
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
-    /** Todo 列表更新回调 */
+    /** Todo list update callback */
     onTodoUpdate?: (todos: import('../types').TodoItem[]) => void;
-    /** 权限审批回调，子 Agent 通过此回调向用户请求执行敏感操作的权限 */
+    /** Permission approval callback, the sub-Agent uses this callback to request permission from the user to perform sensitive operations */
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
 }
 
-/** 质量门检测结果 */
+/** Quality gate test results */
 export interface QualityGateResult {
     passed: boolean;
     diagnosticErrors: number;
@@ -246,7 +246,7 @@ export interface QualityGateResult {
     fixSuggestions?: string[];
 }
 
-/** Agent 运行的排障追踪数据 */
+/** Agent running troubleshooting tracking data */
 export interface AgentRunTrace {
     runId: string;
     agentId: string;

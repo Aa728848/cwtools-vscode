@@ -46,7 +46,7 @@ export class ExternalToolHandler {
         return resolveWorkspacePathInput(inputPath, this.ctx.workspaceRoot, { preferExistingAiPath: true }).resolved;
     }
 
-    // ─── 权限请求辅助：与 AbortSignal 竞争，abort 时自动 deny ────────────────
+    // ─── Permission request assistance: compete with AbortSignal, automatically deny when abort ────────────────
 
     private quoteCommandPath(filePath: string, alreadyQuoted: boolean): string {
         if (alreadyQuoted) return filePath;
@@ -349,18 +349,18 @@ export class ExternalToolHandler {
             const contentType = response.headers.get('content-type') ?? '';
             let text = await response.text();
 
-            // 🔒 防事件循环阻塞：限制原始响应体大小
-            // response.text() 本身是异步的不会阻塞，但后续的同步正则处理
-            // 在超大文本上会独占 JS 主线程，导致 Extension Host 完全假死，
-            // 连 AbortController 和 Promise.race 超时都无法触发。
-            const MAX_RAW_BODY = 512_000; // 512KB — 任何有意义的网页内容都在此范围内
+            // 🔒 Prevent event loop blocking: limit the original response body size
+            // response.text() itself is asynchronous and will not block, but subsequent synchronous regular processing
+            // Oversized text will exclusively occupy the JS main thread, causing the Extension Host to completely freeze.
+            // Even AbortController and Promise.race timeouts cannot be triggered.
+            const MAX_RAW_BODY = 512_000; // 512KB — Any meaningful web content falls within this range
             if (text.length > MAX_RAW_BODY) {
                 text = text.substring(0, MAX_RAW_BODY);
             }
 
             if (contentType.includes('html')) {
-                // 🔒 HTML 正则安全上限：6 次全量 .replace() 在 100KB 上约 1-3ms，
-                // 但在 5MB 上可能需要 30s+，彻底冻结事件循环。
+                // 🔒 HTML regular safety upper limit: 6 full .replace() takes about 1-3ms on 100KB,
+                // But on 5MB it may take 30s+, completely freezing the event loop.
                 const SAFE_REGEX_LIMIT = 100_000;
                 if (text.length > SAFE_REGEX_LIMIT) {
                     text = text.substring(0, SAFE_REGEX_LIMIT);
@@ -758,8 +758,8 @@ export class ExternalToolHandler {
                 if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
             }
             let html = await resp.text();
-            // 🔒 防事件循环阻塞：限制 DuckDuckGo 响应体大小
-            // 正常搜索结果页 < 100KB，但异常页面（验证码/错误）可能更大
+            // 🔒 Prevent event loop blocking: limit DuckDuckGo response body size
+            // Normal search results page < 100KB, but abnormal pages (verification codes/errors) may be larger
             if (html.length > 200_000) {
                 html = html.substring(0, 200_000);
             }
@@ -982,7 +982,7 @@ export class ExternalToolHandler {
         }
     }
 
-    /** 纯净的本地命令执行器（无权限拦截、无 MMX 检查），用于安全的格式转换工具 (ImageMagick/ffmpeg) */
+    /** Pure local command executor (no permission interception, no MMX check) for secure format conversion tools (ImageMagick/ffmpeg) */
     private async execLocalCommand(
         command: string,
         timeoutMs: number = 60000,

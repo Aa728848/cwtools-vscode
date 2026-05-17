@@ -1,24 +1,24 @@
-/**
- * Eddy CWTool Code — 质量门
- *
- * Builder Agent 完成后自动触发 Reviewer Agent 进行审查。
- * 支持多轮修复循环（最多 3 轮），确保代码质量。
- */
+/** 
+* Eddy CWTool Code — Quality Gate 
+* 
+* After the Builder Agent is completed, the Reviewer Agent is automatically triggered for review. 
+* Supports multiple rounds of repair cycles (up to 3 rounds) to ensure code quality. 
+*/
 
 import type { SubAgentResult, TaskNode } from './types';
 import type { AgentStep } from '../types';
 
 import type { QualityGateResult } from './types';
 
-/** 质量门配置 */
+/** Quality gate configuration */
 export interface QualityGateConfig {
-    /** 最大修复循环次数 */
+    /** Maximum number of repair cycles */
     maxFixCycles: number;
-    /** 是否启用自动修复（false = 仅报告） */
+    /** Whether to enable automatic repair (false = report only) */
     autoFix: boolean;
 }
 
-/** 默认配置 */
+/**Default configuration */
 const DEFAULT_CONFIG: QualityGateConfig = {
     maxFixCycles: 3,
     autoFix: true,
@@ -48,18 +48,18 @@ export const SOUND_REPAIR_PROTOCOL = [
     '6. Fix only the offending line with guarded `replace_lines` when line numbers are known, then run `get_diagnostics` on the file again.',
 ].join('\n');
 
-/**
- * 质量门。
- *
- * 工作流程：
- * 1. Builder Agent 完成代码生成
- * 2. QualityGate 自动生成审查 prompt（基于 Builder 写入的文件列表）
- * 3. 调用 Reviewer Agent 审查
- * 4. 如果发现问题且 autoFix = true：
- *    - 生成修复 prompt 并调用 Builder Agent 修复
- *    - 重新审查（最多 maxFixCycles 轮）
- * 5. 输出最终审查报告
- */
+/** 
+* Quality gate. 
+* 
+* Workflow: 
+* 1. Builder Agent completes code generation 
+* 2. QualityGate automatically generates review prompts (based on the file list written by Builder) 
+* 3. Call Reviewer Agent to review 
+* 4. If a problem is found and autoFix = true: 
+* - Generate repair prompt and call Builder Agent to repair 
+* - re-examine (up to maxFixCycles rounds) 
+* 5. Output the final review report 
+*/
 export class QualityGate {
     private config: QualityGateConfig;
 
@@ -67,16 +67,16 @@ export class QualityGate {
         this.config = { ...DEFAULT_CONFIG, ...config };
     }
 
-    /**
-     * 生成综合审查 prompt。
-     * 基于所有写入的文件列表构建针对性的审查指令。
-     */
+    /** 
+* Generate comprehensive review prompt. 
+* Build targeted review instructions based on a list of all files written. 
+*/
     buildCombinedReviewPrompt(writtenFiles: string[], preFetchedDiagnostics?: string): string {
         const fileList = writtenFiles.length > 0
             ? writtenFiles.map(f => `- ${f}`).join('\n')
             : '(No file write records)';
 
-        // W3 修复：预取诊断存在时，明确禁止 Reviewer 重复调用 get_diagnostics
+        // W3 fix: Explicitly prohibit Reviewer from repeatedly calling get_diagnostics when prefetch diagnostics exist
         const diagnosticsSection = preFetchedDiagnostics 
             ? `\n## Pre-fetched LSP Diagnostics (ALREADY RETRIEVED — DO NOT call get_diagnostics again):\n${preFetchedDiagnostics}\n` 
             : '';
@@ -117,10 +117,10 @@ export class QualityGate {
         ].join('\n');
     }
 
-    /**
-     * 执行审查。
-     * 拉起 Reviewer Agent 并分析结果。
-     */
+    /** 
+* Perform review. 
+* Pull up Reviewer Agent and analyze the results. 
+*/
     async reviewOutput(
         agentRunner: import('../agentRunner').AgentRunner,
         writtenFiles: string[],
@@ -160,14 +160,14 @@ export class QualityGate {
 
         const prompt = this.buildCombinedReviewPrompt(writtenFiles, preFetchedDiagnostics);
         
-        // 执行 Reviewer Agent
+        //Execute Reviewer Agent
         const reviewResult = await agentRunner.run(
             prompt,
             {}, // context
             [], // conversationHistory
             {
                 ...options,
-                mode: 'review', // 强制使用审查模式
+                mode: 'review', // Force censorship mode
             }
         );
 
@@ -186,18 +186,18 @@ export class QualityGate {
         };
     }
 
-    // W11 修复：删除与 buildCombinedReviewPrompt 功能完全重复的旧接口。
-    // 旧方法仅因参数类型不同（SubAgentResult vs string[]）而存在，
-    // 现在统一使用 buildCombinedReviewPrompt(writtenFiles: string[])。
-    /** @deprecated 使用 buildCombinedReviewPrompt 代替 */
+    // W11 fix: Removed old interface that was an exact duplicate of buildCombinedReviewPrompt functionality.
+    // The old method only exists because of the different parameter types (SubAgentResult vs string[]),
+    // Now use buildCombinedReviewPrompt(writtenFiles: string[]) uniformly.
+    /** @deprecated Use buildCombinedReviewPrompt instead */
     buildReviewPrompt(builderResult: SubAgentResult, preFetchedDiagnostics?: string): string {
         return this.buildCombinedReviewPrompt(builderResult.writtenFiles, preFetchedDiagnostics);
     }
 
-    /**
-     * 生成修复 prompt。
-     * 基于 Reviewer 的审查报告，构建修复指令。
-     */
+    /** 
+* Generate repair prompt. 
+* Based on Reviewer's review report, build repair instructions. 
+*/
     buildFixPrompt(reviewReport: string, writtenFiles: string[]): string {
         const hasSpriteIssues = /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(reviewReport);
         const hasSoundIssues = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(reviewReport);
@@ -222,9 +222,9 @@ export class QualityGate {
         ].join('\n');
     }
 
-    /**
-     * 解析审查报告，判断是否通过。
-     */
+    /** 
+* Analyze the review report and determine whether it is passed. 
+*/
     parseReviewResult(reviewOutput: string): { logicIssuesCount: number; fixSuggestions: string[] } {
         try {
             // Try extracting JSON block
@@ -245,7 +245,7 @@ export class QualityGate {
         }
     }
 
-    /** 获取配置 */
+    /** Get configuration */
     getConfig(): QualityGateConfig {
         return { ...this.config };
     }

@@ -1,29 +1,29 @@
-/**
- * Eddy CWTool Code — DAG 任务图引擎
- *
- * 管理 TaskGraph 的拓扑排序、就绪节点计算、状态转换和循环依赖检测。
- * 这是多 Agent 协作系统的调度核心。
- */
+/** 
+* Eddy CWTool Code — DAG task graph engine 
+* 
+* Manage TaskGraph's topological sorting, ready node calculations, state transitions, and circular dependency detection. 
+* This is the scheduling core of the multi-Agent collaboration system. 
+*/
 
 import type { TaskGraph, TaskNode, TaskNodeStatus, TaskPriority } from './types';
 
-/**
- * DAG 任务图引擎。
- *
- * 提供以下能力：
- * 1. 拓扑排序 — 将 DAG 分层，同层节点无依赖可并行
- * 2. 就绪节点查询 — 获取所有依赖已完成的待执行节点
- * 3. 状态转换 — 标记完成/失败，并级联取消下游节点
- * 4. 循环依赖检测 — 在执行前验证图的合法性
- */
+/** 
+* DAG task graph engine. 
+* 
+* Provides the following capabilities: 
+* 1. Topological sorting - layer DAG, and nodes on the same layer can be parallelized without dependencies 
+* 2. Ready node query - obtain all pending nodes whose dependencies have been completed 
+* 3. State transition - mark completion/failure, and cascade cancellation of downstream nodes 
+* 4. Circular dependency detection - verify the legality of the graph before execution 
+*/
 export class TaskGraphEngine {
 
-    /**
-     * 拓扑排序 — 将任务图分层。
-     * 返回二维数组：外层是层级（0 = 无依赖的根节点），内层是该层可并行的节点。
-     *
-     * @throws Error 如果检测到循环依赖
-     */
+    /** 
+* Topological sorting - layering the task graph. 
+* Returns a two-dimensional array: the outer layer is the level (0 = root node with no dependencies), and the inner layer is the parallelized nodes of this layer. 
+* 
+* @throws Error if circular dependency is detected 
+*/
     topologicalSort(graph: TaskGraph): TaskNode[][] {
         const cycles = this.detectCycles(graph);
         if (cycles) {
@@ -35,7 +35,7 @@ export class TaskGraphEngine {
         const layers: TaskNode[][] = [];
         const completed = new Set<string>();
 
-        // 不断提取入度为 0 的节点，直到全部节点被分配
+        //Continuously extract nodes with in-degree 0 until all nodes are allocated
         let remaining = new Set(graph.nodes.keys());
         while (remaining.size > 0) {
             const layer: TaskNode[] = [];
@@ -50,7 +50,7 @@ export class TaskGraphEngine {
             }
 
             if (layer.length === 0) {
-                // 不应该发生（已通过 detectCycles 检查），但作为安全网
+                // Shouldn't happen (passed detectCycles check), but serves as a safety net
                 throw new Error('拓扑排序失败: 剩余节点均有未满足的依赖');
             }
 
@@ -59,7 +59,7 @@ export class TaskGraphEngine {
                 remaining.delete(node.id);
             }
 
-            // 按优先级排序：critical > normal > low
+            // Sort by priority: critical > normal > low
             layer.sort((a, b) => priorityWeight(b.priority) - priorityWeight(a.priority));
             layers.push(layer);
         }
@@ -67,10 +67,10 @@ export class TaskGraphEngine {
         return layers;
     }
 
-    /**
-     * 获取当前所有可执行的节点（依赖已满足且状态为 pending）。
-     * 这是调度器每轮循环调用的核心方法。
-     */
+    /** 
+* Get all currently executable nodes (dependencies are satisfied and the status is pending). 
+* This is the core method called by the scheduler in each round of loop. 
+*/
     getReadyNodes(graph: TaskGraph): TaskNode[] {
         const ready: TaskNode[] = [];
         for (const node of graph.nodes.values()) {
@@ -81,15 +81,15 @@ export class TaskGraphEngine {
             });
             if (allDepsDone) ready.push(node);
         }
-        // 按优先级排序
+        // Sort by priority
         ready.sort((a, b) => priorityWeight(b.priority) - priorityWeight(a.priority));
         return ready;
     }
 
-    /**
-     * 标记节点为完成状态。
-     * @returns 新变为就绪的下游节点列表
-     */
+    /** 
+* Mark the node as complete. 
+* @returns List of newly ready downstream nodes 
+*/
     markComplete(graph: TaskGraph, nodeId: string, result: string): TaskNode[] {
         const node = graph.nodes.get(nodeId);
         if (!node) return [];
@@ -98,14 +98,14 @@ export class TaskGraphEngine {
         node.result = result;
         node.completedAt = Date.now();
 
-        // 检查是否有新的下游节点变为就绪
+        // Check if a new downstream node has become ready
         return this.getReadyNodes(graph);
     }
 
-    /**
-     * 标记节点为失败状态，并级联取消所有下游依赖。
-     * @returns 被取消的节点 ID 列表
-     */
+    /** 
+* Mark the node as failed and cascade cancel all downstream dependencies. 
+* @returns list of canceled node IDs 
+*/
     markFailed(graph: TaskGraph, nodeId: string, error: string): string[] {
         const node = graph.nodes.get(nodeId);
         if (!node) return [];
@@ -114,11 +114,11 @@ export class TaskGraphEngine {
         node.error = error;
         node.completedAt = Date.now();
 
-        // 级联取消所有直接和间接依赖该节点的下游节点
+        // Cascade cancel all downstream nodes that directly and indirectly depend on this node
         const cancelled: string[] = [];
         const toCancel = new Set<string>();
 
-        // BFS 查找所有下游
+        // BFS finds all downstream
         const queue = [nodeId];
         while (queue.length > 0) {
             const currentId = queue.shift()!;
@@ -142,9 +142,9 @@ export class TaskGraphEngine {
         return cancelled;
     }
 
-    /**
-     * 标记节点为运行中状态。
-     */
+    /** 
+* Mark the node as running status. 
+*/
     markRunning(graph: TaskGraph, nodeId: string): void {
         const node = graph.nodes.get(nodeId);
         if (node) {
@@ -153,10 +153,10 @@ export class TaskGraphEngine {
         }
     }
 
-    /**
-     * 检测循环依赖。
-     * @returns 循环路径数组（如果有），或 null（无循环）
-     */
+    /** 
+* Detect circular dependencies. 
+* @returns array of loop paths (if any), or null (no loop) 
+*/
     detectCycles(graph: TaskGraph): string[][] | null {
         const visited = new Set<string>();
         const inStack = new Set<string>();
@@ -164,7 +164,7 @@ export class TaskGraphEngine {
 
         const dfs = (nodeId: string, path: string[]): boolean => {
             if (inStack.has(nodeId)) {
-                // 找到循环 — 提取循环部分
+                // Find the loop - extract the loop part
                 const cycleStart = path.indexOf(nodeId);
                 cycles.push([...path.slice(cycleStart), nodeId]);
                 return true;
@@ -198,9 +198,9 @@ export class TaskGraphEngine {
         return cycles.length > 0 ? cycles : null;
     }
 
-    /**
-     * 检查图是否全部完成（所有节点都是 done/failed/cancelled）。
-     */
+    /** 
+* Check whether the graph is fully completed (all nodes are done/failed/cancelled). 
+*/
     isComplete(graph: TaskGraph): boolean {
         for (const node of graph.nodes.values()) {
             if (node.status === 'pending' || node.status === 'running') {
@@ -210,9 +210,9 @@ export class TaskGraphEngine {
         return true;
     }
 
-    /**
-     * 获取图的执行进度摘要。
-     */
+    /** 
+* Get the execution progress summary of the graph. 
+*/
     getProgressSummary(graph: TaskGraph): {
         total: number;
         pending: number;
@@ -234,9 +234,9 @@ export class TaskGraphEngine {
         return { total: graph.nodes.size, pending, running, done, failed, cancelled };
     }
 
-    /**
-     * 创建一个空的任务图。
-     */
+    /** 
+* Create an empty task graph. 
+*/
     static createGraph(userPrompt: string): TaskGraph {
         return {
             id: `tg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
@@ -248,9 +248,9 @@ export class TaskGraphEngine {
         };
     }
 
-    /**
-     * 向任务图添加一个节点。
-     */
+    /** 
+* Add a node to the task graph. 
+*/
     static addNode(
         graph: TaskGraph,
         id: string,
@@ -289,7 +289,7 @@ export class TaskGraphEngine {
     }
 }
 
-/** 优先级权重 */
+/** Priority weight */
 function priorityWeight(priority: TaskPriority): number {
     switch (priority) {
         case 'critical': return 3;

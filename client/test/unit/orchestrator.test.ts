@@ -1,9 +1,9 @@
-/**
- * 多 Agent 协调器模块 — 单元测试
- *
- * 覆盖 Blackboard、TaskGraphEngine、ConflictDetector、QualityGate、AgentRegistry。
- * 使用 ts-mocha + chai，与项目现有测试风格保持一致。
- */
+/** 
+* Multi-Agent coordinator module - unit testing 
+* 
+* Covers Blackboard, TaskGraphEngine, ConflictDetector, QualityGate, AgentRegistry. 
+* Use ts-mocha + chai to be consistent with the existing testing style of the project. 
+*/
 
 import { expect } from 'chai';
 
@@ -78,7 +78,7 @@ describe('Blackboard', () => {
         const result = bb.write('cas', 'v3', 'free_text', 'b', 1);
         expect(result.success).to.be.false;
         expect(result.conflict).to.be.a('string');
-        expect(bb.read('cas')!.value).to.equal('v2'); // 未被改变
+        expect(bb.read('cas')!.value).to.equal('v2'); // not changed
     });
 
     it('queryByPrefix: 前缀查询', () => {
@@ -154,7 +154,7 @@ describe('Blackboard', () => {
         expect(bb2.size).to.equal(2);
     });
 
-    // ── 兼容层测试 ──
+    // ── Compatibility layer testing ──
     it('legacySet + legacyGet: 兼容旧 API', () => {
         const bb = new Blackboard();
         bb.legacySet('old_key', 'old_value');
@@ -202,7 +202,7 @@ describe('TaskGraphEngine', () => {
         TaskGraphEngine = require('../../extension/ai/orchestrator/taskGraphEngine').TaskGraphEngine;
     });
 
-    /** 创建一个简单的钻石形 DAG：A → (B, C) → D */
+    /** Create a simple diamond-shaped DAG: A → (B, C) → D */
     function makeGraph(): TaskGraph {
         const graph = TaskGraphEngine.createGraph('test');
         TaskGraphEngine.addNode(graph, 'A', 'explore', 'explore');
@@ -225,10 +225,10 @@ describe('TaskGraphEngine', () => {
     it('getReadyNodes: 返回依赖全部完成的 pending 节点', () => {
         const engine = new TaskGraphEngine();
         const graph = makeGraph();
-        // 初始状态只有 A 就绪
+        //In the initial state, only A is ready
         let ready = engine.getReadyNodes(graph);
         expect(ready.map(n => n.id)).to.deep.equal(['A']);
-        // 完成 A
+        //Complete A
         engine.markComplete(graph, 'A', 'done');
         ready = engine.getReadyNodes(graph);
         expect(ready.map(n => n.id).sort()).to.deep.equal(['B', 'C']);
@@ -240,11 +240,11 @@ describe('TaskGraphEngine', () => {
         engine.markComplete(graph, 'A', 'done'); // A done
         engine.markRunning(graph, 'B');
         const cancelled = engine.markFailed(graph, 'B', 'timeout');
-        // B 失败应级联取消 D（依赖 B）
+        // If B fails, D should be cascaded and canceled (depending on B)
         expect(graph.nodes.get('B')!.status).to.equal('failed');
         expect(cancelled).to.include('D');
         expect(graph.nodes.get('D')!.status).to.equal('cancelled');
-        // C 不受影响
+        // C is not affected
         expect(graph.nodes.get('C')!.status).to.equal('pending');
     });
 
@@ -257,7 +257,7 @@ describe('TaskGraphEngine', () => {
     it('detectCycles: 有环返回路径', () => {
         const engine = new TaskGraphEngine();
         const graph = TaskGraphEngine.createGraph('cycle test');
-        // 手动创建环：X → Y → Z → X
+        // Manually create the ring: X → Y → Z → X
         const makeNode = (id: string, deps: string[]): TaskNode => ({
             id, agentType: 'explore', prompt: '', dependencies: deps,
             status: 'pending', priority: 'normal', retryCount: 0, maxRetries: 1,
@@ -327,7 +327,7 @@ describe('ConflictDetector', () => {
         const bb = new Blackboard();
         cd.declareIntent('agent-1', ['file-a.txt', 'file-b.txt'], bb);
         const result = cd.checkWriteConflict('agent-1', 'file-a.txt', bb);
-        expect(result.hasConflict).to.be.false; // 同一 Agent 不冲突
+        expect(result.hasConflict).to.be.false; // The same Agent does not conflict
     });
 
     it('checkWriteConflict: 检测到文件冲突', () => {
@@ -713,7 +713,7 @@ describe('AgentRegistry', () => {
     it('getAgentProfile: 未注册角色返回 builder 默认', () => {
         const profile = getAgentProfile('unknown_role');
         expect(profile).to.exist;
-        expect(profile.mode).to.equal('build'); // 默认 builder
+        expect(profile.mode).to.equal('build'); //default builder
     });
 
     it('每个角色都有 toolBudget 和 maxIterations', () => {

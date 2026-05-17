@@ -851,7 +851,7 @@ function drawBody(
 
 function getDisplaySize(body: CelestialBody): number {
     const size = Math.max(1, body.resolvedSize);
-    // 统一缩放系数，确保相同 size 表现出完全相同的视觉大小
+    // Unify the scaling factor to ensure that the same size shows exactly the same visual size
     return Math.max(2, Math.min(40, size * 0.6));
 }
 

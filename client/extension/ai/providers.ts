@@ -87,7 +87,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         toolCallStyle: 'openai',
         // MiniMax M2/M2.5/M2.7 are natively multimodal (docs: minimax.io)
         // IMPORTANT: MiniMax's OpenAI-compatible endpoint currently does NOT support image or audio inputs.
-        // Official docs (2026-04): "当前不支持图像和音频类型的输入"
+        // Official docs (2026-04): "Image and audio type input are currently not supported"
         // IMPORTANT: MiniMax does NOT support tool_choice — also stripped in sanitizeRequest.
         supportsFIM: false,
         supportsVision: false,

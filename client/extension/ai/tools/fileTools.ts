@@ -61,7 +61,7 @@ export interface FileToolContext {
     vfsLocks?: Map<string, Promise<void>>;
     /** Step callback for real-time UI events (Fallback, overwritten by AgentToolContext) */
     onStep?: (step: import('../types').AgentStep) => void;
-    /** 可选：获取 LSP LanguageClient，用于诊断新鲜度查询 */
+    /** Optional: Get LSP LanguageClient for diagnostic freshness query */
     client?: import('vscode-languageclient/node').LanguageClient;
 }
 
@@ -520,7 +520,7 @@ export class FileToolHandler {
                 const ymlReject = this.rejectGenericYmlWrite('write_file', args.file);
                 if (ymlReject) return ymlReject;
                 
-                // 安全阻断已被移除：允许AI直接覆写文件
+                // Security blocking has been removed: allowing AI to overwrite files directly
                 const { content: originalContent, hasBom } = this.readTextFile(args.file, context);
                 (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(args.file, originalContent);
 
@@ -1143,17 +1143,17 @@ export class FileToolHandler {
     async globFiles(args: { pattern: string; limit?: number }): Promise<{ files: string[]; total: number }> {
         try {
             const limit = Math.min(args.limit ?? 200, 500);
-            const uris = await vs.workspace.findFiles(args.pattern, '**/node_modules/**', limit);
-            const files = uris.map(u => u.fsPath);
-            return { files, total: files.length };
-        } catch (e) {
-            return { files: [], total: 0 };
-        }
-    }
+            const uris = await vs.workspace.findFiles(args.pattern, '**/node_modules/**', limit); 
+const files = uris.map(u => u.fsPath); 
+return { files, total: files.length }; 
+} catch (e) { 
+return { files: [], total: 0 }; 
+} 
+} 
 
-    // ─── getLspDiagnosticsForFile ─────────────────────────────────────────────
+// ─── getLspDiagnosticsForFile ─────────────────────────────────────────── 
 
-    /** 从 Problems 面板提取诊断并格式化 */
+/** Extract diagnostics from Problems panel and format */
     private static mapDiagnostics(uri: vs.Uri): ValidationError[] {
         return vs.languages.getDiagnostics(uri).map(d => ({
             code: String(d.code ?? ''),
@@ -1167,10 +1167,10 @@ export class FileToolHandler {
     }
 
 
-    /**
-     * 向 LSP 查询文件的当前诊断状态（即时返回，不阻塞）。
-     * 返回 null 表示 LSP 不可用。
-     */
+    /** 
+* Query the LSP for the current diagnostic status of the file (return immediately, without blocking). 
+* Returning null indicates that the LSP is unavailable. 
+*/
     private async queryDiagnosticsFresh(filePath: string): Promise<{
         freshness: 'fresh' | 'pending' | 'stale';
         epoch: number;
@@ -1195,16 +1195,16 @@ export class FileToolHandler {
                         ? (result.diagnostics as ValidationError[]) : undefined,
                 };
             }
-        } catch { /* LSP 不可用 */ }
+        } catch { /* LSP is not available */ }
         return null;
     }
 
-    /**
-     * 客户端侧轮询 getDiagnosticsFresh，等待 epoch > minEpoch（即新的 lint 已完成）。
-     * 不持有任何服务端锁，避免死锁。最多等待 timeoutMs（默认 3000ms）。
-     *
-     * @param minEpoch 写入前的 epoch 值，等待 epoch > minEpoch 表示 lint 已处理本次写入
-     */
+    /** 
+* The client side polls getDiagnosticsFresh and waits for epoch > minEpoch (i.e. the new lint has completed). 
+* Does not hold any server-side locks to avoid deadlocks. Wait at most timeoutMs (default 3000ms). 
+* 
+* @param minEpoch epoch value before writing, waiting for epoch > minEpoch means lint has processed this write 
+*/
     async getLspDiagnosticsForFileFresh(filePath: string, minEpoch = 0): Promise<{
         diagnostics: ValidationError[];
         freshness: 'fresh' | 'pending' | 'stale';
@@ -1217,13 +1217,13 @@ export class FileToolHandler {
         const uri = vs.Uri.file(filePath);
         try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
 
-        // 客户端侧轮询 getDiagnosticsFresh（即时返回，不持锁）
+        //Client-side polling getDiagnosticsFresh (returns immediately, does not hold a lock)
         let elapsed = 0;
         let lastState: Awaited<ReturnType<typeof this.queryDiagnosticsFresh>> = null;
         while (elapsed < timeoutMs) {
             lastState = await this.queryDiagnosticsFresh(filePath);
             if (lastState) {
-                // 等待条件：epoch > minEpoch（说明新 lint 已完成），且 freshness != stale
+                // Waiting conditions: epoch > minEpoch (indicating that the new lint has been completed), and freshness != stale
                 if (lastState.epoch > minEpoch && lastState.freshness !== 'stale') {
                     return {
                         diagnostics: lastState.diagnostics ?? FileToolHandler.mapDiagnostics(uri),
@@ -1234,13 +1234,13 @@ export class FileToolHandler {
                     };
                 }
             } else {
-                break; // LSP 不可用，走 fallback
+                break; // LSP is unavailable, go to fallback
             }
             await new Promise(r => setTimeout(r, pollIntervalMs));
             elapsed += pollIntervalMs;
         }
 
-        // 超时但 LSP 可用 — 返回当前状态 + timedOut
+        // Timed out but LSP available - return current state + timedOut
         if (lastState) {
             return {
                 diagnostics: lastState.diagnostics ?? FileToolHandler.mapDiagnostics(uri),
@@ -1251,7 +1251,7 @@ export class FileToolHandler {
             };
         }
 
-        // Fallback：LSP 不可用，使用旧的 Problems 面板 debounce 等待
+        // Fallback: LSP is not available, use the old Problems panel to debounce and wait
         const diagnostics = await this.getLspDiagnosticsForFile(filePath);
         return {
             diagnostics,
@@ -1458,7 +1458,7 @@ export class FileToolHandler {
 
                 const diff = this.buildUnifiedDiff(filePath, originalContent, withBom);
 
-                // 获取本地化写入后的诊断新鲜度
+                // Get the diagnostic freshness after localized writing
                 const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
                 const diagnostics = freshResult.diagnostics;
                 const finalKeySet = new Set<string>();

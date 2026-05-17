@@ -129,8 +129,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // validate_code — REMOVED: 由 get_diagnostics（零副作用）+ multi_replace_file_content 内联诊断替代。
-    // get_diagnostics 直接读取诊断面板（~50ms），multi_replace_file_content 写入后自动返回诊断。
+    // validate_code — REMOVED: Replaced by get_diagnostics (zero side effects) + multi_replace_file_content inline diagnostics.
+    // get_diagnostics directly reads the diagnostic panel (~50ms), multi_replace_file_content automatically returns to diagnosis after writing.
     {
         type: 'function',
         function: {
@@ -976,7 +976,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     // ── Line-Range Replacement tool ──────────────────────────────────────
 
-    // ── Orchestrator Tools (多 Agent 协调器) ────────────────────────────
+    // ── Orchestrator Tools (Multi-Agent Coordinator) ─────────────────────────────
     {
         type: 'function',
         function: {

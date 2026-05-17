@@ -11,10 +11,10 @@ open Types
 type private Version =
     { text: StringBuilder
       mutable version: int
-      // 缓存 StringBuilder.ToString() 结果，避免热路径上重复分配字符串
+      //Cache StringBuilder.ToString() results to avoid repeated allocation of strings on the hot path
       mutable cachedText: string
       mutable cachedVersion: int
-      // 行偏移缓存：lineOffsets.[i] = index of first char on line i
+      // Line offset cache: lineOffsets.[i] = index of first char on line i
       // Rebuilt lazily after Open/Replace; invalidated after Patch.
       mutable lineOffsets: int[] | null
       mutable lineOffsetsDirty: bool }
@@ -84,7 +84,7 @@ type DocumentStore() =
     /// All open documents, organized by absolute path
     let activeDocuments = Dictionary<string, Version>()
 
-    /// 获取或创建文本缓存（同一版本只创建一次字符串）
+    /// Get or create a text cache (the same version only creates a string once)
     let getCachedText (v: Version) =
         if v.cachedVersion = v.version then
             v.cachedText
@@ -158,7 +158,7 @@ type DocumentStore() =
                 | Some range -> patch (doc.textDocument, range, change.text)
                 | None -> replace (doc.textDocument, change.text)
 
-    /// 基于文件路径字符串获取文本（避免创建 FileInfo 对象）
+    /// Get text based on a file path string (avoids creating a FileInfo object)
     member this.GetTextByPath(filePath: string) : string option =
         let found, value = activeDocuments.TryGetValue(filePath)
         if found then Some(getCachedText value) else None
@@ -170,7 +170,7 @@ type DocumentStore() =
         let found, value = activeDocuments.TryGetValue(file.FullName)
         if found then Some(value.version) else None
 
-    /// 基于文件路径字符串获取版本号
+    /// Get the version number based on the file path string
     member this.GetVersionByPath(filePath: string) : int option =
         let found, value = activeDocuments.TryGetValue(filePath)
         if found then Some(value.version) else None
@@ -191,7 +191,7 @@ type DocumentStore() =
         [ for file in activeDocuments.Keys do
               yield FileInfo(file) ]
     
-    /// 清理不存在文件的孤儿文档，防止内存泄漏
+    /// Clean up orphan documents that do not exist to prevent memory leaks
     member this.CleanupOrphanedDocuments(existingFiles: Set<string>) : unit =
         let orphanedFiles =
             activeDocuments.Keys

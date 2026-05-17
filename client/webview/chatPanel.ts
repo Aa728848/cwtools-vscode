@@ -981,7 +981,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             area = document.createElement('div');
             area.id = 'fileBadgeArea';
             area.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 0;';
-            // 插入到 input-container 内部 input-row 之前，确保附件区域在输入框圆角框内
+            //Before inserting into input-container inside input-row, make sure the attachment area is within the rounded corner of the input box
             const container = document.querySelector('.input-container');
             const inputRow = container?.querySelector('.input-row');
             if (container && inputRow) container.insertBefore(area, inputRow);
@@ -1112,7 +1112,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             area = document.createElement('div');
             area.id = 'imagePreviewArea';
             area.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 8px 0;';
-            // 插入到 input-container 内部 input-row 之前，确保图片预览在输入框圆角框内
+            //Before inserting into input-container inside input-row, make sure the image preview is within the rounded corner of the input box
             const container = document.querySelector('.input-container');
             const inputRow = container?.querySelector('.input-row');
             if (container && inputRow) container.insertBefore(area, inputRow);
@@ -2054,7 +2054,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const mainSteps: any[] = [];
 
         if (steps && steps.length > 0) {
-            // 分离属于子代理的 steps
+            // Detach the steps belonging to the subagent
             for (const step of steps) {
                 if (step.agentId) {
                     let group = subAgentGroups.get(step.agentId);
@@ -2100,9 +2100,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             div.appendChild(b);
         }
 
-        // 递归渲染所有的子 Agent 独立框，防止与主对话流合并
+        // Recursively render all sub-Agent independent boxes to prevent merging with the main dialogue flow
         for (const [agentId, groupSteps] of subAgentGroups.entries()) {
-            // 使用固定的 uniqueId 防止重渲染时丢失 active 状态
+            // Use a fixed uniqueId to prevent the active state from being lost during re-rendering
             const uniqueId = `subview-${agentId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${msgTime || 'sub'}`;
             const agentSummary = makeRunSummary(groupSteps);
             const agentStatusClass = agentSummary.errorCount + agentSummary.failedToolCount > 0 ? 'lane-failed' : 'lane-done';
@@ -2147,7 +2147,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 <div class="subagent-body"></div>
             `;
             
-            // 递归渲染子 Agent 的内容，不带 msgTime 避免多重时间戳
+            // Recursively render the content of the sub-Agent without msgTime to avoid multiple timestamps
             const innerMsg = buildAssistantMessage('', groupSteps, null);
             fullscreen.querySelector('.subagent-body')!.appendChild(innerMsg);
             
@@ -2190,7 +2190,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         liveThinkContent: string;
         liveSteps: any[];
         container: HTMLElement | null;
-        /** 存储 fullscreen 容器的 uniqueId，用于 subtask_complete 时查找对应卡片 */
+        /** Store the uniqueId of the fullscreen container, used to find the corresponding card when subtask_complete */
         fullscreenId: string | null;
         startedAt: number;
         lastStepAt: number;
@@ -2444,7 +2444,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             if (state.liveSummary) {
                 state.liveSummary.innerHTML = renderRunSummaryHtml(makeRunSummary(state.liveSteps, s.content), false);
             }
-            // 使用显式存储的 fullscreenId 查找卡片（修复：state.container 指向 .subagent-body，没有 id）
+            // Find card using explicitly stored fullscreenId (fix: state.container points to .subagent-body, no id)
             if (state.fullscreenId) {
                 const card = document.querySelector(`.subagent-card[data-target-id="${state.fullscreenId}"]`);
                 if (card) {
@@ -2457,8 +2457,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 }
             }
             updateSubagentCard(state, s.content || '完成');
-            // 终结所有活跃的流式状态——子Agent已完成，不会再有新步骤
-            // 1. 终结 Thinking 块：停止旋转指示器
+            // Terminate all active streaming states - the child agent has completed and there will be no new steps
+            // 1. Terminate the Thinking block: stop the spinning indicator
             if (state.liveThinkBlock) {
                 const pulse = state.liveThinkBlock.querySelector('.think-pulse');
                 if (pulse) pulse.classList.remove('spinning');
@@ -2467,9 +2467,9 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 state.liveThinkSum = null;
                 state.liveThinkContent = '';
             }
-            // 2. 终结文本气泡
+            // 2. End text bubble
             if (state.liveTextBubble) flushLiveText(state);
-            // 3. 清理工具时间线引用
+            // 3. Clean tool timeline references
             state.liveToolTimeline = null;
             state.livePhase = null;
             return;
@@ -2640,13 +2640,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         } else if (target === 'special') {
             const processBody = ensureLiveProcessPanel(state);
             const el = document.createElement('div');
-            // 添加步骤类型作为额外 CSS 类名（与 finalized renderer 一致）
+            // Add step type as additional CSS class name (consistent with finalized renderer)
             el.className = `special-step ${s.type}`;
             const icon = s.type === 'error' ? svgIconNoMargin('x')
                 : s.type === 'validation' ? svgIconNoMargin('check')
                 : s.type === 'orchestrator_progress' ? svgIconNoMargin('chart')
                 : svgIconNoMargin('gear');
-            // 替换 $(iconName) codicon 占位符为 SVG 图标
+            // Replace $(iconName) codicon placeholder with SVG icon
             let safeContent = escapeHtml(s.content || '');
             safeContent = safeContent.replace(/\$\(([\w-]+)\)/g, (_match: string, iconName: string) => {
                 if (iconName in Icons) {
@@ -2784,7 +2784,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         const structuredChips = buildContextChipRow(contexts);
         if (structuredChips) bubble.appendChild(structuredChips);
         
-        // 解析带有代码引用的 Prompt 模板，转换为 UI 芯片 (支持多重引用)
+        // Parse Prompt template with code reference and convert it into UI chip (supports multiple references)
         const refRegex = /文件 `([^`]+)` 第 (\d+-\d+) 行[^\n]*：\n```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```/g;
         
         let remainingText = text;
@@ -3093,7 +3093,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'generationComplete': {
                 setGenerating(false);
-                // 清除所有流式状态，防止残留的 liveThinkBlock 等引用干扰最终消息重建
+                // Clear all streaming status to prevent residual liveThinkBlock and other references from interfering with final message reconstruction
                 streamStates.clear();
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
                 
@@ -3550,16 +3550,16 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
 
             case 'orchestratorProgress': {
                 const p = msg.progress;
-                // 确保 Agent Lane 面板存在
+                // Make sure the Agent Lane panel exists
                 let lanePanel = document.getElementById('orchestratorLanePanel');
                 if (!lanePanel) {
                     lanePanel = document.createElement('div');
                     lanePanel.id = 'orchestratorLanePanel';
                     lanePanel.className = 'orchestrator-lane-panel';
-                    // 插入到 chatArea 末尾
+                    //Insert at the end of chatArea
                     chatArea.appendChild(lanePanel);
                 }
-                // 构建进度摘要头（使用 SVG 图标替代 emoji）
+                // Build progress summary header (use SVG icon instead of emoji)
                 const phaseLabels: Record<string, string> = {
                     planning: `${svgIconNoMargin('clipboard')} 规划中`,
                     executing: `${svgIconNoMargin('zap')} 执行中`,
@@ -3594,7 +3594,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                     html += `<div class="orch-event">${escapeHtml(p.latestEvent)}</div>`;
                 }
 
-                // 构建 Agent Lanes（使用 SVG 图标替代 emoji）
+                // Build Agent Lanes (use SVG icons instead of emojis)
                 if (lanes.length > 0) {
                     html += '<div class="orch-lanes">';
                     const roleIcons: Record<string, string> = {
@@ -4657,7 +4657,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             current.mcp.servers.forEach((s: any) => addMcpServerBlock(s));
         }
 
-        // ── 子 Agent 模型配置：动态填充供应商/模型下拉 ─────────────────────
+        // ── Child Agent model configuration: dynamically populate supplier/model drop-down ──────────────────────
         const savedAgentModels = current.orchestrator?.agentModels || {};
         document.querySelectorAll('.agent-model-row').forEach(row => {
             const role = (row as HTMLElement).dataset.role;
@@ -4666,7 +4666,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
             const modSel = row.querySelector('.agent-model-model') as HTMLSelectElement;
             if (!provSel || !modSel) return;
 
-            // 填充供应商下拉
+            // Populate the supplier dropdown
             provSel.innerHTML = '<option value="__inherit__">继承主设置</option>'
                 + providers.map((p: any) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
 
@@ -4675,7 +4675,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 provSel.value = saved.provider;
             }
 
-            // 填充模型下拉（根据选中的供应商）
+            // Populate model dropdown (according to selected supplier)
             const fillModels = (pid: string) => {
                 const provDef = providers.find((p: any) => p.id === pid);
                 const models: string[] = pid === 'ollama'
@@ -4692,7 +4692,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                 }
             }
 
-            // 供应商变化时联动更新模型下拉
+            // Linked update model drop-down when supplier changes
             provSel.addEventListener('change', () => {
                 if (provSel.value === '__inherit__') {
                     modSel.innerHTML = '<option value="__inherit__">继承主设置</option>';
@@ -5071,7 +5071,7 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
                             if (!role) return;
                             const prov = (row.querySelector('.agent-model-provider') as HTMLSelectElement)?.value || '__inherit__';
                             const mod = (row.querySelector('.agent-model-model') as HTMLSelectElement)?.value || '__inherit__';
-                            // 只收集非继承的配置
+                            //Only collect non-inherited configurations
                             if (prov !== '__inherit__' || mod !== '__inherit__') {
                                 models[role] = { provider: prov, model: mod };
                             }

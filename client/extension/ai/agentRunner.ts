@@ -243,30 +243,30 @@ export interface AgentRunnerOptions {
     onBeforeFileWrite?: (filePath: string, prevContent: string | null) => void;
     /** Callback when a sub-agent creates or modifies a todo list plan */
     onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
-    /**
-     * 跳过内置 validation loop（Phase 3）。
-     * Orchestrator 子代理使用此标志，因为 Orchestrator 有自己的 QualityGate 机制，
-     * 子代理不需要重复验证，且 validation loop 会在推理结束后继续产生步骤导致 UI 状态不一致。
-     */
+    /** 
+* Skip built-in validation loop (Phase 3). 
+* Orchestrator subagent uses this flag because Orchestrator has its own QualityGate mechanism, 
+* The subagent does not need to be repeatedly verified, and the validation loop will continue to generate steps after the inference ends, resulting in inconsistent UI status. 
+*/
     skipValidation?: boolean;
-    /**
-     * 从可用工具集中排除的工具名称列表。
-     * 用于子 Agent 场景：禁用不适合子 Agent 自主使用的工具（如网络搜索），
-     * 防止子 Agent 陷入无意义的搜索循环。
-     */
+    /** 
+* A list of tool names to exclude from the set of available tools. 
+* Used in sub-Agent scenarios: disable tools that are not suitable for independent use by sub-Agents (such as network search), 
+* Prevent child Agents from falling into meaningless search loops. 
+*/
     excludeTools?: string[];
     /** Force file-mutating tools to bypass interactive diff confirmation. Used by orchestrator sub-agents. */
     forceAutoApplyWrites?: boolean;
     /** Max time a write tool may wait for another file lock before returning a structured error. */
     writeQueueWaitTimeoutMs?: number;
-    /**
-     * 使用面向 Orchestrator 子 Agent 的精简系统提示词。
-     * 子 Agent 不应直接向用户提问或等待用户审批，而应把阻塞点上报给主 Agent。
-     */
+    /** 
+* Use condensed system prompt words for Orchestrator sub-agents. 
+* The sub-Agent should not directly ask questions to the user or wait for user approval, but should report the blocking points to the main Agent. 
+*/
     useSlimPrompt?: boolean;
-    /**
-     * 是否从上一次异常退出的断点快照中恢复状态 (断点续传)
-     */
+    /** 
+* Whether to restore the state from the last breakpoint snapshot that exited abnormally (breakpoint resume) 
+*/
     resumeFromState?: boolean;
 }
 
@@ -327,7 +327,7 @@ const LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
-    // W9 修复：移除 web_fetch/search_web/codesearch，本地化 Agent 不需要网络搜索能力
+    // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
     'write_localisation', 'git_ops',
 ];
@@ -338,14 +338,14 @@ const LOC_WRITER_TOOLS: AgentToolName[] = [
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references',
-    // W9 修复：移除 web_fetch/search_web/codesearch，本地化 Agent 不需要网络搜索能力
+    // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
     'write_localisation', 'git_ops',
 ];
 
-/** Orchestrator mode: 只读工具 + 协调器专用工具（dispatch_agents, query_blackboard, merge_results） */
+/** Orchestrator mode: read-only tools + coordinator-specific tools (dispatch_agents, query_blackboard, merge_results) */
 const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
-    // 只读信息收集
+    //Read-only information collection
     'query_scope', 'query_types', 'query_rules', 'query_references',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
@@ -353,9 +353,9 @@ const ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'query_definition', 'query_definition_by_name',
-    // 黑板和任务管理
+    // Blackboard and task management
     'set_memory', 'get_memory', 'search_memory', 'todo_write',
-    // 协调器专用
+    // Coordinator-specific
     'dispatch_agents', 'query_blackboard', 'merge_results',
     // Git
     'git_ops',
@@ -521,11 +521,11 @@ export class AgentRunner {
         }
     }
 
-    /**
-     * 保存当前 Agent 的完整状态（供断点续传使用）。
-     * 与 Checkpoint 不同，这会保存完整的消息队列、工具返回结果，
-     * 能够在超时或被取消后恢复并继续上次的上下文。
-     */
+    /** 
+* Save the complete status of the current Agent (for use in resumed downloads). 
+* Unlike Checkpoint, this will save the complete message queue and tool return results, 
+* Ability to resume and continue the last context after timeout or cancellation. 
+*/
     private async saveResumeState(
         topicId: string,
         messages: ChatMessage[],
@@ -559,25 +559,25 @@ export class AgentRunner {
         }
     }
 
-    /**
-     * 读取指定 topicId 下的断点续传状态。
-     */
+    /** 
+* Read the resumable download status under the specified topicId. 
+*/
     /** Checkpoint proxy */
     public async loadResumeState(topicId: string): Promise<import('./types').AgentResumeState | null> {
         return loadResumeState(topicId);
     }
 
-    /**
-     * 判断是否存在断点续传状态。
-     */
+    /** 
+* Determine whether there is a breakpoint resume state. 
+*/
     /** Checkpoint proxy */
     public async hasResumeState(topicId: string): Promise<boolean> {
         return hasResumeState(topicId);
     }
 
-    /**
-     * 清理断点续传状态（当新任务开始时）。
-     */
+    /** 
+* Clean up the resumption status (when a new task starts). 
+*/
     public async clearResumeState(topicId: string): Promise<void> {
         if (!topicId) return;
         try {
@@ -890,9 +890,9 @@ export class AgentRunner {
             }
 
             // Phase 3: Validation loop
-            // Orchestrator 子代理通过 skipValidation 跳过此阶段——
-            // Orchestrator 有独立的 QualityGate 机制，子代理不需要重复验证。
-            // 此外，validation loop 会在推理结束后继续产生步骤，导致外部判断卡片与内部状态不一致。
+            // Orchestrator subagent skips this stage via skipValidation -
+            // Orchestrator has an independent QualityGate mechanism, and subagents do not need to be repeatedly verified.
+            // In addition, the validation loop will continue to generate steps after the reasoning ends, causing the external judgment card to be inconsistent with the internal state.
             if (options?.skipValidation) {
                 return {
                     code,
@@ -1163,9 +1163,9 @@ export class AgentRunner {
                     tools: availableTools,
                     providerId: options?.providerId,
                     model: options?.model,
-                    // 🔴 关键修复：将 abort 信号传播到 HTTP 请求层
-                    // 缺少此参数会导致子 Agent 在等待 LLM 流式响应时
-                    // 完全无法被父级的 cancelGeneration/abort 中断
+                    // 🔴 Key fix: propagate abort signal to HTTP request layer
+                    // The absence of this parameter will cause the child agent to wait for the LLM streaming response
+                    // Cannot be interrupted at all by the parent's cancelGeneration/abort
                     abortSignal: options?.abortSignal,
                     // Stream thinking tokens to UI in real-time (OpenCode-style)
                     onThinking: options?.streaming ? (text) => {
@@ -1284,9 +1284,9 @@ export class AgentRunner {
                 }
                 thinkContent = thinkMatches.join('\n\n');
             }
-            // 注意：thinking_content 的 emit 被延迟到确认有 tool_calls 后执行。
-            // 对于最终回答（无 tool_calls），不单独 emit thinking 块——
-            // 否则最终回答后会出现一个多余的 Thinking 块显示在结果下方。
+            // Note: The emit of thinking_content is delayed until tool_calls are confirmed.
+            // For final answers (no tool_calls), no separate emit thinking block -
+            // Otherwise there will be an extra Thinking block displayed below the result after the final answer.
 
             // Try OpenAI-style tool_calls first, then fall back to DSML/XML parsing
             // (must happen before stripping, since strip removes the DSML tags we need)
@@ -1340,13 +1340,13 @@ export class AgentRunner {
                 continue;
             }
 
-            // If no tool calls (either format), we're done — 最终回答不 emit thinking 块
+            // If no tool calls (either format), we're done — the final answer is no emit thinking block
             if (!toolCalls || toolCalls.length === 0) {
                 return this.cleanFinalContent(contentToString(assistantMessage.content));
             }
 
-            // ── 延迟 emit thinking_content：仅在确认还有后续 tool_calls 时才 emit ──
-            // 这避免了最终回答后出现多余的 Thinking 块。
+            // ── Delay emit thinking_content: emit only when it is confirmed that there are subsequent tool_calls ──
+            // This avoids redundant Thinking blocks after the final answer.
             if (thinkContent.trim()) {
                 emitStep({
                     type: 'thinking_content',
@@ -1768,10 +1768,10 @@ export class AgentRunner {
     private compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number): void {
         _compactMessagesInPlace(messages, toolResultBudget);
     }
-    /**
-     * 验证循环：在推理结束后检查目标文件的 LSP 诊断，如有错误则交给 AI 修复。
-     * 使用 get_diagnostics 直接读取诊断面板（零副作用），替代旧版 validate_code（临时文件方式）。
-     */
+    /** 
+* Verification loop: Check the LSP diagnosis of the target file after inference, and if there are errors, hand them over to AI for repair. 
+* Use get_diagnostics to directly read the diagnostic panel (zero side effects), replacing the old validate_code (temporary file method). 
+*/
     private async validationLoop(
         initialCode: string,
         targetFile: string,
@@ -1802,7 +1802,7 @@ export class AgentRunner {
                 timestamp: Date.now(),
             });
 
-            // 使用 get_diagnostics 直接从诊断面板读取（零副作用，~50ms）
+            // Use get_diagnostics to read directly from the diagnostics panel (zero side effects, ~50ms)
             let result: { isValid: boolean; errors: ValidationError[] };
             try {
                 const rawResult = await this.toolExecutor.execute('get_diagnostics', {
@@ -1828,7 +1828,7 @@ export class AgentRunner {
                     errors: diagnostics,
                 };
             } catch {
-                // 诊断机制本身失败 — 视为通过
+                // The diagnostic mechanism itself failed - considered passed
                 result = { isValid: true, errors: [] };
             }
 
@@ -1849,7 +1849,7 @@ export class AgentRunner {
                 };
             }
 
-            // 已耗尽重试次数
+            //The number of retries has been exhausted
             if (retryCount >= MAX_VALIDATION_RETRIES) {
                 emitStep({
                     type: 'validation',
@@ -1859,7 +1859,7 @@ export class AgentRunner {
                 break;
             }
 
-            // 重试：将错误列表发回 AI 修正
+            //Retry: send error list back to AI for correction
             retryCount++;
             const errorSummary = result.errors
                 .filter(e => e.severity === 'error')
@@ -1903,7 +1903,7 @@ export class AgentRunner {
                         timestamp: Date.now(),
                     });
                 } else {
-                    // AI 无法修复
+                    // AI cannot be repaired
                     break;
                 }
             } catch {

@@ -308,7 +308,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.resolvePermissionRequest(msg.permissionId, msg.allowed, msg.alwaysAllow);
                 break;
             case 'openPlanFile': {
-                // 打开计划文件——支持共享路径候选搜索
+                // Open the plan file - supports shared path candidate search
                 const planPath = this.resolveArtifactFilePath(msg.filePath);
                 if (planPath) {
                     void vs.commands.executeCommand('markdown.showPreview', vs.Uri.file(planPath));
@@ -327,11 +327,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 }
 
                 if (this.currentMode === 'orchestrator') {
-                    // 协调模式下：保持模式不变，指示 AI 开始分发任务
+                    // In coordination mode: keep the mode unchanged and instruct AI to start distributing tasks
                     const prompt = '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。' + contextStr;
                     await this.handleUserMessage(prompt, undefined, undefined, true, true);
                 } else {
-                    // 普通计划模式：自动切换到 build 模式
+                    //Normal planning mode: automatically switch to build mode
                     this.switchMode('build');
                     const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
                     await this.handleUserMessage(prompt, undefined, undefined, true, true);
@@ -635,7 +635,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // Add to history — store images for topic persistence
             this.topicManager.addHistoryMessage({ role: 'user', content: text, displayContent: displayText, contexts, timestamp: Date.now(), images: images?.length ? images : undefined, isHidden: isBackground });
             
-            // 新任务开始，清理旧的断点快照，防止上下文污染
+            // When a new task starts, clean up old breakpoint snapshots to prevent context pollution.
             if (this.topicManager.currentTopic?.id) {
                 void this.agentRunner.clearResumeState(this.topicManager.currentTopic.id);
             }
@@ -1066,7 +1066,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         if (artifact.filePath) {
-            // 共享路径兼容：如果存储的 filePath 不存在，尝试在候选位置查找
+            // Shared path compatibility: if the stored filePath does not exist, try to find it in a candidate location
             const resolvedPath = this.resolveArtifactFilePath(artifact.filePath);
             if (!resolvedPath) {
                 vs.window.showWarningMessage(`无法找到文件: ${path.basename(artifact.filePath)}`);
@@ -1102,7 +1102,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        // 清理旧的临时 diff 文件，防止每次点击都累积新文件
+        // Clean up old temporary diff files to prevent new files from accumulating with each click
         await this.cleanupArtifactDiffTempDir();
 
         const targets = file ? requested.slice(0, 1) : requested.slice(0, 8);
@@ -1161,50 +1161,50 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private makeArtifactDiffTempPath(tmpDir: string, filePath: string, side: 'before' | 'after', index: number): string {
         const ext = path.extname(filePath) || '.txt';
         const name = (path.basename(filePath, ext) || 'artifact').replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
-        // 使用确定性命名（不含 Date.now()），重复点击同一 artifact 时覆盖旧文件而非累积
+        // Use deterministic naming (without Date.now()), and when clicking the same artifact repeatedly, the old file will be overwritten instead of accumulated
         return path.join(tmpDir, `${index}_${name}_${side}${ext}`);
     }
 
-    /**
-     * 清理 artifact diff 临时目录下的旧文件。
-     * 在每次打开 diff artifact 时调用，防止临时文件无限累积。
-     */
+    /** 
+* Clean up old files in the artifact diff temporary directory. 
+* Called every time a diff artifact is opened to prevent unlimited accumulation of temporary files. 
+*/
     private async cleanupArtifactDiffTempDir(): Promise<void> {
         const tmpDir = this.getArtifactDiffTempDir();
         try {
             if (!fs.existsSync(tmpDir)) return;
             const entries = await fs.promises.readdir(tmpDir);
-            // 仅删除临时 diff 文件（匹配确定性命名格式或旧版 Date.now 格式）
+            // Delete only temporary diff files (matching deterministic naming format or legacy Date.now format)
             for (const entry of entries) {
                 if (/_(before|after)\.[^.]+$/.test(entry)) {
-                    await fs.promises.unlink(path.join(tmpDir, entry)).catch(() => { /* 忽略 */ });
+                    await fs.promises.unlink(path.join(tmpDir, entry)).catch(() => { /* neglect */ });
                 }
             }
         } catch {
-            // 目录不存在或无法读取时静默忽略
+            // Silently ignore the directory if it does not exist or cannot be read.
         }
     }
 
-    /**
-     * 解析 artifact 文件路径——兼容共享路径和多候选位置。
-     * 如果直接路径存在则使用，否则从文件名推断并在所有 topic 候选目录中查找。
-     */
+    /** 
+* Parse artifact file paths - compatible with shared paths and multiple candidate locations. 
+* Used if direct path exists, otherwise inferred from filename and looked in all topic candidate directories. 
+*/
     private resolveArtifactFilePath(filePath: string): string | null {
-        // 优先检查直接路径
+        // Check direct paths first
         if (fs.existsSync(filePath)) return filePath;
 
-        // 从路径中提取文件名，在候选位置查找
+        // Extract the file name from the path and search in the candidate location
         const fileName = path.basename(filePath);
         const topicId = this.topicManager.currentTopic?.id;
 
-        // 先尝试从当前 topic 的所有候选目录查找
+        // First try to search from all candidate directories of the current topic
         if (topicId) {
             const candidates = getTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
             const found = candidates.find(c => fs.existsSync(c));
             if (found) return found;
         }
 
-        // 最后尝试从路径本身推断 topicId（可能与当前 topic 不同）
+        // Finally try to infer the topicId from the path itself (which may be different from the current topic)
         const parentName = path.basename(path.dirname(filePath));
         if (parentName && parentName !== topicId) {
             const candidates = getTopicFileCandidates(parentName, fileName, getProjectWorkspaceRoot());
@@ -1238,19 +1238,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
 
-    /**
-     * 检测 Plan/Orchestrator 模式下 AI 的回复是否属于"澄清/提问阶段"。
-     *
-     * 仅使用确定性信号判断，不做启发式猜测：
-     * - 已存在计划文件 → 修订阶段（非澄清）
-     * - write_file 写入了计划 → 计划阶段（非澄清）
-     * - 包含 :::question 语法 → 澄清阶段
-     */
+    /** 
+* Check whether the AI's reply in Plan/Orchestrator mode belongs to the "clarification/question stage". 
+* 
+* Only use deterministic signal judgment, no heuristic guessing: 
+* - Plan document already exists → Revision phase (not clarification) 
+* - write_file writes the plan → planning phase (non-clarification) 
+* - contains :::question syntax → clarification phase 
+*/
     private detectClarificationPhase(result: { explanation: string; steps: any[] }): boolean {
         if (!result.explanation) return false;
 
-        // 如果当前 topic 下已存在 Implementation_Plan.md，
-        // 说明用户已经批注过计划、AI 正在修订，不应判定为澄清阶段。
+        // If Implementation_Plan.md already exists under the current topic,
+        // This indicates that the user has already commented on the plan and the AI ​​is revising it, so it should not be judged to be in the clarification stage.
         const topicId = this.topicManager.currentTopic?.id;
         if (topicId) {
             const candidates = getTopicFileCandidates(topicId, 'Implementation_Plan.md', getProjectWorkspaceRoot());
@@ -1258,7 +1258,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (planExists) return false;
         }
 
-        // 如果 AI 通过 write_file 工具写入了计划文件 → 计划阶段
+        // If AI writes the plan file through the write_file tool → planning phase
         const wroteImplementationPlan = result.steps.some(
             (s: any) => (s.toolName === 'write_file') &&
             typeof s.toolArgs?.file === 'string' &&
@@ -1266,7 +1266,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         );
         if (wroteImplementationPlan) return false;
 
-        // 包含 :::question 语法 → 明确为提问阶段
+        // Contains :::question syntax → explicitly for question phase
         if (result.explanation.includes(':::question')) return true;
 
         return false;
@@ -1279,7 +1279,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const baseDir = getAiStorageRoot(getProjectWorkspaceRoot());
         if (baseDir) {
             const topicId = this.topicManager.currentTopic?.id || 'default';
-            // Put under topic folder to scope "同一个对话系列" (same conversation series) while keeping exactly "Implementation_Plan.md"
+            // Put under topic folder to scope "same conversation series" (same conversation series) while keeping exactly "Implementation_Plan.md"
             const planDir = path.join(baseDir, topicId);
             await fs.promises.mkdir(planDir, { recursive: true });
 
@@ -1511,8 +1511,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) with debouncing */
     sendTodoUpdate(todos: import('./types').TodoItem[]): void {
-        // 防御性 try-catch：多 Agent 并发场景中，此回调由子 Agent 的 todoWrite 同步调用，
-        // 任何未捕获的异常都会导致子 Agent 的 Promise reject 进而卡死协调器。
+        // Defensive try-catch: In a multi-Agent concurrent scenario, this callback is called synchronously by the sub-Agent's todoWrite.
+        // Any uncaught exception will cause the child Agent's Promise to reject, thus blocking the coordinator.
         try {
             this._pendingTodos = todos;
             
@@ -1528,7 +1528,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
                 try {
                     this.postMessage({ type: 'todoUpdate', todos: currentTodos });
-                } catch { /* 防止 postMessage 异常影响 task.md 写入 */ }
+                } catch { /* Prevent postMessage exception from affecting task.md writing */ }
 
                 // Natively save task.md in the topic folder
                 const topicId = this.topicManager.currentTopic?.id || 'default';
@@ -1551,7 +1551,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 }
             }, 500);
         } catch (e) {
-            // 静默吞下异常，确保调用方（子 Agent todoWrite）不受影响
+            // Swallow the exception silently to ensure that the caller (sub-Agent todoWrite) is not affected
             ErrorReporter.debug(SOURCE.CHAT_PANEL, 'sendTodoUpdate: 回调异常已捕获', e);
         }
     }
@@ -1668,12 +1668,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.clearArtifacts();
         }
 
-        // 异步清理话题对应的磁盘文件夹（.cwtools-ai/{topicId}/），
-        // 包括 plan、walkthrough、task、scratch、media、tmp 等所有衍生文件
+        // Asynchronously clean up the disk folder corresponding to the topic (.cwtools-ai/{topicId}/),
+        //Includes all derivative files such as plan, walkthrough, task, scratch, media, tmp, etc.
         const topicDirs = getTopicStorageDirCandidates(topicId, getProjectWorkspaceRoot());
         if (topicDirs.length > 0) {
             for (const topicDir of topicDirs) fs.promises.rm(topicDir, { recursive: true, force: true }).catch(() => {
-                // 文件夹不存在或删除失败时静默忽略
+                // Silently ignore if the folder does not exist or fails to be deleted
             });
         }
     }
@@ -1737,14 +1737,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         this.aiService.cancel();
 
-        // 清理所有挂起的权限审批 resolver，防止孤立的 Promise 和 UI 残留卡片
+        // Clean up all pending permission approval resolvers to prevent orphaned Promise and UI residual cards
         for (const [id, resolver] of this.pendingPermissionResolvers.entries()) {
             resolver(false);
         }
         this.pendingPermissionResolvers.clear();
         this.pendingPermissionModes.clear();
 
-        // 清理所有挂起的文件写入确认 resolver
+        // Clean up any pending file write confirmations resolver
         for (const [id, resolver] of this.pendingWriteResolvers.entries()) {
             resolver(false);
         }
@@ -2039,15 +2039,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return getChatPanelHtml(webview, this.extensionUri);
     }
 
-    /**
-     * 将选区引用发送到 Webview 输入框
-     */
+    /** 
+* Send the selection reference to the Webview input box 
+*/
     public async sendSelectionReference(
         relPath: string,
         startLine: number,
         endLine: number
     ): Promise<void> {
-        // 聚焦 AI 面板
+        // Focus on AI panel
         await vs.commands.executeCommand('cwtools.aiChat.focus');
         let attempts = 0;
         while ((!this.view || !this.view.visible) && attempts < 50) {

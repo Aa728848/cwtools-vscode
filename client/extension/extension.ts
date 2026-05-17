@@ -56,7 +56,7 @@ function safeRegisterCommand(context: ExtensionContext, commandId: string, handl
 
 export async function activate(context: ExtensionContext) {
 
-	// 后台检查扩展更新
+	// Background check for extension updates
 	await checkForUpdates(context).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
@@ -88,7 +88,7 @@ export async function activate(context: ExtensionContext) {
 						if (!seen.has(varName)) {
 							seen.add(varName);
 							const item = new vs.CompletionItem('@' + varName, vs.CompletionItemKind.Constant);
-							// 替换掉触发时已经输入的 @ 以及后续字符
+							//Replace the @ and subsequent characters that have been entered when triggering
 							item.range = new vs.Range(
 								position.line, position.character - matchPrefix[0].length,
 								position.line, position.character
@@ -742,40 +742,40 @@ export async function activate(context: ExtensionContext) {
 
 		context.subscriptions.push(window.onDidChangeActiveTextEditor(didChangeActiveTextEditor));
 
-		// 监听文档变化，当在 script_value 环境中输入 | 时自动触发补全
+		// Monitor document changes and automatically trigger completion when | is entered in the script_value environment
 		let lastCursorLine = -1;
 		let lastCursorChar = -1;
 		context.subscriptions.push(workspace.onDidChangeTextDocument(async (e) => {
-			// 只处理当前活动的文本
+			//Only process the currently active text
 			if (window.activeTextEditor && e.document === window.activeTextEditor.document) {
 				const doc = window.activeTextEditor.document;
 
-				// 只处理 paradox 语言
+				// Only handle paradox languages
 				if (doc.languageId !== language) return;
 
-				// 获取当前光标位置
+				// Get the current cursor position
 				const cursor = window.activeTextEditor.selection.active;
 				const currentLine = cursor.line;
 				const currentChar = cursor.character;
 
-				// 检查是否有变化
+				// Check if there are any changes
 				if (currentLine === lastCursorLine && currentChar === lastCursorChar) return;
 				lastCursorLine = currentLine;
 				lastCursorChar = currentChar;
 
-				// 获取当前行文本
+				// Get the current line of text
 				const lineText = doc.lineAt(currentLine).text;
 
-				// 检查是否在 value:xxx| 环境中
-				// 匹配模式：value:xxx| （光标在 | 之后）
+				// Check if it is in value:xxx| environment
+				// Matching pattern: value:xxx| (cursor is after |)
 				const textBeforeCursor = lineText.substring(0, currentChar);
 
-				// 检查是否以 value:xxx| 结尾（允许空格）
+				// Check if it ends with value:xxx| (spaces allowed)
 				const scriptValuePattern = /value\s*:\s*\S+\|\s*$/;
 				const isMatch = scriptValuePattern.test(textBeforeCursor);
 
 				if (isMatch) {
-					// 延迟 150ms 后触发补全，让文档同步完成
+					//Trigger completion after a delay of 150ms to allow the document to be completed synchronously
 					setTimeout(() => {
 						commands.executeCommand('editor.action.triggerSuggest');
 					}, 150);

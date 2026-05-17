@@ -573,7 +573,7 @@ export class LspToolHandler {
             findSymbol(symbols.symbols);
 
             if (!targetSymbol) {
-                // 将所有可用符号名称（含子级）扁平化后附带在错误消息中，帮助 AI 自助定位
+                // Flatten all available symbol names (including children) and include them in the error message to help AI self-service positioning
                 const collectNames = (syms: DocumentSymbolInfo[], depth = 0): string[] => {
                     const names: string[] = [];
                     for (const s of syms) {
@@ -897,7 +897,7 @@ export class LspToolHandler {
             });
         }
 
-        // 查询全局诊断新鲜度状态
+        //Query the global diagnostic freshness status
         let freshness: 'fresh' | 'pending' | 'stale' = 'pending';
         let pendingGlobalKinds: string[] = [];
         let lastEpoch = 0;
@@ -915,7 +915,7 @@ export class LspToolHandler {
                     lastEpoch = typeof statusResult.epoch === 'number' ? statusResult.epoch : 0;
                 }
             }
-        } catch { /* LSP 命令不可用，保持默认 pending */ }
+        } catch { /* LSP command is not available, keep the default pending */ }
 
         return {
             summary,

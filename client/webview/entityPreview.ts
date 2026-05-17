@@ -196,15 +196,15 @@ let animLooping = true;
 let selectedLocatorSnapshot: { px: number; py: number; pz: number; rx: number; ry: number; rz: number } | null = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-// 骨骼挂载同步列表：不直接挂到骨骼场景图下，避免 SkinnedMesh 双重变换
+//Skeleton mounting synchronization list: not directly mounted to the skeleton scene graph to avoid SkinnedMesh double transformation
 interface BoneAttachment {
     bone: THREE.Bone;
     group: THREE.Group;
-    parentGroup: THREE.Group; // 实际挂载的父节点
-    entityScale: number;      // 子模型原始 entity scale，同步时需保留
+    parentGroup: THREE.Group; //The actual mounted parent node
+    entityScale: number;      // The original entity scale of the sub-model, which needs to be retained during synchronization
 }
 const boneAttachments: BoneAttachment[] = [];
-// 预分配向量/四元数/矩阵，避免每帧 GC 压力
+// Pre-allocate vectors/quaternions/matrices to avoid GC pressure per frame
 const _baDecompPos = new THREE.Vector3();
 const _baDecompQuat = new THREE.Quaternion();
 const _baDecompScale = new THREE.Vector3();
@@ -239,20 +239,20 @@ function initThree() {
     controls.minDistance = 0.5;
     controls.maxDistance = 5000;
     
-    // 重映射按钮：左键=旋转，中键=平移。右键完全禁用，以支持右键菜单创建定位器。
+    //Remap buttons: left button=rotation, middle button=translation. Right-click is completely disabled in favor of right-click menu creation locator.
     controls.mouseButtons = {
         LEFT: THREE.MOUSE.ROTATE,
         MIDDLE: THREE.MOUSE.PAN,
-        RIGHT: -1 as any  // 使用 -1 禁用右键（null 可能被某些版本忽略）
+        RIGHT: -1 as any  // Use -1 to disable right-click (null may be ignored by some versions)
     };
     controls.enablePan = true;
 
-    // 在 OrbitControls 处理之前拦截右键 pointerdown，防止 OrbitControls 吞掉事件
+    //Intercept right-click pointerdown before OrbitControls processing to prevent OrbitControls from swallowing the event
     renderer.domElement.addEventListener('pointerdown', (e) => {
         if (e.button === 2) {
-            e.stopPropagation();  // 阻止 OrbitControls 处理右键
+            e.stopPropagation();  // Prevent OrbitControls from processing right clicks
         }
-    }, true);  // 使用捕获阶段
+    }, true);  // use capture phase
 
     // Lighting — bright PBR setup for dark-textured models
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -357,21 +357,21 @@ function animate() {
 
 
 
-    // 同步骨骼挂载的子模型位置（避免 SkinnedMesh 双重变换）
-    // 骨骼的 matrixWorld 是世界空间变换，但 childGroup 是 parentGroup 的子节点，
-    // 设置 position/quaternion 时必须转换到父节点的局部空间，
-    // 否则 Three.js 计算 matrixWorld 时会再叠加一次父节点变换导致严重变形。
+    // Synchronize the position of the bone-mounted sub-model (to avoid SkinnedMesh double transformation)
+    // The matrixWorld of the bone is the world space transformation, but the childGroup is the child node of parentGroup.
+    // When setting position/quaternion, it must be converted to the local space of the parent node.
+    // Otherwise, when Three.js calculates matrixWorld, it will superimpose the parent node transformation again, causing severe deformation.
     for (const ba of boneAttachments) {
-        // 确保骨骼的 matrixWorld 在动画 mixer 更新后是最新的
+        // Make sure the bone's matrixWorld is up to date after the animation mixer is updated
         ba.bone.updateWorldMatrix(true, false);
-        // 计算骨骼相对于 parentGroup 的局部变换
+        // Calculate the local transformation of the bone relative to parentGroup
         _baParentInverse.copy(ba.parentGroup.matrixWorld).invert();
         _baParentInverse.multiply(ba.bone.matrixWorld);
         _baParentInverse.decompose(_baLocalPos, _baLocalQuat, _baLocalScale);
         ba.group.position.copy(_baLocalPos);
         ba.group.quaternion.copy(_baLocalQuat);
-        // 骨骼传递均匀缩放（uniform scale）给子模型，不传递非均匀缩放
-        // 使用 3 轴缩放的几何平均值作为均匀缩放因子
+        // The skeleton passes uniform scale to the submodel and does not pass non-uniform scale.
+        // Use the geometric mean of the 3-axis scaling as the uniform scaling factor
         const boneUniformScale = Math.cbrt(_baLocalScale.x * _baLocalScale.y * _baLocalScale.z);
         ba.group.scale.setScalar(boneUniformScale * ba.entityScale);
     }
@@ -422,19 +422,19 @@ function createLocatorLabel(name: string, source: string): HTMLDivElement {
     const el = document.createElement('div');
     el.className = 'locator-label';
     el.textContent = name;
-    // 根据来源类型设置左边框颜色
+    //Set the left border color based on the source type
     const borderColors: Record<string, string> = {
-        mesh: '#4CAF50',      // 绿色 — mesh 内嵌 locator
-        override: '#FFC107',  // 黄色 — 脚本覆盖 locator
-        script: '#2196F3',    // 蓝色 — 脚本定义 locator
-        bone: '#4fc3f7',      // 青色 — 骨骼点
+        mesh: '#4CAF50',      // Green — mesh embedded locator
+        override: '#FFC107',  // yellow — script overrides locator
+        script: '#2196F3',    // blue — script definition locator
+        bone: '#4fc3f7',      // Cyan — bone points
     };
     el.style.borderLeft = `2px solid ${borderColors[source] ?? '#2196F3'}`;
     canvasContainer.appendChild(el);
     return el;
 }
 
-/** 根据 Three.js 对象 id 获取其关联的标签 DOM 元素 */
+/** Get the associated tag DOM element based on the Three.js object id */
 function getLabelForObject(obj: THREE.Object3D): HTMLDivElement | undefined {
     return locatorLabelEls.get(`${obj.id}`);
 }
@@ -445,7 +445,7 @@ function updateLocatorLabels() {
         return;
     }
 
-    // 两个开关都关闭时隐藏所有标签
+    //Hide all labels when both switches are off
     const showLocators = locatorToggle.checked;
     const showBones = bonesToggle.checked;
     if (!showLocators && !showBones) {
@@ -459,10 +459,10 @@ function updateLocatorLabels() {
     const halfW = w / 2;
     const halfH = h / 2;
 
-    // 追踪本帧活跃的标签 key，帧结束后清理失效标签
+    // Track the active tag key of this frame and clean up the invalid tags after the frame ends.
     const activeKeys = new Set<string>();
 
-    // 处理单个标注点：创建/更新 DOM 标签并投影到 2D
+    // Handle single annotation points: create/update DOM tags and project to 2D
     const processPoint = (obj: THREE.Object3D, displayName: string, source: string) => {
         const key = `${obj.id}`;
         activeKeys.add(key);
@@ -488,7 +488,7 @@ function updateLocatorLabels() {
         el.style.top = `${y}px`;
     };
 
-    // 判断对象是否属于子实体（attach 的模型内部）— 子实体的点不显示
+    // Determine whether the object belongs to the sub-entity (inside the attach model) - the point of the sub-entity is not displayed
     const isInsideChildEntity = (obj: THREE.Object3D): boolean => {
         let p = obj.parent;
         while (p) {
@@ -499,23 +499,23 @@ function updateLocatorLabels() {
         return false;
     };
 
-    // 只遍历根实体的定位器和骨骼，跳过子实体的
+    // Only traverse the locators and bones of the root entity, skipping those of the child entities
     currentModel.traverse(obj => {
-        // 跳过子实体内部的对象
+        // Skip objects inside child entities
         if (isInsideChildEntity(obj)) return;
 
-        // 根实体定位器 — 由 locatorToggle 控制
+        // Root entity locator — controlled by locatorToggle
         if (obj.userData?.isLocator && showLocators) {
             const src = (obj.userData as { source?: string }).source ?? 'mesh';
             processPoint(obj, obj.name, src);
         }
-        // 根实体骨骼点 — 由 bonesToggle 控制
+        // Root entity bone point — controlled by bonesToggle
         if (obj instanceof THREE.Bone && showBones) {
             processPoint(obj, obj.name, 'bone');
         }
     });
 
-    // 清理不再存在的旧标签（模型切换、开关切换时）
+    // Clean up old tags that no longer exist (when switching models or switches)
     for (const [key, el] of locatorLabelEls) {
         if (!activeKeys.has(key)) {
             el.remove();
@@ -1480,7 +1480,7 @@ function decompressBC3(src: Uint8Array, width: number, height: number): Uint8Arr
     }
     return out;
 }
-// 贴图缓存：key = URI, value = { promise, lastUsed }
+//Texture cache: key = URI, value = { promise, lastUsed }
 const textureCache = new Map<string, { promise: Promise<THREE.Texture | null>; lastUsed: number }>();
 const TEXTURE_CACHE_MAX = 128;
 
@@ -1495,7 +1495,7 @@ async function fetchTexture(uri: string): Promise<THREE.Texture | null> {
     const promise = fetchTextureRaw(uri);
     textureCache.set(uri, { promise, lastUsed: performance.now() });
     
-    // LRU 淘汰
+    // LRU elimination
     if (textureCache.size > TEXTURE_CACHE_MAX) {
         let oldestKey = '';
         let oldestTime = Infinity;
@@ -1715,7 +1715,7 @@ async function upgradeSubmeshMaterial(mesh: THREE.Mesh | THREE.SkinnedMesh, text
             const hasNormalAtCompile = !!mat.normalMap;
             const hasSpecAtCompile = !!mat.roughnessMap;
 
-            // 注入 PDX GLSL 着色器片段（从 pdxShaders.ts 导入）
+            // Inject PDX GLSL shader fragment (imported from pdxShaders.ts)
             shader.fragmentShader = pdxHelperFunctions + shader.fragmentShader;
 
             if (hasNormalAtCompile) {
@@ -2154,8 +2154,8 @@ async function loadAttachChildren(
                 }
             }
             if (!locator) {
-                // 搜索骨骼：骨骼名称可能有实体前缀（如 "entityName__root"），
-                // 所以同时匹配精确名称和以 "__locatorName" 结尾的名称
+                //Search for bones: bone names may have entity prefixes (such as "entityName__root"),
+                // So match both exact names and names ending in "__locatorName"
                 parentGroup.traverse(obj => {
                     if (!locator && obj instanceof THREE.Bone) {
                         if (obj.name === child.locatorName || obj.name.endsWith(`__${child.locatorName}`)) {
@@ -2258,9 +2258,9 @@ async function loadAttachChildren(
                         }, childEntityData, currentMeshIndexInShape);
 
                         const material = createPlaceholderMaterial(textures);
-                        // attach 吸附的子模型统一作为刚性体（普通 Mesh），
-                        // SkinnedMesh 不通过 attach 传递。
-                        // 子模型只跟随骨骼的位置/旋转/缩放数值变化，不受蒙皮影响。
+                        // The attached sub-models are unified as rigid bodies (ordinary Mesh),
+                        // SkinnedMesh is not passed through attach.
+                        // The sub-model only follows the bone's position/rotation/scale value changes and is not affected by skinning.
                         const mesh = new THREE.Mesh(geo, material);
                         mesh.name = `${child.entityName}_submesh_${submeshIndex}`;
 
@@ -2328,17 +2328,17 @@ async function loadAttachChildren(
 
             // Mount child at the locator position in parent's coordinate space
             if (attachType === 'bone' && locator instanceof THREE.Bone) {
-                // 骨骼挂载：不直接加入骨骼的场景图子树，
-                // 否则子模型的 SkinnedMesh 会被骨骼的 matrixWorld 双重变换导致严重变形。
-                // 改为挂载到 parentGroup 并在动画循环中手动同步骨骼的世界位置/旋转。
+                // Bone mounting: Do not directly add bones to the scene graph subtree.
+                // Otherwise, the SkinnedMesh of the submodel will be severely deformed by the double transformation of the bone's matrixWorld.
+                // Mount to parentGroup instead and manually synchronize the bone's world position/rotation in the animation loop.
                 parentGroup.add(childGroup);
                 boneAttachments.push({
                     bone: locator,
                     group: childGroup,
                     parentGroup: parentGroup,
-                    entityScale: scale,  // 保存子模型原始 entity scale
+                    entityScale: scale,  //Save the original entity scale of the submodel
                 });
-                // 立即同步一次位置：将骨骼世界变换转换到 parentGroup 的局部空间
+                //Synchronize the position immediately: convert the bone world transformation to the local space of parentGroup
                 locator.updateWorldMatrix(true, false);
                 parentGroup.updateWorldMatrix(true, false);
                 _baParentInverse.copy(parentGroup.matrixWorld).invert();
@@ -2346,7 +2346,7 @@ async function loadAttachChildren(
                 _baParentInverse.decompose(_baLocalPos, _baLocalQuat, _baLocalScale);
                 childGroup.position.copy(_baLocalPos);
                 childGroup.quaternion.copy(_baLocalQuat);
-                // 骨骼传递均匀缩放（uniform scale）给子模型
+                // Bones pass uniform scale to submodels
                 const boneUniformScale = Math.cbrt(_baLocalScale.x * _baLocalScale.y * _baLocalScale.z);
                 childGroup.scale.setScalar(boneUniformScale * scale);
             } else {
@@ -2551,12 +2551,12 @@ function removeAttachAtLocator(locatorName: string) {
             target.remove(obj);
         }
     }
-    // 也清理 boneAttachments 中的对应条目
+    // Also clear the corresponding entries in boneAttachments
     for (let i = boneAttachments.length - 1; i >= 0; i--) {
         const ba = boneAttachments[i]!;
         const boneName = ba.bone.name.replace(/^.*?__/, '');
         if (boneName === locatorName || ba.bone.name === locatorName) {
-            // 清理并从场景中移除
+            //Clean and remove from scene
             ba.group.traverse(node => {
                 if (node instanceof THREE.Mesh) {
                     node.geometry?.dispose();
@@ -2583,14 +2583,14 @@ function buildEntityTree() {
 }
 
 function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
-    // SVG 图标（从 svgIcons.ts 导入）
+    // SVG icons (imported from svgIcons.ts)
     const svgIconEntity = Icons.entity;
     const svgIconBone = Icons.bone;
     const svgIconLocator = Icons.locator;
     const svgIconCollapse = Icons.collapseAll;
     const svgIconAdd = Icons.addItem;
 
-    // 保存当前展开状态（按 data-parent 属性键值），默认折叠
+    //Save the current expanded state (according to the data-parent attribute key value), collapsed by default
     const expandedSet = new Set<string>();
     let hasPreviousState = false;
     entityTree.querySelectorAll<HTMLElement>('.tree-children').forEach(el => {
@@ -2598,7 +2598,7 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
         const key = el.dataset.parent;
         if (key && !el.classList.contains('collapsed')) expandedSet.add(key);
     });
-    // 保存过滤器激活状态
+    //Save filter activation status
     const boneFilterActive = entityTree.classList.contains('filter-bone');
     const locFilterActive = entityTree.classList.contains('filter-locator');
 
@@ -2613,7 +2613,7 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
     </div>`;
 
     const treeObjects = new Map<string, THREE.Object3D>();
-    // 标记骨骼挂载的子组，避免在主遍历中重复出现
+    // Mark the subgroup of bone mounting to avoid repeated occurrence in the main traversal
     const boneAttachedGroups = new Set<THREE.Object3D>();
     for (const ba of boneAttachments) {
         boneAttachedGroups.add(ba.group);
@@ -2646,7 +2646,7 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
             isNode = true;
             nodeClass = 'tree-bone';
             icon = svgIconBone;
-            label = label.replace(/^.*?__/, ''); // 清除碰撞前缀以供显示
+            label = label.replace(/^.*?__/, ''); // Clear collision prefix for display
             treeObjects.set(obj.uuid, obj);
             dataset = `data-object-uuid="${obj.uuid}"`;
         } else if ((obj.userData as any).isLocator) {
@@ -2662,12 +2662,12 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
         let childrenHtml = '';
         for (const child of obj.children) {
             if (child.name.endsWith('_axes') || child.name.endsWith('_hit')) continue;
-            // 跳过骨骼挂载的子组（它们会在骨骼节点下被虚拟添加）
+            // Skip the subgroups of bone mounts (they will be added virtually under the bone node)
             if (boneAttachedGroups.has(child)) continue;
             childrenHtml += buildTreeHtml(child, isNode ? depth + 1 : depth);
         }
-        // 骨骼挂载的子模型在场景图中不是骨骼的直接子节点，
-        // 但在大纲中应该显示在该骨骼下面
+        // The submodel mounted by the bone is not a direct child node of the bone in the scene graph.
+        // But it should be displayed under the bone in the outline
         if (obj instanceof THREE.Bone) {
             for (const ba of boneAttachments) {
                 if (ba.bone === obj) {
@@ -2677,7 +2677,7 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
         }
         
         if (isNode) {
-            // 恢复之前保存的展开状态（初次加载时只展开根节点）
+            //Restore the previously saved expansion state (only expand the root node when loading for the first time)
             const isExpanded = hasPreviousState ? expandedSet.has(label) : (obj === currentModel);
             const isCollapsed = !isExpanded;
             const toggleCls = childrenHtml ? 'tree-toggle' : 'tree-toggle-placeholder';
@@ -2707,7 +2707,7 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
 
     entityTree.innerHTML = html;
 
-    // 恢复过滤器激活状态
+    //Restore filter activation state
     entityTree.classList.toggle('filter-bone', boneFilterActive);
     entityTree.classList.toggle('filter-locator', locFilterActive);
 
@@ -2743,7 +2743,7 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
             const uuid = el.dataset.objectUuid!;
             const obj = treeObjects.get(uuid);
             if (obj) {
-                // 判断对象是否属于子实体（attach 的模型内部）
+                // Determine whether the object belongs to a sub-entity (inside the attach model)
                 let isInsideChild = false;
                 let p = obj.parent;
                 while (p) {
@@ -2752,7 +2752,7 @@ function updateEntityTree(entity: EntityData, parsed?: ParsedMeshFile) {
                     p = p.parent;
                 }
                 
-                // 子模型的点和骨骼不能被选中和编辑
+                // The points and bones of the submodel cannot be selected and edited.
                 if (isInsideChild) {
                     return;
                 }
@@ -3260,10 +3260,10 @@ function hideContextMenu() {
     contextMenu.classList.remove('visible');
 }
 
-// 右键拦截在 initThree() 内注册（见 initThree 函数中对 renderer.domElement 的 pointerdown 监听）
+// Right-click interception is registered in initThree() (see pointerdown monitoring of renderer.domElement in initThree function)
 
 canvasContainer.addEventListener('contextmenu', (e) => {
-    // 仅在已加载实体且定位器可见时才显示
+    // Only displayed if the entity is loaded and the locator is visible
     if (!currentEntity || !locatorToggle.checked) return;
     e.preventDefault();
 

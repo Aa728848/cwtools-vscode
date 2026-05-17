@@ -29,7 +29,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
             return;
         }
 
-        // 更新最后检查时间
+        // Update last check time
         await context.globalState.update(stateKeyLastCheck, now);
 
         const currentVersion = context.extension.packageJSON?.version;
@@ -107,7 +107,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
 
 async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string) {
     let mirrors = [
-        originalUrl, // 首选直连
+        originalUrl, // Prefer direct connection
         `https://gh-proxy.org/${originalUrl}`,
         `https://hk.gh-proxy.org/${originalUrl}`,
         `https://cdn.gh-proxy.org/${originalUrl}`,
@@ -117,7 +117,7 @@ async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string
 
     const configProxy = vscode.workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim().toLowerCase();
     if (configProxy === 'none' || configProxy === 'direct' || process.env.http_proxy || process.env.https_proxy || process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
-        // 如果用户明确指定不用代理源，或者系统存在本地代理环境变量，我们就不去试无效镜像白白浪费时间了
+        // If the user explicitly specifies not to use a proxy source, or the system has local proxy environment variables, we will not waste time trying invalid images.
         mirrors = [originalUrl];
     }
 
@@ -138,7 +138,7 @@ async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string
                 progress.report({ message: `通过 ${hostname} 创建连接...` });
                 await downloadFile(url, tmpPath, progress, token);
                 
-                // 下载成功
+                // Download successful
                 progress.report({ message: '下载完成，正在安装...' });
                 await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(tmpPath));
                 
@@ -147,7 +147,7 @@ async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string
                         vscode.commands.executeCommand('workbench.action.reloadWindow');
                     }
                 });
-                return; // 安装成功即退出
+                return; // Exit after successful installation
             } catch (err: any) {
                 ErrorReporter.warn('UpdateChecker', `下载失败 [${url}]`, err);
                 if (fs.existsSync(tmpPath)) {

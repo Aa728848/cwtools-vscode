@@ -38,7 +38,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_types: 45_000,
     query_rules: 45_000,
     query_references: 45_000,
-    // validate_code — REMOVED: 由 get_diagnostics + edit_file 内联诊断替代
+    // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
     get_diagnostics: 45_000,
     get_file_context: 45_000,
     search_mod_files: 45_000,
@@ -71,10 +71,10 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     web_fetch: 20_000,
     search_web: 20_000,
     codesearch: 20_000,
-    // Shell — 需要用户权限审批（无限等待），命令执行有独立的内部 timeoutMs 保护，
-    // 外层超时设为 0 = 禁用，改由 AbortSignal 负责全局中断
+    // Shell - requires user permission approval (infinite wait), command execution has independent internal timeoutMs protection,
+    // Set outer timeout to 0 = disabled, AbortSignal is responsible for global interrupt instead
     run_command: 0,
-    // MiniMax CLI Media — 同样需要权限审批，内部有独立的 spawn 超时
+    // MiniMax CLI Media — also requires permission approval and has an independent spawn timeout internally.
     mmx_generate_image: 0,
     mmx_generate_video: 0,
     mmx_generate_music: 0,
@@ -82,14 +82,14 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     // Media Asset Conversion
     convert_image_to_dds: 60_000,
     convert_audio: 60_000,
-    // 媒体资产部署 — 需要权限审批，同样禁用外层超时
+    // Media asset deployment - requires permission approval, also disables outer timeout
     deploy_mod_asset: 0,
     // Git
     git_ops: 30_000,
-    // Todo — 纯内存操作，极短超时即可
+    // Todo — pure memory operation, very short timeout is enough
     todo_write: 5_000,
-    // Orchestrator — 子 Agent 调度需要较长时间，由协调器自身生命周期和外部 AbortSignal 管理
-    // 超时放宽至 1 小时，防止因为大语言模型响应慢导致意外超时和僵尸重试
+    // Orchestrator - sub-Agent scheduling takes a long time and is managed by the coordinator's own life cycle and external AbortSignal
+    // Relax the timeout to 1 hour to prevent unexpected timeouts and zombie retries due to slow response of large language models
     dispatch_agents: 3600_000,
     merge_results: 30_000,
 };
@@ -156,7 +156,7 @@ export class AgentToolExecutor {
         this.lspHandler = new LspToolHandler(this, this.clientGetter, findFiles);
         this.externalHandler = new ExternalToolHandler(this);
 
-        // 初始化增强版黑板（替代旧版 sharedMemory）
+        // Initialize the enhanced blackboard (replacing the old sharedMemory)
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { Blackboard } = require('./orchestrator/blackboard') as typeof import('./orchestrator/blackboard');
         this.blackboard = new Blackboard();
@@ -198,9 +198,9 @@ export class AgentToolExecutor {
         try { this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
     }
 
-    /** 增强版黑板——多 Agent 间的共享知识存储。
-     * 替代旧版 sharedMemory Map，提供类型化条目、CAS 乐观锁、前缀订阅。
-     * 兼容层 legacySet/Get/Search 确保现有 set_memory/get_memory/search_memory 工具无缝工作。 */
+    /** Enhanced Blackboard - Shared knowledge storage between multiple Agents. 
+* Replaces the old sharedMemory Map and provides typed entries, CAS optimistic locking, and prefix subscriptions. 
+* Compatibility layer legacySet/Get/Search ensures existing set_memory/get_memory/search_memory tools work seamlessly. */
     public blackboard!: import('./orchestrator/blackboard').Blackboard;
 
     /** Forward LSP read-cache invalidation to the lspHandler. */
@@ -354,7 +354,7 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_references':
                 result = await this.lspHandler.queryReferences(args as any); break;
-            // validate_code — REMOVED: 由 get_diagnostics + edit_file 内联诊断替代
+            // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
             case 'get_diagnostics':
                 result = await this.lspHandler.getDiagnostics(args as any); break;
             case 'get_file_context':
@@ -398,7 +398,7 @@ export class AgentToolExecutor {
                 };
                 const targetSymbol = findSymbol(symbols.symbols);
                 if (!targetSymbol) {
-                    // 直接附带可用符号列表，避免 AI 再调 document_symbols
+                    // Directly attach the list of available symbols to avoid AI adjusting document_symbols again
                     const collectNames = (syms: import('./types').DocumentSymbolInfo[], depth = 0): string[] => {
                         const names: string[] = [];
                         for (const s of syms) {
@@ -783,20 +783,20 @@ export class AgentToolExecutor {
         return result;
     }
 
-    // ── Orchestrator 调度实现 ─────────────────────────────────────────────────
+    //── Orchestrator scheduling implementation ───────────────────────────────────────────────
 
-    /** 正在执行的 Orchestrator 中止控制器（防重入保护） */
+    /** Executing Orchestrator abort controller (anti-reentrancy protection) */
     private _activeDispatchAbortController?: AbortController;
 
-    /** 最近一次协调器执行结果（供 merge_results 读取） */
+    /** The latest coordinator execution result (read by merge_results) */
     private _lastOrchestratorResult?: import('./orchestrator/types').OrchestratorResult;
 
-    /**
-     * 执行 dispatch_agents 工具：将 AI 构建的任务数组转换为 TaskGraph，
-     * 然后通过 Orchestrator.execute() 触发真正的多 Agent 并行执行。
-     */
+    /** 
+* Execute the dispatch_agents tool: convert the task array built by AI into TaskGraph, 
+* Then trigger true multi-Agent parallel execution through Orchestrator.execute(). 
+*/
     private async executeDispatchAgents(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
-        // 防重入：如果已经有正在运行的调度（由于超时重试或用户强制中断），先中止旧的以清理僵尸进程
+        // Anti-reentrancy: If there is already a running schedule (due to timeout retry or user forced interruption), kill the old one first to clean up the zombie process
         if (this._activeDispatchAbortController) {
             this._activeDispatchAbortController.abort('New dispatch_agents call replaced the previous one.');
             this._activeDispatchAbortController = undefined;
@@ -829,27 +829,27 @@ export class AgentToolExecutor {
             };
         }
 
-        // 确保有 parentAgentRunner（Orchestrator 需要它来调度子 Agent）
+        // Make sure there is a parentAgentRunner (the Orchestrator needs it to schedule child Agents)
         if (!this.parentAgentRunner) {
             return { success: false, error: 'Orchestrator 未就绪：缺少 AgentRunner 实例引用。请确保在协调模式下运行。' };
         }
 
         try {
-            // 动态导入避免循环依赖
+            //Dynamic import avoids circular dependencies
             const { Orchestrator } = await import('./orchestrator/orchestrator');
             const { TaskGraphEngine } = await import('./orchestrator/taskGraphEngine');
             const { applyUserModelOverrides } = await import('./orchestrator/agentRegistry');
             const { ErrorReporter } = await import('./errorReporter');
             const { SOURCE } = await import('./messages');
 
-            // 应用用户的子 Agent 模型配置（从 VS Code 设置中读取）
+            //Apply user's child Agent model configuration (read from VS Code settings)
             const cfg = vs.workspace.getConfiguration('cwtools.ai');
             const agentModels = cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels');
             if (agentModels) {
                 applyUserModelOverrides(agentModels);
             }
 
-            // 构建 TaskGraph
+            // Build TaskGraph
             const userPrompt = (args.userPrompt as string) || '多 Agent 协作任务';
             const graph = TaskGraphEngine.createGraph(userPrompt);
 
@@ -871,10 +871,10 @@ export class AgentToolExecutor {
                 );
             }
 
-            // 实例化 Orchestrator
+            // Instantiate Orchestrator
             const orchestrator = new Orchestrator(this.parentAgentRunner);
 
-            // 构建执行选项（优先从 AgentToolContext 读取，回退到旧的实例字段）
+            // Build execution options (read first from AgentToolContext, fallback to old instance fields)
             const runnerOpts = context?.runnerOptions ?? this.parentRunnerOptions;
             const globalSignal = runnerOpts?.abortSignal;
             const onGlobalAbort = () => localAbort.abort(globalSignal?.reason);
@@ -894,7 +894,7 @@ export class AgentToolExecutor {
                 // Sub-agents are non-interactive and install their own deny callback.
             };
 
-            // 推送初始进度
+            // Push initial progress
             options.onStep?.({
                 type: 'thinking',
                 content: `🎯 协调器启动: 分派 ${tasks.length} 个子 Agent 任务`,
@@ -903,7 +903,7 @@ export class AgentToolExecutor {
 
             let result;
             try {
-                // 执行
+                // implement
                 result = await orchestrator.execute(graph, options);
             } finally {
                 if (globalSignal) {
@@ -914,10 +914,10 @@ export class AgentToolExecutor {
                 }
             }
 
-            // 缓存结果供 merge_results 使用
+            // Cache results for use by merge_results
             this._lastOrchestratorResult = result;
 
-            // 将执行结果写入 Blackboard 供后续查询
+            //Write execution results to Blackboard for subsequent query
             this.blackboard.write(
                 'orchestrator:lastResult',
                 JSON.stringify({
@@ -931,8 +931,8 @@ export class AgentToolExecutor {
                 '__orchestrator__',
             );
 
-            // 构建轻量返回结果（只含状态和文件列表，不含完整输出）
-            // 减少主 Agent context 大小，缓解总结阶段 thinking 卡顿
+            // Build lightweight return results (only status and file list, not complete output)
+            // Reduce the size of the main Agent context and alleviate the thinking lag in the summary stage.
             const agentSummaries: Array<{
                 id: string;
                 success: boolean;
@@ -977,12 +977,12 @@ export class AgentToolExecutor {
         }
     }
 
-    /**
-     * 执行 merge_results 工具：从最近一次协调器执行结果中提取摘要。
-     */
+    /** 
+* Execute the merge_results tool: extract a summary from the results of the most recent coordinator execution. 
+*/
     private executeMergeResults(): unknown {
         if (!this._lastOrchestratorResult) {
-            // 尝试从 Blackboard 读取
+            //Try to read from Blackboard
             const stored = this.blackboard.readValue('orchestrator:lastResult');
             if (stored) {
                 try {
@@ -999,7 +999,7 @@ export class AgentToolExecutor {
         const allWrittenFiles: string[] = [];
         const agentOutputs: Array<{ id: string; output: string; files: string[] }> = [];
 
-        // 智能截断：单 Agent 上限 2000 字符，总量预算 8000 字符
+        //Smart truncation: the upper limit for a single Agent is 2000 characters, and the total budget is 8000 characters
         const MAX_PER_AGENT = 2000;
         const MAX_TOTAL = 8000;
         let totalOutputLen = 0;

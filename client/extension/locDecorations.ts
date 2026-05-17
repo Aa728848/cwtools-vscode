@@ -229,20 +229,20 @@ class LocRefDefinitionProvider implements vs.DefinitionProvider {
     }
 }
 
-/**
- * 脚本文件中本地化 key 的定义跳转
- * 支持 title = "xxx" / name = xxx / desc = xxx 等引用格式
- */
+/** 
+* Jump to the definition of localization key in the script file 
+* Support title = "xxx" / name = xxx / desc = xxx and other reference formats 
+*/
 class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
     async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
-        // 尝试匹配带引号和不带引号的字符串值
+        //Try to match quoted and unquoted string values
         const range =
             document.getWordRangeAtPosition(position, /"([A-Za-z_][A-Za-z0-9_.:-]+)"/) ||
             document.getWordRangeAtPosition(position, /\b([A-Za-z_][A-Za-z0-9_.:-]+)\b/);
         if (!range) return null;
 
         let word = document.getText(range).replace(/^"|"$/g, '');
-        // 跳过明显非本地化 key 的情况（纯数字、yes/no、常见关键字等）
+        // Skip obvious non-localized key cases (pure numbers, yes/no, common keywords, etc.)
         if (/^\d+$/.test(word) || /^(yes|no|none|root|prev|from|this|event_target|owner|capital_scope)$/i.test(word)) return null;
 
         const locMap = await getLocMap();
@@ -254,25 +254,25 @@ class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
 }
 
 
-/**
- * 注册所有本地化增强功能
- */
+/** 
+* Register all localization enhancements 
+*/
 export function registerLocalizationFeatures(context: vs.ExtensionContext): void {
-    // 注册 .yml 文件内 $REF$ 引用的 hover 和定义跳转
+    // Register the hover and definition jump referenced by $REF$ in the .yml file
     const ymlSelector: vs.DocumentSelector = { scheme: 'file', pattern: '**/*.yml' };
 
-    // 游戏脚本语言选择器 — 用于脚本文件中 loc key 的跳转
+    // Game script language selector — used to jump to the loc key in the script file
     const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
     const scriptSelector: vs.DocumentSelector = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 
     context.subscriptions.push(
-        // .yml 文件内部的 $REF$ 引用
+        // $REF$ reference inside .yml file
         vs.languages.registerHoverProvider(ymlSelector, new LocRefHoverProvider()),
         vs.languages.registerDefinitionProvider(ymlSelector, new LocRefDefinitionProvider()),
-        // 脚本文件中 loc key 的 Ctrl+Click 跳转
-        // 注意：不注册 ScriptLocHoverProvider，因为 F# CWTools 后端已经通过
-        // lochoverFromInfo 提供了脚本文件中 loc key 的本地化悬浮预览，
-        // 重复注册会导致 hover 弹窗中翻译文本出现两次。
+        //Ctrl+Click jump of loc key in script file
+        // Note: ScriptLocHoverProvider is not registered because the F# CWTools backend already passes
+        // lochoverFromInfo provides a localized floating preview of the loc key in the script file.
+        // Repeated registration will cause the translated text to appear twice in the hover pop-up window.
         vs.languages.registerDefinitionProvider(scriptSelector, new ScriptLocDefinitionProvider()),
     );
 

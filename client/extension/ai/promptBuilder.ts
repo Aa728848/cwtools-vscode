@@ -100,8 +100,8 @@ You are currently running as a specialized sub-agent in a multi-agent workflow. 
 - ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file inside the exact Agent Workspace Dir shown in Current Editor Context (e.g. \`.cwtools-ai/<current-topic-id>/scratch/data.md\`) and then use \`set_memory\` to only share the file path.
 - Always check the blackboard FIRST before making assumptions about namespaces or IDs.`;
 
-// 子代理防越权指令：注入到 Builder/LocWriter 等底层执行代理的 slim 模式中，
-// 防止它们在执行 Orchestrator 分发的子任务时擅自扩展系统范围或引入计划外的子系统。
+// Subagent anti-violation instructions: injected into the slim mode of underlying execution agents such as Builder/LocWriter,
+// Prevent them from unnecessarily extending the scope of the system or introducing unplanned subsystems when executing subtasks distributed by Orchestrator.
 const SUB_AGENT_ANTI_OVERREACH_RULE = `## 🛑 CRITICAL: Sub-Agent Execution Discipline (Anti-Overreach)
 You are an **execution node** in a multi-agent workflow. Your ONLY job is to precisely implement the specific sub-task assigned by the Orchestrator.
 1. **DO NOT invent, propose, or create new game subsystems** (Situations, Relics, On_Actions, Special Projects, etc.) unless they are EXPLICITLY listed in your current sub-task prompt or the approved blueprint.
@@ -613,8 +613,8 @@ ${gameKnowledge}`;
 // ─── Explore Mode System Prompt Template ─────────────────────────────────────
 
 function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
-    // W1/W8 修复：Explore 模式是只读模式，不注入 BUILD_CLARIFICATION_RULE（包含写入验证指令）。
-    // Slim 模式也不注入 BLACKBOARD_USAGE_RULE（Explore 工具集没有黑板工具）。
+    // W1/W8 Fix: Explore mode is read-only and does not inject BUILD_CLARIFICATION_RULE (contains write verification instructions).
+    // Slim mode also does not inject BLACKBOARD_USAGE_RULE (the Explore toolset does not have a blackboard tool).
     const rules = isSlim
         ? `${ANALYSIS_COMPLIANCE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
@@ -651,7 +651,7 @@ ${gameKnowledge}`;
 // ─── General Mode System Prompt Template ─────────────────────────────────────
 
 function buildGeneralModeSystemPrompt(gameKnowledge: string, gameName: string): string {
-    // W2 修复：General 模式是纯 Q&A 模式，不注入 BUILD_CLARIFICATION_RULE（包含 validate_code 等写入指令）。
+    // W2 fix: General mode is pure Q&A mode and does not inject BUILD_CLARIFICATION_RULE (including write instructions such as validate_code).
     return `You are Eddy CWTool Code — a versatile AI assistant for ${gameName} mod development.
 ${LANGUAGE_MIRRORING_RULE}
 
@@ -711,8 +711,8 @@ ${gameKnowledge}`;
 }
 
 function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
-    // W1/W8 修复：Review 模式是只读模式，不注入 BUILD_CLARIFICATION_RULE（包含写入验证指令）。
-    // Slim 模式也不注入 BLACKBOARD_USAGE_RULE（Review 工具集没有黑板工具）。
+    // W1/W8 fix: Review mode is read-only and does not inject BUILD_CLARIFICATION_RULE (contains write verification instructions).
+    // Slim mode also does not inject BLACKBOARD_USAGE_RULE (the Review toolset does not have a blackboard tool).
     const rules = isSlim
         ? `${ANALYSIS_COMPLIANCE_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${ANALYSIS_COMPLIANCE_RULE}`;
@@ -1564,8 +1564,8 @@ ${trimmed}
 
 
 
-    // W6 修复：不再重复注入完整代码块（AI 已经在上一轮看过自己生成的代码了）。
-    // 仅列出错误行，指导 AI 使用 replace_lines 定向修复，避免大文件时数千 tokens 的浪费。
+    // W6 fix: no longer inject complete code blocks repeatedly (AI has already seen its own generated code in the previous round).
+    //Only list the error lines and guide the AI ​​to use replace_lines for directed repair to avoid wasting thousands of tokens on large files.
     buildValidationRetryMessage(code: string, errors: Array<{ message: string; line: number }>): ChatMessage {
         const errorList = errors.map(e => `  - Line ${e.line}: ${e.message}`).join('\n');
         const hasSpriteError = errors.some(e => /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(e.message));

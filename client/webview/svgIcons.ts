@@ -43,7 +43,7 @@ export const Icons = {
     filePlus: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>`,
     layers: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>`,
 
-    // ── 实体预览器专用图标（16x16, fill 模式） ──────────────────────────────
+    //──Special icon for entity previewer (16x16, fill mode) ──────────────────────────────
     entity: `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1L1 4.5V11.5L8 15L15 11.5V4.5L8 1ZM2 5.06L7.5 7.81V13.88L2 11.13V5.06ZM8.5 13.88V7.81L14 5.06V11.13L8.5 13.88ZM13.15 4.19L8 6.76L2.85 4.19L8 1.62L13.15 4.19Z"/></svg>`,
     bone: `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M12.63 2H3.37L1 5.37L8 14L15 5.37L12.63 2ZM3.79 3H12.21L13.84 5H2.16L3.79 3ZM8 12.83L2.73 5.99H13.27L8 12.83Z"/></svg>`,
     locator: `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a3.5 3.5 0 0 0-3.5 3.5c0 3.33 3.5 7.5 3.5 7.5s3.5-4.17 3.5-7.5A3.5 3.5 0 0 0 8 1zm0 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>`,

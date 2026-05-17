@@ -78,7 +78,7 @@ const TOOL_ICON_LABELS: Record<string, string> = {
     glob_files: '📁', delete_file: '🗑️', apply_patch: '🩹',
     web_fetch: '🌐',
     permission_request: '🔑',
-    // 协调器工具
+    // Coordinator tool
     dispatch_agents: '🎯', query_blackboard: '📋', merge_results: '🔗',
 };
 
@@ -431,7 +431,7 @@ export function buildAssistantMessageHtml(
     classified: ClassifiedSteps,
     msgTime?: number
 ): string {
-    // 拦截并分组带有 agentId 的步骤
+    // Intercept and group steps with agentId
     const mainClassified: ClassifiedSteps = {
         thinkingSteps: [], textDeltaSteps: [], toolCalls: [], toolResults: [], specialSteps: []
     };
@@ -444,10 +444,10 @@ export function buildAssistantMessageHtml(
                 group = { thinkingSteps: [], textDeltaSteps: [], toolCalls: [], toolResults: [], specialSteps: [] };
                 subAgentGroups.set(step.agentId, group);
             }
-            // 浅拷贝并移除 agentId，防止后续递归调用时陷入死循环
+            //Shallow copy and remove agentId to prevent subsequent recursive calls from falling into an infinite loop
             const stepCopy = { ...step };
             delete stepCopy.agentId;
-            // 过滤掉 content 中的 [node.id] 前缀，因为已经在框的标题上显示了
+            // Filter out the [node.id] prefix in content because it is already displayed on the title of the box
             if (stepCopy.content && stepCopy.content.startsWith(`[${step.agentId}] `)) {
                 stepCopy.content = stepCopy.content.substring(step.agentId.length + 3);
             }
@@ -472,7 +472,7 @@ export function buildAssistantMessageHtml(
         ...mainClassified.specialSteps,
     ].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-    // 如果没有任何步骤（既没有主线也没有子任务），直接渲染文本
+    // If there are no steps (neither mainline nor subtasks), render the text directly
     if (allSteps.length === 0 && subAgentGroups.size === 0) {
         if (!content?.trim()) return '';
         return `<div class="msg-bubble" data-raw-content="${escapeHtml(content)}">${escapeHtml(content)}</div>`;
@@ -578,7 +578,7 @@ export function buildAssistantMessageHtml(
         html += `<div class="msg-bubble" data-raw-content="${escapeHtml(content)}">${escapeHtml(content)}</div>`;
     }
 
-    // 递归渲染所有的子 Agent 独立框
+    // Recursively render all child Agent independent boxes
     for (const [agentId, groupClassified] of subAgentGroups.entries()) {
         const innerHtml = buildAssistantMessageHtml('', groupClassified, msgTime);
         const uniqueId = `subview-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;

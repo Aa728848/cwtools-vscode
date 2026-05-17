@@ -172,26 +172,26 @@ export class EventChainPanel {
 
         const eventPattern = new vscode.RelativePattern(wsRoot, '**/events/**/*.txt');
         const eventFiles = await vscode.workspace.findFiles(eventPattern, '**/node_modules/**', 500);
-        const eventGraphs: EventGraph[] = [];
+const eventGraphs: EventGraph[] = [];
 
-        for (const fileUri of eventFiles) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(fileUri);
-                const content = doc.getText();
-                const relativePath = vscode.workspace.asRelativePath(fileUri);
-                const graph = parseEventFile(content, relativePath);
-                if (graph.nodes.length > 0) {
-                    eventGraphs.push(graph);
-                }
-            } catch {
-                // Skip unreadable files
-            }
-        }
+for (const fileUri of eventFiles) {
+try {
+const doc = await vscode.workspace.openTextDocument(fileUri);
+const content = doc.getText();
+const relativePath = vscode.workspace.asRelativePath(fileUri);
+const graph = parseEventFile(content, relativePath);
+if (graph.nodes.length > 0) {
+eventGraphs.push(graph);
+}
+} catch {
+// Skip unreadable files
+}
+}
 
-        this._panel.webview.postMessage({ command: 'loading', text: '扫描 common/ 触发器...' });
+this._panel.webview.postMessage({ command: 'loading', text: '扫描 common/ 触发器...' });
 
-        const commonPatterns = [
-            '**/common/on_actions/**/*.txt',
+const commonPatterns = [
+'**/common/on_actions/**/*.txt',
             '**/common/decisions/**/*.txt',
             '**/common/scripted_effects/**/*.txt',
             '**/common/scripted_triggers/**/*.txt',
@@ -220,120 +220,120 @@ export class EventChainPanel {
         for (const glob of commonPatterns) {
             const pattern = new vscode.RelativePattern(wsRoot, glob);
             const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 200);
-            for (const fileUri of files) {
-                try {
-                    const doc = await vscode.workspace.openTextDocument(fileUri);
-                    const content = doc.getText();
-                    const relativePath = vscode.workspace.asRelativePath(fileUri);
-                    const result = parseCommonFile(content, relativePath);
+for (const fileUri of files) {
+try {
+const doc = await vscode.workspace.openTextDocument(fileUri);
+const content = doc.getText();
+const relativePath = vscode.workspace.asRelativePath(fileUri);
+const result = parseCommonFile(content, relativePath);
 
-                    const graph: EventGraph = { nodes: [], edges: result.edges };
-                    for (const src of result.externalSources) {
-                        graph.nodes.push({
-                            id: src.id,
-                            type: src.sourceType,
-                            title: src.name,
-                            isTriggeredOnly: false,
-                            file: src.file,
-                            line: src.line,
-                            endLine: src.line,
-                            namespace: `__${src.sourceType}__`,
-                            isFireOnAction: src.sourceType === 'on_action',
-                            isHidden: false,
-                            hasMTTH: false,
-                            flagsSet: [],
-                            flagsChecked: [],
-                            techsGranted: [],
-                            techsRequired: [],
-                            techsLastIncreased: [],
-                            firedOnActions: [],
-                        });
-                    }
-                    if (graph.nodes.length > 0 || graph.edges.length > 0) {
-                        eventGraphs.push(graph);
-                    }
-                } catch {
-                    // Skip
-                }
-            }
-        }
+const graph: EventGraph = { nodes: [], edges: result.edges };
+for (const src of result.externalSources) {
+graph.nodes.push({
+id: src.id,
+type: src.sourceType,
+title: src.name,
+isTriggeredOnly: false,
+file: src.file,
+line: src.line,
+endLine: src.line,
+namespace: `__${src.sourceType}__`,
+isFireOnAction: src.sourceType === 'on_action',
+isHidden: false,
+hasMTTH: false,
+flagsSet: [],
+flagsChecked: [],
+techsGranted: [],
+techsRequired: [],
+techsLastIncreased: [],
+firedOnActions: [],
+});
+}
+if (graph.nodes.length > 0 || graph.edges.length > 0) {
+eventGraphs.push(graph);
+}
+} catch {
+// Skip
+}
+}
+}
 
-        // ── Phase 1.5: 解析科技定义文件中的 flag 前置条件 ─────────────────
-        this._panel.webview.postMessage({ command: 'loading', text: '解析科技 flag 前置条件...' });
-        const techFlagMap: TechFlagMap = new Map();
-        const techPattern = new vscode.RelativePattern(wsRoot, '**/common/technology/**/*.txt');
+// ── Phase 1.5: Parse the flag preconditions in the technology definition file ─────────────────
+this._panel.webview.postMessage({ command: 'loading', text: '解析科技 flag 前置条件...' });
+const techFlagMap: TechFlagMap = new Map();
+const techPattern = new vscode.RelativePattern(wsRoot, '**/common/technology/**/*.txt');
         const techFiles = await vscode.workspace.findFiles(techPattern, '**/node_modules/**', 200);
-        for (const fileUri of techFiles) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(fileUri);
-                const content = doc.getText();
-                const fileMap = parseTechFlagRequirements(content);
-                for (const [tech, flags] of fileMap) {
-                    if (flags.length > 0) {
-                        techFlagMap.set(tech, flags);
-                    }
-                }
-            } catch {
-                // Skip
-            }
-        }
+for (const fileUri of techFiles) {
+try {
+const doc = await vscode.workspace.openTextDocument(fileUri);
+const content = doc.getText();
+const fileMap = parseTechFlagRequirements(content);
+for (const [tech, flags] of fileMap) {
+if (flags.length > 0) {
+techFlagMap.set(tech, flags);
+}
+}
+} catch {
+// Skip
+}
+}
 
-        // ── Phase 2: BFS-expand from seed events (shallow: depth 2) ───────────
-        this._panel.webview.postMessage({ command: 'loading', text: '构建事件关系图...' });
+// ── Phase 2: BFS-expand from seed events (shallow: depth 2) ───────────
+this._panel.webview.postMessage({ command: 'loading', text: '构建事件关系图...' });
 
-        const eventsOnlyGraph = mergeGraphs(eventGraphs);
+const eventsOnlyGraph = mergeGraphs(eventGraphs);
 
-        // 构建隐式连接边（flag/科技/on_action + 传递性 flag→tech→event）
-        this._panel.webview.postMessage({ command: 'loading', text: '构建隐式连接关系...' });
-        const implicitEdges = buildImplicitEdges(eventsOnlyGraph, techFlagMap);
-        eventsOnlyGraph.edges.push(...implicitEdges);
+// Build implicit connection edges (flag/technology/on_action + transitivity flag→tech→event)
+this._panel.webview.postMessage({ command: 'loading', text: '构建隐式连接关系...' });
+const implicitEdges = buildImplicitEdges(eventsOnlyGraph, techFlagMap);
+eventsOnlyGraph.edges.push(...implicitEdges);
 
-        // Depth 2: seed events → their direct targets → one more hop
-        const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
+// Depth 2: seed events → their direct targets → one more hop
+const subgraph = extractConnectedSubgraph(eventsOnlyGraph, seedIds, 2);
 
-        // (Phase 3 removed: common/ scanning is now done in Phase 1 before BFS)
+// (Phase 3 removed: common/ scanning is now done in Phase 1 before BFS)
 
-        // ── Phase 4: Resolve localization titles for non-hidden events ─────────
-        this._panel.webview.postMessage({ command: 'loading', text: '解析本地化文本...' });
-        await this._resolveLocTitles(subgraph);
+// ── Phase 4: Resolve localization titles for non-hidden events ─────────
+this._panel.webview.postMessage({ command: 'loading', text: '解析本地化文本...' });
+await this._resolveLocTitles(subgraph);
 
-        return subgraph;
-    }
+return subgraph;
+}
 
-    // ── Resolve localization titles for non-hidden events ────────────────────
+// ── Resolve localization titles for non-hidden events ────────────────────
 
-    private async _resolveLocTitles(graph: EventGraph) {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) return;
+private async _resolveLocTitles(graph: EventGraph) {
+const workspaceFolders = vscode.workspace.workspaceFolders;
+if (!workspaceFolders) return;
 
-        // Collect title keys that need resolving (non-hidden events with a title key)
-        const keysToResolve = new Set<string>();
-        for (const node of graph.nodes) {
-            if (!node.isHidden && node.title) {
-                keysToResolve.add(node.title);
-            }
-        }
-        if (keysToResolve.size === 0) return;
+// Collect title keys that need resolving (non-hidden events with a title key)
+const keysToResolve = new Set<string>();
+for (const node of graph.nodes) {
+if (!node.isHidden && node.title) {
+keysToResolve.add(node.title);
+}
+}
+if (keysToResolve.size === 0) return;
 
-        const locMap = new Map<string, string>();
+const locMap = new Map<string, string>();
 
-        // Get configured validation languages, prioritize Chinese if present
-        const config = vscode.workspace.getConfiguration('cwtools');
-        let locLangs = config.get<string[]>('localisation.languages') || ['English'];
-        
-        let targetLangs = locLangs.map(l => l.toLowerCase());
-        if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {
-            targetLangs = ['simp_chinese', 'chinese'];
-        } else {
-            targetLangs = targetLangs.map(l => l === 'english' ? 'english' : l === 'chinese' ? 'simp_chinese' : l);
-        }
+// Get configured validation languages, prioritize Chinese if present
+const config = vscode.workspace.getConfiguration('cwtools');
+let locLangs = config.get<string[]>('localisation.languages') || ['English'];
 
-        // Only scan YML files that match the target languages (e.g. *l_english.yml)
-        // This is significantly faster than parsing all loc files
-        for (const lang of targetLangs) {
-            const locPattern = new vscode.RelativePattern(
-                workspaceFolders[0]!,
-                `**/{localisation,localisation_synced,localization}/**/*l_${lang}.yml`,
+let targetLangs = locLangs.map(l => l.toLowerCase());
+if (targetLangs.length >= 2 && targetLangs.includes('chinese')) {
+targetLangs = ['simp_chinese', 'chinese'];
+} else {
+targetLangs = targetLangs.map(l => l === 'english' ? 'english' : l === 'chinese' ? 'simp_chinese' : l);
+}
+
+// Only scan YML files that match the target languages (e.g. *l_english.yml)
+// This is significantly faster than parsing all loc files
+for (const lang of targetLangs) {
+const locPattern = new vscode.RelativePattern(
+workspaceFolders[0]!,
+`**/{localisation,localisation_synced,localization}/**/*l_${lang}.yml`,
             );
             const locFiles = await vscode.workspace.findFiles(locPattern, '**/node_modules/**', 200);
             const linePattern = /^\s*([a-zA-Z0-9_.:-]+)\s*:\d*\s*"(.*)"\s*$/;

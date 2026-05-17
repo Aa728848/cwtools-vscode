@@ -1,48 +1,48 @@
-/**
- * Eddy CWTool Code — 冲突检测器
- *
- * 在多 Agent 并行执行时，检测文件写入冲突和语义冲突。
- * 通过 Blackboard 的 write_intent 条目实现意图声明。
- */
+/** 
+* Eddy CWTool Code — Clash Detector 
+* 
+* Detect file writing conflicts and semantic conflicts when multiple Agents are executed in parallel. 
+* Implement intent declaration via Blackboard's write_intent entry. 
+*/
 
 import { Blackboard } from './blackboard';
 
-/** 冲突检测结果 */
+/** Conflict detection results */
 export interface ConflictResult {
-    /** 是否存在冲突 */
+    /** Whether there is a conflict */
     hasConflict: boolean;
-    /** 冲突类型 */
+    /** Conflict type */
     conflictType?: 'file_write' | 'entity_id';
-    /** 冲突对方 Agent ID */
+    /** Conflict partner Agent ID */
     conflictAgentId?: string;
-    /** 冲突详情 */
+    /** Conflict details */
     details?: string;
 }
 
-/**
- * 冲突检测器。
- *
- * 工作原理：
- * 1. Agent 在写入文件前通过 declareIntent 声明写入意图
- * 2. 其他 Agent 在写入前调用 checkWriteConflict 检查是否有冲突
- * 3. Agent 完成后调用 clearIntent 清除意图声明
- *
- * 这是在 PartitionedWriteQueue 之上的语义层冲突检测 —
- * 写队列保证了物理层面的串行化，冲突检测器防止逻辑层面的重复工作。
- */
+/** 
+* Conflict detector. 
+* 
+* Working principle: 
+* 1. Agent declares the writing intention through declareIntent before writing the file 
+* 2. Other Agents call checkWriteConflict to check whether there is a conflict before writing. 
+* 3. After the Agent is completed, call clearIntent to clear the intent statement. 
+* 
+* This is semantic layer conflict detection on top of PartitionedWriteQueue — 
+* The write queue ensures serialization at the physical level, and the conflict detector prevents duplication of work at the logical level. 
+*/
 export class ConflictDetector {
-    /** 写入意图在 Blackboard 中的 key 前缀 */
+    /** Key prefix for writing intent in Blackboard */
     private static readonly INTENT_PREFIX = '__intent:';
-    /** 实体注册在 Blackboard 中的 key 前缀 */
+    /** The key prefix of the entity registered in Blackboard */
     private static readonly ENTITY_PREFIX = '__entity:';
 
-    /**
-     * 检查 Agent 的写入意图是否与其他运行中 Agent 冲突。
-     *
-     * @param agentId 当前 Agent ID
-     * @param filePath 目标文件路径
-     * @param blackboard 共享黑板
-     */
+    /** 
+* Check whether the Agent's write intent conflicts with other running Agents. 
+* 
+* @param agentId current Agent ID 
+* @param filePath target file path 
+* @param blackboard shared blackboard 
+*/
     checkWriteConflict(
         agentId: string,
         filePath: string,
@@ -63,13 +63,13 @@ export class ConflictDetector {
         return { hasConflict: false };
     }
 
-    /**
-     * 检查实体 ID 是否已被其他 Agent 创建。
-     *
-     * @param agentId 当前 Agent ID
-     * @param entityId 实体 ID (如 event namespace.1)
-     * @param blackboard 共享黑板
-     */
+    /** 
+* Check whether the entity ID has been created by other Agents. 
+* 
+* @param agentId current Agent ID 
+* @param entityId entity ID (such as event namespace.1) 
+* @param blackboard shared blackboard 
+*/
     checkEntityConflict(
         agentId: string,
         entityId: string,
@@ -90,13 +90,13 @@ export class ConflictDetector {
         return { hasConflict: false };
     }
 
-    /**
-     * Agent 写入前声明意图。
-     *
-     * @param agentId Agent ID
-     * @param filePaths 即将写入的文件路径列表
-     * @param blackboard 共享黑板
-     */
+    /** 
+* Agent declares intent before writing. 
+* 
+* @param agentId Agent ID 
+* @param filePaths list of file paths to be written 
+* @param blackboard shared blackboard 
+*/
     declareIntent(
         agentId: string,
         filePaths: string[],
@@ -108,13 +108,13 @@ export class ConflictDetector {
         }
     }
 
-    /**
-     * Agent 创建实体后注册到黑板。
-     *
-     * @param agentId Agent ID
-     * @param entityIds 已创建的实体 ID 列表
-     * @param blackboard 共享黑板
-     */
+    /** 
+* Agent registers to the blackboard after creating the entity. 
+* 
+* @param agentId Agent ID 
+* @param entityIds List of created entity IDs 
+* @param blackboard shared blackboard 
+*/
     registerEntities(
         agentId: string,
         entityIds: string[],
@@ -126,12 +126,12 @@ export class ConflictDetector {
         }
     }
 
-    /**
-     * Agent 完成后清除写入意图声明。
-     *
-     * @param agentId Agent ID
-     * @param blackboard 共享黑板
-     */
+    /** 
+* Clear the write intent statement after the Agent completes. 
+* 
+* @param agentId Agent ID 
+* @param blackboard shared blackboard 
+*/
     clearIntent(agentId: string, blackboard: Blackboard): void {
         const intents = blackboard.queryByPrefix(ConflictDetector.INTENT_PREFIX);
         for (const entry of intents) {
@@ -141,9 +141,9 @@ export class ConflictDetector {
         }
     }
 
-    /**
-     * 获取所有当前活跃的写入意图（用于调试和 UI 展示）。
-     */
+    /** 
+* Get all currently active write intents (for debugging and UI display). 
+*/
     getActiveIntents(blackboard: Blackboard): Array<{ agentId: string; filePath: string }> {
         const intents = blackboard.queryByPrefix(ConflictDetector.INTENT_PREFIX);
         return intents.map(e => ({

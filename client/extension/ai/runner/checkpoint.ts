@@ -4,10 +4,10 @@ import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidat
 import type { AgentResumeState, ChatMessage, AgentMode } from '../types';
 import type { AgentToolExecutor } from '../agentTools';
 
-/**
- * 将当前 Agent 状态保存至磁盘，以便在 IDE 重启或发生崩溃时恢复。
- * (Checkpoint / Resume)
- */
+/** 
+* Save the current Agent state to disk for recovery in the event of an IDE restart or crash. 
+* (Checkpoint/Resume) 
+*/
 export async function saveResumeState(
     topicId: string,
     mode: AgentMode,
@@ -40,9 +40,9 @@ export async function saveResumeState(
     }
 }
 
-/**
- * 读取指定 topicId 下的断点续传状态。
- */
+/** 
+* Read the resumable download status under the specified topicId. 
+*/
 export async function loadResumeState(topicId: string): Promise<AgentResumeState | null> {
     try {
         const wsRoot = getProjectWorkspaceRoot();
@@ -61,9 +61,9 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
     }
 }
 
-/**
- * 判断是否存在断点续传状态。
- */
+/** 
+* Determine whether there is a breakpoint resume state. 
+*/
 export async function hasResumeState(topicId: string): Promise<boolean> {
     if (!topicId) return false;
     try {
@@ -76,9 +76,9 @@ export async function hasResumeState(topicId: string): Promise<boolean> {
     }
 }
 
-/**
- * 清理断点续传状态（当新任务开始时）。
- */
+/** 
+* Clean up the resumption status (when a new task starts). 
+*/
 export async function clearResumeState(topicId: string): Promise<void> {
     if (!topicId) return;
     try {

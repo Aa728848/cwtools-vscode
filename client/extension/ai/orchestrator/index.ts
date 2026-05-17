@@ -1,10 +1,10 @@
-/**
- * Eddy CWTool Code — 多 Agent 协作系统模块导出
- *
- * 集中导出 orchestrator 包的所有公共 API。
- */
+/** 
+* Eddy CWTool Code — Multi-Agent collaboration system module export 
+* 
+* Centrally export all public APIs of the orchestrator package. 
+*/
 
-// 类型
+// type
 export type {
     BlackboardEntry,
     BlackboardEntryType,
@@ -24,27 +24,27 @@ export type {
     QualityGateResult,
 } from './types';
 
-// 黑板系统
+// blackboard system
 export { Blackboard } from './blackboard';
 export type { BlackboardDisposable } from './blackboard';
 
-// Agent 注册表
+//Agent registry
 export { AGENT_REGISTRY, getAgentProfile, getAvailableRoles, getRoleDescriptions, applyUserModelOverrides } from './agentRegistry';
 
-// DAG 任务图引擎
+// DAG task graph engine
 export { TaskGraphEngine } from './taskGraphEngine';
 
-// 冲突检测器
+// conflict detector
 export { ConflictDetector } from './conflictDetector';
 export type { ConflictResult } from './conflictDetector';
 
-// 质量门
+// quality gate
 export { QualityGate } from './qualityGate';
 export type { QualityGateConfig } from './qualityGate';
 
-// 并行执行器
+// Parallel executor
 export { ParallelExecutor } from './parallelExecutor';
 export type { SubAgentExecutor } from './parallelExecutor';
 
-// 协调器
+// coordinator
 export { Orchestrator } from './orchestrator';

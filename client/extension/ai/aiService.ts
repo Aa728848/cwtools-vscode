@@ -857,7 +857,7 @@ export class AIService {
         const toolCallMap: Record<number, { id: string; type: string; function: { name: string; arguments: string } }> = {};
 
         while (true) {
-            const { done, value } = await this.readWithTimeout(reader, controller, 600000); // 600s idle timeout (防止大模型断连假死)
+            const { done, value } = await this.readWithTimeout(reader, controller, 600000); // 600s idle timeout (to prevent large models from being disconnected and suspended)
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
@@ -1002,7 +1002,7 @@ export class AIService {
         let currentBlockType = '';
 
         while (true) {
-            const { done, value } = await this.readWithTimeout(reader, controller, 600000); // 600s idle timeout (防止大模型断连假死)
+            const { done, value } = await this.readWithTimeout(reader, controller, 600000); // 600s idle timeout (to prevent large models from being disconnected and suspended)
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');

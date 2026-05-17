@@ -526,9 +526,9 @@ export interface GetMemoryResult {
 
 // ─── Agent Tool Context ────────────────────────────────────────────────────────
 
-/**
- * 传递给工具执行器的每次运行上下文（线程安全/并发隔离）
- */
+/** 
+* Per-run context passed to tool executor (thread safety/concurrency isolation) 
+*/
 export interface AgentToolContext {
     runnerOptions?: import('./agentRunner').AgentRunnerOptions;
     agentRunner?: import('./agentRunner').AgentRunner;
@@ -598,7 +598,7 @@ export type AgentToolName =
     | 'query_types'
     | 'query_rules'
     | 'query_references'
-    // validate_code — REMOVED: 由 get_diagnostics + multi_replace_file_content 内联诊断替代
+    // validate_code — REMOVED: replaced by get_diagnostics + multi_replace_file_content inline diagnostics
     | 'get_diagnostics'
     | 'get_file_context'
     | 'search_mod_files'
@@ -861,11 +861,11 @@ export interface GetDiagnosticsResult {
     /** Total number of matching diagnostics before truncation */
     totalDiagnosticCount: number;
     truncated: boolean;
-    /** 全局诊断新鲜度：fresh=全部验证完成, pending=全局验证进行中, stale=未验证 */
+    /** Global diagnostic freshness: fresh=all verification completed, pending=global verification in progress, stale=not verified */
     freshness?: 'fresh' | 'pending' | 'stale';
-    /** 当前未完成的全局验证类型，如 ["localisation", "types"] */
+    /** Currently unfinished global validation types, such as ["localisation", "types"] */
     pendingGlobalKinds?: string[];
-    /** 全局诊断 epoch 计数器 */
+    /** Global diagnostic epoch counter */
     lastEpoch?: number;
 }
 
@@ -984,7 +984,7 @@ export interface AgentStep {
     durationMs?: number;
     /** Iteration context string, e.g. "Iteration 3/10" */
     iterationInfo?: string;
-    /** 子 Agent 节点 ID，用于 UI 分组显示 */
+    /** Child Agent node ID, used for UI group display */
     agentId?: string;
 }
 
@@ -1264,7 +1264,7 @@ export type HostMessage =
     | { type: 'skillInstallComplete'; success: boolean }
     | { type: 'usageStats'; stats: any }
     | { type: 'artifactList'; artifacts: AgentArtifact[] }
-    /** 多 Agent 协调器进度推送 — Agent Lane UI */
+    /** Multi-Agent coordinator progress push — Agent Lane UI */
     | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
     | { type: 'mentionSearchResults'; results: Array<{
         type?: ContextItemType;
@@ -1327,9 +1327,9 @@ export interface PanelSettings {
     mcp?: {
         servers: MCPServerConfig[];
     };
-    /** 协调模式子 Agent 模型覆盖配置 */
+    /** Coordination mode sub-Agent model coverage configuration */
     orchestrator?: {
-        /** 角色 → { provider, model } 映射（'__inherit__' 表示继承主设置） */
+        /** Role → { provider, model } mapping ('__inherit__' means inheriting the main settings) */
         agentModels?: Record<string, { provider: string; model: string }>;
     };
 }
@@ -1348,46 +1348,46 @@ export function contentToString(content: string | ContentPart[] | null | undefin
         .join('');
 }
 
-// ─── Orchestrator 进度推送载荷 ──────────────────────────────────────────────
+// ─── Orchestrator progress push payload ────────────────────────────────────────────
 
-/** 单个 Agent 泳道的实时状态 */
+/** Real-time status of a single Agent lane */
 export interface AgentLaneInfo {
-    /** Agent 实例 ID */
+    /** Agent instance ID */
     id: string;
-    /** 角色标签 (explorer / builder / reviewer...) */
+    /** Role tag (explorer / builder / reviewer...) */
     role: string;
-    /** 对应任务节点 ID */
+    /** Corresponding task node ID */
     taskNodeId: string;
-    /** 当前状态 */
+    /** Current status */
     status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
-    /** 已用步骤数 */
+    /** Number of steps used */
     stepCount: number;
-    /** 消耗 token 数 */
+    /** Number of tokens consumed */
     tokenUsed: number;
-    /** 开始时间 */
+    /** Start time */
     startedAt?: number;
-    /** 耗时 (ms) */
+    /** Time consuming (ms) */
     duration?: number;
-    /** 最新状态文本 */
+    /** Latest status text */
     statusText?: string;
 }
 
-/** Orchestrator 推送到 WebView 的进度数据 */
+/** Progress data pushed to WebView by Orchestrator */
 export interface OrchestratorProgressPayload {
-    /** 阶段标签 */
+    /** Stage label */
     phase: 'planning' | 'executing' | 'reviewing' | 'complete' | 'failed';
-    /** 总节点数 */
+    /** Total number of nodes */
     total: number;
-    /** 已完成节点数 */
+    /** Number of completed nodes */
     done: number;
-    /** 运行中节点数 */
+    /** Number of running nodes */
     running: number;
-    /** 失败节点数 */
+    /** Number of failed nodes */
     failed: number;
-    /** 被取消节点数 */
+    /** Number of canceled nodes */
     cancelled: number;
-    /** 各 Agent 泳道信息 */
+    /** Each Agent swim lane information */
     lanes: AgentLaneInfo[];
-    /** 最新事件描述 */
+    /** Latest event description */
     latestEvent?: string;
 }

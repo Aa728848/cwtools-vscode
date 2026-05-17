@@ -11,7 +11,9 @@
     "test:watch": "tsc -w -p . & vscode-test -c ./.vscode-test.js -w",
     "test:unit": "npx ts-mocha -p tsconfig.json \"client/test/unit/**/*.test.ts\"",
     "test:coverage": "nyc npm run test:unit",
-    "lint": "eslint client/"
+    "lint": "eslint client/",
+    "check:release": "node tools/check-release.js",
+    "verify": "npm run lint && npm run compile && npm run test:unit && npm run check:release -- --skip-compile --skip-test"
   },
   "dependencies": {
     "google-translate-api-x": "^10.7.2",

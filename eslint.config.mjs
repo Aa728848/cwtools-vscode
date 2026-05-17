@@ -34,5 +34,14 @@ export default tseslint.config(
 				varsIgnorePattern: "^_",
 			}],
 		},
-	}
+	},
+	// Test files: relax rules that conflict with Chai/Mocha patterns
+	{
+		files: ['client/test/**/*.ts', 'client/test/**/*.test.ts'],
+		rules: {
+			'no-unused-expressions': 'off',
+			'@typescript-eslint/no-unused-expressions': 'off',
+			'@typescript-eslint/no-floating-promises': 'off',
+		},
+	},
 );

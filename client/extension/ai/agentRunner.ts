@@ -39,6 +39,7 @@ import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
 import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from './workspacePaths';
 import { filterToolDefinitionsForMode, resolveMaxToolIterations } from './runnerPolicy';
+import { getWorkflow } from './workflowRegistry';
 import { WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { saveResumeState, loadResumeState, hasResumeState, clearResumeState } from './runner/checkpoint';
@@ -268,6 +269,11 @@ export interface AgentRunnerOptions {
 * Whether to restore the state from the last breakpoint snapshot that exited abnormally (breakpoint resume) 
 */
     resumeFromState?: boolean;
+    /**
+     * If set, the agent run is executing within a specific workflow.
+     * The runner will apply the workflow's tool policy and prompt supplement.
+     */
+    workflowId?: string;
 }
 
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
@@ -807,9 +813,15 @@ export class AgentRunner {
                 : effectiveUserMessage;
 
         const providerForPrompt = options?.providerId ?? this.aiService.getConfig().provider;
-        const systemPrompt = options?.useSlimPrompt
+        let systemPrompt = options?.useSlimPrompt
             ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt)
             : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt);
+
+        // Inject workflow prompt supplement if running within a workflow
+        const activeWorkflowForPrompt = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
+        if (activeWorkflowForPrompt?.promptSupplement) {
+            systemPrompt = activeWorkflowForPrompt.promptSupplement + '\n\n' + systemPrompt;
+        }
 
         // Build the message array
         let messages: ChatMessage[];
@@ -1050,11 +1062,26 @@ export class AgentRunner {
         const confirmedWrittenFiles = new Set<string>();
         const performanceConfig = vs.workspace.getConfiguration('cwtools.ai.performance');
         const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
-        const availableTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
+        let availableTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
             legacyFullToolset,
         });
+
+        // Apply workflow tool policy if running within a workflow
+        const activeWorkflow = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
+        if (activeWorkflow) {
+            const policy = activeWorkflow.toolPolicy;
+            if (policy.strategy === 'allowlist') {
+                const allowed = new Set<string>(policy.tools);
+                availableTools = availableTools.filter(t => allowed.has(t.function.name));
+            } else {
+                // blocklist
+                const blocked = new Set<string>(policy.tools);
+                availableTools = availableTools.filter(t => !blocked.has(t.function.name));
+            }
+            ErrorReporter.debug('AgentRunner', `Workflow "${activeWorkflow.id}" tool policy applied: ${availableTools.length} tools available`);
+        }
 
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
         // imported at the top of this file; dynamic import added latency for nothing.

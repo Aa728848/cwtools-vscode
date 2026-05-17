@@ -1,6 +1,19 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 import { routeLiveStep, buildToolPairHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import { getDiffArtifactFilesForWebview, type DiffArtifactFileView } from './artifactPanelModel';
+import {
+    escapeHtml as _fmtEscapeHtml,
+    formatNum as _fmtFormatNum,
+    formatTime as _fmtFormatTime,
+    formatDuration as _fmtFormatDuration,
+    extractStepFile as _fmtExtractStepFile,
+    makeRunSummary as _fmtMakeRunSummary,
+    WRITE_TOOL_NAMES as _fmtWriteTools,
+    READ_TOOL_NAMES as _fmtReadTools,
+    VALIDATION_TOOL_NAMES as _fmtValidationTools,
+    ORCHESTRATOR_TOOL_NAMES as _fmtOrchestratorTools,
+    type RunSummary as _FmtRunSummary,
+} from './chat/formatters';
 
 /** Type-safe getElementById with generic cast */
 function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -1263,18 +1276,10 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         bar.style.display = '';
     }
 
-    function formatNum(n: number) { return n >= 1000 ? (n / 1000).toFixed(0) + 'k' : String(n); }
-
-    function formatTime(ts: number | string | null) {
-        if (!ts) return '';
-        const d = new Date(ts);
-        return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-    }
-
-    // ── HTML escape ────────────────────────────────────────────────────────────
-    function escapeHtml(t: any): string {
-        return String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+    // Delegated to chat/formatters.ts for single-source-of-truth
+    const formatNum = _fmtFormatNum;
+    const formatTime = _fmtFormatTime;
+    const escapeHtml = _fmtEscapeHtml;
 
     // ── Markdown renderer ──────────────────────────────────────────────────────
     function inlineMd(raw: string) {
@@ -1699,39 +1704,13 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         document_symbols: Icons.bookmark, workspace_symbols: Icons.bookmark, query_scope: Icons.telescope,
         query_types: Icons.ruler, query_rules: Icons.ruler, query_references: Icons.link, todo_write: Icons.clipboard,
     };
-    const WRITE_TOOL_NAMES = new Set(['edit_file', 'write_file', 'multiedit', 'apply_patch', 'delete_file']);
-    const READ_TOOL_NAMES = new Set(['read_file', 'list_directory', 'glob_files', 'codesearch', 'search_mod_files', 'get_file_context', 'document_symbols', 'workspace_symbols']);
-    const VALIDATION_TOOL_NAMES = new Set(['validate_code', 'get_diagnostics']);
-    const ORCHESTRATOR_TOOL_NAMES = new Set(['dispatch_agents', 'query_blackboard', 'merge_results']);
-
-    type RunSummary = {
-        startedAt: number | null;
-        endedAt: number | null;
-        durationMs: number;
-        totalSteps: number;
-        thinkingCount: number;
-        toolCallCount: number;
-        toolResultCount: number;
-        writeCount: number;
-        readCount: number;
-        validationCount: number;
-        orchestratorCount: number;
-        errorCount: number;
-        failedToolCount: number;
-        changedFiles: string[];
-        topTools: Array<{ name: string; count: number }>;
-        latestStatus: string;
-        hasOrchestrator: boolean;
-        alerts: string[];
-        validations: string[];
-    };
-
-    function extractStepFile(step: any): string {
-        const args = step?.toolArgs || {};
-        const raw = args.filePath || args.file || args.path || args.directory || '';
-        if (!raw) return '';
-        return String(raw).split(/[\\/]/).pop() || String(raw);
-    }
+    // Delegated to chat/formatters.ts
+    const WRITE_TOOL_NAMES = _fmtWriteTools;
+    const READ_TOOL_NAMES = _fmtReadTools;
+    const VALIDATION_TOOL_NAMES = _fmtValidationTools;
+    const ORCHESTRATOR_TOOL_NAMES = _fmtOrchestratorTools;
+    type RunSummary = _FmtRunSummary;
+    const extractStepFile = _fmtExtractStepFile;
 
     function makeRunSummary(steps: any[] | undefined, fallbackContent?: string): RunSummary {
         const all = steps || [];
@@ -1866,14 +1845,8 @@ function $id<T extends HTMLElement = HTMLElement>(id: string): T | null {
         `;
     }
 
-    function formatDuration(ms: number): string {
-        if (ms <= 0) return '0ms';
-        if (ms < 1000) return `${Math.round(ms)}ms`;
-        if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-        const minutes = Math.floor(ms / 60000);
-        const seconds = Math.round((ms % 60000) / 1000);
-        return `${minutes}m ${seconds}s`;
-    }
+    // Delegated to chat/formatters.ts
+    const formatDuration = _fmtFormatDuration;
 
     function buildProcessPanel(sortedSteps: any[]) {
         const thinkingSteps = sortedSteps.filter((s: any) => s.type === 'thinking' || s.type === 'thinking_content');

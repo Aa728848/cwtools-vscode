@@ -6,6 +6,8 @@
  * based on the active languageId.
  */
 
+import { getProfileByLanguageId } from '../gameProfiles';
+
 // ─── Stellaris Knowledge (full, authoritative) ───────────────────────────────
 
 export const STELLARIS_KNOWLEDGE = `
@@ -589,19 +591,9 @@ export function getGameKnowledge(languageId: string): string {
 
 /**
  * Returns the display name of the game.
+ * Delegates to the GameProfile registry for known games.
  */
 export function getGameDisplayName(languageId: string): string {
-    switch (languageId) {
-        case 'stellaris': return 'Stellaris';
-        case 'hoi4': return 'Hearts of Iron IV';
-        case 'eu4': return 'Europa Universalis IV';
-        case 'ck2': return 'Crusader Kings II';
-        case 'ck3': return 'Crusader Kings III';
-        case 'vic2': return 'Victoria II';
-        case 'vic3': return 'Victoria 3';
-        case 'imperator': return 'Imperator: Rome';
-        case 'eu5': return 'Europa Universalis V';
-        case 'paradox': return 'Paradox Game';
-        default: return 'Stellaris';
-    }
+    if (languageId === 'paradox') return 'Paradox Game';
+    return getProfileByLanguageId(languageId).displayName;
 }

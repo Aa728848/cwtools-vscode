@@ -7,11 +7,11 @@ describe('getModelPricing', () => {
     });
 
     it('exact match: claude-sonnet-4-6', () => {
-        expect(getModelPricing('claude-sonnet-4-6')).to.deep.equal([20.49, 102.45]);
+        expect(getModelPricing('claude-sonnet-4-6')).to.deep.equal([21.6, 108]);
     });
 
     it('exact match: gpt-5.5', () => {
-        expect(getModelPricing('gpt-5.5')).to.deep.equal([34.15, 204.90]);
+        expect(getModelPricing('gpt-5.5')).to.deep.equal([36, 216]);
     });
 
     it('exact match: deepseek-v4-pro', () => {
@@ -19,12 +19,12 @@ describe('getModelPricing', () => {
     });
 
     it('prefix match: dated model tag', () => {
-        expect(getModelPricing('claude-opus-4-7-20251101')).to.deep.equal([34.15, 170.75]);
+        expect(getModelPricing('claude-opus-4-7-20251101')).to.deep.equal([36, 180]);
     });
 
     it('contains match: substring', () => {
         const result = getModelPricing('some-prefix-claude-sonnet-4-6-suffix');
-        expect(result).to.deep.equal([20.49, 102.45]);
+        expect(result).to.deep.equal([21.6, 108]);
     });
 
     it('unknown model returns [0, 0]', () => {

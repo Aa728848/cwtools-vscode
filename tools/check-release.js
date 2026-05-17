@@ -1,0 +1,353 @@
+#!/usr/bin/env node
+/**
+ * Release Quality Gate — Pre-publish Checks
+ *
+ * Verifies the project is in a releasable state:
+ *   1.  Root & release manifest version sync
+ *   2.  CHANGELOG entry for current version
+ *   3.  Required files present (README, LICENSE, etc.)
+ *   4.  No hardcoded secrets or localhost URLs in source
+ *   5.  TypeScript compiles cleanly
+ *   6.  Unit tests pass
+ *   7.  Release manifest is valid JSON
+ *   8.  NLS key completeness (package.nls.json ↔ package.nls.zh.json)
+ *   9.  Webview bundles exist and are non-empty
+ *   10. Server binaries exist for all platforms
+ *
+ * Usage: node tools/check-release.js [--skip-compile] [--skip-test]
+ * Exit code 0 = all checks passed, 1 = at least one failure.
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+const ROOT = path.resolve(__dirname, '..');
+const RELEASE = path.join(ROOT, 'release');
+const FAIL = '\x1b[31m✗\x1b[0m';
+const PASS = '\x1b[32m✓\x1b[0m';
+const WARN = '\x1b[33m⚠\x1b[0m';
+
+const args = process.argv.slice(2);
+const skipCompile = args.includes('--skip-compile');
+const skipTest = args.includes('--skip-test');
+
+let failures = 0;
+let warnings = 0;
+
+function check(label, fn) {
+    try {
+        const result = fn();
+        if (result === true) {
+            console.log(`  ${PASS} ${label}`);
+        } else if (result === 'warn') {
+            console.log(`  ${WARN} ${label}`);
+            warnings++;
+        } else {
+            console.log(`  ${FAIL} ${label}`);
+            failures++;
+        }
+    } catch (e) {
+        console.log(`  ${FAIL} ${label}: ${e.message}`);
+        failures++;
+    }
+}
+
+console.log('\n🔍 Release Quality Gate\n');
+
+// ── 1. Version Sync ─────────────────────────────────────────────────────────
+
+check('Root package.json version matches release/package.json', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
+    const relPkgPath = path.join(RELEASE, 'package.json');
+    if (!fs.existsSync(relPkgPath)) return 'warn';
+    const relPkg = JSON.parse(fs.readFileSync(relPkgPath, 'utf-8'));
+    const rootVersion = pkg.version;
+    const releaseVersion = relPkg.version;
+    if (!rootVersion) return false;
+    if (!releaseVersion) return 'warn';
+    if (rootVersion !== releaseVersion) {
+        console.log(`    Root: ${rootVersion} ≠ Release: ${releaseVersion} — run version sync before publishing`);
+        return 'warn';
+    }
+    return true;
+});
+
+// ── 2. CHANGELOG Entry ──────────────────────────────────────────────────────
+
+check('CHANGELOG has entry for current version', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
+    const version = pkg.version;
+    // Check both root and release changelog
+    for (const dir of [ROOT, RELEASE]) {
+        const clPath = path.join(dir, 'CHANGELOG.md');
+        if (fs.existsSync(clPath)) {
+            const cl = fs.readFileSync(clPath, 'utf-8');
+            if (cl.includes(version)) return true;
+        }
+    }
+    return 'warn';
+});
+
+// ── 3. Required Files ───────────────────────────────────────────────────────
+
+const REQUIRED_FILES = [
+    'README.md',
+    // Root may have CHANGELOG.md or it may live only in release/
+    // LICENSE may be LICENSE.md at root
+];
+// Also check that at least one of these pairs exists
+const REQUIRED_PAIRS = [
+    { files: ['CHANGELOG.md', 'release/CHANGELOG.md'], label: 'CHANGELOG' },
+    { files: ['LICENSE', 'LICENSE.md', 'release/LICENSE.md'], label: 'LICENSE' },
+];
+
+for (const file of REQUIRED_FILES) {
+    check(`Required file exists: ${file}`, () => {
+        const filePath = path.join(ROOT, file);
+        if (!fs.existsSync(filePath)) return false;
+        const stat = fs.statSync(filePath);
+        return stat.size > 0;
+    });
+}
+
+for (const pair of REQUIRED_PAIRS) {
+    check(`Required file exists: ${pair.label}`, () => {
+        for (const file of pair.files) {
+            const filePath = path.join(ROOT, file);
+            if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) return true;
+        }
+        return false;
+    });
+}
+
+// ── 4. No Secrets or Localhost URLs ─────────────────────────────────────────
+
+check('No hardcoded localhost URLs or API keys in extension source', () => {
+    const srcDir = path.join(ROOT, 'client', 'extension');
+    if (!fs.existsSync(srcDir)) return true;
+
+    const patterns = [
+        /http:\/\/localhost/,
+        /127\.0\.0\.1:\d/,
+        /sk-[a-zA-Z0-9]{20,}/,
+    ];
+
+    const tsFiles = [];
+    function walk(dir) {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory() && entry.name !== 'node_modules') {
+                walk(full);
+            } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+                tsFiles.push(full);
+            }
+        }
+    }
+    walk(srcDir);
+
+    for (const file of tsFiles) {
+        const content = fs.readFileSync(file, 'utf-8');
+        for (const pattern of patterns) {
+            if (pattern.test(content)) {
+                // Whitelist: Ollama/local provider default endpoints
+                if (content.includes('// localhost is expected for local providers')) continue;
+                if (content.includes('ollama') || content.includes('Ollama')) continue;
+                if (content.includes('localEndpoint') || content.includes('localProvider')) continue;
+                // Whitelist: provider configuration with localhost defaults
+                const rel = path.relative(ROOT, file);
+                if (rel.includes('aiService') || rel.includes('providers')) continue;
+                console.log(`    Found: ${pattern.source} in ${rel}`);
+                return false;
+            }
+        }
+    }
+    return true;
+});
+
+// ── 5. TypeScript Compilation ───────────────────────────────────────────────
+
+if (skipCompile) {
+    console.log(`  ${WARN} TypeScript compilation [SKIPPED]`);
+    warnings++;
+} else {
+    check('TypeScript compiles cleanly', () => {
+        try {
+            execSync('npm run compile', { cwd: ROOT, stdio: 'pipe', timeout: 120000 });
+            return true;
+        } catch (e) {
+            const stderr = e.stderr ? e.stderr.toString().slice(0, 500) : '';
+            if (stderr) console.log(`    ${stderr}`);
+            return false;
+        }
+    });
+}
+
+// ── 6. Unit Tests ───────────────────────────────────────────────────────────
+
+if (skipTest) {
+    console.log(`  ${WARN} Unit tests [SKIPPED]`);
+    warnings++;
+} else {
+    check('Unit tests pass', () => {
+        try {
+            execSync('npm run test:unit', { cwd: ROOT, stdio: 'pipe', timeout: 120000 });
+            return true;
+        } catch (e) {
+            const stdout = e.stdout ? e.stdout.toString().slice(-500) : '';
+            if (stdout) console.log(`    ${stdout}`);
+            return false;
+        }
+    });
+}
+
+// ── 7. Release Manifest Integrity ───────────────────────────────────────────
+
+check('Release manifest (release/package.json) is valid JSON', () => {
+    const manifestPath = path.join(RELEASE, 'package.json');
+    if (!fs.existsSync(manifestPath)) return 'warn';
+    try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        // Basic sanity: must have a name and version
+        if (!manifest.name || !manifest.version) {
+            console.log('    Missing name or version in release manifest');
+            return false;
+        }
+        return true;
+    } catch {
+        return false;
+    }
+});
+
+// ── 8. NLS Key Completeness ─────────────────────────────────────────────────
+
+check('NLS keys: package.nls.json and package.nls.zh.json in sync', () => {
+    const nlsEnPath = path.join(RELEASE, 'package.nls.json');
+    const nlsZhPath = path.join(RELEASE, 'package.nls.zh.json');
+
+    if (!fs.existsSync(nlsEnPath) || !fs.existsSync(nlsZhPath)) {
+        console.log('    NLS files not found in release/');
+        return 'warn';
+    }
+
+    const nlsEn = JSON.parse(fs.readFileSync(nlsEnPath, 'utf-8'));
+    const nlsZh = JSON.parse(fs.readFileSync(nlsZhPath, 'utf-8'));
+    const enKeys = new Set(Object.keys(nlsEn));
+    const zhKeys = new Set(Object.keys(nlsZh));
+
+    const missingInZh = [...enKeys].filter(k => !zhKeys.has(k));
+    const missingInEn = [...zhKeys].filter(k => !enKeys.has(k));
+
+    if (missingInZh.length > 0) {
+        console.log(`    Missing in zh: ${missingInZh.slice(0, 5).join(', ')}${missingInZh.length > 5 ? ` (+${missingInZh.length - 5} more)` : ''}`);
+    }
+    if (missingInEn.length > 0) {
+        console.log(`    Extra in zh (not in en): ${missingInEn.slice(0, 5).join(', ')}${missingInEn.length > 5 ? ` (+${missingInEn.length - 5} more)` : ''}`);
+    }
+
+    return missingInZh.length === 0 && missingInEn.length === 0;
+});
+
+check('NLS keys: manifest references exist in NLS files', () => {
+    const manifestPath = path.join(RELEASE, 'package.json');
+    const nlsPath = path.join(RELEASE, 'package.nls.json');
+    if (!fs.existsSync(manifestPath) || !fs.existsSync(nlsPath)) return 'warn';
+
+    const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
+    const nlsKeys = new Set(Object.keys(JSON.parse(fs.readFileSync(nlsPath, 'utf-8'))));
+
+    // Find all %key% references in the manifest
+    const refRegex = /%([^%]+)%/g;
+    const missing = [];
+    let match;
+    while ((match = refRegex.exec(manifestContent)) !== null) {
+        const key = match[1];
+        if (!nlsKeys.has(key)) {
+            missing.push(key);
+        }
+    }
+
+    if (missing.length > 0) {
+        console.log(`    Manifest references missing NLS keys: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ` (+${missing.length - 5} more)` : ''}`);
+        return false;
+    }
+    return true;
+});
+
+// ── 9. Webview Bundles ──────────────────────────────────────────────────────
+
+const EXPECTED_WEBVIEW_BUNDLES = [
+    'chatPanel.js',
+    'entityPreview.js',
+    'guiPreview.js',
+    'solarSystemPreview.js',
+    'eventChainPreview.js',
+    'techTreePreview.js',
+];
+
+check('Webview bundles exist and are non-empty', () => {
+    const webviewDir = path.join(RELEASE, 'bin', 'client', 'webview');
+    if (!fs.existsSync(webviewDir)) {
+        console.log(`    Directory not found: release/bin/client/webview/`);
+        return 'warn';
+    }
+
+    const missing = [];
+    const empty = [];
+    for (const bundle of EXPECTED_WEBVIEW_BUNDLES) {
+        const p = path.join(webviewDir, bundle);
+        if (!fs.existsSync(p)) {
+            missing.push(bundle);
+        } else if (fs.statSync(p).size === 0) {
+            empty.push(bundle);
+        }
+    }
+
+    if (missing.length > 0) console.log(`    Missing bundles: ${missing.join(', ')}`);
+    if (empty.length > 0) console.log(`    Empty bundles: ${empty.join(', ')}`);
+    return missing.length === 0 && empty.length === 0;
+});
+
+// ── 10. Server Binaries ─────────────────────────────────────────────────────
+
+const EXPECTED_PLATFORMS = ['win-x64', 'linux-x64', 'osx-x64'];
+
+check('Server binaries exist for all platforms', () => {
+    const serverDir = path.join(RELEASE, 'bin', 'server');
+    if (!fs.existsSync(serverDir)) {
+        console.log(`    Directory not found: release/bin/server/`);
+        return 'warn';
+    }
+
+    const missing = [];
+    const empty = [];
+    for (const platform of EXPECTED_PLATFORMS) {
+        const platformDir = path.join(serverDir, platform);
+        if (!fs.existsSync(platformDir)) {
+            missing.push(platform);
+        } else {
+            const files = fs.readdirSync(platformDir);
+            if (files.length === 0) {
+                empty.push(platform);
+            }
+        }
+    }
+
+    if (missing.length > 0) console.log(`    Missing platforms: ${missing.join(', ')}`);
+    if (empty.length > 0) console.log(`    Empty platform dirs: ${empty.join(', ')}`);
+    return missing.length === 0 && empty.length === 0;
+});
+
+// ── Summary ─────────────────────────────────────────────────────────────────
+
+console.log('');
+if (failures > 0) {
+    console.log(`\x1b[31m❌ ${failures} check(s) failed, ${warnings} warning(s)\x1b[0m`);
+    process.exit(1);
+} else if (warnings > 0) {
+    console.log(`\x1b[33m⚠ All checks passed with ${warnings} warning(s)\x1b[0m`);
+    process.exit(0);
+} else {
+    console.log('\x1b[32m✅ All checks passed — ready to release!\x1b[0m');
+    process.exit(0);
+}

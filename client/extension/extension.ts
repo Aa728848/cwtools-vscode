@@ -28,16 +28,7 @@ import { registerCodeActions } from './codeActions';
 import { registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
-
-const stellarisRemote = `https://github.com/Aa728848/cwtools-stellaris-config`;
-const eu4Remote = `https://github.com/cwtools/cwtools-eu4-config`;
-const hoi4Remote = `https://github.com/cwtools/cwtools-hoi4-config`;
-const ck2Remote = `https://github.com/cwtools/cwtools-ck2-config`;
-const irRemote = `https://github.com/cwtools/cwtools-ir-config`;
-const vic2Remote = `https://github.com/cwtools/cwtools-vic2-config`;
-const vic3Remote = `https://github.com/cwtools/cwtools-vic3-config`;
-const ck3Remote = `https://github.com/cwtools/cwtools-ck3-config`;
-const eu5Remote = `https://github.com/kaiser-chris/cwtools-eu5-config`;
+import { getAllLanguageIds, getRulesRemoteUrl, getGameInfoMap, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -106,7 +97,7 @@ export async function activate(context: ExtensionContext) {
 
 	// Client-side Rename Provider — uses VSCode's built-in reference finding
 	// Fix #8: shared game language list (was duplicated as gameLanguages and gameLanguages2)
-	const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
+	const gameLanguages = [...getAllLanguageIds(), 'paradox'];
 	const docSelector = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 
 	context.subscriptions.push(
@@ -563,7 +554,7 @@ export async function activate(context: ExtensionContext) {
 	registerCodeActions(
 		context,
 		(msg: string) => chatPanelProvider.sendProgrammaticMessage(msg),
-		['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox']
+		[...getAllLanguageIds(), 'paradox']
 	);
 
 	// ── AI Chat: Send selection to chat ──────────────────────────────────────
@@ -623,19 +614,7 @@ export async function activate(context: ExtensionContext) {
 			return originalUrl;
 		}
 
-		let repoPathStr = undefined;
-		switch (language) {
-			case "stellaris": repoPathStr = stellarisRemote; break;
-			case "eu4": repoPathStr = eu4Remote; break;
-			case "hoi4": repoPathStr = hoi4Remote; break;
-			case "ck2": repoPathStr = ck2Remote; break;
-			case "imperator": repoPathStr = irRemote; break;
-			case "vic2": repoPathStr = vic2Remote; break;
-			case "vic3": repoPathStr = vic3Remote; break;
-			case "ck3": repoPathStr = ck3Remote; break;
-			case "eu5": repoPathStr = eu5Remote; break;
-			default: repoPathStr = stellarisRemote; break;
-		}
+		const repoPathStr = getRulesRemoteUrl(language);
 		const repoPath = getBestRepoPath(repoPathStr);
 		ErrorReporter.debug('Extension', `Language: ${language}, repo: ${repoPath}`);
 
@@ -869,18 +848,8 @@ export async function activate(context: ExtensionContext) {
 			await commands.executeCommand('workbench.action.reloadWindow');
 		})
 		client.onNotification(promptVanillaPath, async (param: string) => {
-			// ── Game metadata mapping ──────────────────────────────────────────
-			const gameInfoMap: Record<string, { display: string; steamFolder: string; subdir?: string; steamAppId: string }> = {
-				stellaris:  { display: 'Stellaris',              steamFolder: 'Stellaris',              steamAppId: '281990' },
-				hoi4:       { display: 'Hearts of Iron IV',      steamFolder: 'Hearts of Iron IV',      steamAppId: '394360' },
-				eu4:        { display: 'Europa Universalis IV',   steamFolder: 'Europa Universalis IV',  steamAppId: '236850' },
-				ck2:        { display: 'Crusader Kings II',       steamFolder: 'Crusader Kings II',       steamAppId: '203770' },
-				imperator:  { display: 'Imperator: Rome',        steamFolder: 'ImperatorRome',           subdir: 'game', steamAppId: '859580' },
-				vic2:       { display: 'Victoria II',            steamFolder: 'Victoria 2',              steamAppId: '42960' },
-				vic3:       { display: 'Victoria 3',             steamFolder: 'Victoria 3',              subdir: 'game', steamAppId: '529340' },
-				ck3:        { display: 'Crusader Kings III',      steamFolder: 'Crusader Kings III',      subdir: 'game', steamAppId: '1158310' },
-				eu5:        { display: 'Europa Universalis V',    steamFolder: 'Europa Universalis V',    subdir: 'game', steamAppId: '0' },
-			};
+			// ── Game metadata mapping (derived from GameProfile registry) ─────
+			const gameInfoMap = getGameInfoMap();
 			const info = gameInfoMap[param];
 			if (!info) return;
 
@@ -913,33 +882,13 @@ export async function activate(context: ExtensionContext) {
 			const gameFolder = path.basename(directory.fsPath)
 			let dir = directory.fsPath
 			let game = ""
-			switch (gameFolder) {
-				case "Stellaris": game = "stellaris"; break;
-				case "Hearts of Iron IV": game = "hoi4"; break;
-				case "Europa Universalis IV": game = "eu4"; break;
-				case "Crusader Kings II": game = "ck2"; break;
-				case "Crusader Kings III":
-					game = "ck3";
-					dir = path.join(dir, "game");
-					break;
-				case "Victoria II": game = "vic2"; break;
-				case "Victoria 2": game = "vic2"; break;
-				case "Victoria 3":
-					game = "vic3";
-					dir = path.join(dir, "game");
-					break;
-				case "ImperatorRome":
-					game = "imperator";
-					dir = path.join(dir, "game");
-					break;
-				case "Imperator":
-					game = "imperator";
-					dir = path.join(dir, "game");
-					break;
-				case "Europa Universalis V":
-					game = "eu5";
-					dir = path.join(dir, "game");
-					break;
+			const folderMapping = getGameFolderMapping();
+			const mappedGame = folderMapping.get(gameFolder);
+			if (mappedGame) {
+				game = mappedGame.languageId;
+				if (mappedGame.subdir) {
+					dir = path.join(dir, mappedGame.subdir);
+				}
 			}
 			ErrorReporter.debug('Extension', `Game common path: ${path.join(dir, "common")}`);
 			if (game === "" || !(fs.existsSync(path.join(dir, "common")))) {
@@ -1089,7 +1038,7 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	let languageId: string;
-	const knownLanguageIds = ["stellaris", "eu4", "hoi4", "ck2", "imperator", "vic2", "vic3", "ck3", "eu5"];
+	const knownLanguageIds = getAllLanguageIds();
 	const getLanguageIdFallback = async function () {
 		const markerFiles = await workspace.findFiles("**/*.txt", null, 1);
 		if (markerFiles.length == 1) {
@@ -1104,17 +1053,10 @@ export async function activate(context: ExtensionContext) {
 		guessedLanguageId = await getLanguageIdFallback();
 	}
 
-	switch (guessedLanguageId) {
-		case "stellaris": languageId = "stellaris"; break;
-		case "eu4": languageId = "eu4"; break;
-		case "hoi4": languageId = "hoi4"; break;
-		case "ck2": languageId = "ck2"; break;
-		case "imperator": languageId = "imperator"; break;
-		case "vic2": languageId = "vic2"; break;
-		case "vic3": languageId = "vic3"; break;
-		case "ck3": languageId = "ck3"; break;
-		case "eu5": languageId = "eu5"; break;
-		default: languageId = "paradox"; break;
+	if (guessedLanguageId && knownLanguageIds.includes(guessedLanguageId)) {
+		languageId = guessedLanguageId;
+	} else {
+		languageId = "paradox";
 	}
 	async function findExeInFiles(gameExeName: string, binariesPrefix = false) {
 		if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
@@ -1139,17 +1081,7 @@ export async function activate(context: ExtensionContext) {
 
 		return validFiles;
 	}
-	const games = [
-		{ id: "eu4", exeName: "eu4", binariesPrefix: false },
-		{ id: "hoi4", exeName: "hoi4", binariesPrefix: false },
-		{ id: "stellaris", exeName: "stellaris", binariesPrefix: false },
-		{ id: "ck2", exeName: "CK2", binariesPrefix: false },
-		{ id: "imperator", exeName: "imperator", binariesPrefix: true },
-		{ id: "vic2", exeName: "v2game", binariesPrefix: false },
-		{ id: "ck3", exeName: "ck3", binariesPrefix: true },
-		{ id: "vic3", exeName: "victoria3", binariesPrefix: true },
-		{ id: "eu5", exeName: "eu5", binariesPrefix: true },
-	];
+	const games = getGameExeList();
 
 	const promises = games.map(({ exeName, binariesPrefix }) =>
 		findExeInFiles(exeName, binariesPrefix)
@@ -1298,7 +1230,7 @@ async function autoDetectGamePath(steamFolderName: string, subdir?: string): Pro
 		}
 
 		// Also try alternative folder names (some games have variant names)
-		const altNames = getAlternativeFolderNames(steamFolderName);
+		const altNames = getAlternativeSteamFolderNames(steamFolderName);
 		for (const altName of altNames) {
 			for (const lib of steamLibraries) {
 				const gamePath = path.join(lib, 'steamapps', 'common', altName);
@@ -1402,15 +1334,3 @@ function getSteamLibraryPaths(): string[] {
 	return libraries;
 }
 
-/**
- * Some games have variant folder names across platforms or versions.
- * Return alternative names to check.
- */
-function getAlternativeFolderNames(steamFolderName: string): string[] {
-	const map: Record<string, string[]> = {
-		'Victoria 2': ['Victoria II'],
-		'ImperatorRome': ['Imperator'],
-		'Imperator': ['ImperatorRome'],
-	};
-	return map[steamFolderName] || [];
-}

@@ -874,9 +874,16 @@ type Server(client: ILanguageClient) =
                 | x -> x |> List.map parserErrorToDiagnostics
 
             // 发布到 VS Code Problems 面板
+            // 重要：必须确保当前编辑文件始终收到诊断更新，
+            // 即使 diagnosticsList 中没有该文件的条目（错误已全部修复）
             match diagnosticsList with
             | [] -> client.PublishDiagnostics { uri = doc; diagnostics = [] }
-            | x -> x |> sendDiagnostics
+            | x ->
+                x |> sendDiagnostics
+                // 如果当前文件不在 diagnosticsList 中，补发空诊断清除旧错误
+                let currentFileDiags = x |> List.filter (fun (f, _) -> f = name)
+                if currentFileDiags.IsEmpty then
+                    client.PublishDiagnostics { uri = doc; diagnostics = [] }
 
             // 更新诊断新鲜度状态表
             let newEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
@@ -1992,6 +1999,10 @@ type Server(client: ILanguageClient) =
                 docs.Change p
                 let path = getPathFromDoc p.textDocument.uri
                 forgetFileCaches path
+                // 清除该文件的深度验证缓存，确保 shallow lint 不会返回修复前的旧错误
+                match gameObj with
+                | Some game -> game.InvalidateFileCache path
+                | None -> ()
                 markFileStale path "edit"
 
                 // Use debounce agent instead of immediate lint.

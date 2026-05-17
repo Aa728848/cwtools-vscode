@@ -14,6 +14,7 @@ describe('webview smoke checks', () => {
         expect(html).to.include('id="workflowSel"');
         expect(html).to.include('id="artifactDrawer"');
         expect(script).to.include("case 'workflowList'");
+        expect(script).to.include('renderWorkflowSelector');
         expect(script).to.include('renderArtifactPanel');
         expect(script).to.include('renderTopics');
     });

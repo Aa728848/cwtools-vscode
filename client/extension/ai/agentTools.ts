@@ -38,6 +38,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_scope: 45_000,
     query_types: 45_000,
     query_localisation_index: 10_000,
+    query_workspace_index: 10_000,
     query_rules: 45_000,
     query_references: 45_000,
     // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
@@ -229,6 +230,44 @@ export class AgentToolExecutor {
         };
     }
 
+    private queryWorkspaceIndex(args: import('./types').QueryWorkspaceIndexArgs): import('./types').QueryWorkspaceIndexResult {
+        if (!this.indexService) {
+            return {
+                status: 'unavailable',
+                totalCount: 0,
+                entries: [],
+                _hint: 'The shared IndexService is not available in this extension host.',
+            };
+        }
+
+        const limit = Math.max(1, Math.min(Number(args.limit ?? 50) || 50, 200));
+        const entries = this.indexService.queryWorkspaceSymbols({
+            name: args.name,
+            kind: args.kind,
+            source: args.source,
+            directory: args.directory,
+            prefix: !!args.prefix,
+            exact: !!args.exact,
+            limit,
+        });
+
+        return {
+            status: this.indexService.status,
+            totalCount: entries.length,
+            entries: entries.map(entry => ({
+                name: entry.name,
+                kind: entry.kind,
+                file: entry.file,
+                line: entry.line,
+                source: entry.source,
+                container: entry.container,
+            })),
+            _hint: this.indexService.status === 'ready'
+                ? undefined
+                : 'Index may still be building; retry after the initial refresh completes.',
+        };
+    }
+
     suspendLsp = (): void => {
         try { void this.client.sendNotification('cwtools/suspendIndexing'); } catch { /* ignore */ }
     }
@@ -391,6 +430,8 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.queryTypes(args as any); break;
             case 'query_localisation_index':
                 result = this.queryLocalisationIndex(args as any); break;
+            case 'query_workspace_index':
+                result = this.queryWorkspaceIndex(args as any); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_references':

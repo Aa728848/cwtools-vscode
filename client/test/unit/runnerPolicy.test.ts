@@ -5,6 +5,7 @@ import type { ToolDefinition } from '../../extension/ai/types';
 const toolDefinitions = [
     'read_file',
     'replace_lines',
+    'query_workspace_index',
     'dispatch_agents',
     'query_blackboard',
     'mcp_call',
@@ -19,6 +20,7 @@ describe('runnerPolicy', () => {
         const filtered = filterToolDefinitionsForMode(toolDefinitions, 'build');
         const names = filtered.map(t => t.function.name);
         expect(names).to.include('read_file');
+        expect(names).to.include('query_workspace_index');
         expect(names).to.include('replace_lines');
         expect(names).to.not.include('dispatch_agents');
         expect(names).to.not.include('mcp_call');

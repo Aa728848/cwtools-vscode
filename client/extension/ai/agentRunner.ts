@@ -277,7 +277,7 @@ export interface AgentRunnerOptions {
 
 /** Tools allowed in Plan mode (read-only + architecture design tools) */
 const _PLAN_MODE_TOOLS: AgentToolName[] = [
-    'query_scope', 'query_types', 'query_rules', 'query_references',
+    'query_scope', 'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'todo_write',
     'read_file', 'list_directory', 'get_diagnostics', 'web_fetch', 'search_web',
@@ -296,7 +296,7 @@ const _PLAN_MODE_TOOLS: AgentToolName[] = [
 
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
 const _EXPLORE_MODE_TOOLS: AgentToolName[] = [
-    'query_scope', 'query_types', 'query_rules', 'query_references',
+    'query_scope', 'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
     'get_diagnostics', 'web_fetch', 'search_web', 'glob_files',
@@ -316,7 +316,7 @@ const _UTILITY_EXCLUDED_TOOLS: AgentToolName[] = ['dispatch_agents', 'query_blac
 
 /** Review mode: same as explore, plus query_definition — read-only tools only */
 const _REVIEW_MODE_TOOLS: AgentToolName[] = [
-    'query_scope', 'query_types', 'query_rules', 'query_references',
+    'query_scope', 'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
     'get_diagnostics', 'query_definition', 'query_definition_by_name',
@@ -332,6 +332,7 @@ const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
+    'query_localisation_index', 'query_workspace_index',
     // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
     'write_localisation', 'git_ops',
@@ -342,7 +343,7 @@ const _LOC_WRITER_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
-    'query_types', 'query_rules', 'query_references',
+    'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
     'write_localisation', 'git_ops',
@@ -351,7 +352,7 @@ const _LOC_WRITER_TOOLS: AgentToolName[] = [
 /** Orchestrator mode: read-only tools + coordinator-specific tools (dispatch_agents, query_blackboard, merge_results) */
 const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     //Read-only information collection
-    'query_scope', 'query_types', 'query_rules', 'query_references',
+    'query_scope', 'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
     'get_diagnostics', 'web_fetch', 'search_web', 'glob_files', 'codesearch',

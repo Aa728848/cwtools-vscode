@@ -95,6 +95,12 @@ describe('AI Workflow Registry', () => {
         expect(wf.toolPolicy.tools).to.include('find_sound_candidates');
     });
 
+    it('all workflows can query the shared workspace index', () => {
+        for (const wf of getAllWorkflows()) {
+            expect(wf.toolPolicy.tools, wf.id).to.include('query_workspace_index');
+        }
+    });
+
     // ── Tool policy derivation ─────────────────────────────────────────
 
     it('getWorkflowAllowedTools returns allowlist directly for allowlist strategy', () => {

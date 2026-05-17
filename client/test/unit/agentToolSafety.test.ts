@@ -387,6 +387,16 @@ describe('agent sprite candidate tool contract', () => {
         expect(definition.function.parameters.properties).to.have.property('prefix');
     });
 
+    it('registers query_workspace_index as a first-class read-only tool', () => {
+        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'query_workspace_index');
+        if (!definition) {
+            throw new Error('query_workspace_index tool definition is missing');
+        }
+        expect(definition.function.description).to.include('shared incremental workspace index');
+        expect(definition.function.parameters.properties).to.have.property('kind');
+        expect(definition.function.parameters.properties).to.have.property('source');
+    });
+
     it('queries the shared localisation index when IndexService is provided', async () => {
         const fakeIndexService = {
             status: 'ready',
@@ -413,6 +423,39 @@ describe('agent sprite candidate tool contract', () => {
     it('returns unavailable localisation index result without IndexService', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const result = await executor.execute('query_localisation_index', { key: 'my_key' }) as any;
+
+        expect(result.status).to.equal('unavailable');
+        expect(result.entries).to.deep.equal([]);
+    });
+
+    it('queries the shared workspace symbol index when IndexService is provided', async () => {
+        const fakeIndexService = {
+            status: 'ready',
+            queryWorkspaceSymbols: (query: any) => [{
+                name: query.name,
+                kind: query.kind || 'event',
+                file: path.join('events', 'test.txt'),
+                line: 3,
+                source: query.source || 'script',
+                container: 'country_event',
+            }],
+        };
+        const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
+
+        const result = await executor.execute('query_workspace_index', {
+            name: 'kuat.100',
+            kind: 'event',
+            exact: true,
+        }) as any;
+
+        expect(result.status).to.equal('ready');
+        expect(result.totalCount).to.equal(1);
+        expect(result.entries[0].name).to.equal('kuat.100');
+    });
+
+    it('returns unavailable workspace index result without IndexService', async () => {
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const result = await executor.execute('query_workspace_index', { name: 'kuat.100' }) as any;
 
         expect(result.status).to.equal('unavailable');
         expect(result.entries).to.deep.equal([]);

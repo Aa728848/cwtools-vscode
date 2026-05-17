@@ -248,6 +248,30 @@ export interface QueryLocalisationIndexResult {
     _hint?: string;
 }
 
+export interface QueryWorkspaceIndexArgs {
+    name?: string;
+    kind?: string;
+    source?: 'script' | 'asset' | 'gui';
+    directory?: string;
+    prefix?: boolean;
+    exact?: boolean;
+    limit?: number;
+}
+
+export interface QueryWorkspaceIndexResult {
+    status: 'ready' | 'indexing' | 'idle' | 'error' | 'unavailable';
+    totalCount: number;
+    entries: Array<{
+        name: string;
+        kind: string;
+        file: string;
+        line: number;
+        source: 'script' | 'asset' | 'gui';
+        container?: string;
+    }>;
+    _hint?: string;
+}
+
 export interface QueryRulesArgs {
     category: 'trigger' | 'effect' | 'scope_change' | 'modifier';
     name?: string;
@@ -564,6 +588,7 @@ export type ToolArgs =
     | QueryScopeArgs
     | QueryTypesArgs
     | QueryLocalisationIndexArgs
+    | QueryWorkspaceIndexArgs
     | QueryRulesArgs
     | QueryReferencesArgs
     | GetFileContextArgs
@@ -592,6 +617,7 @@ export type ToolResult =
     | QueryScopeResult
     | QueryTypesResult
     | QueryLocalisationIndexResult
+    | QueryWorkspaceIndexResult
     | QueryRulesResult
     | QueryReferencesResult
     | GetFileContextResult
@@ -619,6 +645,7 @@ export type AgentToolName =
     | 'query_scope'
     | 'query_types'
     | 'query_localisation_index'
+    | 'query_workspace_index'
     | 'query_rules'
     | 'query_references'
     // validate_code — REMOVED: replaced by get_diagnostics + multi_replace_file_content inline diagnostics
@@ -1251,8 +1278,8 @@ export type HostMessage =
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat' }
     | { type: 'modeChanged'; mode: AgentMode; label?: string }
-    | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null }
-    | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> } }
+    | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
+    | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'todoUpdate'; todos: TodoItem[] }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[] }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }

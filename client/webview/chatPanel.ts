@@ -32,7 +32,8 @@ import {
     type TopicPanelItem,
     type TopicPanelStats,
 } from './chat/topics';
-import { buildWorkflowSummary, getWorkflowSlashCommand, type WorkflowView } from './chat/workflows';
+import { getWorkflowSlashCommand, type WorkflowUiLabels, type WorkflowView } from './chat/workflows';
+import { renderWorkflowSelector } from './chat/workflowSelector';
 
 (function () {
     const vscode = acquireVsCodeApi();
@@ -134,6 +135,7 @@ import { buildWorkflowSummary, getWorkflowSlashCommand, type WorkflowView } from
     let artifactFilter: ArtifactFilter = 'all';
     let workflows: WorkflowView[] = [];
     let activeWorkflowId: string | null = null;
+    let workflowLabels: WorkflowUiLabels | null = null;
     const CONTEXT_TYPE_META: Record<ActiveContext['type'], { icon: keyof typeof Icons; label: string }> = {
         code_selection: { icon: 'file', label: 'selection' },
         diagnostics: { icon: 'stethoscope', label: 'diagnostics' },
@@ -3185,11 +3187,13 @@ import { buildWorkflowSummary, getWorkflowSlashCommand, type WorkflowView } from
             case 'workflowList':
                 workflows = (msg.workflows || []) as WorkflowView[];
                 activeWorkflowId = msg.currentWorkflowId || null;
+                workflowLabels = (msg.labels || null) as WorkflowUiLabels | null;
                 updateWorkflowSelector();
                 break;
 
             case 'workflowChanged':
                 activeWorkflowId = msg.workflowId || null;
+                workflowLabels = (msg.labels || workflowLabels || null) as WorkflowUiLabels | null;
                 if (msg.workflow && !workflows.some(workflow => workflow.id === msg.workflow.id)) {
                     workflows = [...workflows, msg.workflow as WorkflowView];
                 }
@@ -4429,24 +4433,7 @@ import { buildWorkflowSummary, getWorkflowSlashCommand, type WorkflowView } from
 
     function updateWorkflowSelector() {
         const sel = document.getElementById('workflowSel') as HTMLSelectElement | null;
-        if (!sel) return;
-        const activeWorkflow = workflows.find(workflow => workflow.id === activeWorkflowId);
-        sel.innerHTML = '';
-        const off = document.createElement('option');
-        off.value = '';
-        off.textContent = 'Workflow';
-        off.title = 'No workflow selected';
-        sel.appendChild(off);
-        for (const workflow of workflows) {
-            const opt = document.createElement('option');
-            opt.value = workflow.id;
-            opt.textContent = workflow.title;
-            opt.title = buildWorkflowSummary(workflow);
-            opt.selected = workflow.id === activeWorkflowId;
-            sel.appendChild(opt);
-        }
-        sel.classList.toggle('active', !!activeWorkflow);
-        sel.title = buildWorkflowSummary(activeWorkflow);
+        renderWorkflowSelector(sel, { workflows, activeWorkflowId, labels: workflowLabels });
     }
 
     function refreshSettingsOverview() {

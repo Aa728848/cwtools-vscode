@@ -308,7 +308,7 @@
 | 检查项 | 结果 |
 | --- | --- |
 | `npm run compile` | ✅ 通过 |
-| `npm run test:unit` | ✅ **431 passing, 0 failing** |
+| `npm run test:unit` | ✅ **442 passing, 0 failing** |
 | `node tools/check-release.js` | ✅ 通过 |
 | `npx eslint client/test/` | ✅ 通过（0 warnings） |
 | `npm run lint`（全量） | ✅ 通过（0 errors, 0 warnings） |
@@ -336,6 +336,10 @@
 | `client/test/unit/chatModels.test.ts` | 4/5 | Chat topics/artifacts/workflows 模型测试 |
 | `client/test/unit/workflowViewModel.test.ts` | 2 | Workflow 视图模型测试 |
 | `client/test/unit/webviewSmoke.test.ts` | 5 | Chat webview smoke 检查 |
+| `client/extension/ai/workflowI18n.ts` | 2 | Workflow 中英文 i18n 文案与 UI 标签 |
+| `client/webview/chat/workflowSelector.ts` | 4 | Workflow selector DOM 渲染模块 |
+| `client/extension/indexing/workspaceSymbolParser.ts` | 3 | Workspace symbol/asset 纯解析与查询 helper |
+| `client/test/unit/workspaceSymbolParser.test.ts` | 3/5 | Workspace symbol/asset 索引单元测试 |
 
 ## 修改文件清单
 
@@ -344,15 +348,15 @@
 | `client/extension/extension.ts` | 使用 GameProfile 替代硬编码游戏配置 |
 | `client/extension/ai/gameKnowledge.ts` | `getGameDisplayName()` 委托到 GameProfile |
 | `client/extension/ai/agentRunner.ts` | 新增 `workflowId` 选项 |
-| `client/extension/ai/agentTools.ts` | 新增 `query_localisation_index`，通过共享 `IndexService` 查询本地化索引 |
-| `client/extension/ai/chatPanel.ts` | 新增 workflow 状态下发、切换入口与 active workflow 传递 |
+| `client/extension/ai/agentTools.ts` | 新增 `query_localisation_index` / `query_workspace_index`，通过共享 `IndexService` 查询本地化与 workspace 索引 |
+| `client/extension/ai/chatPanel.ts` | 新增 workflow 状态下发、切换入口、i18n 标签与 active workflow 传递 |
 | `client/extension/ai/chatHtml.ts` | 新增 workflow selector |
-| `client/extension/ai/tools/definitions.ts` | 新增 `query_localisation_index` 工具 schema |
-| `client/extension/ai/tools/registry.ts` | 将 `query_localisation_index` 注册为只读工具 |
+| `client/extension/ai/tools/definitions.ts` | 新增 `query_localisation_index` / `query_workspace_index` 工具 schema |
+| `client/extension/ai/tools/registry.ts` | 将 `query_localisation_index` / `query_workspace_index` 注册为只读工具 |
 | `client/extension/gameProfiles.ts` | 新增本地化目录推导 helper |
-| `client/extension/indexing/indexService.ts` | 本地化扫描/监听 glob 改为从 `GameProfile` 推导 |
+| `client/extension/indexing/indexService.ts` | 本地化扫描/监听 glob 改为从 `GameProfile` 推导，并扩展 workspace symbol/asset 索引 |
 | `client/extension/locDecorations.ts` | 迁移本地化 hover/definition 到共享 `IndexService` |
-| `client/webview/chatPanel.ts` | 内部 helper 继续迁移到 `chat/formatters.ts`、`chat/artifacts.ts`、`chat/topics.ts`、`chat/workflows.ts` |
+| `client/webview/chatPanel.ts` | 内部 helper 继续迁移到 `chat/formatters.ts`、`chat/artifacts.ts`、`chat/topics.ts`、`chat/workflows.ts`、`chat/workflowSelector.ts` |
 | `package.json` | 新增 `check:release` + `verify` scripts |
 
 ## 本轮追加完成项（2026-05-17）
@@ -368,7 +372,7 @@
 当前验证：
 
 - `npm run compile`：通过
-- `npm run test:unit`：431 passing, 0 failing
+- `npm run test:unit`：442 passing, 0 failing
 - `npm run lint`：通过，0 warnings
 
 ## 下一轮建议优先级

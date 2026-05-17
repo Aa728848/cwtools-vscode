@@ -14,7 +14,7 @@ import {
     shortenText,
     type TopicPanelItem,
 } from '../../webview/chat/topics';
-import { buildWorkflowSummary, getWorkflowSlashCommand, type WorkflowView } from '../../webview/chat/workflows';
+import { buildWorkflowSummary, getWorkflowSlashCommand, normalizeWorkflowLabels, type WorkflowView } from '../../webview/chat/workflows';
 
 describe('chat artifact model helpers', () => {
     const artifacts: ArtifactRecord[] = [
@@ -103,5 +103,19 @@ describe('chat workflow model helpers', () => {
 
     it('builds workflow slash commands', () => {
         expect(getWorkflowSlashCommand('diagnostic-fix')).to.equal('/workflow:diagnostic-fix');
+    });
+
+    it('builds localized workflow summaries', () => {
+        const labels = normalizeWorkflowLabels({
+            noWorkflowSelected: '未选择工作流',
+            phaseUnit: '阶段',
+            phasesUnit: '阶段',
+            requiredCheckUnit: '必需检查',
+            requiredChecksUnit: '必需检查',
+        });
+
+        expect(buildWorkflowSummary(undefined, labels)).to.equal('未选择工作流');
+        expect(buildWorkflowSummary(workflow, labels)).to.include('1 阶段');
+        expect(buildWorkflowSummary(workflow, labels)).to.include('1 必需检查');
     });
 });

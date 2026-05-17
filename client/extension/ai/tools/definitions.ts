@@ -59,6 +59,26 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'query_workspace_index',
+            description: 'Query the shared incremental workspace index for PDXScript symbols and named .gfx/.asset/.gui assets without scanning files. Use this before broad grep/search when looking for event IDs, scripted triggers/effects, technologies, buildings, sprites, sounds, GUI elements, or other named project symbols.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    name: { type: 'string', description: 'Exact, prefix, or substring symbol/asset name to search for.' },
+                    kind: { type: 'string', description: 'Optional kind filter, e.g. event, namespace, scripted_trigger, scripted_effect, technology, building, sprite, sound, asset, gui.' },
+                    source: { type: 'string', enum: ['script', 'asset', 'gui'], description: 'Optional source filter. script=.txt, asset=.gfx/.asset, gui=.gui.' },
+                    directory: { type: 'string', description: 'Optional path fragment filter, e.g. events, common/scripted_triggers, interface, gfx.' },
+                    prefix: { type: 'boolean', description: 'If true, name is treated as a prefix. Default false.' },
+                    exact: { type: 'boolean', description: 'If true, name must match exactly. Default false.' },
+                    limit: { type: 'number', description: 'Maximum entries to return. Default 50, max 200.' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'query_rules',
             description: 'Query syntax rules for triggers, effects, scope changes, or modifiers. Returns valid syntax, parameters, and scopes. Fuzzy-matches if exact name not found.',
             parameters: {

@@ -16,15 +16,44 @@ export interface WorkflowView {
     title: string;
     description: string;
     mode: string;
+    locale?: string;
     phases: WorkflowPhaseView[];
     verification: WorkflowVerificationView[];
 }
 
-export function buildWorkflowSummary(workflow: WorkflowView | undefined): string {
-    if (!workflow) return 'No workflow selected';
+export interface WorkflowUiLabels {
+    selectorPlaceholder: string;
+    noWorkflowSelected: string;
+    phaseUnit: string;
+    phasesUnit: string;
+    requiredCheckUnit: string;
+    requiredChecksUnit: string;
+}
+
+export const DEFAULT_WORKFLOW_LABELS: WorkflowUiLabels = {
+    selectorPlaceholder: 'Workflow',
+    noWorkflowSelected: 'No workflow selected',
+    phaseUnit: 'phase',
+    phasesUnit: 'phases',
+    requiredCheckUnit: 'required check',
+    requiredChecksUnit: 'required checks',
+};
+
+export function normalizeWorkflowLabels(labels?: Partial<WorkflowUiLabels> | null): WorkflowUiLabels {
+    return {
+        ...DEFAULT_WORKFLOW_LABELS,
+        ...(labels ?? {}),
+    };
+}
+
+export function buildWorkflowSummary(workflow: WorkflowView | undefined, labels?: Partial<WorkflowUiLabels> | null): string {
+    const ui = normalizeWorkflowLabels(labels);
+    if (!workflow) return ui.noWorkflowSelected;
     const phaseCount = workflow.phases?.length ?? 0;
     const requiredChecks = (workflow.verification ?? []).filter(v => v.required !== false).length;
-    return `${workflow.title} | ${workflow.mode} | ${phaseCount} phase(s) | ${requiredChecks} required check(s)`;
+    const phaseUnit = phaseCount === 1 ? ui.phaseUnit : ui.phasesUnit;
+    const checkUnit = requiredChecks === 1 ? ui.requiredCheckUnit : ui.requiredChecksUnit;
+    return `${workflow.title} | ${workflow.mode} | ${phaseCount} ${phaseUnit} | ${requiredChecks} ${checkUnit}`;
 }
 
 export function getWorkflowSlashCommand(workflowId: string): string {

@@ -37,6 +37,7 @@ import { UI, SOURCE } from './messages';
 import { ContextReferenceManager } from './contextReferences';
 import { getAllWorkflows, getWorkflow } from './workflowRegistry';
 import { toWorkflowViewModel } from './workflowViewModel';
+import { getWorkflowUiLabels } from './workflowI18n';
 import {
     getAiStorageRoot,
     getProjectWorkspaceRoot,
@@ -1890,16 +1891,20 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private sendWorkflowState(): void {
-        const workflows = getAllWorkflows().map(toWorkflowViewModel);
+        const workflowLocale = vs.env.language;
+        const workflows = getAllWorkflows().map(workflow => toWorkflowViewModel(workflow, workflowLocale));
+        const labels = getWorkflowUiLabels(workflowLocale);
         this.postMessage({
             type: 'workflowList',
             workflows,
             currentWorkflowId: this.currentWorkflowId,
+            labels,
         });
         this.postMessage({
             type: 'workflowChanged',
             workflowId: this.currentWorkflowId,
             workflow: this.currentWorkflowId ? workflows.find(w => w.id === this.currentWorkflowId) : undefined,
+            labels,
         });
     }
 

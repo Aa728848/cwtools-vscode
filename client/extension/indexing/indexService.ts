@@ -5,6 +5,7 @@
  * The first version indexes:
  *   - workspace file inventory
  *   - localisation keys
+ *   - top-level PDXScript symbols and named .gfx/.asset/.gui assets
  *
  * Consumers (AI tools, editor features, previews) should query this service
  * instead of performing their own file scans.
@@ -19,6 +20,15 @@ import * as vscode from 'vscode';
 import { ErrorReporter } from '../ai/errorReporter';
 import { getLocalisationDirectoryGlob } from '../gameProfiles';
 import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex } from './locParser';
+import {
+	addSymbolsToIndex,
+	isWorkspaceSymbolFile,
+	parseWorkspaceSymbols,
+	queryWorkspaceSymbolIndex,
+	removeFileFromSymbolIndex,
+	type WorkspaceSymbolEntry,
+	type WorkspaceSymbolQuery,
+} from './workspaceSymbolParser';
 
 // ─── Index status ────────────────────────────────────────────────────────────
 
@@ -43,13 +53,17 @@ export interface LocQuery {
 	limit?: number;
 }
 
+export type { WorkspaceSymbolEntry, WorkspaceSymbolQuery };
+
 // ─── IndexService ────────────────────────────────────────────────────────────
 
 export class IndexService implements vscode.Disposable {
 	private _status: IndexStatus = 'idle';
 	private _disposables: vscode.Disposable[] = [];
 	private _locIndex: Map<string, LocEntry[]> = new Map();
+	private _workspaceSymbolIndex: Map<string, WorkspaceSymbolEntry[]> = new Map();
 	private _fileWatcher: vscode.FileSystemWatcher | undefined;
+	private _symbolFileWatcher: vscode.FileSystemWatcher | undefined;
 	private _debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	private static readonly DEBOUNCE_MS = 300;
 	private readonly _locDirectoryGlob = getLocalisationDirectoryGlob();
@@ -62,6 +76,11 @@ export class IndexService implements vscode.Disposable {
 	/** Number of indexed localisation keys. */
 	get locKeyCount(): number {
 		return this._locIndex.size;
+	}
+
+	/** Number of indexed workspace symbol names. */
+	get workspaceSymbolCount(): number {
+		return this._workspaceSymbolIndex.size;
 	}
 
 	/**
@@ -83,11 +102,19 @@ export class IndexService implements vscode.Disposable {
 			this._fileWatcher.onDidDelete(uri => this._onFileDeleted(uri));
 			this._disposables.push(this._fileWatcher);
 
+			this._symbolFileWatcher = vscode.workspace.createFileSystemWatcher(
+				'**/*.{txt,gfx,asset,gui}'
+			);
+			this._symbolFileWatcher.onDidChange(uri => this._onFileChanged(uri));
+			this._symbolFileWatcher.onDidCreate(uri => this._onFileChanged(uri));
+			this._symbolFileWatcher.onDidDelete(uri => this._onFileDeleted(uri));
+			this._disposables.push(this._symbolFileWatcher);
+
 			// Perform initial indexing
 			await this.refresh('initial');
 			this._status = 'ready';
 
-			ErrorReporter.debug('IndexService', `Index ready: ${this._locIndex.size} localisation keys`);
+			ErrorReporter.debug('IndexService', `Index ready: ${this._locIndex.size} localisation keys, ${this._workspaceSymbolIndex.size} workspace symbols`);
 		} catch (e) {
 			this._status = 'error';
 			ErrorReporter.warn('IndexService', 'Failed to start indexing', e);
@@ -103,8 +130,9 @@ export class IndexService implements vscode.Disposable {
 
 		try {
 			await this._indexLocalisationFiles();
+			await this._indexWorkspaceSymbolFiles();
 			this._status = 'ready';
-			ErrorReporter.debug('IndexService', `Refresh (${reason}): ${this._locIndex.size} loc keys`);
+			ErrorReporter.debug('IndexService', `Refresh (${reason}): ${this._locIndex.size} loc keys, ${this._workspaceSymbolIndex.size} workspace symbols`);
 		} catch (e) {
 			this._status = prevStatus === 'ready' ? 'ready' : 'error';
 			ErrorReporter.warn('IndexService', `Refresh (${reason}) failed`, e);
@@ -119,6 +147,8 @@ export class IndexService implements vscode.Disposable {
 			const filePath = uri.fsPath;
 			if (filePath.endsWith('.yml')) {
 				await this._indexSingleLocFile(uri);
+			} else if (isWorkspaceSymbolFile(filePath)) {
+				await this._indexSingleWorkspaceSymbolFile(uri);
 			}
 		} catch (e) {
 			ErrorReporter.debug('IndexService', `updateFile failed: ${uri.fsPath}`, e);
@@ -130,6 +160,7 @@ export class IndexService implements vscode.Disposable {
 	 */
 	removeFile(uri: vscode.Uri): void {
 		removeFileFromIndex(this._locIndex, uri.fsPath);
+		removeFileFromSymbolIndex(this._workspaceSymbolIndex, uri.fsPath);
 	}
 
 	/**
@@ -137,6 +168,13 @@ export class IndexService implements vscode.Disposable {
 	 */
 	queryLocalisation(query: LocQuery): LocEntry[] {
 		return queryLocIndex(this._locIndex, query);
+	}
+
+	/**
+	 * Query indexed PDXScript symbols and named asset/gui entries.
+	 */
+	queryWorkspaceSymbols(query: WorkspaceSymbolQuery): WorkspaceSymbolEntry[] {
+		return queryWorkspaceSymbolIndex(this._workspaceSymbolIndex, query);
 	}
 
 	/** Check if a localisation key exists. */
@@ -164,6 +202,24 @@ export class IndexService implements vscode.Disposable {
 		}
 	}
 
+	private async _indexWorkspaceSymbolFiles(): Promise<void> {
+		this._workspaceSymbolIndex.clear();
+
+		const files = await vscode.workspace.findFiles(
+			'**/*.{txt,gfx,asset,gui}',
+			'**/node_modules/**',
+			10000
+		);
+
+		for (const uri of files) {
+			try {
+				await this._indexSingleWorkspaceSymbolFile(uri);
+			} catch {
+				// Skip files that can't be parsed
+			}
+		}
+	}
+
 	private async _indexSingleLocFile(uri: vscode.Uri): Promise<void> {
 		const filePath = uri.fsPath;
 
@@ -176,6 +232,20 @@ export class IndexService implements vscode.Disposable {
 			addEntriesToIndex(this._locIndex, entries);
 		} catch {
 			// File read error — skip
+		}
+	}
+
+	private async _indexSingleWorkspaceSymbolFile(uri: vscode.Uri): Promise<void> {
+		const filePath = uri.fsPath;
+
+		this.removeFile(uri);
+
+		try {
+			const content = (await vscode.workspace.fs.readFile(uri)).toString();
+			const entries = parseWorkspaceSymbols(content, filePath);
+			addSymbolsToIndex(this._workspaceSymbolIndex, entries);
+		} catch {
+			// File read error - skip
 		}
 	}
 
@@ -209,6 +279,7 @@ export class IndexService implements vscode.Disposable {
 		}
 		this._disposables = [];
 		this._locIndex.clear();
+		this._workspaceSymbolIndex.clear();
 		this._status = 'idle';
 	}
 }

@@ -3,6 +3,10 @@
   "version": "2.1.21",
   "scripts": {
     "compile": "tsc -p ./tsconfig.extension.json && rollup -c",
+    "rules:stellaris": "node tools/rules-sync/stellaris-rules-sync.js",
+    "rules:stellaris:scan": "node tools/rules-sync/stellaris-rules-sync.js scan",
+    "rules:stellaris:check": "node tools/rules-sync/stellaris-rules-sync.js check",
+    "rules:stellaris:update": "node tools/rules-sync/stellaris-rules-sync.js update",
     "test": "npm run compile && vscode-test -c ./.vscode-test.js",
     "test:watch": "tsc -w -p . & vscode-test -c ./.vscode-test.js -w",
     "test:unit": "npx ts-mocha -p tsconfig.json \"client/test/unit/**/*.test.ts\"",

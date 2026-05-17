@@ -601,8 +601,6 @@ function writeCwt(outDir: string, rules: RulesGenerated) {
     fs.mkdirSync(generatedDir, { recursive: true });
     writeFileIfChanged(path.join(generatedDir, 'effects.generated.cwt'), renderAliasRules('effect', renderableRules(rules.effects)));
     writeFileIfChanged(path.join(generatedDir, 'triggers.generated.cwt'), renderAliasRules('trigger', renderableRules(rules.triggers)));
-    writeFileIfChanged(path.join(generatedDir, 'modifiers.generated.cwt'), renderModifierRules(renderableRules(rules.modifiers)));
-    writeFileIfChanged(path.join(generatedDir, 'scopes.generated.cwt'), renderScopeRules(renderableRules(rules.scopes)));
     writeFileIfChanged(path.join(generatedDir, 'localisation_commands.generated.cwt'), renderLocalisationRules(rules.localisationCommands));
     writeFileIfChanged(path.join(generatedDir, 'common_definitions.inventory.cwt'), renderCommonDefinitionInventory(rules.commonDefinitions));
 }
@@ -630,33 +628,6 @@ function renderAliasRules(kind: 'effect' | 'trigger', rules: GeneratedRule[]): s
         lines.push('');
     }
     lines.push(`# </auto-generated:${kind}s>\n`);
-    return lines.join('\n');
-}
-
-function renderModifierRules(rules: GeneratedRule[]): string {
-    const lines = [header('modifiers')];
-    for (const rule of rules) {
-        lines.push(`### ${rule.description || 'Generated modifier'}`);
-        if (rule.needsManualReview) lines.push('## needs_manual_review = yes');
-        lines.push(`alias[modifier:${rule.name}] = float`);
-        lines.push('');
-    }
-    lines.push('# </auto-generated:modifiers>\n');
-    return lines.join('\n');
-}
-
-function renderScopeRules(rules: GeneratedRule[]): string {
-    const lines = [header('scopes')];
-    for (const rule of rules) {
-        if (rule.targetScopes[0]) lines.push(`## push_scope = ${rule.targetScopes[0]}`);
-        lines.push(`### ${rule.description || 'Generated scope change'}`);
-        if (rule.scopes.length) lines.push(`## supported_scopes = ${rule.scopes.join(' ')}`);
-        if (rule.needsManualReview) lines.push('## needs_manual_review = yes');
-        lines.push(`alias[trigger:${rule.name}] = { alias_name[trigger] = alias_match_left[trigger] }`);
-        lines.push(`alias[effect:${rule.name}] = { alias_name[effect] = alias_match_left[effect] }`);
-        lines.push('');
-    }
-    lines.push('# </auto-generated:scopes>\n');
     return lines.join('\n');
 }
 

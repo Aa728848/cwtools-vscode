@@ -14,6 +14,8 @@ nupkgs/
 .cwtools/
 .ionide/
 .vscode-test/
+.rules-sync/
+.codex-smoke/
 .fake
 .ionide
 *.user

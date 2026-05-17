@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 type RuleKind = 'effect' | 'trigger' | 'modifier' | 'scope' | 'localisation_command' | 'common_definition';
-type GeneratableRuleKind = Exclude<RuleKind, 'localisation_command' | 'common_definition'>;
+type GeneratableRuleKind = Extract<RuleKind, 'effect' | 'trigger'>;
 type SourceKind = 'log' | 'common' | 'cwt' | 'mixed';
 type ReportAction =
     | 'added'
@@ -65,8 +65,6 @@ interface UpdateReport {
 const KIND_FILES: Record<GeneratableRuleKind, string> = {
     effect: 'effects.generated.cwt',
     trigger: 'triggers.generated.cwt',
-    modifier: 'modifiers.generated.cwt',
-    scope: 'scopes.generated.cwt',
 };
 
 function walkCwtFiles(dir: string): string[] {
@@ -264,6 +262,7 @@ function run(generatedJson: string, existingRulesDir: string, outDir: string, ch
             });
             continue;
         }
+        if (!isGeneratableRuleKind(rule.kind)) continue;
 
         const targetName = KIND_FILES[rule.kind];
         if (!targetName) continue;
@@ -314,6 +313,10 @@ function run(generatedJson: string, existingRulesDir: string, outDir: string, ch
     }
 
     return report;
+}
+
+function isGeneratableRuleKind(kind: RuleKind): kind is GeneratableRuleKind {
+    return kind === 'effect' || kind === 'trigger';
 }
 
 function parseArgs(argv: string[]) {

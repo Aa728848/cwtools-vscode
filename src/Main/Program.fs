@@ -2013,7 +2013,7 @@ type Server(client: ILanguageClient) =
                     UpdateRequest(
                         { uri = p.textDocument.uri
                           version = p.textDocument.version },
-                        false
+                        true  // 强制 deep lint，确保错误和警告都基于最新文件内容
                     )
                 )
             }

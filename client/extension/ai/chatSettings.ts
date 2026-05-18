@@ -157,9 +157,14 @@ export class ChatSettingsManager {
         lastAISettingsWriteTime = Date.now();
         await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
         await cfg.update('model', settings.model, vs.ConfigurationTarget.Global);
-        if (settings.apiKey && settings.apiKey.trim().length > 0) {
-            await this.aiService.getKeyManager().setKey(settings.provider, settings.apiKey.trim());
-            await cfg.update('apiKey', '', vs.ConfigurationTarget.Global);
+        if (settings.apiKey !== undefined) {
+            const trimmedKey = settings.apiKey.trim();
+            if (trimmedKey.length > 0 && !trimmedKey.startsWith('•')) {
+                await this.aiService.getKeyManager().setKey(settings.provider, trimmedKey);
+                try { await cfg.update('apiKey', '', vs.ConfigurationTarget.Global); } catch {}
+            } else if (trimmedKey.length === 0) {
+                await this.aiService.getKeyManager().setKey(settings.provider, '');
+            }
         }
         if (settings.braveSearchApiKey && settings.braveSearchApiKey.trim().length > 0
             && !settings.braveSearchApiKey.startsWith('•')) {

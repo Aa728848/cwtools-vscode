@@ -515,7 +515,12 @@
 						"openrouter",
 						"github",
 						"together",
-						"deepinfra"
+						"deepinfra",
+						"google",
+						"mimo",
+						"minimax-token-plan",
+						"mimo-token-plan",
+						"opencode"
 					],
 					"enumDescriptions": [
 						"%configuration.cwtools.ai.provider.enum.openai%",
@@ -529,7 +534,12 @@
 						"%configuration.cwtools.ai.provider.enum.openrouter%",
 						"%configuration.cwtools.ai.provider.enum.github%",
 						"%configuration.cwtools.ai.provider.enum.together%",
-						"%configuration.cwtools.ai.provider.enum.deepinfra%"
+						"%configuration.cwtools.ai.provider.enum.deepinfra%",
+						"Google (Gemini)",
+						"MiMo (Xiaomi)",
+						"MiniMax Token Plan",
+						"MiMo Token Plan (Xiaomi)",
+						"OpenCode Zen"
 					],
 					"default": "openai",
 					"markdownDescription": "%configuration.cwtools.ai.provider.description%"
@@ -649,7 +659,12 @@
 						"openrouter",
 						"github",
 						"together",
-						"deepinfra"
+						"deepinfra",
+						"google",
+						"mimo",
+						"minimax-token-plan",
+						"mimo-token-plan",
+						"opencode"
 					],
 					"enumDescriptions": [
 						"%configuration.cwtools.ai.provider.enum.openai%",
@@ -663,7 +678,12 @@
 						"%configuration.cwtools.ai.provider.enum.openrouter%",
 						"%configuration.cwtools.ai.provider.enum.github%",
 						"%configuration.cwtools.ai.provider.enum.together%",
-						"%configuration.cwtools.ai.provider.enum.deepinfra%"
+						"%configuration.cwtools.ai.provider.enum.deepinfra%",
+						"Google (Gemini)",
+						"MiMo (Xiaomi)",
+						"MiniMax Token Plan",
+						"MiMo Token Plan (Xiaomi)",
+						"OpenCode Zen"
 					],
 					"default": "",
 					"description": "%configuration.cwtools.ai.inlineCompletion.provider.description%"
@@ -719,14 +739,42 @@
 					"items": {
 						"type": "object",
 						"properties": {
-							"name": { "type": "string", "description": "Server name" },
-							"type": { "type": "string", "enum": ["stdio", "sse"], "description": "Transport type" },
-							"command": { "type": "string", "description": "Command for stdio transport" },
-							"args": { "type": "array", "items": { "type": "string" }, "description": "Command arguments" },
-							"env": { "type": "object", "description": "Environment variables" },
-							"url": { "type": "string", "description": "URL for SSE transport" }
+							"name": {
+								"type": "string",
+								"description": "Server name"
+							},
+							"type": {
+								"type": "string",
+								"enum": [
+									"stdio",
+									"sse"
+								],
+								"description": "Transport type"
+							},
+							"command": {
+								"type": "string",
+								"description": "Command for stdio transport"
+							},
+							"args": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								},
+								"description": "Command arguments"
+							},
+							"env": {
+								"type": "object",
+								"description": "Environment variables"
+							},
+							"url": {
+								"type": "string",
+								"description": "URL for SSE transport"
+							}
 						},
-						"required": ["name", "type"]
+						"required": [
+							"name",
+							"type"
+						]
 					}
 				},
 				"cwtools.ai.orchestrator.agentModels": {
@@ -737,8 +785,12 @@
 					"additionalProperties": {
 						"type": "object",
 						"properties": {
-							"provider": { "type": "string" },
-							"model": { "type": "string" }
+							"provider": {
+								"type": "string"
+							},
+							"model": {
+								"type": "string"
+							}
 						}
 					}
 				},
@@ -1133,3 +1185,4 @@
 		"anthonyj.stellaris-localisation-syntax"
 	]
 }
+

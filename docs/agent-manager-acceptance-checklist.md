@@ -10,10 +10,13 @@
 - [ ] Opening/closing `Artifacts` updates the center-pane floating cards and slash popup width without leaving a stale right-side gap.
 - [ ] Resizing the manager keeps the composer `+` menu and quick-model menu aligned with their trigger buttons.
 - [ ] Settings stay centered and bounded instead of stretching edge to edge on wide screens.
+- [ ] Manager left rail does not show the overview counter block.
+- [ ] Manager header topics button collapses and expands the left topics rail.
 
 ## Core Workflow
 
 - [ ] Open `cwtools.ai.openAgentManager` and confirm manager panel initializes.
+- [ ] Click the sidebar chat header Agent Manager button and confirm it opens or focuses the detached manager.
 - [ ] Create new topic from manager and see immediate update in sidebar.
 - [ ] Switch topic in sidebar and confirm manager conversation updates.
 - [ ] Switch topic in manager and confirm sidebar conversation updates.
@@ -47,6 +50,7 @@
 - [ ] Close and reopen manager panel: snapshot reload restores topic/message/artifact state.
 - [ ] Hide and re-show manager panel: snapshot refresh works and no duplicate UI blocks appear.
 - [ ] Reopening the panel during generation keeps only one background-running banner in the conversation.
+- [ ] With sidebar and manager both open, close/hide only the sidebar; manager should not receive a new background-running banner.
 - [ ] During generation, status transitions to running; after completion/error returns to idle.
 
 ## Regression

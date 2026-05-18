@@ -74,15 +74,31 @@ describe('agent manager cross-surface contracts', () => {
         const manager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
         const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
         const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
+        const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
 
         expect(managerCss).to.include('--manager-active-right-width: 0px;');
+        expect(managerCss).to.include('--manager-active-left-width: var(--manager-left-width);');
         expect(managerCss).to.include('--manager-active-right-width: var(--manager-right-width);');
         expect(managerCss).to.include('right: calc(var(--manager-active-right-width) + 16px);');
+        expect(managerCss).to.include('left: calc(var(--manager-active-left-width) + 16px);');
+        expect(managerCss).to.include('body.agent-manager-shell.manager-topics-collapsed');
+        expect(managerCss).to.include('body.agent-manager-shell .manager-overview {\n    display: none;');
+        expect(managerCss).to.include('body.agent-manager-shell .header-actions #btnTopics {\n    display: inline-flex;');
+        expect(managerCss).to.include('body.agent-manager-shell .header-actions #btnAgentManager {\n    display: none;');
         expect(webview).to.include('function positionComposerMenus(): void');
+        expect(webview).to.include('function updateManagerTopicsToggleState(): void');
+        expect(webview).to.include("document.body.classList.toggle('manager-topics-collapsed', collapsed);");
+        expect(webview).to.include("vscode.postMessage({ type: 'openAgentManager' })");
         expect(webview).to.include("window.addEventListener('resize', positionComposerMenus);");
         expect(webview).to.include('menu.style.left =');
         expect(manager).to.include('taskStatusMark(');
         expect(managerCss).to.include('.manager-task-mark');
+        expect(html).to.include('id="btnAgentManager"');
+        expect(hostTypes).to.include("{ type: 'openAgentManager' }");
+        expect(hostPanel).to.include("case 'openAgentManager'");
+        expect(hostPanel).to.include("this._restoreViewState('manager')");
     });
 
     it('restored interactive cards and replay banners stay idempotent', () => {
@@ -99,5 +115,17 @@ describe('agent manager cross-surface contracts', () => {
         expect(webview).to.include("bpCard.uiState !== 'approved'");
         expect(webview).to.include("document.querySelectorAll('.replay-steps-banner').forEach(el => el.remove());");
         expect(webview).to.include("banner.className = 'special-step replay-steps-banner';");
+    });
+
+    it('sidebar restore messages do not broadcast replay state into the manager', () => {
+        const broadcaster = fs.readFileSync(path.join(root, 'client/extension/ai/agentUiBroadcaster.ts'), 'utf8');
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+
+        expect(broadcaster).to.include('postMessageToSurface');
+        expect(broadcaster).to.include("targetSurface === surface");
+        expect(hostPanel).to.include("this._restoreViewState('chat')");
+        expect(hostPanel).to.include('this.postMessageToSurface(targetSurface, msg)');
+        expect(hostPanel).to.include('this.sendWorkflowState(send)');
+        expect(hostPanel).to.include('this.broadcaster.register(webview, surface)');
     });
 });

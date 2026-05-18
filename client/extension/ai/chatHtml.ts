@@ -65,6 +65,7 @@ ${stylesheetLinks}
             ${svgIconNoMargin('folder')}
             <span class="workspace-toggle-text">工作区</span>
         </button>
+        <button class="icon-btn" id="btnAgentManager" title="打开 Agent Manager" aria-label="打开独立 Agent Manager">${svgIconNoMargin('bot')}</button>
         <button class="icon-btn" id="btnNewTopic" title="新话题" aria-label="新建对话话题">${svgIconNoMargin('plus')}</button>
         <button class="icon-btn" id="btnTopics" title="历史话题" aria-label="展开历史话题面板">≡</button>
         <button class="icon-btn" id="btnSettings" title="设置" aria-label="打开 AI 设置">${svgIconNoMargin('gear')}</button>

@@ -60,4 +60,32 @@ describe('AgentUiBroadcaster', () => {
         expect(receivedA).to.deep.equal([]);
         expect(receivedB).to.deep.equal([payload]);
     });
+
+    it('can send restore messages to a single registered surface', () => {
+        const broadcaster = new AgentUiBroadcaster();
+        const receivedChat: HostMessage[] = [];
+        const receivedManager: HostMessage[] = [];
+
+        const chatWebview = {
+            postMessage: (msg: HostMessage) => {
+                receivedChat.push(msg);
+                return Promise.resolve(true);
+            },
+        } as any;
+        const managerWebview = {
+            postMessage: (msg: HostMessage) => {
+                receivedManager.push(msg);
+                return Promise.resolve(true);
+            },
+        } as any;
+
+        broadcaster.register(chatWebview, 'chat');
+        broadcaster.register(managerWebview, 'manager');
+
+        const payload: HostMessage = { type: 'replaySteps', steps: [], isGenerating: true };
+        broadcaster.postMessageToSurface('chat', payload);
+
+        expect(receivedChat).to.deep.equal([payload]);
+        expect(receivedManager).to.deep.equal([]);
+    });
 });

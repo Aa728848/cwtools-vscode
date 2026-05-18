@@ -1249,6 +1249,7 @@ export type WebViewMessage =
     | { type: 'cancelGeneration' }
     | { type: 'switchMode'; mode: AgentMode }
     | { type: 'switchWorkflow'; workflowId?: string | null }
+    | { type: 'openAgentManager' }
     | { type: 'openSettings' }
     | { type: 'saveSettings'; settings: PanelSettings }
     | { type: 'detectOllamaModels'; endpoint: string }

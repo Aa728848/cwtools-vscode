@@ -208,7 +208,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // ── Restore state when panel becomes visible again ────────────────────
         webviewView.onDidChangeVisibility(
-            () => { if (webviewView.visible) this._restoreViewState(); },
+            () => { if (webviewView.visible) this._restoreViewState('chat'); },
             this,
             this._viewDisposables
         );
@@ -221,24 +221,31 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Restore the full panel state after the WebView is (re)created or becomes
      * visible again. Called on initial load and on every onDidChangeVisibility(true).
      */
-    private _restoreViewState(): void {
+    private _restoreViewState(targetSurface?: 'chat' | 'manager'): void {
+        const send = (msg: HostMessage) => {
+            if (targetSurface) {
+                this.postMessageToSurface(targetSurface, msg);
+            } else {
+                this.postMessage(msg);
+            }
+        };
         // 1. Restore persisted topic messages
         if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
-            this.postMessage({ type: 'loadTopicMessages', messages: this.topicManager.currentTopic.messages });
+            send({ type: 'loadTopicMessages', messages: this.topicManager.currentTopic.messages });
         }
         // 2. Restore current mode
-        this.postMessage({ type: 'setMode', mode: this.currentMode });
+        send({ type: 'setMode', mode: this.currentMode });
         // 3. If a generation was running when the panel was hidden, replay steps
         //    so the user can see what the AI has done so far and cancel if needed
         if (this._isGenerating && this._liveSteps.length > 0) {
-            this.postMessage({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
+            send({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
         }
         if (this.artifactStore.size > 0) {
-            this.postMessage({ type: 'artifactList', artifacts: this.artifactStore.list() });
+            send({ type: 'artifactList', artifacts: this.artifactStore.list() });
         }
-        this.sendWorkflowState();
+        this.sendWorkflowState(send);
         // 4. Restore model lists and settings bindings
-        void this.settingsManager.buildAndSendSettingsData();
+        void this.settingsManager.buildAndSendSettingsData(false, targetSurface);
     }
 
     // ─── Message Handling ────────────────────────────────────────────────────
@@ -336,6 +343,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'switchWorkflow':
                 this.switchWorkflow(msg.workflowId);
+                break;
+            case 'openAgentManager':
+                await this.openAgentManager();
                 break;
             case 'retractMessage':
                 // Fix #3: retractMessage is async — must await to catch errors
@@ -1966,17 +1976,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.sendWorkflowState();
     }
 
-    private sendWorkflowState(): void {
+    private sendWorkflowState(postMessage: (msg: HostMessage) => void = (msg) => this.postMessage(msg)): void {
         const workflowLocale = vs.env.language;
         const workflows = getAllWorkflows().map(workflow => toWorkflowViewModel(workflow, workflowLocale));
         const labels = getWorkflowUiLabels(workflowLocale);
-        this.postMessage({
+        postMessage({
             type: 'workflowList',
             workflows,
             currentWorkflowId: this.currentWorkflowId,
             labels,
         });
-        this.postMessage({
+        postMessage({
             type: 'workflowChanged',
             workflowId: this.currentWorkflowId,
             workflow: this.currentWorkflowId ? workflows.find(w => w.id === this.currentWorkflowId) : undefined,
@@ -2125,6 +2135,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.broadcaster.postMessage(msg);
     }
 
+    private postMessageToSurface(surface: 'chat' | 'manager', msg: HostMessage): void {
+        this.broadcaster.postMessageToSurface(surface, msg);
+    }
+
     private clearArtifacts(): void {
         this.postMessage({ type: 'artifactList', artifacts: this.artifactStore.clear() });
     }
@@ -2218,7 +2232,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async openAgentManager(): Promise<void> {
         if (this.managerPanel) {
             this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);
-            this._restoreViewState();
+            this._restoreViewState('manager');
             return;
         }
 
@@ -2245,10 +2259,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }, this, this._managerDisposables);
 
         panel.onDidChangeViewState((e) => {
-            if (e.webviewPanel.visible) this._restoreViewState();
+            if (e.webviewPanel.visible) this._restoreViewState('manager');
         }, this, this._managerDisposables);
 
-        this._restoreViewState();
+        this._restoreViewState('manager');
     }
 
     /** 
@@ -2299,11 +2313,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this,
             bucket
         );
-        bucket.push(this.broadcaster.register(webview));
+        bucket.push(this.broadcaster.register(webview, surface));
 
         this.topicManager.sendTopicList();
         this.settingsManager.buildAndSendSettingsData().catch(() => { /* ignore on startup */ });
-        this._restoreViewState();
+        this._restoreViewState(surface);
     }
 
     private hasVisibleChatSurface(): boolean {

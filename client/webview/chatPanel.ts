@@ -232,6 +232,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     if (inputWrapper) composerResizeObserver.observe(inputWrapper);
     window.addEventListener('resize', updateComposerStackHeight);
     window.addEventListener('resize', positionComposerMenus);
+    window.addEventListener('resize', updateManagerTopicsToggleState);
     updateComposerStackHeight();
 
     function shouldUseSideWorkspace(): boolean {
@@ -245,6 +246,26 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function isCurrentSurface(targetSurface?: 'chat' | 'manager'): boolean {
         if (!targetSurface) return true;
         return targetSurface === (isManagerShell() ? 'manager' : 'chat');
+    }
+
+    function isManagerTopicsRailMode(): boolean {
+        return isManagerShell() && (window.innerWidth || document.documentElement.clientWidth) >= 980;
+    }
+
+    function updateManagerTopicsToggleState(): void {
+        if (!isManagerShell()) return;
+        const button = document.getElementById('btnTopics') as HTMLButtonElement | null;
+        if (!button) return;
+        const collapsed = document.body.classList.contains('manager-topics-collapsed');
+        const railVisible = isManagerTopicsRailMode() && !collapsed;
+        button.classList.toggle('active', railVisible);
+        button.setAttribute('aria-pressed', railVisible ? 'true' : 'false');
+        button.title = collapsed ? '展开话题栏' : '关闭话题栏';
+        button.setAttribute('aria-label', collapsed ? '展开话题栏' : '关闭话题栏');
+        if (isManagerTopicsRailMode()) {
+            topicsPanel.classList.remove('show');
+            if (sideWorkspaceContent === topicsPanel) closeSideWorkspace();
+        }
     }
 
     function updateWorkspaceToggleState(): void {
@@ -1483,6 +1504,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
     bindBtn('btnWorkspace', openWorkspaceFromButton);
     bindBtn('btnArtifacts', toggleArtifactDrawer);
+    bindBtn('btnAgentManager', () => vscode.postMessage({ type: 'openAgentManager' }));
     bindBtn('btnCloseArtifacts', () => setArtifactDrawerOpen(false));
     bindBtn('artifactScrim', () => setArtifactDrawerOpen(false));
     document.querySelectorAll<HTMLElement>('[data-artifact-filter]').forEach(btn => {
@@ -1493,6 +1515,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
     });
     bindBtn('btnTopics', () => {
+        if (isManagerTopicsRailMode()) {
+            const collapsed = !document.body.classList.contains('manager-topics-collapsed');
+            document.body.classList.toggle('manager-topics-collapsed', collapsed);
+            updateManagerTopicsToggleState();
+            updateComposerStackHeight();
+            positionComposerMenus();
+            return;
+        }
         setArtifactDrawerOpen(false);
         if (shouldUseSideWorkspace()) {
             if (document.body.classList.contains('side-workspace-open') && sideWorkspaceContent === topicsPanel) {
@@ -1506,8 +1536,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         closeSideWorkspace();
         topicsPanel.classList.toggle('show');
         updateWorkspaceToggleState();
+        updateManagerTopicsToggleState();
     });
     bindBtn('btnNewTopicPanel', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); if (sideWorkspaceContent === topicsPanel) closeSideWorkspace(); });
+    updateManagerTopicsToggleState();
     bindBtn('btnSettings', () => {
         setArtifactDrawerOpen(false);
         vscode.postMessage({ type: 'openSettings' });

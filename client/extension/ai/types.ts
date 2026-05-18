@@ -1050,6 +1050,8 @@ export interface AgentStep {
     iterationInfo?: string;
     /** Child Agent node ID, used for UI group display */
     agentId?: string;
+    /** UI-only lifecycle marker for persisted interactive cards restored from history. */
+    uiState?: 'pending' | 'approved';
 }
 
 export type AgentArtifactKind =

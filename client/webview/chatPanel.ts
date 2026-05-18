@@ -231,6 +231,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const composerResizeObserver = new ResizeObserver(updateComposerStackHeight);
     if (inputWrapper) composerResizeObserver.observe(inputWrapper);
     window.addEventListener('resize', updateComposerStackHeight);
+    window.addEventListener('resize', positionComposerMenus);
     updateComposerStackHeight();
 
     function shouldUseSideWorkspace(): boolean {
@@ -1290,6 +1291,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         composerMenu?.classList.toggle('show', open);
         composerMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
         composerAddBtn?.classList.toggle('active', open);
+        if (open) positionComposerMenus();
         if (open) {
             modelMenu?.classList.remove('show');
             modelMenu?.setAttribute('aria-hidden', 'true');
@@ -1307,11 +1309,33 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         modelMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
         quickModelTrigger?.classList.toggle('active', open);
         quickModelTrigger?.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) positionComposerMenus();
         if (open) {
             composerMenu?.classList.remove('show');
             composerMenu?.setAttribute('aria-hidden', 'true');
             composerAddBtn?.classList.remove('active');
         }
+    }
+
+    function positionComposerMenus(): void {
+        if (!inputWrapper) return;
+        const wrapperRect = inputWrapper.getBoundingClientRect();
+        const composerMenu = document.getElementById('composerMenu') as HTMLElement | null;
+        const modelMenu = document.getElementById('modelMenu') as HTMLElement | null;
+        const composerAddBtn = document.getElementById('composerAddBtn') as HTMLElement | null;
+        const quickModelTrigger = document.getElementById('quickModelTrigger') as HTMLElement | null;
+
+        const positionMenu = (menu: HTMLElement | null, anchor: HTMLElement | null) => {
+            if (!menu || !anchor) return;
+            const anchorRect = anchor.getBoundingClientRect();
+            const preferredLeft = anchorRect.left - wrapperRect.left;
+            const menuWidth = menu.offsetWidth || 260;
+            const maxLeft = Math.max(12, wrapperRect.width - menuWidth - 12);
+            menu.style.left = `${Math.max(12, Math.min(preferredLeft, maxLeft))}px`;
+        };
+
+        positionMenu(composerMenu, composerAddBtn);
+        positionMenu(modelMenu, quickModelTrigger);
     }
 
     function renderComposerChips() {
@@ -3675,6 +3699,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'loadTopicMessages':
+                chatArea.innerHTML = '';
+                messageIndexMap.clear();
                 restoreArtifactsFromMessages(msg.messages || []);
                 msg.messages.forEach((m: any, idx: number) => {
                     if (m.isHidden === true) return;
@@ -3687,19 +3713,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         // Restore custom UI cards from steps
                         if (m.steps) {
                             const pCard = m.steps.find((s: any) => s.type === 'plan_card');
-                            if (pCard && pCard.toolResult) {
+                            if (pCard && pCard.toolResult && pCard.uiState !== 'approved') {
                                 window.dispatchEvent(new MessageEvent('message', {
                                     data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content, mode: pCard.mode }
                                 }));
                             }
                             const wtCard = m.steps.find((s: any) => s.type === 'walkthrough_card');
-                            if (wtCard && wtCard.toolResult) {
+                            if (wtCard && wtCard.toolResult && wtCard.uiState !== 'approved') {
                                 window.dispatchEvent(new MessageEvent('message', {
                                     data: { type: 'renderWalkthrough', sections: wtCard.toolResult }
                                 }));
                             }
                             const bpCard = m.steps.find((s: any) => s.type === 'blueprint_card');
-                            if (bpCard && bpCard.toolResult) {
+                            if (bpCard && bpCard.toolResult && bpCard.uiState !== 'approved') {
                                 window.dispatchEvent(new MessageEvent('message', {
                                     data: { type: 'renderBlueprint', sections: bpCard.toolResult, planText: bpCard.content }
                                 }));
@@ -3762,8 +3788,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'replaySteps': {
                 // Panel was hidden while AI was running — replay accumulated steps
                 // Show a banner so user knows the AI is/was running in the background
+                document.querySelectorAll('.replay-steps-banner').forEach(el => el.remove());
                 const banner = document.createElement('div');
-                banner.className = 'special-step';
+                banner.className = 'special-step replay-steps-banner';
                 banner.style.cssText = 'padding:6px 8px;background:rgba(255,200,50,0.08);border-left:2px solid #ffc832;font-size:11px;opacity:0.8;margin:4px 0;';
                 banner.innerHTML = msg.isGenerating
                     ? `${svgIconNoMargin('zap')} AI 正在后台运行（面板重新打开时恢复显示）`

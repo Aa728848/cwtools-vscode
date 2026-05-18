@@ -69,4 +69,35 @@ describe('agent manager cross-surface contracts', () => {
         expect(webview).to.include("document.getElementById('exaApiKey')");
         expect(webview).to.include('exaApiKey: ((document.getElementById');
     });
+
+    it('manager layout and composer menus adapt to the active surface geometry', () => {
+        const manager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
+        const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
+        const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(managerCss).to.include('--manager-active-right-width: 0px;');
+        expect(managerCss).to.include('--manager-active-right-width: var(--manager-right-width);');
+        expect(managerCss).to.include('right: calc(var(--manager-active-right-width) + 16px);');
+        expect(webview).to.include('function positionComposerMenus(): void');
+        expect(webview).to.include("window.addEventListener('resize', positionComposerMenus);");
+        expect(webview).to.include('menu.style.left =');
+        expect(manager).to.include('taskStatusMark(');
+        expect(managerCss).to.include('.manager-task-mark');
+    });
+
+    it('restored interactive cards and replay banners stay idempotent', () => {
+        const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(hostTypes).to.include("uiState?: 'pending' | 'approved'");
+        expect(hostPanel).to.include('markLatestInteractiveCardApproved');
+        expect(hostPanel).to.include("['plan_card', 'blueprint_card']");
+        expect(hostPanel).to.include("['walkthrough_card']");
+        expect(webview).to.include("pCard.uiState !== 'approved'");
+        expect(webview).to.include("wtCard.uiState !== 'approved'");
+        expect(webview).to.include("bpCard.uiState !== 'approved'");
+        expect(webview).to.include("document.querySelectorAll('.replay-steps-banner').forEach(el => el.remove());");
+        expect(webview).to.include("banner.className = 'special-step replay-steps-banner';");
+    });
 });

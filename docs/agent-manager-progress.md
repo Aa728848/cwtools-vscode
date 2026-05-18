@@ -29,6 +29,13 @@ Last updated: 2026-05-19
   - workspace toggle remains available in the detached window
   - composer `+` and quick-model menus are positioned inside the manager composer
   - Exa search token is restored and saved with the rest of the settings payload
+- [x] Close detached-window interaction regressions found during manual verification:
+  - floating cards and slash popup now follow the active inspector width instead of a fixed right offset
+  - composer menus anchor to the real trigger positions and reflow on resize
+  - approved plan / walkthrough / blueprint cards stay dismissed after history restore
+  - replaying hidden-session steps reuses one background-running banner instead of stacking duplicates
+  - manager settings keep a readable bounded width
+  - task rows use compact status symbols (`✓`, `…`, `○`) rather than raw status labels
 - [x] Extend smoke/unit tests for new wiring and core abstractions.
 
 ## Remaining To Reach Plan Completion

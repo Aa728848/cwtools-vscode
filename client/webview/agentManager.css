@@ -2,6 +2,7 @@
 body.agent-manager-shell {
     --manager-left-width: clamp(260px, 20vw, 340px);
     --manager-right-width: clamp(300px, 24vw, 420px);
+    --manager-active-right-width: 0px;
     display: grid;
     grid-template-columns: var(--manager-left-width) minmax(560px, 1fr) 0;
     grid-template-rows: auto 1fr auto;
@@ -120,7 +121,7 @@ body.agent-manager-shell .input-wrapper {
 body.agent-manager-shell .floating-card-area {
     position: absolute;
     left: calc(var(--manager-left-width) + 16px);
-    right: calc(var(--manager-right-width) + 16px);
+    right: calc(var(--manager-active-right-width) + 16px);
     bottom: 98px;
     width: auto;
     max-width: none;
@@ -144,7 +145,7 @@ body.agent-manager-shell.chat-empty .model-menu {
 body.agent-manager-shell .slash-popup {
     position: absolute;
     left: calc(var(--manager-left-width) + 16px);
-    right: calc(var(--manager-right-width) + 16px);
+    right: calc(var(--manager-active-right-width) + 16px);
     width: auto;
     max-width: none;
     bottom: 110px;
@@ -177,6 +178,7 @@ body.agent-manager-shell .artifact-toggle {
 }
 
 body.agent-manager-shell.artifact-drawer-open {
+    --manager-active-right-width: var(--manager-right-width);
     grid-template-columns: var(--manager-left-width) minmax(560px, 1fr) var(--manager-right-width);
 }
 
@@ -193,23 +195,41 @@ body.agent-manager-shell .header-actions #btnTopics {
 }
 
 body.agent-manager-shell .settings-page.active {
-    grid-column: 2 / 4;
+    grid-column: 2 / 3;
     grid-row: 2 / 4;
-    align-items: stretch;
+    align-items: center;
     padding: 0;
     z-index: 50;
 }
 
 body.agent-manager-shell .settings-header,
-body.agent-manager-shell .settings-overview,
 body.agent-manager-shell .settings-body,
 body.agent-manager-shell .settings-footer {
-    width: 100%;
-    max-width: none;
+    width: min(100%, 1040px);
+    max-width: 1040px;
+}
+
+body.agent-manager-shell .settings-overview {
+    width: min(calc(100% - 24px), 1016px);
+    max-width: 1016px;
 }
 
 body.agent-manager-shell .settings-body {
     padding-bottom: 24px;
+}
+
+body.agent-manager-shell .manager-task-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+body.agent-manager-shell .manager-task-mark {
+    width: 16px;
+    flex: 0 0 16px;
+    text-align: center;
+    color: var(--accent);
+    font-weight: 700;
 }
 
 @media (max-width: 1280px) {

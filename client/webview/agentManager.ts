@@ -117,8 +117,10 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             artifactListEl.innerHTML = state.todos.length
                 ? state.todos.map(todo => `
                     <article class="artifact-item manager-task-item manager-task-${escapeHtml(todo.status)}">
-                        <div class="artifact-item-title">${escapeHtml(todo.content)}</div>
-                        <div class="artifact-meta">${escapeHtml(todo.status.replace('_', ' '))}</div>
+                        <div class="manager-task-line">
+                            <span class="manager-task-mark">${taskStatusMark(todo.status)}</span>
+                            <span class="artifact-item-title">${escapeHtml(todo.content)}</span>
+                        </div>
                     </article>
                 `).join('')
                 : '<div class="artifact-empty">No tasks yet</div>';
@@ -145,6 +147,12 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 </article>
             `).join('')}
         `;
+    }
+
+    function taskStatusMark(status: 'pending' | 'in_progress' | 'done'): string {
+        if (status === 'done') return '&#10003;';
+        if (status === 'in_progress') return '&#8230;';
+        return '&#9675;';
     }
 
     function updateFromSnapshot(snapshot: ManagerSnapshotMessage): void {

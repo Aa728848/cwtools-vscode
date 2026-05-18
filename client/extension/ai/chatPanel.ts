@@ -376,6 +376,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.openArtifact(msg.artifactId, msg.file);
                 break;
             case 'submitPlanAnnotations': {
+                this.markLatestInteractiveCardApproved(['plan_card', 'blueprint_card']);
                 let contextStr = '';
                 if (msg.annotations && msg.annotations.length > 0) {
                     contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
@@ -413,6 +414,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             }
             case 'approveWalkthrough':
+                this.markLatestInteractiveCardApproved(['walkthrough_card']);
                 if (this.previousMode && this.previousMode !== this.currentMode) {
                     this.switchMode(this.previousMode);
                 }
@@ -2016,6 +2018,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             liveStepCount: this._liveSteps.length,
             artifacts: this.artifactStore.list(),
         });
+    }
+
+    private markLatestInteractiveCardApproved(types: Array<'plan_card' | 'blueprint_card' | 'walkthrough_card'>): void {
+        const topic = this.topicManager.currentTopic;
+        if (!topic) return;
+
+        for (let messageIndex = topic.messages.length - 1; messageIndex >= 0; messageIndex--) {
+            const steps = topic.messages[messageIndex]?.steps;
+            if (!steps) continue;
+            for (let stepIndex = steps.length - 1; stepIndex >= 0; stepIndex--) {
+                const step = steps[stepIndex];
+                if (!step || !types.includes(step.type as any) || step.uiState === 'approved') continue;
+                step.uiState = 'approved';
+                this.topicManager.saveTopics();
+                return;
+            }
+        }
     }
 
 

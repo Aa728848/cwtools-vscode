@@ -237,6 +237,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return (window.innerWidth || document.documentElement.clientWidth) >= 1180;
     }
 
+    function isManagerShell(): boolean {
+        return document.body.classList.contains('agent-manager-shell');
+    }
+
+    function isCurrentSurface(targetSurface?: 'chat' | 'manager'): boolean {
+        if (!targetSurface) return true;
+        return targetSurface === (isManagerShell() ? 'manager' : 'chat');
+    }
+
     function updateWorkspaceToggleState(): void {
         const toggle = document.getElementById('btnWorkspace');
         if (!toggle) return;
@@ -3823,7 +3832,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
                 updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
-                if (msg.showPanel) showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
+                if (msg.showPanel && isCurrentSurface(msg.targetSurface)) showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
                 break;
 
             case 'ollamaModels': {
@@ -4566,6 +4575,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         // Brave Search API key — show masked placeholder if already set
         const braveKeyEl = document.getElementById('braveSearchApiKey') as HTMLInputElement | null;
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
+        const exaKeyEl = document.getElementById('exaApiKey') as HTMLInputElement | null;
+        if (exaKeyEl) exaKeyEl.value = current.exaApiKey || '';
 
         // Render MCP Servers
         const mcpList = document.getElementById('mcpServersList');
@@ -4685,7 +4696,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         updateModelUI(current.provider, current.model, ollamaModels);
         updateApiKeyStatus(current.provider, providers);
         settingsPage.classList.add('active');
-        if (shouldUseSideWorkspace()) {
+        if (shouldUseSideWorkspace() && !isManagerShell()) {
             settingsInSideWorkspace = true;
             responsiveWorkspacePinnedClosed = !!activeResponsiveWorkspace;
             openSideWorkspace({ title: 'AI 设置', subtitle: '模型、上下文、API 和工具', content: settingsPage });
@@ -4985,6 +4996,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 forcedThinkingMode: (document.getElementById('forcedThinkingMode') as HTMLInputElement | null)?.checked ?? false,
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 braveSearchApiKey: ((document.getElementById('braveSearchApiKey') as HTMLInputElement | null)?.value || '').trim(),
+                exaApiKey: ((document.getElementById('exaApiKey') as HTMLInputElement | null)?.value || '').trim(),
                 inlineCompletion: {
                     enabled: (document.getElementById('inlineEnabled') as HTMLInputElement).checked,
                     provider: (document.getElementById('inlineProvider') as HTMLSelectElement).value,

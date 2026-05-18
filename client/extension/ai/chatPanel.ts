@@ -243,7 +243,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     // ─── Message Handling ────────────────────────────────────────────────────
 
-    private async handleWebViewMessage(msg: WebViewMessage): Promise<void> {
+    private async handleWebViewMessage(msg: WebViewMessage, sourceSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
         switch (msg.type) {
             case 'sendMessage':
                 await this.handleUserMessage(msg.text, msg.images, msg.attachedFiles);
@@ -304,11 +304,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'configureProvider':
             case 'openSettings':
-                await this.settingsManager.openSettingsPage();
+                await this.settingsManager.openSettingsPage(sourceSurface);
                 await this.settingsManager.getSkillsList();
                 break;
             case 'saveSettings':
-                await this.settingsManager.saveSettings(msg.settings);
+                await this.settingsManager.saveSettings(msg.settings, sourceSurface);
                 break;
             case 'detectOllamaModels':
                 await this.settingsManager.detectOllamaModels(msg.endpoint);
@@ -2272,7 +2272,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             async (msg: WebViewMessage) => {
                 if (!msg?.type) return;
                 try {
-                    await this.handleWebViewMessage(msg);
+                    await this.handleWebViewMessage(msg, surface);
                 } catch (e) {
                     ErrorReporter.warn(SOURCE.CHAT_PANEL, `Error handling webview message '${msg.type}'`, e);
                 }

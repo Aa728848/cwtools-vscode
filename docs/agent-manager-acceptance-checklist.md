@@ -18,6 +18,8 @@
 - [ ] Open Settings from manager and confirm provider/model/MCP controls are usable.
 - [ ] Use the composer `+` menu and quick model selector from manager.
 - [ ] Trigger permission, write confirmation, and plan annotation flows from manager and complete them without returning to the sidebar.
+- [ ] Open Settings from manager and confirm the sidebar does not also switch into settings.
+- [ ] Save Brave and Exa search tokens from manager, reopen settings, and confirm both fields restore as masked values.
 
 ## Topic Metadata
 
@@ -32,6 +34,8 @@
 - [ ] `Artifacts` tab reflects host artifact list in descending creation time.
 - [ ] `Tasks` tab reflects todo updates and status transitions.
 - [ ] Inspector tabs switch without losing current state.
+- [ ] Header `Artifacts` button can collapse and reopen the inspector on desktop.
+- [ ] Workspace button is available in the manager header and can reopen the active plan/diff workspace.
 
 ## Runtime and Recovery
 

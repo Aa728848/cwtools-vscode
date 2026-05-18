@@ -50,5 +50,23 @@ describe('agent manager cross-surface contracts', () => {
         expect(contracts).to.include('export interface OrchestratorProgressMessage');
 
         expect(css).to.include('.manager-inspector-tabs');
+        expect(css).to.include('body.agent-manager-shell.artifact-drawer-open');
+        expect(css).to.not.include('workspace-toggle {\n    display: none !important;');
+    });
+
+    it('manager settings stay local and preserve search tokens', () => {
+        const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const settingsHost = fs.readFileSync(path.join(root, 'client/extension/ai/chatSettings.ts'), 'utf8');
+        const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(hostTypes).to.include("targetSurface?: 'chat' | 'manager'");
+        expect(hostPanel).to.include('this.settingsManager.openSettingsPage(sourceSurface)');
+        expect(hostPanel).to.include('this.settingsManager.saveSettings(msg.settings, sourceSurface)');
+        expect(settingsHost).to.include("targetSurface?: 'chat' | 'manager'");
+        expect(webview).to.include('isCurrentSurface(msg.targetSurface)');
+        expect(webview).to.include('&& !isManagerShell()');
+        expect(webview).to.include("document.getElementById('exaApiKey')");
+        expect(webview).to.include('exaApiKey: ((document.getElementById');
     });
 });

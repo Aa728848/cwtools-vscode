@@ -23,6 +23,12 @@ Last updated: 2026-05-19
   - workspace-grouped topic rail
   - `Agents / Artifacts / Tasks` inspector tabs
   - rail-level overview pills
+- [x] Close the remaining manager parity gaps:
+  - desktop artifact drawer now opens and closes from the manager header
+  - settings requests stay scoped to the originating surface
+  - workspace toggle remains available in the detached window
+  - composer `+` and quick-model menus are positioned inside the manager composer
+  - Exa search token is restored and saved with the rest of the settings payload
 - [x] Extend smoke/unit tests for new wiring and core abstractions.
 
 ## Remaining To Reach Plan Completion

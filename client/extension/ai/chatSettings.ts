@@ -28,7 +28,7 @@ export class ChatSettingsManager {
     ) {}
 
     /** Build the settingsData payload and send it to the WebView */
-    async buildAndSendSettingsData(showPanel = false): Promise<void> {
+    async buildAndSendSettingsData(showPanel = false, targetSurface?: 'chat' | 'manager'): Promise<void> {
         const { BUILTIN_PROVIDERS, fetchOllamaModels, MODEL_CONTEXT_TOKENS } = await import('./providers');
         const config = this.aiService.getConfig();
 
@@ -104,13 +104,14 @@ export class ChatSettingsManager {
             current,
             ollamaModels,
             showPanel,
+            targetSurface,
             modelContextTokens: { ...MODEL_CONTEXT_TOKENS, ...dynamicContexts },
             thinkingModelPrefixes: ALWAYS_THINKING_PREFIXES,
         });
     }
 
-    async openSettingsPage(): Promise<void> {
-        await this.buildAndSendSettingsData(true);
+    async openSettingsPage(targetSurface?: 'chat' | 'manager'): Promise<void> {
+        await this.buildAndSendSettingsData(true, targetSurface);
     }
 
     /** Quickly switch model from the input-area selector without opening settings page */
@@ -120,7 +121,7 @@ export class ChatSettingsManager {
         await this.buildAndSendSettingsData();
     }
 
-    async saveSettings(settings: PanelSettings): Promise<void> {
+    async saveSettings(settings: PanelSettings, targetSurface?: 'chat' | 'manager'): Promise<void> {
         const cfg = vs.workspace.getConfiguration('cwtools.ai');
         const { BUILTIN_PROVIDERS } = await import('./providers');
 
@@ -197,7 +198,7 @@ export class ChatSettingsManager {
 
         lastAISettingsWriteTime = Date.now();
         vs.window.showInformationMessage('Eddy CWTool Code 设置已保存，部分 MCP 连接更改可能需要重载窗口生效');
-        await this.openSettingsPage();
+        await this.openSettingsPage(targetSurface);
     }
 
     async detectOllamaModels(endpoint: string): Promise<void> {

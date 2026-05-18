@@ -41,6 +41,10 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     const artifactDrawerEl = artifactDrawer;
     const artifactListEl = artifactList;
 
+    if ((window.innerWidth || document.documentElement.clientWidth) > 1280) {
+        document.body.classList.add('artifact-drawer-open');
+    }
+
     const state: ManagerEnhancementState = { ...DEFAULT_STATE };
     let activeTab: ManagerTab = 'agents';
 

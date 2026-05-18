@@ -46,7 +46,6 @@ import {
     CONTEXT_TYPE_META,
     generateContextId,
     mentionResultToActiveContext,
-    stripConsumedMentionText,
     type ActiveContext,
     type MentionResult,
 } from './chat/contextMentions';
@@ -56,7 +55,7 @@ import {
     const renderMarkdown = createMarkdownRenderer(chatI18n.markdown);
     const vscode = acquireVsCodeApi();
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
-    const input = document.getElementById('input') as HTMLTextAreaElement;
+    const input = document.getElementById('input') as HTMLDivElement;
     const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement;
     const emptyState = document.getElementById('emptyState') as HTMLDivElement;
     const topicsPanel = document.getElementById('topicsPanel') as HTMLDivElement;
@@ -114,6 +113,7 @@ import {
     let pendingFiles: string[] = [];
     /** Pending structured references to attach to the next sent message */
     let activeContexts: ActiveContext[] = [];
+    let savedInputRange: Range | null = null;
     let artifacts: ArtifactRecord[] = [];
     let artifactFilter: ArtifactFilter = 'all';
     let workflows: WorkflowView[] = [];
@@ -134,6 +134,196 @@ import {
     chatContentObserver.observe(chatArea, { childList: true });
     setChatEmptyState();
 
+    function updateComposerStackHeight() {
+        if (!inputWrapper) return;
+        const rect = inputWrapper.getBoundingClientRect();
+        const height = Math.ceil(rect.height);
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        const popupGap = 12;
+        document.documentElement.style.setProperty('--composer-stack-height', `${height}px`);
+        document.documentElement.style.setProperty('--composer-popup-top', `${Math.ceil(rect.bottom + popupGap)}px`);
+        document.documentElement.style.setProperty('--composer-popup-bottom', `${Math.max(12, Math.ceil(viewportHeight - rect.top + popupGap))}px`);
+    }
+
+    const composerResizeObserver = new ResizeObserver(updateComposerStackHeight);
+    if (inputWrapper) composerResizeObserver.observe(inputWrapper);
+    window.addEventListener('resize', updateComposerStackHeight);
+    updateComposerStackHeight();
+
+    function textFromComposerNode(node: Node): string {
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+        if (!(node instanceof HTMLElement)) return '';
+        if (node.classList.contains('reference-chip')) return ' ';
+        if (node.tagName === 'BR') return '\n';
+        const childText = Array.from(node.childNodes).map(textFromComposerNode).join('');
+        return node !== input && (node.tagName === 'DIV' || node.tagName === 'P') ? childText + '\n' : childText;
+    }
+
+    function getInputText(): string {
+        return Array.from(input.childNodes).map(textFromComposerNode).join('').replace(/\u00a0/g, ' ');
+    }
+
+    function isInputEmpty(): boolean {
+        return getInputText().trim() === '' && !input.querySelector('.reference-chip');
+    }
+
+    function autoResizeInput() {
+        updateComposerStackHeight();
+    }
+
+    function normalizeEmptyInput() {
+        if (input.querySelector('.reference-chip')) return;
+        if (getInputText().trim() === '' && input.innerHTML === '<br>') input.innerHTML = '';
+    }
+
+    function isRangeInsideInput(range: Range): boolean {
+        return (range.startContainer === input || input.contains(range.startContainer))
+            && (range.endContainer === input || input.contains(range.endContainer));
+    }
+
+    function saveInputSelection() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+        const range = selection.getRangeAt(0);
+        if (isRangeInsideInput(range)) savedInputRange = range.cloneRange();
+    }
+
+    function setInputRange(range: Range) {
+        input.focus();
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        savedInputRange = range.cloneRange();
+    }
+
+    function getInputEndRange(): Range {
+        const range = document.createRange();
+        range.selectNodeContents(input);
+        range.collapse(false);
+        return range;
+    }
+
+    function getActiveInputRange(): Range {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            if (isRangeInsideInput(range)) return range.cloneRange();
+        }
+        if (savedInputRange && isRangeInsideInput(savedInputRange)) return savedInputRange.cloneRange();
+        return getInputEndRange();
+    }
+
+    function placeCaretAtEnd(el: HTMLElement) {
+        el.focus();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        setInputRange(range);
+    }
+
+    function insertPlainTextAtRange(text: string, range = getActiveInputRange()) {
+        range.deleteContents();
+        const textNode = document.createTextNode(text);
+        range.insertNode(textNode);
+        const caret = document.createRange();
+        caret.setStart(textNode, textNode.length);
+        caret.collapse(true);
+        setInputRange(caret);
+        autoResizeInput();
+    }
+
+    function setInputText(text: string) {
+        input.textContent = text;
+        placeCaretAtEnd(input);
+        autoResizeInput();
+    }
+
+    function appendInputText(text: string, separator = '') {
+        const current = getInputText();
+        placeCaretAtEnd(input);
+        insertPlainTextAtRange(current.trim() ? separator + text : text);
+    }
+
+    function clearInput() {
+        input.innerHTML = '';
+        activeContexts = [];
+        savedInputRange = null;
+        autoResizeInput();
+    }
+
+    function syncContextsFromComposer() {
+        const byId = new Map(activeContexts.map(ctx => [ctx.id, ctx]));
+        activeContexts = Array.from(input.querySelectorAll<HTMLElement>('.reference-chip'))
+            .map(chip => byId.get(chip.dataset.id || ''))
+            .filter((ctx): ctx is ActiveContext => !!ctx);
+    }
+
+    function findLastTextNode(node: Node | undefined): Text | null {
+        if (!node) return null;
+        if (node.nodeType === Node.TEXT_NODE) return node as Text;
+        for (let child = node.lastChild; child; child = child.previousSibling) {
+            const found = findLastTextNode(child);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function getLastTextNodeBeforeCaret(range = getActiveInputRange()): { node: Text; offset: number } | null {
+        if (!isRangeInsideInput(range)) return null;
+        const node = range.startContainer;
+        const offset = range.startOffset;
+        if (node.nodeType === Node.TEXT_NODE) return { node: node as Text, offset };
+        for (let i = Math.min(offset, node.childNodes.length) - 1; i >= 0; i--) {
+            const textNode = findLastTextNode(node.childNodes[i]);
+            if (textNode) return { node: textNode, offset: textNode.length };
+        }
+        return null;
+    }
+
+    function getAtTriggerBeforeCaret(): { range: Range; filter: string } | null {
+        const caretRange = getActiveInputRange();
+        const match = getLastTextNodeBeforeCaret(caretRange);
+        if (!match || match.offset <= 0) return null;
+        const value = match.node.textContent || '';
+        const atIdx = value.lastIndexOf('@', Math.max(0, match.offset - 1));
+        if (atIdx < 0) return null;
+        const filter = value.slice(atIdx + 1, match.offset);
+        if (/[\s\n]/.test(filter)) return null;
+        const triggerRange = document.createRange();
+        triggerRange.setStart(match.node, atIdx);
+        triggerRange.setEnd(match.node, match.offset);
+        return { range: triggerRange, filter };
+    }
+
+    function replaceAtTriggerWithText(text: string) {
+        const trigger = getAtTriggerBeforeCaret();
+        insertPlainTextAtRange(text, trigger?.range || getActiveInputRange());
+    }
+
+    function getMentionFilterBeforeCaret(): string | null {
+        return getAtTriggerBeforeCaret()?.filter ?? null;
+    }
+
+    function insertReferenceAtCaret(ctx: ActiveContext, targetRange = getActiveInputRange()) {
+        activeContexts.push(ctx);
+        const chip = buildReferenceChip(ctx);
+        const spacer = document.createTextNode('\u00a0');
+        const range = isRangeInsideInput(targetRange) ? targetRange : getInputEndRange();
+        range.deleteContents();
+        range.insertNode(spacer);
+        range.insertNode(chip);
+        const caret = document.createRange();
+        caret.setStartAfter(spacer);
+        caret.collapse(true);
+        setInputRange(caret);
+        autoResizeInput();
+    }
+
+    function replaceAtTriggerWithReference(ctx: ActiveContext) {
+        const trigger = getAtTriggerBeforeCaret();
+        insertReferenceAtCaret(ctx, trigger?.range || getActiveInputRange());
+    }
+
     function getReferenceInitial(ctx: ActiveContext, fallback: string): string {
         if (ctx.type === 'file') {
             const ext = ctx.label.split('.').pop();
@@ -145,20 +335,63 @@ import {
         return fallback.slice(0, 2).toUpperCase();
     }
 
+    function buildReferenceChip(ctx: ActiveContext): HTMLElement {
+        const meta = CONTEXT_TYPE_META[ctx.type] || CONTEXT_TYPE_META.file;
+        const range = typeof ctx.startLine === 'number' && typeof ctx.endLine === 'number'
+            ? ` #L${ctx.startLine}-${ctx.endLine}`
+            : typeof ctx.line === 'number'
+                ? ` #L${ctx.line + 1}`
+                : '';
+        const title = ctx.description || ctx.uri || ctx.label;
+        const metaBits = [
+            typeof ctx.tokenEstimate === 'number' && ctx.tokenEstimate > 0 ? `~${formatNum(ctx.tokenEstimate)} tok` : '',
+            ctx.cacheStatus ? ctx.cacheStatus : '',
+        ].filter(Boolean).join(' · ');
+        const chip = document.createElement('span');
+        chip.className = `reference-chip ref-${ctx.type}`;
+        chip.contentEditable = 'false';
+        chip.dataset.id = ctx.id;
+        chip.dataset.label = ctx.label;
+        chip.title = title;
+        chip.innerHTML = `
+            ${svgIconNoMargin(meta.icon)}
+            <span class="ref-kind">${mrEscapeHtml(getReferenceInitial(ctx, meta.label))}</span>
+            <span class="ref-text">${mrEscapeHtml(ctx.label)}${range}</span>
+            ${metaBits ? `<span class="ref-meta">${mrEscapeHtml(metaBits)}</span>` : ''}
+            <button class="remove-ctx-btn" data-id="${ctx.id}" aria-label="Remove reference">&times;</button>
+        `;
+        chip.querySelector('.remove-ctx-btn')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = (e.currentTarget as HTMLElement).dataset.id;
+            activeContexts = activeContexts.filter(c => c.id !== id);
+            chip.remove();
+            autoResizeInput();
+            input.focus();
+        });
+        return chip;
+    }
+
     function renderContextTray() {
+        syncContextsFromComposer();
+        updateComposerStackHeight();
+        /*
+        return;
         let area = document.getElementById('referenceChipArea');
         if (!area) {
             area = document.createElement('div');
             area.id = 'referenceChipArea';
             const container = document.querySelector('.input-container');
-            const inputControls = container?.querySelector('.input-controls');
-            if (container && inputControls) container.insertBefore(area, inputControls);
+            const inputRow = container?.querySelector('.input-row');
+            if (inputRow) inputRow.prepend(area);
+            else if (container) container.prepend(area);
             else inputWrapper?.prepend(area);
         }
         
         area.innerHTML = '';
         if (activeContexts.length === 0) {
             area.style.display = 'none';
+            updateComposerStackHeight();
             return;
         }
         area.style.display = 'flex';
@@ -210,6 +443,8 @@ import {
                 renderContextTray();
             });
         });
+        updateComposerStackHeight();
+        */
     }
 
     // Notify host that WebView JS has fully loaded and is ready to receive messages
@@ -223,16 +458,16 @@ import {
     function startPlaceholderRotation() {
         stopPlaceholderRotation();
         placeholderTimer = setInterval(() => {
-            if (input.value.trim() === '' && !isGenerating) {
+            if (isInputEmpty() && !isGenerating) {
                 placeholderIdx = (placeholderIdx + 1) % PROMPT_EXAMPLES.length;
-                input.placeholder = PROMPT_EXAMPLES[placeholderIdx]!;
+                input.dataset.placeholder = PROMPT_EXAMPLES[placeholderIdx]!;
             }
         }, 6500);
     }
     function stopPlaceholderRotation() {
         if (placeholderTimer) { clearInterval(placeholderTimer); placeholderTimer = null; }
     }
-    input!.placeholder = PROMPT_EXAMPLES[placeholderIdx]!;
+    input.dataset.placeholder = PROMPT_EXAMPLES[placeholderIdx]!;
     startPlaceholderRotation();
 
     document.addEventListener('keydown', e => {
@@ -246,9 +481,7 @@ import {
         btn.addEventListener('click', () => {
             const text = btn.getAttribute('data-suggest');
             if (text && !isGenerating) {
-                input.value = text;
-                autoResizeInput();
-                input.focus();
+                setInputText(text);
                 setTimeout(() => sendMessage(), 120);
             }
         });
@@ -306,9 +539,7 @@ import {
                                     }
                                     
                                     // Append to existing input
-                                    input.value = (input.value ? input.value + '\n\n' : '') + combinedMessage.trim() + '\n';
-                                    autoResizeInput();
-                                    input.focus();
+                                    appendInputText(combinedMessage.trim() + '\n', '\n\n');
                                 }
                             }, false); // <--- DO NOT remove from DOM, so index is preserved!
                             return;
@@ -321,9 +552,7 @@ import {
                                     processFloatingCardQueue();
                                 }
                                 const formattedText = `【${cardTitle}】: ${text}`;
-                                input.value = (input.value ? input.value + '\n\n' : '') + formattedText + '\n';
-                                autoResizeInput();
-                                input.focus();
+                                appendInputText(formattedText + '\n', '\n\n');
                             }, false);
                             return;
                         }
@@ -331,9 +560,7 @@ import {
                 }
                 
                 // Normal behavior (not a question card)
-                input.value = (input.value ? input.value + '\n' : '') + text;
-                autoResizeInput();
-                input.focus();
+                appendInputText(text, '\n');
             }
         }
     });
@@ -380,14 +607,18 @@ import {
             switchMode(nextMode, true);
         }
     });
-    input.addEventListener('input', autoResizeInput);
+    input.addEventListener('input', () => {
+        normalizeEmptyInput();
+        syncContextsFromComposer();
+        saveInputSelection();
+        autoResizeInput();
+    });
+    input.addEventListener('keyup', saveInputSelection);
+    input.addEventListener('mouseup', saveInputSelection);
+    input.addEventListener('focus', saveInputSelection);
+    input.addEventListener('select', saveInputSelection);
     input.addEventListener('focus', stopPlaceholderRotation);
-    input.addEventListener('blur', () => { if (input.value.trim() === '') startPlaceholderRotation(); });
-
-    function autoResizeInput() {
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 180) + 'px';
-    }
+    input.addEventListener('blur', () => { if (isInputEmpty()) startPlaceholderRotation(); });
 
     function bindBtn(id: string, handler: () => void) {
         const el = document.getElementById(id);
@@ -584,12 +815,10 @@ import {
             if (action === 'media') {
                 document.getElementById('imgPickBtn')?.click();
             } else if (action === 'mentions') {
-                input.value = '@';
-                input.focus();
+                insertPlainTextAtRange('@');
                 input.dispatchEvent(new Event('input', { bubbles: true }));
             } else if (action === 'workflows') {
-                input.value = '/workflow:';
-                input.focus();
+                setInputText('/workflow:');
                 input.dispatchEvent(new Event('input', { bubbles: true }));
             }
         });
@@ -720,8 +949,7 @@ import {
                 const cmd = (el as HTMLElement).dataset.cmd;
                 slashPopup.classList.remove('show');
                 vscode.postMessage({ type: 'slashCommand', command: cmd });
-                input.value = '';
-                input.style.height = 'auto';
+                clearInput();
             });
         });
         slashPopup.classList.add('show');
@@ -729,18 +957,12 @@ import {
 
     input.addEventListener('input', () => {
         autoResizeInput();
-        const v = input.value;
+        const v = getInputText();
         if (v.startsWith('/') && v.length > 0) showSlashPopup(v);
         else slashPopup?.classList.remove('show');
-        // @ file mention: request file list on first @
-        const atIdx = v.lastIndexOf('@');
-        if (atIdx >= 0) {
-            const afterAt = v.slice(atIdx + 1);
-            if (!/[\s\n]/.test(afterAt)) {
-                showAtPopup(afterAt);
-            } else {
-                closeAtPopup();
-            }
+        const mentionFilter = getMentionFilterBeforeCaret();
+        if (mentionFilter !== null) {
+            showAtPopup(mentionFilter);
         } else {
             closeAtPopup();
         }
@@ -759,8 +981,7 @@ import {
         const el = document.createElement('div');
         el.id = 'atPopup';
         el.className = 'slash-popup'; // reuse slash-popup styles
-        el.style.cssText = 'display:none;position:absolute;bottom:100%;left:0;right:0;max-height:200px;overflow-y:auto;z-index:200;';
-        inputWrapper?.appendChild(el);
+        document.body.appendChild(el);
         return el;
     })();
     let _atPopupVisible = false;
@@ -785,6 +1006,7 @@ import {
         _mentionSelectedIndex = 0;
         if (results.length === 0) {
             atPopup.style.display = 'none';
+            atPopup.classList.remove('show');
             _atPopupVisible = false;
             return;
         }
@@ -815,8 +1037,14 @@ import {
             return `<div class="mention-group"><div class="mention-group-title">${escapeHtml(groupLabel)}</div>${itemsHtml}</div>`;
         }).join('');
 
+        saveInputSelection();
         atPopup.querySelectorAll('.slash-popup-item').forEach(el => {
-            el.addEventListener('click', () => {
+            el.addEventListener('mousedown', e => {
+                e.preventDefault();
+                saveInputSelection();
+            });
+            el.addEventListener('click', e => {
+                e.preventDefault();
                 const index = Number((el as HTMLElement).dataset.index);
                 const result = results[index];
                 if (!result) return;
@@ -825,29 +1053,17 @@ import {
                 const isTemplate = (type === 'symbol' || type === 'vanilla' || type === 'blackboard')
                     && !result.uri && !result.name && !result.key && !result.vanillaType;
                 if (isTemplate) {
-                    const v = input.value;
-                    const atIdx = v.lastIndexOf('@');
-                    input.value = (atIdx >= 0 ? v.slice(0, atIdx) : v) + '@' + result.label;
-                    autoResizeInput();
-                    input.focus();
+                    replaceAtTriggerWithText('@' + result.label);
                     showAtPopup(result.label);
                     return;
                 }
                 closeAtPopup();
-                
-                // Track into Context Tray
-                activeContexts.push(mentionResultToActiveContext(result));
-                renderContextTray();
-
-                // Replace the @partial in input with nothing (consume the mention)
-                const v = input.value;
-                const atIdx = v.lastIndexOf('@');
-                input.value = atIdx >= 0 ? v.slice(0, atIdx) : v;
-                autoResizeInput();
-                input.focus();
+                replaceAtTriggerWithReference(mentionResultToActiveContext(result));
             });
         });
-        atPopup.style.display = 'block'; _atPopupVisible = true;
+        atPopup.style.display = '';
+        atPopup.classList.add('show');
+        _atPopupVisible = true;
     }
 
     function setMentionSelectedIndex(index: number) {
@@ -957,6 +1173,7 @@ import {
     function closeAtPopup() {
         if (atPopup) {
             atPopup.style.display = 'none';
+            atPopup.classList.remove('show');
             _atPopupVisible = false;
             _mentionResults = [];
             _mentionSelectedIndex = 0;
@@ -1099,9 +1316,11 @@ import {
         del.addEventListener('click', () => {
             pendingImages = pendingImages.filter(u => u !== dataUrl);
             wrap.remove();
+            updateComposerStackHeight();
         });
         wrap.appendChild(img); wrap.appendChild(del);
         area.appendChild(wrap);
+        updateComposerStackHeight();
     }
 
 
@@ -1111,8 +1330,8 @@ import {
     if (endpointInp) endpointInp.addEventListener('input', onEndpointChange);
 
     function sendMessage() {
-        const rawText = input.value.trim();
-        const text = activeContexts.length > 0 ? stripConsumedMentionText(rawText, activeContexts) : rawText;
+        syncContextsFromComposer();
+        const text = getInputText().trim();
         if (!text && pendingImages.length === 0 && activeContexts.length === 0) return;
         setChatEmptyState(false);
         
@@ -1124,9 +1343,6 @@ import {
                 images: pendingImages.length > 0 ? [...pendingImages] : undefined,
             });
             activeContexts = [];
-            const refChip = document.getElementById('referenceChipArea');
-            if (refChip) refChip.innerHTML = '';
-            if (refChip) refChip.style.display = 'none';
         } else {
             vscode.postMessage({
                 type: 'sendMessage',
@@ -1136,8 +1352,7 @@ import {
             });
         }
         
-        input.value = '';
-        input.style.height = 'auto';
+        clearInput();
         stopPlaceholderRotation();
         // Clear image previews
         pendingImages = [];
@@ -1147,6 +1362,7 @@ import {
         // Clear @file badges
         const fileBadges = document.getElementById('fileBadgeArea');
         if (fileBadges) fileBadges.innerHTML = '';
+        updateComposerStackHeight();
     }
 
     /**
@@ -1183,7 +1399,7 @@ import {
             sendBtn.innerHTML = '<span class="send-icon">↑</span>';
             sendBtn.title = `${chatI18n.buttons.send} (Enter)`;
             sendBtn.className = 'send-btn';
-            if (input.value.trim() === '') startPlaceholderRotation();
+            if (isInputEmpty()) startPlaceholderRotation();
         }
     }
 
@@ -2695,9 +2911,8 @@ import {
             case 'fileList':
                 // If @ popup is open, refresh it
                 if (_atPopupVisible) {
-                    const v = input.value;
-                    const atIdx = v.lastIndexOf('@');
-                    if (atIdx >= 0) showAtPopup(v.slice(atIdx + 1));
+                    const filter = getMentionFilterBeforeCaret();
+                    if (filter !== null) showAtPopup(filter);
                 }
                 break;
 
@@ -3247,7 +3462,7 @@ import {
             }
 
             case 'insertSelectionReference': {
-                activeContexts.push({
+                insertReferenceAtCaret({
                     id: generateContextId(),
                     type: 'code_selection',
                     label: msg.relPath.split('/').pop() || msg.relPath,
@@ -3257,9 +3472,6 @@ import {
                     tokenEstimate: Math.max(1, (msg.endLine - msg.startLine + 1) * 24),
                     cacheStatus: 'live',
                 });
-                
-                renderContextTray();
-                input.focus();
                 break;
             }
 

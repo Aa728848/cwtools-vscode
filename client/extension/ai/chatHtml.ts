@@ -103,9 +103,9 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
 </div>
 
 <div id="floatingCardArea" class="floating-card-area"></div>
+<div id="slashPopup" class="slash-popup"></div>
 
 <div class="input-wrapper">
-    <div id="slashPopup" class="slash-popup"></div>
     <div id="composerMenu" class="composer-menu" aria-hidden="true">
         <div class="composer-menu-section">
             <button class="composer-menu-item" data-mode="plan">${svgIconNoMargin('clipboard')}<span>Plan</span></button>
@@ -127,7 +127,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <div class="file-badge-area" id="fileBadgeArea"></div>
         <div class="image-preview-area" id="imagePreviewArea"></div>
         <div class="input-row">
-            <textarea id="input" placeholder="描述你的需求... (/ 输入命令)" rows="1" aria-label="向 AI 发送消息"></textarea>
+            <div id="input" class="composer-input" contenteditable="true" data-placeholder="描述你的需求... (/ 输入命令)" role="textbox" aria-multiline="true" aria-label="向 AI 发送消息"></div>
         </div>
         <div class="input-controls">
             <div class="composer-toolbar">

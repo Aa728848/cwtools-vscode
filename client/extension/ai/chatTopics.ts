@@ -178,6 +178,34 @@ export class ChatTopicManager {
         return shouldStartNew;
     }
 
+    setPinned(topicId: string, pinned?: boolean): boolean {
+        const topic = this.topics.find(t => t.id === topicId);
+        if (!topic) return false;
+        topic.pinned = typeof pinned === 'boolean' ? pinned : !topic.pinned;
+        topic.updatedAt = Date.now();
+        this.saveTopics();
+        this.sendTopicList();
+        return true;
+    }
+
+    setWorkspace(topicId: string, workspaceId?: string | null, workspaceLabel?: string | null): boolean {
+        const topic = this.topics.find(t => t.id === topicId);
+        if (!topic) return false;
+        const nextId = (workspaceId ?? '').trim();
+        const nextLabel = (workspaceLabel ?? '').trim();
+        if (!nextId) {
+            delete topic.workspaceId;
+            delete topic.workspaceLabel;
+        } else {
+            topic.workspaceId = nextId;
+            topic.workspaceLabel = nextLabel || nextId;
+        }
+        topic.updatedAt = Date.now();
+        this.saveTopics();
+        this.sendTopicList();
+        return true;
+    }
+
     addHistoryMessage(msg: ChatHistoryMessage): void {
         if (this.currentTopic) {
             this.currentTopic.messages.push(msg);
@@ -199,6 +227,9 @@ export class ChatTopicManager {
                 updatedAt: t.updatedAt,
                 createdAt: t.createdAt,
                 archived: t.archived,
+                pinned: t.pinned,
+                workspaceId: t.workspaceId,
+                workspaceLabel: t.workspaceLabel,
                 messageCount: t.messages.length,
                 parentTopicId: t.parentTopicId,
                 forkedFromMessageIndex: t.forkedFromMessageIndex,
@@ -292,6 +323,9 @@ export class ChatTopicManager {
             messageCount: this.topics.find(t => t.id === s.id)?.messages.length || 0,
             matchContext: s.matchContext,
             score: s.score,
+            pinned: this.topics.find(t => t.id === s.id)?.pinned,
+            workspaceId: this.topics.find(t => t.id === s.id)?.workspaceId,
+            workspaceLabel: this.topics.find(t => t.id === s.id)?.workspaceLabel,
             parentTopicId: this.topics.find(t => t.id === s.id)?.parentTopicId,
             forkedFromMessageIndex: this.topics.find(t => t.id === s.id)?.forkedFromMessageIndex,
         }));

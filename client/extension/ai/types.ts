@@ -1134,6 +1134,12 @@ export interface ChatTopic {
     forkedFromMessageIndex?: number;
     /** Whether this session is archived (hidden from main list) */
     archived?: boolean;
+    /** Whether this topic is pinned in manager/session rail */
+    pinned?: boolean;
+    /** Optional workspace grouping identifier */
+    workspaceId?: string;
+    /** Optional workspace display label */
+    workspaceLabel?: string;
 }
 
 export interface ChatHistoryMessage {
@@ -1234,6 +1240,8 @@ export type WebViewMessage =
     | { type: 'renameTopic'; topicId: string; title: string }
     | { type: 'forkTopic'; topicId: string; messageIndex: number }
     | { type: 'archiveTopic'; topicId: string }
+    | { type: 'pinTopic'; topicId: string; pinned?: boolean }
+    | { type: 'setTopicWorkspace'; topicId: string; workspaceId?: string | null; workspaceLabel?: string | null }
     | { type: 'setShowArchived'; show: boolean }
     | { type: 'configureProvider' }
     | { type: 'cancelGeneration' }
@@ -1278,7 +1286,8 @@ export type WebViewMessage =
     | { type: 'approveTransaction'; txId: string }
     | { type: 'rejectTransaction'; txId: string }
     | { type: 'clearUsageStats' }
-    | { type: 'requestMentionSearch'; query: string };
+    | { type: 'requestMentionSearch'; query: string }
+    | { type: 'requestManagerSnapshot' };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
@@ -1287,7 +1296,7 @@ export type HostMessage =
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }
-    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
+    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; pinned?: boolean; workspaceId?: string; workspaceLabel?: string; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[] }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat' }
@@ -1324,7 +1333,7 @@ export type HostMessage =
     /** Emit a unified diff summary of all files changed in the message */
     | { type: 'diffSummary'; files: DiffSummaryFile[]; summaryId?: string }
     /** Topic search results */
-    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; matchContext?: string; score?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; query?: string; totalCount?: number; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
+    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; pinned?: boolean; workspaceId?: string; workspaceLabel?: string; messageCount?: number; matchContext?: string; score?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; query?: string; totalCount?: number; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
     /** Topic imported successfully */
     | { type: 'topicImported'; topicId: string; title: string }
     | { type: 'skillsList'; skills: string[] }
@@ -1349,7 +1358,18 @@ export type HostMessage =
         key?: string;
         tokenEstimate?: number;
         cacheStatus?: BaseContextItem['cacheStatus'];
-    }> };
+    }> }
+    | {
+        type: 'managerSnapshot';
+        topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; pinned?: boolean; workspaceId?: string; workspaceLabel?: string; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>;
+        stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null };
+        messages: ChatHistoryMessage[];
+        mode: AgentMode;
+        workflowId?: string | null;
+        isGenerating: boolean;
+        liveStepCount: number;
+        artifacts: AgentArtifact[];
+    };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

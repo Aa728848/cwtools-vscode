@@ -1,0 +1,242 @@
+/* Agent Manager shell: keep chat logic, but present as a three-pane workspace. */
+body.agent-manager-shell {
+    --manager-left-width: clamp(260px, 20vw, 340px);
+    --manager-right-width: clamp(300px, 24vw, 420px);
+    display: grid;
+    grid-template-columns: var(--manager-left-width) minmax(560px, 1fr) var(--manager-right-width);
+    grid-template-rows: auto 1fr auto;
+    gap: 0;
+    height: 100vh;
+    overflow: hidden;
+}
+
+body.agent-manager-shell .header {
+    grid-column: 1 / 4;
+}
+
+body.agent-manager-shell .mode-indicator,
+body.agent-manager-shell .todo-panel {
+    grid-column: 2 / 3;
+}
+
+body.agent-manager-shell .topics-panel {
+    position: static;
+    display: flex !important;
+    flex-direction: column;
+    grid-column: 1 / 2;
+    grid-row: 2 / 4;
+    border: 0;
+    border-right: 1px solid var(--border);
+    box-shadow: none;
+    animation: none;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    background: color-mix(in srgb, var(--bg) 96%, #1b1d20);
+}
+
+body.agent-manager-shell .topics-panel-header,
+body.agent-manager-shell .topics-panel-summary,
+body.agent-manager-shell .topics-list {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+}
+
+body.agent-manager-shell .topics-list {
+    padding-bottom: 24px;
+}
+
+body.agent-manager-shell .manager-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 10px 4px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+body.agent-manager-shell .manager-overview-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+body.agent-manager-shell .manager-inspector-tabs {
+    margin-top: 6px;
+}
+
+body.agent-manager-shell .manager-pill,
+body.agent-manager-shell .manager-meta {
+    font-size: 11px;
+    line-height: 1.3;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    background: color-mix(in srgb, var(--bg) 90%, #2a2f35);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 3px 7px;
+    white-space: nowrap;
+}
+
+body.agent-manager-shell .chat-area {
+    grid-column: 2 / 3;
+    grid-row: 2 / 3;
+    margin-right: 0 !important;
+    padding: 14px 16px 10px;
+}
+
+body.agent-manager-shell .chat-area > *:not(.empty-state) {
+    width: min(100%, 980px);
+    max-width: 980px;
+}
+
+body.agent-manager-shell .chat-area > *:not(.empty-state):last-child {
+    margin-bottom: 20px !important;
+}
+
+body.agent-manager-shell .input-wrapper {
+    position: static;
+    grid-column: 2 / 3;
+    grid-row: 3 / 4;
+    padding: 12px 16px 14px;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    transform: none !important;
+    transition: none;
+}
+
+body.agent-manager-shell .floating-card-area {
+    position: absolute;
+    left: calc(var(--manager-left-width) + 16px);
+    right: calc(var(--manager-right-width) + 16px);
+    bottom: 98px;
+    width: auto;
+    max-width: none;
+    margin: 0;
+}
+
+body.agent-manager-shell .slash-popup {
+    position: absolute;
+    left: calc(var(--manager-left-width) + 16px);
+    right: calc(var(--manager-right-width) + 16px);
+    width: auto;
+    max-width: none;
+    bottom: 110px;
+}
+
+body.agent-manager-shell .artifact-scrim {
+    display: none !important;
+}
+
+body.agent-manager-shell .artifact-drawer {
+    position: static;
+    transform: none !important;
+    width: auto;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    grid-column: 3 / 4;
+    grid-row: 2 / 4;
+    border-left: 1px solid var(--border);
+    box-shadow: none;
+    z-index: auto;
+    background: color-mix(in srgb, var(--bg) 92%, #20242a);
+}
+
+body.agent-manager-shell .artifact-toggle {
+    opacity: 0.95;
+}
+
+body.agent-manager-shell .side-workspace,
+body.agent-manager-shell .workspace-toggle {
+    display: none !important;
+}
+
+body.agent-manager-shell .header-actions #btnTopics {
+    display: none;
+}
+
+body.agent-manager-shell .settings-page.active {
+    grid-column: 2 / 4;
+    grid-row: 2 / 4;
+    align-items: stretch;
+    padding: 0;
+    z-index: 50;
+}
+
+body.agent-manager-shell .settings-header,
+body.agent-manager-shell .settings-overview,
+body.agent-manager-shell .settings-body,
+body.agent-manager-shell .settings-footer {
+    width: 100%;
+    max-width: none;
+}
+
+body.agent-manager-shell .settings-body {
+    padding-bottom: 24px;
+}
+
+@media (max-width: 1280px) {
+    body.agent-manager-shell {
+        grid-template-columns: 280px minmax(420px, 1fr);
+    }
+
+    body.agent-manager-shell .artifact-drawer {
+        position: fixed;
+        top: 42px;
+        right: 0;
+        bottom: 0;
+        width: min(380px, calc(100vw - 32px));
+        transform: translateX(104%) !important;
+        box-shadow: -24px 0 42px rgba(0,0,0,0.36);
+        z-index: 160;
+    }
+
+    body.agent-manager-shell.artifact-drawer-open .artifact-drawer {
+        transform: translateX(0) !important;
+    }
+}
+
+@media (max-width: 980px) {
+    body.agent-manager-shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr auto;
+    }
+
+    body.agent-manager-shell .topics-panel {
+        position: fixed;
+        top: 42px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        grid-column: auto;
+        grid-row: auto;
+        border-right: 0;
+        border-top: 1px solid var(--border);
+        z-index: 140;
+        display: none !important;
+    }
+
+    body.agent-manager-shell .topics-panel.show {
+        display: flex !important;
+    }
+
+    body.agent-manager-shell .chat-area,
+    body.agent-manager-shell .input-wrapper,
+    body.agent-manager-shell .mode-indicator,
+    body.agent-manager-shell .todo-panel {
+        grid-column: 1 / 2;
+    }
+
+    body.agent-manager-shell .floating-card-area,
+    body.agent-manager-shell .slash-popup {
+        left: 12px;
+        right: 12px;
+        width: auto;
+    }
+
+    body.agent-manager-shell .header-actions #btnTopics {
+        display: inline-flex;
+    }
+}

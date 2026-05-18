@@ -29,12 +29,16 @@ import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
 import { UsageTracker } from './usageTracker';
 import { getChatPanelHtml } from './chatHtml';
+import { getAgentManagerHtml } from './agentManagerHtml';
 import { ChatTopicManager } from './chatTopics';
 import { generateInitFile } from './chatInit';
 import { ChatSettingsManager } from './chatSettings';
 import { ErrorReporter } from './errorReporter';
 import { UI, SOURCE } from './messages';
 import { ContextReferenceManager } from './contextReferences';
+import { AgentSessionCoordinator } from './agentSessionCoordinator';
+import { AgentUiBroadcaster } from './agentUiBroadcaster';
+import { ArtifactStore } from './artifactStore';
 import { getAllWorkflows, getWorkflow } from './workflowRegistry';
 import { toWorkflowViewModel } from './workflowViewModel';
 import { getWorkflowUiLabels } from './workflowI18n';
@@ -69,15 +73,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public static readonly viewType = 'cwtools.aiChat';
 
     private view?: vs.WebviewView;
+    private managerPanel?: vs.WebviewPanel;
+    private readonly session = new AgentSessionCoordinator();
+    private readonly broadcaster = new AgentUiBroadcaster();
+    private readonly artifactStore = new ArtifactStore(() => this.topicManager.currentTopic?.id ?? 'session');
     private conversationMessages: ChatMessage[] = [];
     private abortController: AbortController | null = null;
-    private currentMode: AgentMode = 'build';
-    private previousMode: AgentMode = 'build';
-    private currentWorkflowId: string | null = null;
-    /** Live snapshot of agent steps emitted during the current generation */
-    private _liveSteps: AgentStep[] = [];
-    /** Whether an AI generation is currently running */
-    private _isGenerating = false;
     /**
      * Per-message file snapshots for retract/undo support.
      * Key = messageIndex (the topic.messages index at the time the user sent the message).
@@ -101,12 +102,53 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // The mutable `_previewContent` field is updated before each diff view.
     private _previewContent = '';
     private _previewProviderRegistration?: vs.Disposable;
-    /** Fix #2: disposables for WebView event listeners, cleaned up on dispose() */
+    /** Fix #2: disposables for sidebar WebView event listeners, cleaned up on dispose() */
     private _viewDisposables: vs.Disposable[] = [];
+    /** Disposables for detached Agent Manager panel listeners */
+    private _managerDisposables: vs.Disposable[] = [];
     private topicManager!: ChatTopicManager;
     private settingsManager!: ChatSettingsManager;
     private contextReferences: ContextReferenceManager;
-    private artifacts = new Map<string, AgentArtifact>();
+
+    private get currentMode(): AgentMode {
+        return this.session.currentMode;
+    }
+
+    private set currentMode(mode: AgentMode) {
+        this.session.currentMode = mode;
+    }
+
+    private get previousMode(): AgentMode {
+        return this.session.previousMode;
+    }
+
+    private set previousMode(mode: AgentMode) {
+        this.session.previousMode = mode;
+    }
+
+    private get currentWorkflowId(): string | null {
+        return this.session.currentWorkflowId;
+    }
+
+    private set currentWorkflowId(workflowId: string | null) {
+        this.session.currentWorkflowId = workflowId;
+    }
+
+    private get _liveSteps(): AgentStep[] {
+        return this.session.liveSteps;
+    }
+
+    private set _liveSteps(steps: AgentStep[]) {
+        this.session.liveSteps = steps;
+    }
+
+    private get _isGenerating(): boolean {
+        return this.session.isGenerating;
+    }
+
+    private set _isGenerating(value: boolean) {
+        this.session.isGenerating = value;
+    }
 
     constructor(
         private extensionUri: vs.Uri,
@@ -142,10 +184,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // The view reference becomes stale after reload — clear it.
             this.view = undefined;
         }
+        if (this.managerPanel) {
+            try { this.managerPanel.dispose(); } catch { /* ignore */ }
+            this.managerPanel = undefined;
+        }
         this._messageFileSnapshots.clear();
         // Fix #2: dispose WebView event listeners
         this._viewDisposables.forEach(d => d.dispose());
         this._viewDisposables = [];
+        this._managerDisposables.forEach(d => d.dispose());
+        this._managerDisposables = [];
     }
 
     resolveWebviewView(
@@ -154,28 +202,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         _token: vs.CancellationToken
     ): void {
         this.view = webviewView;
-
-        webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [this.extensionUri],
-        };
-
-        webviewView.webview.html = this.getHtmlContent(webviewView.webview);
-
-        // Handle messages from WebView
-        // Fix #2: capture disposables so they are released with the view
-        webviewView.webview.onDidReceiveMessage(
-            async (msg: WebViewMessage) => { 
-                if (!msg?.type) return;
-                try {
-                    await this.handleWebViewMessage(msg);
-                } catch (e) {
-                    ErrorReporter.warn(SOURCE.CHAT_PANEL, `Error handling webview message '${msg.type}'`, e);
-                }
-            },
-            this,
-            this._viewDisposables
-        );
+        this._viewDisposables.forEach(d => d.dispose());
+        this._viewDisposables = [];
+        this.bindWebview(webviewView.webview, this._viewDisposables, 'chat');
 
         // ── Restore state when panel becomes visible again ────────────────────
         webviewView.onDidChangeVisibility(
@@ -184,12 +213,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this._viewDisposables
         );
 
-        // Send topic list and initial model data on load
-        this.topicManager.sendTopicList();
-        // Push provider/model list immediately so the quick selector is populated
-        this.settingsManager.buildAndSendSettingsData().catch(() => { /* ignore on startup */ });
-        // Restore current conversation if any
-        this._restoreViewState();
     }
 
     // ─── View State Restoration ───────────────────────────────────────────────
@@ -210,8 +233,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this._isGenerating && this._liveSteps.length > 0) {
             this.postMessage({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
         }
-        if (this.artifacts.size > 0) {
-            this.postMessage({ type: 'artifactList', artifacts: [...this.artifacts.values()] });
+        if (this.artifactStore.size > 0) {
+            this.postMessage({ type: 'artifactList', artifacts: this.artifactStore.list() });
         }
         this.sendWorkflowState();
         // 4. Restore model lists and settings bindings
@@ -267,6 +290,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'archiveTopic':
                 this.archiveTopic(msg.topicId);
+                break;
+            case 'pinTopic':
+                this.topicManager.setPinned(msg.topicId, msg.pinned);
+                this.sendManagerSnapshot();
+                break;
+            case 'setTopicWorkspace':
+                this.topicManager.setWorkspace(msg.topicId, msg.workspaceId, msg.workspaceLabel);
+                this.sendManagerSnapshot();
                 break;
             case 'setShowArchived':
                 this.topicManager.setShowArchived(msg.show);
@@ -401,6 +432,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'requestFileList':
                 this.sendWorkspaceFileList();
                 break;
+            case 'requestManagerSnapshot':
+                this.sendManagerSnapshot();
+                break;
+            case 'ready':
+                this.sendManagerSnapshot();
+                break;
             case 'requestMentionSearch': {
                 try {
                     this.postMessage({ type: 'mentionSearchResults', results: await this.contextReferences.search(msg.query) });
@@ -435,11 +472,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Opens the chat panel if it's not visible.
      */
     async sendProgrammaticMessage(text: string): Promise<void> {
-        await vs.commands.executeCommand('cwtools.aiChat.focus');
+        if (this.managerPanel) {
+            this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);
+        } else {
+            await vs.commands.executeCommand('cwtools.aiChat.focus');
+        }
         
         // Wait up to 5 seconds for the view to be both defined and visible
         let attempts = 0;
-        while ((!this.view || !this.view.visible) && attempts < 50) {
+        while (!this.hasVisibleChatSurface() && attempts < 50) {
             await new Promise(resolve => setTimeout(resolve, 100));
             attempts++;
         }
@@ -1090,7 +1131,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * unless it already exists on disk, in which case its current content is captured.
      */
     private async openArtifact(artifactId: string, file?: string): Promise<void> {
-        const artifact = this.artifacts.get(artifactId);
+        const artifact = this.artifactStore.get(artifactId);
         if (!artifact) {
             vs.window.showWarningMessage('Artifact is not available in the current session.');
             return;
@@ -1941,6 +1982,42 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         });
     }
 
+    private sendManagerSnapshot(): void {
+        const visibleTopics = this.topicManager.topics
+            .filter(topic => this.topicManager.showArchived || !topic.archived);
+        const archivedCount = this.topicManager.topics.filter(topic => topic.archived).length;
+
+        this.postMessage({
+            type: 'managerSnapshot',
+            topics: visibleTopics.map(topic => ({
+                id: topic.id,
+                title: topic.title,
+                updatedAt: topic.updatedAt,
+                createdAt: topic.createdAt,
+                archived: topic.archived,
+                pinned: topic.pinned,
+                workspaceId: topic.workspaceId,
+                workspaceLabel: topic.workspaceLabel,
+                messageCount: topic.messages.length,
+                parentTopicId: topic.parentTopicId,
+                forkedFromMessageIndex: topic.forkedFromMessageIndex,
+            })),
+            stats: {
+                total: this.topicManager.topics.length,
+                visible: visibleTopics.length,
+                archived: archivedCount,
+                currentTopicId: this.topicManager.currentTopic?.id ?? null,
+                currentTopicTitle: this.topicManager.currentTopic?.title ?? null,
+            },
+            messages: this.topicManager.currentTopic?.messages ?? [],
+            mode: this.currentMode,
+            workflowId: this.currentWorkflowId,
+            isGenerating: this._isGenerating,
+            liveStepCount: this._liveSteps.length,
+            artifacts: this.artifactStore.list(),
+        });
+    }
+
 
 
 
@@ -2026,32 +2103,22 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private postMessage(msg: HostMessage): void {
-        this.view?.webview.postMessage(msg);
+        this.broadcaster.postMessage(msg);
     }
 
     private clearArtifacts(): void {
-        this.artifacts.clear();
-        this.postMessage({ type: 'artifactList', artifacts: [] });
+        this.postMessage({ type: 'artifactList', artifacts: this.artifactStore.clear() });
     }
 
     private upsertArtifact(artifact: Omit<AgentArtifact, 'createdAt'> & { createdAt?: number }): void {
-        const now = Date.now();
-        const previous = this.artifacts.get(artifact.id);
-        this.artifacts.set(artifact.id, {
-            ...previous,
-            ...artifact,
-            createdAt: previous?.createdAt ?? artifact.createdAt ?? now,
-            updatedAt: now,
-        });
         this.postMessage({
             type: 'artifactList',
-            artifacts: [...this.artifacts.values()].sort((a, b) => b.createdAt - a.createdAt),
+            artifacts: this.artifactStore.upsert(artifact),
         });
     }
 
     private artifactId(kind: AgentArtifactKind, key: string): string {
-        const topicId = this.topicManager.currentTopic?.id ?? 'session';
-        return `${topicId}:${kind}:${key.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+        return this.artifactStore.buildId(kind, key);
     }
 
     private collectArtifactsFromResult(result: import('./types').GenerationResult): void {
@@ -2125,6 +2192,46 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return getChatPanelHtml(webview, this.extensionUri);
     }
 
+    private getManagerHtmlContent(webview: vs.Webview): string {
+        return getAgentManagerHtml(webview, this.extensionUri);
+    }
+
+    public async openAgentManager(): Promise<void> {
+        if (this.managerPanel) {
+            this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);
+            this._restoreViewState();
+            return;
+        }
+
+        const panel = vs.window.createWebviewPanel(
+            'cwtools.agentManager',
+            'Agent Manager',
+            { viewColumn: vs.ViewColumn.Beside, preserveFocus: false },
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [this.extensionUri],
+            }
+        );
+
+        this.managerPanel = panel;
+        this._managerDisposables.forEach(d => d.dispose());
+        this._managerDisposables = [];
+        this.bindWebview(panel.webview, this._managerDisposables, 'manager');
+
+        panel.onDidDispose(() => {
+            this.managerPanel = undefined;
+            this._managerDisposables.forEach(d => d.dispose());
+            this._managerDisposables = [];
+        }, this, this._managerDisposables);
+
+        panel.onDidChangeViewState((e) => {
+            if (e.webviewPanel.visible) this._restoreViewState();
+        }, this, this._managerDisposables);
+
+        this._restoreViewState();
+    }
+
     /** 
 * Send the selection reference to the Webview input box 
 */
@@ -2133,10 +2240,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         startLine: number,
         endLine: number
     ): Promise<void> {
-        // Focus on AI panel
-        await vs.commands.executeCommand('cwtools.aiChat.focus');
+        if (this.managerPanel) {
+            this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);
+        } else {
+            await vs.commands.executeCommand('cwtools.aiChat.focus');
+        }
         let attempts = 0;
-        while ((!this.view || !this.view.visible) && attempts < 50) {
+        while (!this.hasVisibleChatSurface() && attempts < 50) {
             await new Promise(resolve => setTimeout(resolve, 100));
             attempts++;
         }
@@ -2147,5 +2257,39 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             startLine,
             endLine
         });
+    }
+
+    private bindWebview(webview: vs.Webview, bucket: vs.Disposable[], surface: 'chat' | 'manager'): void {
+        webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this.extensionUri],
+        };
+        webview.html = surface === 'manager'
+            ? this.getManagerHtmlContent(webview)
+            : this.getHtmlContent(webview);
+
+        webview.onDidReceiveMessage(
+            async (msg: WebViewMessage) => {
+                if (!msg?.type) return;
+                try {
+                    await this.handleWebViewMessage(msg);
+                } catch (e) {
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, `Error handling webview message '${msg.type}'`, e);
+                }
+            },
+            this,
+            bucket
+        );
+        bucket.push(this.broadcaster.register(webview));
+
+        this.topicManager.sendTopicList();
+        this.settingsManager.buildAndSendSettingsData().catch(() => { /* ignore on startup */ });
+        this._restoreViewState();
+    }
+
+    private hasVisibleChatSurface(): boolean {
+        if (this.view?.visible) return true;
+        if (this.managerPanel?.visible) return true;
+        return false;
     }
 }

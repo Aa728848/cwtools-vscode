@@ -81,4 +81,35 @@ describe('webview smoke checks', () => {
 
         expect(stat.size).to.be.greaterThan(1000);
     });
+
+    it('agent manager shell wiring exists', () => {
+        const managerHtml = fs.readFileSync(path.join(root, 'client/extension/ai/agentManagerHtml.ts'), 'utf8');
+        const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
+        const managerEntry = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
+        const host = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+
+        expect(managerHtml).to.include("bodyClass: 'chat-empty agent-manager-shell'");
+        expect(managerHtml).to.include("scriptName: 'agentManager.js'");
+        expect(managerCss).to.include('body.agent-manager-shell');
+        expect(managerCss).to.include('.manager-overview');
+        expect(managerCss).to.include('.manager-inspector-tabs');
+        expect(managerCss).to.include('.topics-panel');
+        expect(managerCss).to.include('.artifact-drawer');
+        expect(managerEntry).to.not.include("import './chatPanel'");
+        expect(managerEntry).to.include("import type { ManagerSnapshotMessage");
+        expect(managerEntry).to.include("type: 'requestManagerSnapshot'");
+        expect(managerEntry).to.include("case 'managerSnapshot'");
+        expect(managerEntry).to.include("case 'orchestratorProgress'");
+        expect(host).to.include("case 'requestManagerSnapshot'");
+        expect(host).to.include("type: 'managerSnapshot'");
+        expect(host).to.include("case 'pinTopic'");
+        expect(host).to.include("case 'setTopicWorkspace'");
+    });
+
+    it('agent manager release bundle exists and is non-empty after compile', () => {
+        const bundlePath = path.join(root, 'release/bin/client/webview/agentManager.js');
+        const stat = fs.statSync(bundlePath);
+
+        expect(stat.size).to.be.greaterThan(1000);
+    });
 });

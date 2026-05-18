@@ -75,6 +75,26 @@ export default [
             copyFile('client/webview/chatPanel.css', 'release/bin/client/webview/chatPanel.css'),
         ],
     },
+    // Agent Manager webview bundle
+    {
+        input: './client/webview/agentManager.ts',
+        output: {
+            file: './release/bin/client/webview/agentManager.js',
+            format: "iife",
+            name: "cwtoolsagentmanager",
+            indent: false,
+        },
+        plugins: [
+            typescript({
+                tsconfig: "tsconfig.webview-chat.json",
+                clean: false,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                }
+            }),
+            copyFile('client/webview/agentManager.css', 'release/bin/client/webview/agentManager.css'),
+        ],
+    },
     // Event Chain Preview webview bundle
     {
         input: './client/webview/eventChainPreview.ts',
@@ -141,4 +161,4 @@ export default [
             copyFile('client/webview/entityPreview.css', 'release/bin/client/webview/entityPreview.css'),
         ],
     },
-];
+];

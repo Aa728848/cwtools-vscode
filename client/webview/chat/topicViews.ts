@@ -37,8 +37,8 @@ export function renderTopicPanelSummary(
             <div class="topics-panel-summary-title">${mode === 'search' ? '搜索结果' : '话题浏览器'}</div>
             <div class="topics-panel-summary-subtitle">${
                 mode === 'search'
-                    ? `关键词 ${escapeHtml(query || '空')} · ${totalCount ?? summaryModel.visibleCount} 条结果`
-                    : '按更新时间自动分组，支持分叉、归档和导出'
+                    ? `关键字 ${escapeHtml(query || '空')} · ${totalCount ?? summaryModel.visibleCount} 条结果`
+                    : '按更新时间自动分组，支持分叉、归档、置顶和导出'
             }</div>
         </div>
         <div class="topics-panel-summary-chips">
@@ -80,12 +80,9 @@ export function buildTopicItem(
         `消息 ${topic.messageCount ?? 0}`,
         `更新 ${formatTopicMoment(topic.updatedAt, callbacks.formatTime)}`,
     ];
+    if (topic.workspaceLabel || topic.workspaceId) metaBits.push(`分组 ${topic.workspaceLabel || topic.workspaceId}`);
     if (topic.createdAt) metaBits.push(`创建 ${formatTopicMoment(topic.createdAt, callbacks.formatTime)}`);
-    if (topic.parentTopicId && topic.forkedFromMessageIndex != null) {
-        metaBits.push(`分叉于 #${topic.forkedFromMessageIndex + 1}`);
-    } else if (topic.parentTopicId) {
-        metaBits.push('分叉来源');
-    }
+    if (topic.parentTopicId && topic.forkedFromMessageIndex != null) metaBits.push(`分叉于 #${topic.forkedFromMessageIndex + 1}`);
     if (topic.score != null) metaBits.push(`相关度 ${Math.round(topic.score)}`);
     metaRow.innerHTML = metaBits.map(bit => `<span class="topic-meta-chip">${escapeHtml(bit)}</span>`).join('');
 
@@ -105,9 +102,7 @@ export function buildTopicItem(
 
     item.appendChild(main);
     item.appendChild(actions);
-    item.addEventListener('click', () => {
-        callbacks.postMessage({ type: 'loadTopic', topicId: topic.id });
-    });
+    item.addEventListener('click', () => callbacks.postMessage({ type: 'loadTopic', topicId: topic.id }));
     return item;
 }
 
@@ -129,7 +124,13 @@ export function renderTopics(
         return;
     }
     list.innerHTML = '';
-    for (const group of groupTopicsByDate(topics)) {
+    const sorted = [...topics].sort((a, b) => {
+        const pinA = a.pinned ? 1 : 0;
+        const pinB = b.pinned ? 1 : 0;
+        if (pinA !== pinB) return pinB - pinA;
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+    for (const group of groupTopicsByDate(sorted)) {
         const header = document.createElement('div');
         header.className = 'topic-date-group';
         header.textContent = group.label;
@@ -174,6 +175,9 @@ function appendTopicState(head: HTMLElement, topic: TopicPanelItem, currentTopic
     if (topic.id === currentTopicId) {
         state.className = 'topic-state topic-state-current';
         state.textContent = '当前';
+    } else if (topic.pinned) {
+        state.className = 'topic-state topic-state-current';
+        state.textContent = '置顶';
     } else if (topic.archived) {
         state.className = 'topic-state topic-state-archived';
         state.textContent = '归档';
@@ -193,6 +197,15 @@ function appendTopicActions(
     title: HTMLElement,
     callbacks: TopicViewCallbacks,
 ): void {
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'topic-action-btn topic-pin-btn';
+    pinBtn.textContent = topic.pinned ? '📌' : '📍';
+    pinBtn.title = topic.pinned ? '取消置顶' : '置顶';
+    pinBtn.addEventListener('click', event => {
+        event.stopPropagation();
+        callbacks.postMessage({ type: 'pinTopic', topicId: topic.id, pinned: !topic.pinned });
+    });
+
     const forkBtn = document.createElement('button');
     forkBtn.className = 'topic-action-btn topic-fork-btn';
     forkBtn.innerHTML = svgIconNoMargin('link');
@@ -229,6 +242,7 @@ function appendTopicActions(
         callbacks.postMessage({ type: 'deleteTopic', topicId: topic.id });
     });
 
+    actions.appendChild(pinBtn);
     actions.appendChild(forkBtn);
     actions.appendChild(renameBtn);
     actions.appendChild(archiveBtn);
@@ -237,8 +251,8 @@ function appendTopicActions(
 
 function localizeCurrentLabel(label: string): string {
     return label
-        .replace(/^Current archived: /, '当前归档：')
-        .replace(/^Current: hidden topic$/, '当前：会话已隐藏')
-        .replace(/^Current: none$/, '当前：无活动会话')
-        .replace(/^Current: /, '当前：');
+        .replace(/^Current archived: /, '当前归档: ')
+        .replace(/^Current: hidden topic$/, '当前: 会话已隐藏')
+        .replace(/^Current: none$/, '当前: 无活动会话')
+        .replace(/^Current: /, '当前: ');
 }

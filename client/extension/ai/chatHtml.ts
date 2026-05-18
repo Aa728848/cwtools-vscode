@@ -8,29 +8,41 @@
 import * as vs from 'vscode';
 import { svgIcon, svgIconNoMargin } from '../../webview/svgIcons';
 
+export interface ChatPanelHtmlOptions {
+    title?: string;
+    bodyClass?: string;
+    extraStylesheets?: string[];
+    scriptName?: string;
+}
+
 /**
  * Build the full HTML document for the chat panel WebView.
  * @param webview  The VS Code Webview instance (needed for URI resolution and CSP)
  * @param extensionUri  The root URI of the extension (used to resolve asset paths)
  */
-export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): string {
+export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, options?: ChatPanelHtmlOptions): string {
+    const scriptName = options?.scriptName ?? 'chatPanel.js';
     const scriptUri = webview.asWebviewUri(
-        vs.Uri.joinPath(extensionUri, 'bin', 'client', 'webview', 'chatPanel.js')
+        vs.Uri.joinPath(extensionUri, 'bin', 'client', 'webview', scriptName)
     );
     const cssUri = webview.asWebviewUri(
         vs.Uri.joinPath(extensionUri, 'bin', 'client', 'webview', 'chatPanel.css')
     );
+    const stylesheetUris = [cssUri.toString(), ...(options?.extraStylesheets ?? [])];
+    const stylesheetLinks = stylesheetUris.map(uri => `<link rel="stylesheet" href="${uri}">`).join('\n');
     const csp = webview.cspSource;
+    const title = options?.title ?? 'Eddy CWTool Code';
+    const bodyClass = options?.bodyClass ?? 'chat-empty';
     return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp}; img-src data: blob:;">
-<title>Eddy CWTool Code</title>
-<link rel="stylesheet" href="${cssUri}">
+<title>${title}</title>
+${stylesheetLinks}
 </head>
-<body class="chat-empty">
+<body class="${bodyClass}">
 <div class="header" role="banner">
     <div class="header-title">
         <svg class="header-brand-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">

@@ -4,6 +4,9 @@ export interface TopicPanelItem {
     updatedAt: number;
     createdAt?: number;
     archived?: boolean;
+    pinned?: boolean;
+    workspaceId?: string;
+    workspaceLabel?: string;
     messageCount?: number;
     matchContext?: string;
     score?: number;

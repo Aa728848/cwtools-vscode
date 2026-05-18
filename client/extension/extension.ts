@@ -289,6 +289,9 @@ export async function activate(context: ExtensionContext) {
 	safeRegisterCommand(context, "cwtools.ai.openChat", async () => {
 		await vs.commands.executeCommand('cwtools.aiChat.focus');
 	});
+	safeRegisterCommand(context, "cwtools.ai.openAgentManager", async () => {
+		await chatPanelProvider.openAgentManager();
+	});
 	safeRegisterCommand(context, "cwtools.ai.selectModel", async () => {
 		await aiService.selectModelCommand();
 	});

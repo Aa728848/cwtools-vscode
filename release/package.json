@@ -5,7 +5,7 @@
 	"description": "%extension.description%",
 	"author": "Eddy",
 	"license": "MIT",
-	"version": "2.1.24",
+	"version": "2.1.25",
 	"preview": true,
 	"publisher": "Eddy",
 	"icon": "docs/stellaris.png",
@@ -59,6 +59,11 @@
 				{
 					"command": "cwtools.ai.openChat",
 					"group": "navigation@0",
+					"when": "true"
+				},
+				{
+					"command": "cwtools.ai.openAgentManager",
+					"group": "navigation@1",
 					"when": "true"
 				},
 				{
@@ -200,6 +205,12 @@
 				"title": "%commands.cwtools.ai.openChat%",
 				"category": "CWTools AI",
 				"icon": "$(sparkle)"
+			},
+			{
+				"command": "cwtools.ai.openAgentManager",
+				"title": "Open Agent Manager",
+				"category": "CWTools AI",
+				"icon": "$(layout)"
 			},
 			{
 				"command": "cwtools.ai.selectModel",

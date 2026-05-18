@@ -3,28 +3,36 @@
 本文档描述 **Eddy's Stellaris CWTools** 的当前架构、模块边界、数据流和维护约束。
 项目是一个面向 Paradox 游戏 Modding 的 VS Code 扩展，主要增强 Stellaris 的语言服务、可视化预览和 AI 辅助开发能力。
 
-当前版本：`2.1.21`
+版本号不在架构文档中重复维护；源码与发布清单分别以根目录 `package.json` 和 `release/package.json` 为准，并由 release gate 检查一致性。
 
 ## 总体结构
 
-系统由四层组成：
+系统由四个运行层和两个共享平台能力组成：
 
 1. VS Code Extension Host：`client/extension/`
 2. AI Agent 子系统：`client/extension/ai/`
 3. Webview 沙盒 UI：`client/webview/`
 4. .NET/F# 语言服务器：`src/LSP/` 与 `src/Main/`
+5. 共享平台能力：
+   - `client/extension/gameProfiles.ts`
+   - `client/extension/indexing/`
 
 ```mermaid
 flowchart TD
     VS["VS Code Extension Host\nclient/extension"]
+    GP["GameProfile Platform\ngameProfiles.ts"]
+    IDX["Shared Index Layer\nclient/extension/indexing"]
     AI["AI Agent\nclient/extension/ai"]
     WV["Webview Sandbox\nclient/webview"]
     LSP["CWTools Server\nsrc/Main + src/LSP"]
     CW["CWTools F# library\nsubmodules/cwtools"]
 
+    VS --> GP
+    VS --> IDX
     VS --> AI
     VS <-->|postMessage| WV
     VS <-->|LSP JSON-RPC over stdio| LSP
+    AI --> IDX
     LSP --> CW
 ```
 
@@ -32,11 +40,15 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 
 ## Extension Host
 
-`client/extension/` 运行在 VS Code 扩展宿主进程中，负责命令注册、LSP 客户端、文件系统访问、Webview 面板宿主和 AI 面板宿主。
+`client/extension/` 运行在 VS Code 扩展宿主进程中，负责命令注册、LSP 客户端、文件系统访问、Webview 面板宿主、AI 面板宿主，以及共享平台能力的装配。
 
 | 文件 | 作用 |
 | --- | --- |
-| `extension.ts` | 扩展入口，注册命令、启动语言服务器、初始化功能 |
+| `extension.ts` | 扩展入口，注册命令、启动语言服务器、创建 `IndexService` |
+| `gameProfiles.ts` | 多游戏 profile 注册表、路径约定、能力开关和安装探测元数据 |
+| `indexing/indexService.ts` | 共享增量索引服务 |
+| `indexing/locParser.ts` | 本地化 YML 纯解析与查询 helper |
+| `indexing/workspaceSymbolParser.ts` | PDXScript/asset/gui 符号解析、查询与引用提取 |
 | `codeActions.ts` | AI 诊断修复、解释和批量修复 Code Actions |
 | `guiPanel.ts` / `guiParser.ts` | `.gui` 文件解析与 Canvas 预览宿主 |
 | `solarSystemPanel.ts` / `solarSystemParser.ts` | `solar_system_initializers/` 星系预览 |
@@ -45,16 +57,44 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 | `entityPanel.ts` / `entityAssetParser.ts` | `.asset` 实体模型预览宿主和资源解析 |
 | `graphicsFeatures.ts` | 图形资源相关编辑器功能 |
 | `ddsDecoder.ts` | DDS/TGA 解码支持 |
-| `locDecorations.ts` | 本地化索引和编辑器装饰 |
+| `locDecorations.ts` | 基于 `IndexService` 的本地化 hover/definition 和装饰 |
 | `fileExplorer.ts` | Mod 文件树视图 |
 | `vanillaCompare.ts` | 与原版文件比较 |
 | `updateChecker.ts` | 更新检查 |
 | `pdxTokenizer.ts` | PDX 脚本共享分词器 |
 | `exprEval.ts` | `@[...]` 数学表达式安全求值 |
 
+## 共享平台与索引层
+
+### GameProfile 平台
+
+`gameProfiles.ts` 负责把多游戏差异集中到 profile 中，而不是散落在 extension、索引和 AI 代码里。当前 profile 描述：
+
+- 语言 ID 与文件扩展名
+- 原版缓存配置键
+- 本地化目录、编码和语言标签
+- 脚本/GUI/GFX 目录约定
+- 预览能力开关
+- AI 知识块映射
+- Steam 安装探测元数据
+
+扩展入口、索引层和 AI 游戏知识都应优先消费 profile helper。
+
+### IndexService
+
+`IndexService` 是 editor features 和 AI tools 共用的知识层：
+
+- 本地化 key 在激活阶段即刻建立索引，用于 hover、definition 和 AI 查询。
+- 更重的 workspace/vanilla symbol 索引通过 `ensureWorkspaceSymbolsReady()` 懒加载，避免拖慢启动。
+- 符号层支持 `.txt`、`.gfx`、`.asset`、`.gui`，记录 `origin`、`updatedAt`、`fileVersion` 和轻量引用。
+- watcher 对 `.yml` 与 symbol 文件做增量更新；symbol 索引闲置后会回收。
+- AI 通过 `query_localisation_index` 和 `query_workspace_index` 消费共享索引。
+
+该层的核心约束是：当共享索引能回答问题时，不要让每个消费者各自重新扫描工作区。
+
 ## AI Agent 子系统
 
-AI 代码位于 `client/extension/ai/`，由聊天宿主、模型提供商、提示词构建、工具系统、执行循环和多 Agent 协作层组成。
+AI 代码位于 `client/extension/ai/`，由聊天宿主、模型提供商、提示词构建、工具系统、workflow 系统、执行循环和多 Agent 协作层组成。
 
 ### 核心数据流
 
@@ -65,28 +105,36 @@ sequenceDiagram
     participant Runner as agentRunner.ts
     participant Service as aiService.ts
     participant Tools as agentTools.ts
+    participant Index as IndexService
     participant LSP as LSP
 
     User->>Chat: sendMessage
-    Chat->>Runner: runAgent(mode, context)
+    Chat->>Runner: runAgent(mode, workflowId, context)
     Runner->>Service: chat/completion request
     Service-->>Runner: text + tool calls
     Runner->>Tools: execute tools
+    Tools->>Index: optional shared-index queries
     Tools->>LSP: optional LSP/deep queries
     Tools-->>Runner: tool results
-    Runner-->>Chat: agent steps + final result
-    Chat-->>User: render messages/artifacts
+    Runner-->>Chat: agent steps + artifacts + final result
+    Chat-->>User: render messages/workflows/artifacts
 ```
 
 ### 核心文件
 
 | 文件 | 作用 |
 | --- | --- |
-| `agentRunner.ts` | 推理循环、工具权限、上下文压缩、检查点、回退、写队列 |
+| `agentRunner.ts` | 推理循环、工具权限、workflow 应用、上下文压缩、检查点、回退 |
+| `runner/compaction.ts` | 历史压缩与上下文窗口辅助 |
+| `runner/checkpoint.ts` | 断点恢复元数据 |
+| `runner/writeCoordinator.ts` | `PartitionedWriteQueue` 写入协调 |
 | `agentTools.ts` | 工具分发、工具超时、共享黑板和 orchestrator 工具入口 |
+| `tools/registry.ts` | 工具注册、模式门控、读写分类、子 Agent 允许策略 |
 | `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配和回退 |
 | `providers.ts` | Provider 元数据、默认模型、视觉/FIM/上下文窗口能力 |
 | `promptBuilder.ts` | 系统提示词、模式提示词、项目上下文和子 Agent 提示词 |
+| `workflowRegistry.ts` | workflow 元数据、工具策略和阶段定义 |
+| `workflowI18n.ts` / `workflowViewModel.ts` | workflow 的本地化与 UI 视图模型 |
 | `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
 | `contextBudget.ts` | Token 预算和工具结果裁剪 |
 | `contextReferences.ts` | `@file`、`@folder`、`@symbol`、`@blackboard` 引用解析 |
@@ -108,13 +156,28 @@ sequenceDiagram
 | `build` | 默认构建模式，允许读写和验证 |
 | `plan` | 计划模式，只读为主，可写设计蓝图 |
 | `explore` | 只读探索和 CWTools 查询 |
-| `general` | 通用研究模式，排除 `todo_write` |
+| `general` | 为旧会话保留的兼容模式 |
+| `utility` | 非 PDXScript 的脚本、工具和工作区任务 |
 | `review` | 只读审查模式 |
 | `gui_expert` | GUI 专家子 Agent |
 | `script_reviewer` | 脚本审查子 Agent |
 | `loc_translator` | 本地化翻译 |
 | `loc_writer` | 本地化创作 |
 | `orchestrator` | 多 Agent 协作调度 |
+
+### Workflow 系统
+
+`workflowRegistry.ts` 当前注册 5 个 workflow：
+
+| Workflow | 模式 | 作用 |
+| --- | --- | --- |
+| `diagnostic-fix` | `build` | 修复 CWTools 诊断 |
+| `loc-generation` | `build` | 生成缺失本地化 |
+| `event-chain-design` | `plan` | 设计事件链蓝图 |
+| `rules-sync-review` | `review` | 规则同步后的诊断复核 |
+| `asset-wiring` | `build` | 修复 sprite / sound 资产引用 |
+
+Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 workflow prompt supplement 注入系统提示词。聊天 UI 通过 `workflowViewModel.ts`、`workflowI18n.ts` 和 webview workflow 模块展示当前 workflow、阶段和验证要求。
 
 ### 工具系统
 
@@ -123,25 +186,29 @@ sequenceDiagram
 | 文件 | 作用 |
 | --- | --- |
 | `tools/definitions.ts` | 工具 JSON Schema |
+| `tools/registry.ts` | 工具注册表、模式门控、`WRITE_TOOLS` / `READ_ONLY_TOOLS` |
 | `tools/fileTools.ts` | 文件读写、精确替换、补丁、本地化写入、资产部署 |
 | `tools/lspTools.ts` | LSP 查询、诊断、CWTools Deep API、缓存 |
 | `tools/externalTools.ts` | 命令、网络搜索、媒体生成/转换、外部资源 |
-| `tools/replacerSuite.ts` | `edit_file` 的多策略模糊替换 |
+| `tools/replacerSuite.ts` | 通用文本替换的多策略匹配 |
 | `agentTools.ts` | 工具名称到实现的路由 |
-| `types.ts` | `AgentToolName`、Args、Result 类型 |
+| `types.ts` | Args / Result 契约 |
 
 新增工具时必须同步更新：
 
 1. `tools/definitions.ts`
-2. `agentTools.ts`
-3. `types.ts`
-4. 如果会写文件，还要加入 `agentRunner.ts` 的 `WRITE_TOOLS`
+2. `types.ts`
+3. `tools/registry.ts`
+4. `agentTools.ts`
 
 当前注意事项：
 
+- `tools/registry.ts` 是工具读写分类和 mode gating 的事实来源。
 - `write_file`、`multi_replace_file_content`、`replace_lines`、`apply_patch`、`write_localisation` 等写工具经由 `PartitionedWriteQueue` 管理。
 - `todo_write` 是纯内存/UI 计划工具，故意不进入写文件锁。
 - `.yml` 本地化文件必须使用 `write_localisation`；通用写工具会拒绝本地化写入。
+- 对 PDXScript 先优先使用 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context` 等结构化读取工具，再退回到原始文本读取。
+- `run_command` 带权限门控，适合作为执行和兜底通道，不应替代结构化读取路径。
 - 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。
 
 ### Orchestrator
@@ -166,12 +233,29 @@ sequenceDiagram
 
 | 入口 | 相关文件 | 作用 |
 | --- | --- | --- |
-| `chatPanel.ts` | `chatPanel.css`, `messageRenderer.ts`, `svgIcons.ts` | AI 聊天 UI、设置、Artifact、计划卡、diff 展示 |
+| `chatPanel.ts` | `chatPanel.css`, `chat/`, `messageRenderer.ts`, `svgIcons.ts` | AI 聊天 UI、workflow、设置、Artifact、计划卡、diff 展示 |
 | `guiPreview.ts` | `guiPreview.css`, `canvas.ts` | `.gui` Canvas 预览、拖拽编辑、DDS/TGA 显示 |
 | `solarSystemPreview.ts` | `solarSystemPreview.css` | 星系、轨道、行星和环世界交互预览 |
 | `eventChainPreview.ts` | `eventChainPreview.css` | Cytoscape.js 事件引用图 |
 | `techTreePreview.ts` | `techTreePreview.css` | Cytoscape.js 科技依赖图 |
 | `entityPreview.ts` | `entityPreview.css`, `meshWorker.ts`, `pdxMeshParser.ts`, `pdxShaders.ts` | Three.js 实体模型、网格、动画和材质渲染 |
+
+`client/webview/chat/` 已拆出：
+
+- `artifacts.ts` / `artifactDrawer.ts`
+- `topics.ts` / `topicViews.ts`
+- `workflows.ts` / `workflowSelector.ts`
+- `formatters.ts`
+- `i18n.ts`
+- `modes.ts`
+- `slashCommands.ts`
+- `settingsOverview.ts`
+- `liveSteps.ts`
+- `markdown.ts`
+- `annotations.ts`
+- `contextMentions.ts`
+
+`client/test/unit/webviewSmoke.test.ts` 当前承担 chat Webview 的结构契约 smoke 检查，为后续真实浏览器回归提供基础。
 
 Webview 维护规则：
 
@@ -207,6 +291,15 @@ Webview 维护规则：
 | `npm run test:unit` | `ts-mocha` 单元测试 |
 | `npm run test:coverage` | `nyc` 覆盖率运行单元测试 |
 | `npm run test` | 编译后运行 VS Code 集成测试 |
+| `npm run check:release` | 发布前质量门 |
+| `npm run verify` | `lint + compile + unit + release gate` 综合验证 |
+
+与规则同步相关的脚本：
+
+- `npm run rules:stellaris`
+- `npm run rules:stellaris:scan`
+- `npm run rules:stellaris:check`
+- `npm run rules:stellaris:update`
 
 .NET 常用命令：
 
@@ -222,6 +315,8 @@ dotnet build src/Main/
 - `build.nu`
 
 这些脚本会恢复 dotnet tools、初始化子模块，并调用 `dotnet run --project build -- -t ...`。
+
+CI 当前由 `.github/workflows/ci.yml` 执行 `npm run verify`。
 
 ## 打包
 
@@ -248,6 +343,10 @@ Webview 与 Extension Host 是不同运行环境。Webview 只能发送消息，
 
 本地化文件通常需要 BOM、语言头和 key 更新语义。AI 工具层强制使用 `write_localisation`，不要用通用文本替换写 `.yml`。
 
+### 共享索引优先
+
+共享索引已经承担 localisation 和 workspace symbol 查询。新的消费者优先复用 `IndexService`，而不是各自新增目录遍历和全文扫描。
+
 ### 提供商兼容
 
 `aiService.ts` 负责不同 Provider 的请求兼容：
@@ -261,13 +360,18 @@ Webview 与 Extension Host 是不同运行环境。Webview 只能发送消息，
 
 项目会扫描大型 Mod 和原版资源：
 
-- LSP 和工具查询必须使用有界缓存。
+- LSP、索引和工具查询必须使用有界缓存。
+- workspace symbol 索引采用懒加载和闲置回收。
 - Webview 大列表使用虚拟化或 `content-visibility`。
 - Three.js、纹理、worker 和事件监听器必须显式清理。
 
-### 错误处理
+### 错误处理与 i18n
 
-Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。用户可见中文文本尽量集中在 `client/extension/ai/messages.ts`。
+Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。用户可见中文文本尽量集中在：
+
+- `client/extension/ai/messages.ts`
+- `client/extension/ai/workflowI18n.ts`
+- `client/webview/chat/i18n.ts`
 
 ## 目录概览
 
@@ -277,14 +381,19 @@ cwtools-vscode/
     extension/
       ai/
         orchestrator/
+        runner/
         tools/
         agentRunner.ts
         agentTools.ts
-        aiService.ts
-        promptBuilder.ts
-        providers.ts
-        types.ts
+        workflowRegistry.ts
+        workflowViewModel.ts
+        workflowI18n.ts
+      indexing/
+        indexService.ts
+        locParser.ts
+        workspaceSymbolParser.ts
       extension.ts
+      gameProfiles.ts
       guiPanel.ts
       solarSystemPanel.ts
       eventChainPanel.ts
@@ -292,6 +401,7 @@ cwtools-vscode/
       entityPanel.ts
       codeActions.ts
     webview/
+      chat/
       chatPanel.ts
       messageRenderer.ts
       guiPreview.ts
@@ -314,6 +424,8 @@ cwtools-vscode/
     cwtools/
   .agents/
     rules/
+    workflows/
+  .github/
     workflows/
   release/
     bin/

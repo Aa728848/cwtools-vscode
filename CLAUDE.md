@@ -1,7 +1,6 @@
 # CLAUDE.md
 
 This file gives AI coding assistants the current working map for this repository.
-`AGENTS.md` mirrors this guidance for agents that prefer that filename.
 
 ## Project Overview
 
@@ -9,14 +8,21 @@ This file gives AI coding assistants the current working map for this repository
 [CWTools](https://github.com/cwtools/cwtools-vscode). It is a Visual Studio Code
 extension for Paradox game modding, with Stellaris as the primary target.
 
-The project has four major parts:
+The project has four main runtime layers:
 
 1. `client/extension/`: VS Code extension host code in TypeScript.
-2. `client/extension/ai/`: the integrated AI assistant, providers, tools, and orchestrator.
+2. `client/extension/ai/`: the integrated AI assistant, providers, tools, workflows, and orchestrator.
 3. `client/webview/`: browser-sandboxed Webview UIs bundled by Rollup.
 4. `src/`: .NET 9 / F# language server and launcher projects backed by the `submodules/cwtools` submodule.
 
-Current package version: `2.1.21`.
+Two shared platform pieces now matter across those layers:
+
+- `client/extension/gameProfiles.ts`: centralized multi-game profile metadata.
+- `client/extension/indexing/`: shared localisation and workspace-symbol indexing.
+
+Do not duplicate version numbers in guidance docs. The source of truth is the
+root `package.json`; release metadata lives in `release/package.json` and is
+checked by the release gate.
 
 ## Current Build And Test Commands
 
@@ -27,6 +33,8 @@ npm run compile
 npm run lint
 npm run test:unit
 npm run test
+npm run check:release
+npm run verify
 dotnet build src/LSP/
 dotnet build src/Main/
 ```
@@ -41,13 +49,17 @@ Rollup builds six Webview entry points into `release/bin/client/webview/`:
 - `techTreePreview.ts`
 - `entityPreview.ts`
 
-`npm run test:unit` currently discovers tests under `client/test/unit/**/*.test.ts`.
+`npm run verify` is the broad project gate: lint, compile, unit tests, and the
+release checks. `npm run test:unit` discovers tests under
+`client/test/unit/**/*.test.ts`.
 
 ## High-Value Paths
 
 | Path | Purpose |
 | --- | --- |
 | `client/extension/extension.ts` | Main activation, command registration, LSP client setup |
+| `client/extension/gameProfiles.ts` | Shared game profile registry and path/capability helpers |
+| `client/extension/indexing/` | Shared localisation and workspace symbol/asset index layer |
 | `client/extension/codeActions.ts` | AI quick fixes and explanations for diagnostics |
 | `client/extension/guiPanel.ts` / `guiParser.ts` | `.gui` preview host and parser |
 | `client/extension/solarSystemPanel.ts` / `solarSystemParser.ts` | Solar system initializer preview |
@@ -55,12 +67,33 @@ Rollup builds six Webview entry points into `release/bin/client/webview/`:
 | `client/extension/techTreePanel.ts` / `techTreeParser.ts` | Technology tree visualizer |
 | `client/extension/entityPanel.ts` / `entityAssetParser.ts` | 3D entity preview host and asset parser |
 | `client/extension/vanillaCompare.ts` | Vanilla file comparison tools |
-| `client/extension/locDecorations.ts` | Localization indexing and editor decorations |
-| `client/webview/chatPanel.ts` / `chatPanel.css` | Chat Webview runtime UI |
+| `client/extension/locDecorations.ts` | Localization editor features backed by `IndexService` |
+| `client/webview/chatPanel.ts` / `client/webview/chat/` | Chat Webview shell plus extracted view/model helpers |
 | `client/webview/messageRenderer.ts` | Shared chat message rendering logic |
 | `client/webview/entityPreview.ts` | Three.js entity renderer |
 | `src/LSP/` | Reusable LSP protocol and parser layer |
 | `src/Main/` | `CWTools Server` executable entry point |
+
+## Platform And Index Layer
+
+`gameProfiles.ts` centralizes game-specific metadata instead of scattering game
+names, cache keys, localisation folders, and preview capabilities throughout the
+extension. Consumers should query the profile helpers rather than add new
+hard-coded branches.
+
+`IndexService` in `client/extension/indexing/indexService.ts` is the shared
+knowledge layer for editor features and AI tools:
+
+- Localisation keys are indexed eagerly during activation.
+- The heavier workspace/vanilla symbol and asset index is built lazily through
+  `ensureWorkspaceSymbolsReady()`.
+- `locParser.ts` and `workspaceSymbolParser.ts` keep the pure parsing/query logic
+  testable without VS Code dependencies.
+- AI tools expose the layer through `query_localisation_index` and
+  `query_workspace_index`.
+
+When a shared index or AST/LSP query already answers the question, prefer that
+over adding another ad hoc workspace scan.
 
 ## AI Module Map
 
@@ -68,11 +101,16 @@ The AI module lives in `client/extension/ai/`.
 
 | Path | Purpose |
 | --- | --- |
-| `agentRunner.ts` | Main reasoning loop, mode tool gating, context compaction, checkpoints, write queue |
+| `agentRunner.ts` | Main reasoning loop, mode tool gating, workflow application, context compaction, checkpoints |
+| `runner/` | `compaction.ts`, `checkpoint.ts`, and `writeCoordinator.ts` helpers extracted from the runner |
 | `agentTools.ts` | Tool dispatch router and shared tool executor |
+| `tools/registry.ts` | Canonical tool registry, mode allowlists, write/read-only classification |
+| `tools/*.ts` | File, LSP, external, and replacement tool implementations |
 | `aiService.ts` | Provider HTTP clients, streaming, request shaping, provider fallbacks |
 | `providers.ts` | Built-in provider metadata and capability checks |
 | `promptBuilder.ts` | System prompts, mode prompts, project context injection |
+| `workflowRegistry.ts` | Stable workflow metadata and tool policies |
+| `workflowI18n.ts` / `workflowViewModel.ts` | Localized workflow presentation for the chat UI |
 | `types.ts` | Agent mode, tool, message, artifact, and context types |
 | `contextBudget.ts` | Token budgeting and tool-result truncation |
 | `contextReferences.ts` | `@file`, `@folder`, `@symbol`, `@blackboard` references |
@@ -86,8 +124,24 @@ The AI module lives in `client/extension/ai/`.
 Agent modes are defined in `types.ts`:
 
 ```ts
-build | plan | explore | general | review | gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
+build | plan | explore | general | utility | review | gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
 ```
+
+`general` is kept for saved-topic compatibility; `utility` is the current
+general-purpose workspace mode for non-PDXScript scripts and tools.
+
+### Workflows And Orchestration
+
+`workflowRegistry.ts` currently registers five guided workflows:
+
+- `diagnostic-fix`
+- `loc-generation`
+- `event-chain-design`
+- `rules-sync-review`
+- `asset-wiring`
+
+The runner applies workflow tool policies and prompt supplements, while the chat
+UI renders localized workflow metadata through the workflow view-model layer.
 
 Orchestrator mode uses `dispatch_agents`, `query_blackboard`, and `merge_results`.
 Specialist roles are registered in `client/extension/ai/orchestrator/agentRegistry.ts`
@@ -96,21 +150,29 @@ and currently include `explorer`, `architect`, `builder`, `locWriter`, `reviewer
 
 ## AI Tool Rules
 
-When adding or changing an AI tool, update all relevant pieces together:
+When adding or changing an AI tool, update the coordinated surfaces together:
 
 1. `client/extension/ai/tools/definitions.ts`: OpenAI-style JSON schema.
-2. `client/extension/ai/agentTools.ts`: execution dispatch.
-3. `client/extension/ai/types.ts`: `AgentToolName`, args, and result types.
-4. `client/extension/ai/agentRunner.ts`: add file-mutating tools to `WRITE_TOOLS`.
+2. `client/extension/ai/types.ts`: args and result contracts.
+3. `client/extension/ai/tools/registry.ts`: tool name, allowed modes, write/read-only flags, sub-agent policy.
+4. `client/extension/ai/agentTools.ts`: execution dispatch.
 
 Important current tool details:
 
-- The current schema file defines more than 50 tools.
+- The schema file defines more than 50 tools.
+- `tools/registry.ts`, not `agentRunner.ts`, is the source of truth for
+  `WRITE_TOOLS`, `READ_ONLY_TOOLS`, and tool-mode gating.
 - File writes are serialized by `PartitionedWriteQueue` per target file.
 - Multi-file writes must acquire file locks in sorted path order.
 - `todo_write` is intentionally excluded from the global file-write lock path.
 - Generic write tools reject `.yml` localization writes; use `write_localisation`.
-- The active multi-agent tool is `dispatch_agents`, not the older `spawn_sub_agents` naming.
+- Prefer semantic read paths such as `query_workspace_index`, `document_symbols`,
+  `get_pdx_block`, and targeted `read_file` ranges before falling back to raw
+  shell reads.
+- `run_command` is a supplemental execution channel with permission gating, not
+  the primary way to understand PDXScript structure.
+- The active multi-agent tool is `dispatch_agents`, not the older
+  `spawn_sub_agents` naming.
 
 ## Webview Rules
 
@@ -121,6 +183,10 @@ Use `postMessage` for all host/Webview communication:
 
 - Extension host files: `client/extension/*Panel.ts`, `client/extension/ai/chatPanel.ts`.
 - Webview files: `client/webview/*.ts`.
+
+The chat UI is no longer a single monolith. Shared chat helpers now live under
+`client/webview/chat/`, including workflow, topic, artifact, markdown, annotation,
+i18n, and live-step modules. Keep additional extractions aligned with that split.
 
 Webview CSS must use VS Code theme variables such as
 `var(--vscode-editor-background)` and should support `prefers-reduced-motion`.
@@ -180,7 +246,8 @@ project or a local CWTools override via `src/Main/cwtools.local.props`.
 - Do not use `any` in production code without a clear reason, even though ESLint currently permits it.
 - Respect the ESLint 9 async safety rules: `no-floating-promises`, `no-misused-promises`, and `prefer-promise-reject-errors`.
 - Use `ErrorReporter` instead of bare `console.error` in extension/AI code.
-- Put user-visible Chinese UI strings in `client/extension/ai/messages.ts` when practical.
+- Put user-visible Chinese UI strings in the established i18n/message modules when practical:
+  `client/extension/ai/messages.ts`, `workflowI18n.ts`, and `client/webview/chat/i18n.ts`.
 - Do not hard-code Webview colors; use VS Code theme variables.
 - Add bounded caches for data structures that can grow with workspace size.
 - For localizations, preserve UTF-8 BOM conventions where the localization writer expects them.
@@ -189,10 +256,12 @@ project or a local CWTools override via `src/Main/cwtools.local.props`.
 
 Use the narrowest validation that matches the change:
 
-- Docs only: no build required; run link/path checks if practical.
+- Docs only: check paths, links, and commands against the current tree.
 - TypeScript extension or AI changes: `npm run compile`, then `npm run test:unit` for risky logic.
-- Webview changes: `npm run compile`; manually inspect the relevant Webview in an Extension Development Host.
+- Workflow/index/tool changes: run the relevant focused unit tests, then `npm run test:unit` if behavior crosses modules.
+- Webview changes: `npm run compile`; inspect the relevant Webview in an Extension Development Host when UI behavior changes.
 - F# LSP changes: `dotnet build src/LSP/` or `dotnet build src/Main/`.
+- Release-sensitive changes: `npm run verify`.
 - Packaging changes: follow `.agents/workflows/package.md`.
 
 ## Packaging

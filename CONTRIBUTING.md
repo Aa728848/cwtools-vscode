@@ -35,6 +35,8 @@ npm run compile
 npm run lint
 npm run test:unit
 npm run test
+npm run check:release
+npm run verify
 dotnet build src/LSP/
 dotnet build src/Main/
 ```
@@ -52,6 +54,17 @@ Rollup 当前打包 6 个 Webview 入口：
 - `client/webview/eventChainPreview.ts`
 - `client/webview/techTreePreview.ts`
 - `client/webview/entityPreview.ts`
+
+`npm run verify` 是当前最完整的项目验证入口，会串联 lint、compile、unit test 和 release gate。
+
+与 Stellaris 规则同步相关的脚本：
+
+```bash
+npm run rules:stellaris
+npm run rules:stellaris:scan
+npm run rules:stellaris:check
+npm run rules:stellaris:update
+```
 
 也可以使用根目录脚本：
 
@@ -86,7 +99,11 @@ Webview 调试：
 ```text
 client/
   extension/                  VS Code Extension Host
-    ai/                       AI assistant, providers, tools, orchestrator
+    ai/                       AI assistant, providers, tools, workflows, orchestrator
+      runner/                 compaction, checkpoint, write coordination
+      tools/                  schema, registry, file/LSP/external tools
+    indexing/                 shared localisation + workspace-symbol knowledge layer
+    gameProfiles.ts           multi-game profile registry
     extension.ts              activation and command registration
     guiPanel.ts               GUI preview host
     solarSystemPanel.ts       solar system preview host
@@ -95,6 +112,7 @@ client/
     entityPanel.ts            3D entity preview host
     codeActions.ts            AI quick fixes
   webview/                    browser-sandboxed Webview scripts
+    chat/                     extracted chat modules
     chatPanel.ts
     messageRenderer.ts
     guiPreview.ts
@@ -142,7 +160,10 @@ submodules/cwtools/           upstream CWTools F# library
   - `@typescript-eslint/no-misused-promises`
   - `prefer-promise-reject-errors`
 - Extension/AI 错误报告优先使用 `ErrorReporter`，不要裸用 `console.error`。
-- 用户可见中文文本尽量集中到 `client/extension/ai/messages.ts`。
+- 用户可见中文文本尽量放入现有 i18n / message 模块：
+  - `client/extension/ai/messages.ts`
+  - `client/extension/ai/workflowI18n.ts`
+  - `client/webview/chat/i18n.ts`
 - 修改大文件时优先做局部、可验证的变更。
 
 ## Webview 规范
@@ -155,15 +176,32 @@ Webview 代码运行在浏览器沙盒中：
 - CSS 使用 VS Code 主题变量，例如 `var(--vscode-editor-background)`。
 - 动画应支持 `prefers-reduced-motion`。
 - Three.js/WebGL 面板必须在销毁时释放 renderer、geometry、material、texture、worker、事件监听器和动画循环。
+- 新增 chat UI 逻辑时，优先沿用 `client/webview/chat/` 里的拆分模式，而不是继续膨胀 `chatPanel.ts`。
+
+## 平台与索引层规范
+
+- 新的游戏差异优先落在 `client/extension/gameProfiles.ts`，不要在消费者里继续散落硬编码。
+- 新的 localisation、symbol、asset 查询优先复用 `IndexService`；只有共享索引无法回答时才新增额外扫描逻辑。
+- `IndexService` 的纯逻辑部分应尽量留在 `locParser.ts` / `workspaceSymbolParser.ts` 里，便于单元测试。
+- 如果新增查询维度，请同步考虑：
+  - workspace 与 vanilla 来源
+  - freshness / fileVersion 元数据
+  - limit 与缓存边界
 
 ## AI Agent 修改规范
 
 新增或修改 AI 工具时，请同步维护：
 
 1. `client/extension/ai/tools/definitions.ts`
-2. `client/extension/ai/agentTools.ts`
-3. `client/extension/ai/types.ts`
-4. `client/extension/ai/agentRunner.ts` 的 `WRITE_TOOLS`，如果该工具会写文件
+2. `client/extension/ai/types.ts`
+3. `client/extension/ai/tools/registry.ts`
+4. `client/extension/ai/agentTools.ts`
+
+工具设计注意点：
+
+- `tools/registry.ts` 是模式门控、读写分类和子 Agent 可用性的事实来源。
+- 结构化读取优先级高于原始命令读取：先考虑 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context`，再考虑全文读取或 shell。
+- `run_command` 适合执行、构建、批处理和兜底查询，不应成为理解 PDXScript 结构的默认入口。
 
 并发写入规则：
 
@@ -172,11 +210,13 @@ Webview 代码运行在浏览器沙盒中：
 - `todo_write` 是计划/UI 状态工具，必须继续排除在文件写锁之外。
 - `.yml` 本地化文件必须用 `write_localisation`，不要用 `write_file`、`apply_patch` 或通用替换工具直接写。
 
-多 Agent 协作：
+Workflow 与多 Agent 协作：
 
+- 当前 workflow 注册表在 `client/extension/ai/workflowRegistry.ts`。
 - 当前协作模式使用 `dispatch_agents`、`query_blackboard`、`merge_results`。
 - 角色注册在 `client/extension/ai/orchestrator/agentRegistry.ts`。
 - 大上下文应通过 `contextFiles` 或 Blackboard key 传递，不要塞进子 Agent prompt。
+- 如果 workflow 会新增 UI 元数据，请同步检查 `workflowI18n.ts`、`workflowViewModel.ts` 和 webview workflow 模块。
 
 ## 测试
 
@@ -188,17 +228,20 @@ Webview 代码运行在浏览器沙盒中：
 npm run test:unit
 ```
 
-当前包含的重点测试包括：
+当前较有代表性的测试包括：
 
 - `agentToolSafety.test.ts`
+- `runnerPolicy.test.ts`
 - `contextBudget.test.ts`
-- `diffEngine.test.ts`
-- `editFileReplacer.test.ts`
-- `jsonRepair.test.ts`
-- `messageRenderer.test.ts`
+- `gameProfiles.test.ts`
+- `indexService.test.ts`
+- `workspaceSymbolParser.test.ts`
+- `workflowRegistry.test.ts`
+- `workflowViewModel.test.ts`
+- `chatFormatters.test.ts`
+- `chatModels.test.ts`
+- `webviewSmoke.test.ts`
 - `orchestrator.test.ts`
-- `pricing.test.ts`
-- `promptBuilderSprite.test.ts`
 - `providers.test.ts`
 - `toolCallParser.test.ts`
 
@@ -218,21 +261,25 @@ npm run test
 | --- | --- |
 | 文档 | 检查链接、路径和命令是否存在 |
 | Extension TypeScript | `npm run compile`，必要时 `npm run test:unit` |
-| AI 工具/Prompt/Orchestrator | `npm run test:unit`，重点看工具安全和 orchestrator 测试 |
+| AI 工具 / Prompt / Workflow / Orchestrator | 先跑相关单测，再视范围执行 `npm run test:unit` |
+| IndexService / GameProfile | 相关单测 + `npm run test:unit` |
 | Webview | `npm run compile`，在开发宿主中打开对应面板检查控制台 |
 | F# LSP | `dotnet build src/LSP/` |
-| 服务端入口/发布 | `dotnet build src/Main/`，按打包流程验证 |
+| 服务端入口 / 发布 | `dotnet build src/Main/`，必要时 `npm run verify` |
+| 发布前总检 | `npm run verify` |
 
 ## Pull Request 清单
 
 提交前请确认：
 
 - [ ] 相关构建或测试已运行，或在 PR 中说明未运行原因。
-- [ ] 新增用户可见文本已考虑中英双语或放入合适的消息文件。
+- [ ] 新增用户可见文本已放入合适的 message / i18n 模块。
 - [ ] Webview 变更没有引入 Node.js 或 VS Code API 直接访问。
-- [ ] 新 AI 工具同步更新了 schema、类型、路由和写锁配置。
+- [ ] 新 AI 工具同步更新了 schema、类型、registry 和 dispatch。
 - [ ] 文件写入逻辑不会绕过 `PartitionedWriteQueue`。
 - [ ] 本地化写入使用 `write_localisation`。
+- [ ] 新的游戏差异优先进入 `gameProfiles.ts`。
+- [ ] 新的 localisation / symbol / asset 查询优先复用 `IndexService`。
 - [ ] WebGL/Three.js 资源有明确释放路径。
 - [ ] 大型缓存、索引、扫描结果有边界或清理策略。
 - [ ] 没有无关格式化、生成文件或大范围重排。
@@ -257,5 +304,5 @@ eddy-stellaris-cwt-<version>.vsix
 ## 获取帮助
 
 - 架构概览：[ARCHITECTURE.md](./ARCHITECTURE.md)
-- AI 助手工作指南：[AGENTS.md](./AGENTS.md) / [CLAUDE.md](./CLAUDE.md)
+- AI 助手工作指南：[CLAUDE.md](./CLAUDE.md)
 - 打包流程：`.agents/workflows/package.md`

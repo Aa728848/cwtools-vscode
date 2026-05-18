@@ -160,7 +160,7 @@ import {
     }
 
     function getInputText(): string {
-        return Array.from(input.childNodes).map(textFromComposerNode).join('').replace(/\u00a0/g, ' ');
+        return Array.from(input.childNodes).map(textFromComposerNode).join('').replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
     }
 
     function isInputEmpty(): boolean {
@@ -307,13 +307,18 @@ import {
     function insertReferenceAtCaret(ctx: ActiveContext, targetRange = getActiveInputRange()) {
         activeContexts.push(ctx);
         const chip = buildReferenceChip(ctx);
-        const spacer = document.createTextNode('\u00a0');
         const range = isRangeInsideInput(targetRange) ? targetRange : getInputEndRange();
         range.deleteContents();
-        range.insertNode(spacer);
-        range.insertNode(chip);
+        const fragment = document.createDocumentFragment();
+        const leadingSpace = document.createTextNode(' ');
+        const trailingSpace = document.createTextNode(' ');
+        fragment.appendChild(leadingSpace);
+        fragment.appendChild(chip);
+        fragment.appendChild(trailingSpace);
+        range.insertNode(fragment);
+
         const caret = document.createRange();
-        caret.setStartAfter(spacer);
+        caret.setStart(trailingSpace, trailingSpace.textContent?.length || 0);
         caret.collapse(true);
         setInputRange(caret);
         autoResizeInput();

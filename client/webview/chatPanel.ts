@@ -14,6 +14,7 @@ import {
     type RunSummary as _FmtRunSummary,
 } from './chat/formatters';
 import {
+    getDiffArtifactFiles,
     restoreArtifactsFromMessages as restoreArtifactsFromHistory,
     sortArtifactsByNewest,
     type ArtifactFilter,
@@ -50,6 +51,76 @@ import {
     type MentionResult,
 } from './chat/contextMentions';
 
+interface SideDiffLine {
+    type: 'add' | 'remove' | 'context';
+    content: string;
+    oldLineNo?: number;
+    newLineNo?: number;
+}
+
+interface SideDiffFile {
+    file: string;
+    status?: string;
+    diffPreview?: string;
+    additions?: number;
+    deletions?: number;
+    diffLines?: SideDiffLine[];
+}
+
+interface SideDiffEntry {
+    id: string;
+    title: string;
+    timestamp: number;
+    files: SideDiffFile[];
+    pending?: { messageId: string; isNewFile: boolean };
+    sourceKey?: string;
+}
+
+interface SideDiffFocus {
+    entryId?: string;
+    file?: string;
+}
+
+interface ResponsiveWorkspacePanel {
+    kind: 'plan' | 'walkthrough' | 'blueprint';
+    title: string;
+    subtitle?: string;
+    content: HTMLElement;
+    wide?: boolean;
+}
+
+function cloneSideDiffLines(lines?: SideDiffLine[]): SideDiffLine[] | undefined {
+    if (!lines || lines.length === 0) return undefined;
+    return lines.map(line => ({
+        type: line.type,
+        content: line.content,
+        ...(line.oldLineNo != null ? { oldLineNo: line.oldLineNo } : {}),
+        ...(line.newLineNo != null ? { newLineNo: line.newLineNo } : {}),
+    }));
+}
+
+function cloneSideDiffFile(file: SideDiffFile): SideDiffFile {
+    return {
+        file: file.file,
+        status: file.status,
+        diffPreview: file.diffPreview,
+        additions: file.additions,
+        deletions: file.deletions,
+        diffLines: cloneSideDiffLines(file.diffLines),
+    };
+}
+
+function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
+    return {
+        id: entry.id,
+        title: entry.title,
+        timestamp: entry.timestamp,
+        files: entry.files.map(cloneSideDiffFile),
+        ...(entry.pending ? { pending: { ...entry.pending } } : {}),
+        ...(entry.sourceKey ? { sourceKey: entry.sourceKey } : {}),
+    };
+}
+
 (function () {
     const chatI18n = getChatI18n(document.documentElement.lang || navigator.language);
     const renderMarkdown = createMarkdownRenderer(chatI18n.markdown);
@@ -63,6 +134,10 @@ import {
     const chatHeader = document.querySelector('.header') as HTMLElement;
     const inputWrapper = document.querySelector('.input-wrapper') as HTMLElement;
     const todoPanel = document.getElementById('todoPanel') as HTMLDivElement;
+    const sideWorkspace = document.getElementById('sideWorkspace') as HTMLElement | null;
+    const sideWorkspaceBody = document.getElementById('sideWorkspaceBody') as HTMLElement | null;
+    const sideWorkspaceTitle = document.getElementById('sideWorkspaceTitle') as HTMLElement | null;
+    const sideWorkspaceSubtitle = document.getElementById('sideWorkspaceSubtitle') as HTMLElement | null;
 
     let isGenerating = false;
     let currentAssistantDiv: HTMLDivElement | null = null;
@@ -120,6 +195,14 @@ import {
     let activeWorkflowId: string | null = null;
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
+    let sideWorkspaceContent: HTMLElement | null = null;
+    let settingsInSideWorkspace = false;
+    let sideDiffEntrySeq = 0;
+    const sideDiffEntries: SideDiffEntry[] = [];
+    const originalParents = new Map<HTMLElement, { parent: Node; nextSibling: ChildNode | null }>();
+    let activeResponsiveWorkspace: ResponsiveWorkspacePanel | null = null;
+    let responsiveWorkspacePinnedClosed = false;
+    let wasWideWorkspace = shouldUseSideWorkspace();
     
     function hasConversationContent(): boolean {
         return Array.from(chatArea.children).some(child => child !== emptyState && !(child as HTMLElement).classList.contains('empty-state'));
@@ -149,6 +232,520 @@ import {
     if (inputWrapper) composerResizeObserver.observe(inputWrapper);
     window.addEventListener('resize', updateComposerStackHeight);
     updateComposerStackHeight();
+
+    function shouldUseSideWorkspace(): boolean {
+        return (window.innerWidth || document.documentElement.clientWidth) >= 1180;
+    }
+
+    function updateWorkspaceToggleState(): void {
+        const toggle = document.getElementById('btnWorkspace');
+        if (!toggle) return;
+        const hasWorkspaceItems = sideDiffEntries.length > 0 || !!activeResponsiveWorkspace;
+        const isWorkspacePanelOpen = document.body.classList.contains('side-workspace-open')
+            && !!sideWorkspaceContent
+            && sideWorkspaceContent !== settingsPage
+            && sideWorkspaceContent !== topicsPanel;
+        toggle.classList.toggle('active', isWorkspacePanelOpen);
+        toggle.classList.toggle('has-workspace-items', hasWorkspaceItems);
+        toggle.setAttribute('aria-pressed', isWorkspacePanelOpen ? 'true' : 'false');
+        const visible = shouldUseSideWorkspace();
+        toggle.style.display = visible ? 'inline-flex' : '';
+        toggle.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    }
+
+    function createWorkspaceHomeView(): HTMLElement {
+        const view = document.createElement('div');
+        view.className = 'workspace-empty';
+        view.innerHTML = `
+            <div class="workspace-empty-title">${svgIconNoMargin('folder')} 工作区</div>
+            <div class="workspace-empty-text">当前没有可在右侧显示的文件变更或批注文档。产生计划、Walkthrough、蓝图或文件变更后，这里会自动承载详情。</div>
+        `;
+        return view;
+    }
+
+    function rememberOriginalParent(element: HTMLElement): void {
+        if (!originalParents.has(element) && element.parentNode) {
+            originalParents.set(element, { parent: element.parentNode, nextSibling: element.nextSibling });
+        }
+    }
+
+    function restoreOriginalParent(element: HTMLElement): void {
+        const original = originalParents.get(element);
+        if (!original) return;
+        if (element.parentNode === original.parent) return;
+        const anchor = original.nextSibling && original.nextSibling.parentNode === original.parent
+            ? original.nextSibling
+            : null;
+        original.parent.insertBefore(element, anchor);
+    }
+
+    function detachSideWorkspaceContent(): void {
+        if (!sideWorkspaceContent) return;
+        hideDetachedWorkspaceContent(sideWorkspaceContent);
+        restoreOriginalParent(sideWorkspaceContent);
+        sideWorkspaceContent = null;
+    }
+
+    function clearSideWorkspaceShell(): void {
+        document.body.classList.remove('side-workspace-open');
+        document.body.classList.remove('side-workspace-wide');
+        sideWorkspace?.setAttribute('aria-hidden', 'true');
+        if (sideWorkspaceTitle) sideWorkspaceTitle.textContent = '工作区';
+        if (sideWorkspaceSubtitle) sideWorkspaceSubtitle.textContent = '';
+        if (sideWorkspaceBody) sideWorkspaceBody.innerHTML = '';
+        updateWorkspaceToggleState();
+    }
+
+    function hideDetachedWorkspaceContent(content: HTMLElement): void {
+        if (content === topicsPanel) {
+            topicsPanel.classList.remove('show');
+            return;
+        }
+        if (content === settingsPage) {
+            settingsInSideWorkspace = false;
+            settingsPage.classList.remove('active');
+            chatHeader.style.display = '';
+            document.getElementById('chatArea')!.style.display = 'flex';
+            if (inputWrapper) inputWrapper.style.display = '';
+            const mi = document.getElementById('modeIndicator');
+            if (mi) mi.style.display = '';
+            if (todoPanel) todoPanel.style.display = '';
+        }
+    }
+
+    function closeSideWorkspace(options: { preserveResponsivePin?: boolean } = {}): void {
+        if (!options.preserveResponsivePin
+            && shouldUseSideWorkspace()
+            && activeResponsiveWorkspace?.content === sideWorkspaceContent) {
+            responsiveWorkspacePinnedClosed = true;
+        }
+        detachSideWorkspaceContent();
+        clearSideWorkspaceShell();
+    }
+
+    function openSideWorkspace(options: { title: string; subtitle?: string; content?: HTMLElement; build?: () => HTMLElement; wide?: boolean }): HTMLElement | null {
+        if (!sideWorkspace || !sideWorkspaceBody) return null;
+        if (document.body.classList.contains('artifact-drawer-open')) setArtifactDrawerOpen(false);
+        let content = options.content || null;
+        if (!content && options.build) content = options.build();
+        if (!content) return null;
+        if (sideWorkspaceContent && sideWorkspaceContent !== content) {
+            detachSideWorkspaceContent();
+        }
+        if (sideWorkspaceContent !== content) {
+            sideWorkspaceBody.innerHTML = '';
+            rememberOriginalParent(content);
+            sideWorkspaceBody.appendChild(content);
+            sideWorkspaceContent = content;
+        }
+        if (sideWorkspaceTitle) sideWorkspaceTitle.textContent = options.title;
+        if (sideWorkspaceSubtitle) sideWorkspaceSubtitle.textContent = options.subtitle || '';
+        document.body.classList.add('side-workspace-open');
+        document.body.classList.toggle('side-workspace-wide', !!options.wide);
+        sideWorkspace.setAttribute('aria-hidden', 'false');
+        updateComposerStackHeight();
+        updateWorkspaceToggleState();
+        return content;
+    }
+
+    function forgetResponsiveWorkspaceContent(content: HTMLElement): void {
+        if (activeResponsiveWorkspace?.content === content) {
+            activeResponsiveWorkspace = null;
+            responsiveWorkspacePinnedClosed = false;
+        }
+        if (sideWorkspaceContent === content) {
+            sideWorkspaceContent = null;
+            clearSideWorkspaceShell();
+        }
+        originalParents.delete(content);
+        updateWorkspaceToggleState();
+    }
+
+    function showResponsiveWorkspacePanel(panel: ResponsiveWorkspacePanel): void {
+        activeResponsiveWorkspace = panel;
+        responsiveWorkspacePinnedClosed = false;
+        if (!panel.content.parentNode) {
+            chatArea.appendChild(panel.content);
+        }
+
+        if (shouldUseSideWorkspace()) {
+            openSideWorkspace({
+                title: panel.title,
+                subtitle: panel.subtitle,
+                content: panel.content,
+                wide: panel.wide,
+            });
+        } else {
+            if (sideWorkspaceContent === panel.content) {
+                closeSideWorkspace({ preserveResponsivePin: true });
+            }
+            if (panel.content.parentNode !== chatArea) {
+                chatArea.appendChild(panel.content);
+            }
+            scrollBottom();
+        }
+        setChatEmptyState();
+        updateWorkspaceToggleState();
+    }
+
+    function syncResponsiveWorkspaceLayout(): void {
+        const isWide = shouldUseSideWorkspace();
+        if (isWide !== wasWideWorkspace) {
+            responsiveWorkspacePinnedClosed = false;
+            wasWideWorkspace = isWide;
+        }
+
+        if (activeResponsiveWorkspace) {
+            const panel = activeResponsiveWorkspace;
+            if (isWide && !responsiveWorkspacePinnedClosed) {
+                openSideWorkspace({
+                    title: panel.title,
+                    subtitle: panel.subtitle,
+                    content: panel.content,
+                    wide: panel.wide,
+                });
+            } else if (!isWide) {
+                if (sideWorkspaceContent === panel.content) {
+                    closeSideWorkspace({ preserveResponsivePin: true });
+                }
+                if (panel.content.parentNode !== chatArea) {
+                    chatArea.appendChild(panel.content);
+                    scrollBottom();
+                }
+            }
+        }
+
+        if (!isWide && document.body.classList.contains('side-workspace-open')) {
+            closeSideWorkspace({ preserveResponsivePin: true });
+        }
+        updateWorkspaceToggleState();
+    }
+
+    function openWorkspaceFromButton(): void {
+        if (!shouldUseSideWorkspace()) return;
+        if (document.body.classList.contains('side-workspace-open')) {
+            const isNonWorkspacePanel = sideWorkspaceContent === settingsPage || sideWorkspaceContent === topicsPanel;
+            if (isNonWorkspacePanel) {
+                responsiveWorkspacePinnedClosed = false;
+                if (activeResponsiveWorkspace) {
+                    openSideWorkspace({
+                        title: activeResponsiveWorkspace.title,
+                        subtitle: activeResponsiveWorkspace.subtitle,
+                        content: activeResponsiveWorkspace.content,
+                        wide: activeResponsiveWorkspace.wide,
+                    });
+                    return;
+                }
+                if (sideDiffEntries.length > 0) {
+                    showSideDiffWorkspace();
+                    return;
+                }
+                openSideWorkspace({
+                    title: '工作区',
+                    subtitle: '计划、批注和文件变更会显示在这里',
+                    build: createWorkspaceHomeView,
+                });
+                return;
+            }
+            if (activeResponsiveWorkspace && sideWorkspaceContent !== activeResponsiveWorkspace.content) {
+                responsiveWorkspacePinnedClosed = false;
+                openSideWorkspace({
+                    title: activeResponsiveWorkspace.title,
+                    subtitle: activeResponsiveWorkspace.subtitle,
+                    content: activeResponsiveWorkspace.content,
+                    wide: activeResponsiveWorkspace.wide,
+                });
+                return;
+            }
+            if (!activeResponsiveWorkspace && sideDiffEntries.length > 0 && !sideWorkspaceContent?.classList.contains('side-diff-view')) {
+                showSideDiffWorkspace();
+                return;
+            }
+            closeSideWorkspace();
+            return;
+        }
+
+        responsiveWorkspacePinnedClosed = false;
+        setArtifactDrawerOpen(false);
+        if (activeResponsiveWorkspace) {
+            openSideWorkspace({
+                title: activeResponsiveWorkspace.title,
+                subtitle: activeResponsiveWorkspace.subtitle,
+                content: activeResponsiveWorkspace.content,
+                wide: activeResponsiveWorkspace.wide,
+            });
+            return;
+        }
+        if (sideDiffEntries.length > 0) {
+            showSideDiffWorkspace();
+            return;
+        }
+        openSideWorkspace({
+            title: '工作区',
+            subtitle: '计划、批注和文件变更会显示在这里',
+            build: createWorkspaceHomeView,
+        });
+    }
+
+    function fileBaseNameLocal(file: string): string {
+        return (file || '').replace(/\\/g, '/').split('/').pop() || file;
+    }
+
+    function renderDiffTable(lines: SideDiffLine[] | undefined): string {
+        if (!lines || lines.length === 0) {
+            return '<div class="side-diff-empty">没有可内联显示的差异。</div>';
+        }
+        let html = '<table class="ds-diff-table"><tbody>';
+        for (const line of lines) {
+            const cls = line.type === 'add' ? 'ds-line-add' : line.type === 'remove' ? 'ds-line-del' : 'ds-line-ctx';
+            const prefix = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
+            const oldNo = line.oldLineNo != null ? String(line.oldLineNo) : '';
+            const newNo = line.newLineNo != null ? String(line.newLineNo) : '';
+            html += `<tr class="${cls}">
+                <td class="ds-ln">${oldNo}</td>
+                <td class="ds-ln">${newNo}</td>
+                <td class="ds-prefix">${prefix}</td>
+                <td class="ds-code">${escapeHtml(line.content)}</td>
+            </tr>`;
+        }
+        return html + '</tbody></table>';
+    }
+
+    function getSideDiffTotals(files: SideDiffFile[]): { additions: number; deletions: number; lineCount: number } {
+        return files.reduce((totals, file) => {
+            totals.additions += file.additions || 0;
+            totals.deletions += file.deletions || 0;
+            totals.lineCount += file.diffLines?.length || 0;
+            return totals;
+        }, { additions: 0, deletions: 0, lineCount: 0 });
+    }
+
+    function createSideDiffEntry(
+        files: SideDiffFile[],
+        title: string,
+        pending?: { messageId: string; isNewFile: boolean },
+        sourceKey?: string,
+    ): SideDiffEntry {
+        return {
+            id: `diff-${Date.now()}-${++sideDiffEntrySeq}`,
+            title,
+            timestamp: Date.now(),
+            files: files.map(cloneSideDiffFile),
+            pending,
+            sourceKey,
+        };
+    }
+
+    function normalizeSideDiffFilePath(file: string): string {
+        return (file || '').replace(/\\/g, '/').trim().toLowerCase();
+    }
+
+    function getSideDiffSourceKey(title: string, files: SideDiffFile[], pending?: { messageId: string; isNewFile: boolean }): string {
+        if (pending) return `pending:${pending.messageId}`;
+        const payload = files.map(file => [
+            normalizeSideDiffFilePath(file.file),
+            file.status || '',
+            file.additions ?? '',
+            file.deletions ?? '',
+            file.diffPreview || '',
+            file.diffLines?.length ?? 0,
+        ].join('|')).join('||');
+        return `${title}::${payload}`;
+    }
+
+    function findSideDiffEntryIndex(entry: SideDiffEntry): number {
+        if (entry.sourceKey) {
+            const bySourceKey = sideDiffEntries.findIndex(item => item.sourceKey === entry.sourceKey);
+            if (bySourceKey >= 0) return bySourceKey;
+        }
+        if (entry.pending) {
+            return sideDiffEntries.findIndex(item => item.pending?.messageId === entry.pending?.messageId);
+        }
+        return sideDiffEntries.findIndex(item => item.id === entry.id);
+    }
+
+    function upsertSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
+        const existingIndex = findSideDiffEntryIndex(entry);
+        if (existingIndex >= 0) {
+            const existing = sideDiffEntries[existingIndex]!;
+            sideDiffEntries[existingIndex] = {
+                ...entry,
+                id: existing.id,
+                timestamp: existing.timestamp,
+            };
+            updateWorkspaceToggleState();
+            return sideDiffEntries[existingIndex];
+        }
+        sideDiffEntries.unshift(entry);
+        if (sideDiffEntries.length > 30) sideDiffEntries.length = 30;
+        updateWorkspaceToggleState();
+        return entry;
+    }
+
+    function removeSideDiffEntry(entryId: string): boolean {
+        const index = sideDiffEntries.findIndex(item => item.id === entryId);
+        if (index < 0) return false;
+        sideDiffEntries.splice(index, 1);
+        updateWorkspaceToggleState();
+        return true;
+    }
+
+    function removePendingSideDiffEntry(messageId: string): boolean {
+        const index = sideDiffEntries.findIndex(item => item.pending?.messageId === messageId || item.sourceKey === `pending:${messageId}`);
+        if (index < 0) return false;
+        sideDiffEntries.splice(index, 1);
+        updateWorkspaceToggleState();
+        return true;
+    }
+
+    function refreshSideDiffWorkspaceAfterRemoval(): void {
+        if (!sideWorkspaceContent?.classList.contains('side-diff-view')) return;
+        if (sideDiffEntries.length > 0) {
+            showSideDiffWorkspace('文件变更');
+        } else {
+            closeSideWorkspace();
+        }
+    }
+
+    function formatSideDiffTime(timestamp: number): string {
+        const d = new Date(timestamp);
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+    }
+
+    function createSideDiffView(entries: SideDiffEntry[], options: { title: string; focus?: SideDiffFocus }): HTMLElement {
+        const view = document.createElement('div');
+        view.className = 'side-diff-view';
+        const allFiles = entries.flatMap(entry => entry.files);
+        const totals = getSideDiffTotals(allFiles);
+        const toolbarTitle = options.title === '文件变更' ? '变更概览' : options.title;
+        view.innerHTML = `<div class="side-diff-toolbar">
+            <div class="side-diff-title">${svgIconNoMargin('edit')}<span>${escapeHtml(toolbarTitle)}</span></div>
+            <div class="side-diff-stats"><span class="ds-add">+${totals.additions}</span><span class="ds-del">-${totals.deletions}</span><span>${entries.length} 次变更</span><span>${allFiles.length} 个文件</span></div>
+        </div>`;
+
+        const fileList = document.createElement('div');
+        fileList.className = 'side-diff-files';
+        const focusPath = options.focus?.file ? normalizeSideDiffFilePath(options.focus.file) : '';
+        const focusEntryId = options.focus?.entryId || '';
+        let focusTarget: HTMLElement | null = null;
+        for (const entry of entries) {
+            const entryEl = document.createElement('section');
+            entryEl.className = 'side-diff-entry open';
+            entryEl.dataset.sideDiffEntryId = entry.id;
+            const entryTotals = getSideDiffTotals(entry.files);
+            const entryTitle = entry.title === options.title ? (entries.length === 1 ? '本次变更' : '变更记录') : entry.title;
+            const entryHeader = document.createElement('button');
+            entryHeader.type = 'button';
+            entryHeader.className = 'side-diff-entry-header';
+            entryHeader.innerHTML = `
+                <div class="side-diff-entry-main">
+                    <span class="side-diff-chevron">&gt;</span>
+                    <span class="side-diff-entry-title">${escapeHtml(entryTitle)}</span>
+                    <span class="side-diff-entry-time">${formatSideDiffTime(entry.timestamp)}</span>
+                </div>
+                <div class="side-diff-entry-stats"><span class="ds-add">+${entryTotals.additions}</span><span class="ds-del">-${entryTotals.deletions}</span><span>${entry.files.length} 个文件</span><span>${entryTotals.lineCount} 行预览</span></div>`;
+            entryHeader.addEventListener('click', () => {
+                entryEl.classList.toggle('open');
+            });
+            entryEl.appendChild(entryHeader);
+
+            const entryFiles = document.createElement('div');
+            entryFiles.className = 'side-diff-entry-files';
+            for (const file of entry.files) {
+                const item = document.createElement('section');
+                item.className = 'side-diff-file open';
+                item.dataset.sideDiffFile = file.file;
+                const stats = file.additions != null ? `<span class="ds-add">+${file.additions || 0}</span><span class="ds-del">-${file.deletions || 0}</span>` : escapeHtml(file.diffPreview || '');
+                const preview = file.diffPreview ? `<span class="side-diff-file-preview">${escapeHtml(file.diffPreview)}</span>` : '';
+                const fileHeader = document.createElement('button');
+                fileHeader.type = 'button';
+                fileHeader.className = 'side-diff-file-header';
+                fileHeader.innerHTML = `
+                    <div class="side-diff-file-main">
+                        <span class="side-diff-file-title">
+                            <span class="side-diff-chevron">&gt;</span>
+                            <span class="side-diff-file-name" title="${escapeHtml(file.file)}">${escapeHtml(fileBaseNameLocal(file.file))}</span>
+                        </span>
+                        <span class="side-diff-file-path">${escapeHtml(file.file)}</span>
+                        ${preview}
+                    </div>
+                    <div class="side-diff-file-stats">${stats}</div>`;
+                fileHeader.addEventListener('click', event => {
+                    event.stopPropagation();
+                    item.classList.toggle('open');
+                });
+                item.appendChild(fileHeader);
+                const code = document.createElement('div');
+                code.className = 'side-diff-code';
+                code.innerHTML = renderDiffTable(file.diffLines);
+                item.appendChild(code);
+                if (focusPath && (!focusEntryId || focusEntryId === entry.id) && normalizeSideDiffFilePath(file.file) === focusPath) {
+                    item.classList.add('focused');
+                    entryEl.classList.add('focused');
+                    focusTarget = item;
+                }
+                entryFiles.appendChild(item);
+            }
+            entryEl.appendChild(entryFiles);
+            if (!focusTarget && focusEntryId === entry.id) {
+                entryEl.classList.add('focused');
+                focusTarget = entryEl;
+            }
+
+            if (entry.pending) {
+                const actions = document.createElement('div');
+                actions.className = 'side-diff-actions';
+                actions.innerHTML = `<button class="diff-reject-btn" type="button">${svgIcon('x')}拒绝</button>
+                    <button class="diff-accept-btn" type="button">${svgIcon('check')}接受</button>`;
+                actions.querySelector('.diff-accept-btn')?.addEventListener('click', () => {
+                    vscode.postMessage({ type: 'confirmWriteFile', messageId: entry.pending!.messageId });
+                    removeSideDiffEntry(entry.id);
+                    refreshSideDiffWorkspaceAfterRemoval();
+                });
+                actions.querySelector('.diff-reject-btn')?.addEventListener('click', () => {
+                    vscode.postMessage({ type: 'cancelWriteFile', messageId: entry.pending!.messageId });
+                    removeSideDiffEntry(entry.id);
+                    refreshSideDiffWorkspaceAfterRemoval();
+                });
+                entryEl.appendChild(actions);
+            }
+            fileList.appendChild(entryEl);
+        }
+        view.appendChild(fileList);
+        if (focusTarget) {
+            requestAnimationFrame(() => focusTarget?.scrollIntoView({ block: 'nearest' }));
+        }
+
+        return view;
+    }
+
+    function showSideDiffWorkspace(title = '文件变更', entries = sideDiffEntries, focus?: SideDiffFocus): void {
+        const fileCount = entries.reduce((sum, entry) => sum + entry.files.length, 0);
+        const snapshot = entries.map(cloneSideDiffEntry);
+        openSideWorkspace({
+            title,
+            subtitle: entries.length === 1 && fileCount === 1 ? `${entries[0]?.title || title} · ${entries[0]?.files[0]?.file || ''}` : `${entries.length} 次变更 · ${fileCount} 个文件`,
+            wide: true,
+            build: () => createSideDiffView(snapshot, { title, focus }),
+        });
+    }
+
+    function openDiffInSideWorkspace(
+        files: SideDiffFile[],
+        title = '文件变更',
+        options: { pending?: { messageId: string; isNewFile: boolean }; append?: boolean; sourceKey?: string; focusFile?: string } = {},
+    ): void {
+        const sourceKey = options.sourceKey || getSideDiffSourceKey(title, files, options.pending);
+        const entry = createSideDiffEntry(files, title, options.pending, sourceKey);
+        const activeEntry = upsertSideDiffEntry(entry);
+        showSideDiffWorkspace('文件变更', sideDiffEntries, {
+            entryId: activeEntry.id,
+            file: options.focusFile,
+        });
+    }
+
+    window.addEventListener('resize', syncResponsiveWorkspaceLayout);
+    updateWorkspaceToggleState();
 
     function textFromComposerNode(node: Node): string {
         if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
@@ -230,6 +827,10 @@ import {
         caret.collapse(true);
         setInputRange(caret);
         autoResizeInput();
+    }
+
+    function normalizePastedText(text: string): string {
+        return text.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
     }
 
     function setInputText(text: string) {
@@ -633,9 +1234,11 @@ import {
     function setArtifactDrawerOpen(open: boolean) {
         const drawer = document.getElementById('artifactDrawer');
         const toggle = document.getElementById('btnArtifacts');
+        if (open) closeSideWorkspace({ preserveResponsivePin: true });
         document.body.classList.toggle('artifact-drawer-open', open);
         drawer?.setAttribute('aria-hidden', open ? 'false' : 'true');
         toggle?.classList.toggle('active', open);
+        updateWorkspaceToggleState();
     }
 
     function toggleArtifactDrawer() {
@@ -845,6 +1448,7 @@ import {
     bindBtn('currentTopicRename', () => {
         if (currentTopicId) startTopicRename(currentTopicId, currentTopicTitle, 'header');
     });
+    bindBtn('btnWorkspace', openWorkspaceFromButton);
     bindBtn('btnArtifacts', toggleArtifactDrawer);
     bindBtn('btnCloseArtifacts', () => setArtifactDrawerOpen(false));
     bindBtn('artifactScrim', () => setArtifactDrawerOpen(false));
@@ -857,15 +1461,27 @@ import {
     });
     bindBtn('btnTopics', () => {
         setArtifactDrawerOpen(false);
+        if (shouldUseSideWorkspace()) {
+            if (document.body.classList.contains('side-workspace-open') && sideWorkspaceContent === topicsPanel) {
+                closeSideWorkspace();
+                return;
+            }
+            topicsPanel.classList.add('show');
+            openSideWorkspace({ title: '历史话题', subtitle: '搜索、切换和管理对话', content: topicsPanel });
+            return;
+        }
+        closeSideWorkspace();
         topicsPanel.classList.toggle('show');
+        updateWorkspaceToggleState();
     });
-    bindBtn('btnNewTopicPanel', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); });
+    bindBtn('btnNewTopicPanel', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); if (sideWorkspaceContent === topicsPanel) closeSideWorkspace(); });
     bindBtn('btnSettings', () => {
         setArtifactDrawerOpen(false);
         vscode.postMessage({ type: 'openSettings' });
         topicsPanel.classList.remove('show');
     });
     bindBtn('settingsBackBtn', closeSettings);
+    bindBtn('sideWorkspaceClose', closeSideWorkspace);
     bindBtn('testConnBtn', testConnection);
     bindBtn('saveSettingsBtn', saveSettings);
     bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey') as HTMLInputElement | null; if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
@@ -920,11 +1536,14 @@ import {
     bindBtn('btnExportTopic', () => {
         vscode.postMessage({ type: 'exportTopic', topicId: undefined });
         topicsPanel.classList.remove('show');
+        if (sideWorkspaceContent === topicsPanel) closeSideWorkspace();
     });
 
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && document.body.classList.contains('artifact-drawer-open')) {
             setArtifactDrawerOpen(false);
+        } else if (e.key === 'Escape' && document.body.classList.contains('side-workspace-open')) {
+            closeSideWorkspace();
         }
     });
     renderArtifactPanel();
@@ -1081,6 +1700,11 @@ import {
     }
 
     function renderArtifactPanel() {
+        const openArtifact = (artifactId: string, file?: string) => {
+            if (openArtifactDiffInSideWorkspace(artifactId, file)) return;
+            vscode.postMessage({ type: 'openArtifact', artifactId, file });
+        };
+
         renderArtifactDrawer(
             {
                 list: document.getElementById('artifactList'),
@@ -1093,9 +1717,27 @@ import {
             chatI18n,
             {
                 openPlanFile: filePath => vscode.postMessage({ type: 'openPlanFile', filePath }),
-                openArtifact: (artifactId, file) => vscode.postMessage({ type: 'openArtifact', artifactId, file }),
+                openArtifact,
             },
         );
+    }
+
+    function openArtifactDiffInSideWorkspace(artifactId: string, file?: string): boolean {
+        const artifact = artifacts.find(item => item.id === artifactId);
+        if (!artifact || (artifact.kind !== 'diff' && artifact.action !== 'openDiff')) return false;
+
+        const files = getDiffArtifactFiles(artifact).map(change => ({
+            file: change.file,
+            status: change.status,
+            diffPreview: change.diffPreview,
+            additions: change.additions,
+            deletions: change.deletions,
+            diffLines: change.diffLines,
+        }));
+        if (files.length === 0) return true;
+
+        openDiffInSideWorkspace(files, '文件变更', { sourceKey: artifactId, focusFile: file });
+        return true;
     }
 
     function restoreArtifactsFromMessages(messages: any[]) {
@@ -1221,13 +1863,14 @@ import {
     }
 
     // ── Image paste (Ctrl+V or paste event on input) ───────────────────────────
-    // Supports multiple images per paste (no break limit)
     input.addEventListener('paste', e => {
         const items = e.clipboardData && e.clipboardData.items;
-        if (!items) return;
-        for (const item of Array.from(items)) {
-            if (item.type.startsWith('image/')) {
-                e.preventDefault();
+        const text = e.clipboardData?.getData('text/plain') || '';
+        let handled = false;
+        if (items) {
+            for (const item of Array.from(items)) {
+                if (!item.type.startsWith('image/')) continue;
+                handled = true;
                 const blob = item.getAsFile();
                 if (!blob) continue;
                 compressImage(blob, dataUrl => {
@@ -1236,6 +1879,12 @@ import {
                 });
             }
         }
+        if (text) {
+            handled = true;
+            insertPlainTextAtRange(normalizePastedText(text));
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (handled) e.preventDefault();
     });
 
     // ── Drag-and-drop images onto input area ───────────────────────────────────
@@ -1419,7 +2068,7 @@ import {
         fill.style.width = pct + '%';
         fill.style.background = pct > 80 ? 'var(--error)' : pct > 60 ? 'var(--warning)' : 'var(--accent)';
         label.textContent = `~${formatNum(used)} / ${formatNum(limit)} tokens`;
-        bar.style.display = '';
+        bar.style.display = 'flex';
     }
 
     // Delegated to chat/formatters.ts for single-source-of-truth
@@ -1697,8 +2346,8 @@ import {
         `;
         panel.appendChild(summary);
 
-        const body = document.createElement('div');
-        body.className = 'process-body';
+        const stack = document.createElement('div');
+        stack.className = 'process-stack';
 
         if (thinkingSteps.length > 0) {
             let thinkText = '';
@@ -1716,7 +2365,7 @@ import {
                 thinkingBody.className = 'thinking-body markdown-body';
                 thinkingBody.innerHTML = renderMarkdown(thinkText);
                 thinking.appendChild(thinkingBody);
-                body.appendChild(thinking);
+                stack.appendChild(thinking);
             }
         }
 
@@ -1727,10 +2376,10 @@ import {
                 textBlock.className = 'process-section process-text';
                 textBlock.innerHTML = `<summary>${svgIconNoMargin('file')} 过程文本 <span>${textDeltas.length} chunks</span></summary>`;
                 const textBody = document.createElement('div');
-                textBody.className = 'process-text-body markdown-body';
+                textBody.className = 'thinking-body process-text-body markdown-body';
                 textBody.innerHTML = renderMarkdown(text);
                 textBlock.appendChild(textBody);
-                body.appendChild(textBlock);
+                stack.appendChild(textBlock);
             }
         }
 
@@ -1740,7 +2389,7 @@ import {
             tools.open = hasFailedTool;
             tools.innerHTML = `<summary>${svgIconNoMargin('gear')} 工具详情 <span>${toolCalls.length} 次调用${hasFailedTool ? ' · 有失败' : ''}</span></summary>`;
             const timelineDiv = document.createElement('div');
-            timelineDiv.className = 'tool-timeline';
+            timelineDiv.className = 'tool-timeline process-tool-timeline';
             const resultsCopy = [...toolResults];
             toolCalls.forEach((call: any, idx: number) => {
                 const resultIdx = resultsCopy.findIndex((r: any) => r.toolName === call.toolName);
@@ -1756,7 +2405,7 @@ import {
                 if (wrapper.firstElementChild) timelineDiv.appendChild(wrapper.firstElementChild);
             });
             tools.appendChild(timelineDiv);
-            body.appendChild(tools);
+            stack.appendChild(tools);
         }
 
         if (specialSteps.length > 0) {
@@ -1769,10 +2418,10 @@ import {
                 el.innerHTML = icon + ' ' + escapeHtml(s.content || '');
                 special.appendChild(el);
             });
-            body.appendChild(special);
+            stack.appendChild(special);
         }
 
-        panel.appendChild(body);
+        panel.appendChild(stack);
         return panel;
     }
 
@@ -2069,7 +2718,7 @@ import {
             summary.innerHTML = buildLiveProcessSummaryHtml('layers', chatI18n.live.realtimeProcess, '');
             state.liveProcessPanel.appendChild(summary);
             state.liveProcessBody = document.createElement('div');
-            state.liveProcessBody.className = 'process-body';
+            state.liveProcessBody.className = 'process-stack live-process-stack';
             state.liveProcessPanel.appendChild(state.liveProcessBody);
             if (state.liveSummary && state.liveSummary.nextSibling) {
                 state.container.insertBefore(state.liveProcessPanel, state.liveSummary.nextSibling);
@@ -2077,7 +2726,7 @@ import {
                 state.container.appendChild(state.liveProcessPanel);
             }
         }
-        const meta = state.liveProcessPanel.querySelector('.process-meta');
+        const meta = state.liveProcessPanel.querySelector(':scope > summary .process-meta');
         if (meta) meta.textContent = buildLiveProcessMeta(state.liveSteps, chatI18n);
         return state.liveProcessBody;
     }
@@ -2121,6 +2770,12 @@ import {
         state.liveTextBubble = null;
         state.liveTextProcessBody = null;
         state.liveTextContent = '';
+    }
+
+    function createToolPairElement(html: string): HTMLElement | null {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = html;
+        return wrapper.firstElementChild as HTMLElement | null;
     }
 
     function applyLiveStep(s: any) {
@@ -2233,9 +2888,11 @@ import {
                 const section = document.createElement('details');
                 section.className = 'process-section process-text live-process-text';
                 section.open = false;
-                section.innerHTML = buildLiveProcessSummaryHtml('file', '过程文本', 'streaming');
+                const summary = document.createElement('summary');
+                summary.innerHTML = buildLiveProcessSummaryHtml('file', '过程文本', 'streaming');
+                section.appendChild(summary);
                 state.liveTextProcessBody = document.createElement('div');
-                state.liveTextProcessBody.className = 'process-text-body markdown-body stream-cursor';
+                state.liveTextProcessBody.className = 'thinking-body process-text-body markdown-body stream-cursor';
                 section.appendChild(state.liveTextProcessBody);
                 processBody.appendChild(section);
             }
@@ -2257,21 +2914,24 @@ import {
                 const toolSection = document.createElement('details');
                 toolSection.className = 'process-section process-tools live-process-tools';
                 toolSection.open = false;
-                toolSection.innerHTML = buildLiveProcessSummaryHtml('gear', '工具详情', '实时调用');
+                const summary = document.createElement('summary');
+                summary.innerHTML = buildLiveProcessSummaryHtml('gear', '工具详情', '实时调用');
+                toolSection.appendChild(summary);
                 state.liveToolTimeline = document.createElement('div');
-                state.liveToolTimeline.className = 'tool-timeline';
+                state.liveToolTimeline.className = 'tool-timeline process-tool-timeline live-tool-timeline';
                 toolSection.appendChild(state.liveToolTimeline);
                 processBody?.appendChild(toolSection);
             }
             const stepIdx = s.stepIndex || (state.liveToolTimeline.querySelectorAll('.tool-pair').length + 1);
-            const pairDiv = document.createElement('div');
-            pairDiv.className = 'tool-pair';
+            const toolMeta = state.liveToolTimeline.closest('.process-tools')?.querySelector('.process-meta');
+            if (toolMeta) toolMeta.textContent = `${stepIdx} 次调用`;
+            const pairDiv = createToolPairElement(buildToolPairHtml(s as RendererStep, undefined, { stepIndex: stepIdx, showDuration: false }));
+            if (!pairDiv) return;
             pairDiv.dataset.tool = s.toolName || '';
             pairDiv.dataset.callIdx = String(stepIdx);
             pairDiv.dataset.callTs = String(s.timestamp || Date.now());
             // Store toolArgs so we can recover them when tool_result arrives
             try { pairDiv.dataset.callArgs = JSON.stringify(s.toolArgs || {}); } catch { pairDiv.dataset.callArgs = '{}'; }
-            pairDiv.innerHTML = buildToolPairHtml(s as RendererStep, undefined, { stepIndex: stepIdx, showDuration: false });
 
             // Auto-collapse: when tool count exceeds threshold, wrap overflow in <details>
             const LIVE_COLLAPSE_THRESHOLD = 1;
@@ -2321,11 +2981,15 @@ import {
                     let recoveredArgs: Record<string, unknown> = {};
                     try { recoveredArgs = JSON.parse(pair.dataset.callArgs || '{}'); } catch { /* ignore */ }
                     const fakeCall: RendererStep = { type: 'tool_call', toolName: s.toolName, toolArgs: recoveredArgs, content: '', timestamp: callTs };
-                    pair.innerHTML = buildToolPairHtml(fakeCall, s as RendererStep, {
+                    const updatedPair = createToolPairElement(buildToolPairHtml(fakeCall, s as RendererStep, {
                         stepIndex: stepIdx,
                         showDuration: true,
                         showDiff: true,
-                    });
+                    }));
+                    if (updatedPair) {
+                        pair.className = updatedPair.className;
+                        pair.innerHTML = updatedPair.innerHTML;
+                    }
                     break;
                 }
             }
@@ -2569,6 +3233,7 @@ import {
             setTimeout(() => {
                 if (removeDom) {
                     el.remove();
+                    forgetResponsiveWorkspaceContent(el);
                 } else {
                     el.style.display = 'none';
                     el.style.opacity = '1';
@@ -2596,6 +3261,15 @@ import {
             '<button class="diff-reject-btn" data-txid="' + safeId + '">' + svgIcon('x') + '拒绝</button>' +
             '</div>';
             
+        const actions = card.querySelector('.diff-card-actions') as HTMLElement | null;
+        if (actions) {
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'diff-preview-btn';
+            previewBtn.type = 'button';
+            previewBtn.innerHTML = svgIcon('search') + '查看详情';
+            previewBtn.style.display = 'none';
+            actions.insertBefore(previewBtn, actions.firstChild);
+        }
         (card.querySelector('.diff-accept-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; (card.querySelector('.diff-reject-btn') as HTMLButtonElement).disabled = true;
             this.innerHTML = svgIcon('check') + '已接受';
@@ -2608,9 +3282,19 @@ import {
             vscode.postMessage({ type: 'rejectTransaction', txId: cardInfo.id });
             dismissCard(div, 800);
         });
+        const pendingActions = card.querySelector('.diff-card-actions') as HTMLElement | null;
+        if (pendingActions) {
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'diff-preview-btn';
+            previewBtn.type = 'button';
+            previewBtn.innerHTML = svgIcon('search') + '查看详情';
+            previewBtn.style.display = 'none';
+            pendingActions.insertBefore(previewBtn, pendingActions.firstChild);
+        }
         div.appendChild(card);
         chatArea.appendChild(div);
         scrollBottom();
+        // Batch transaction cards keep their compact confirmation UI.
     }
 
     // ── Diff card ──────────────────────────────────────────────────────────────
@@ -2624,12 +3308,25 @@ import {
         chatArea.appendChild(wrap);
         scrollBottom();
     }
-    function showPendingWriteCard(file: string, messageId: string, isNewFile: boolean) {
+    function showPendingWriteCard(file: string, messageId: string, isNewFile: boolean, diff?: Partial<SideDiffFile>) {
         const fileName = (file || '').split(/[\\/]/).pop() || file;
         const div = document.createElement('div');
         const card = document.createElement('div');
         card.className = 'diff-card';
         const safeId = escapeHtml(messageId);
+        const diffFile: SideDiffFile = {
+            file,
+            status: isNewFile ? 'created' : 'modified',
+            diffPreview: diff?.diffPreview,
+            additions: diff?.additions,
+            deletions: diff?.deletions,
+            diffLines: diff?.diffLines,
+        };
+        const openPendingDiff = () => openDiffInSideWorkspace(
+            [diffFile],
+            isNewFile ? '新建文件' : '文件修改',
+            { pending: { messageId, isNewFile } },
+        );
         const hint = isNewFile ? '新文件已在编辑器中打开，请确认内容后决定' : '文件对比已在 VSCode 差异编辑器中打开';
         card.innerHTML =
             '<div class="diff-card-header">' +
@@ -2643,17 +3340,31 @@ import {
             this.disabled = true; (card.querySelector('.diff-reject-btn') as HTMLButtonElement).disabled = true;
             this.innerHTML = svgIcon('check') + '已接受';
             vscode.postMessage({ type: 'confirmWriteFile', messageId });
+            removePendingSideDiffEntry(messageId);
+            refreshSideDiffWorkspaceAfterRemoval();
             dismissCard(div, 400);
         });
         (card.querySelector('.diff-reject-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; (card.querySelector('.diff-accept-btn') as HTMLButtonElement).disabled = true;
             this.textContent = '已拒绝';
             vscode.postMessage({ type: 'cancelWriteFile', messageId });
+            removePendingSideDiffEntry(messageId);
+            refreshSideDiffWorkspaceAfterRemoval();
             dismissCard(div, 400);
         });
+        const pendingActions = card.querySelector('.diff-card-actions') as HTMLElement | null;
+        if (pendingActions) {
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'diff-preview-btn';
+            previewBtn.type = 'button';
+            previewBtn.innerHTML = svgIcon('search') + '查看详情';
+            previewBtn.addEventListener('click', openPendingDiff);
+            pendingActions.insertBefore(previewBtn, pendingActions.firstChild);
+        }
         div.appendChild(card);
         chatArea.appendChild(div);
         scrollBottom();
+        if (shouldUseSideWorkspace()) openPendingDiff();
     }
 
     // ── Floating Card Queue ──────────────────────────────────────────────────
@@ -2944,6 +3655,7 @@ import {
             case 'topicForked': {
                 // Close the topics panel and show a notification
                 topicsPanel.classList.remove('show');
+                if (sideWorkspaceContent === topicsPanel) closeSideWorkspace();
                 const notif = document.createElement('div');
                 notif.className = 'special-step';
                 notif.style.cssText = 'padding:6px 0;opacity:0.6;font-size:11px;';
@@ -3008,7 +3720,7 @@ import {
                 break;
             }
 
-            case 'pendingWriteFile': showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile); break;
+            case 'pendingWriteFile': showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile, msg); break;
 
             case 'permissionRequest': {
                 showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways);
@@ -3373,20 +4085,26 @@ import {
             case 'renderPlan': {
                 document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
                 const isOrchestratorPlan = msg.mode === 'orchestrator';
+                const labels = isOrchestratorPlan ? chatI18n.annotations.orchestratorPlan : chatI18n.annotations.plan;
                 const wrap = createAnnotationCard({
                     className: `plan-card-wrap ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`,
                     icon: isOrchestratorPlan ? 'bot' : 'edit',
                     approveIcon: isOrchestratorPlan ? 'zap' : 'check',
                     sections: msg.sections || [],
-                    labels: isOrchestratorPlan ? chatI18n.annotations.orchestratorPlan : chatI18n.annotations.plan,
+                    labels,
                     renderMarkdown,
                     postMessage: message => vscode.postMessage(message),
                     dismissCard: (element, delay = 0, done, removeFromDom) => dismissCard(element, delay, done, removeFromDom),
                     approveMessageType: 'submitPlanAnnotations',
                     reviseMessageType: 'revisePlanWithAnnotations',
                 });
-                chatArea.appendChild(wrap);
-                scrollBottom();
+                showResponsiveWorkspacePanel({
+                    kind: 'plan',
+                    title: labels.title,
+                    subtitle: labels.hint,
+                    content: wrap,
+                    wide: true,
+                });
                 break;
             }
 
@@ -3443,8 +4161,13 @@ import {
                     reviseMessageType: 'reviseWalkthroughWithAnnotations',
                     disableApproveOnSubmit: true,
                 });
-                chatArea.appendChild(wrap);
-                scrollBottom();
+                showResponsiveWorkspacePanel({
+                    kind: 'walkthrough',
+                    title: chatI18n.annotations.walkthrough.title,
+                    subtitle: chatI18n.annotations.walkthrough.hint,
+                    content: wrap,
+                    wide: true,
+                });
                 break;
             }
 
@@ -3461,8 +4184,13 @@ import {
                     approveMessageType: 'submitPlanAnnotations',
                     reviseMessageType: 'revisePlanWithAnnotations',
                 });
-                chatArea.appendChild(wrap);
-                scrollBottom();
+                showResponsiveWorkspacePanel({
+                    kind: 'blueprint',
+                    title: chatI18n.annotations.blueprint.title,
+                    subtitle: chatI18n.annotations.blueprint.hint,
+                    content: wrap,
+                    wide: true,
+                });
                 break;
             }
 
@@ -3504,6 +4232,15 @@ import {
 
             case 'diffSummary': {
                 if (!msg.files || msg.files.length === 0) break;
+                const summaryFiles: SideDiffFile[] = msg.files.map((f: any) => ({
+                    file: f.file,
+                    status: f.status,
+                    diffPreview: f.diffPreview,
+                    additions: f.additions,
+                    deletions: f.deletions,
+                    diffLines: f.diffLines,
+                }));
+                const summarySourceKey = msg.summaryId || getSideDiffSourceKey('文件变更', summaryFiles);
                 const card = document.createElement('div');
                 card.className = 'diff-summary-card';
 
@@ -3511,6 +4248,7 @@ import {
                 let totalAdd = 0, totalDel = 0;
                 for (const f of msg.files) { totalAdd += f.additions || 0; totalDel += f.deletions || 0; }
                 const headerHtml = `<div class="ds-header">
+                    <button class="ds-collapse-btn" type="button" aria-label="收起文件变更摘要" aria-expanded="true">▾</button>
                     <span class="ds-title">${svgIconNoMargin('edit')} 文件变更摘要</span>
                     <span class="ds-stats"><span class="ds-add">+${totalAdd}</span> <span class="ds-del">-${totalDel}</span> · ${msg.files.length} 个文件</span>
                 </div>`;
@@ -3563,6 +4301,10 @@ import {
                         // Toggle expand/collapse
                         fileHeader.style.cursor = 'pointer';
                         fileHeader.addEventListener('click', () => {
+                            if (shouldUseSideWorkspace()) {
+                                openDiffInSideWorkspace(summaryFiles, '文件变更', { sourceKey: summarySourceKey, focusFile: f.file });
+                                return;
+                            }
                             const isOpen = diffBody.style.display !== 'none';
                             diffBody.style.display = isOpen ? 'none' : 'block';
                             const btn = fileHeader.querySelector('.ds-expand-btn');
@@ -3574,8 +4316,21 @@ import {
                 }
 
                 card.appendChild(filesList);
+                const collapseBtn = card.querySelector('.ds-collapse-btn') as HTMLButtonElement | null;
+                if (collapseBtn) {
+                    collapseBtn.addEventListener('click', event => {
+                        event.stopPropagation();
+                        const collapsed = card.classList.toggle('collapsed');
+                        collapseBtn.textContent = collapsed ? '▸' : '▾';
+                        collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                        collapseBtn.setAttribute('aria-label', collapsed ? '展开文件变更摘要' : '收起文件变更摘要');
+                    });
+                }
                 chatArea.appendChild(card);
                 scrollBottom();
+                if (shouldUseSideWorkspace()) {
+                    openDiffInSideWorkspace(summaryFiles, '文件变更', { sourceKey: summarySourceKey });
+                }
                 break;
             }
 
@@ -3690,7 +4445,9 @@ import {
             {
                 postMessage: message => {
                     vscode.postMessage(message);
-                    if ((message as any)?.type === 'loadTopic') topicsPanel.classList.remove('show');
+                    if ((message as any)?.type === 'loadTopic' && sideWorkspaceContent !== topicsPanel) {
+                        topicsPanel.classList.remove('show');
+                    }
                 },
                 startRename: (topicId, title, source, titleElement) => startTopicRename(topicId, title, source, titleElement),
                 formatTime,
@@ -3708,7 +4465,9 @@ import {
             {
                 postMessage: message => {
                     vscode.postMessage(message);
-                    if ((message as any)?.type === 'loadTopic') topicsPanel.classList.remove('show');
+                    if ((message as any)?.type === 'loadTopic' && sideWorkspaceContent !== topicsPanel) {
+                        topicsPanel.classList.remove('show');
+                    }
                 },
                 startRename: (topicId, title, source, titleElement) => startTopicRename(topicId, title, source, titleElement),
                 formatTime,
@@ -3924,13 +4683,21 @@ import {
         inlineProviderSel.onchange = () => updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
         updateModelUI(current.provider, current.model, ollamaModels);
         updateApiKeyStatus(current.provider, providers);
-        chatHeader.style.display = 'none';
-        document.getElementById('chatArea')!.style.display = 'none';
-        if (inputWrapper) inputWrapper.style.display = 'none';
-        const mi = document.getElementById('modeIndicator');
-        if (mi) mi.style.display = 'none';
-        if (todoPanel) todoPanel.style.display = 'none';
         settingsPage.classList.add('active');
+        if (shouldUseSideWorkspace()) {
+            settingsInSideWorkspace = true;
+            responsiveWorkspacePinnedClosed = !!activeResponsiveWorkspace;
+            openSideWorkspace({ title: 'AI 设置', subtitle: '模型、上下文、API 和工具', content: settingsPage });
+        } else {
+            settingsInSideWorkspace = false;
+            closeSideWorkspace({ preserveResponsivePin: true });
+            chatHeader.style.display = 'none';
+            document.getElementById('chatArea')!.style.display = 'none';
+            if (inputWrapper) inputWrapper.style.display = 'none';
+            const mi = document.getElementById('modeIndicator');
+            if (mi) mi.style.display = 'none';
+            if (todoPanel) todoPanel.style.display = 'none';
+        }
         const _tr = document.getElementById('testResult');
         if (_tr) { _tr.className = 'test-result'; _tr.textContent = ''; }
         refreshSettingsOverview();
@@ -3956,6 +4723,12 @@ import {
     }
 
     function closeSettings() {
+        if (settingsInSideWorkspace) {
+            closeSideWorkspace({ preserveResponsivePin: true });
+            responsiveWorkspacePinnedClosed = false;
+            syncResponsiveWorkspaceLayout();
+            return;
+        }
         settingsPage.classList.remove('active');
         chatHeader.style.display = '';
         document.getElementById('chatArea')!.style.display = 'flex';

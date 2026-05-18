@@ -1300,7 +1300,7 @@ export type HostMessage =
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
     | { type: 'messageRetracted'; messageIndex: number }
-    | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean }
+    | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean; diffPreview?: string; additions?: number; deletions?: number; diffLines?: DiffLine[] }
     | { type: 'autoWriteFile'; file: string; isNewFile: boolean }
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
@@ -1322,7 +1322,7 @@ export type HostMessage =
     /** Token usage stats after generation completes */
     | { type: 'tokenUsage'; usage: TokenUsage; model: string }
     /** Emit a unified diff summary of all files changed in the message */
-    | { type: 'diffSummary'; files: DiffSummaryFile[] }
+    | { type: 'diffSummary'; files: DiffSummaryFile[]; summaryId?: string }
     /** Topic search results */
     | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; messageCount?: number; matchContext?: string; score?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; query?: string; totalCount?: number; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
     /** Topic imported successfully */

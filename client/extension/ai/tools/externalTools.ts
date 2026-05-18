@@ -7,7 +7,7 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { TodoItem, TodoWriteResult } from '../types';
-import { getAiStorageRoot, getAiStorageRootCandidates, getScratchDir, getTopicStorageDir } from '../workspacePaths';
+import { getAiStorageRoot, getAiStorageRootCandidates, getTopicScratchDir, getTopicStorageDir } from '../workspacePaths';
 import {
     escapeRegExp,
     isPathInsideOrEqual,
@@ -15,6 +15,38 @@ import {
     resolveWorkspacePathInput,
     sanitizePathInput,
 } from '../workspaceSandbox';
+
+const COMMAND_SNAPSHOT_MAX_FILE_BYTES = 500_000;
+const COMMAND_SNAPSHOT_MAX_TOTAL_BYTES = 24_000_000;
+const COMMAND_SNAPSHOT_MAX_FILES = 8000;
+const COMMAND_SNAPSHOT_TEXT_EXTENSIONS = new Set([
+    '.asset', '.cson', '.css', '.csv', '.cwt', '.fs', '.fsx', '.gfx', '.gui', '.html',
+    '.ini', '.js', '.json', '.jsonc', '.jsx', '.loc', '.lua', '.md', '.mod', '.pdxtxt',
+    '.ps1', '.py', '.rules', '.sfx', '.shader', '.txt', '.ts', '.tsx', '.xml', '.yaml',
+    '.yml',
+]);
+const COMMAND_SNAPSHOT_TEXT_FILENAMES = new Set([
+    'cwtools.md', 'readme', 'license', 'changelog', 'makefile', 'dockerfile',
+]);
+const COMMAND_TEMP_SCRIPT_EXTENSIONS = new Set([
+    '.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh',
+]);
+const COMMAND_SNAPSHOT_EXCLUDED_DIRS = new Set([
+    '.cwtools-ai', '.git', '.hg', '.svn', '.tmp-test', '.vscode-test', '.vs', '.idea',
+    'node_modules', 'dist', 'out', 'build', 'coverage',
+]);
+const COMMAND_TEMP_SCRIPT_DIR_NAMES = new Set([
+    '.tmp', 'scratch', 'temp', 'tmp',
+]);
+const COMMAND_TEMP_SCRIPT_NAME_PATTERN = /^(?:agent_helper|helper|tmp|temp|scratch|batch|bulk|replace|rewrite|fix|verify|check|search|scan)(?:[_\-.].*)?\.(?:bat|cmd|cjs|js|mjs|ps1|py|sh)$/i;
+
+interface CommandFileState {
+    filePath: string;
+    size: number;
+    mtimeMs: number;
+    previousContent?: string | null;
+    contentCaptured: boolean;
+}
 
 // ─── Context type ────────────────────────────────────────────────────────────
 
@@ -31,6 +63,7 @@ export interface ExternalToolContext {
 
 export class ExternalToolHandler {
     private currentTodos: TodoItem[] = [];
+    private ignoredCommandTempArtifacts = new Set<string>();
 
     constructor(private ctx: ExternalToolContext) {}
 
@@ -62,8 +95,14 @@ export class ExternalToolHandler {
             return (relPath || '.').replace(/\\/g, '/');
         };
 
+        const escapedQuotedPattern = /(^|[\s(])\\(["'])([A-Za-z]:[\\/][^"']+?)\\\2/g;
+        const withEscapedQuotedPaths = command.replace(escapedQuotedPattern, (match: string, prefix: string, quote: string, rawPath: string) => {
+            const rewritten = rewritePath(rawPath);
+            return rewritten === rawPath ? match : `${prefix}${quote}${rewritten}${quote}`;
+        });
+
         const quotedPattern = /(["'])([A-Za-z]:[\\/][^"']+)\1/g;
-        const withQuotedPaths = command.replace(quotedPattern, (match: string, _quote: string, rawPath: string) => {
+        const withQuotedPaths = withEscapedQuotedPaths.replace(quotedPattern, (match: string, _quote: string, rawPath: string) => {
             const rewritten = rewritePath(rawPath);
             return rewritten === rawPath ? match : `"${rewritten.replace(/"/g, '\\"')}"`;
         });
@@ -78,43 +117,48 @@ export class ExternalToolHandler {
     private normalizeAgentWorkspaceCommand(command: string, topicId: string): string {
         const aiRoot = getAiStorageRoot(this.ctx.workspaceRoot);
         const aiRoots = getAiStorageRootCandidates(this.ctx.workspaceRoot);
+        const safeTopicId = (topicId || 'default').replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const safeTopicLower = safeTopicId.toLowerCase();
         const rewriteAgentPath = (rawPath: string): string => {
             const normalized = rawPath.replace(/\\/g, '/');
             const rest = normalized.replace(/^\.cwtools-ai(?:[\\/]|$)/i, '').replace(/^\/+/, '');
             if (!rest) return aiRoot || '.cwtools-ai';
 
-            const firstSegment = rest.split('/')[0]?.toLowerCase() ?? '';
-            const scoped = firstSegment === 'scratch'
-                || firstSegment.startsWith('topic_')
-                || firstSegment === topicId.toLowerCase();
-            const targetRest = scoped ? rest : path.posix.join('scratch', rest);
+            const restSegments = rest.split('/').filter(Boolean);
+            const firstSegment = restSegments[0]?.toLowerCase() ?? '';
+            const explicitlyScopedTopic = firstSegment === safeTopicLower || firstSegment.startsWith('topic_');
+            const targetSegments = firstSegment === 'scratch'
+                ? [safeTopicId, 'scratch', ...restSegments.slice(1)]
+                : explicitlyScopedTopic
+                    ? restSegments
+                    : [safeTopicId, ...restSegments];
 
             if (!aiRoot) {
-                return scoped ? rawPath : `.cwtools-ai/${targetRest}`;
+                return `.cwtools-ai/${targetSegments.join('/')}`;
             }
 
-            const restSegments = rest.split('/').filter(Boolean);
-            const existingScoped = aiRoots
-                .map(root => path.join(root, ...restSegments))
-                .find(candidate => fs.existsSync(candidate));
-            if (scoped && existingScoped) {
-                return existingScoped;
-            }
-
-            const targetCandidate = path.join(aiRoot, ...targetRest.split('/').filter(Boolean));
-            if (!scoped) {
-                const existingRootFile = aiRoots
-                    .map(root => path.join(root, ...restSegments))
-                    .find(candidate => fs.existsSync(candidate));
-                if (existingRootFile && !fs.existsSync(targetCandidate)) {
-                    return existingRootFile;
+            const candidates: string[] = [];
+            for (const root of aiRoots) {
+                candidates.push(path.join(root, ...targetSegments));
+                if (!explicitlyScopedTopic && firstSegment !== 'scratch') {
+                    candidates.push(path.join(root, safeTopicId, 'scratch', ...restSegments));
                 }
             }
-            return targetCandidate;
+            const existingCandidate = candidates.find(candidate => fs.existsSync(candidate));
+            if (existingCandidate) {
+                return existingCandidate;
+            }
+
+            return path.join(aiRoot, ...targetSegments);
         };
 
+        const escapedQuotedPattern = /(^|[\s(])\\(["'])(\.cwtools-ai(?:[\\/][^"']+?)?)\\\2/g;
+        const withEscapedQuotedPaths = command.replace(escapedQuotedPattern, (_match, prefix: string, quote: string, agentPath: string) =>
+            `${prefix}${quote}${rewriteAgentPath(agentPath)}${quote}`
+        );
+
         const quotedPattern = /(^|[\s(])(["'])(\.cwtools-ai(?:[\\/][^"']+)?)\2/g;
-        const withQuotedPaths = command.replace(quotedPattern, (_match, prefix: string, quote: string, agentPath: string) =>
+        const withQuotedPaths = withEscapedQuotedPaths.replace(quotedPattern, (_match, prefix: string, quote: string, agentPath: string) =>
             `${prefix}${quote}${rewriteAgentPath(agentPath)}${quote}`
         );
 
@@ -155,6 +199,207 @@ export class ExternalToolHandler {
             });
         }
         return { command: normalizedCommand, crossWorkspacePathAccess };
+    }
+
+    private commandSnapshotKey(filePath: string): string {
+        const resolved = path.resolve(filePath);
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    }
+
+    private getCommandSnapshotRoots(): string[] {
+        const roots: string[] = [];
+        const addRoot = (root: string | undefined) => {
+            if (!root || path.basename(root).toLowerCase() === '.cwtools-ai') return;
+            const resolved = path.resolve(root);
+            const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+            if (!roots.some(existing => this.commandSnapshotKey(existing) === key)) {
+                roots.push(resolved);
+            }
+        };
+
+        for (const folder of vs.workspace.workspaceFolders ?? []) {
+            addRoot(folder.uri.fsPath);
+        }
+        addRoot(this.ctx.workspaceRoot);
+        return roots;
+    }
+
+    private shouldSkipCommandSnapshotDir(entryName: string): boolean {
+        return COMMAND_SNAPSHOT_EXCLUDED_DIRS.has(entryName.toLowerCase());
+    }
+
+    private getCommandSnapshotRelativePath(filePath: string): string {
+        const resolved = path.resolve(filePath);
+        for (const root of this.getCommandSnapshotRoots()) {
+            if (isPathInsideOrEqual(resolved, root)) {
+                return path.relative(root, resolved).replace(/\\/g, '/');
+            }
+        }
+        return path.basename(resolved);
+    }
+
+    private shouldIgnoreCommandChange(filePath: string, isNewFile = false): boolean {
+        const snapshotKey = this.commandSnapshotKey(filePath);
+        if (this.ignoredCommandTempArtifacts.has(snapshotKey)) return true;
+
+        const relPath = this.getCommandSnapshotRelativePath(filePath);
+        const segments = relPath.split('/').filter(Boolean).map(segment => segment.toLowerCase());
+        if (segments[0] === '.cwtools-ai') return true;
+
+        const basename = path.basename(filePath).toLowerCase();
+        const ext = path.extname(basename).toLowerCase();
+        if (!COMMAND_TEMP_SCRIPT_EXTENSIONS.has(ext)) return false;
+        if (segments.some(segment => COMMAND_TEMP_SCRIPT_DIR_NAMES.has(segment))
+            || basename === 'agent_helper.py'
+            || (isNewFile && COMMAND_TEMP_SCRIPT_NAME_PATTERN.test(basename))) {
+            this.ignoredCommandTempArtifacts.add(snapshotKey);
+            return true;
+        }
+        return false;
+    }
+
+    private isCommandSnapshotTextFile(filePath: string): boolean {
+        const basename = path.basename(filePath).toLowerCase();
+        if (COMMAND_SNAPSHOT_TEXT_FILENAMES.has(basename)) return true;
+        return COMMAND_SNAPSHOT_TEXT_EXTENSIONS.has(path.extname(basename).toLowerCase());
+    }
+
+    private async collectCommandFileState(captureContent: boolean): Promise<Map<string, CommandFileState>> {
+        const files = new Map<string, CommandFileState>();
+        let capturedBytes = 0;
+        let hitFileLimit = false;
+
+        const walk = async (dir: string): Promise<void> => {
+            if (hitFileLimit) return;
+            let entries: fs.Dirent[];
+            try {
+                entries = await fs.promises.readdir(dir, { withFileTypes: true });
+            } catch {
+                return;
+            }
+
+            for (const entry of entries) {
+                if (hitFileLimit) return;
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    if (!this.shouldSkipCommandSnapshotDir(entry.name)) {
+                        await walk(fullPath);
+                    }
+                    continue;
+                }
+                if (!entry.isFile() || !this.isCommandSnapshotTextFile(fullPath)) {
+                    continue;
+                }
+
+                let stat: fs.Stats;
+                try {
+                    stat = await fs.promises.stat(fullPath);
+                } catch {
+                    continue;
+                }
+                if (!stat.isFile()) continue;
+                if (files.size >= COMMAND_SNAPSHOT_MAX_FILES) {
+                    hitFileLimit = true;
+                    return;
+                }
+
+                let previousContent: string | null | undefined;
+                let contentCaptured = false;
+                if (captureContent
+                    && stat.size <= COMMAND_SNAPSHOT_MAX_FILE_BYTES
+                    && capturedBytes + stat.size <= COMMAND_SNAPSHOT_MAX_TOTAL_BYTES) {
+                    try {
+                        const content = await fs.promises.readFile(fullPath, 'utf-8');
+                        if (!content.includes('\u0000')) {
+                            previousContent = content;
+                            contentCaptured = true;
+                            capturedBytes += stat.size;
+                        }
+                    } catch {
+                        previousContent = undefined;
+                    }
+                }
+
+                files.set(this.commandSnapshotKey(fullPath), {
+                    filePath: fullPath,
+                    size: stat.size,
+                    mtimeMs: stat.mtimeMs,
+                    previousContent,
+                    contentCaptured,
+                });
+            }
+        };
+
+        for (const root of this.getCommandSnapshotRoots()) {
+            await walk(root);
+        }
+        return files;
+    }
+
+    private getCommandSnapshotCallback(context?: import('../types').AgentToolContext):
+        | ((filePath: string, previousContent: string | null) => void)
+        | undefined {
+        return context?.onBeforeFileWrite
+            ?? context?.runnerOptions?.onBeforeFileWrite
+            ?? this.ctx.onBeforeFileWrite;
+    }
+
+    private async recordCommandFileChanges(
+        before: Map<string, CommandFileState> | undefined,
+        context?: import('../types').AgentToolContext
+    ): Promise<number> {
+        if (!before) return 0;
+        const record = this.getCommandSnapshotCallback(context);
+        if (!record) return 0;
+
+        const after = await this.collectCommandFileState(false);
+        let recorded = 0;
+
+        for (const [key, beforeState] of before) {
+            if (this.shouldIgnoreCommandChange(beforeState.filePath)) {
+                continue;
+            }
+            const afterState = after.get(key);
+            if (!afterState) {
+                if (beforeState.contentCaptured && beforeState.previousContent !== undefined) {
+                    record(beforeState.filePath, beforeState.previousContent);
+                    recorded++;
+                }
+                continue;
+            }
+
+            if (beforeState.size === afterState.size
+                && Math.abs(beforeState.mtimeMs - afterState.mtimeMs) < 1) {
+                continue;
+            }
+            if (!beforeState.contentCaptured || beforeState.previousContent === undefined) {
+                continue;
+            }
+
+            try {
+                if (afterState.size <= COMMAND_SNAPSHOT_MAX_FILE_BYTES) {
+                    const current = await fs.promises.readFile(afterState.filePath, 'utf-8');
+                    if (current === beforeState.previousContent) {
+                        continue;
+                    }
+                }
+            } catch {
+                // If the file changed but cannot be read now, still keep the old snapshot.
+            }
+
+            record(beforeState.filePath, beforeState.previousContent);
+            recorded++;
+        }
+
+        for (const [key, afterState] of after) {
+            if (before.has(key)) continue;
+            if (this.shouldIgnoreCommandChange(afterState.filePath, true)) continue;
+            if (afterState.size > COMMAND_SNAPSHOT_MAX_FILE_BYTES) continue;
+            record(afterState.filePath, null);
+            recorded++;
+        }
+
+        return recorded;
     }
 
     private async requestPermissionWithAbort(
@@ -548,10 +793,13 @@ export class ExternalToolHandler {
                 : ['/d', '/v:off', '/c', args.command])
             : ['-c', args.command];
         const agentWorkspaceDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
-        const scratchDir = getScratchDir(this.ctx.workspaceRoot);
+        const scratchDir = getTopicScratchDir(topicId, this.ctx.workspaceRoot);
+        const helperScript = scratchDir ? path.join(scratchDir, 'agent_helper.py') : '';
+        const mediaDir = agentWorkspaceDir ? path.join(agentWorkspaceDir, 'media') : '';
         try {
+            if (agentWorkspaceDir) fs.mkdirSync(agentWorkspaceDir, { recursive: true });
             if (scratchDir) fs.mkdirSync(scratchDir, { recursive: true });
-            fs.mkdirSync(path.join(agentWorkspaceDir, 'media'), { recursive: true });
+            if (mediaDir) fs.mkdirSync(mediaDir, { recursive: true });
         } catch { /* best effort */ }
         const commandEnv = {
             ...process.env,
@@ -559,14 +807,29 @@ export class ExternalToolHandler {
             CWT_AGENT_TOPIC_ID: topicId,
             CWT_AGENT_WORKSPACE_DIR: agentWorkspaceDir,
             CWT_AGENT_SCRATCH_DIR: scratchDir,
-            CWT_AGENT_MEDIA_DIR: path.join(agentWorkspaceDir, 'media'),
+            CWT_AGENT_HELPER_SCRIPT: helperScript,
+            CWT_AGENT_MEDIA_DIR: mediaDir,
         };
 
         let stdoutBuf = '';
         let stderrBuf = '';
         const MAX_OUTPUT = 4000;
+        let commandChangeBaseline: Map<string, CommandFileState> | undefined;
+        if (this.getCommandSnapshotCallback(context)
+            && !(isAutoApproveSafeCommand && !hasShellControlOperator)) {
+            try {
+                commandChangeBaseline = await this.collectCommandFileState(true);
+            } catch {
+                commandChangeBaseline = undefined;
+            }
+        }
 
-        return new Promise(resolve => {
+        const commandResult = await new Promise<{
+            stdout: string;
+            stderr: string;
+            exitCode: number;
+            timedOut?: boolean;
+        }>(resolve => {
             let proc: ReturnType<typeof spawn>;
             try {
                 proc = spawn(shell, shellArgs, { cwd, env: commandEnv, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -681,6 +944,21 @@ export class ExternalToolHandler {
                 });
             });
         });
+
+        try {
+            const recordedChanges = await this.recordCommandFileChanges(commandChangeBaseline, context);
+            if (recordedChanges > 0) {
+                context?.onStep?.({
+                    type: 'thinking',
+                    content: `run_command recorded ${recordedChanges} file change(s) for the workspace panel.`,
+                    timestamp: Date.now(),
+                });
+            }
+        } catch {
+            // File-change capture is best-effort; command output remains authoritative.
+        }
+
+        return commandResult;
     }
 
     // ─── searchWeb ───────────────────────────────────────────────────────────

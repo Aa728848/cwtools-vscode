@@ -638,6 +638,164 @@ describe('agent tool topic artifacts', () => {
         expect(result.stdout).to.include('ran script');
     });
 
+    it('maps legacy scratch paths into the current topic scratch directory for commands', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'scratch');
+        fs.mkdirSync(topicScratch, { recursive: true });
+        const targetPath = path.join(topicScratch, 'helper.js');
+        fs.writeFileSync(targetPath, 'console.log("ok");\n', 'utf8');
+
+        const result = await handler.runCommand({
+            command: 'node ".cwtools-ai/scratch/helper.js"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(result.stdout).to.include('ok');
+    });
+
+    it('normalizes backslash-escaped quoted scratch script paths before running commands', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'scratch');
+        fs.mkdirSync(topicScratch, { recursive: true });
+        const targetPath = path.join(topicScratch, 'agent_helper.js');
+        fs.writeFileSync(targetPath, 'console.log("escaped ok");\n', 'utf8');
+
+        const result = await handler.runCommand({
+            command: 'node \\".cwtools-ai/scratch/agent_helper.js\\"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(result.stdout).to.include('escaped ok');
+    });
+
+    it('records project file changes made by a command for the diff panel', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const scriptDir = path.join(workspaceRoot, 'tools');
+        const scriptPath = path.join(scriptDir, 'change-file.js');
+        const targetPath = path.join(workspaceRoot, 'config.txt');
+        fs.mkdirSync(scriptDir, { recursive: true });
+        fs.writeFileSync(targetPath, 'before\n', 'utf8');
+        fs.writeFileSync(scriptPath, [
+            "const fs = require('fs');",
+            "fs.writeFileSync('config.txt', 'after\\n', 'utf8');",
+            "console.log('changed');",
+        ].join('\n'), 'utf8');
+
+        const snapshots: Array<{ filePath: string; previousContent: string | null }> = [];
+        const result = await handler.runCommand({
+            command: 'node "tools/change-file.js"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+            onBeforeFileWrite: (filePath: string, previousContent: string | null) => {
+                snapshots.push({ filePath, previousContent });
+            },
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(fs.readFileSync(targetPath, 'utf8')).to.equal('after\n');
+        expect(snapshots).to.deep.include({ filePath: targetPath, previousContent: 'before\n' });
+    });
+
+    it('omits temporary helper scripts from command-recorded workspace changes', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const scriptDir = path.join(workspaceRoot, 'tools');
+        const scriptPath = path.join(scriptDir, 'create-temp-and-change.js');
+        const targetPath = path.join(workspaceRoot, 'config.txt');
+        const helperPath = path.join(workspaceRoot, 'agent_helper.py');
+        fs.mkdirSync(scriptDir, { recursive: true });
+        fs.writeFileSync(targetPath, 'before\n', 'utf8');
+        fs.writeFileSync(scriptPath, [
+            "const fs = require('fs');",
+            "fs.writeFileSync('config.txt', 'after\\n', 'utf8');",
+            "fs.writeFileSync('agent_helper.py', 'print(\"temporary\")\\n', 'utf8');",
+        ].join('\n'), 'utf8');
+
+        const snapshots: Array<{ filePath: string; previousContent: string | null }> = [];
+        const result = await handler.runCommand({
+            command: 'node "tools/create-temp-and-change.js"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+            onBeforeFileWrite: (filePath: string, previousContent: string | null) => {
+                snapshots.push({ filePath, previousContent });
+            },
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(fs.existsSync(helperPath)).to.equal(true);
+        expect(snapshots).to.deep.include({ filePath: targetPath, previousContent: 'before\n' });
+        expect(snapshots.some(snapshot => snapshot.filePath === helperPath)).to.equal(false);
+    });
+
+    it('still records edits to existing project scripts with helper-like names', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const scriptDir = path.join(workspaceRoot, 'tools');
+        const scriptPath = path.join(scriptDir, 'modify-existing-helper.js');
+        const helperPath = path.join(workspaceRoot, 'helper.py');
+        fs.mkdirSync(scriptDir, { recursive: true });
+        fs.writeFileSync(helperPath, 'print("before")\n', 'utf8');
+        fs.writeFileSync(scriptPath, [
+            "const fs = require('fs');",
+            "fs.writeFileSync('helper.py', 'print(\"after\")\\n', 'utf8');",
+        ].join('\n'), 'utf8');
+
+        const snapshots: Array<{ filePath: string; previousContent: string | null }> = [];
+        const result = await handler.runCommand({
+            command: 'node "tools/modify-existing-helper.js"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+            onBeforeFileWrite: (filePath: string, previousContent: string | null) => {
+                snapshots.push({ filePath, previousContent });
+            },
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(snapshots).to.deep.include({ filePath: helperPath, previousContent: 'print("before")\n' });
+    });
+
     it('rejects media deployment targets outside the workspace boundary', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const sourcePath = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media', 'source.png');

@@ -59,4 +59,20 @@ describe('PromptBuilder context budgeting', () => {
         expect(prompt).to.include('execute it with `run_command` from the project root');
         expect(prompt).to.include('Prefer `python "relative/path/to/script.py"` over wrapper files');
     });
+
+    it('tells agents to reuse one temporary helper script per task', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSystemPromptForMode('utility');
+        const context = builder.buildContextMessages({ topicId: 'topic-123' });
+
+        expect(prompt).to.include('reuse and overwrite one script for the whole task');
+        expect(prompt).to.include('CWT_AGENT_HELPER_SCRIPT');
+        expect(prompt).to.include('agent_helper.py');
+        expect(prompt).to.include('Delete the helper only when it is a temporary execution/verification helper');
+        expect(prompt).to.include('preserve user-requested deliverable scripts');
+        expect(String(context[0]!.content)).to.include('Agent Helper Script');
+        expect(String(context[0]!.content)).to.include('.cwtools-ai/topic-123/scratch/agent_helper.py');
+        expect(String(context[0]!.content)).to.include('never user-requested deliverables');
+    });
 });

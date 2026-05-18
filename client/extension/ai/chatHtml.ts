@@ -49,6 +49,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
             <span class="artifact-toggle-text">Artifacts</span>
             <span class="artifact-badge" id="artifactCount">0</span>
         </button>
+        <button class="workspace-toggle" id="btnWorkspace" title="打开工作区" aria-label="打开右侧工作区">
+            ${svgIconNoMargin('folder')}
+            <span class="workspace-toggle-text">工作区</span>
+        </button>
         <button class="icon-btn" id="btnNewTopic" title="新话题" aria-label="新建对话话题">${svgIconNoMargin('plus')}</button>
         <button class="icon-btn" id="btnTopics" title="历史话题" aria-label="展开历史话题面板">≡</button>
         <button class="icon-btn" id="btnSettings" title="设置" aria-label="打开 AI 设置">${svgIconNoMargin('gear')}</button>
@@ -93,13 +97,19 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
     <div id="artifactList" class="artifact-list"></div>
 </aside>
 
+<aside class="side-workspace" id="sideWorkspace" aria-label="右侧工作区" aria-hidden="true">
+    <div class="side-workspace-header">
+        <div class="side-workspace-heading">
+            <div class="side-workspace-title" id="sideWorkspaceTitle">工作区</div>
+            <div class="side-workspace-subtitle" id="sideWorkspaceSubtitle"></div>
+        </div>
+        <button class="icon-btn side-workspace-close" id="sideWorkspaceClose" title="关闭" aria-label="关闭右侧工作区">${svgIconNoMargin('x')}</button>
+    </div>
+    <div class="side-workspace-body" id="sideWorkspaceBody"></div>
+</aside>
+
 <div class="chat-area" id="chatArea" role="log" aria-live="polite" aria-label="AI 对话消息区">
     <div class="empty-state" id="emptyState" aria-hidden="true"></div>
-</div>
-
-<div id="tokenUsageBar" style="display:none">
-    <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
-    <div class="token-usage-label" id="tokenUsageLabel"></div>
 </div>
 
 <div id="floatingCardArea" class="floating-card-area"></div>
@@ -128,6 +138,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri): str
         <div class="image-preview-area" id="imagePreviewArea"></div>
         <div class="input-row">
             <div id="input" class="composer-input" contenteditable="true" data-placeholder="描述你的需求... (/ 输入命令)" role="textbox" aria-multiline="true" aria-label="向 AI 发送消息"></div>
+        </div>
+        <div id="tokenUsageBar" class="composer-token-usage" style="display:none">
+            <div class="token-usage-bar"><div class="token-usage-fill" id="tokenUsageFill" style="width:0%"></div></div>
+            <div class="token-usage-label" id="tokenUsageLabel"></div>
         </div>
         <div class="input-controls">
             <div class="composer-toolbar">

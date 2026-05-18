@@ -13,6 +13,7 @@ describe('webview smoke checks', () => {
         expect(html).to.include('id="modeSel"');
         expect(html).to.include('id="composerAddBtn"');
         expect(html).to.include('id="quickModelTrigger"');
+        expect(html).to.include('id="btnWorkspace"');
         expect(html).to.include('data-composer-action="workflows"');
         expect(html).to.include('id="artifactDrawer"');
         expect(script).to.include("case 'workflowList'");
@@ -20,6 +21,7 @@ describe('webview smoke checks', () => {
         expect(script).to.include('renderArtifactPanel');
         expect(script).to.include('renderTopics');
         expect(script).to.include('renderArtifactDrawer');
+        expect(script).to.include('showResponsiveWorkspacePanel');
         expect(script).to.include('renderTopicsView');
         expect(script).to.include('buildSettingsOverviewModel');
     });
@@ -57,6 +59,7 @@ describe('webview smoke checks', () => {
             '.model-menu',
             '.slash-popup',
             '.artifact-drawer',
+            '.workspace-toggle',
             '.topics-panel',
             '.subagent-fullscreen-view',
             '.annotatable-plan',
@@ -64,7 +67,7 @@ describe('webview smoke checks', () => {
         ]) {
             expect(css).to.include(selector);
         }
-        for (const id of ['chatArea', 'input', 'sendBtn', 'slashPopup', 'artifactDrawer', 'topicsPanel']) {
+        for (const id of ['chatArea', 'input', 'sendBtn', 'slashPopup', 'artifactDrawer', 'topicsPanel', 'btnWorkspace']) {
             expect(html).to.include(`id="${id}"`);
         }
         expect(script).to.include('IntersectionObserver');

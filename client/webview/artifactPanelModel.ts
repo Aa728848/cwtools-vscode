@@ -4,6 +4,14 @@ export interface DiffArtifactFileView {
     diffPreview?: string;
     additions?: number;
     deletions?: number;
+    diffLines?: DiffArtifactLineView[];
+}
+
+export interface DiffArtifactLineView {
+    type: 'add' | 'remove' | 'context';
+    content: string;
+    oldLineNo?: number;
+    newLineNo?: number;
 }
 
 export interface ArtifactLike {
@@ -26,5 +34,21 @@ export function getDiffArtifactFilesForWebview(artifact: ArtifactLike): DiffArti
             diffPreview: typeof file.diffPreview === 'string' ? file.diffPreview : undefined,
             additions: typeof file.additions === 'number' ? file.additions : undefined,
             deletions: typeof file.deletions === 'number' ? file.deletions : undefined,
+            diffLines: normalizeDiffLines(file.diffLines),
         }));
+}
+
+function normalizeDiffLines(value: unknown): DiffArtifactLineView[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+    const lines = value
+        .filter((line): line is Record<string, unknown> => !!line && typeof line === 'object')
+        .filter(line => line.type === 'add' || line.type === 'remove' || line.type === 'context')
+        .filter(line => typeof line.content === 'string')
+        .map(line => ({
+            type: line.type as DiffArtifactLineView['type'],
+            content: String(line.content),
+            ...(typeof line.oldLineNo === 'number' ? { oldLineNo: line.oldLineNo } : {}),
+            ...(typeof line.newLineNo === 'number' ? { newLineNo: line.newLineNo } : {}),
+        }));
+    return lines.length > 0 ? lines : undefined;
 }

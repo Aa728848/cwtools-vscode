@@ -7,7 +7,14 @@ describe('artifactPanelModel', () => {
             data: {
                 files: [
                     { file: 'common/foo.txt', status: 'modified', additions: 2, deletions: 1 },
-                    { file: 'events/bar.txt', diffPreview: '+ file added' },
+                    {
+                        file: 'events/bar.txt',
+                        diffPreview: '+ file added',
+                        diffLines: [
+                            { type: 'add', content: 'foo = bar', newLineNo: 1 },
+                            { type: 'ignored', content: 'nope' },
+                        ],
+                    },
                 ],
             },
         });
@@ -16,5 +23,6 @@ describe('artifactPanelModel', () => {
         expect(files[0]!.file).to.equal('common/foo.txt');
         expect(files[0]!.status).to.equal('modified');
         expect(files[1]!.diffPreview).to.equal('+ file added');
+        expect(files[1]!.diffLines).to.deep.equal([{ type: 'add', content: 'foo = bar', newLineNo: 1 }]);
     });
 });

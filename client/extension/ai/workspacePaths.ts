@@ -80,6 +80,10 @@ export function getExistingTopicFilePath(topicId: string | undefined, fileName: 
 }
 
 export function getScratchDir(fallbackWorkspaceRoot = ''): string {
-    const aiRoot = getAiStorageRoot(fallbackWorkspaceRoot);
-    return aiRoot ? path.join(aiRoot, 'scratch') : '';
+    return getTopicScratchDir('default', fallbackWorkspaceRoot);
+}
+
+export function getTopicScratchDir(topicId: string | undefined, fallbackWorkspaceRoot = ''): string {
+    const topicDir = getTopicStorageDir(topicId, fallbackWorkspaceRoot);
+    return topicDir ? path.join(topicDir, 'scratch') : '';
 }

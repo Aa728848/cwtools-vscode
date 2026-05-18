@@ -116,11 +116,7 @@ export class FileToolHandler {
             || context?.runnerOptions?.useSlimPrompt === true;
     }
 
-    private normalizeAgentWorkspacePath(filePath: string): string {
-        return filePath;
-    }
-
-    private normalizeAgentWorkspaceWritePath(filePath: string, context?: import('../types').AgentToolContext): string {
+    private normalizeAgentWorkspacePath(filePath: string, context?: import('../types').AgentToolContext): string {
         const topicId = context?.runnerOptions?.topicId;
         if (!topicId) return filePath;
 
@@ -137,13 +133,17 @@ export class FileToolHandler {
         return path.posix.join('.cwtools-ai', safeTopicId, ...rest);
     }
 
-    private resolveWorkspacePath(filePath: string, preferExistingAiPath: boolean): WorkspacePathResolution {
-        const normalizedInput = this.normalizeAgentWorkspacePath(filePath);
+    private normalizeAgentWorkspaceWritePath(filePath: string, context?: import('../types').AgentToolContext): string {
+        return this.normalizeAgentWorkspacePath(filePath, context);
+    }
+
+    private resolveWorkspacePath(filePath: string, preferExistingAiPath: boolean, context?: import('../types').AgentToolContext): WorkspacePathResolution {
+        const normalizedInput = this.normalizeAgentWorkspacePath(filePath, context);
         return resolveWorkspacePathInput(normalizedInput, this.ctx.workspaceRoot, { preferExistingAiPath });
     }
 
-    private resolveAndAssertInWorkspace(filePath: string, _context?: import('../types').AgentToolContext): string {
-        const resolution = this.resolveWorkspacePath(filePath, true);
+    private resolveAndAssertInWorkspace(filePath: string, context?: import('../types').AgentToolContext): string {
+        const resolution = this.resolveWorkspacePath(filePath, true, context);
         if (isSecuritySandboxDisabled() || resolution.isWithinAnyWorkspace) {
             return resolution.resolved;
         }
@@ -182,7 +182,7 @@ export class FileToolHandler {
     }
 
     private async resolveAndAuthorizeWrite(filePath: string, toolName: string, context?: import('../types').AgentToolContext): Promise<string> {
-        const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), false);
+        const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), false, context);
         if (isSecuritySandboxDisabled()) {
             return resolution.resolved;
         }

@@ -32,7 +32,7 @@ export interface FileDiffResult {
  * Maximum number of diff lines to emit per file.
  * Prevents the Webview from choking on huge diffs.
  */
-const MAX_DIFF_LINES = 300;
+const MAX_DIFF_LINES = 1200;
 
 /**
  * Maximum number of context lines to show around each change hunk.

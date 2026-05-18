@@ -691,6 +691,7 @@ export class AgentRunner {
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
+            onBeforeFileWrite: options?.onBeforeFileWrite,
             onTodoUpdate: options?.onTodoUpdate
         };
 
@@ -878,7 +879,7 @@ export class AgentRunner {
             }
 
             // Phase 1: Agent reasoning loop (with tool calls)
-            const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator, undefined, runMetrics);
+            const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator, options?.onBeforeFileWrite, runMetrics);
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
 
             // Auto-mark remaining in-progress todos as done on successful completion

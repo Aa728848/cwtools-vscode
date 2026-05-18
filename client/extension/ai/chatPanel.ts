@@ -38,6 +38,7 @@ import { ContextReferenceManager } from './contextReferences';
 import { getAllWorkflows, getWorkflow } from './workflowRegistry';
 import { toWorkflowViewModel } from './workflowViewModel';
 import { getWorkflowUiLabels } from './workflowI18n';
+import { computeLineDiff } from './diffEngine';
 import {
     getAiStorageRoot,
     getProjectWorkspaceRoot,
@@ -48,6 +49,21 @@ import {
 
 type FileSnapshot = { filePath: string; previousContent: string | null; _tooLarge?: boolean };
 const MAX_ARTIFACT_DIFF_CONTENT = 500000;
+const TEMP_DIFF_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh']);
+const TEMP_DIFF_SCRIPT_DIR_NAMES = new Set(['.tmp', 'scratch', 'temp', 'tmp']);
+const TEMP_DIFF_SCRIPT_NAME_PATTERN = /^(?:agent_helper|helper|tmp|temp|scratch|batch|bulk|replace|rewrite|fix|verify|check|search|scan)(?:[_\-.].*)?\.(?:bat|cmd|cjs|js|mjs|ps1|py|sh)$/i;
+
+function isTempScriptSnapshot(snapshot: FileSnapshot, workspaceRoot = getProjectWorkspaceRoot()): boolean {
+    const relativePath = path.relative(workspaceRoot, snapshot.filePath).replace(/\\/g, '/');
+    const segments = relativePath.split('/').filter(Boolean).map(segment => segment.toLowerCase());
+    const basename = path.basename(snapshot.filePath).toLowerCase();
+    const ext = path.extname(basename).toLowerCase();
+    if (!TEMP_DIFF_SCRIPT_EXTENSIONS.has(ext)) return false;
+    if (segments[0] === '.cwtools-ai' && segments[2] === 'scratch') return true;
+    if (segments.some(segment => TEMP_DIFF_SCRIPT_DIR_NAMES.has(segment))) return true;
+    if (basename === 'agent_helper.py') return true;
+    return snapshot.previousContent === null && TEMP_DIFF_SCRIPT_NAME_PATTERN.test(basename);
+}
 
 export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public static readonly viewType = 'cwtools.aiChat';
@@ -954,13 +970,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private async sendDiffSummary(snapshots: FileSnapshot[]): Promise<void> {
         if (!snapshots || snapshots.length === 0) return;
 
-        // Lazy-load diff engine to avoid startup cost
-        const { computeLineDiff } = await import('./diffEngine');
-
         const files: DiffSummaryFile[] = [];
         const artifactFiles: DiffArtifactFile[] = [];
 
         for (const snap of snapshots) {
+            if (isTempScriptSnapshot(snap)) continue;
             const currentContentExists = fs.existsSync(snap.filePath);
             let currentContent: string | null = null;
             let currentTooLarge = false;
@@ -998,21 +1012,33 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     deletions: 0,
                 });
             } else if (snap.previousContent === null && currentContentExists) {
-                const lineCount = currentContent === null ? undefined : currentContent.split('\n').length;
+                const currentLines = currentContent === null ? undefined : currentContent.split('\n');
+                const lineCount = currentLines?.length;
                 pushFile({
                     file: snap.filePath,
                     status: 'created',
                     diffPreview: lineCount === undefined ? '+ file added' : `+ ${lineCount} lines added`,
                     additions: lineCount,
                     deletions: 0,
+                    diffLines: currentLines?.slice(0, 1200).map((content, index) => ({
+                        type: 'add',
+                        content,
+                        newLineNo: index + 1,
+                    })),
                 });
             } else if (snap.previousContent !== null && !currentContentExists) {
+                const previousLines = snap.previousContent.split('\n');
                 pushFile({
                     file: snap.filePath,
                     status: 'deleted',
-                    diffPreview: `- ${snap.previousContent.split('\n').length} lines removed`,
+                    diffPreview: `- ${previousLines.length} lines removed`,
                     additions: 0,
-                    deletions: snap.previousContent.split('\n').length,
+                    deletions: previousLines.length,
+                    diffLines: previousLines.slice(0, 1200).map((content, index) => ({
+                        type: 'remove',
+                        content,
+                        oldLineNo: index + 1,
+                    })),
                 });
             } else if (snap.previousContent !== null && currentContentExists) {
                 if (currentTooLarge || currentContent === null) {
@@ -1038,12 +1064,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         if (files.length > 0) {
-            this.postMessage({ type: 'diffSummary', files });
+            const summaryId = this.artifactId('diff', String(Date.now()));
+            this.postMessage({ type: 'diffSummary', files, summaryId });
             const additions = files.reduce((sum, file) => sum + (file.additions ?? 0), 0);
             const deletions = files.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
             const data: DiffArtifactData = { files: artifactFiles, additions, deletions };
             this.upsertArtifact({
-                id: this.artifactId('diff', String(Date.now())),
+                id: summaryId,
                 kind: 'diff',
                 title: 'File Changes',
                 summary: `${files.length} file(s), +${additions} -${deletions}`,
@@ -1456,33 +1483,39 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const tmpDir = path.join(getTopicStorageDir(topicId, getProjectWorkspaceRoot()), 'tmp');
             const ext = path.extname(file) || '.txt';
             const tempPath = path.join(tmpDir, `__pending_${messageId}${ext}`);
+            let diffPreview = isNewFile ? '+ file added' : 'Pending file change';
+            let additions = 0;
+            let deletions = 0;
+            let diffLines: import('./types').DiffLine[] | undefined;
 
             try {
                 if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
                 fs.writeFileSync(tempPath, newContent, 'utf-8');
                 this.pendingDiffTempFiles.set(messageId, tempPath);
 
-                const tempUri = vs.Uri.file(tempPath);
-                const label = `AI Changes → ${path.basename(file)}`;
-
                 if (isNewFile) {
-                    vs.commands.executeCommand('vscode.open', tempUri, {
-                        preview: true,
-                        viewColumn: vs.ViewColumn.Beside,
-                    });
+                    const lines = newContent.split('\n');
+                    additions = lines.length;
+                    diffPreview = `+ ${additions} lines added`;
+                    diffLines = lines.slice(0, 1200).map((content, index) => ({
+                        type: 'add',
+                        content,
+                        newLineNo: index + 1,
+                    }));
                 } else {
-                    vs.commands.executeCommand('vscode.diff',
-                        vs.Uri.file(file), tempUri,
-                        label,
-                        { preview: true, viewColumn: vs.ViewColumn.Active }
-                    );
+                    const previousContent = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
+                    const diffResult = computeLineDiff(previousContent, newContent);
+                    additions = diffResult.additions;
+                    deletions = diffResult.deletions;
+                    diffLines = diffResult.lines;
+                    diffPreview = `+${additions} -${deletions}${diffResult.truncated ? ' (truncated)' : ''}`;
                 }
             } catch (e) {
-                ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to open diff view', e);
+                ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to prepare inline diff view', e);
             }
 
             // Tell the WebView to show a simple Accept/Reject card
-            this.postMessage({ type: 'pendingWriteFile', file, messageId, isNewFile });
+            this.postMessage({ type: 'pendingWriteFile', file, messageId, isNewFile, diffPreview, additions, deletions, diffLines });
         });
     }
 

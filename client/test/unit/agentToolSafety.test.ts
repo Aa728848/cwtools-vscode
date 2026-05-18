@@ -713,6 +713,55 @@ describe('agent tool topic artifacts', () => {
         expect(result.stdout).to.include('topic escaped ok');
     });
 
+    it('normalizes one-sided escaped quoted topic scratch paths for PowerShell commands', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'topic_1779112553395', 'scratch');
+        fs.mkdirSync(topicScratch, { recursive: true });
+        const targetPath = path.join(topicScratch, 'search_fallen.txt');
+        fs.writeFileSync(targetPath, 'powershell path ok\n', 'utf8');
+
+        const result = await handler.runCommand({
+            command: 'Get-Content \\".cwtools-ai\\topic_1779112553395\\scratch\\search_fallen.txt"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'topic_1779112553395',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(result.stdout).to.include('powershell path ok');
+    });
+
+    it('uses PowerShell for normal Windows commands instead of cmd quoting', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const topicScratch = path.join(workspaceRoot, '.cwtools-ai', 'topic_1779112553395', 'scratch');
+        fs.mkdirSync(topicScratch, { recursive: true });
+        const targetPath = path.join(topicScratch, 'search_fallen.txt');
+        fs.writeFileSync(targetPath, 'normal powershell path ok\n', 'utf8');
+
+        const result = await handler.runCommand({
+            command: 'Get-Content \\".cwtools-ai\\topic_1779112553395\\scratch\\search_fallen.txt"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                topicId: 'topic_1779112553395',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(result.stdout).to.include('normal powershell path ok');
+    });
+
     it('records project file changes made by a command for the diff panel', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const scriptDir = path.join(workspaceRoot, 'tools');

@@ -92,7 +92,9 @@ export class ExternalToolHandler {
                 return rawPath;
             }
             const relPath = path.relative(cwd, rawPath);
-            return (relPath || '.').replace(/\\/g, '/');
+            return process.platform === 'win32'
+                ? (relPath || '.')
+                : (relPath || '.').replace(/\\/g, '/');
         };
 
         // Pass 1: quoted absolute paths. Model-generated commands sometimes
@@ -724,7 +726,7 @@ export class ExternalToolHandler {
         const isSafePrefix = SAFE_COMMAND_PREFIXES.some(startsWithCommandPrefix);
         const AUTO_APPROVE_CONTROL_BLOCKED = [
             ...PIPE_REDIRECT_BLOCKED,
-            /(^|[^&])&(?!&)/, // cmd.exe single-ampersand chaining
+            /(^|[^&])&(?!&)/, // single-ampersand shell chaining
         ];
         const hasShellControlOperator = AUTO_APPROVE_CONTROL_BLOCKED.some(pat => pat.test(args.command));
         const SAFE_AUTO_APPROVE_PATTERNS = [
@@ -822,12 +824,10 @@ export class ExternalToolHandler {
         // Parse command into binary + args on the platform shell
         const isWindows = process.platform === 'win32';
         const shell = isWindows
-            ? (isUtilityMode ? 'powershell.exe' : 'cmd.exe')
+            ? 'powershell.exe'
             : '/bin/sh';
         const shellArgs = isWindows
-            ? (isUtilityMode
-                ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', args.command]
-                : ['/d', '/v:off', '/c', args.command])
+            ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', args.command]
             : ['-c', args.command];
         const agentWorkspaceDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
         const scratchDir = getTopicScratchDir(topicId, this.ctx.workspaceRoot);

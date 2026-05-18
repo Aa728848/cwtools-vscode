@@ -964,11 +964,11 @@ body.chat-empty .slash-popup { top: var(--composer-popup-top); bottom: auto; max
 .process-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-weight: inherit; color: inherit; }
 .process-meta { min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; margin-left: auto; opacity: 0.46; font-family: var(--vscode-editor-font-family, monospace); font-size: 9.5px; white-space: nowrap; }
 .process-section { border: 1px solid rgba(255,255,255,0.08); border-radius: 7px; overflow: hidden; background: rgba(255,255,255,0.018); }
-.process-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 9px; font-size: 11px; opacity: 0.68; color: var(--fg); }
+.process-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 9px; font-size: 11px; opacity: 0.88; color: cornflowerblue; }
 .process-section > summary::-webkit-details-marker { display: none; }
 .process-section > summary::before { content: '▸'; font-size: 8px; opacity: 0.58; transition: transform 0.15s; }
 .process-section[open] > summary::before { transform: rotate(90deg); }
-.process-section > summary span { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.48; font-family: var(--vscode-editor-font-family, monospace); font-size: 9.5px; }
+.process-section > summary .process-meta { min-width: 0; max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; opacity: 0.46; font-family: var(--vscode-editor-font-family, monospace); font-size: 9.5px; }
 .process-text-body { padding: 7px 9px; border-top: 1px solid rgba(255,255,255,0.055); font-size: 11px; line-height: 1.55; opacity: 0.74; overflow-wrap: anywhere; word-break: break-word; }
 .process-tool-timeline { margin: 0; border-color: rgba(255,255,255,0.08); border-radius: 7px; background: rgba(255,255,255,0.018); }
 .process-tool-timeline > .tool-pair { padding: 6px 9px; }

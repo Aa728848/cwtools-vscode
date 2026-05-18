@@ -66,6 +66,17 @@ body.agent-manager-shell .manager-inspector-tabs {
     margin-top: 6px;
 }
 
+body.agent-manager-shell .artifact-drawer[data-active-tab="agents"] .artifact-filter-row:not(.manager-inspector-tabs),
+body.agent-manager-shell .artifact-drawer[data-active-tab="tasks"] .artifact-filter-row:not(.manager-inspector-tabs) {
+    display: none;
+}
+
+body.agent-manager-shell .manager-agent-summary,
+body.agent-manager-shell .manager-agent-lane,
+body.agent-manager-shell .manager-task-item {
+    cursor: default;
+}
+
 body.agent-manager-shell .manager-pill,
 body.agent-manager-shell .manager-meta {
     font-size: 11px;

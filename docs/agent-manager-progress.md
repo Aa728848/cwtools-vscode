@@ -1,6 +1,6 @@
 # Agent Manager Implementation Progress
 
-Last updated: 2026-05-18
+Last updated: 2026-05-19
 
 ## Completed
 
@@ -15,14 +15,19 @@ Last updated: 2026-05-18
   - Webview -> Host: `requestManagerSnapshot`
   - Host -> Webview: `managerSnapshot`
 - [x] Add manager runtime overlay:
-  - requests snapshot on load/visibility restore
+  - receives restored shared runtime state plus manager snapshots on load/visibility restore
   - renders rail-level overview pills (topics, artifacts, steps, messages)
   - reflects mode/workflow/status from live host updates
+- [x] Reconnect the manager shell to the shared chat runtime so settings, composer controls, rich message rendering, approvals, and plan cards inherit the same behavior as the sidebar.
+- [x] Keep manager-only enhancements as an additive layer:
+  - workspace-grouped topic rail
+  - `Agents / Artifacts / Tasks` inspector tabs
+  - rail-level overview pills
 - [x] Extend smoke/unit tests for new wiring and core abstractions.
 
 ## Remaining To Reach Plan Completion
 
-- [x] Split manager runtime from shared chat runtime (remove implicit chat IIFE dependency).
+- [x] Share the chat runtime between sidebar and manager while keeping manager-only presentation enhancements isolated.
 - [x] Build manager-specific message contract layer (`shared/chat/manager` message modules).
 - [x] Add manager-focused center pane renderer (conversation-focused, less chat-page coupling).
 - [x] Add right inspector tabs for `Agents / Artifacts / Tasks` with explicit state model.
@@ -31,10 +36,13 @@ Last updated: 2026-05-18
 - [x] Add conflict and cross-surface interaction tests (simultaneous actions from sidebar and manager).
 - [x] Add end-to-end visual/manual verification checklist for wide/medium/narrow manager layouts.
 
-## Suggested Next Execution Order
+## Final Verification Focus
 
-1. Runtime split (`chatPanel` boot API + manager boot API).
-2. Manager inspector tabs (`Agents / Artifacts / Tasks`) with live data.
-3. Topic metadata upgrade (`pinned`, `workspace`) and UI support.
-4. Orchestrator lane details and summary widgets.
-5. Final regression + release verification.
+1. Manually verify wide, medium, and narrow layouts from the acceptance checklist.
+2. Exercise shared-runtime parity in the manager shell:
+   - settings
+   - quick model selection
+   - permission cards
+   - write confirmation cards
+   - plan / walkthrough annotation flows
+3. Re-run release verification before packaging.

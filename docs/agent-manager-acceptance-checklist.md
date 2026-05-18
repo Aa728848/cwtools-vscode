@@ -15,6 +15,9 @@
 - [ ] Switch topic in sidebar and confirm manager conversation updates.
 - [ ] Switch topic in manager and confirm sidebar conversation updates.
 - [ ] Send message from manager and receive assistant response.
+- [ ] Open Settings from manager and confirm provider/model/MCP controls are usable.
+- [ ] Use the composer `+` menu and quick model selector from manager.
+- [ ] Trigger permission, write confirmation, and plan annotation flows from manager and complete them without returning to the sidebar.
 
 ## Topic Metadata
 
@@ -38,9 +41,10 @@
 
 ## Regression
 
-- [ ] `npm run compile` passes.
-- [ ] `client/test/unit/webviewSmoke.test.ts` passes.
-- [ ] `client/test/unit/agentSessionCoordinator.test.ts` passes.
-- [ ] `client/test/unit/agentUiBroadcaster.test.ts` passes.
-- [ ] `client/test/unit/artifactStore.test.ts` passes.
-- [ ] `client/test/unit/agentManagerContracts.test.ts` passes.
+- [x] `npm run compile` passes.
+- [x] `client/test/unit/webviewSmoke.test.ts` passes.
+- [x] `client/test/unit/agentSessionCoordinator.test.ts` passes.
+- [x] `client/test/unit/agentUiBroadcaster.test.ts` passes.
+- [x] `client/test/unit/artifactStore.test.ts` passes.
+- [x] `client/test/unit/agentManagerContracts.test.ts` passes.
+- [x] `npm run test:unit` passes.

@@ -4452,6 +4452,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 startRename: (topicId, title, source, titleElement) => startTopicRename(topicId, title, source, titleElement),
                 formatTime,
             },
+            { grouping: document.body.classList.contains('agent-manager-shell') ? 'workspace' : 'date' },
         );
     }
 

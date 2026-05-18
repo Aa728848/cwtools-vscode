@@ -21,6 +21,10 @@ export interface TopicViewCallbacks {
     formatTime: (timestamp: number) => string;
 }
 
+export interface TopicRenderOptions {
+    grouping?: 'date' | 'workspace';
+}
+
 export function renderTopicPanelSummary(
     summary: HTMLElement | null,
     mode: 'list' | 'search',
@@ -111,6 +115,7 @@ export function renderTopics(
     topics: TopicPanelItem[],
     stats: TopicPanelStats | undefined,
     callbacks: TopicViewCallbacks,
+    options: TopicRenderOptions = {},
 ): void {
     const { list } = elements;
     if (!list) return;
@@ -130,7 +135,10 @@ export function renderTopics(
         if (pinA !== pinB) return pinB - pinA;
         return (b.updatedAt || 0) - (a.updatedAt || 0);
     });
-    for (const group of groupTopicsByDate(sorted)) {
+    const groups = options.grouping === 'workspace'
+        ? groupTopicsByWorkspace(sorted)
+        : groupTopicsByDate(sorted);
+    for (const group of groups) {
         const header = document.createElement('div');
         header.className = 'topic-date-group';
         header.textContent = group.label;
@@ -233,6 +241,24 @@ function appendTopicActions(
         callbacks.postMessage({ type: 'archiveTopic', topicId: topic.id });
     });
 
+    const workspaceBtn = document.createElement('button');
+    workspaceBtn.className = 'topic-action-btn topic-workspace-btn';
+    workspaceBtn.innerHTML = svgIconNoMargin('folder');
+    workspaceBtn.title = '设置工作区分组';
+    workspaceBtn.addEventListener('click', event => {
+        event.stopPropagation();
+        const current = topic.workspaceLabel || topic.workspaceId || '';
+        const nextValue = window.prompt('输入工作区分组名（留空清除）', current);
+        if (nextValue === null) return;
+        const next = nextValue.trim();
+        callbacks.postMessage({
+            type: 'setTopicWorkspace',
+            topicId: topic.id,
+            workspaceId: next || null,
+            workspaceLabel: next || null,
+        });
+    });
+
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'topic-action-btn topic-delete';
     deleteBtn.innerHTML = svgIconNoMargin('trash');
@@ -245,8 +271,20 @@ function appendTopicActions(
     actions.appendChild(pinBtn);
     actions.appendChild(forkBtn);
     actions.appendChild(renameBtn);
+    actions.appendChild(workspaceBtn);
     actions.appendChild(archiveBtn);
     actions.appendChild(deleteBtn);
+}
+
+function groupTopicsByWorkspace(topics: TopicPanelItem[]): Array<{ label: string; items: TopicPanelItem[] }> {
+    const groups = new Map<string, TopicPanelItem[]>();
+    for (const topic of topics) {
+        const label = topic.workspaceLabel || topic.workspaceId || '默认工作区';
+        const items = groups.get(label) || [];
+        items.push(topic);
+        groups.set(label, items);
+    }
+    return Array.from(groups.entries()).map(([label, items]) => ({ label, items }));
 }
 
 function localizeCurrentLabel(label: string): string {

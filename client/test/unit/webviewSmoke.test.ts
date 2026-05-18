@@ -95,9 +95,8 @@ describe('webview smoke checks', () => {
         expect(managerCss).to.include('.manager-inspector-tabs');
         expect(managerCss).to.include('.topics-panel');
         expect(managerCss).to.include('.artifact-drawer');
-        expect(managerEntry).to.not.include("import './chatPanel'");
+        expect(managerEntry).to.include("import './chatPanel'");
         expect(managerEntry).to.include("import type { ManagerSnapshotMessage");
-        expect(managerEntry).to.include("type: 'requestManagerSnapshot'");
         expect(managerEntry).to.include("case 'managerSnapshot'");
         expect(managerEntry).to.include("case 'orchestratorProgress'");
         expect(host).to.include("case 'requestManagerSnapshot'");

@@ -28,20 +28,22 @@ describe('agent manager cross-surface contracts', () => {
         expect(topics).to.include('pinned: t.pinned');
     });
 
-    it('manager runtime has independent renderer and inspector tabs', () => {
+    it('manager runtime inherits chat behavior and adds inspector tabs', () => {
         const manager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
         const contracts = fs.readFileSync(path.join(root, 'client/webview/chat/messages.manager.ts'), 'utf8');
+        const topicViews = fs.readFileSync(path.join(root, 'client/webview/chat/topicViews.ts'), 'utf8');
         const css = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
 
+        expect(manager).to.include("import './chatPanel'");
         expect(manager).to.include("import type { ManagerSnapshotMessage");
-        expect(manager).to.not.include("import './chatPanel'");
-        expect(manager).to.include("type: 'sendMessage'");
-        expect(manager).to.include("type: 'pinTopic'");
-        expect(manager).to.include("type: 'setTopicWorkspace'");
         expect(manager).to.include("case 'orchestratorProgress'");
-        expect(manager).to.include("data-tab=\"agents\"");
-        expect(manager).to.include("data-tab=\"artifacts\"");
-        expect(manager).to.include("data-tab=\"tasks\"");
+        expect(manager).to.include('data-manager-tab="agents"');
+        expect(manager).to.include('data-manager-tab="artifacts"');
+        expect(manager).to.include('data-manager-tab="tasks"');
+        expect(manager).to.not.include('function renderMessages');
+        expect(topicViews).to.include("grouping?: 'date' | 'workspace'");
+        expect(topicViews).to.include('groupTopicsByWorkspace');
+        expect(topicViews).to.include("type: 'setTopicWorkspace'");
 
         expect(contracts).to.include('export type ManagerWebviewMessage');
         expect(contracts).to.include('export interface ManagerSnapshotMessage');

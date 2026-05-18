@@ -95,23 +95,60 @@ export class ExternalToolHandler {
             return (relPath || '.').replace(/\\/g, '/');
         };
 
-        const escapedQuotedPattern = /(^|[\s(])\\(["'])([A-Za-z]:[\\/][^"']+?)\\\2/g;
-        const withEscapedQuotedPaths = command.replace(escapedQuotedPattern, (match: string, prefix: string, quote: string, rawPath: string) => {
+        // Pass 1: quoted absolute paths. Model-generated commands sometimes
+        // preserve JSON-style escaped quotes, e.g. \"C:\path\" or \"C:\path".
+        const quotedOrEscapedPattern = /(^|[\s(])(\\?)(["'])([A-Za-z]:[\\/][^"']+?)(\\?)\3/g;
+        const withEscapedQuotedPaths = command.replace(quotedOrEscapedPattern, (match: string, prefix: string, openingEscape: string, quote: string, rawPath: string, closingEscape: string) => {
             const rewritten = rewritePath(rawPath);
-            return rewritten === rawPath ? match : `${prefix}${quote}${rewritten}${quote}`;
+            return rewritten === rawPath && !openingEscape && !closingEscape
+                ? match
+                : `${prefix}${quote}${rewritten.replace(/"/g, '\\"')}${quote}`;
         });
 
+        // Pass 2: normally-quoted paths, e.g. "C:\path with spaces"
         const quotedPattern = /(["'])([A-Za-z]:[\\/][^"']+)\1/g;
         const withQuotedPaths = withEscapedQuotedPaths.replace(quotedPattern, (match: string, _quote: string, rawPath: string) => {
             const rewritten = rewritePath(rawPath);
-            return rewritten === rawPath ? match : `"${rewritten.replace(/"/g, '\\"')}"`;
+            if (rewritten === rawPath) return match;
+            // Always re-wrap in double-quotes; relative paths may contain spaces
+            return `"${rewritten.replace(/"/g, '\\"')}"`;
         });
 
-        const barePattern = /(^|[\s(])([A-Za-z]:[\\/][^\s"';&|<>]+)/g;
-        return withQuotedPaths.replace(barePattern, (match: string, prefix: string, rawPath: string) => {
-            const rewritten = rewritePath(rawPath);
-            return rewritten === rawPath ? match : `${prefix}${this.quoteCommandPath(rewritten, false)}`;
-        });
+        // Pass 3: bare (unquoted) absolute paths.
+        // Use a character-level scan so we skip any double-quoted spans that were
+        // already produced by Passes 1/2, preventing double-rewriting.
+        let result = '';
+        let pos = 0;
+        const src = withQuotedPaths;
+        while (pos < src.length) {
+            const ch = src[pos]!;
+            // Skip double-quoted spans verbatim
+            if (ch === '"') {
+                const close = src.indexOf('"', pos + 1);
+                if (close === -1) { result += src.slice(pos); break; }
+                result += src.slice(pos, close + 1);
+                pos = close + 1;
+                continue;
+            }
+            // A bare absolute path must be preceded by whitespace, '(' or start-of-string
+            if (pos === 0 || ch === ' ' || ch === '\t' || ch === '(') {
+                const startOfPath = pos === 0 ? pos : pos + 1;
+                const after = src.slice(startOfPath);
+                const m = /^([A-Za-z]:[\\/][^\s"';&|<>]+)/.exec(after);
+                if (m) {
+                    const rawPath = m[1]!;
+                    const rewritten = rewritePath(rawPath);
+                    if (rewritten !== rawPath) {
+                        result += (pos === 0 ? '' : ch) + this.quoteCommandPath(rewritten, false);
+                        pos = startOfPath + rawPath.length;
+                        continue;
+                    }
+                }
+            }
+            result += ch;
+            pos++;
+        }
+        return result;
     }
 
     private normalizeAgentWorkspaceCommand(command: string, topicId: string): string {
@@ -152,8 +189,8 @@ export class ExternalToolHandler {
             return path.join(aiRoot, ...targetSegments);
         };
 
-        const escapedQuotedPattern = /(^|[\s(])\\(["'])(\.cwtools-ai(?:[\\/][^"']+?)?)\\\2/g;
-        const withEscapedQuotedPaths = command.replace(escapedQuotedPattern, (_match, prefix: string, quote: string, agentPath: string) =>
+        const quotedAgentPathPattern = /(^|[\s(])\\?(["'])(\.cwtools-ai(?:[\\/][^"']+?)?)\\?\2/g;
+        const withEscapedQuotedPaths = command.replace(quotedAgentPathPattern, (_match, prefix: string, quote: string, agentPath: string) =>
             `${prefix}${quote}${rewriteAgentPath(agentPath)}${quote}`
         );
 

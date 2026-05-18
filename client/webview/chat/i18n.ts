@@ -316,7 +316,7 @@ const ZH_CN: ChatI18nText = {
         starting: '正在启动...',
         back: '返回',
         subagent: '子代理',
-        realtimeProcess: '实时过程集中显示',
+        realtimeProcess: '探索过程',
         reads: '读取',
         writes: '写入',
         thinkingDetails: '思考详情',

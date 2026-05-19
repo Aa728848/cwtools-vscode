@@ -732,9 +732,12 @@ export class ExternalToolHandler {
         const DESTRUCTIVE_BLOCKED = [
             /\brm\s+-rf\b/i, /\bdel\s+\/[fqs]/i, /\bformat\b/i,
             /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
-            /\bnode\b\s+-e/i, /\bpython\b\s+-c/i,
             /\bcurl\b.*\|\s*bash/i, /\bwget\b.*\|\s*sh/i,
         ];
+        // Inline interpreter commands: not destructive, but should never be auto-approved.
+        // In confirm mode → normal permission prompt; in auto mode → still requires explicit confirmation.
+        const INTERPRETER_INLINE = [/\bnode\b\s+-e/i, /\bpython\b\s+-c/i];
+        const isInterpreterInline = INTERPRETER_INLINE.some(pat => pat.test(args.command));
         const MODE_BLOCKED = isUtilityMode ? [] : [/\bpowershell\b/i, /\bpwsh\b/i];
         const ALWAYS_BLOCKED = [...DESTRUCTIVE_BLOCKED, ...MODE_BLOCKED];
         const PIPE_REDIRECT_BLOCKED = [
@@ -838,7 +841,9 @@ export class ExternalToolHandler {
 
         const safeAutoApprove = isAutoApproveSafeCommand && !hasShellControlOperator && !args.requestEscalation && !escalationReason;
         const utilityAutoApprove = isUtilityMode && fileWriteMode === 'auto' && !args.requestEscalation && !escalationReason;
-        const requiresPermission = !(safeAutoApprove || utilityAutoApprove);
+        // Interpreter inline commands (python -c, node -e) always require explicit user permission,
+        // even in auto mode, to prevent silent arbitrary code execution.
+        const requiresPermission = isInterpreterInline || !(safeAutoApprove || utilityAutoApprove);
         const onPermissionRequest = context?.onPermissionRequest;
 
         if (requiresPermission && onPermissionRequest) {

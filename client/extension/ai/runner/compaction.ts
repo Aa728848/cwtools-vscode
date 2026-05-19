@@ -190,6 +190,24 @@ export async function maybeCompactHistory(
                 timestamp: Date.now(),
             });
 
+            const isDeepSeek = (options?.providerId ?? '').startsWith('deepseek');
+
+            if (isDeepSeek) {
+                // ── DeepSeek prefix-cache optimization path ──
+                // Rules:
+                //   1. system message stays unchanged (frozen prefix)
+                //   2. summary injected as user+assistant pair (append-only)
+                //   3. recent messages preserved with byte-stable order
+                const systemMsg = history[0]?.role === 'system' ? history[0] : undefined;
+                return [
+                    ...(systemMsg ? [systemMsg] : []),
+                    { role: 'user', content: '[Context Recovery] Please review the conversation summary below and continue.' },
+                    { role: 'assistant', content: `## Conversation Summary (compacted)\n${summary}${pinnedSection}` },
+                    ...recentMessages,
+                ];
+            }
+
+            // ── Default path (other providers) ──
             return [
                 {
                     role: 'system',

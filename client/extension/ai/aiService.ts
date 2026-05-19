@@ -851,7 +851,7 @@ export class AIService {
         let contentBuf = '';
         let reasoningBuf = '';
         let finishReason: string | null = null;
-        let usageBuf: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
+        let usageBuf: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens?: number } | undefined;
         let modelBuf = '';
         // tool_calls reassembly: index → { id, type, function.name, function.arguments(buf) }
         const toolCallMap: Record<number, { id: string; type: string; function: { name: string; arguments: string } }> = {};
@@ -872,7 +872,7 @@ export class AIService {
                 const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
                 // Capture model name and usage from any chunk
                 if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
-                if (chunk.usage) { const u = chunk.usage as Record<string, number>; usageBuf = { prompt_tokens: u.prompt_tokens ?? u.input_tokens ?? 0, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? ((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)) }; }
+                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const cached = u.prompt_cache_hit_tokens ?? u.cached_tokens ?? u.cache_read_input_tokens ?? 0; usageBuf = { prompt_tokens: u.prompt_tokens ?? u.input_tokens ?? 0, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? ((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)), cached_tokens: cached }; }
                 if (!choices || choices.length === 0) continue;
                 const delta = choices[0]!.delta as Record<string, unknown> | undefined;  
                 if (!delta) { finishReason = (choices[0]!.finish_reason as string) ?? finishReason; continue; }  
@@ -938,7 +938,12 @@ export class AIService {
                 } as ChatMessage & { tool_calls?: typeof toolCalls },
                 finish_reason: finishReason ?? 'stop',
             }],
-            usage: usageBuf,
+            usage: usageBuf ? {
+                prompt_tokens: usageBuf.prompt_tokens,
+                completion_tokens: usageBuf.completion_tokens,
+                total_tokens: usageBuf.total_tokens,
+                cached_tokens: usageBuf.cached_tokens,
+            } : undefined,
         } as ChatCompletionResponse;
     }
 
@@ -995,6 +1000,7 @@ export class AIService {
         let stopReason: string | null = null;
         let inputTokens = 0;
         let outputTokens = 0;
+        let cachedTokens = 0;
 
         // Tool-use blocks: index → { id, name, argsBuf }
         const toolBlocks: Record<number, { id: string; name: string; argsBuf: string }> = {};
@@ -1024,7 +1030,10 @@ export class AIService {
                         const msg = evt.message as Record<string, unknown> | undefined;
                         if (msg?.model) modelBuf = msg.model as string;
                         const u = msg?.usage as Record<string, number> | undefined;
-                        if (u) inputTokens = u.input_tokens ?? 0;
+                        if (u) {
+                            inputTokens = u.input_tokens ?? 0;
+                            cachedTokens = u.cache_read_input_tokens ?? 0;
+                        }
                         break;
                     }
                     case 'content_block_start': {
@@ -1110,6 +1119,7 @@ export class AIService {
                 prompt_tokens: inputTokens,
                 completion_tokens: outputTokens,
                 total_tokens: inputTokens + outputTokens,
+                cached_tokens: cachedTokens,
             },
         } as ChatCompletionResponse;
     }

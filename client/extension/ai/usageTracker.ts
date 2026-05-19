@@ -12,6 +12,8 @@ export interface UsageRecord {
     outputTokens: number;
     totalTokens: number;
     costCny: number;
+    /** Input tokens that hit prefix cache (0 if not applicable) */
+    cachedTokens?: number;
     /** Tool calls made in this request (Batch 4.2) */
     toolCalls?: Record<string, number>;
     /** Response latency in ms (Batch 4.2) */
@@ -51,6 +53,13 @@ export interface UsageStats {
     toolFrequency: { tool: string; count: number; percentage: number }[];
     /** Batch 4.2: Average response time in ms */
     avgResponseMs: number;
+    /** Aggregate cache hit statistics */
+    cacheStats: {
+        totalCachedTokens: number;
+        totalInputTokens: number;
+        cacheHitRate: number;       // 0-100 percentage
+        estimatedSavingsCny: number; // cost saved by cache hits
+    };
 }
 
 // ─── Internal persisted shape ────────────────────────────────────────────────
@@ -97,6 +106,7 @@ export class UsageTracker {
             outputTokens: usage.output ?? 0,
             totalTokens: usage.total,
             costCny: usage.estimatedCostCny ?? 0,
+            cachedTokens: usage.cachedTokens ?? 0,
             toolCalls: options?.toolCalls,
             durationMs: options?.durationMs,
             topicId: options?.topicId,
@@ -193,6 +203,23 @@ export class UsageTracker {
             .sort((a, b) => b.count - a.count);
         const avgResponseMs = durationCount > 0 ? Math.round(totalDurationMs / durationCount) : 0;
 
+        // Cache hit statistics
+        let totalCachedTokens = 0;
+        let totalInputTokens = 0;
+        for (const r of records) {
+            totalCachedTokens += r.cachedTokens ?? 0;
+            totalInputTokens += r.inputTokens;
+        }
+        const cacheHitRate = totalInputTokens > 0
+            ? Math.round((totalCachedTokens / totalInputTokens) * 10000) / 100
+            : 0;
+        // Estimated savings: cached tokens billed at 0.1× vs full price → savings = 0.9× cached cost
+        // Use average input cost per token across all records as approximation
+        const avgInputCostPerToken = totalInputTokens > 0
+            ? (totalCostCny / (totalInputTokens + records.reduce((s, r) => s + r.outputTokens, 0) || 1))
+            : 0;
+        const estimatedSavingsCny = Math.round(totalCachedTokens * avgInputCostPerToken * 0.9 * 1000000) / 1000000;
+
         return {
             totalTokens,
             totalCostCny,
@@ -202,6 +229,12 @@ export class UsageTracker {
             modelDistribution,
             toolFrequency,
             avgResponseMs,
+            cacheStats: {
+                totalCachedTokens,
+                totalInputTokens,
+                cacheHitRate,
+                estimatedSavingsCny,
+            },
         };
     }
 
@@ -289,7 +322,7 @@ export class UsageTracker {
         }
 
         // CSV format
-        const headers = ['timestamp', 'date', 'provider', 'model', 'inputTokens', 'outputTokens', 'totalTokens', 'costCny', 'durationMs', 'topicId', 'toolCalls'];
+        const headers = ['timestamp', 'date', 'provider', 'model', 'inputTokens', 'outputTokens', 'totalTokens', 'cachedTokens', 'costCny', 'durationMs', 'topicId', 'toolCalls'];
         const rows = records.map(r => [
             r.timestamp,
             (function(){ try { return new Date(r.timestamp).toISOString(); } catch { return 'unknown'; } })(),
@@ -298,6 +331,7 @@ export class UsageTracker {
             r.inputTokens,
             r.outputTokens,
             r.totalTokens,
+            r.cachedTokens ?? 0,
             r.costCny.toFixed(6),
             r.durationMs ?? '',
             r.topicId ?? '',

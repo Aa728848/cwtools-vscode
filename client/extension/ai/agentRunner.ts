@@ -30,9 +30,10 @@ import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder } from './promptBuilder';
 import { getProvider, isModelVisionCapable } from './providers';
-import { getModelPricing } from './pricing';
+import { getModelPricing, getCacheDiscountFactor } from './pricing';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
+import { repairToolArgs } from './tools/argRepair';
 import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace, TOOL_RESULT_BUDGET_BASE } from './contextBudget';
 import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
@@ -814,9 +815,14 @@ export class AgentRunner {
                 : effectiveUserMessage;
 
         const providerForPrompt = options?.providerId ?? this.aiService.getConfig().provider;
+        const isDeepSeekProvider = providerForPrompt.startsWith('deepseek');
+        // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
+        // to ensure byte-level stability across API calls for cache hits.
         let systemPrompt = options?.useSlimPrompt
             ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt)
-            : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt);
+            : isDeepSeekProvider
+                ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt)
+                : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt);
 
         // Inject workflow prompt supplement if running within a workflow
         const activeWorkflowForPrompt = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
@@ -1016,7 +1022,8 @@ export class AgentRunner {
         runMetrics?: AgentRunMetrics
     ): Promise<string> {
         let iteration = 0;
-        
+        const isDeepSeekProvider = (options?.providerId ?? '').startsWith('deepseek');
+
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
             agentRunner: this,
@@ -1145,7 +1152,7 @@ export class AgentRunner {
                         content: AGENT.COMPACTION_MID_LOOP(loopTokens, midLoopThreshold),
                         timestamp: Date.now(),
                     });
-                    this.compactMessagesInPlace(messages, toolResultBudget);
+                    this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: isDeepSeekProvider });
                 }
             }
 
@@ -1278,13 +1285,19 @@ export class AgentRunner {
                 const totalTokens = response.usage?.total_tokens ?? (promptTokens + completionTokens);
 
                 const pricing = getModelPricing(response.model ?? options?.model ?? '');
-                const inputCost = (promptTokens / 1_000_000) * pricing[0];
+                // Cache-aware cost calculation: cached tokens billed at 0.1× input rate
+                const cachedTokens = response.usage?.cached_tokens ?? 0;
+                const uncachedInputTokens = promptTokens - cachedTokens;
+                const cacheDiscount = getCacheDiscountFactor(response.model ?? options?.model ?? '');
+                const cachedCost = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount;
+                const uncachedCost = (uncachedInputTokens / 1_000_000) * pricing[0];
                 const outputCost = (completionTokens / 1_000_000) * pricing[1];
-                
+
                 tokenAccumulator.input += promptTokens;
                 tokenAccumulator.output += completionTokens;
                 tokenAccumulator.total += totalTokens;
-                tokenAccumulator.estimatedCostCny += inputCost + outputCost;
+                tokenAccumulator.estimatedCostCny += cachedCost + uncachedCost + outputCost;
+                tokenAccumulator.cachedTokens = (tokenAccumulator.cachedTokens ?? 0) + cachedTokens;
                 tokenAccumulator.contextWindowTokens = promptTokens;
             }
 
@@ -1455,8 +1468,8 @@ export class AgentRunner {
                 }
                 let toolArgs: Record<string, unknown>;
                 let toolArgsParseError: string | undefined;
-                try { 
-                    toolArgs = JSON.parse(toolCall.function.arguments); 
+                try {
+                    toolArgs = JSON.parse(toolCall.function.arguments);
                 } catch (e) {
                     // Attempt common JSON repairs before giving up (Issue #2 fix)
                     const repaired = this.tryRepairJson(toolCall.function.arguments);
@@ -1467,6 +1480,20 @@ export class AgentRunner {
                         toolArgsParseError = `JSON parse error: ${e instanceof Error ? e.message : String(e)}. Raw arguments: ${toolCall.function.arguments?.substring(0, 200)}`;
                     }
                 }
+
+                // P1-B: Semantic argument repair (fuzzy name match + type coercion)
+                if (!toolArgsParseError) {
+                    const argRepair = repairToolArgs(toolName, toolArgs);
+                    if (argRepair.repaired) {
+                        toolArgs = argRepair.args;
+                        emitStep({
+                            type: 'thinking',
+                            content: `[Tool Arg Repair] ${argRepair.repairs.join('; ')}`,
+                            timestamp: Date.now(),
+                        });
+                    }
+                }
+
                 emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now(), stepIndex: ++globalToolCallIndex, iterationInfo: `Iteration ${iteration}/${maxToolIterations}` });
                 parsedCalls.push({ toolName, toolArgs, toolArgsParseError, toolCall });
             }
@@ -1660,7 +1687,7 @@ export class AgentRunner {
                     content: AGENT.COMPACTION_EMERGENCY(emergencyTokens, contextLimit),
                     timestamp: Date.now(),
                 });
-                this.compactMessagesInPlace(messages, toolResultBudget);
+                this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: isDeepSeekProvider });
             }
 
             // If forceStop was set in the inner loop, exit the outer while now
@@ -1793,8 +1820,8 @@ export class AgentRunner {
         return _budgetToolResult(result, maxChars);
     }
 
-    private compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number): void {
-        _compactMessagesInPlace(messages, toolResultBudget);
+    private compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number, options?: { preserveTailBytes?: boolean }): void {
+        _compactMessagesInPlace(messages, toolResultBudget, options);
     }
     /** 
 * Verification loop: Check the LSP diagnosis of the target file after inference, and if there are errors, hand them over to AI for repair. 

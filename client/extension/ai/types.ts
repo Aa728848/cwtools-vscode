@@ -184,6 +184,8 @@ export interface ChatCompletionResponse {
         prompt_tokens: number;
         completion_tokens: number;
         total_tokens: number;
+        /** Provider prefix-cache hit tokens (DeepSeek, Claude, etc.) */
+        cached_tokens?: number;
     };
 }
 
@@ -946,6 +948,8 @@ export interface TokenUsage {
     estimatedCostCny: number;
     /** Final prompt tokens for the conversation window, used to drive the UI fullness progress bar */
     contextWindowTokens?: number;
+    /** Input tokens that hit provider prefix cache (DeepSeek, Claude, etc.) */
+    cachedTokens?: number;
 }
 
 export interface AgentRunMetrics {

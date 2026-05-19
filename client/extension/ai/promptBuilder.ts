@@ -1028,6 +1028,11 @@ When multiple independent pieces of information are needed, batch your tool call
 export class PromptBuilder {
     private memoryParser: MemoryParser;
 
+    /** Frozen system prompt cache for prefix-cache optimization (DeepSeek etc.).
+     *  Key: `${mode}|${providerId}` — value is the cached prompt string.
+     *  Once built, the same string is returned on subsequent calls within the session. */
+    private _frozenPromptCache = new Map<string, string>();
+
     constructor(
         private workspaceRoot: string,
         private globalStoragePath?: string,
@@ -1096,6 +1101,26 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;
 
         return finalPrompt;
+    }
+
+    /**
+     * Build a frozen (session-cached) system prompt for DeepSeek prefix-cache optimization.
+     * The first call builds and caches the prompt; subsequent calls return the cached string
+     * verbatim, ensuring byte-level stability across API calls for prefix cache hits.
+     */
+    buildFrozenSystemPrompt(mode: AgentMode = 'build', providerId?: string, languageId?: string): string {
+        const cacheKey = `${mode}|${providerId ?? ''}|${languageId ?? ''}`;
+        const cached = this._frozenPromptCache.get(cacheKey);
+        if (cached !== undefined) return cached;
+
+        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId);
+        this._frozenPromptCache.set(cacheKey, prompt);
+        return prompt;
+    }
+
+    /** Clear the frozen prompt cache (e.g., when starting a new session). */
+    clearFrozenPromptCache(): void {
+        this._frozenPromptCache.clear();
     }
 
     /**

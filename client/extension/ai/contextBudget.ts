@@ -240,11 +240,11 @@ function buildArrayResult(
  * 3. For very old tool results (beyond the last 12 messages),
  *    aggressively compress to just file/success/error metadata.
  */
-export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number): void {
+export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number, options?: { preserveTailBytes?: boolean }): void {
     if (messages.length <= 8) return;
 
     const keepHead = 1;
-    const keepTail = 6;
+    const keepTail = options?.preserveTailBytes ? 8 : 6;
     const aggressiveThreshold = messages.length - 12;
 
     for (let i = keepHead; i < messages.length - keepTail; i++) {
@@ -300,6 +300,9 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
         // Strip reasoning_content from ALL compacted messages (not just aggressive zone).
         // Messages in the middle zone may have truncated content but preserved reasoning,
         // creating a mismatch. Consistent removal prevents stale reasoning from bloating context.
+        //
+        // DeepSeek cache-optimization: the keep-tail zone (i >= messages.length - keepTail)
+        // is already excluded by the loop upper bound, so its reasoning_content is never touched.
         if (m.role === 'assistant' && m.reasoning_content !== undefined) {
             const stripped: ChatMessage = { ...m };
             delete stripped.reasoning_content;

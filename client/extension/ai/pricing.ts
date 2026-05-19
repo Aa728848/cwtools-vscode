@@ -32,3 +32,10 @@ export function getModelPricing(model: string): [number, number] {
     }
     return [0, 0];
 }
+
+/** Get cache-hit discount factor for a model. DeepSeek and Claude cache reads are 0.1× input price. */
+export function getCacheDiscountFactor(model: string): number {
+    if (model.startsWith('deepseek')) return 0.1;
+    if (model.startsWith('claude')) return 0.1;
+    return 1.0;
+}

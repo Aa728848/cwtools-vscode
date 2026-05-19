@@ -217,6 +217,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     chatContentObserver.observe(chatArea, { childList: true });
     setChatEmptyState();
 
+    let lastComposerStackHeight = 0;
+    let composerStackScrollSyncPending = false;
+
+    function scheduleComposerScrollSync() {
+        if (composerStackScrollSyncPending) return;
+        composerStackScrollSyncPending = true;
+        requestAnimationFrame(() => {
+            composerStackScrollSyncPending = false;
+            if (!document.body.classList.contains('chat-empty')) {
+                scrollBottom();
+            }
+        });
+    }
+
     function updateComposerStackHeight() {
         if (!inputWrapper) return;
         const rect = inputWrapper.getBoundingClientRect();
@@ -226,6 +240,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         document.documentElement.style.setProperty('--composer-stack-height', `${height}px`);
         document.documentElement.style.setProperty('--composer-popup-top', `${Math.ceil(rect.bottom + popupGap)}px`);
         document.documentElement.style.setProperty('--composer-popup-bottom', `${Math.max(12, Math.ceil(viewportHeight - rect.top + popupGap))}px`);
+        if (Math.abs(height - lastComposerStackHeight) > 1) {
+            lastComposerStackHeight = height;
+            scheduleComposerScrollSync();
+        }
     }
 
     const composerResizeObserver = new ResizeObserver(updateComposerStackHeight);
@@ -2168,7 +2186,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function scrollBottom(force = false) {
         if (force || !isUserScrolledUp) {
-            chatArea.scrollTop = chatArea.scrollHeight;
+            const applyScroll = () => {
+                chatArea.scrollTop = chatArea.scrollHeight;
+            };
+            applyScroll();
+            requestAnimationFrame(applyScroll);
             isUserScrolledUp = false;
             jumpLatestBtn.classList.remove('show');
         }

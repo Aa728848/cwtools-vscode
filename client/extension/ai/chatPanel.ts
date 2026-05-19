@@ -248,6 +248,25 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         void this.settingsManager.buildAndSendSettingsData(false, targetSurface);
     }
 
+    private _syncViewChromeState(targetSurface?: 'chat' | 'manager'): void {
+        const send = (msg: HostMessage) => {
+            if (targetSurface) {
+                this.postMessageToSurface(targetSurface, msg);
+            } else {
+                this.postMessage(msg);
+            }
+        };
+        send({ type: 'setMode', mode: this.currentMode });
+        if (this.artifactStore.size > 0) {
+            send({ type: 'artifactList', artifacts: this.artifactStore.list() });
+        }
+        this.sendWorkflowState(send);
+        void this.settingsManager.buildAndSendSettingsData(false, targetSurface);
+        if (targetSurface === 'manager') {
+            this.sendManagerSnapshot();
+        }
+    }
+
     // ─── Message Handling ────────────────────────────────────────────────────
 
     private async handleWebViewMessage(msg: WebViewMessage, sourceSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
@@ -2244,7 +2263,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async openAgentManager(): Promise<void> {
         if (this.managerPanel) {
             this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);
-            this._restoreViewState('manager', true);
+            this._syncViewChromeState('manager');
             this.openManagerPanelInNewWindow();
             return;
         }
@@ -2272,10 +2291,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }, this, this._managerDisposables);
 
         panel.onDidChangeViewState((e) => {
-            if (e.webviewPanel.visible) this._restoreViewState('manager', true);
+            if (e.webviewPanel.visible) this._syncViewChromeState('manager');
         }, this, this._managerDisposables);
 
-        this._restoreViewState('manager', true);
+        this._syncViewChromeState('manager');
         this.openManagerPanelInNewWindow();
     }
 

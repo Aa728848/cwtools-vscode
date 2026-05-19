@@ -100,7 +100,7 @@ describe('agent manager cross-surface contracts', () => {
         expect(html).to.include('id="btnAgentManager"');
         expect(hostTypes).to.include("{ type: 'openAgentManager' }");
         expect(hostPanel).to.include("case 'openAgentManager'");
-        expect(hostPanel).to.include("this._restoreViewState('manager', true)");
+        expect(hostPanel).to.include("this._syncViewChromeState('manager')");
         expect(hostPanel).to.include('openManagerPanelInNewWindow');
         expect(hostPanel).to.include("workbench.action.moveEditorToNewWindow");
         expect(hostPanel).to.include('if (replayLiveSteps && this._isGenerating');
@@ -139,6 +139,16 @@ describe('agent manager cross-surface contracts', () => {
         expect(hostPanel).to.include('this._restoreViewState(sourceSurface, true)');
         expect(hostPanel).to.include('this.sendWorkflowState(send)');
         expect(hostPanel).to.include('this.broadcaster.register(webview, surface)');
+    });
+
+    it('manager focus restore is non-destructive for chat DOM state', () => {
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+
+        expect(hostPanel).to.include('private _syncViewChromeState');
+        expect(hostPanel).to.include("if (e.webviewPanel.visible) this._syncViewChromeState('manager');");
+        expect(hostPanel).to.include("this._restoreViewState(sourceSurface, true)");
+        expect(hostPanel).to.not.include("if (e.webviewPanel.visible) this._restoreViewState('manager', true);");
+        expect(hostPanel).to.not.include("this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);\n            this._restoreViewState('manager', true);");
     });
 
     it('manager side workspace shifts conversation and composer away from the workspace', () => {

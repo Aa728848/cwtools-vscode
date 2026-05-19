@@ -75,6 +75,20 @@ describe('webview smoke checks', () => {
         expect(script).to.include('enhanceTaskLists');
     });
 
+    it('chat sidebar reserves composer height for bottom confirmation cards', () => {
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(css).to.include('--chat-scroll-bottom-pad: calc(var(--composer-stack-height)');
+        expect(css).to.include('padding: 12px 12px var(--chat-scroll-bottom-pad)');
+        expect(css).to.include('scroll-padding-bottom: var(--chat-scroll-bottom-pad)');
+        expect(css).to.include('bottom: calc(var(--composer-popup-bottom) + 2px)');
+        expect(css).to.include('@media (max-height: 620px)');
+        expect(css).to.include('.floating-card-area { max-height: calc(100vh - var(--composer-popup-bottom) - 48px); overflow-y: auto; }');
+        expect(script).to.include('function scheduleComposerScrollSync()');
+        expect(script).to.include('requestAnimationFrame(applyScroll)');
+    });
+
     it('release bundle exists and is non-empty after compile', () => {
         const bundlePath = path.join(root, 'release/bin/client/webview/chatPanel.js');
         const stat = fs.statSync(bundlePath);

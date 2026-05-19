@@ -19,6 +19,8 @@
     --side-workspace-wide-width: min(clamp(760px, 58vw, 1120px), calc(100vw - 28px));
     --active-side-workspace-width: var(--side-workspace-width);
     --composer-stack-height: 96px;
+    --composer-bottom-safe-area: max(0px, env(safe-area-inset-bottom));
+    --chat-scroll-bottom-pad: calc(var(--composer-stack-height) + var(--composer-bottom-safe-area) + 28px);
     --composer-popup-top: 50%;
     --composer-popup-bottom: calc(var(--composer-stack-height) + 12px);
 }
@@ -217,11 +219,11 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
     body.side-workspace-open.artifact-drawer-open .slash-popup { right: 0; }
 }
 
-.chat-area { flex: 1; overflow-y: auto; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 14px; min-height: 0; transition: opacity 0.22s ease; }
+.chat-area { flex: 1; overflow-y: auto; padding: 12px 12px var(--chat-scroll-bottom-pad); scroll-padding-bottom: var(--chat-scroll-bottom-pad); display: flex; flex-direction: column; gap: 14px; min-height: 0; transition: opacity 0.22s ease; }
 .chat-area.is-empty { pointer-events: none; }
 .chat-area > *:not(.empty-state) { width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin-left: auto; margin-right: auto; align-self: center; }
-.chat-area > *:not(.empty-state):last-child { margin-bottom: 80px !important; }
-.jump-latest-btn { position: fixed; right: 14px; bottom: 92px; z-index: 80; display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(100,166,255,0.32); background: color-mix(in srgb, var(--bg) 82%, #406aa8); color: var(--fg); border-radius: 999px; padding: 6px 10px; font-size: 11px; font-family: inherit; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.24); opacity: 0; pointer-events: none; transform: translateY(6px); transition: opacity 0.15s, transform 0.15s, background 0.15s; }
+.chat-area > *:not(.empty-state):last-child { margin-bottom: 0 !important; }
+.jump-latest-btn { position: fixed; right: 14px; bottom: calc(var(--composer-popup-bottom) + 2px); z-index: 80; display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(100,166,255,0.32); background: color-mix(in srgb, var(--bg) 82%, #406aa8); color: var(--fg); border-radius: 999px; padding: 6px 10px; font-size: 11px; font-family: inherit; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.24); opacity: 0; pointer-events: none; transform: translateY(6px); transition: opacity 0.15s, transform 0.15s, background 0.15s; }
 .jump-latest-btn.show { opacity: 0.96; pointer-events: auto; transform: translateY(0); }
 .jump-latest-btn:hover { background: color-mix(in srgb, var(--bg) 72%, #4d7fc8); }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -385,7 +387,7 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .ap-dropdown { position: absolute; top: calc(100% + 2px); left: 0; max-height: 200px; overflow-y: auto; background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); width: calc(100% - 2px); z-index: 1000; box-shadow: 0 4px 8px rgba(0,0,0,0.3); border-radius: 4px; display: none; }
 .ap-dropdown-item { padding: 5px 8px; cursor: pointer; color: var(--vscode-foreground); font-size: 12px; }
 .ap-dropdown-item:hover { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-.input-wrapper { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 10px 12px 12px; flex-shrink: 0; transform: translateY(0); transition: bottom 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), padding 0.34s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.input-wrapper { position: fixed; left: 0; right: 0; bottom: var(--composer-bottom-safe-area); z-index: 40; padding: 10px 12px calc(12px + var(--composer-bottom-safe-area)); flex-shrink: 0; transform: translateY(0); transition: bottom 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1), padding 0.34s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .input-container { width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin: 0 auto; background: var(--input-bg); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; overflow: visible; transition: all 0.15s; display: flex; flex-direction: column; max-height: 50vh; }
 body.chat-empty .input-wrapper { bottom: calc(50% - 20px); transform: translateY(50%); padding-left: 30px; padding-right: 30px; }
 body.chat-empty .input-wrapper::before { content: 'cwtools-vscode'; display: block; width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin: 0 auto 8px; color: var(--fg); font-size: 18px; font-weight: 700; letter-spacing: 0; }
@@ -884,6 +886,23 @@ body.chat-empty .slash-popup { top: var(--composer-popup-top); bottom: auto; max
 }
 
 /* ── Diff Summary Card ── */
+@media (max-height: 620px) {
+    :root { --chat-scroll-bottom-pad: calc(var(--composer-stack-height) + var(--composer-bottom-safe-area) + 20px); }
+    .chat-area { padding-top: 8px; gap: 10px; }
+    .input-wrapper { padding: 8px 10px calc(8px + var(--composer-bottom-safe-area)); }
+    .input-container { max-height: min(46vh, 220px); border-radius: 16px; }
+    .input-row { padding: 10px 12px 4px; }
+    .input-controls { padding: 5px 8px 8px; }
+    .composer-input { max-height: 96px; font-size: 14px; }
+    #imagePreviewArea { max-height: 58px; padding: 8px 12px 6px; }
+    .floating-card-area { max-height: calc(100vh - var(--composer-popup-bottom) - 48px); overflow-y: auto; }
+}
+
+@media (max-height: 520px) {
+    .input-container { max-height: min(42vh, 176px); }
+    .composer-input { max-height: 72px; }
+}
+
 .diff-summary-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 6px 0; font-size: 12px; }
 .ds-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border); }
 .ds-collapse-btn { flex-shrink: 0; width: 20px; height: 20px; border: 0; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; background: transparent; color: var(--fg); opacity: 0.62; cursor: pointer; font-size: 12px; line-height: 1; }

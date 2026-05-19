@@ -471,6 +471,40 @@ export class ExternalToolHandler {
 
     // ─── todoWrite ───────────────────────────────────────────────────────────
 
+    // Conservative auto-approval classifier for shell commands that only read or format output.
+    private isReadOnlyRunCommand(command: string): boolean {
+        const trimmed = command.trim();
+        if (!trimmed) return false;
+
+        const unsafePatterns = [
+            /&&/,
+            /;\s*\S/,
+            /\d*>{1,2}\s*\S/,
+            /</,
+            /(^|[^&])&(?!&)/,
+            /\b(?:rm|del|erase|rmdir|remove-item|ri|rd|format|shutdown|reboot)\b/i,
+            /\b(?:set-content|add-content|out-file|tee-object|export-\w+|new-item|ni|copy-item|cp|move-item|mv|rename-item|ren|set-item|set-location|cd|push-location|pop-location)\b/i,
+            /\b(?:start-process|invoke-expression|iex|invoke-webrequest|iwr|invoke-restmethod|curl|wget)\b/i,
+            /\b(?:node|python|py|powershell|pwsh)\s+-(?:e|c|command|encodedcommand)\b/i,
+        ];
+        if (unsafePatterns.some(pattern => pattern.test(trimmed))) return false;
+
+        const readOnlySegmentPatterns = [
+            /^git\s+(?:log|status|diff|show|rev-parse|branch|tag|remote)(?:\s|$)/i,
+            /^git\s+stash\s+list(?:\s|$)/i,
+            /^(?:dotnet\s+(?:--version|--info)|node\s+--version|npm\s+(?:list|ls|--version)|npx\s+--version|mmx\s+--version)$/i,
+            /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where|findstr)(?:\s|$)/i,
+            /^(?:get-childitem|gci|get-content|gc|select-string|sls|get-item|gi|test-path|resolve-path|get-location|pwd|get-command|get-help|get-module)(?:\s|$)/i,
+            /^(?:where-object|\?|select-object|sort-object|measure-object|format-table|format-list|format-wide|out-string)(?:\s|$)/i,
+        ];
+
+        return trimmed
+            .split('|')
+            .map(segment => segment.trim())
+            .filter(Boolean)
+            .every(segment => readOnlySegmentPatterns.some(pattern => pattern.test(segment)));
+    }
+
     async todoWrite(args: { todos: TodoItem[] }, context?: import('../types').AgentToolContext): Promise<TodoWriteResult> {
         console.time('todoWrite_exec');
         this.currentTodos = args.todos;
@@ -724,8 +758,12 @@ export class ExternalToolHandler {
         const startsWithCommandPrefix = (prefix: string) =>
             cmdLower === prefix || cmdLower.startsWith(`${prefix} `);
         const isSafePrefix = SAFE_COMMAND_PREFIXES.some(startsWithCommandPrefix);
+        const isReadOnlyCommand = this.isReadOnlyRunCommand(args.command);
         const AUTO_APPROVE_CONTROL_BLOCKED = [
-            ...PIPE_REDIRECT_BLOCKED,
+            /&&/,
+            /;\s*\S/,
+            /\d*>{1,2}\s*\S/,
+            /</,
             /(^|[^&])&(?!&)/, // single-ampersand shell chaining
         ];
         const hasShellControlOperator = AUTO_APPROVE_CONTROL_BLOCKED.some(pat => pat.test(args.command));
@@ -742,7 +780,8 @@ export class ExternalToolHandler {
             /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where)(?:\s|$)/i,
             /^mmx\s+--version$/i,
         ];
-        const isAutoApproveSafeCommand = SAFE_AUTO_APPROVE_PATTERNS.some(pat => pat.test(cmdLower));
+        const isSingleSafeCommand = !args.command.includes('|') && SAFE_AUTO_APPROVE_PATTERNS.some(pat => pat.test(cmdLower));
+        const isAutoApproveSafeCommand = isReadOnlyCommand || isSingleSafeCommand;
 
         const bypassSandbox = isSecuritySandboxDisabled();
         const fileWriteMode = vs.workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
@@ -753,7 +792,7 @@ export class ExternalToolHandler {
             for (const pat of ALWAYS_BLOCKED) {
                 if (pat.test(args.command)) { triggeredBlock = pat; break; }
             }
-            if (!triggeredBlock && !isSafePrefix) {
+            if (!triggeredBlock && !isSafePrefix && !isReadOnlyCommand) {
                 for (const pat of PIPE_REDIRECT_BLOCKED) {
                     if (pat.test(args.command)) { triggeredBlock = pat; break; }
                 }

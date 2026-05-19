@@ -762,6 +762,37 @@ describe('agent tool topic artifacts', () => {
         expect(result.stdout).to.include('normal powershell path ok');
     });
 
+    it('classifies PowerShell read-only commands as safe auto-run commands', () => {
+        const handler = new ExternalToolHandler({ workspaceRoot }) as any;
+
+        expect(handler.isReadOnlyRunCommand('Select-String -Path "common/buildings/*.txt" -Pattern "planet"')).to.equal(true);
+        expect(handler.isReadOnlyRunCommand('Get-ChildItem -Path "common" -Recurse -Filter *.txt | Select-String -Pattern "trigger"')).to.equal(true);
+        expect(handler.isReadOnlyRunCommand('Get-Content "common/test.txt" | Select-Object -First 20')).to.equal(true);
+        expect(handler.isReadOnlyRunCommand('Select-String -Path "common/*.txt" -Pattern "planet" | Set-Content out.txt')).to.equal(false);
+    });
+
+    it('does not request permission for read-only run_command invocations', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let permissionRequested = false;
+
+        const result = await handler.runCommand({
+            command: 'ls .',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => {
+                permissionRequested = true;
+                return false;
+            },
+        } as any);
+
+        expect(permissionRequested).to.equal(false);
+        expect(result.stderr).to.not.include('no permission handler configured');
+    });
+
     it('records project file changes made by a command for the diff panel', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const scriptDir = path.join(workspaceRoot, 'tools');

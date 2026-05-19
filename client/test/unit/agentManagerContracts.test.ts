@@ -98,10 +98,13 @@ describe('agent manager cross-surface contracts', () => {
         expect(html).to.include('id="btnAgentManager"');
         expect(hostTypes).to.include("{ type: 'openAgentManager' }");
         expect(hostPanel).to.include("case 'openAgentManager'");
-        expect(hostPanel).to.include("this._restoreViewState('manager')");
+        expect(hostPanel).to.include("this._restoreViewState('manager', false)");
+        expect(hostPanel).to.include('openManagerPanelInNewWindow');
+        expect(hostPanel).to.include("workbench.action.moveEditorToNewWindow");
+        expect(hostPanel).to.include('if (replayLiveSteps && this._isGenerating');
     });
 
-    it('restored interactive cards and replay banners stay idempotent', () => {
+    it('restored interactive cards and live replay stay idempotent', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
         const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
         const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
@@ -113,8 +116,10 @@ describe('agent manager cross-surface contracts', () => {
         expect(webview).to.include("pCard.uiState !== 'approved'");
         expect(webview).to.include("wtCard.uiState !== 'approved'");
         expect(webview).to.include("bpCard.uiState !== 'approved'");
-        expect(webview).to.include("document.querySelectorAll('.replay-steps-banner').forEach(el => el.remove());");
-        expect(webview).to.include("banner.className = 'special-step replay-steps-banner';");
+        expect(webview).to.include('function removeReplayBanners(): void');
+        expect(webview).to.include("window.addEventListener('focus', removeReplayBanners);");
+        expect(webview).to.include('currentAssistantDiv = initLiveAssistantDiv();');
+        expect(webview).to.include('for (const step of replayedSteps)');
     });
 
     it('sidebar restore messages do not broadcast replay state into the manager', () => {
@@ -125,7 +130,36 @@ describe('agent manager cross-surface contracts', () => {
         expect(broadcaster).to.include("targetSurface === surface");
         expect(hostPanel).to.include("this._restoreViewState('chat')");
         expect(hostPanel).to.include('this.postMessageToSurface(targetSurface, msg)');
+        expect(hostPanel).to.include("targetSurface })");
+        expect(hostPanel).to.include("this._restoreViewState(surface, surface === 'chat')");
         expect(hostPanel).to.include('this.sendWorkflowState(send)');
         expect(hostPanel).to.include('this.broadcaster.register(webview, surface)');
+    });
+
+    it('manager side workspace shifts conversation and composer away from the workspace', () => {
+        const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
+
+        expect(managerCss).to.include('body.agent-manager-shell.side-workspace-open');
+        expect(managerCss).to.include('--manager-active-right-width: var(--active-side-workspace-width);');
+        expect(managerCss).to.include('body.agent-manager-shell.side-workspace-open .chat-area');
+        expect(managerCss).to.include('body.agent-manager-shell.side-workspace-open .input-wrapper');
+        expect(managerCss).to.include('margin-right: var(--active-side-workspace-width) !important;');
+    });
+
+    it('cross-surface floating cards resolve on both surfaces', () => {
+        const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(hostTypes).to.include("type: 'floatingCardResolved'");
+        expect(hostPanel).to.include("card: 'permission'");
+        expect(hostPanel).to.include("card: 'write'");
+        expect(hostPanel).to.include("card: 'transaction'");
+        expect(hostPanel).to.include("card: 'walkthrough'");
+        expect(webview).to.include("case 'floatingCardResolved'");
+        expect(webview).to.include('function resolveFloatingCard');
+        expect(webview).to.include("approveMessageType: 'approveWalkthrough'");
+        expect(webview).to.include('scheduleResponsiveWorkspaceLayoutSync()');
+        expect(webview).to.include('if (!isCurrentSurface(msg.targetSurface)) break;');
     });
 });

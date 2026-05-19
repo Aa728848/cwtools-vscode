@@ -33,7 +33,7 @@ Last updated: 2026-05-19
   - floating cards and slash popup now follow the active inspector width instead of a fixed right offset
   - composer menus anchor to the real trigger positions and reflow on resize
   - approved plan / walkthrough / blueprint cards stay dismissed after history restore
-  - replaying hidden-session steps reuses one background-running banner instead of stacking duplicates
+  - replaying hidden-session steps rebuilds the live process view without showing a background-running banner
   - manager settings keep a readable bounded width
   - task rows use compact status symbols (`✓`, `…`, `○`) rather than raw status labels
 - [x] Polish manager entry and rail behavior:
@@ -41,6 +41,7 @@ Last updated: 2026-05-19
   - hide manager-only overview counters from the detached left rail
   - let the manager topics rail collapse and expand from the header topics button
   - target restore/replay messages to the surface that became visible so closing the sidebar does not add a manager background banner
+  - shift the manager conversation and composer left when the side workspace is open
 - [x] Extend smoke/unit tests for new wiring and core abstractions.
 
 ## Remaining To Reach Plan Completion

@@ -183,10 +183,12 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 renderOverview();
                 break;
             case 'loadTopicMessages':
+                if (msg.targetSurface && msg.targetSurface !== 'manager') break;
                 state.messageCount = (msg.messages || []).filter((message: { isHidden?: boolean }) => !message.isHidden).length;
                 renderOverview();
                 break;
             case 'clearChat':
+                if (msg.targetSurface && msg.targetSurface !== 'manager') break;
                 state.messageCount = 0;
                 renderOverview();
                 break;

@@ -221,7 +221,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Restore the full panel state after the WebView is (re)created or becomes
      * visible again. Called on initial load and on every onDidChangeVisibility(true).
      */
-    private _restoreViewState(targetSurface?: 'chat' | 'manager'): void {
+    private _restoreViewState(targetSurface?: 'chat' | 'manager', replayLiveSteps = true): void {
         const send = (msg: HostMessage) => {
             if (targetSurface) {
                 this.postMessageToSurface(targetSurface, msg);
@@ -231,13 +231,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         };
         // 1. Restore persisted topic messages
         if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
-            send({ type: 'loadTopicMessages', messages: this.topicManager.currentTopic.messages });
+            send({ type: 'loadTopicMessages', messages: this.topicManager.currentTopic.messages, targetSurface });
         }
         // 2. Restore current mode
         send({ type: 'setMode', mode: this.currentMode });
         // 3. If a generation was running when the panel was hidden, replay steps
         //    so the user can see what the AI has done so far and cancel if needed
-        if (this._isGenerating && this._liveSteps.length > 0) {
+        if (replayLiveSteps && this._isGenerating && this._liveSteps.length > 0) {
             send({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
         }
         if (this.artifactStore.size > 0) {
@@ -352,15 +352,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.retractMessage(msg.messageIndex);
                 break;
             case 'confirmWriteFile':
+                this.postMessage({ type: 'floatingCardResolved', card: 'write', id: msg.messageId });
                 void this.resolveWriteConfirmation(msg.messageId, true);
                 break;
             case 'cancelWriteFile':
+                this.postMessage({ type: 'floatingCardResolved', card: 'write', id: msg.messageId });
                 void this.resolveWriteConfirmation(msg.messageId, false);
                 break;
             case 'approveTransaction':
+                this.postMessage({ type: 'floatingCardResolved', card: 'transaction', id: msg.txId });
                 void this.agentRunner.commitTransaction(msg.txId);
                 break;
             case 'rejectTransaction':
+                this.postMessage({ type: 'floatingCardResolved', card: 'transaction', id: msg.txId });
                 this.agentRunner.discardTransaction(msg.txId);
                 break;
             case 'quickChangeModel':
@@ -370,6 +374,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.handleSlashCommand(msg.command);
                 break;
             case 'permissionResponse':
+                this.postMessage({ type: 'floatingCardResolved', card: 'permission', id: msg.permissionId });
                 this.resolvePermissionRequest(msg.permissionId, msg.allowed, msg.alwaysAllow);
                 break;
             case 'openPlanFile': {
@@ -387,6 +392,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             case 'submitPlanAnnotations': {
                 this.markLatestInteractiveCardApproved(['plan_card', 'blueprint_card']);
+                this.postMessage({ type: 'floatingCardResolved', card: 'plan' });
+                this.postMessage({ type: 'floatingCardResolved', card: 'blueprint' });
                 let contextStr = '';
                 if (msg.annotations && msg.annotations.length > 0) {
                     contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
@@ -405,6 +412,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             }
             case 'revisePlanWithAnnotations': {
+                this.postMessage({ type: 'floatingCardResolved', card: 'plan' });
+                this.postMessage({ type: 'floatingCardResolved', card: 'blueprint' });
                 let reviseContext = '';
                 if (msg.annotations && msg.annotations.length > 0) {
                     reviseContext = '\n\n需要修改的地方批注如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
@@ -415,6 +424,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 break;
             }
             case 'reviseWalkthroughWithAnnotations': {
+                this.postMessage({ type: 'floatingCardResolved', card: 'walkthrough' });
                 let reviseWtContext = '';
                 if (msg.annotations && msg.annotations.length > 0) {
                     reviseWtContext = '\n\n针对报告中需要修改的地方，我的批注（要求）如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `### 针对片段：\n${a.section}\n**要求**：${a.note}`).join('\n\n');
@@ -425,6 +435,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
             case 'approveWalkthrough':
                 this.markLatestInteractiveCardApproved(['walkthrough_card']);
+                this.postMessage({ type: 'floatingCardResolved', card: 'walkthrough' });
                 if (this.previousMode && this.previousMode !== this.currentMode) {
                     this.switchMode(this.previousMode);
                 }
@@ -2232,7 +2243,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async openAgentManager(): Promise<void> {
         if (this.managerPanel) {
             this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);
-            this._restoreViewState('manager');
+            this._restoreViewState('manager', false);
+            this.openManagerPanelInNewWindow();
             return;
         }
 
@@ -2259,10 +2271,20 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }, this, this._managerDisposables);
 
         panel.onDidChangeViewState((e) => {
-            if (e.webviewPanel.visible) this._restoreViewState('manager');
+            if (e.webviewPanel.visible) this._restoreViewState('manager', false);
         }, this, this._managerDisposables);
 
-        this._restoreViewState('manager');
+        this._restoreViewState('manager', false);
+        this.openManagerPanelInNewWindow();
+    }
+
+    private openManagerPanelInNewWindow(): void {
+        setTimeout(() => {
+            void vs.commands.executeCommand('workbench.action.moveEditorToNewWindow').then(
+                undefined,
+                () => { /* VS Code versions without floating editor support keep the panel in-place. */ },
+            );
+        }, 120);
     }
 
     /** 
@@ -2316,8 +2338,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         bucket.push(this.broadcaster.register(webview, surface));
 
         this.topicManager.sendTopicList();
-        this.settingsManager.buildAndSendSettingsData().catch(() => { /* ignore on startup */ });
-        this._restoreViewState(surface);
+        this.settingsManager.buildAndSendSettingsData(false, surface).catch(() => { /* ignore on startup */ });
+        this._restoreViewState(surface, surface === 'chat');
     }
 
     private hasVisibleChatSurface(): boolean {

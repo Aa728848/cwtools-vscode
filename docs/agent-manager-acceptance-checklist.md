@@ -12,6 +12,7 @@
 - [ ] Settings stay centered and bounded instead of stretching edge to edge on wide screens.
 - [ ] Manager left rail does not show the overview counter block.
 - [ ] Manager header topics button collapses and expands the left topics rail.
+- [ ] Opening the manager Workspace shifts the conversation and composer left so they do not sit under the workspace.
 
 ## Core Workflow
 
@@ -49,7 +50,7 @@
 
 - [ ] Close and reopen manager panel: snapshot reload restores topic/message/artifact state.
 - [ ] Hide and re-show manager panel: snapshot refresh works and no duplicate UI blocks appear.
-- [ ] Reopening the panel during generation keeps only one background-running banner in the conversation.
+- [ ] Reopening the panel during generation shows the live process view without adding a background-running banner.
 - [ ] With sidebar and manager both open, close/hide only the sidebar; manager should not receive a new background-running banner.
 - [ ] During generation, status transitions to running; after completion/error returns to idle.
 

@@ -1300,9 +1300,9 @@ export type HostMessage =
     | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }
     | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; pinned?: boolean; workspaceId?: string; workspaceLabel?: string; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
-    | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[] }
+    | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[]; targetSurface?: 'chat' | 'manager' }
     | { type: 'streamToken'; token: string }
-    | { type: 'clearChat' }
+    | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
     | { type: 'modeChanged'; mode: AgentMode; label?: string }
     | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
@@ -1317,6 +1317,7 @@ export type HostMessage =
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
     | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string; allowAlways?: boolean }
+    | { type: 'floatingCardResolved'; card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     /** Restore mode state after webview rebuild (panel visibility change) */
     | { type: 'setMode'; mode: AgentMode }
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */

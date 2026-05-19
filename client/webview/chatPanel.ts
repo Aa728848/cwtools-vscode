@@ -233,6 +233,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     window.addEventListener('resize', updateComposerStackHeight);
     window.addEventListener('resize', positionComposerMenus);
     window.addEventListener('resize', updateManagerTopicsToggleState);
+    window.addEventListener('focus', removeReplayBanners);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) removeReplayBanners();
+    });
     updateComposerStackHeight();
 
     function shouldUseSideWorkspace(): boolean {
@@ -246,6 +250,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function isCurrentSurface(targetSurface?: 'chat' | 'manager'): boolean {
         if (!targetSurface) return true;
         return targetSurface === (isManagerShell() ? 'manager' : 'chat');
+    }
+
+    function removeReplayBanners(): void {
+        document.querySelectorAll('.replay-steps-banner').forEach(el => el.remove());
     }
 
     function isManagerTopicsRailMode(): boolean {
@@ -417,6 +425,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
         setChatEmptyState();
         updateWorkspaceToggleState();
+    }
+
+    function scheduleResponsiveWorkspaceLayoutSync(): void {
+        requestAnimationFrame(() => {
+            syncResponsiveWorkspaceLayout();
+            updateComposerStackHeight();
+            positionComposerMenus();
+        });
     }
 
     function syncResponsiveWorkspaceLayout(): void {
@@ -3450,6 +3466,94 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         scrollBottom();
     }
 
+    function removeQueuedFloatingCards(predicate: (card: HTMLElement) => boolean): void {
+        const nextQueue: HTMLElement[] = [];
+        for (const card of floatingCardQueue) {
+            if (predicate(card)) {
+                card.remove();
+            } else {
+                nextQueue.push(card);
+            }
+        }
+        floatingCardQueue = nextQueue;
+    }
+
+    function dismissResolvedCard(card: HTMLElement): void {
+        if (card.dataset.resolved === 'true') return;
+        card.dataset.resolved = 'true';
+        const floatingCardArea = document.getElementById('floatingCardArea');
+        const wasVisibleFloatingCard = (!!floatingCardArea && card.parentElement === floatingCardArea)
+            || (!floatingCardArea && card.parentElement === chatArea && isShowingFloatingCard);
+        dismissCard(card, 0, () => {
+            if (wasVisibleFloatingCard) {
+                isShowingFloatingCard = false;
+                processFloatingCardQueue();
+            }
+        });
+    }
+
+    function cardShell(element: HTMLElement): HTMLElement {
+        const parent = element.parentElement as HTMLElement | null;
+        if (parent && parent.parentElement === chatArea && parent.childElementCount === 1) return parent;
+        return element;
+    }
+
+    function disableInlinePermissionActions(permissionId?: string): void {
+        document.querySelectorAll('.tp-perm-btn[data-perm]').forEach(btn => {
+            const el = btn as HTMLButtonElement;
+            if (permissionId && el.dataset.perm !== permissionId) return;
+            el.disabled = true;
+            el.style.opacity = '0.4';
+        });
+    }
+
+    function resolveFloatingCard(card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint', id?: string): void {
+        if (card === 'permission') {
+            if (id) floatingPermissionIds.delete(id);
+            else floatingPermissionIds.clear();
+            removeQueuedFloatingCards(el => el.classList.contains('permission-card') && (!id || el.dataset.permId === id));
+            document.querySelectorAll('.permission-card[data-perm-id]').forEach(el => {
+                const cardEl = el as HTMLElement;
+                if (!id || cardEl.dataset.permId === id) dismissResolvedCard(cardEl);
+            });
+            disableInlinePermissionActions(id);
+            return;
+        }
+
+        if (card === 'write') {
+            if (id) {
+                removePendingSideDiffEntry(id);
+                refreshSideDiffWorkspaceAfterRemoval();
+            }
+            document.querySelectorAll('.diff-card').forEach(el => {
+                const cardEl = el as HTMLElement;
+                const button = cardEl.querySelector('[data-msgid]') as HTMLElement | null;
+                if (!button) return;
+                if (!id || button.dataset.msgid === id) dismissResolvedCard(cardShell(cardEl));
+            });
+            return;
+        }
+
+        if (card === 'transaction') {
+            document.querySelectorAll('.diff-card').forEach(el => {
+                const cardEl = el as HTMLElement;
+                const button = cardEl.querySelector('[data-txid]') as HTMLElement | null;
+                if (!button) return;
+                if (!id || button.dataset.txid === id) dismissResolvedCard(cardShell(cardEl));
+            });
+            return;
+        }
+
+        const className = card === 'plan'
+            ? 'plan-card-wrap'
+            : card === 'walkthrough'
+                ? 'walkthrough-card-wrap'
+                : 'blueprint-card-wrap';
+        document.querySelectorAll(`.annotatable-plan.${className}`).forEach(el => {
+            dismissResolvedCard(el as HTMLElement);
+        });
+    }
+
     // ── Permission request card ─────────────────────────────────────────────────
     function showPermissionCard(permissionId: string, tool: string, description: string, command: string, allowAlways?: boolean) {
         if (!permissionId || floatingPermissionIds.has(permissionId)) return;
@@ -3538,6 +3642,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         switch (msg.type) {
 
             case 'addUserMessage':
+                removeReplayBanners();
                 setGenerating(true);
                 streamStates.clear();
                 addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts);
@@ -3547,6 +3652,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
 
             case 'startBackgroundGeneration':
+                removeReplayBanners();
                 setGenerating(true);
                 streamStates.clear();
                 // Do not add user message bubble, but still render the assistant div
@@ -3556,10 +3662,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
 
             case 'agentStep':
+                removeReplayBanners();
                 applyLiveStep(msg.step);
                 break;
-
             case 'generationComplete': {
+                removeReplayBanners();
                 setGenerating(false);
                 // Clear all streaming status to prevent residual liveThinkBlock and other references from interfering with final message reconstruction
                 streamStates.clear();
@@ -3622,6 +3729,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'generationError': {
+                removeReplayBanners();
                 setGenerating(false);
                 streamStates.clear();
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
@@ -3658,6 +3766,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'clearChat':
+                if (!isCurrentSurface(msg.targetSurface)) break;
                 while (chatArea.firstChild) chatArea.removeChild(chatArea.firstChild);
                 emptyState.style.display = '';
                 chatArea.appendChild(emptyState);
@@ -3731,6 +3840,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'loadTopicMessages':
+                if (!isCurrentSurface(msg.targetSurface)) break;
                 chatArea.innerHTML = '';
                 messageIndexMap.clear();
                 restoreArtifactsFromMessages(msg.messages || []);
@@ -3789,6 +3899,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'pendingWriteFile': showPendingWriteCard(msg.file, msg.messageId, msg.isNewFile, msg); break;
 
+            case 'floatingCardResolved':
+                resolveFloatingCard(msg.card, msg.id);
+                break;
+
             case 'permissionRequest': {
                 showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways);
                 break;
@@ -3818,12 +3932,26 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
 
             case 'replaySteps': {
+                removeReplayBanners();
+                const replayedSteps = Array.isArray(msg.steps) ? msg.steps : [];
+                if (msg.isGenerating) {
+                    setGenerating(true);
+                    streamStates.clear();
+                    if (currentAssistantDiv) currentAssistantDiv.remove();
+                    currentAssistantDiv = initLiveAssistantDiv();
+                    chatArea.appendChild(currentAssistantDiv);
+                    for (const step of replayedSteps) {
+                        applyLiveStep(step);
+                    }
+                } else if (replayedSteps.length > 0) {
+                    if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
+                    streamStates.clear();
+                    chatArea.appendChild(buildAssistantMessage('', replayedSteps, Date.now()));
+                }
+                scrollBottom();
+                break;
+                /*
                 // Panel was hidden while AI was running — replay accumulated steps
-                // Show a banner so user knows the AI is/was running in the background
-                document.querySelectorAll('.replay-steps-banner').forEach(el => el.remove());
-                const banner = document.createElement('div');
-                banner.className = 'special-step replay-steps-banner';
-                banner.style.cssText = 'padding:6px 8px;background:rgba(255,200,50,0.08);border-left:2px solid #ffc832;font-size:11px;opacity:0.8;margin:4px 0;';
                 banner.innerHTML = msg.isGenerating
                     ? `${svgIconNoMargin('zap')} AI 正在后台运行（面板重新打开时恢复显示）`
                     : `${svgIconNoMargin('clipboard')} 以下为 AI 上次运行记录`;
@@ -3837,11 +3965,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     sendBtn.classList.add('cancel-mode');
                     const sendIcon = sendBtn.querySelector('.send-icon') as HTMLElement | null;
                     const stopIcon = sendBtn.querySelector('.stop-icon') as HTMLElement | null;
-                    if (sendIcon) sendIcon.style.display = 'none';
-                    if (stopIcon) stopIcon.style.display = 'inline-block';
+                    if (sendIcon) (sendIcon as HTMLElement).style.display = 'none';
+                    if (stopIcon) (stopIcon as HTMLElement).style.display = 'inline-block';
                 }
                 scrollBottom();
                 break;
+                */
             }
 
             case 'todoUpdate': renderTodos(msg.todos); break;
@@ -4173,6 +4302,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     content: wrap,
                     wide: true,
                 });
+                scheduleResponsiveWorkspaceLayoutSync();
                 break;
             }
 
@@ -4226,6 +4356,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     renderMarkdown,
                     postMessage: message => vscode.postMessage(message),
                     dismissCard: (element, delay = 0, done, removeFromDom) => dismissCard(element, delay, done, removeFromDom),
+                    approveMessageType: 'approveWalkthrough',
                     reviseMessageType: 'reviseWalkthroughWithAnnotations',
                     disableApproveOnSubmit: true,
                 });
@@ -4236,6 +4367,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     content: wrap,
                     wide: true,
                 });
+                scheduleResponsiveWorkspaceLayoutSync();
                 break;
             }
 
@@ -4259,6 +4391,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     content: wrap,
                     wide: true,
                 });
+                scheduleResponsiveWorkspaceLayoutSync();
                 break;
             }
 

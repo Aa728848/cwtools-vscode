@@ -185,6 +185,10 @@ body.agent-manager-shell.artifact-drawer-open {
     grid-template-columns: var(--manager-active-left-width) minmax(560px, 1fr) var(--manager-right-width);
 }
 
+body.agent-manager-shell.side-workspace-open {
+    --manager-active-right-width: var(--active-side-workspace-width);
+}
+
 body.agent-manager-shell.artifact-drawer-open .artifact-drawer {
     width: auto;
     border-left: 1px solid var(--border);
@@ -248,6 +252,15 @@ body.agent-manager-shell .manager-task-mark {
     text-align: center;
     color: var(--accent);
     font-weight: 700;
+}
+
+@media (min-width: 1180px) {
+    body.agent-manager-shell.side-workspace-open .chat-area,
+    body.agent-manager-shell.side-workspace-open .mode-indicator,
+    body.agent-manager-shell.side-workspace-open .todo-panel,
+    body.agent-manager-shell.side-workspace-open .input-wrapper {
+        margin-right: var(--active-side-workspace-width) !important;
+    }
 }
 
 @media (max-width: 1280px) {

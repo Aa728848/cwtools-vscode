@@ -403,9 +403,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function showResponsiveWorkspacePanel(panel: ResponsiveWorkspacePanel): void {
         activeResponsiveWorkspace = panel;
         responsiveWorkspacePinnedClosed = false;
-        if (!panel.content.parentNode) {
-            chatArea.appendChild(panel.content);
-        }
 
         if (shouldUseSideWorkspace()) {
             openSideWorkspace({

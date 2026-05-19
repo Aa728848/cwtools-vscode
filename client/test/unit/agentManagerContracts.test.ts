@@ -98,10 +98,11 @@ describe('agent manager cross-surface contracts', () => {
         expect(html).to.include('id="btnAgentManager"');
         expect(hostTypes).to.include("{ type: 'openAgentManager' }");
         expect(hostPanel).to.include("case 'openAgentManager'");
-        expect(hostPanel).to.include("this._restoreViewState('manager', false)");
+        expect(hostPanel).to.include("this._restoreViewState('manager', true)");
         expect(hostPanel).to.include('openManagerPanelInNewWindow');
         expect(hostPanel).to.include("workbench.action.moveEditorToNewWindow");
         expect(hostPanel).to.include('if (replayLiveSteps && this._isGenerating');
+        expect(manager).to.include('__cwtoolsPostReady');
     });
 
     it('restored interactive cards and live replay stay idempotent', () => {
@@ -131,7 +132,9 @@ describe('agent manager cross-surface contracts', () => {
         expect(hostPanel).to.include("this._restoreViewState('chat')");
         expect(hostPanel).to.include('this.postMessageToSurface(targetSurface, msg)');
         expect(hostPanel).to.include("targetSurface })");
-        expect(hostPanel).to.include("this._restoreViewState(surface, surface === 'chat')");
+        expect(hostPanel).to.include("this._restoreViewState(surface, true)");
+        expect(hostPanel).to.include("case 'ready'");
+        expect(hostPanel).to.include('this._restoreViewState(sourceSurface, true)');
         expect(hostPanel).to.include('this.sendWorkflowState(send)');
         expect(hostPanel).to.include('this.broadcaster.register(webview, surface)');
     });

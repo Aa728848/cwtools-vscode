@@ -7,11 +7,10 @@ trigger: always_on
 作为 AI 编程助手 (Antigravity)，在处理本项目（Eddy's Stellaris CWTools）时，你必须严格遵循以下开发规范：
 
 ## 0. 📖 项目理解先行
-- **阅读文档**：在对项目进行任何代码或架构改动前，必须先阅读项目根目录下的 `README.md`、`ARCHITECTURE.md` 确保对项目的业务逻辑和架构有充分的理解。
+- **阅读文档**：在对项目进行任何代码或架构改动前，必须先阅读项目根目录下的 `README.md`、`ARCHITECTURE.md`、`CONTRIBUTING.md` 确保对项目的业务逻辑和架构有充分的理解。
 
 ## 1. 🌍 语言与本地化规范
 - **UI 文本**：所有用户可见的 VS Code 界面文本（如信息提示、报错、状态栏）应当考虑中英双语兼容，核心中文文本应存放于统一文件（如 `ai/messages.ts`）。
-- **Git Commit**：如果需要代表用户提供 Git 提交建议或执行提交，Commit Message 必须使用中文，并采用传统的 `type: description` 格式（例如 `feat: 新增 AI 提示词构建器`）。
 
 ## 2. 🛡️ 前后端架构与通信规范
 - **Webview 沙盒隔离**：牢记 Webview 环境（如 `guiPreview.ts`、`chatPanel.ts`、`entityPreview.ts`）运行在受限的浏览器沙盒中。**绝对禁止**在 Webview 代码中引入 Node.js 原生 API（如 `fs`, `path`）或 `vscode` 模块。它们只能通过 `vscode.postMessage` 与扩展宿主 (Extension Host) 进行通信。

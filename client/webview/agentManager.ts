@@ -251,3 +251,5 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     renderOverview();
     renderInspector();
 })();
+
+(window as any).__cwtoolsPostReady?.();

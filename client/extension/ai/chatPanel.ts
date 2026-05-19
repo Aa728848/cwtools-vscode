@@ -459,6 +459,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.sendManagerSnapshot();
                 break;
             case 'ready':
+                this._restoreViewState(sourceSurface, true);
                 this.sendManagerSnapshot();
                 break;
             case 'requestMentionSearch': {
@@ -2243,7 +2244,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async openAgentManager(): Promise<void> {
         if (this.managerPanel) {
             this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);
-            this._restoreViewState('manager', false);
+            this._restoreViewState('manager', true);
             this.openManagerPanelInNewWindow();
             return;
         }
@@ -2271,10 +2272,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }, this, this._managerDisposables);
 
         panel.onDidChangeViewState((e) => {
-            if (e.webviewPanel.visible) this._restoreViewState('manager', false);
+            if (e.webviewPanel.visible) this._restoreViewState('manager', true);
         }, this, this._managerDisposables);
 
-        this._restoreViewState('manager', false);
+        this._restoreViewState('manager', true);
         this.openManagerPanelInNewWindow();
     }
 
@@ -2339,7 +2340,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         this.topicManager.sendTopicList();
         this.settingsManager.buildAndSendSettingsData(false, surface).catch(() => { /* ignore on startup */ });
-        this._restoreViewState(surface, surface === 'chat');
+        this._restoreViewState(surface, true);
     }
 
     private hasVisibleChatSurface(): boolean {

@@ -1100,9 +1100,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         */
     }
 
-    // Notify host that WebView JS has fully loaded and is ready to receive messages
-    vscode.postMessage({ type: 'ready' });
-
     // ── Placeholder rotation ───────────────────────────────────────────────────
     const PROMPT_EXAMPLES = chatI18n.promptExamples;
     let placeholderIdx = Math.floor(Math.random() * PROMPT_EXAMPLES.length);
@@ -5233,5 +5230,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 mcp: { servers: [] }
             }
         });
+    }
+
+    // Send ready only after all message handlers are registered.
+    (window as any).__cwtoolsPostReady = () => vscode.postMessage({ type: 'ready' });
+    if (!isManagerShell()) {
+        (window as any).__cwtoolsPostReady();
     }
 })();

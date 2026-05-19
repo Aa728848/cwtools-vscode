@@ -380,6 +380,26 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         clearSideWorkspaceShell();
     }
 
+    function clearTopicWorkspaceState(): void {
+        const responsiveContent = activeResponsiveWorkspace?.content || null;
+        sideDiffEntries.length = 0;
+        responsiveWorkspacePinnedClosed = false;
+
+        if (sideWorkspaceContent && sideWorkspaceContent !== settingsPage && sideWorkspaceContent !== topicsPanel) {
+            closeSideWorkspace({ preserveResponsivePin: true });
+        }
+
+        if (responsiveContent) {
+            if (responsiveContent.parentNode) {
+                responsiveContent.remove();
+            }
+            originalParents.delete(responsiveContent);
+        }
+
+        activeResponsiveWorkspace = null;
+        updateWorkspaceToggleState();
+    }
+
     function openSideWorkspace(options: { title: string; subtitle?: string; content?: HTMLElement; build?: () => HTMLElement; wide?: boolean }): HTMLElement | null {
         if (!sideWorkspace || !sideWorkspaceBody) return null;
         if (document.body.classList.contains('artifact-drawer-open')) setArtifactDrawerOpen(false);
@@ -3783,6 +3803,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'clearChat':
                 if (!isCurrentSurface(msg.targetSurface)) break;
+                clearTopicWorkspaceState();
                 while (chatArea.firstChild) chatArea.removeChild(chatArea.firstChild);
                 emptyState.style.display = '';
                 chatArea.appendChild(emptyState);

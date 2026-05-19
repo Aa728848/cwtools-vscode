@@ -89,6 +89,15 @@ describe('webview smoke checks', () => {
         expect(script).to.include('requestAnimationFrame(applyScroll)');
     });
 
+    it('chat clear resets stale topic workspace panels', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        expect(script).to.include('function clearTopicWorkspaceState()');
+        expect(script).to.include('sideDiffEntries.length = 0;');
+        expect(script).to.include('activeResponsiveWorkspace = null;');
+        expect(script).to.include("case 'clearChat':\n                if (!isCurrentSurface(msg.targetSurface)) break;\n                clearTopicWorkspaceState();");
+    });
+
     it('release bundle exists and is non-empty after compile', () => {
         const bundlePath = path.join(root, 'release/bin/client/webview/chatPanel.js');
         const stat = fs.statSync(bundlePath);

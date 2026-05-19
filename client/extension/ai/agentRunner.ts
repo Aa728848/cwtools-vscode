@@ -815,12 +815,12 @@ export class AgentRunner {
                 : effectiveUserMessage;
 
         const providerForPrompt = options?.providerId ?? this.aiService.getConfig().provider;
-        const isDeepSeekProvider = providerForPrompt.startsWith('deepseek');
+        const supportsPrefixCache = providerForPrompt.startsWith('deepseek') || providerForPrompt.startsWith('openai');
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
         // to ensure byte-level stability across API calls for cache hits.
         let systemPrompt = options?.useSlimPrompt
             ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt)
-            : isDeepSeekProvider
+            : supportsPrefixCache
                 ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt)
                 : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt);
 
@@ -1022,7 +1022,7 @@ export class AgentRunner {
         runMetrics?: AgentRunMetrics
     ): Promise<string> {
         let iteration = 0;
-        const isDeepSeekProvider = (options?.providerId ?? '').startsWith('deepseek');
+        const supportsPrefixCache = (options?.providerId ?? '').startsWith('deepseek') || (options?.providerId ?? '').startsWith('openai');
 
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
@@ -1152,7 +1152,7 @@ export class AgentRunner {
                         content: AGENT.COMPACTION_MID_LOOP(loopTokens, midLoopThreshold),
                         timestamp: Date.now(),
                     });
-                    this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: isDeepSeekProvider });
+                    this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: supportsPrefixCache });
                 }
             }
 
@@ -1687,7 +1687,7 @@ export class AgentRunner {
                     content: AGENT.COMPACTION_EMERGENCY(emergencyTokens, contextLimit),
                     timestamp: Date.now(),
                 });
-                this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: isDeepSeekProvider });
+                this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: supportsPrefixCache });
             }
 
             // If forceStop was set in the inner loop, exit the outer while now

@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { getModelPricing, MODEL_PRICING } from '../../extension/ai/pricing';
+import { getModelPricing, MODEL_PRICING, getCacheDiscountFactor } from '../../extension/ai/pricing';
 
 describe('getModelPricing', () => {
     it('returns [0, 0] for empty model', () => {
@@ -37,5 +37,29 @@ describe('getModelPricing', () => {
             expect(val[0]).to.be.a('number');
             expect(val[1]).to.be.a('number');
         }
+    });
+});
+
+describe('getCacheDiscountFactor', () => {
+    it('returns 0.1 for DeepSeek models', () => {
+        expect(getCacheDiscountFactor('deepseek-v4-pro')).to.equal(0.1);
+        expect(getCacheDiscountFactor('deepseek-chat')).to.equal(0.1);
+    });
+
+    it('returns 0.1 for Claude models', () => {
+        expect(getCacheDiscountFactor('claude-sonnet-4-6')).to.equal(0.1);
+        expect(getCacheDiscountFactor('claude-opus-4-7-20251101')).to.equal(0.1);
+    });
+
+    it('returns 0.5 for OpenAI models', () => {
+        expect(getCacheDiscountFactor('gpt-5.5')).to.equal(0.5);
+        expect(getCacheDiscountFactor('gpt-5.4-mini')).to.equal(0.5);
+        expect(getCacheDiscountFactor('gpt-5-nano')).to.equal(0.5);
+    });
+
+    it('returns 1.0 for providers without cache discount', () => {
+        expect(getCacheDiscountFactor('gemini-2.5-pro')).to.equal(1.0);
+        expect(getCacheDiscountFactor('qwen-max')).to.equal(1.0);
+        expect(getCacheDiscountFactor('unknown-model')).to.equal(1.0);
     });
 });

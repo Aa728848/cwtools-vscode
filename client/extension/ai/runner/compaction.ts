@@ -190,9 +190,9 @@ export async function maybeCompactHistory(
                 timestamp: Date.now(),
             });
 
-            const isDeepSeek = (options?.providerId ?? '').startsWith('deepseek');
+            const supportsPrefixCache = (options?.providerId ?? '').startsWith('deepseek') || (options?.providerId ?? '').startsWith('openai');
 
-            if (isDeepSeek) {
+            if (supportsPrefixCache) {
                 // ── DeepSeek prefix-cache optimization path ──
                 // Rules:
                 //   1. system message stays unchanged (frozen prefix)

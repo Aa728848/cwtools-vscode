@@ -37,7 +37,7 @@ export class ChatSettingsManager {
             name: p.name,
             models: p.models,
             defaultModel: p.defaultModel,
-            requiresApiKey: p.id !== 'ollama',
+            requiresApiKey: p.requiresApiKey,
             defaultEndpoint: p.endpoint,
             maxContextTokens: p.maxContextTokens,
             supportsFIM: p.supportsFIM,
@@ -217,14 +217,20 @@ export class ChatSettingsManager {
     }
 
     async fetchApiModels(providerId: string, endpointOverride: string, apiKeyOverride: string): Promise<void> {
-        const { getEffectiveEndpoint } = await import('./providers');
+        const { getEffectiveEndpoint, getProvider } = await import('./providers');
         const saved = this.aiService.getConfig();
+        const provider = getProvider(providerId);
         const endpoint = endpointOverride || getEffectiveEndpoint(providerId, saved.endpoint);
 
         let apiKey = apiKeyOverride;
         if (!apiKey) apiKey = await this.aiService.getKeyForProvider(providerId) || '';
 
-        if (!apiKey) {
+        if (!endpoint) {
+            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: '请先填写 Endpoint' });
+            return;
+        }
+
+        if (provider.requiresApiKey && !apiKey) {
             this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: '需要 API Key 才能拉取模型列表' });
             return;
         }
@@ -238,8 +244,10 @@ export class ChatSettingsManager {
 
         try {
             const modelsUrl = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '') + '/models';
+            const headers: Record<string, string> = {};
+            if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
             const res = await fetch(modelsUrl, {
-                headers: { 'Authorization': `Bearer ${apiKey}` }
+                headers
             });
             if (res.ok) {
                 const data = await res.json() as any;
@@ -293,9 +301,10 @@ export class ChatSettingsManager {
     }
 
     async testConnection(settings?: PanelSettings): Promise<void> {
-        const { getEffectiveEndpoint } = await import('./providers');
+        const { getEffectiveEndpoint, getProvider } = await import('./providers');
         const saved = this.aiService.getConfig();
         const providerId = settings?.provider ?? saved.provider;
+        const provider = getProvider(providerId);
         const rawSettingsKey = settings?.apiKey ?? '';
         const apiKey = (rawSettingsKey && !rawSettingsKey.startsWith('\u2022'))
             ? rawSettingsKey
@@ -307,7 +316,11 @@ export class ChatSettingsManager {
             this.postMessage({ type: 'testConnectionResult', ok: false, message: '请先选择 Provider' });
             return;
         }
-        if (providerId !== 'ollama' && !apiKey) {
+        if (!endpoint) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: '请填写 Endpoint' });
+            return;
+        }
+        if (provider.requiresApiKey && !apiKey) {
             this.postMessage({ type: 'testConnectionResult', ok: false, message: '请填写 API Key' });
             return;
         }

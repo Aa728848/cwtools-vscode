@@ -7,6 +7,7 @@ export interface SettingsProviderView {
     defaultEndpoint?: string;
     defaultModel?: string;
     hasKey?: boolean;
+    requiresApiKey?: boolean;
 }
 
 export interface SettingsOverviewInput {
@@ -37,7 +38,7 @@ export function buildSettingsOverviewModel(input: SettingsOverviewInput, i18n: C
     const endpoint = input.endpoint?.trim() || provider?.defaultEndpoint || labels.defaultEndpoint;
     const contextTokens = input.contextTokens || 0;
     const contextLabel = contextTokens > 0 ? `${formatNum(contextTokens)} tokens` : labels.automatic;
-    const apiState = input.providerId === 'ollama'
+    const apiState = provider?.requiresApiKey === false
         ? labels.localModel
         : (provider?.hasKey ? labels.apiKeyConfigured : labels.apiKeyMissing);
     const inlineState = input.inlineEnabled

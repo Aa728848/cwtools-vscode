@@ -251,9 +251,9 @@ export class AIService {
         const providerId = options?.providerId ?? config.provider;
         const provider = getProvider(providerId);
 
-        // Ollama doesn't require an API key
+        // Some providers (for example Ollama) do not require an API key.
         let apiKey = '';
-        if (providerId !== 'ollama') {
+        if (provider.requiresApiKey) {
             // Priority: options override (for test) > SecretStorage (with migration fallback)
             if (options?.apiKey) {
                 apiKey = options.apiKey;
@@ -273,6 +273,9 @@ export class AIService {
         }
 
         const endpoint = options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
+        if (!endpoint) {
+            throw new Error(`${provider.name} endpoint is not configured. Please set an API endpoint in the AI Settings panel.`);
+        }
         const rawModel = options?.model ?? getEffectiveModel(providerId, config.model);
         // Strip the UI '(免费)' suffix from the model ID before sending to the API
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
@@ -399,7 +402,7 @@ export class AIService {
         const provider = getProvider(providerId);
 
         let apiKey = '';
-        if (providerId !== 'ollama') {
+        if (provider.requiresApiKey) {
             if (options?.apiKey) {
                 apiKey = options.apiKey;
             } else {
@@ -410,6 +413,9 @@ export class AIService {
         }
 
         const endpoint = options?.endpoint || getEffectiveEndpoint(providerId, config.inlineCompletion.endpoint || config.endpoint);
+        if (!endpoint) {
+            throw new Error(`${provider.name} endpoint is not configured. Please set an API endpoint in the AI Settings panel.`);
+        }
         const rawModel = options?.model ?? getEffectiveModel(providerId, config.inlineCompletion.model || config.model);
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
 
@@ -514,6 +520,10 @@ export class AIService {
      * - All other providers: standard "Bearer {apiKey}".
      */
     private buildAuthHeaders(providerId: string, apiKey: string): Record<string, string> {
+        if (!apiKey.trim()) {
+            return {};
+        }
+
         // GLM (Zhipu AI): generate JWT from "{id}.{secret}" key
         if (providerId === 'glm' && apiKey.includes('.')) {
             const dot = apiKey.indexOf('.');
@@ -1207,6 +1217,16 @@ export class AIService {
                     }
                 }
             );
+        } else if (providerId === 'custom') {
+            const modelName = await vs.window.showInputBox({
+                title: 'Custom Model Name',
+                prompt: '输入自定义 OpenAI 兼容渠道使用的模型名',
+                placeHolder: 'model-name',
+                ignoreFocusOut: true,
+            });
+            if (modelName) {
+                await vs.workspace.getConfiguration('cwtools.ai').update('model', modelName, vs.ConfigurationTarget.Global);
+            }
         } else if (provider.models.length > 0) {
             const modelItems = provider.models.map(m => ({
                 label: m,
@@ -1239,12 +1259,14 @@ export class AIService {
             }
         }
 
-        // For Ollama: ask optional custom endpoint
-        if (providerId === 'ollama') {
+        // For endpoint-driven providers: ask optional/required custom endpoint.
+        if (providerId === 'ollama' || providerId === 'custom') {
             const epInput = await vs.window.showInputBox({
-                title: 'Ollama Endpoint',
-                prompt: '输入 Ollama 的 API 地址 (留空使用默认 http://localhost:11434/v1)',
-                placeHolder: 'http://localhost:11434/v1',
+                title: providerId === 'ollama' ? 'Ollama Endpoint' : 'Custom OpenAI-Compatible Endpoint',
+                prompt: providerId === 'ollama'
+                    ? '输入 Ollama 的 API 地址 (留空使用默认 http://localhost:11434/v1)'
+                    : '输入自定义渠道的 OpenAI 兼容 API 地址，例如 https://example.com/v1',
+                placeHolder: providerId === 'ollama' ? 'http://localhost:11434/v1' : 'https://example.com/v1',
                 value: vs.workspace.getConfiguration('cwtools.ai').get<string>('endpoint', ''),
                 ignoreFocusOut: true,
             });
@@ -1267,8 +1289,8 @@ export class AIService {
             }
         }
 
-        // Prompt for API key (skip for Ollama local)
-        if (providerId !== 'ollama') {
+        // Prompt for API key only when the provider needs one.
+        if (provider.requiresApiKey) {
             await this.keyManager.promptForKey(providerId);
         }
 
@@ -1294,7 +1316,7 @@ export class AIService {
         }
 
         let apiKey = '';
-        if (providerId !== 'ollama') {
+        if (provider.requiresApiKey) {
             apiKey = await this.getKeyForProvider(providerId) || '';
             if (!apiKey) {
                 vs.window.showWarningMessage(`No API key configured for ${provider.name}. Showing default models only.`);
@@ -1313,13 +1335,13 @@ export class AIService {
                 detectedModels = ollamaModels.map(m => ({ id: m.name }));
             } else if (providerId.startsWith('minimax')) {
                 detectedModels = provider.models.map(m => ({ id: m }));
-            } else if (provider.isOpenAICompatible) {
+            } else if (provider.isOpenAICompatible && endpoint) {
                 try {
                     const modelsUrl = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '') + '/models';
+                    const headers: Record<string, string> = {};
+                    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
                     const res = await fetch(modelsUrl, {
-                        headers: {
-                            'Authorization': `Bearer ${apiKey}`
-                        }
+                        headers
                     });
                     if (res.ok) {
                         const data = await res.json() as any;

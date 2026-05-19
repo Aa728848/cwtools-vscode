@@ -158,6 +158,12 @@ describe('getProvider', () => {
         expect(p.id).to.equal('claude');
     });
 
+    it('returns custom for "custom"', () => {
+        const p = getProvider('custom');
+        expect(p.id).to.equal('custom');
+        expect(p.isOpenAICompatible).to.equal(true);
+    });
+
     it('falls back to openai for unknown provider', () => {
         const p = getProvider('nonexistent-provider');
         expect(p.id).to.equal('openai');
@@ -196,6 +202,10 @@ describe('getEffectiveEndpoint', () => {
         const p = getProvider('openai');
         expect(getEffectiveEndpoint('openai', '   ')).to.equal(p.endpoint);
     });
+
+    it('returns an empty default endpoint for custom when no override is configured', () => {
+        expect(getEffectiveEndpoint('custom')).to.equal('');
+    });
 });
 
 // ─── getEffectiveModel ───────────────────────────────────────────────────────
@@ -213,6 +223,10 @@ describe('getEffectiveModel', () => {
     it('ignores empty string override', () => {
         const p = getProvider('claude');
         expect(getEffectiveModel('claude', '')).to.equal(p.defaultModel);
+    });
+
+    it('returns an empty default model for custom when no override is configured', () => {
+        expect(getEffectiveModel('custom')).to.equal('');
     });
 
     it('trims whitespace from override', () => {
@@ -459,10 +473,13 @@ describe('BUILTIN_PROVIDERS', () => {
         for (const [key, p] of Object.entries(BUILTIN_PROVIDERS)) {
             expect(p.id, `${key}.id`).to.be.a('string').with.length.greaterThan(0);
             expect(p.name, `${key}.name`).to.be.a('string').with.length.greaterThan(0);
-            expect(p.endpoint, `${key}.endpoint`).to.be.a('string').with.length.greaterThan(0);
+            // custom intentionally starts blank; users provide the endpoint/model in settings.
+            if (key !== 'custom') {
+                expect(p.endpoint, `${key}.endpoint`).to.be.a('string').with.length.greaterThan(0);
+            }
             expect(p.maxContextTokens, `${key}.maxContextTokens`).to.be.a('number').and.greaterThan(0);
-            // ollama has empty defaultModel/models (auto-detected at runtime)
-            if (key !== 'ollama') {
+            // ollama is auto-detected; custom is user-entered.
+            if (key !== 'ollama' && key !== 'custom') {
                 expect(p.defaultModel, `${key}.defaultModel`).to.be.a('string').with.length.greaterThan(0);
                 expect(p.models, `${key}.models`).to.be.an('array').with.length.greaterThan(0);
             }

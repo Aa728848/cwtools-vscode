@@ -252,6 +252,21 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsFIM: true,
         supportsVision: true,
     },
+    custom: {
+        id: 'custom',
+        name: '自定义渠道 (OpenAI 兼容)',
+        endpoint: '',
+        defaultModel: '',
+        models: [],
+        supportsToolUse: true,
+        requiresApiKey: true,
+        supportsStreaming: true,
+        maxContextTokens: 128000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsFIM: true,
+        supportsVision: true,
+    },
     siliconflow: {
         id: 'siliconflow',
         registerUrl: 'https://cloud.siliconflow.cn/',
@@ -887,7 +902,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
 }
 
 /**
- * Get a provider config by ID, falling back to custom.
+ * Get a provider config by ID, falling back to OpenAI.
  */
 export function getProvider(id: string): AIProviderConfig {
     if (id && !(id in BUILTIN_PROVIDERS)) {

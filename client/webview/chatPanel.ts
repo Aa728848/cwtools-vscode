@@ -4984,7 +4984,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const status = document.getElementById('apiKeyStatus')!;
         const group = document.getElementById('apiKeyGroup')!;
         const providerHint = document.getElementById('providerHint')!;
-        if (providerId === 'ollama') { group.style.display = 'none'; providerHint.innerHTML = ''; refreshSettingsOverview(); return; }
+        if (p && p.requiresApiKey === false) { group.style.display = 'none'; providerHint.innerHTML = ''; refreshSettingsOverview(); return; }
         group.style.display = '';
         
         if (p && p.hasKey) { status.innerHTML = svgIcon('check') + '已配置 API Key'; status.style.color = '#4caf50'; }
@@ -5036,6 +5036,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         } else if (provider && provider.models.length > 0) {
             currentDropdownOpts = provider.models;
             modelHint.textContent = '可选择下拉项，或直接输入自定义模型名';
+            detectBtn.style.display = 'none';
+        } else if (providerId === 'custom') {
+            currentDropdownOpts = [];
+            modelHint.textContent = '输入自定义渠道支持的模型名，或用 API Key 和 Endpoint 拉取模型';
             detectBtn.style.display = 'none';
         } else { currentDropdownOpts = []; modelHint.textContent = ''; detectBtn.style.display = 'none'; }
 

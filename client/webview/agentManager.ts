@@ -2,6 +2,8 @@ import './chatPanel';
 import { escapeHtml } from './chat/formatters';
 import { renderInspectorHTML } from './chat/runInspector';
 import { groupTimelineEvents, renderTimelineHTML } from './chat/runTimeline';
+import { getChatI18n, normalizeChatLocale } from './chat/i18n';
+import { svgIcon } from './svgIcons';
 import type { ManagerSnapshotMessage, OrchestratorProgressMessage } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
 
@@ -21,6 +23,8 @@ type ManagerEnhancementState = {
     run: any | null;
     runEvents: any[];
     selectedRunEventId?: string;
+    /** 当前展开的事件 inspector 面板是否可见（侧滑栏） */
+    inspectorPanelOpen: boolean;
     compactedMemoryContent?: string;
     cleanupResult?: { deletedCount: number; keptCount: number; reclaimedBytes: number };
     copiedEventAt?: number;
@@ -40,6 +44,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     run: null,
     runEvents: [],
     selectedRunEventId: undefined,
+    inspectorPanelOpen: false,
     compactedMemoryContent: undefined,
     cleanupResult: undefined,
     copiedEventAt: undefined,
@@ -63,6 +68,11 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     let activeTab: ManagerTab = 'agents';
     const vscode = (window as any).__cwtoolsVscode;
 
+    // 从 HTML body 的 data-locale 属性读取 locale（由 agentManagerHtml.ts 注入）
+    const locale = normalizeChatLocale((document.body as HTMLElement).dataset.locale);
+    const i18n = getChatI18n(locale);
+    const m = i18n.manager;
+
     const overview = document.createElement('div');
     overview.className = 'manager-overview';
     overview.id = 'managerOverview';
@@ -71,13 +81,28 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     const tabs = document.createElement('div');
     tabs.className = 'manager-inspector-tabs artifact-filter-row';
     tabs.innerHTML = `
-        <button type="button" class="artifact-filter active" data-manager-tab="agents">Agents</button>
-        <button type="button" class="artifact-filter" data-manager-tab="runs">Runs</button>
-        <button type="button" class="artifact-filter" data-manager-tab="artifacts">Artifacts</button>
-        <button type="button" class="artifact-filter" data-manager-tab="tasks">Tasks</button>
+        <button type="button" class="artifact-filter active" data-manager-tab="agents">${m.tabs.agents}</button>
+        <button type="button" class="artifact-filter" data-manager-tab="runs">${m.tabs.runs}</button>
+        <button type="button" class="artifact-filter" data-manager-tab="artifacts">${m.tabs.artifacts}</button>
+        <button type="button" class="artifact-filter" data-manager-tab="tasks">${m.tabs.tasks}</button>
     `;
     artifactDrawerEl.querySelector('.artifact-drawer-header')?.after(tabs);
     artifactDrawerEl.setAttribute('data-active-tab', activeTab);
+
+    // 次级 inspector 侧滑栏（问题4）- 挂到 body，fixed 定位，贴 artifactDrawer 左侧
+    const inspectorSlider = document.createElement('div');
+    inspectorSlider.className = 'run-inspector-slider';
+    inspectorSlider.innerHTML = `
+        <div class="run-inspector-slider-header">
+            <span class="run-inspector-slider-title">${svgIcon('layers')}${m.runs.eventDetail}</span>
+            <button type="button" class="run-inspector-slider-close" data-run-action="close-inspector" title="${m.runs.closeInspector}">${svgIcon('x')}</button>
+        </div>
+        <div class="run-inspector-slider-body" id="runInspectorSliderBody"></div>
+    `;
+    document.body.appendChild(inspectorSlider);
+
+    // 原生 artifact-filter-row（全部/计划/验证/变更）引用
+    const artifactNativeFilterRow = artifactDrawerEl.querySelector<HTMLElement>('.artifact-filter-row:not(.manager-inspector-tabs)');
 
     tabs.addEventListener('click', event => {
         const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('[data-manager-tab]');
@@ -110,16 +135,37 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     void navigator.clipboard?.writeText(JSON.stringify(selectedEvent, null, 2)).then(() => {
                         state.copiedEventAt = Date.now();
                         renderInspector();
+                        renderInspectorSlider();
                     });
                 }
             }
             return;
         }
 
+        // 时间线分组折叠切换（问题5）
+        const groupHeader = target?.closest<HTMLElement>('.timeline-group-header');
+        if (groupHeader) {
+            const groupEl = groupHeader.closest<HTMLElement>('.timeline-group');
+            groupEl?.classList.toggle('collapsed');
+            return;
+        }
+
+        // 点击事件行 → 打开次级 inspector 侧滑栏（问题4）
         const eventRow = target?.closest<HTMLElement>('.timeline-event');
         if (activeTab === 'runs' && eventRow?.dataset.eventId) {
             state.selectedRunEventId = eventRow.dataset.eventId;
-            renderInspector();
+            state.inspectorPanelOpen = true;
+            markSelectedRunEvent();
+            renderInspectorSlider();
+        }
+    });
+
+    // inspector 侧滑栏关闭按钮
+    inspectorSlider.addEventListener('click', event => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('[data-run-action="close-inspector"]')) {
+            state.inspectorPanelOpen = false;
+            updateInspectorSliderVisibility();
         }
     });
 
@@ -131,20 +177,20 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
     function renderOverview(): void {
         const runPill = state.run
-            ? `<span class="manager-pill manager-pill-run">Run: ${escapeHtml(state.run.runId.substring(0, 10))} (${escapeHtml(state.run.status)})</span>`
+            ? `<span class="manager-pill manager-pill-run">${m.overview.run}: ${escapeHtml(state.run.runId.substring(0, 10))} (${escapeHtml(state.run.status)})</span>`
             : '';
         overview.innerHTML = `
             <div class="manager-overview-row">
-                <span class="manager-pill">${state.stats.visible} Topics</span>
-                <span class="manager-pill">${state.artifacts.length} Artifacts</span>
-                <span class="manager-pill">${state.liveStepCount} Steps</span>
-                <span class="manager-pill">${currentTopicMessageCount()} Messages</span>
+                <span class="manager-pill">${state.stats.visible} ${m.overview.topics}</span>
+                <span class="manager-pill">${state.artifacts.length} ${m.overview.artifacts}</span>
+                <span class="manager-pill">${state.liveStepCount} ${m.overview.steps}</span>
+                <span class="manager-pill">${currentTopicMessageCount()} ${m.overview.messages}</span>
                 ${runPill}
             </div>
             <div class="manager-overview-row">
-                <span class="manager-meta">Mode: ${escapeHtml(state.mode)}</span>
-                <span class="manager-meta">Workflow: ${escapeHtml(state.workflowId || 'none')}</span>
-                <span class="manager-meta">Status: ${state.isGenerating ? 'running' : 'idle'}</span>
+                <span class="manager-meta">${m.overview.mode}: ${escapeHtml(state.mode)}</span>
+                <span class="manager-meta">${m.overview.workflow}: ${escapeHtml(state.workflowId || m.overview.none)}</span>
+                <span class="manager-meta">${m.overview.status}: ${state.isGenerating ? m.overview.running : m.overview.idle}</span>
             </div>
         `;
     }
@@ -156,6 +202,17 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             button.classList.toggle('active', button.dataset.managerTab === activeTab);
         });
 
+        // 原生筛选行（全部/计划/验证/变更）仅在 artifacts tab 时显示
+        if (artifactNativeFilterRow) {
+            artifactNativeFilterRow.style.display = activeTab === 'artifacts' ? '' : 'none';
+        }
+
+        // 切换到非 runs 时关闭 inspector 侧滑栏
+        if (activeTab !== 'runs') {
+            state.inspectorPanelOpen = false;
+            updateInspectorSliderVisibility();
+        }
+
         if (activeTab === 'artifacts') {
             window.dispatchEvent(new MessageEvent('message', {
                 data: { type: 'artifactList', artifacts: state.artifacts },
@@ -164,6 +221,40 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         }
 
         renderInspector();
+    }
+
+    function updateInspectorSliderVisibility(): void {
+        const isOpen = state.inspectorPanelOpen && activeTab === 'runs';
+        inspectorSlider.classList.toggle('open', isOpen);
+        if (isOpen) {
+            // 动态定位：侧滑栏 right = artifactDrawer 的 offsetWidth，从其左边界向左弹出
+            const drawerRect = artifactDrawerEl.getBoundingClientRect();
+            inspectorSlider.style.right = `${window.innerWidth - drawerRect.left}px`;
+        }
+    }
+
+    function renderInspectorSlider(): void {
+        const sliderBody = document.getElementById('runInspectorSliderBody');
+        if (!sliderBody) return;
+
+        const events = Array.isArray(state.runEvents) ? state.runEvents : [];
+        const selectedEvent = events.find((evt: any) => evt.eventId === state.selectedRunEventId);
+        const run = state.run;
+        const context = run?.context || {};
+        const contextMeter = context.estimatedPromptTokens && context.contextLimit ? {
+            estimatedPromptTokens: context.estimatedPromptTokens,
+            contextLimit: context.contextLimit,
+            percentage: Math.round((context.estimatedPromptTokens / context.contextLimit) * 100),
+        } : undefined;
+
+        const copyLabel = state.copiedEventAt && Date.now() - state.copiedEventAt < 2500 ? m.runs.copiedEvent : m.runs.copyEventJson;
+        sliderBody.innerHTML = `
+            <div class="run-action-row run-inspector-actions">
+                <button type="button" class="run-action-btn" data-run-action="copy-event" ${selectedEvent ? '' : 'disabled'}>${copyLabel}</button>
+            </div>
+            ${renderInspectorHTML({ selectedEventId: state.selectedRunEventId, selectedEvent, contextMeter }, i18n)}
+        `;
+        updateInspectorSliderVisibility();
     }
 
     function renderInspector(): void {
@@ -179,14 +270,14 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                         </div>
                     </article>
                 `).join('')
-                : '<div class="artifact-empty">No tasks yet</div>';
+                : `<div class="artifact-empty">${m.tasks.noTasks}</div>`;
             return;
         }
 
         if (activeTab === 'runs') {
             const run = state.run;
             if (!run) {
-                artifactListEl.innerHTML = '<div class="artifact-empty">No active run recorded</div>';
+                artifactListEl.innerHTML = `<div class="artifact-empty">${m.runs.noRun}</div>`;
                 return;
             }
 
@@ -199,38 +290,26 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             if (events.length === 0) {
                 state.selectedRunEventId = undefined;
             }
-            const selectedEvent = events.find((evt: any) => evt.eventId === state.selectedRunEventId);
-            const context = run.context || {};
-            const contextMeter = context.estimatedPromptTokens && context.contextLimit ? {
-                estimatedPromptTokens: context.estimatedPromptTokens,
-                contextLimit: context.contextLimit,
-                percentage: Math.round((context.estimatedPromptTokens / context.contextLimit) * 100),
-            } : undefined;
-            const eventTimelineHtml = events.length
-                ? renderTimelineHTML(groupTimelineEvents(events))
-                : '';
-            const eventInspectorHtml = renderInspectorHTML({
-                selectedEventId: state.selectedRunEventId,
-                selectedEvent,
-                contextMeter,
-            });
+
             const cleanupHtml = state.cleanupResult ? `
                 <div class="run-action-note">
-                    Cleaned ${state.cleanupResult.deletedCount} large result file(s), kept ${state.cleanupResult.keptCount}, reclaimed ${formatBytes(state.cleanupResult.reclaimedBytes)}.
+                    ${m.runs.cleaned
+                        .replace('{deleted}', String(state.cleanupResult.deletedCount))
+                        .replace('{kept}', String(state.cleanupResult.keptCount))
+                        .replace('{size}', formatBytes(state.cleanupResult.reclaimedBytes))}
                 </div>
             ` : '';
             const memoryHtml = state.compactedMemoryContent ? `
                 <details class="run-memory-panel" open>
-                    <summary>Compacted Memory</summary>
+                    <summary>${m.runs.compactedMemory}</summary>
                     <pre>${escapeHtml(state.compactedMemoryContent)}</pre>
                 </details>
             ` : '';
-            const copyLabel = state.copiedEventAt && Date.now() - state.copiedEventAt < 2500 ? 'Copied Event' : 'Copy Event JSON';
             const subAgentChangeSets = events
                 .filter((evt: any) => evt.type === 'subagent_end' && Array.isArray(evt.payload?.filesWritten) && evt.payload.filesWritten.length > 0);
             const subAgentChangeHtml = subAgentChangeSets.length ? `
                 <details class="run-subagent-change-set">
-                    <summary>Sub-Agent Change Sets (${subAgentChangeSets.length})</summary>
+                    <summary>${m.runs.subAgentChangeSets} (${subAgentChangeSets.length})</summary>
                     ${subAgentChangeSets.map((evt: any) => `
                         <div class="run-subagent-change-item">
                             <div class="run-subagent-change-title">${escapeHtml(evt.agentId || evt.payload?.taskNodeId || 'sub-agent')}</div>
@@ -242,31 +321,32 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 </details>
             ` : '';
 
+            // steps 区域（emoji → svgIcon，问题3）
             const stepsHtml = steps.map((step: any) => {
-                let icon = '💭';
-                let title = 'Thought / reasoning';
+                let icon = svgIcon('messageSquare');
+                let title = m.runs.steps.thought;
                 let contentClass = 'run-step-thought';
                 let body = '';
 
                 if (step.type === 'thinking') {
-                    icon = '🧠';
-                    title = 'Thinking process';
+                    icon = svgIcon('sparkles');
+                    title = m.runs.steps.thinking;
                     body = escapeHtml(step.content || '');
                 } else if (step.type === 'tool_call' || step.toolName) {
-                    icon = '⚙️';
-                    title = `Tool Call: ${escapeHtml(step.toolName)}`;
+                    icon = svgIcon('gear');
+                    title = `${m.runs.steps.toolCall}: ${escapeHtml(step.toolName)}`;
                     contentClass = 'run-step-tool';
                     const argsStr = step.toolArgs ? JSON.stringify(step.toolArgs, null, 2) : '';
                     body = `<pre class="run-step-code"><code>${escapeHtml(argsStr)}</code></pre>`;
                 } else if (step.type === 'tool_result') {
-                    icon = '📦';
-                    title = `Tool Result: ${escapeHtml(step.toolName)}`;
+                    icon = svgIcon('package');
+                    title = `${m.runs.steps.toolResult}: ${escapeHtml(step.toolName)}`;
                     contentClass = 'run-step-result';
                     const resStr = typeof step.toolResult === 'object' ? JSON.stringify(step.toolResult, null, 2) : String(step.toolResult || '');
                     body = `<pre class="run-step-code"><code>${escapeHtml(resStr)}</code></pre>`;
                 } else if (step.type === 'error') {
-                    icon = '⚠️';
-                    title = 'Execution Error';
+                    icon = svgIcon('warning');
+                    title = m.runs.steps.execError;
                     contentClass = 'run-step-error';
                     body = escapeHtml(step.content || '');
                 } else if (step.content) {
@@ -285,24 +365,28 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 `;
             }).join('');
 
+            // 时间线：传入 i18n，并在分组 header 上加折叠按钮（问题5）
+            const eventTimelineHtml = events.length
+                ? renderTimelineHTML(groupTimelineEvents(events, i18n), true)
+                : '';
+
             artifactListEl.innerHTML = `
                 <article class="artifact-item manager-run-summary">
-                    <div class="artifact-item-title">Run ID: ${escapeHtml(run.runId)}</div>
-                    <div class="artifact-item-summary">Status: <span class="run-status-pill run-status-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span></div>
+                    <div class="artifact-item-title">${m.runs.runId}: ${escapeHtml(run.runId)}</div>
+                    <div class="artifact-item-summary">${m.runs.status}: <span class="run-status-pill run-status-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span></div>
                     <div class="run-metrics-grid">
-                        <div class="run-metric-cell">Tokens: <strong>${metrics.totalTokens}</strong> (${metrics.promptTokens} in / ${metrics.completionTokens} out)</div>
-                        <div class="run-metric-cell">Cost: <strong>¥${metrics.costCny?.toFixed(4) || '0.0000'}</strong></div>
-                        <div class="run-metric-cell">Tools: <strong>${metrics.toolCalls} calls</strong></div>
+                        <div class="run-metric-cell">${m.runs.metrics.tokens}: <strong>${metrics.totalTokens}</strong> (${metrics.promptTokens} in / ${metrics.completionTokens} out)</div>
+                        <div class="run-metric-cell">${m.runs.metrics.cost}: <strong>¥${metrics.costCny?.toFixed(4) || '0.0000'}</strong></div>
+                        <div class="run-metric-cell">${m.runs.metrics.tools}: <strong>${metrics.toolCalls} ${m.runs.metrics.calls}</strong></div>
                     </div>
                     <div class="run-action-row">
-                        <button type="button" class="run-action-btn" data-run-action="memory">Open Memory</button>
-                        <button type="button" class="run-action-btn" data-run-action="copy-event" ${selectedEvent ? '' : 'disabled'}>${copyLabel}</button>
-                        <button type="button" class="run-action-btn" data-run-action="cleanup-results">Clean Large Results</button>
+                        <button type="button" class="run-action-btn" data-run-action="memory">${m.runs.openMemory}</button>
+                        <button type="button" class="run-action-btn" data-run-action="cleanup-results">${m.runs.cleanLargeResults}</button>
                     </div>
                     ${cleanupHtml}
                     ${run.writtenFiles?.length ? `
                         <div class="run-written-files">
-                            <strong>Modified Files:</strong>
+                            <strong>${m.runs.modifiedFiles}:</strong>
                             <ul>
                                 ${run.writtenFiles.map((f: string) => `<li><code>${escapeHtml(f.split(/[\\/]/).pop() || f)}</code></li>`).join('')}
                             </ul>
@@ -314,35 +398,38 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     <div class="run-events-container">
                         ${eventTimelineHtml}
                     </div>
-                    <div class="run-inspector-container">
-                        ${eventInspectorHtml}
-                    </div>
                 ` : ''}
                 ${memoryHtml}
-                <div class="run-timeline-container">
-                    ${stepsHtml || '<div class="artifact-empty">No steps recorded in this run</div>'}
-                </div>
+                <details class="run-steps-section" open>
+                    <summary class="run-steps-summary">${m.runs.stepsTitle}</summary>
+                    <div class="run-timeline-container">
+                        ${stepsHtml || `<div class="artifact-empty">${m.runs.noSteps}</div>`}
+                    </div>
+                </details>
             `;
             markSelectedRunEvent();
+            if (state.inspectorPanelOpen) {
+                renderInspectorSlider();
+            }
             return;
         }
 
         const progress = state.orchestrator;
         if (!progress) {
-            artifactListEl.innerHTML = '<div class="artifact-empty">No active orchestrator lanes</div>';
+            artifactListEl.innerHTML = `<div class="artifact-empty">${m.agents.noLanes}</div>`;
             return;
         }
 
         artifactListEl.innerHTML = `
             <article class="artifact-item manager-agent-summary">
-                <div class="artifact-item-title">Phase: ${escapeHtml(progress.phase)}</div>
-                <div class="artifact-item-summary">Done ${progress.done}/${progress.total}, Running ${progress.running}, Failed ${progress.failed}</div>
+                <div class="artifact-item-title">${m.agents.phase}: ${escapeHtml(progress.phase)}</div>
+                <div class="artifact-item-summary">${m.agents.done} ${progress.done}/${progress.total}, ${m.agents.running} ${progress.running}, ${m.agents.failed} ${progress.failed}</div>
                 <div class="artifact-meta">${escapeHtml(progress.latestEvent || '')}</div>
             </article>
             ${progress.lanes.map(lane => `
                 <article class="artifact-item manager-agent-lane manager-agent-${escapeHtml(lane.status)}">
                     <div class="artifact-item-title">${escapeHtml(lane.role)} / ${escapeHtml(lane.status)}</div>
-                    <div class="artifact-item-summary">Task ${escapeHtml(lane.taskNodeId)} / steps ${lane.stepCount} / tokens ${lane.tokenUsed}</div>
+                    <div class="artifact-item-summary">${m.agents.task} ${escapeHtml(lane.taskNodeId)} / ${m.agents.steps} ${lane.stepCount} / ${m.agents.tokens} ${lane.tokenUsed}</div>
                     <div class="artifact-meta">${escapeHtml(lane.statusText || '')}</div>
                 </article>
             `).join('')}

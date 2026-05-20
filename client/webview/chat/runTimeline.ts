@@ -53,10 +53,13 @@ const EVENT_GROUP_MAP: Record<string, TimelineGroupId> = {
     'subagent_end': 'subagents',
 };
 
+import type { ChatI18nText } from './i18n';
+import { svgIcon } from '../svgIcons';
+
 /**
  * Groups flat events into categorized timeline groups.
  */
-export function groupTimelineEvents(events: TimelineEvent[]): TimelineGroup[] {
+export function groupTimelineEvents(events: TimelineEvent[], i18n?: ChatI18nText): TimelineGroup[] {
     const groups: Record<TimelineGroupId, TimelineEvent[]> = {
         model: [],
         tools: [],
@@ -73,15 +76,16 @@ export function groupTimelineEvents(events: TimelineEvent[]): TimelineGroup[] {
         groups[groupId].push(evt);
     }
 
+    const g = i18n?.runs?.groups;
     const labels: Record<TimelineGroupId, { label: string; icon: string }> = {
-        model: { label: 'Model Calls', icon: '🧠' },
-        tools: { label: 'Tool Invocations', icon: '🔧' },
-        files: { label: 'File Changes', icon: '📁' },
-        permissions: { label: 'Permissions', icon: '🔐' },
-        validation: { label: 'Validation', icon: '✅' },
-        context: { label: 'Context & Memory', icon: '📦' },
-        subagents: { label: 'Sub-Agents', icon: '🤖' },
-        other: { label: 'Other', icon: '📋' },
+        model:       { label: g?.model       ?? 'Model Calls',      icon: svgIcon('sparkles') },
+        tools:       { label: g?.tools       ?? 'Tool Invocations', icon: svgIcon('gear') },
+        files:       { label: g?.files       ?? 'File Changes',     icon: svgIcon('file') },
+        permissions: { label: g?.permissions ?? 'Permissions',      icon: svgIcon('shield') },
+        validation:  { label: g?.validation  ?? 'Validation',       icon: svgIcon('check') },
+        context:     { label: g?.context     ?? 'Context & Memory', icon: svgIcon('package') },
+        subagents:   { label: g?.subagents   ?? 'Sub-Agents',       icon: svgIcon('bot') },
+        other:       { label: g?.other       ?? 'Other',            icon: svgIcon('clipboard') },
     };
 
     return (Object.keys(groups) as TimelineGroupId[])
@@ -150,11 +154,12 @@ export function groupByAgentLane(events: TimelineEvent[]): Map<string, {
 /**
  * Renders timeline HTML for embedding in the Agent Manager webview.
  */
-export function renderTimelineHTML(groups: TimelineGroup[]): string {
+export function renderTimelineHTML(groups: TimelineGroup[], collapsible = false): string {
     let html = '<div class="run-timeline">';
     for (const group of groups) {
+        const collapseAttr = collapsible ? ' tabindex="0" role="button"' : '';
         html += `<div class="timeline-group" data-group="${group.id}">`;
-        html += `<h3 class="timeline-group-header">${group.icon} ${group.label} <span class="count">(${group.events.length})</span></h3>`;
+        html += `<h3 class="timeline-group-header"${collapseAttr}>${group.icon} ${group.label} <span class="count">(${group.events.length})</span></h3>`;
         html += '<ul class="timeline-events">';
         for (const evt of group.events) {
             const time = new Date(evt.timestamp).toLocaleTimeString();

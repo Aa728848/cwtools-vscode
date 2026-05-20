@@ -63,6 +63,68 @@ export interface ChatI18nText {
         walkthrough: AnnotationI18nText;
         blueprint: AnnotationI18nText;
     };
+    runs: {
+        groups: {
+            model: string;
+            tools: string;
+            files: string;
+            permissions: string;
+            validation: string;
+            context: string;
+            subagents: string;
+            other: string;
+        };
+        inspector: {
+            noEvent: string;
+            args: string;
+            argRepairs: string;
+            targetPaths: string;
+            toolResult: string;
+            fullResult: string;
+            openFullContent: string;
+            error: string;
+            preview: string;
+            truncated: string;
+            fileChange: string;
+            path: string;
+            diff: string;
+            subagentResult: string;
+            task: string;
+            changeset: string;
+            steps: string;
+            tokens: string;
+            compactionDone: string;
+            goal: string;
+            nextSteps: string;
+            selectEventHint: string;
+            contextUsage: string;
+            agentLabel: string;
+        };
+    };
+    manager: {
+        tabs: { agents: string; runs: string; artifacts: string; tasks: string };
+        overview: {
+            topics: string; artifacts: string; steps: string; messages: string;
+            run: string; mode: string; workflow: string; status: string;
+            none: string; running: string; idle: string;
+        };
+        runs: {
+            noRun: string; runId: string; status: string;
+            metrics: { tokens: string; cost: string; tools: string; calls: string };
+            openMemory: string; cleanLargeResults: string; modifiedFiles: string;
+            subAgentChangeSets: string; compactedMemory: string;
+            cleaned: string;
+            stepsTitle: string; noSteps: string;
+            eventDetail: string; closeInspector: string;
+            copyEventJson: string; copiedEvent: string;
+            steps: { thought: string; thinking: string; toolCall: string; toolResult: string; execError: string };
+        };
+        tasks: { noTasks: string };
+        agents: {
+            noLanes: string; phase: string; done: string; running: string;
+            failed: string; task: string; steps: string; tokens: string;
+        };
+    };
 }
 
 export interface AnnotationI18nText {
@@ -226,6 +288,70 @@ const EN: ChatI18nText = {
             edit: 'Edit',
         },
     },
+    manager: {
+        tabs: { agents: 'Agents', runs: 'Runs', artifacts: 'Artifacts', tasks: 'Tasks' },
+        // placeholder — EN manager block already present below
+        overview: { topics: 'Topics', artifacts: 'Artifacts', steps: 'Steps', messages: 'Messages', run: 'Run', mode: 'Mode', workflow: 'Workflow', status: 'Status', none: 'none', running: 'running', idle: 'idle' },
+        runs: {
+            noRun: 'No active run recorded',
+            runId: 'Run ID',
+            status: 'Status',
+            metrics: { tokens: 'Tokens', cost: 'Cost', tools: 'Tools', calls: 'calls' },
+            openMemory: 'Open Memory',
+            copyEventJson: 'Copy Event JSON',
+            copiedEvent: 'Copied Event',
+            cleanLargeResults: 'Clean Large Results',
+            cleaned: 'Cleaned {deleted} large result file(s), kept {kept}, reclaimed {size}.',
+            modifiedFiles: 'Modified Files',
+            subAgentChangeSets: 'Sub-Agent Change Sets',
+            compactedMemory: 'Compacted Memory',
+            stepsTitle: 'Steps',
+            noSteps: 'No steps recorded in this run',
+            eventDetail: 'Event Detail',
+            closeInspector: 'Close',
+            steps: { thought: 'Thought / reasoning', thinking: 'Thinking process', toolCall: 'Tool Call', toolResult: 'Tool Result', execError: 'Execution Error' },
+        },
+        tasks: { noTasks: 'No tasks yet' },
+        agents: { noLanes: 'No active orchestrator lanes', phase: 'Phase', done: 'Done', running: 'Running', failed: 'Failed', task: 'Task', steps: 'steps', tokens: 'tokens' },
+    },
+    runs: {
+        groups: {
+            model: 'Model Calls',
+            tools: 'Tool Invocations',
+            files: 'File Changes',
+            permissions: 'Permissions',
+            validation: 'Validation',
+            context: 'Context & Memory',
+            subagents: 'Sub-Agents',
+            other: 'Other',
+        },
+        inspector: {
+            noEvent: 'No event selected',
+            args: 'Arguments',
+            argRepairs: 'Argument Repairs',
+            targetPaths: 'Target Paths',
+            toolResult: 'Tool Result',
+            fullResult: 'Full Result',
+            openFullContent: '📂 Open full content',
+            error: 'Error',
+            preview: 'Preview',
+            truncated: '... (truncated)',
+            fileChange: 'File Change',
+            path: 'Path',
+            diff: 'Diff',
+            subagentResult: 'Sub-Agent Result',
+            task: 'Task',
+            changeset: 'Files Written',
+            steps: 'Steps',
+            tokens: 'Tokens',
+            compactionDone: '📦 Context Compaction Complete',
+            goal: 'Goal',
+            nextSteps: 'Next Steps',
+            selectEventHint: 'Select an event to view details',
+            contextUsage: 'Context usage',
+            agentLabel: 'Agent',
+        },
+    },
 };
 
 const ZH_CN: ChatI18nText = {
@@ -373,6 +499,69 @@ const ZH_CN: ChatI18nText = {
             confirm: '确定',
             cancel: '取消',
             edit: '编辑',
+        },
+    },
+    manager: {
+        tabs: { agents: 'Agents', runs: 'Runs', artifacts: 'Artifacts', tasks: '任务' },
+        overview: { topics: '话题', artifacts: 'Artifacts', steps: '步骤', messages: '消息', run: '运行', mode: '模式', workflow: '工作流', status: '状态', none: '无', running: '运行中', idle: '空闲' },
+        runs: {
+            noRun: '暂无运行记录',
+            runId: '运行 ID',
+            status: '状态',
+            metrics: { tokens: 'Tokens', cost: '费用', tools: '工具', calls: '次' },
+            openMemory: '查看记忆',
+            copyEventJson: '复制事件 JSON',
+            copiedEvent: '已复制',
+            cleanLargeResults: '清理大型结果',
+            cleaned: '已清理 {deleted} 个大型结果文件，保留 {kept} 个，回收 {size}。',
+            modifiedFiles: '修改文件',
+            subAgentChangeSets: '子 Agent 变更集',
+            compactedMemory: '压缩记忆',
+            stepsTitle: '步骤记录',
+            noSteps: '本次运行暂无步骤记录',
+            eventDetail: '事件详情',
+            closeInspector: '关闭',
+            steps: { thought: '思考 / 推理', thinking: '思考过程', toolCall: '工具调用', toolResult: '工具结果', execError: '执行错误' },
+        },
+        tasks: { noTasks: '暂无任务' },
+        agents: { noLanes: '暂无活跃的编排器通道', phase: '阶段', done: '完成', running: '运行中', failed: '失败', task: '任务', steps: '步骤', tokens: 'tokens' },
+    },
+    runs: {
+        groups: {
+            model: '模型调用',
+            tools: '工具调用',
+            files: '文件变更',
+            permissions: '权限',
+            validation: '校验',
+            context: '上下文与记忆',
+            subagents: '子 Agent',
+            other: '其他',
+        },
+        inspector: {
+            noEvent: '无选中事件',
+            args: '参数',
+            argRepairs: '参数修复',
+            targetPaths: '影响路径',
+            toolResult: '工具结果',
+            fullResult: '完整结果',
+            openFullContent: '📂 打开完整内容',
+            error: '错误',
+            preview: '预览',
+            truncated: '... (已截断)',
+            fileChange: '文件变更',
+            path: '路径',
+            diff: 'Diff',
+            subagentResult: '子 Agent 结果',
+            task: '任务',
+            changeset: '变更集',
+            steps: '步骤',
+            tokens: 'Tokens',
+            compactionDone: '上下文压缩完成',
+            goal: '目标',
+            nextSteps: '下一步',
+            selectEventHint: '选择一个事件以查看详情',
+            contextUsage: '上下文使用率',
+            agentLabel: 'Agent',
         },
     },
 };

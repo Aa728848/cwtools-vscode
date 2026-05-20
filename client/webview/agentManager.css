@@ -35,22 +35,92 @@ body.agent-manager-shell .topics-panel {
     right: auto;
     bottom: auto;
     left: auto;
-    background: color-mix(in srgb, var(--bg) 96%, #1b1d20);
+    background: color-mix(in srgb, var(--bg) 92%, #20242a);
     min-width: 0;
     overflow: hidden;
 }
 
-body.agent-manager-shell .topics-panel-header,
-body.agent-manager-shell .topics-panel-summary,
+body.agent-manager-shell .topics-panel-header {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+}
+
+body.agent-manager-shell .topics-panel-summary {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+}
+
 body.agent-manager-shell .topics-list {
     width: 100%;
     max-width: none;
     margin: 0;
+    padding: 10px 16px 24px;
 }
 
-body.agent-manager-shell .topics-list {
-    padding-bottom: 24px;
+/* 统一左侧微件样式以匹配右侧高级质感 */
+body.agent-manager-shell .new-topic-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
 }
+
+body.agent-manager-shell .new-topic-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--focus-ring);
+}
+
+body.agent-manager-shell .topics-search-input {
+    border-color: var(--border);
+}
+
+body.agent-manager-shell .topics-search-input:focus {
+    border-color: var(--focus-ring);
+}
+
+body.agent-manager-shell .topics-search-row label {
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+body.agent-manager-shell .topics-export-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+}
+
+body.agent-manager-shell .topics-export-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--focus-ring);
+}
+
+/* 统一左侧对话项卡片样式以对齐右侧 artifacts/runs 的优雅圆角与边框 */
+body.agent-manager-shell .topic-item {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    transition: background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+body.agent-manager-shell .topic-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--focus-ring);
+}
+
+body.agent-manager-shell .topic-item-active {
+    border-color: var(--focus-ring);
+    background: rgba(100, 166, 255, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(100, 166, 255, 0.15);
+}
+
+body.agent-manager-shell .topic-state {
+    border: 1px solid var(--border);
+}
+
 
 body.agent-manager-shell .manager-overview {
     display: none;
@@ -71,7 +141,8 @@ body.agent-manager-shell .manager-inspector-tabs {
 }
 
 body.agent-manager-shell .artifact-drawer[data-active-tab="agents"] .artifact-filter-row:not(.manager-inspector-tabs),
-body.agent-manager-shell .artifact-drawer[data-active-tab="tasks"] .artifact-filter-row:not(.manager-inspector-tabs) {
+body.agent-manager-shell .artifact-drawer[data-active-tab="tasks"] .artifact-filter-row:not(.manager-inspector-tabs),
+body.agent-manager-shell .artifact-drawer[data-active-tab="runs"] .artifact-filter-row:not(.manager-inspector-tabs) {
     display: none;
 }
 
@@ -407,21 +478,24 @@ body.agent-manager-shell .manager-task-mark {
 }
 
 .run-action-btn {
-    border: 1px solid var(--vscode-button-border, var(--vscode-border));
-    background: var(--vscode-button-secondaryBackground, transparent);
-    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-    border-radius: 4px;
-    padding: 4px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--vscode-foreground, var(--fg));
+    border-radius: 6px;
+    padding: 6px 12px;
     font-size: 11px;
     cursor: pointer;
+    font-weight: 550;
+    transition: background 0.15s, border-color 0.15s;
 }
 
 .run-action-btn:hover:not(:disabled) {
-    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+    background: rgba(255, 255, 255, 0.09);
+    border-color: var(--focus-ring);
 }
 
 .run-action-btn:disabled {
-    opacity: 0.55;
+    opacity: 0.4;
     cursor: default;
 }
 
@@ -594,14 +668,16 @@ body.agent-manager-shell .manager-task-mark {
 
 .inspector-section pre,
 .run-inspector pre {
-    max-height: 260px;
+    max-height: 480px;
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-word;
-    background: color-mix(in srgb, var(--vscode-editor-background) 88%, #15181b);
-    border: 1px solid color-mix(in srgb, var(--vscode-border) 40%, transparent);
-    border-radius: 4px;
-    padding: 8px;
+    background: color-mix(in srgb, var(--bg) 95%, #1b1d20);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11.5px;
 }
 
 .inspector-empty {
@@ -733,4 +809,232 @@ body.agent-manager-shell .manager-task-mark {
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 10px;
     color: var(--vscode-editor-foreground);
+}
+
+/* ── 时间线分组折叠支持 ──────────────────────────────────────────── */
+.timeline-group-header {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.timeline-group-header:hover {
+    background: color-mix(in srgb, var(--vscode-list-hoverBackground) 60%, transparent);
+    border-radius: 4px 4px 0 0;
+}
+
+.timeline-group-header::after {
+    content: '';
+    display: inline-block;
+    margin-left: auto;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid var(--vscode-descriptionForeground);
+    transition: transform 0.15s ease;
+}
+
+.timeline-group.collapsed .timeline-group-header::after {
+    transform: rotate(-90deg);
+}
+
+.timeline-group.collapsed .timeline-events {
+    display: none;
+}
+
+/* ── 次级 inspector 侧滑栏（问题4）─────────────────────────────── */
+/*
+ * 侧滑栏挂在 document.body，fixed 定位，贴 artifactDrawer 左边界向左弹出。
+ * JS 在 updateInspectorSliderVisibility() 中动态计算 right 值（= artifactDrawer 宽度）。
+ */
+.run-inspector-slider {
+    position: fixed;
+    top: 42px; /* header 高度 */
+    bottom: 0;
+    right: 0; /* 初始贴右边，JS 会更新为 artifactDrawer 的 offsetWidth */
+    width: 0;
+    overflow: hidden;
+    background: var(--bg);
+    background: color-mix(in srgb, var(--bg) 88%, #2b2b2b);
+    border-left: 1px solid rgba(255, 255, 255, 0.14);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+    z-index: 200;
+    transition: width 0.2s ease;
+    pointer-events: none;
+    box-shadow: -24px 0 42px rgba(0, 0, 0, 0.36);
+}
+
+.run-inspector-slider.open {
+    width: clamp(280px, 24vw, 440px);
+    pointer-events: auto;
+}
+
+.run-inspector-slider-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    justify-content: space-between;
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+}
+
+.run-inspector-slider-title {
+    color: #f3f3f3;
+    font-size: 17px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.run-inspector-slider-title svg {
+    flex: 0 0 auto;
+    opacity: 0.9;
+}
+
+.run-inspector-slider-close {
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--vscode-icon-foreground, var(--fg));
+    cursor: pointer;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    line-height: 0;
+    flex: 0 0 auto;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.run-inspector-slider-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.24);
+}
+
+.run-inspector-slider-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.run-inspector-slider-body .run-inspector {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    padding: 12px;
+}
+
+.run-inspector-slider-body .run-inspector-actions {
+    margin-bottom: 12px;
+}
+
+.run-inspector-slider-body .run-action-btn {
+    background: rgba(255, 255, 255, 0.025);
+    border-color: rgba(255, 255, 255, 0.14);
+    min-height: 26px;
+    padding: 4px 10px;
+}
+
+.run-inspector-slider-body .run-action-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.24);
+}
+
+.run-inspector-slider-body .inspector-header {
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+}
+
+.run-inspector-slider-body .event-time {
+    color: var(--vscode-descriptionForeground);
+    font-size: 10px;
+}
+
+.run-inspector-slider-body .event-type-badge,
+.run-inspector-slider-body .agent-badge,
+.run-inspector-slider-body .badge,
+.run-inspector-slider-body .run-inspector code {
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    color: var(--fg);
+    font-size: 10px;
+    padding: 2px 6px;
+}
+
+.run-inspector-slider-body .inspector-section {
+    color: var(--fg);
+    line-height: 1.45;
+}
+
+.run-inspector-slider-body .inspector-section strong,
+.run-inspector-slider-body .inspector-tool-call h4,
+.run-inspector-slider-body .inspector-tool-result h4,
+.run-inspector-slider-body .inspector-file-change h4,
+.run-inspector-slider-body .inspector-subagent-result h4,
+.run-inspector-slider-body .inspector-compaction h4 {
+    color: #f3f3f3;
+}
+
+.run-inspector-slider-body .inspector-section pre,
+.run-inspector-slider-body .run-inspector pre {
+    background: color-mix(in srgb, var(--vscode-editor-background) 90%, #15181b);
+    border: 1px solid color-mix(in srgb, var(--vscode-border) 40%, transparent);
+    border-radius: 6px;
+    margin: 6px 0 0;
+    padding: 10px;
+    font-size: 11px;
+}
+
+/* Steps 折叠区域 */
+.run-steps-section {
+    border: 1px solid var(--vscode-border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--vscode-editor-background) 96%, #25282c);
+    margin-bottom: 12px;
+}
+
+.run-steps-summary {
+    cursor: pointer;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--vscode-border);
+    list-style: none;
+    user-select: none;
+}
+
+.run-steps-section:not([open]) .run-steps-summary {
+    border-bottom: none;
+    border-radius: 6px;
+}
+
+.run-steps-section[open] .run-timeline-container {
+    padding: 10px 10px 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .run-inspector-slider {
+        transition: none;
+    }
+    .timeline-group-header::after {
+        transition: none;
+    }
 }

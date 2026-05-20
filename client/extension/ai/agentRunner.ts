@@ -42,7 +42,7 @@ import { filterToolDefinitionsForMode, resolveMaxToolIterations } from './runner
 import { getWorkflow } from './workflowRegistry';
 import { WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
-import { loadResumeState, hasResumeState } from './runner/checkpoint';
+import { prepareMessagesForResume, loadResumeState, hasResumeState } from './runner/checkpoint';
 import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT } from './runner/compaction';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles } from './runner/toolScheduler';
@@ -443,7 +443,7 @@ export class AgentRunner {
             const resumeState: import('./types').AgentResumeState = {
                 timestamp: Date.now(),
                 mode,
-                messages,
+                messages: prepareMessagesForResume(messages),
                 todos: this.toolExecutor.getTodos(),
                 topicId,
             };
@@ -537,7 +537,7 @@ export class AgentRunner {
         images?: string[]
     ): Promise<GenerationResult> {
         const steps: AgentStep[] = [];
-        const mode = options?.mode ?? 'build';
+        let mode = options?.mode ?? 'build';
         const emitStep = (step: AgentStep) => {
             steps.push(step);
             options?.onStep?.(step);
@@ -554,6 +554,14 @@ export class AgentRunner {
             repeatedToolSignatureCount: 0,
             maxToolResultChars: 0,
             finalPromptTokens: 0,
+        };
+        const shouldKeepResumeState = () => steps.some(step =>
+            step.type === 'error' && String(step.content).startsWith('Max tool iterations reached')
+        );
+        const clearResumeStateIfComplete = async () => {
+            if (context.topicId && !shouldKeepResumeState()) {
+                await this.clearResumeState(context.topicId);
+            }
         };
 
         // Context object to be passed to tool executor (replaces old global assignment)
@@ -708,6 +716,8 @@ export class AgentRunner {
             const resumeState = await this.loadResumeState(context.topicId);
             if (resumeState) {
                 messages = resumeState.messages;
+                mode = resumeState.mode ?? mode;
+                options = { ...options, mode };
                 if (resumeState.todos && resumeState.todos.length > 0) {
                     void this.toolExecutor.getExternalToolHandler().todoWrite({ todos: resumeState.todos });
                 }
@@ -733,6 +743,11 @@ export class AgentRunner {
             ];
         }
 
+        if (context.topicId) {
+            options = { ...options, topicId: context.topicId, mode };
+            await this.saveResumeState(context.topicId, messages, mode);
+        }
+
         const modeLabel: Record<string, string> = {
             build: AGENT.MODE_BUILD,
             plan: AGENT.MODE_PLAN,
@@ -752,7 +767,7 @@ export class AgentRunner {
         try {
             // Wire topicId from context into options for checkpoint persistence
             if (context.topicId) {
-                options = { ...options, topicId: context.topicId };
+                options = { ...options, topicId: context.topicId, mode };
             }
 
             // Phase 1: Agent reasoning loop (with tool calls)
@@ -767,6 +782,7 @@ export class AgentRunner {
 
             // Plan / Explore / General / Review / Orchestrator mode — or no code generated — just an explanation
             if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator') {
+                await clearResumeStateIfComplete();
                 return {
                     code: '',
                     explanation: finalMessage,
@@ -784,6 +800,7 @@ export class AgentRunner {
             // Orchestrator has an independent QualityGate mechanism, and subagents do not need to be repeatedly verified.
             // In addition, the validation loop will continue to generate steps after the reasoning ends, causing the external judgment card to be inconsistent with the internal state.
             if (options?.skipValidation) {
+                await clearResumeStateIfComplete();
                 return {
                     code,
                     explanation: this.extractExplanation(finalMessage),
@@ -801,6 +818,7 @@ export class AgentRunner {
                 code, targetFile, messages, emitStep, options
             );
 
+            await clearResumeStateIfComplete();
             return {
                 ...validationResult,
                 explanation: this.extractExplanation(finalMessage),
@@ -1001,6 +1019,9 @@ export class AgentRunner {
             options?.abortSignal?.throwIfAborted();
             iteration++;
             if (runMetrics) runMetrics.iterations = iteration;
+            if (options?.topicId) {
+                await this.saveResumeState(options.topicId, messages, mode);
+            }
 
             // Batch 2.3: Periodic checkpoint save for crash recovery
             if (iteration > 1 && iteration % CHECKPOINT_INTERVAL === 0) {
@@ -1616,6 +1637,10 @@ export class AgentRunner {
                     role: 'user',
                     content: '[SYSTEM] Repeated tool-call pattern detected. Change strategy, avoid identical arguments, narrow the next action, or answer if enough information is available.',
                 });
+            }
+
+            if (options?.topicId && !forceStop) {
+                await this.saveResumeState(options.topicId, messages, mode);
             }
 
             // If forceStop was set in the emit-results loop, exit outer while now

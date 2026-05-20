@@ -128,11 +128,23 @@ sequenceDiagram
 | `runner/compaction.ts` | 历史压缩与上下文窗口辅助 |
 | `runner/checkpoint.ts` | 断点恢复元数据 |
 | `runner/writeCoordinator.ts` | `PartitionedWriteQueue` 写入协调 |
+| `runner/fallbackPolicy.ts` | 模型备选字典及 API 报错备选重试管理 |
+| `runner/cancellation.ts` | 大模型生成终止判定与异常抛出 |
+| `runner/stepEmitter.ts` | 细粒度步骤与 Token 增量流式实时广播 |
+| `runner/toolScheduler.ts` | 工具运行排它锁及跨平台路径安全规约 |
+| `runner/doomLoopDetector.ts` | 基于 FNV-1a 哈希的两阶段防死循环语义检测 |
+| `chat/bridge.ts` | 隔离沙盒 WebView 与 Extension Host 的高内聚通信桥接器 |
+| `agentSessionCoordinator.ts` | chat / manager 共用会话状态、模式、workflow、live steps |
+| `agentUiBroadcaster.ts` | 多 Webview surface 广播与定向发送 |
+| `artifactStore.ts` | Agent Artifact 的会话级存储、排序和稳定 ID |
+| `agentManagerHtml.ts` | detached Agent Manager 面板 HTML 模板 |
 | `agentTools.ts` | 工具分发、工具超时、共享黑板和 orchestrator 工具入口 |
 | `tools/registry.ts` | 工具注册、模式门控、读写分类、子 Agent 允许策略 |
 | `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配和回退 |
-| `providers.ts` | Provider 元数据、默认模型、视觉/FIM/上下文窗口能力 |
-| `promptBuilder.ts` | 系统提示词、模式提示词、项目上下文和子 Agent 提示词 |
+| `providers.ts` | Provider facade，聚合默认配置、能力和价格 |
+| `providers/models/` | 默认模型、vision/FIM/context 能力、价格表 |
+| `promptBuilder.ts` | Prompt facade、项目上下文、记忆和技能注入 |
+| `prompt/sections/` | 基础规则和各模式系统提示词构建函数 |
 | `workflowRegistry.ts` | workflow 元数据、工具策略和阶段定义 |
 | `workflowI18n.ts` / `workflowViewModel.ts` | workflow 的本地化与 UI 视图模型 |
 | `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
@@ -187,6 +199,8 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 | --- | --- |
 | `tools/definitions.ts` | 工具 JSON Schema |
 | `tools/registry.ts` | 工具注册表、模式门控、`WRITE_TOOLS` / `READ_ONLY_TOOLS` |
+| `tools/permissions.ts` | 工具模式、写权限和子 Agent 沙盒访问校验 |
+| `tools/argRepair.ts` | 工具调用参数名修复、类型转换和默认推断 |
 | `tools/fileTools.ts` | 文件读写、精确替换、补丁、本地化写入、资产部署 |
 | `tools/lspTools.ts` | LSP 查询、诊断、CWTools Deep API、缓存 |
 | `tools/externalTools.ts` | 命令、网络搜索、媒体生成/转换、外部资源 |
@@ -200,11 +214,14 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 1. `tools/definitions.ts`
 2. `types.ts`
 3. `tools/registry.ts`
-4. `agentTools.ts`
+4. `tools/permissions.ts`（如果访问策略变化）
+5. `agentTools.ts`
 
 当前注意事项：
 
 - `tools/registry.ts` 是工具读写分类和 mode gating 的事实来源。
+- `tools/permissions.ts` 从 registry 读取权限元数据，统一执行 mode/sub-agent 访问校验。
+- `tools/argRepair.ts` 在 Runner 执行工具前修复常见参数名和类型漂移。
 - `write_file`、`multi_replace_file_content`、`replace_lines`、`apply_patch`、`write_localisation` 等写工具经由 `PartitionedWriteQueue` 管理。
 - `todo_write` 是纯内存/UI 计划工具，故意不进入写文件锁。
 - `.yml` 本地化文件必须使用 `write_localisation`；通用写工具会拒绝本地化写入。
@@ -230,11 +247,12 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 
 ## Webview 层
 
-`client/webview/` 编译为浏览器端脚本。Rollup 打包 6 个入口：
+`client/webview/` 编译为浏览器端脚本。Rollup 打包 7 个入口：
 
 | 入口 | 相关文件 | 作用 |
 | --- | --- | --- |
 | `chatPanel.ts` | `chatPanel.css`, `chat/`, `messageRenderer.ts`, `svgIcons.ts` | AI 聊天 UI、workflow、设置、Artifact、计划卡、diff 展示 |
+| `agentManager.ts` | `agentManager.css`, `chatPanel.ts`, `chat/` message contracts | Detached Agent Manager，查看 agents、artifacts、tasks |
 | `guiPreview.ts` | `guiPreview.css`, `canvas.ts` | `.gui` Canvas 预览、拖拽编辑、DDS/TGA 显示 |
 | `solarSystemPreview.ts` | `solarSystemPreview.css` | 星系、轨道、行星和环世界交互预览 |
 | `eventChainPreview.ts` | `eventChainPreview.css` | Cytoscape.js 事件引用图 |
@@ -255,8 +273,11 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 - `markdown.ts`
 - `annotations.ts`
 - `contextMentions.ts`
+- `messages.chat.ts`
+- `messages.manager.ts`
+- `messages.shared.ts`
 
-`client/test/unit/webviewSmoke.test.ts` 当前承担 chat Webview 的结构契约 smoke 检查，为后续真实浏览器回归提供基础。
+`client/test/unit/webviewSmoke.test.ts` 当前承担 chat Webview 与 Agent Manager 的结构契约 smoke 检查，为后续真实浏览器回归提供基础。
 
 Webview 维护规则：
 
@@ -287,7 +308,7 @@ Webview 维护规则：
 
 | 命令 | 作用 |
 | --- | --- |
-| `npm run compile` | TypeScript 扩展编译 + Rollup Webview 打包 |
+| `npm run compile` | TypeScript 扩展编译 + Rollup Webview 打包（7 个入口） |
 | `npm run lint` | ESLint 9 检查 `client/` |
 | `npm run test:unit` | `ts-mocha` 单元测试 |
 | `npm run test:coverage` | `nyc` 覆盖率运行单元测试 |
@@ -373,6 +394,7 @@ Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。�
 - `client/extension/ai/messages.ts`
 - `client/extension/ai/workflowI18n.ts`
 - `client/webview/chat/i18n.ts`
+- `client/webview/chat/messages.*.ts`
 
 ## 目录概览
 
@@ -383,9 +405,18 @@ cwtools-vscode/
       ai/
         orchestrator/
         runner/
+        chat/
         tools/
+        prompt/
+          sections/
+        providers/
+          models/
         agentRunner.ts
         agentTools.ts
+        agentSessionCoordinator.ts
+        agentUiBroadcaster.ts
+        artifactStore.ts
+        agentManagerHtml.ts
         workflowRegistry.ts
         workflowViewModel.ts
         workflowI18n.ts
@@ -403,6 +434,8 @@ cwtools-vscode/
       codeActions.ts
     webview/
       chat/
+      agentManager.ts
+      agentManager.css
       chatPanel.ts
       messageRenderer.ts
       guiPreview.ts

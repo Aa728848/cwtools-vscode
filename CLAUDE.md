@@ -40,9 +40,10 @@ dotnet build src/Main/
 ```
 
 `npm run compile` runs `tsc -p ./tsconfig.extension.json` and then `rollup -c`.
-Rollup builds six Webview entry points into `release/bin/client/webview/`:
+Rollup builds seven Webview entry points into `release/bin/client/webview/`:
 
 - `chatPanel.ts`
+- `agentManager.ts`
 - `guiPreview.ts`
 - `solarSystemPreview.ts`
 - `eventChainPreview.ts`
@@ -68,7 +69,9 @@ release checks. `npm run test:unit` discovers tests under
 | `client/extension/entityPanel.ts` / `entityAssetParser.ts` | 3D entity preview host and asset parser |
 | `client/extension/vanillaCompare.ts` | Vanilla file comparison tools |
 | `client/extension/locDecorations.ts` | Localization editor features backed by `IndexService` |
+| `client/extension/ai/agentManagerHtml.ts` | Detached Agent Manager Webview HTML host |
 | `client/webview/chatPanel.ts` / `client/webview/chat/` | Chat Webview shell plus extracted view/model helpers |
+| `client/webview/agentManager.ts` / `agentManager.css` | Agent Manager surface for agents, artifacts, and tasks |
 | `client/webview/messageRenderer.ts` | Shared chat message rendering logic |
 | `client/webview/entityPreview.ts` | Three.js entity renderer |
 | `src/LSP/` | Reusable LSP protocol and parser layer |
@@ -101,14 +104,23 @@ The AI module lives in `client/extension/ai/`.
 
 | Path | Purpose |
 | --- | --- |
-| `agentRunner.ts` | Main reasoning loop, mode tool gating, workflow application, context compaction, checkpoints |
-| `runner/` | `compaction.ts`, `checkpoint.ts`, and `writeCoordinator.ts` helpers extracted from the runner |
-| `agentTools.ts` | Tool dispatch router and shared tool executor |
+| `agentRunner.ts` | Main reasoning loop and execution flow coordinator |
+| `runner/` | Orchestration helpers: `compaction.ts`, `checkpoint.ts`, `writeCoordinator.ts`, `fallbackPolicy.ts`, `cancellation.ts`, `stepEmitter.ts`, `toolScheduler.ts`, and `doomLoopDetector.ts` |
+| `chat/` | Extracted Webview host bridge: `bridge.ts` for sandboxed message routing |
+| `agentSessionCoordinator.ts` | Shared chat/manager session state holder |
+| `agentUiBroadcaster.ts` | Broadcasts host messages to chat and manager surfaces |
+| `artifactStore.ts` | Session-scoped artifact storage and stable artifact IDs |
+| `agentManagerHtml.ts` | HTML template for the detached Agent Manager panel |
+| `agentTools.ts` | Slim tool dispatch router to dedicated handlers |
 | `tools/registry.ts` | Canonical tool registry, mode allowlists, write/read-only classification |
-| `tools/*.ts` | File, LSP, external, and replacement tool implementations |
+| `tools/permissions.ts` | Centralized tool access validation for modes and sub-agents |
+| `tools/argRepair.ts` | Schema-aware tool-call argument repair |
+| `tools/*.ts` | Dedicated tool handlers: `fileTools.ts`, `lspTools.ts`, `memoryTools.ts`, `externalTools.ts`, and `replacerSuite.ts` |
 | `aiService.ts` | Provider HTTP clients, streaming, request shaping, provider fallbacks |
 | `providers.ts` | Built-in provider metadata and capability checks |
-| `promptBuilder.ts` | System prompts, mode prompts, project context injection |
+| `providers/models/` | Provider defaults, model capabilities, pricing table |
+| `promptBuilder.ts` | System prompts, mode prompts, project context injection facade |
+| `prompt/sections/` | Extracted base rules and mode prompt builders |
 | `workflowRegistry.ts` | Stable workflow metadata and tool policies |
 | `workflowI18n.ts` / `workflowViewModel.ts` | Localized workflow presentation for the chat UI |
 | `types.ts` | Agent mode, tool, message, artifact, and context types |
@@ -155,13 +167,16 @@ When adding or changing an AI tool, update the coordinated surfaces together:
 1. `client/extension/ai/tools/definitions.ts`: OpenAI-style JSON schema.
 2. `client/extension/ai/types.ts`: args and result contracts.
 3. `client/extension/ai/tools/registry.ts`: tool name, allowed modes, write/read-only flags, sub-agent policy.
-4. `client/extension/ai/agentTools.ts`: execution dispatch.
+4. `client/extension/ai/tools/permissions.ts`: access behavior if mode/sub-agent policy changes.
+5. `client/extension/ai/agentTools.ts`: execution dispatch.
 
 Important current tool details:
 
 - The schema file defines more than 50 tools.
 - `tools/registry.ts`, not `agentRunner.ts`, is the source of truth for
   `WRITE_TOOLS`, `READ_ONLY_TOOLS`, and tool-mode gating.
+- `tools/permissions.ts` validates mode and sub-agent access from the registry.
+- `tools/argRepair.ts` repairs common malformed tool-call arguments before execution.
 - File writes are serialized by `PartitionedWriteQueue` per target file.
 - Multi-file writes must acquire file locks in sorted path order.
 - `todo_write` is intentionally excluded from the global file-write lock path.
@@ -181,12 +196,14 @@ Webviews run in a restricted browser sandbox. They cannot access Node.js, `fs`,
 
 Use `postMessage` for all host/Webview communication:
 
-- Extension host files: `client/extension/*Panel.ts`, `client/extension/ai/chatPanel.ts`.
+- Extension host files: `client/extension/*Panel.ts`, `client/extension/ai/chatPanel.ts` (bridged via `ai/chat/bridge.ts`).
 - Webview files: `client/webview/*.ts`.
 
-The chat UI is no longer a single monolith. Shared chat helpers now live under
-`client/webview/chat/`, including workflow, topic, artifact, markdown, annotation,
-i18n, and live-step modules. Keep additional extractions aligned with that split.
+The chat UI and detached Agent Manager share host-side state through
+`AgentSessionCoordinator`, `AgentUiBroadcaster`, and `ArtifactStore`. Shared
+browser helpers live under `client/webview/chat/`, including message contracts,
+workflow, topic, artifact, markdown, annotation, i18n, and live-step modules.
+Keep additional extractions aligned with that split.
 
 Webview CSS must use VS Code theme variables such as
 `var(--vscode-editor-background)` and should support `prefers-reduced-motion`.
@@ -196,7 +213,8 @@ down.
 
 ## Provider Notes
 
-Built-in provider configs are in `client/extension/ai/providers.ts`:
+Provider compatibility helpers are exposed through `client/extension/ai/providers.ts`;
+built-in defaults live in `client/extension/ai/providers/models/defaults.ts`:
 
 - OpenAI
 - Claude / Anthropic Messages API
@@ -213,6 +231,9 @@ Built-in provider configs are in `client/extension/ai/providers.ts`:
 - Together AI
 - DeepInfra
 - OpenCode Zen
+
+`providers.ts` is the public facade. Provider defaults, model-level capability
+checks, and pricing live under `client/extension/ai/providers/models/`.
 
 Provider quirks that matter:
 

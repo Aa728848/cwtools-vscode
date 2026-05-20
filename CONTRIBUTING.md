@@ -46,9 +46,10 @@ dotnet build src/Main/
 1. `tsc -p ./tsconfig.extension.json`
 2. `rollup -c`
 
-Rollup 当前打包 6 个 Webview 入口：
+Rollup 当前打包 7 个 Webview 入口：
 
 - `client/webview/chatPanel.ts`
+- `client/webview/agentManager.ts`
 - `client/webview/guiPreview.ts`
 - `client/webview/solarSystemPreview.ts`
 - `client/webview/eventChainPreview.ts`
@@ -100,8 +101,15 @@ Webview 调试：
 client/
   extension/                  VS Code Extension Host
     ai/                       AI assistant, providers, tools, workflows, orchestrator
-      runner/                 compaction, checkpoint, write coordination
-      tools/                  schema, registry, file/LSP/external tools
+      runner/                 compaction, checkpoint, write coordinator, fallback, cancel, emitter, scheduler, doomLoop
+      chat/                   extracted webview message bridge (bridge.ts)
+      prompt/                 extracted base/mode prompt sections
+      providers/              model defaults, capabilities, pricing helpers
+      tools/                  schema, registry, dedicated handlers (file, LSP, memory, external, replacer)
+      agentSessionCoordinator.ts
+      agentUiBroadcaster.ts
+      artifactStore.ts
+      agentManagerHtml.ts
     indexing/                 shared localisation + workspace-symbol knowledge layer
     gameProfiles.ts           multi-game profile registry
     extension.ts              activation and command registration
@@ -113,6 +121,8 @@ client/
     codeActions.ts            AI quick fixes
   webview/                    browser-sandboxed Webview scripts
     chat/                     extracted chat modules
+    agentManager.ts           detached Agent Manager surface
+    agentManager.css
     chatPanel.ts
     messageRenderer.ts
     guiPreview.ts
@@ -177,6 +187,7 @@ Webview 代码运行在浏览器沙盒中：
 - 动画应支持 `prefers-reduced-motion`。
 - Three.js/WebGL 面板必须在销毁时释放 renderer、geometry、material、texture、worker、事件监听器和动画循环。
 - 新增 chat UI 逻辑时，优先沿用 `client/webview/chat/` 里的拆分模式，而不是继续膨胀 `chatPanel.ts`。
+- Chat 面板和 Agent Manager 面板共享 host-side state；涉及跨 surface 同步时检查 `AgentUiBroadcaster`、`AgentSessionCoordinator`、`ArtifactStore` 和 `ai/chat/bridge.ts`。
 
 ## 平台与索引层规范
 
@@ -195,11 +206,14 @@ Webview 代码运行在浏览器沙盒中：
 1. `client/extension/ai/tools/definitions.ts`
 2. `client/extension/ai/types.ts`
 3. `client/extension/ai/tools/registry.ts`
-4. `client/extension/ai/agentTools.ts`
+4. `client/extension/ai/tools/permissions.ts`（如果访问策略变化）
+5. `client/extension/ai/agentTools.ts`
 
 工具设计注意点：
 
 - `tools/registry.ts` 是模式门控、读写分类和子 Agent 可用性的事实来源。
+- `tools/permissions.ts` 统一读取 registry 元数据做访问校验。
+- `tools/argRepair.ts` 负责常见工具参数名/类型修复；新增 schema 字段时留意是否需要 alias。
 - 结构化读取优先级高于原始命令读取：先考虑 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context`，再考虑全文读取或 shell。
 - `run_command` 适合执行、构建、批处理和兜底查询，不应成为理解 PDXScript 结构的默认入口。
 
@@ -231,6 +245,13 @@ npm run test:unit
 当前较有代表性的测试包括：
 
 - `agentToolSafety.test.ts`
+- `agentRunnerState.test.ts` (状态机、Token 估算与 API 回退测试)
+- `agentSessionCoordinator.test.ts`
+- `agentUiBroadcaster.test.ts`
+- `agentManagerContracts.test.ts`
+- `artifactStore.test.ts`
+- `argRepair.test.ts`
+- `promptBuilderSnapshot.test.ts` (系统提示词防漂移快照测试)
 - `runnerPolicy.test.ts`
 - `contextBudget.test.ts`
 - `gameProfiles.test.ts`

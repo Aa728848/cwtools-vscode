@@ -4,6 +4,69 @@ import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidat
 import type { AgentResumeState, ChatMessage, AgentMode } from '../types';
 import type { AgentToolExecutor } from '../agentTools';
 
+function cloneChatMessage(message: ChatMessage): ChatMessage {
+    return {
+        ...message,
+        content: Array.isArray(message.content)
+            ? message.content.map(part => part.type === 'image_url'
+                ? { ...part, image_url: { ...part.image_url } }
+                : { ...part })
+            : message.content,
+        tool_calls: message.tool_calls?.map(call => ({
+            ...call,
+            function: { ...call.function },
+        })),
+    };
+}
+
+/**
+ * Return a provider-safe resume transcript.
+ *
+ * OpenAI-compatible APIs reject an assistant message that contains tool_calls
+ * unless every tool call is followed by a matching tool response. A crash or
+ * abort can happen after the assistant tool_calls are appended but before the
+ * tool results are recorded. Fill those gaps with explicit interrupted tool
+ * results so the next run can continue from the latest transcript instead of
+ * failing before the model sees the recovery context.
+ */
+export function prepareMessagesForResume(messages: ChatMessage[]): ChatMessage[] {
+    const normalized = messages.map(cloneChatMessage);
+
+    for (let i = 0; i < normalized.length; i++) {
+        const message = normalized[i];
+        const toolCalls = message?.role === 'assistant' ? message.tool_calls : undefined;
+        if (!toolCalls || toolCalls.length === 0) continue;
+
+        let cursor = i + 1;
+        const answeredCallIds = new Set<string>();
+        while (cursor < normalized.length && normalized[cursor]?.role === 'tool') {
+            const toolCallId = normalized[cursor]?.tool_call_id;
+            if (toolCallId) answeredCallIds.add(toolCallId);
+            cursor++;
+        }
+
+        const missingResults = toolCalls
+            .filter(call => !answeredCallIds.has(call.id))
+            .map(call => ({
+                role: 'tool' as const,
+                content: JSON.stringify({
+                    success: false,
+                    interrupted: true,
+                    error: `Tool '${call.function.name}' did not return before the previous run stopped. Re-read current state before retrying.`,
+                }),
+                tool_call_id: call.id,
+                name: call.function.name,
+            }));
+
+        if (missingResults.length > 0) {
+            normalized.splice(cursor, 0, ...missingResults);
+            i = cursor + missingResults.length - 1;
+        }
+    }
+
+    return normalized;
+}
+
 /** 
 * Save the current Agent state to disk for recovery in the event of an IDE restart or crash. 
 * (Checkpoint/Resume) 
@@ -25,7 +88,7 @@ export async function saveResumeState(
         const resumeState: AgentResumeState = {
             timestamp: Date.now(),
             mode,
-            messages,
+            messages: prepareMessagesForResume(messages),
             todos: toolExecutor.getTodos(),
             topicId,
         };

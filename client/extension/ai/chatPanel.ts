@@ -25,6 +25,7 @@ import type {
     DiffSummaryFile,
     GenerationResult,
 } from './types';
+import { contentToString } from './types';
 import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
 import { UsageTracker } from './usageTracker';
@@ -497,6 +498,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.topicManager.createNewTopic(visibleUserText);
         }
 
+        const normalizedText = text.trim().toLowerCase();
+        if (!resumeFromState
+            && this.topicManager.currentTopic?.id
+            && /^(continue|resume|继续|继续执行|接着来)$/.test(normalizedText)
+            && await this.agentRunner.hasResumeState(this.topicManager.currentTopic.id)) {
+            resumeFromState = true;
+        }
+
         // Track message index for retract support
         const messageIndex = this.topicManager.currentTopic!.messages.length;
 
@@ -513,7 +522,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             
             // When a new task starts, clean up old breakpoint snapshots to prevent context pollution.
             if (this.topicManager.currentTopic?.id) {
-                void this.agentRunner.clearResumeState(this.topicManager.currentTopic.id);
+                await this.agentRunner.clearResumeState(this.topicManager.currentTopic.id);
             }
         }
 
@@ -590,10 +599,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const assistantContent = result.code
                 ? `${result.explanation}\n\`\`\`pdx\n${result.code}\n\`\`\``
                 : result.explanation;
-            this.conversationMessages.push(
-                { role: 'user', content: userHistoryContent },
-                { role: 'assistant', content: assistantContent }
-            );
+            const lastConversationMessage = this.conversationMessages[this.conversationMessages.length - 1];
+            const shouldAppendUserHistory = !resumeFromState
+                || lastConversationMessage?.role !== 'user'
+                || contentToString(lastConversationMessage.content) !== text;
+            if (shouldAppendUserHistory) {
+                this.conversationMessages.push({ role: 'user', content: userHistoryContent });
+            }
+            this.conversationMessages.push({ role: 'assistant', content: assistantContent });
 
             // ── Plan/Orchestrator mode: suppress explanation in chat, auto-open annotation panel ──
             // If the AI is just asking clarification questions (indicated by :::question syntax
@@ -1597,13 +1610,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (!this.topicManager.currentTopic || this.topicManager.currentTopic.messages.length < 1) return;
 
         const lastMsg = this.topicManager.currentTopic.messages[this.topicManager.currentTopic.messages.length - 1];
-        const isInterrupted = lastMsg?.role === 'user';
-
-        if (isInterrupted) {
-            const topicId = this.topicManager.currentTopic.id;
-            const resumeState = await this.agentRunner.loadResumeState(topicId);
-            if (resumeState) {
-                await this.handleUserMessage(lastMsg.content, lastMsg.images, undefined, false, false, true);
+        const topicId = this.topicManager.currentTopic.id;
+        const resumeState = await this.agentRunner.loadResumeState(topicId);
+        if (resumeState) {
+            if (lastMsg?.role === 'assistant') {
+                this.topicManager.currentTopic.messages.pop();
+                this.conversationMessages.pop();
+            }
+            const lastUserMsg = this.topicManager.currentTopic.messages[this.topicManager.currentTopic.messages.length - 1];
+            if (lastUserMsg?.role === 'user') {
+                await this.handleUserMessage(lastUserMsg.content, lastUserMsg.images, undefined, false, false, true, lastUserMsg.displayContent, lastUserMsg.contexts);
                 return;
             }
         }

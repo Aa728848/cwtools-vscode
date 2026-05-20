@@ -738,7 +738,7 @@ export class ExternalToolHandler {
         // In confirm mode → normal permission prompt; in auto mode → still requires explicit confirmation.
         const INTERPRETER_INLINE = [/\bnode\b\s+-e/i, /\bpython\b\s+-c/i];
         const isInterpreterInline = INTERPRETER_INLINE.some(pat => pat.test(args.command));
-        const MODE_BLOCKED = isUtilityMode ? [] : [/\bpowershell\b/i, /\bpwsh\b/i];
+        const MODE_BLOCKED: RegExp[] = [];
         const ALWAYS_BLOCKED = [...DESTRUCTIVE_BLOCKED, ...MODE_BLOCKED];
         const PIPE_REDIRECT_BLOCKED = [
             /\|/,               // pipe operator

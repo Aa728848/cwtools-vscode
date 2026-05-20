@@ -776,13 +776,18 @@ export class AgentToolExecutor {
                 globalSignal.addEventListener('abort', onGlobalAbort);
             }
 
+            const onBeforeFileWrite =
+                context?.onBeforeFileWrite
+                ?? runnerOpts?.onBeforeFileWrite
+                ?? this.onBeforeFileWrite;
+
             const options: import('./orchestrator/types').OrchestratorOptions = {
                 providerId: runnerOpts?.providerId,
                 model: runnerOpts?.model,
                 abortSignal: localAbort.signal,
                 topicId: runnerOpts?.topicId,
                 onStep: context?.onStep,
-                onBeforeFileWrite: runnerOpts?.onBeforeFileWrite,
+                onBeforeFileWrite,
                 onTodoUpdate: context?.onTodoUpdate || runnerOpts?.onTodoUpdate,
                 // Do not pass the parent permission callback into orchestrator workers.
                 // Sub-agents are non-interactive and install their own deny callback.
@@ -873,6 +878,15 @@ export class AgentToolExecutor {
                         },
                         { agentId: id, status: agentResult.success ? 'done' : 'failed' }
                     ).catch(() => {});
+                    for (const filePath of agentResult.writtenFiles ?? []) {
+                        if (typeof filePath !== 'string' || !filePath) continue;
+                        await runLedger.appendEvent(
+                            parentRun.runId,
+                            'file_change',
+                            { filePath, source: 'subagent', taskNodeId: id },
+                            { agentId: id, status: agentResult.success ? 'done' : 'failed' }
+                        ).catch(() => {});
+                    }
                 }
                 agentSummaries.push({
                     id,

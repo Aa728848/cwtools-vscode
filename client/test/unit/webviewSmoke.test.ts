@@ -103,7 +103,9 @@ describe('webview smoke checks', () => {
         expect(script).to.include('function clearTopicWorkspaceState()');
         expect(script).to.include('sideDiffEntries.length = 0;');
         expect(script).to.include('activeResponsiveWorkspace = null;');
-        expect(script).to.include("case 'clearChat':\n                if (!isCurrentSurface(msg.targetSurface)) break;\n                clearTopicWorkspaceState();");
+        expect(script).to.include("case 'clearChat':");
+        expect(script).to.include('clearActiveSubagentViews();');
+        expect(script).to.include('clearTopicWorkspaceState();');
     });
 
     it('release bundle exists and is non-empty after compile', () => {

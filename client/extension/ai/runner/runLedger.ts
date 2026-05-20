@@ -155,6 +155,12 @@ export class RunLedger {
             if (!run.writtenFiles.includes(payload.filePath)) {
                 run.writtenFiles.push(payload.filePath);
             }
+        } else if (type === 'subagent_end' && Array.isArray(payload?.filesWritten)) {
+            for (const filePath of payload.filesWritten) {
+                if (typeof filePath === 'string' && filePath && !run.writtenFiles.includes(filePath)) {
+                    run.writtenFiles.push(filePath);
+                }
+            }
         } else if (type === 'metrics_updated') {
             run.metrics = { ...run.metrics, ...payload.metrics };
         }

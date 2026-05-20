@@ -1872,7 +1872,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         summary: 'Restored from chat history.',
                         filePath: step.content,
                         relPath: step.content,
-                        status: 'pending',
+                        status: step.uiState === 'approved' ? 'done' : 'pending',
                         createdAt: stamp,
                     });
                 } else if (step.type === 'blueprint_card') {
@@ -1883,7 +1883,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         summary: 'Restored from chat history.',
                         filePath: step.content,
                         relPath: step.content,
-                        status: 'pending',
+                        status: step.uiState === 'approved' ? 'done' : 'pending',
                         createdAt: stamp,
                     });
                 } else if (step.type === 'walkthrough_card') {
@@ -2207,6 +2207,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
 
     function scrollBottom(force = false) {
+        const activeSubagent = document.querySelector('.subagent-fullscreen-view.active') as HTMLElement | null;
+        if (!force && activeSubagent) {
+            const applySubagentScroll = () => {
+                activeSubagent.scrollTop = activeSubagent.scrollHeight;
+            };
+            applySubagentScroll();
+            requestAnimationFrame(applySubagentScroll);
+            return;
+        }
         if (force || !isUserScrolledUp) {
             const applyScroll = () => {
                 chatArea.scrollTop = chatArea.scrollHeight;
@@ -2683,9 +2692,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     // ── Global Drill-Down Functions ───────────────────────────────────────────
+    function clearActiveSubagentViews(): void {
+        document.querySelectorAll('.subagent-fullscreen-view.active').forEach(el => {
+            el.classList.remove('active');
+        });
+        document.body.classList.remove('has-active-subagent');
+    }
+
     (window as any).openSubagentView = (id: string) => {
         const el = document.getElementById(id);
         if (el) {
+            document.querySelectorAll('.subagent-fullscreen-view.active').forEach(active => {
+                if (active !== el) active.classList.remove('active');
+            });
             el.classList.add('active');
             document.body.classList.add('has-active-subagent');
         }
@@ -2694,7 +2713,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const el = document.getElementById(id);
         if (el) {
             el.classList.remove('active');
-            document.body.classList.remove('has-active-subagent');
+            if (!document.querySelector('.subagent-fullscreen-view.active')) {
+                document.body.classList.remove('has-active-subagent');
+            }
         }
     };
 
@@ -3746,6 +3767,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'addUserMessage':
                 removeReplayBanners();
+                clearActiveSubagentViews();
                 setGenerating(true);
                 if (subagentTicker) {
                     clearInterval(subagentTicker);
@@ -3760,6 +3782,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'startBackgroundGeneration':
                 removeReplayBanners();
+                clearActiveSubagentViews();
                 setGenerating(true);
                 if (subagentTicker) {
                     clearInterval(subagentTicker);
@@ -3778,6 +3801,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
             case 'generationComplete': {
                 removeReplayBanners();
+                clearActiveSubagentViews();
                 setGenerating(false);
                 if (subagentTicker) {
                     clearInterval(subagentTicker);
@@ -3845,6 +3869,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'generationError': {
                 removeReplayBanners();
+                clearActiveSubagentViews();
                 setGenerating(false);
                 streamStates.clear();
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
@@ -3855,7 +3880,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 isShowingFloatingCard = false;
                 document.querySelectorAll('.permission-card, .diff-card').forEach(el => dismissCard(el as HTMLElement, 0));
 
-                const errNode = buildAssistantMessage(svgIcon('x') + ' ' + msg.error, [], Date.now());
+                const errNode = buildAssistantMessage(String(msg.error || ''), [], Date.now());
+                errNode.classList.add('assistant-error-message');
+                const errBubble = errNode.querySelector('.msg-bubble');
+                if (errBubble) {
+                    const icon = document.createElement('span');
+                    icon.className = 'assistant-error-icon';
+                    icon.innerHTML = svgIconNoMargin('x');
+                    errBubble.prepend(document.createTextNode(' '));
+                    errBubble.prepend(icon);
+                }
                 if (msg.canResume) {
                     const resumeBtn = document.createElement('button');
                     resumeBtn.className = 'resume-btn';
@@ -3882,6 +3916,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'clearChat':
                 if (!isCurrentSurface(msg.targetSurface)) break;
+                clearActiveSubagentViews();
                 clearTopicWorkspaceState();
                 while (chatArea.firstChild) chatArea.removeChild(chatArea.firstChild);
                 emptyState.style.display = '';
@@ -3957,6 +3992,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'loadTopicMessages':
                 if (!isCurrentSurface(msg.targetSurface)) break;
+                clearActiveSubagentViews();
                 chatArea.innerHTML = '';
                 messageIndexMap.clear();
                 restoreArtifactsFromMessages(msg.messages || []);
@@ -3970,20 +4006,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         scrollBottom();
                         // Restore custom UI cards from steps
                         if (m.steps) {
-                            const pCard = m.steps.find((s: any) => s.type === 'plan_card');
-                            if (pCard && pCard.toolResult && pCard.uiState !== 'approved') {
+                            const pCard = m.steps.find((s: any) => s.type === 'plan_card' && s.uiState === 'pending');
+                            if (pCard && pCard.toolResult) {
                                 window.dispatchEvent(new MessageEvent('message', {
                                     data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content, mode: pCard.mode }
                                 }));
                             }
-                            const wtCard = m.steps.find((s: any) => s.type === 'walkthrough_card');
-                            if (wtCard && wtCard.toolResult && wtCard.uiState !== 'approved') {
+                            const wtCard = m.steps.find((s: any) => s.type === 'walkthrough_card' && s.uiState === 'pending');
+                            if (wtCard && wtCard.toolResult) {
                                 window.dispatchEvent(new MessageEvent('message', {
                                     data: { type: 'renderWalkthrough', sections: wtCard.toolResult }
                                 }));
                             }
-                            const bpCard = m.steps.find((s: any) => s.type === 'blueprint_card');
-                            if (bpCard && bpCard.toolResult && bpCard.uiState !== 'approved') {
+                            const bpCard = m.steps.find((s: any) => s.type === 'blueprint_card' && s.uiState === 'pending');
+                            if (bpCard && bpCard.toolResult) {
                                 window.dispatchEvent(new MessageEvent('message', {
                                     data: { type: 'renderBlueprint', sections: bpCard.toolResult, planText: bpCard.content }
                                 }));

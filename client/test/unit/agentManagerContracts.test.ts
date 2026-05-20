@@ -125,9 +125,9 @@ describe('agent manager cross-surface contracts', () => {
         expect(hostBridge).to.include('markLatestInteractiveCardApproved');
         expect(hostBridge).to.include("['plan_card', 'blueprint_card']");
         expect(hostBridge).to.include("['walkthrough_card']");
-        expect(webview).to.include("pCard.uiState !== 'approved'");
-        expect(webview).to.include("wtCard.uiState !== 'approved'");
-        expect(webview).to.include("bpCard.uiState !== 'approved'");
+        expect(webview).to.include("pCard = m.steps.find((s: any) => s.type === 'plan_card' && s.uiState === 'pending')");
+        expect(webview).to.include("wtCard = m.steps.find((s: any) => s.type === 'walkthrough_card' && s.uiState === 'pending')");
+        expect(webview).to.include("bpCard = m.steps.find((s: any) => s.type === 'blueprint_card' && s.uiState === 'pending')");
         expect(webview).to.include('function removeReplayBanners(): void');
         expect(webview).to.include("window.addEventListener('focus', removeReplayBanners);");
         expect(webview).to.include('currentAssistantDiv = initLiveAssistantDiv();');

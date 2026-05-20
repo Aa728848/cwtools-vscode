@@ -234,6 +234,7 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .user-role { opacity: 0.7; }
 .ai-star { flex-shrink: 0; }
 .msg-bubble { line-height: 1.65; word-break: break-word; padding: 1px 0; font-size: 13px; }
+.assistant-error-icon { display: inline-flex; align-items: center; color: var(--error); vertical-align: -2px; margin-right: 4px; }
 .user-bubble { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px; padding: 10px 13px; margin-left: 0; white-space: pre-wrap; }
 .msg-bubble code { background: rgba(255,255,255,0.1); border-radius: 3px; padding: 0 3px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12.5px; }
 .msg-bubble pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 6px 0; font-size: 13px; font-family: var(--vscode-editor-font-family, monospace); }
@@ -1270,11 +1271,12 @@ body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
 /* ── 下钻视图 (Drill-Down View) ── */
 .subagent-fullscreen-view {
     display: none;
-    position: absolute; /* Relative to .chat-area */
-    top: 0; left: 0; right: 0; bottom: 0;
+    position: fixed;
+    top: 42px; left: 0; right: 0; bottom: 0;
     background: var(--vscode-editor-background);
     z-index: 100;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 14px;
 }
 .subagent-fullscreen-view.active {
@@ -1398,8 +1400,8 @@ body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
     /* 💡 高保真设计：子 Agent 独立视图以局部绝对定位靠于右侧 50% */
     body.has-active-subagent .subagent-fullscreen-view.active {
         display: block !important;
-        position: absolute !important;
-        top: 0 !important;
+        position: fixed !important;
+        top: 42px !important;
         bottom: 0 !important;
         left: calc(50% + 12px) !important;
         right: 0 !important;

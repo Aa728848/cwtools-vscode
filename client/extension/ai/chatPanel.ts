@@ -1303,7 +1303,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'renderPlan', sections, planText, mode: this.currentMode });
 
             if (steps) {
-                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode: this.currentMode, timestamp: Date.now() });
+                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode: this.currentMode, uiState: 'pending', timestamp: Date.now() });
             }
 
         }
@@ -1344,7 +1344,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'renderWalkthrough', sections });
 
             if (steps) {
-                steps.push({ type: 'walkthrough_card', content: filePath, toolResult: sections, timestamp: Date.now() });
+                steps.push({ type: 'walkthrough_card', content: filePath, toolResult: sections, uiState: 'pending', timestamp: Date.now() });
                 this.topicManager.saveTopics();
             }
 
@@ -1388,7 +1388,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.postMessage({ type: 'renderBlueprint', sections, planText: content });
 
             if (steps) {
-                steps.push({ type: 'blueprint_card', content: filePath, toolResult: sections, timestamp: Date.now() });
+                steps.push({ type: 'blueprint_card', content: filePath, toolResult: sections, uiState: 'pending', timestamp: Date.now() });
                 this.topicManager.saveTopics();
             }
 
@@ -1657,8 +1657,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async loadTopic(topicId: string): Promise<void> {
         this.clearArtifacts();
         this.conversationMessages = this.topicManager.loadTopic(topicId);
-        const hasResume = await this.agentRunner.hasResumeState(topicId);
-        if (hasResume) {
+        const resumeState = await this.agentRunner.loadResumeState(topicId);
+        if (resumeState) {
+            const topic = this.topicManager.currentTopic;
+            const lastAssistant = [...(topic?.messages ?? [])]
+                .reverse()
+                .find(message => message.role === 'assistant' && message.timestamp);
+            if (lastAssistant?.timestamp && lastAssistant.timestamp >= (resumeState.timestamp ?? 0) - 1000) {
+                await this.agentRunner.clearResumeState(topicId);
+                return;
+            }
             this.postMessage({ type: 'generationError', error: '当前会话包含未完成的任务快照。', canResume: true });
         }
     }
@@ -2022,10 +2030,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         for (let messageIndex = topic.messages.length - 1; messageIndex >= 0; messageIndex--) {
             const steps = topic.messages[messageIndex]?.steps;
             if (!steps) continue;
+            let changed = false;
             for (let stepIndex = steps.length - 1; stepIndex >= 0; stepIndex--) {
-                const step = steps[stepIndex];
+                const step = steps[stepIndex] as any;
                 if (!step || !types.includes(step.type as any) || step.uiState === 'approved') continue;
                 step.uiState = 'approved';
+                changed = true;
+            }
+            if (changed) {
                 this.topicManager.saveTopics();
                 return;
             }

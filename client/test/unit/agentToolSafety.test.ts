@@ -990,4 +990,50 @@ describe('agent tool progress and aborts', () => {
             clock.restore();
         }
     });
+
+    it('routes dynamic MCP tool names without treating them as unknown registry tools', async () => {
+        const executor = createExecutor();
+        const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true, routed: true });
+
+        const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
+            runnerOptions: { mode: 'build' },
+        } as any) as any;
+
+        expect(result).to.deep.include({ success: true, routed: true });
+        expect(executeInternal.calledOnce).to.equal(true);
+        expect(executeInternal.firstCall.args[0]).to.equal('mcp_filesystem_read_file');
+    });
+
+    it('keeps generic mcp_call behind normal registry mode validation', async () => {
+        const executor = createExecutor();
+        const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true });
+
+        const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
+            runnerOptions: { mode: 'build' },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include("Tool 'mcp_call' is not allowed in current mode 'build'");
+        expect(executeInternal.called).to.equal(false);
+    });
+
+    it('blocks sub-agents from manually invoking git_ops or run_command at runtime', async () => {
+        const executor = createExecutor();
+        const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true });
+        const context = {
+            runnerOptions: {
+                mode: 'orchestrator',
+                useSlimPrompt: true,
+            },
+        } as any;
+
+        const gitResult = await executor.execute('git_ops', { operation: 'status' }, context) as any;
+        const commandResult = await executor.execute('run_command', { command: 'git status' }, context) as any;
+
+        expect(gitResult.success).to.equal(false);
+        expect(gitResult.message).to.include('git_ops is disabled');
+        expect(commandResult.exitCode).to.equal(1);
+        expect(commandResult.stderr).to.include('run_command is disabled');
+        expect(executeInternal.called).to.equal(false);
+    });
 });

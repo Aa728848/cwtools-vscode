@@ -28,6 +28,7 @@ import type {
 import { AgentRunner } from './agentRunner';
 import { AIService } from './aiService';
 import { UsageTracker } from './usageTracker';
+import { routeWebviewMessage } from './chat/bridge';
 import { getChatPanelHtml } from './chatHtml';
 import { getAgentManagerHtml } from './agentManagerHtml';
 import { ChatTopicManager } from './chatTopics';
@@ -74,10 +75,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private view?: vs.WebviewView;
     private managerPanel?: vs.WebviewPanel;
-    private readonly session = new AgentSessionCoordinator();
-    private readonly broadcaster = new AgentUiBroadcaster();
-    private readonly artifactStore = new ArtifactStore(() => this.topicManager.currentTopic?.id ?? 'session');
-    private conversationMessages: ChatMessage[] = [];
+    public readonly session = new AgentSessionCoordinator();
+    public readonly broadcaster = new AgentUiBroadcaster();
+    public readonly artifactStore = new ArtifactStore(() => this.topicManager.currentTopic?.id ?? 'session');
+    public conversationMessages: ChatMessage[] = [];
     private abortController: AbortController | null = null;
     /**
      * Per-message file snapshots for retract/undo support.
@@ -96,7 +97,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * (e.g. plan file) to register themselves into the same snapshot.
      */
     private _currentMessageSnapshots: FileSnapshot[] | null = null;
-
     // ── Shared ContentProvider for insertCodeWithDiff (M5 fix) ───────────────
     // Lazily registered once and reused for all code-insert previews.
     // The mutable `_previewContent` field is updated before each diff view.
@@ -106,9 +106,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private _viewDisposables: vs.Disposable[] = [];
     /** Disposables for detached Agent Manager panel listeners */
     private _managerDisposables: vs.Disposable[] = [];
-    private topicManager!: ChatTopicManager;
-    private settingsManager!: ChatSettingsManager;
-    private contextReferences: ContextReferenceManager;
+    public topicManager!: ChatTopicManager;
+    public settingsManager!: ChatSettingsManager;
+    public contextReferences: ContextReferenceManager;
 
     private get currentMode(): AgentMode {
         return this.session.currentMode;
@@ -151,11 +151,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     constructor(
-        private extensionUri: vs.Uri,
-        private agentRunner: AgentRunner,
-        private aiService: AIService,
-        private usageTracker: UsageTracker,
-        private storageUri: vs.Uri | undefined
+        public extensionUri: vs.Uri,
+        public agentRunner: AgentRunner,
+        public aiService: AIService,
+        public usageTracker: UsageTracker,
+        public storageUri: vs.Uri | undefined
     ) {
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
@@ -221,6 +221,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Restore the full panel state after the WebView is (re)created or becomes
      * visible again. Called on initial load and on every onDidChangeVisibility(true).
      */
+    public restoreViewState(targetSurface?: 'chat' | 'manager', replayLiveSteps = true): void {
+        this._restoreViewState(targetSurface, replayLiveSteps);
+    }
+
     private _restoreViewState(targetSurface?: 'chat' | 'manager', replayLiveSteps = true): void {
         const send = (msg: HostMessage) => {
             if (targetSurface) {
@@ -270,246 +274,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // ─── Message Handling ────────────────────────────────────────────────────
 
     private async handleWebViewMessage(msg: WebViewMessage, sourceSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
-        switch (msg.type) {
-            case 'sendMessage':
-                await this.handleUserMessage(msg.text, msg.images, msg.attachedFiles);
-                break;
-            case 'sendMessageWithReference': {
-                const referencePrompt = await this.contextReferences.buildReferencePrompt(msg.contexts);
-                const displayText = msg.text.trim();
-                const agentText = [
-                    referencePrompt,
-                    msg.text || 'Please use the referenced context above.',
-                ].filter(Boolean).join('\n\n');
-
-                await this.handleUserMessage(agentText, msg.images, undefined, false, false, false, displayText, msg.contexts);
-                break;
-            }
-            case 'openContextReference':
-                await this.contextReferences.openReference(msg.context);
-                break;
-            case 'insertCode':
-                await this.insertCodeWithDiff(msg.code);
-                break;
-            case 'copyCode':
-                await vs.env.clipboard.writeText(msg.code);
-                vs.window.showInformationMessage('代码已复制到剪贴板');
-                break;
-            case 'resumeGeneration':
-            case 'regenerate':
-                await this.regenerateLastResponse();
-                break;
-            case 'newTopic':
-                this.startNewTopic();
-                break;
-            case 'loadTopic':
-                void this.loadTopic(msg.topicId);
-                break;
-            case 'deleteTopic':
-                this.deleteTopic(msg.topicId);
-                break;
-            case 'renameTopic':
-                this.topicManager.renameTopic(msg.topicId, msg.title);
-                break;
-            case 'forkTopic':
-                this.forkTopic(msg.topicId, msg.messageIndex);
-                break;
-            case 'archiveTopic':
-                this.archiveTopic(msg.topicId);
-                break;
-            case 'pinTopic':
-                this.topicManager.setPinned(msg.topicId, msg.pinned);
-                this.sendManagerSnapshot();
-                break;
-            case 'setTopicWorkspace':
-                this.topicManager.setWorkspace(msg.topicId, msg.workspaceId, msg.workspaceLabel);
-                this.sendManagerSnapshot();
-                break;
-            case 'setShowArchived':
-                this.topicManager.setShowArchived(msg.show);
-                break;
-            case 'configureProvider':
-            case 'openSettings':
-                await this.settingsManager.openSettingsPage(sourceSurface);
-                await this.settingsManager.getSkillsList();
-                break;
-            case 'saveSettings':
-                await this.settingsManager.saveSettings(msg.settings, sourceSurface);
-                break;
-            case 'detectOllamaModels':
-                await this.settingsManager.detectOllamaModels(msg.endpoint);
-                break;
-            case 'fetchApiModels':
-                await this.settingsManager.fetchApiModels(msg.providerId, msg.endpoint, msg.apiKey);
-                break;
-            case 'deleteApiKey':
-                await this.settingsManager.deleteApiKey(msg.providerId, sourceSurface);
-                break;
-            case 'testConnection':
-                await this.settingsManager.testConnection(msg.settings);
-                break;
-            case 'deleteDynamicModel':
-                await this.settingsManager.deleteDynamicModel(msg.providerId, msg.modelId);
-                break;
-            case 'installSkill':
-                await this.settingsManager.installSkill(msg.source);
-                break;
-            case 'deleteSkill':
-                await this.settingsManager.deleteSkill(msg.skill);
-                break;
-            case 'cancelGeneration':
-                this.cancelGeneration();
-                break;
-            case 'switchMode':
-                this.switchMode(msg.mode);
-                break;
-            case 'switchWorkflow':
-                this.switchWorkflow(msg.workflowId);
-                break;
-            case 'openAgentManager':
-                await this.openAgentManager();
-                break;
-            case 'retractMessage':
-                // Fix #3: retractMessage is async — must await to catch errors
-                await this.retractMessage(msg.messageIndex);
-                break;
-            case 'confirmWriteFile':
-                this.postMessage({ type: 'floatingCardResolved', card: 'write', id: msg.messageId });
-                void this.resolveWriteConfirmation(msg.messageId, true);
-                break;
-            case 'cancelWriteFile':
-                this.postMessage({ type: 'floatingCardResolved', card: 'write', id: msg.messageId });
-                void this.resolveWriteConfirmation(msg.messageId, false);
-                break;
-            case 'approveTransaction':
-                this.postMessage({ type: 'floatingCardResolved', card: 'transaction', id: msg.txId });
-                void this.agentRunner.commitTransaction(msg.txId);
-                break;
-            case 'rejectTransaction':
-                this.postMessage({ type: 'floatingCardResolved', card: 'transaction', id: msg.txId });
-                this.agentRunner.discardTransaction(msg.txId);
-                break;
-            case 'quickChangeModel':
-                await this.settingsManager.quickChangeModel(msg.model);
-                break;
-            case 'slashCommand':
-                await this.handleSlashCommand(msg.command);
-                break;
-            case 'permissionResponse':
-                this.postMessage({ type: 'floatingCardResolved', card: 'permission', id: msg.permissionId });
-                this.resolvePermissionRequest(msg.permissionId, msg.allowed, msg.alwaysAllow);
-                break;
-            case 'openPlanFile': {
-                // Open the plan file - supports shared path candidate search
-                const planPath = this.resolveArtifactFilePath(msg.filePath);
-                if (planPath) {
-                    void vs.commands.executeCommand('markdown.showPreview', vs.Uri.file(planPath));
-                } else {
-                    vs.window.showWarningMessage(`无法找到计划文件: ${path.basename(msg.filePath)}`);
-                }
-                break;
-            }
-            case 'openArtifact':
-                await this.openArtifact(msg.artifactId, msg.file);
-                break;
-            case 'submitPlanAnnotations': {
-                this.markLatestInteractiveCardApproved(['plan_card', 'blueprint_card']);
-                this.postMessage({ type: 'floatingCardResolved', card: 'plan' });
-                this.postMessage({ type: 'floatingCardResolved', card: 'blueprint' });
-                let contextStr = '';
-                if (msg.annotations && msg.annotations.length > 0) {
-                    contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
-                }
-
-                if (this.currentMode === 'orchestrator') {
-                    // In coordination mode: keep the mode unchanged and instruct AI to start distributing tasks
-                    const prompt = '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。' + contextStr;
-                    await this.handleUserMessage(prompt, undefined, undefined, true, true);
-                } else {
-                    //Normal planning mode: automatically switch to build mode
-                    this.switchMode('build');
-                    const prompt = '同意执行。请根据最新生成的计划进行构建。\n\n⚠️ 重要要求：你必须首先使用 `todo_write` 工具将该计划的所有步骤转化为详细的子任务列表（即 task 线路），在开始任何 `write_file` 或其他构建操作之前完成这一步！' + contextStr;
-                    await this.handleUserMessage(prompt, undefined, undefined, true, true);
-                }
-                break;
-            }
-            case 'revisePlanWithAnnotations': {
-                this.postMessage({ type: 'floatingCardResolved', card: 'plan' });
-                this.postMessage({ type: 'floatingCardResolved', card: 'blueprint' });
-                let reviseContext = '';
-                if (msg.annotations && msg.annotations.length > 0) {
-                    reviseContext = '\n\n需要修改的地方批注如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
-                }
-                const revisePrompt = '请根据我的批注考虑改进现有的执行计划，重新完善计划。' + reviseContext;
-                // keep current mode ('plan'), do not auto-switch since it's just revising
-                await this.handleUserMessage(revisePrompt, undefined, undefined, true, true);
-                break;
-            }
-            case 'reviseWalkthroughWithAnnotations': {
-                this.postMessage({ type: 'floatingCardResolved', card: 'walkthrough' });
-                let reviseWtContext = '';
-                if (msg.annotations && msg.annotations.length > 0) {
-                    reviseWtContext = '\n\n针对报告中需要修改的地方，我的批注（要求）如下:\n' + msg.annotations.map((a: { section: string; note: string }) => `### 针对片段：\n${a.section}\n**要求**：${a.note}`).join('\n\n');
-                }
-                const reviseWtPrompt = '请根据我的批注，重新修改并输出一份新的 walkthrough.md 报告。' + reviseWtContext;
-                await this.handleUserMessage(reviseWtPrompt, undefined, undefined, true, true);
-                break;
-            }
-            case 'approveWalkthrough':
-                this.markLatestInteractiveCardApproved(['walkthrough_card']);
-                this.postMessage({ type: 'floatingCardResolved', card: 'walkthrough' });
-                if (this.previousMode && this.previousMode !== this.currentMode) {
-                    this.switchMode(this.previousMode);
-                }
-                break;
-            case 'searchTopics':
-                this.topicManager.handleSearchTopics(msg.query);
-                break;
-            case 'exportTopic':
-                await this.topicManager.exportTopicAsMarkdown(msg.topicId);
-                break;
-            case 'exportTopicJson':
-                await this.topicManager.exportTopicAsJson(msg.topicId);
-                break;
-            case 'importTopic':
-                { const msgs = await this.topicManager.importTopicFromJson(msg.data); if (msgs) this.conversationMessages = msgs; };
-                break;
-            case 'requestFileList':
-                this.sendWorkspaceFileList();
-                break;
-            case 'requestManagerSnapshot':
-                this.sendManagerSnapshot();
-                break;
-            case 'ready':
-                this._restoreViewState(sourceSurface, true);
-                this.sendManagerSnapshot();
-                break;
-            case 'requestMentionSearch': {
-                try {
-                    this.postMessage({ type: 'mentionSearchResults', results: await this.contextReferences.search(msg.query) });
-                } catch (e) {
-                    ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Mention search failed', e);
-                    this.postMessage({ type: 'mentionSearchResults', results: [] });
-                }
-                break;
-            }
-            case 'requestUsageStats':
-                this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
-                break;
-            case 'promptClearUsageStats':
-                vs.window.showWarningMessage('确定要清空所有 Token 消耗统计吗？此操作不可逆转。', '确定清空', '取消').then(sel => {
-                    if (sel === '确定清空') {
-                        this.usageTracker.clearStats();
-                        this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
-                        vs.window.showInformationMessage('Token 消耗统计已清空');
-                    }
-                });
-                break;
-            case 'clearUsageStats':
-                this.usageTracker.clearStats();
-                this.postMessage({ type: 'usageStats', stats: this.usageTracker.getStats() });
-                break;
-        }
+        await routeWebviewMessage(this, msg, sourceSurface);
     }
 
     /**
@@ -706,7 +471,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return text.slice(0, Math.max(0, maxLength - 3)).trimEnd() + '...';
     }
 
-    private async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
+    public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
         if (text.trim().startsWith('/')) {
@@ -948,7 +713,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     /** Retract a user message, its AI response, AND any file changes made during that exchange */
-    private async retractMessage(messageIndex: number): Promise<void> {
+    public async retractMessage(messageIndex: number): Promise<void> {
         if (!this.topicManager.currentTopic) return;
 
         // ── P0 Fix: validate file paths are within workspace boundaries ──────
@@ -1176,7 +941,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * (e.g. savePlanFile). The file is treated as newly created (previousContent=null)
      * unless it already exists on disk, in which case its current content is captured.
      */
-    private async openArtifact(artifactId: string, file?: string): Promise<void> {
+    public async openArtifact(artifactId: string, file?: string): Promise<void> {
         const artifact = this.artifactStore.get(artifactId);
         if (!artifact) {
             vs.window.showWarningMessage('Artifact is not available in the current session.');
@@ -1312,7 +1077,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 * Parse artifact file paths - compatible with shared paths and multiple candidate locations. 
 * Used if direct path exists, otherwise inferred from filename and looked in all topic candidate directories. 
 */
-    private resolveArtifactFilePath(filePath: string): string | null {
+    public resolveArtifactFilePath(filePath: string): string | null {
         // Check direct paths first
         if (fs.existsSync(filePath)) return filePath;
 
@@ -1687,7 +1452,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     // ─── Code Insertion ──────────────────────────────────────────────────────
 
-    private async insertCodeWithDiff(code: string): Promise<void> {
+    public async insertCodeWithDiff(code: string): Promise<void> {
         const editor = vs.window.activeTextEditor;
         if (!editor) {
             vs.window.showWarningMessage(UI.NO_ACTIVE_EDITOR);
@@ -1771,7 +1536,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.topicManager.topics.unshift(this.topicManager.currentTopic);
     }
 
-    private startNewTopic(): void {
+    public startNewTopic(): void {
         this.topicManager.startNewTopic();
         this.conversationMessages = [];
         this._messageFileSnapshots.clear();
@@ -1779,7 +1544,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.clearArtifacts();
     }
 
-    private async loadTopic(topicId: string): Promise<void> {
+    public async loadTopic(topicId: string): Promise<void> {
         this.clearArtifacts();
         this.conversationMessages = this.topicManager.loadTopic(topicId);
         const hasResume = await this.agentRunner.hasResumeState(topicId);
@@ -1788,7 +1553,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    private deleteTopic(topicId: string): void {
+    public deleteTopic(topicId: string): void {
         const wasCurrentDeleted = this.topicManager.deleteTopic(topicId);
         if (wasCurrentDeleted) {
             this.conversationMessages = [];
@@ -1811,13 +1576,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Fork a topic at a specific message index (OpenCode-style session fork).
      * Creates a new topic with messages[0..messageIndex], switches to it.
      */
-    private forkTopic(topicId: string, messageIndex: number): void {
+    public forkTopic(topicId: string, messageIndex: number): void {
         this.clearArtifacts();
         this.conversationMessages = this.topicManager.forkTopic(topicId, messageIndex);
     }
 
     /** Archive/unarchive a topic (hidden from main list but not deleted) */
-    private archiveTopic(topicId: string): void {
+    public archiveTopic(topicId: string): void {
         const wasCurrentArchived = this.topicManager.archiveTopic(topicId);
         if (wasCurrentArchived) {
             this.conversationMessages = [];
@@ -1828,7 +1593,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
 
-    private async regenerateLastResponse(): Promise<void> {
+    public async regenerateLastResponse(): Promise<void> {
         if (!this.topicManager.currentTopic || this.topicManager.currentTopic.messages.length < 1) return;
 
         const lastMsg = this.topicManager.currentTopic.messages[this.topicManager.currentTopic.messages.length - 1];
@@ -1859,7 +1624,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    private cancelGeneration(): void {
+    public cancelGeneration(): void {
         if (this.abortController) {
             this.abortController.abort();
             this.abortController = null;
@@ -1883,7 +1648,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     /**
      * Handle slash commands from the WebView e.g. /clear, /fork, /mode:build, /init.
      */
-    private async handleSlashCommand(command: string): Promise<void> {
+    public async handleSlashCommand(command: string): Promise<void> {
         const cmd = command.trim().toLowerCase();
         if (cmd === 'clear' || cmd === '/clear') {
             this.startNewTopic();
@@ -1972,7 +1737,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         });
     }
 
-    private resolvePermissionRequest(permissionId: string, allowed: boolean, alwaysAllow?: boolean): void {
+    public resolvePermissionRequest(permissionId: string, allowed: boolean, alwaysAllow?: boolean): void {
         const resolver = this.pendingPermissionResolvers.get(permissionId);
         if (resolver) {
             this.pendingPermissionResolvers.delete(permissionId);
@@ -1984,13 +1749,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    private switchMode(mode: AgentMode): void {
+    public switchMode(mode: AgentMode): void {
         if (this.currentMode !== mode) this.previousMode = this.currentMode;
         this.currentMode = mode;
         this.postMessage({ type: 'modeChanged', mode });
     }
 
-    private switchWorkflow(workflowId?: string | null): void {
+    public switchWorkflow(workflowId?: string | null): void {
         const normalized = (workflowId || '').trim();
         if (!normalized) {
             this.currentWorkflowId = null;
@@ -2028,7 +1793,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         });
     }
 
-    private sendManagerSnapshot(): void {
+    public sendManagerSnapshot(): void {
         const visibleTopics = this.topicManager.topics
             .filter(topic => this.topicManager.showArchived || !topic.archived);
         const archivedCount = this.topicManager.topics.filter(topic => topic.archived).length;
@@ -2064,7 +1829,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         });
     }
 
-    private markLatestInteractiveCardApproved(types: Array<'plan_card' | 'blueprint_card' | 'walkthrough_card'>): void {
+    public markLatestInteractiveCardApproved(types: Array<'plan_card' | 'blueprint_card' | 'walkthrough_card'>): void {
         const topic = this.topicManager.currentTopic;
         if (!topic) return;
 
@@ -2098,7 +1863,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Send the list of workspace files to the WebView for @ mention autocomplete.
      * Limits to 500 files to avoid UI lag; excludes binary/generated directories.
      */
-    private sendWorkspaceFileList(): void {
+    public sendWorkspaceFileList(): void {
         const root = getProjectWorkspaceRoot();
         if (!root) {
             this.postMessage({ type: 'fileList', files: [] });
@@ -2165,11 +1930,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return results.sort((a, b) => a.length - b.length);
     }
 
-    private postMessage(msg: HostMessage): void {
+    public postMessage(msg: HostMessage): void {
         this.broadcaster.postMessage(msg);
     }
 
-    private postMessageToSurface(surface: 'chat' | 'manager', msg: HostMessage): void {
+    public postMessageToSurface(surface: 'chat' | 'manager', msg: HostMessage): void {
         this.broadcaster.postMessageToSurface(surface, msg);
     }
 

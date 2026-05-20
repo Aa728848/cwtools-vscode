@@ -109,7 +109,8 @@ describe('webview smoke checks', () => {
         const managerHtml = fs.readFileSync(path.join(root, 'client/extension/ai/agentManagerHtml.ts'), 'utf8');
         const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
         const managerEntry = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
-        const host = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
 
         expect(managerHtml).to.include("bodyClass: 'chat-empty agent-manager-shell'");
         expect(managerHtml).to.include("scriptName: 'agentManager.js'");
@@ -122,10 +123,10 @@ describe('webview smoke checks', () => {
         expect(managerEntry).to.include("import type { ManagerSnapshotMessage");
         expect(managerEntry).to.include("case 'managerSnapshot'");
         expect(managerEntry).to.include("case 'orchestratorProgress'");
-        expect(host).to.include("case 'requestManagerSnapshot'");
-        expect(host).to.include("type: 'managerSnapshot'");
-        expect(host).to.include("case 'pinTopic'");
-        expect(host).to.include("case 'setTopicWorkspace'");
+        expect(hostBridge).to.include("case 'requestManagerSnapshot'");
+        expect(hostPanel).to.include("type: 'managerSnapshot'");
+        expect(hostBridge).to.include("case 'pinTopic'");
+        expect(hostBridge).to.include("case 'setTopicWorkspace'");
     });
 
     it('agent manager release bundle exists and is non-empty after compile', () => {

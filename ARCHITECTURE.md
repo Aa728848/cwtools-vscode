@@ -190,6 +190,7 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 | `tools/fileTools.ts` | 文件读写、精确替换、补丁、本地化写入、资产部署 |
 | `tools/lspTools.ts` | LSP 查询、诊断、CWTools Deep API、缓存 |
 | `tools/externalTools.ts` | 命令、网络搜索、媒体生成/转换、外部资源 |
+| `tools/memoryTools.ts` | 内存与黑板操作的物理存储及 I/O 交互逻辑 |
 | `tools/replacerSuite.ts` | 通用文本替换的多策略匹配 |
 | `agentTools.ts` | 工具名称到实现的路由 |
 | `types.ts` | Args / Result 契约 |

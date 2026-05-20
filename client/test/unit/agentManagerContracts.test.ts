@@ -7,7 +7,7 @@ describe('agent manager cross-surface contracts', () => {
 
     it('host contract supports manager snapshot and topic metadata actions', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
-        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
         const topics = fs.readFileSync(path.join(root, 'client/extension/ai/chatTopics.ts'), 'utf8');
 
         expect(hostTypes).to.include("type: 'requestManagerSnapshot'");
@@ -17,10 +17,10 @@ describe('agent manager cross-surface contracts', () => {
         expect(hostTypes).to.include('workspaceLabel?: string');
         expect(hostTypes).to.include('pinned?: boolean');
 
-        expect(hostPanel).to.include("case 'requestManagerSnapshot'");
-        expect(hostPanel).to.include('sendManagerSnapshot()');
-        expect(hostPanel).to.include("case 'pinTopic'");
-        expect(hostPanel).to.include("case 'setTopicWorkspace'");
+        expect(hostBridge).to.include("case 'requestManagerSnapshot'");
+        expect(hostBridge).to.include('sendManagerSnapshot()');
+        expect(hostBridge).to.include("case 'pinTopic'");
+        expect(hostBridge).to.include("case 'setTopicWorkspace'");
 
         expect(topics).to.include('setPinned(');
         expect(topics).to.include('setWorkspace(');
@@ -56,13 +56,13 @@ describe('agent manager cross-surface contracts', () => {
 
     it('manager settings stay local and preserve search tokens', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
-        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
         const settingsHost = fs.readFileSync(path.join(root, 'client/extension/ai/chatSettings.ts'), 'utf8');
         const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
 
         expect(hostTypes).to.include("targetSurface?: 'chat' | 'manager'");
-        expect(hostPanel).to.include('this.settingsManager.openSettingsPage(sourceSurface)');
-        expect(hostPanel).to.include('this.settingsManager.saveSettings(msg.settings, sourceSurface)');
+        expect(hostBridge).to.include('provider.settingsManager.openSettingsPage(sourceSurface)');
+        expect(hostBridge).to.include('provider.settingsManager.saveSettings(msg.settings, sourceSurface)');
         expect(settingsHost).to.include("targetSurface?: 'chat' | 'manager'");
         expect(webview).to.include('isCurrentSurface(msg.targetSurface)');
         expect(webview).to.include('&& !isManagerShell()');
@@ -77,6 +77,7 @@ describe('agent manager cross-surface contracts', () => {
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
         const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
 
         expect(managerCss).to.include('--manager-active-right-width: 0px;');
         expect(managerCss).to.include('--manager-active-left-width: var(--manager-left-width);');
@@ -99,7 +100,7 @@ describe('agent manager cross-surface contracts', () => {
         expect(managerCss).to.include('.manager-task-mark');
         expect(html).to.include('id="btnAgentManager"');
         expect(hostTypes).to.include("{ type: 'openAgentManager' }");
-        expect(hostPanel).to.include("case 'openAgentManager'");
+        expect(hostBridge).to.include("case 'openAgentManager'");
         expect(hostPanel).to.include("this._syncViewChromeState('manager')");
         expect(hostPanel).to.include('openManagerPanelInNewWindow');
         expect(hostPanel).to.include("workbench.action.moveEditorToNewWindow");
@@ -109,13 +110,13 @@ describe('agent manager cross-surface contracts', () => {
 
     it('restored interactive cards and live replay stay idempotent', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
-        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
         const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
 
         expect(hostTypes).to.include("uiState?: 'pending' | 'approved'");
-        expect(hostPanel).to.include('markLatestInteractiveCardApproved');
-        expect(hostPanel).to.include("['plan_card', 'blueprint_card']");
-        expect(hostPanel).to.include("['walkthrough_card']");
+        expect(hostBridge).to.include('markLatestInteractiveCardApproved');
+        expect(hostBridge).to.include("['plan_card', 'blueprint_card']");
+        expect(hostBridge).to.include("['walkthrough_card']");
         expect(webview).to.include("pCard.uiState !== 'approved'");
         expect(webview).to.include("wtCard.uiState !== 'approved'");
         expect(webview).to.include("bpCard.uiState !== 'approved'");
@@ -128,6 +129,7 @@ describe('agent manager cross-surface contracts', () => {
     it('sidebar restore messages do not broadcast replay state into the manager', () => {
         const broadcaster = fs.readFileSync(path.join(root, 'client/extension/ai/agentUiBroadcaster.ts'), 'utf8');
         const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
 
         expect(broadcaster).to.include('postMessageToSurface');
         expect(broadcaster).to.include("targetSurface === surface");
@@ -135,18 +137,19 @@ describe('agent manager cross-surface contracts', () => {
         expect(hostPanel).to.include('this.postMessageToSurface(targetSurface, msg)');
         expect(hostPanel).to.include("targetSurface })");
         expect(hostPanel).to.include("this._restoreViewState(surface, true)");
-        expect(hostPanel).to.include("case 'ready'");
-        expect(hostPanel).to.include('this._restoreViewState(sourceSurface, true)');
+        expect(hostBridge).to.include("case 'ready'");
+        expect(hostBridge).to.include('provider.restoreViewState(sourceSurface, true)');
         expect(hostPanel).to.include('this.sendWorkflowState(send)');
         expect(hostPanel).to.include('this.broadcaster.register(webview, surface)');
     });
 
     it('manager focus restore is non-destructive for chat DOM state', () => {
         const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
 
         expect(hostPanel).to.include('private _syncViewChromeState');
         expect(hostPanel).to.include("if (e.webviewPanel.visible) this._syncViewChromeState('manager');");
-        expect(hostPanel).to.include("this._restoreViewState(sourceSurface, true)");
+        expect(hostBridge).to.include("provider.restoreViewState(sourceSurface, true)");
         expect(hostPanel).to.not.include("if (e.webviewPanel.visible) this._restoreViewState('manager', true);");
         expect(hostPanel).to.not.include("this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);\n            this._restoreViewState('manager', true);");
     });
@@ -163,14 +166,14 @@ describe('agent manager cross-surface contracts', () => {
 
     it('cross-surface floating cards resolve on both surfaces', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
-        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
         const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
 
         expect(hostTypes).to.include("type: 'floatingCardResolved'");
-        expect(hostPanel).to.include("card: 'permission'");
-        expect(hostPanel).to.include("card: 'write'");
-        expect(hostPanel).to.include("card: 'transaction'");
-        expect(hostPanel).to.include("card: 'walkthrough'");
+        expect(hostBridge).to.include("card: 'permission'");
+        expect(hostBridge).to.include("card: 'write'");
+        expect(hostBridge).to.include("card: 'transaction'");
+        expect(hostBridge).to.include("card: 'walkthrough'");
         expect(webview).to.include("case 'floatingCardResolved'");
         expect(webview).to.include('function resolveFloatingCard');
         expect(webview).to.include("approveMessageType: 'approveWalkthrough'");

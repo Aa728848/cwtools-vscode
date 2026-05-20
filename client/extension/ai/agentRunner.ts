@@ -44,58 +44,17 @@ import { WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { loadResumeState, hasResumeState } from './runner/checkpoint';
 import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT } from './runner/compaction';
+import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
+import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles } from './runner/toolScheduler';
+import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash } from './runner/doomLoopDetector';
 
-// Doom-loop detection: two-phase approach.
-// Phase 1 — signature-pair tracking: (prevSig, currSig) pairs. Same pair ≥ PAIR_THRESHOLD triggers Phase 2.
-// Phase 2 — normalized result hash: compare hashes of adjacent same-name tool results.
-//   Same hash = "spinning in place" → confirmed doom-loop → stop.
-//   Different hash = "making progress" → reset pair counter and continue.
-const DOOM_LOOP_SOFT_THRESHOLD = 4;
-const DOOM_LOOP_PAIR_THRESHOLD = 6;
+export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
+export { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } from './runner/toolScheduler';
+export { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash } from './runner/doomLoopDetector';
+export { AgentAbortError, checkCancellation, isAbortError } from './runner/cancellation';
+export { StepEmitter } from './runner/stepEmitter';
 
-// Lightweight 32-bit FNV-1a hash for normalized tool result comparison.
-function fnv32a(str: string): number {
-    let hash = 2166136261;
-    for (let i = 0; i < str.length; i++) {
-        hash ^= str.charCodeAt(i);
-        hash = (hash * 16777619) | 0;
-    }
-    return hash >>> 0;
-}
 
-// Normalize a tool result to a hashable key, extracting only semantically
-// meaningful fields (stripping positional info like line/column numbers).
-function normalizeToolResultHash(toolName: string, result: unknown): string {
-    if (result === null || result === undefined) return String(result);
-    if (typeof result !== 'object') return String(result).substring(0, 256);
-
-    const obj = result as Record<string, unknown>;
-    // read_file → hash file content
-    if (toolName === 'read_file' && typeof obj.content === 'string') {
-        return `read_file:${obj.file ?? ''}:${obj.content.length}`;
-    }
-    // multi_replace_file_content / write_file → hash written content
-    if ((toolName === 'multi_replace_file_content' || toolName === 'write_file') && typeof obj.content === 'string') {
-        return `write:${obj.filePath ?? obj.file ?? obj.TargetFile ?? ''}:${obj.content.length}`;
-    }
-    // query_scope → hash scope chain
-    if (toolName === 'query_scope') {
-        return `scope:${JSON.stringify(obj.currentScope ?? '')}:${JSON.stringify(obj.thisScope ?? '')}`;
-    }
-    // get_diagnostics → hash summary counts
-    if (toolName === 'get_diagnostics' && obj.summary) {
-        return `diag:${JSON.stringify(obj.summary)}`;
-    }
-    // lsp_operation → hash the returned structure (exclude positions)
-    if (toolName === 'lsp_operation') {
-        const stripped = JSON.stringify(obj, (key, val) =>
-            (key === 'line' || key === 'column' || key === 'character' || key === 'offset') ? undefined : val
-        );
-        return `lsp:${stripped.substring(0, 256)}`;
-    }
-    // Generic fallback: first 256 chars of JSON
-    return `${toolName}:${JSON.stringify(obj).substring(0, 256)}`;
-}
 // Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
 const MAX_VALIDATION_RETRIES = 2;
 // Token estimation: Dual-path strategy for balancing speed and accuracy.
@@ -192,27 +151,7 @@ const TOOL_RESULT_BUDGET_MAX = 18000;
 // instead of starting from scratch.
 const CHECKPOINT_INTERVAL = 10;
 
-// ─── Batch 2.5: Provider fallback retry ──────────────────────────────────────
-// When a provider returns a catastrophic error (5xx, rate-limit after exhaustion,
-// network timeout), the agent can retry with a fallback model.
-// Maps primary provider → fallback provider+model pairs.
-const PROVIDER_FALLBACK: Record<string, { providerId: string; model: string }[]> = {
-    // If the primary provider fails, try these in order:
-    openai:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    deepseek:   [{ providerId: 'minimax-token-plan',  model: 'MiniMax-M2.7-highspeed' }],
-    claude:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    qwen:       [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    glm:        [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    google:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    minimax:    [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-};
 
-export function isFallbackEligibleApiError(error: unknown): boolean {
-    const msg = error instanceof Error ? error.message : String(error);
-    return /\b(5\d{2})\b/.test(msg) ||          // 5xx server errors
-           /timeout|timed out|ETIMEDOUT|ECONNRESET/i.test(msg) ||  // Network failures
-           /overloaded|capacity|unavailable/i.test(msg); // Capacity issues
-}
 
 export interface AgentRunnerOptions {
     /** Override provider for this run */
@@ -369,54 +308,7 @@ const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
 ];
 
 
-// Fix #9: module-level constants — no need to recreate on every loop iteration
-export const SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS = new Set<string>(['write_file']);
 
-export function getAgentToolTargetFiles(
-    toolName: string,
-    args: Record<string, unknown>,
-    workspaceRoot?: string,
-    topicId?: string
-): string[] {
-    const paths: string[] = [];
-    const add = (value: unknown) => {
-        if (typeof value === 'string' && value.trim()) {
-            const trimmed = value.trim();
-            paths.push(workspaceRoot
-                ? (path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(workspaceRoot, trimmed))
-                : trimmed);
-        }
-    };
-
-    switch (toolName) {
-        case 'write_file':
-        case 'edit_pdx_block':
-        case 'git_ops':
-            add(args.file);
-            break;
-        case 'multi_replace_file_content':
-            add(args.TargetFile);
-            break;
-        case 'replace_lines':
-        case 'write_localisation':
-            add(args.filePath);
-            break;
-        case 'deploy_mod_asset':
-            if (workspaceRoot && typeof args.targetRelativePath === 'string') {
-                paths.push(path.resolve(workspaceRoot, args.targetRelativePath));
-            } else {
-                add(args.targetRelativePath);
-            }
-            break;
-        case 'write_design_blueprint':
-            if (workspaceRoot) {
-                paths.push(path.join(getTopicStorageDir(topicId || 'default', workspaceRoot), 'design_blueprint.md'));
-            }
-            break;
-    }
-
-    return [...new Set(paths)];
-}
 
 const globalPartitionedWriteQueue = new PartitionedWriteQueue();
 
@@ -622,28 +514,7 @@ export class AgentRunner {
         options?: { tools?: import('./types').ToolDefinition[]; model?: string },
         emitStep?: (step: AgentStep) => void
     ): Promise<ChatCompletionResponse | null> {
-        const fallbacks = PROVIDER_FALLBACK[originalProviderId];
-        if (!fallbacks || fallbacks.length === 0) return null;
-
-        for (const fb of fallbacks) {
-            try {
-                emitStep?.({
-                    type: 'compaction',
-                    content: `Provider fallback: ${originalProviderId} → ${fb.providerId} (${fb.model})`,
-                    timestamp: Date.now(),
-                });
-                const response = await this.aiService.chatCompletion(messages, {
-                    tools: options?.tools,
-                    providerId: fb.providerId,
-                    model: fb.model,
-                });
-                return response;
-            } catch {
-                // This fallback also failed — try the next one
-                continue;
-            }
-        }
-        return null;
+        return executeFallbackRetry(this.aiService, messages, originalProviderId, options, emitStep);
     }
 
     /**

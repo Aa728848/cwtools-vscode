@@ -45,6 +45,8 @@ export interface LspToolContext {
     fileWriteMode?: 'confirm' | 'auto';
     /** Callback when a file write needs user confirmation (confirm mode). */
     onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
+    /** Delegate multi_replace_file_content back to FileToolHandler via executor */
+    multiReplaceFileContent?: (args: any, context?: any) => Promise<any>;
 }
 
 // ─── Handler class ───────────────────────────────────────────────────────────
@@ -2065,5 +2067,152 @@ export class LspToolHandler {
         } catch (e) {
             return { error: `LSP 操作失败：${e instanceof Error ? e.message : String(e)}` };
         }
+    }
+    queryLocalisationIndex(args: import('../types').QueryLocalisationIndexArgs): import('../types').QueryLocalisationIndexResult {
+        if (!this.ctx.indexService) {
+            return {
+                status: 'unavailable',
+                totalCount: 0,
+                entries: [],
+                _hint: 'The shared IndexService is not available in this extension host.',
+            };
+        }
+
+        const limit = Math.max(1, Math.min(Number(args.limit ?? 20) || 20, 100));
+        const entries = this.ctx.indexService.queryLocalisation({
+            key: args.key,
+            language: args.language,
+            prefix: !!args.prefix,
+            limit,
+        });
+
+        return {
+            status: this.ctx.indexService.status,
+            totalCount: entries.length,
+            entries: entries.map(entry => ({
+                key: entry.key,
+                value: entry.value,
+                file: entry.file,
+                line: entry.line,
+                language: entry.language,
+            })),
+            _hint: this.ctx.indexService.status === 'ready'
+                ? undefined
+                : 'Index may still be building; retry after the initial refresh completes.',
+        };
+    }
+
+    async queryWorkspaceIndex(args: import('../types').QueryWorkspaceIndexArgs): Promise<import('../types').QueryWorkspaceIndexResult> {
+        if (!this.ctx.indexService) {
+            return {
+                status: 'unavailable',
+                totalCount: 0,
+                entries: [],
+                _hint: 'The shared IndexService is not available in this extension host.',
+            };
+        }
+
+        const limit = Math.max(1, Math.min(Number(args.limit ?? 50) || 50, 200));
+        await this.ctx.indexService.ensureWorkspaceSymbolsReady?.({
+            includeVanilla: args.origin !== 'workspace',
+        });
+        const entries = this.ctx.indexService.queryWorkspaceSymbols({
+            name: args.name,
+            kind: args.kind,
+            category: args.category,
+            source: args.source,
+            origin: args.origin,
+            directory: args.directory,
+            prefix: !!args.prefix,
+            exact: !!args.exact,
+            includeReferences: !!args.includeReferences,
+            limit,
+        });
+
+        return {
+            status: this.ctx.indexService.status,
+            totalCount: entries.length,
+            entries: entries.map(entry => ({
+                name: entry.name,
+                kind: entry.kind,
+                file: entry.file,
+                line: entry.line,
+                source: entry.source,
+                origin: entry.origin,
+                container: entry.container,
+                category: entry.category,
+                references: args.includeReferences ? entry.references : undefined,
+                updatedAt: entry.updatedAt,
+                fileVersion: entry.fileVersion,
+            })),
+            indexedSymbolNames: this.ctx.indexService.workspaceSymbolCount,
+            indexUpdatedAt: this.ctx.indexService.workspaceSymbolUpdatedAt,
+            _hint: this.ctx.indexService.status === 'ready'
+                ? undefined
+                : 'Index may still be building; retry after the initial refresh completes.',
+        };
+    }
+
+    async editPdxBlock(args: import('../types').EditPdxBlockArgs, context?: import('../types').AgentToolContext): Promise<unknown> {
+        if (!this.ctx.multiReplaceFileContent) {
+            return { success: false, message: 'File writing operations are unavailable in this context.' };
+        }
+        const symbols = await this.documentSymbols({ file: args.file });
+        if (symbols.symbols.length === 0) {
+            return { success: false, message: 'Could not parse symbols in file. File might be invalid or empty.' };
+        }
+        const findSymbol = (syms: DocumentSymbolInfo[]): DocumentSymbolInfo | null => {
+            for (const sym of syms) {
+                if (sym.name === args.symbol) {
+                    return sym;
+                }
+                if (sym.children && sym.children.length > 0) {
+                    const found = findSymbol(sym.children);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+        const targetSymbol = findSymbol(symbols.symbols);
+        if (!targetSymbol) {
+            // Directly attach the list of available symbols to avoid AI adjusting document_symbols again
+            const collectNames = (syms: DocumentSymbolInfo[], depth = 0): string[] => {
+                const names: string[] = [];
+                for (const s of syms) {
+                    const prefix = depth > 0 ? '  '.repeat(depth) + '└ ' : '';
+                    names.push(`${prefix}${s.name} (L${s.range.startLine}-${s.range.endLine})`);
+                    if (s.children && s.children.length > 0 && depth < 1) {
+                        names.push(...collectNames(s.children, depth + 1));
+                    }
+                }
+                return names;
+            };
+            const allNames = collectNames(symbols.symbols);
+            const preview = allNames.slice(0, 20).join('\n');
+            const suffix = allNames.length > 20 ? `\n... and ${allNames.length - 20} more` : '';
+            return { success: false, message: `Symbol '${args.symbol}' not found in file.\n\nAvailable symbols:\n${preview}${suffix}\n\nUse one of these exact names.` };
+        }
+        // documentSymbols is 0-indexed, replaceLines is 1-indexed
+        const startLine = targetSymbol.range.startLine + 1;
+        const endLine = targetSymbol.range.endLine + 1;
+        
+        const rawContent = fs.readFileSync(args.file, 'utf-8');
+        const hasBom = rawContent.charCodeAt(0) === 0xFEFF;
+        const content = hasBom ? rawContent.slice(1) : rawContent;
+
+        const isCRLF = content.includes('\r\n');
+        // The split needs to preserve the exact string to be a precise match
+        const targetContent = content.split(isCRLF ? '\r\n' : '\n').slice(startLine - 1, endLine).join(isCRLF ? '\r\n' : '\n');
+
+        return await this.ctx.multiReplaceFileContent({
+            TargetFile: args.file,
+            Instruction: `Update PDX block: ${args.symbol}`,
+            ReplacementChunks: [{
+                StartLine: startLine,
+                EndLine: endLine,
+                TargetContent: targetContent,
+                ReplacementContent: args.newContent
+            }]
+        }, context);
     }
 }

@@ -9,9 +9,8 @@
  */
 
 import * as vs from 'vscode';
-import * as fs from 'fs';
 import type { LanguageClient } from 'vscode-languageclient/node';
-import type { AgentToolName, TodoItem } from './types';
+import type { TodoItem } from './types';
 
 // Re-export the canonical tool definitions (unchanged public API)
 export { TOOL_DEFINITIONS } from './tools/definitions';
@@ -20,8 +19,9 @@ export { TOOL_DEFINITIONS } from './tools/definitions';
 import { FileToolHandler, findFiles } from './tools/fileTools';
 import { LspToolHandler } from './tools/lspTools';
 import { ExternalToolHandler } from './tools/externalTools';
-import { getTopicStorageDir } from './workspacePaths';
+import { MemoryToolHandler } from './tools/memoryTools';
 import type { IndexService } from '../indexing/indexService';
+import { validateToolAccess } from './tools/permissions';
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
 
@@ -140,6 +140,7 @@ export class AgentToolExecutor {
     private fileHandler: FileToolHandler;
     private lspHandler: LspToolHandler;
     private externalHandler: ExternalToolHandler;
+    private memoryHandler: MemoryToolHandler;
 
     private readonly clientGetter: () => LanguageClient;
     public readonly workspaceRoot: string;
@@ -161,6 +162,7 @@ export class AgentToolExecutor {
         this.fileHandler = new FileToolHandler(this);
         this.lspHandler = new LspToolHandler(this, this.clientGetter, findFiles);
         this.externalHandler = new ExternalToolHandler(this);
+        this.memoryHandler = new MemoryToolHandler(this);
 
         // Initialize the enhanced blackboard (replacing the old sharedMemory)
          
@@ -197,88 +199,11 @@ export class AgentToolExecutor {
     }
 
     private queryLocalisationIndex(args: import('./types').QueryLocalisationIndexArgs): import('./types').QueryLocalisationIndexResult {
-        if (!this.indexService) {
-            return {
-                status: 'unavailable',
-                totalCount: 0,
-                entries: [],
-                _hint: 'The shared IndexService is not available in this extension host.',
-            };
-        }
-
-        const limit = Math.max(1, Math.min(Number(args.limit ?? 20) || 20, 100));
-        const entries = this.indexService.queryLocalisation({
-            key: args.key,
-            language: args.language,
-            prefix: !!args.prefix,
-            limit,
-        });
-
-        return {
-            status: this.indexService.status,
-            totalCount: entries.length,
-            entries: entries.map(entry => ({
-                key: entry.key,
-                value: entry.value,
-                file: entry.file,
-                line: entry.line,
-                language: entry.language,
-            })),
-            _hint: this.indexService.status === 'ready'
-                ? undefined
-                : 'Index may still be building; retry after the initial refresh completes.',
-        };
+        return this.lspHandler.queryLocalisationIndex(args);
     }
 
     private async queryWorkspaceIndex(args: import('./types').QueryWorkspaceIndexArgs): Promise<import('./types').QueryWorkspaceIndexResult> {
-        if (!this.indexService) {
-            return {
-                status: 'unavailable',
-                totalCount: 0,
-                entries: [],
-                _hint: 'The shared IndexService is not available in this extension host.',
-            };
-        }
-
-        const limit = Math.max(1, Math.min(Number(args.limit ?? 50) || 50, 200));
-        await this.indexService.ensureWorkspaceSymbolsReady?.({
-            includeVanilla: args.origin !== 'workspace',
-        });
-        const entries = this.indexService.queryWorkspaceSymbols({
-            name: args.name,
-            kind: args.kind,
-            category: args.category,
-            source: args.source,
-            origin: args.origin,
-            directory: args.directory,
-            prefix: !!args.prefix,
-            exact: !!args.exact,
-            includeReferences: !!args.includeReferences,
-            limit,
-        });
-
-        return {
-            status: this.indexService.status,
-            totalCount: entries.length,
-            entries: entries.map(entry => ({
-                name: entry.name,
-                kind: entry.kind,
-                file: entry.file,
-                line: entry.line,
-                source: entry.source,
-                origin: entry.origin,
-                container: entry.container,
-                category: entry.category,
-                references: args.includeReferences ? entry.references : undefined,
-                updatedAt: entry.updatedAt,
-                fileVersion: entry.fileVersion,
-            })),
-            indexedSymbolNames: this.indexService.workspaceSymbolCount,
-            indexUpdatedAt: this.indexService.workspaceSymbolUpdatedAt,
-            _hint: this.indexService.status === 'ready'
-                ? undefined
-                : 'Index may still be building; retry after the initial refresh completes.',
-        };
+        return this.lspHandler.queryWorkspaceIndex(args);
     }
 
     suspendLsp = (): void => {
@@ -295,6 +220,10 @@ export class AgentToolExecutor {
     public blackboard!: import('./orchestrator/blackboard').Blackboard;
 
     /** Forward LSP read-cache invalidation to the lspHandler. */
+    public async multiReplaceFileContent(args: any, context?: any): Promise<any> {
+        return this.fileHandler.multiReplaceFileContent(args, context);
+    }
+
     invalidateCacheForFile(filePath: string): void {
         this.lspHandler.invalidateCacheForFile(filePath);
     }
@@ -315,18 +244,32 @@ export class AgentToolExecutor {
      * to prevent hangs on network filesystems, LSP deadlocks, or unresponsive external services.
      */
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
-        if (context?.runnerOptions?.useSlimPrompt && toolName === 'git_ops') {
+        const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
+        if (isSubAgent && toolName === 'git_ops') {
             return {
                 success: false,
                 message: 'git_ops is disabled for orchestrator sub-agents. Report the issue to the main agent instead of running git commands.',
             };
         }
-        if (context?.runnerOptions?.useSlimPrompt && toolName === 'run_command') {
+        if (isSubAgent && toolName === 'run_command') {
             return {
                 stdout: '',
                 stderr: 'run_command is disabled for orchestrator sub-agents. Report the need to the main agent instead of running shell commands or requesting permission.',
                 exitCode: 1,
             };
+        }
+
+        const mode = context?.runnerOptions?.mode ?? 
+            ((['dispatch_agents', 'merge_results', 'query_blackboard'].includes(toolName)) ? 'orchestrator' : 'build');
+        const isDynamicMcpTool = toolName.startsWith('mcp_') && toolName !== 'mcp_call';
+        if (!isDynamicMcpTool) {
+            const access = validateToolAccess(toolName, { mode, isSubAgent });
+            if (!access.allowed) {
+                return {
+                    success: false,
+                    error: access.reason
+                };
+            }
         }
 
         let timeout = TOOL_TIMEOUTS[toolName];
@@ -435,7 +378,7 @@ export class AgentToolExecutor {
     /** Internal tool dispatch — the actual switch statement, called within a timeout wrapper. */
     private async executeInternal(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         let result: unknown;
-        switch (toolName as AgentToolName | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command' | 'search_web' | 'codesearch' | 'apply_patch' | 'multi_replace_file_content' | 'task' | 'analyze_diagnostic_error') {
+        switch (toolName as any) {
             // ── LSP / CWTools query tools ─────────────────────────────────
             case 'query_scope':
                 result = await this.lspHandler.queryScope(args as any); break;
@@ -472,69 +415,9 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
             case 'get_pdx_block':
                 result = await this.lspHandler.getPdxBlock(args as any); break;
-            case 'edit_pdx_block': {
-                const argsBlock = args as unknown as import('./types').EditPdxBlockArgs;
-                const symbols = await this.lspHandler.documentSymbols({ file: argsBlock.file });
-                if (symbols.symbols.length === 0) {
-                    result = { success: false, message: 'Could not parse symbols in file. File might be invalid or empty.' };
-                    break;
-                }
-                const findSymbol = (syms: import('./types').DocumentSymbolInfo[]): import('./types').DocumentSymbolInfo | null => {
-                    for (const sym of syms) {
-                        if (sym.name === argsBlock.symbol) {
-                            return sym;
-                        }
-                        if (sym.children && sym.children.length > 0) {
-                            const found = findSymbol(sym.children);
-                            if (found) return found;
-                        }
-                    }
-                    return null;
-                };
-                const targetSymbol = findSymbol(symbols.symbols);
-                if (!targetSymbol) {
-                    // Directly attach the list of available symbols to avoid AI adjusting document_symbols again
-                    const collectNames = (syms: import('./types').DocumentSymbolInfo[], depth = 0): string[] => {
-                        const names: string[] = [];
-                        for (const s of syms) {
-                            const prefix = depth > 0 ? '  '.repeat(depth) + '└ ' : '';
-                            names.push(`${prefix}${s.name} (L${s.range.startLine}-${s.range.endLine})`);
-                            if (s.children && s.children.length > 0 && depth < 1) {
-                                names.push(...collectNames(s.children, depth + 1));
-                            }
-                        }
-                        return names;
-                    };
-                    const allNames = collectNames(symbols.symbols);
-                    const preview = allNames.slice(0, 20).join('\n');
-                    const suffix = allNames.length > 20 ? `\n... and ${allNames.length - 20} more` : '';
-                    result = { success: false, message: `Symbol '${argsBlock.symbol}' not found in file.\n\nAvailable symbols:\n${preview}${suffix}\n\nUse one of these exact names.` };
-                    break;
-                }
-                // documentSymbols is 0-indexed, replaceLines is 1-indexed
-                const startLine = targetSymbol.range.startLine + 1;
-                const endLine = targetSymbol.range.endLine + 1;
-                
-                const rawContent = fs.readFileSync(argsBlock.file, 'utf-8');
-                const hasBom = rawContent.charCodeAt(0) === 0xFEFF;
-                const content = hasBom ? rawContent.slice(1) : rawContent;
-
-                const isCRLF = content.includes('\r\n');
-                // The split needs to preserve the exact string to be a precise match
-                const targetContent = content.split(isCRLF ? '\r\n' : '\n').slice(startLine - 1, endLine).join(isCRLF ? '\r\n' : '\n');
-
-                result = await this.fileHandler.multiReplaceFileContent({
-                    TargetFile: argsBlock.file,
-                    Instruction: `Update PDX block: ${argsBlock.symbol}`,
-                    ReplacementChunks: [{
-                        StartLine: startLine,
-                        EndLine: endLine,
-                        TargetContent: targetContent,
-                        ReplacementContent: argsBlock.newContent
-                    }]
-                }, context);
-                break;
-            }
+            case 'edit_pdx_block':
+                result = await this.lspHandler.editPdxBlock(args as any, context); break;
+            case 'edit_pdx_block_disabled': break;
             case 'lsp_operation':
                 result = await this.lspHandler.lspOperation(args as any, context); break;
             case 'query_definition':
@@ -618,73 +501,20 @@ export class AgentToolExecutor {
                     message: "Reflection recorded. Proceed with your planned fix in the next step."
                 };
                 break;
-            case 'set_memory': {
-                const { key, value } = args as unknown as import('./types').SetMemoryArgs;
-                if (!key || typeof value !== 'string') {
-                    result = { success: false, message: 'Invalid arguments' };
-                } else if (value.length > 500) {
-                    const topicId = context?.runnerOptions?.topicId ?? this.parentRunnerOptions?.topicId ?? 'session';
-                    const fs = await import('fs');
-                    const path = await import('path');
-                    const blackboardDir = path.join(getTopicStorageDir(topicId, this.workspaceRoot), 'blackboard');
-                    fs.mkdirSync(blackboardDir, { recursive: true });
-                    const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
-                    const filePath = path.join(blackboardDir, `${safeKey}.txt`);
-                    fs.writeFileSync(filePath, value, 'utf-8');
-                    this.blackboard.legacySet(key, `file://${filePath}`);
-                    result = { success: true, message: `Successfully saved large payload (${value.length} chars) to high-capacity storage. Reference stored in blackboard. You MUST now output your final text response to complete your sub-task.` };
-                } else {
-                    this.blackboard.legacySet(key, value);
-                    result = { success: true, message: `Stored value in memory under key '${key}'.` };
-                }
-                break;
-            }
-            case 'get_memory': {
-                const { key } = args as unknown as import('./types').GetMemoryArgs;
-                if (!key) {
-                    result = { found: false };
-                } else {
-                    const mem = this.blackboard.legacyGet(key);
-                    if (mem && typeof mem.value === 'string' && mem.value.startsWith('file://')) {
-                        const filePath = mem.value.slice(7);
-                        try {
-                            const fs = await import('fs');
-                            const content = fs.readFileSync(filePath, 'utf-8');
-                            const truncated = content.length > 3000 
-                                ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
-                                : content;
-                            result = { found: true, value: truncated, _sourceFile: filePath, _fullLength: content.length };
-                        } catch {
-                            result = { found: false, error: `File not found: ${filePath}` };
-                        }
-                    } else {
-                        result = mem;
-                    }
-                }
-                break;
-            }
-            case 'search_memory': {
-                const { query } = args as unknown as { query: string };
-                if (!query) {
-                    result = { success: false, message: 'Missing query argument' };
-                } else {
-                    result = this.blackboard.legacySearch(query);
-                }
-                break;
-            }
+            case 'set_memory':
+                result = await this.memoryHandler.setMemory(args as any, context); break;
+            case 'set_memory_disabled': break;
+            case 'get_memory':
+                result = await this.memoryHandler.getMemory(args as any); break;
+            case 'get_memory_disabled': break;
+            case 'search_memory':
+                result = this.memoryHandler.searchMemory(args as any); break;
+            case 'search_memory_disabled': break;
 
             // ── Persistent memory (cross-session, written to .cwtools-ai-memory.md) ──
-            case 'save_memory': {
-                const { key, content, priority } = args as { key: string; content: string; priority?: 'high' | 'normal' | 'low' };
-                if (!key || !content) {
-                    result = { success: false, message: 'Missing key or content' };
-                } else {
-                    const { MemoryParser } = await import('./memoryParser');
-                    const parser = new MemoryParser(this.workspaceRoot);
-                    result = await parser.appendMemory({ key, content, priority: priority || 'normal' });
-                }
-                break;
-            }
+            case 'save_memory':
+                result = await this.memoryHandler.saveMemory(args as any); break;
+            case 'save_memory_disabled': break;
 
             // ── MCP tool call ────────────────────────────────────────────────────
             case 'mcp_call':
@@ -695,41 +525,9 @@ export class AgentToolExecutor {
                 result = await this.executeDispatchAgents(args, context);
                 break;
             }
-            case 'query_blackboard': {
-                const { key: qbKey, prefix, type: qbType } = args as { key?: string; prefix?: string; type?: string };
-                const resolveFileRef = async (entry: any) => {
-                    if (entry && typeof entry.value === 'string' && entry.value.startsWith('file://')) {
-                        const filePath = entry.value.slice(7);
-                        try {
-                            const fs = await import('fs');
-                            const content = fs.readFileSync(filePath, 'utf-8');
-                            const truncated = content.length > 3000 
-                                ? content.substring(0, 3000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
-                                : content;
-                            return { ...entry, value: truncated, _sourceFile: filePath, _fullLength: content.length };
-                        } catch {
-                            return entry;
-                        }
-                    }
-                    return entry;
-                };
-
-                if (qbKey) {
-                    const entry = this.blackboard.read(qbKey);
-                    result = entry ? { found: true, entry: await resolveFileRef(entry) } : { found: false };
-                } else if (prefix) {
-                    const entries = this.blackboard.queryByPrefix(prefix);
-                    const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
-                    result = { found: resolved.length > 0, count: entries.length, entries: resolved };
-                } else if (qbType) {
-                    const entries = this.blackboard.queryByType(qbType as any);
-                    const resolved = await Promise.all(entries.slice(0, 50).map(resolveFileRef));
-                    result = { found: resolved.length > 0, count: entries.length, entries: resolved };
-                } else {
-                    result = { success: false, message: '请提供 key、prefix 或 type 参数' };
-                }
-                break;
-            }
+            case 'query_blackboard':
+                result = await this.memoryHandler.queryBlackboard(args as any); break;
+            case 'query_blackboard_disabled': break;
             case 'merge_results': {
                 result = this.executeMergeResults();
                 break;

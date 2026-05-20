@@ -2192,6 +2192,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const escapeHtml = _fmtEscapeHtml;
 
     let isUserScrolledUp = false;
+    let scrollBottomPending = false;
+    let subagentScrollPending = false;
     const jumpLatestBtn = document.createElement('button');
     jumpLatestBtn.className = 'jump-latest-btn';
     jumpLatestBtn.type = 'button';
@@ -2209,21 +2211,23 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function scrollBottom(force = false) {
         const activeSubagent = document.querySelector('.subagent-fullscreen-view.active') as HTMLElement | null;
         if (!force && activeSubagent) {
-            const applySubagentScroll = () => {
+            if (subagentScrollPending) return;
+            subagentScrollPending = true;
+            requestAnimationFrame(() => {
+                subagentScrollPending = false;
                 activeSubagent.scrollTop = activeSubagent.scrollHeight;
-            };
-            applySubagentScroll();
-            requestAnimationFrame(applySubagentScroll);
+            });
             return;
         }
         if (force || !isUserScrolledUp) {
-            const applyScroll = () => {
+            if (scrollBottomPending) return;
+            scrollBottomPending = true;
+            requestAnimationFrame(() => {
+                scrollBottomPending = false;
                 chatArea.scrollTop = chatArea.scrollHeight;
-            };
-            applyScroll();
-            requestAnimationFrame(applyScroll);
-            isUserScrolledUp = false;
-            jumpLatestBtn.classList.remove('show');
+                isUserScrolledUp = false;
+                jumpLatestBtn.classList.remove('show');
+            });
         }
     }
 
@@ -2699,6 +2703,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         document.body.classList.remove('has-active-subagent');
     }
 
+    function removeLiveAssistantViews(): void {
+        document.querySelectorAll('.message.assistant.live-msg').forEach(el => el.remove());
+        currentAssistantDiv = null;
+        streamStates.clear();
+    }
+
     (window as any).openSubagentView = (id: string) => {
         const el = document.getElementById(id);
         if (el) {
@@ -2742,9 +2752,41 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         lastStepAt: number;
         completedAt: number | null;
         isComplete: boolean;
+        lastSummaryRenderAt: number;
+        pendingThinkingRender: boolean;
+        pendingTextRender: boolean;
+        lastSpecialKey: string | null;
+        lastSpecialElement: HTMLElement | null;
     }
     const streamStates = new Map<string, AgentStreamState>();
     let subagentTicker: ReturnType<typeof setInterval> | null = null;
+    const LIVE_RENDER_MAX_CHARS = 16000;
+    const LIVE_SPECIAL_MAX_ITEMS = 18;
+
+    function clipLiveMarkdownContent(content: string): string {
+        if (content.length <= LIVE_RENDER_MAX_CHARS) return content;
+        const head = content.substring(0, 5000);
+        const tail = content.substring(content.length - 10000);
+        const hidden = Math.max(0, content.length - head.length - tail.length);
+        return `${head}\n\n...\n\n[${hidden} chars hidden while streaming]\n\n...\n\n${tail}`;
+    }
+
+    function liveStepCoalesceKey(step: any): string | null {
+        if (!step || step.type !== 'orchestrator_progress') return null;
+        const content = String(step.content || '').replace(/\(\d+s\)/g, '(...)').trim();
+        if (!content) return null;
+        if (/waiting|等待模型返回/i.test(content)) return `${step.agentId || '__main__'}:wait-model`;
+        return `${step.agentId || '__main__'}:progress:${content}`;
+    }
+
+    function coalesceLiveStep(state: AgentStreamState, step: any): boolean {
+        const key = liveStepCoalesceKey(step);
+        if (!key || state.liveSteps.length === 0) return false;
+        const last = state.liveSteps[state.liveSteps.length - 1];
+        if (liveStepCoalesceKey(last) !== key) return false;
+        state.liveSteps[state.liveSteps.length - 1] = step;
+        return true;
+    }
 
     function getStreamState(agentId: string | undefined): AgentStreamState {
         const key = agentId || '__main__';
@@ -2770,6 +2812,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 lastStepAt: Date.now(),
                 completedAt: null,
                 isComplete: false,
+                lastSummaryRenderAt: 0,
+                pendingThinkingRender: false,
+                pendingTextRender: false,
+                lastSpecialKey: null,
+                lastSpecialElement: null,
             };
             if (agentId && currentAssistantDiv) {
                 const uniqueId = `live-subview-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -2889,14 +2936,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return state.liveProcessBody;
     }
 
-    function ensureLiveSummary(state: AgentStreamState, step?: any) {
+    function ensureLiveSummary(state: AgentStreamState, step?: any, coalesced = false) {
         if (!state.container) return;
-        if (step) state.liveSteps.push(step);
+        if (step && !coalesced) state.liveSteps.push(step);
         if (!state.liveSummary) {
             state.liveSummary = document.createElement('div');
             state.liveSummary.className = 'live-run-summary-anchor';
             state.container.prepend(state.liveSummary);
         }
+        const now = Date.now();
+        const noisy = step && (step.type === 'text_delta' || step.type === 'thinking_content' || step.type === 'orchestrator_progress');
+        if (noisy && now - state.lastSummaryRenderAt < 800) return;
+        state.lastSummaryRenderAt = now;
         state.liveSummary.innerHTML = renderRunSummaryHtml(makeRunSummary(state.liveSteps), true);
     }
 
@@ -2919,15 +2970,42 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function flushLiveText(state: AgentStreamState) {
         if (state.liveTextBubble) {
             state.liveTextBubble.classList.remove('stream-cursor');
-            state.liveTextBubble.innerHTML = renderMarkdown(state.liveTextContent);
+            state.liveTextBubble.innerHTML = renderMarkdown(clipLiveMarkdownContent(state.liveTextContent));
         }
         if (state.liveTextProcessBody) {
             state.liveTextProcessBody.classList.remove('stream-cursor');
-            state.liveTextProcessBody.innerHTML = renderMarkdown(state.liveTextContent);
+            state.liveTextProcessBody.innerHTML = renderMarkdown(clipLiveMarkdownContent(state.liveTextContent));
         }
         state.liveTextBubble = null;
         state.liveTextProcessBody = null;
         state.liveTextContent = '';
+    }
+
+    function scheduleThinkingRender(state: AgentStreamState) {
+        if (state.pendingThinkingRender) return;
+        state.pendingThinkingRender = true;
+        requestAnimationFrame(() => {
+            state.pendingThinkingRender = false;
+            if (state.liveThinkBody) {
+                state.liveThinkBody.innerHTML = renderMarkdown(clipLiveMarkdownContent(state.liveThinkContent));
+            }
+            if (state.liveThinkSum) {
+                state.liveThinkSum.innerHTML = buildThinkingSummaryHtml(state.liveThinkContent, chatI18n);
+            }
+            scrollBottom();
+        });
+    }
+
+    function scheduleTextRender(state: AgentStreamState) {
+        if (state.pendingTextRender) return;
+        state.pendingTextRender = true;
+        requestAnimationFrame(() => {
+            state.pendingTextRender = false;
+            if (state.liveTextProcessBody) {
+                state.liveTextProcessBody.innerHTML = renderMarkdown(clipLiveMarkdownContent(state.liveTextContent));
+            }
+            scrollBottom();
+        });
     }
 
     function createToolPairElement(html: string): HTMLElement | null {
@@ -2940,7 +3018,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!currentAssistantDiv) return;
 
         const state = getStreamState(s.agentId);
-        ensureLiveSummary(state, s);
+        const coalesced = coalesceLiveStep(state, s);
+        ensureLiveSummary(state, s, coalesced);
         state.lastStepAt = Date.now();
         updateSubagentCard(state);
 
@@ -3027,15 +3106,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 } else {
                     state.liveThinkContent += (s.content || '');
                 }
-                state.liveThinkBody.innerHTML = renderMarkdown(state.liveThinkContent);
-                if (state.liveThinkSum) {
-                    state.liveThinkSum.innerHTML = buildThinkingSummaryHtml(state.liveThinkContent, chatI18n);
-                }
+                scheduleThinkingRender(state);
             }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
                 showTransactionCard(s.transactionCard);
             }
-            scrollBottom();
             return;
         }
 
@@ -3056,12 +3131,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
             if (state.liveTextProcessBody) {
                 state.liveTextContent += (s.content || '');
-                state.liveTextProcessBody.innerHTML = renderMarkdown(state.liveTextContent);
+                scheduleTextRender(state);
             }
             if (s.transactionCard && s.transactionCard.status === 'pending') {
                 showTransactionCard(s.transactionCard);
             }
-            scrollBottom();
             return;
         }
 
@@ -3153,6 +3227,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
         } else if (target === 'special') {
             const processBody = ensureLiveProcessPanel(state);
+            const specialKey = liveStepCoalesceKey(s);
             const el = document.createElement('div');
             // Add step type as additional CSS class name (consistent with finalized renderer)
             el.className = `special-step ${s.type}`;
@@ -3168,8 +3243,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 }
                 return _match;
             });
-            el.innerHTML = icon + ' ' + safeContent;
-            processBody?.appendChild(el);
+            const nextHtml = icon + ' ' + safeContent;
+            if (specialKey && state.lastSpecialKey === specialKey && state.lastSpecialElement?.isConnected) {
+                state.lastSpecialElement.innerHTML = nextHtml;
+            } else {
+                el.innerHTML = nextHtml;
+                processBody?.appendChild(el);
+                state.lastSpecialKey = specialKey;
+                state.lastSpecialElement = el;
+                const specialItems = processBody ? Array.from(processBody.querySelectorAll(':scope > .special-step')) as HTMLElement[] : [];
+                const overflow = specialItems.length - LIVE_SPECIAL_MAX_ITEMS;
+                if (overflow > 0) {
+                    for (const item of specialItems.slice(0, overflow)) item.remove();
+                }
+            }
         }
         scrollBottom();
     }
@@ -3760,6 +3847,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         processFloatingCardQueue();
     }
 
+    function prepareSingleFileArtifactCard(card: HTMLElement, kind: string, filePath?: string, relPath?: string): void {
+        const key = filePath || relPath || kind;
+        document.querySelectorAll<HTMLElement>(`.plan-file-card[data-card-kind="${kind}"]`).forEach(existing => {
+            if (existing.dataset.cardPath === key) existing.remove();
+        });
+        card.dataset.cardKind = kind;
+        card.dataset.cardPath = key;
+    }
+
     // ── Message handler ────────────────────────────────────────────────────────
     window.addEventListener('message', event => {
         const msg = event.data;
@@ -3773,7 +3869,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     clearInterval(subagentTicker);
                     subagentTicker = null;
                 }
-                streamStates.clear();
+                removeLiveAssistantViews();
                 addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
@@ -3788,7 +3884,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     clearInterval(subagentTicker);
                     subagentTicker = null;
                 }
-                streamStates.clear();
+                removeLiveAssistantViews();
                 // Do not add user message bubble, but still render the assistant div
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
@@ -3796,7 +3892,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
 
             case 'agentStep':
-                removeReplayBanners();
                 applyLiveStep(msg.step);
                 break;
             case 'generationComplete': {
@@ -3808,8 +3903,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     subagentTicker = null;
                 }
                 // Clear all streaming status to prevent residual liveThinkBlock and other references from interfering with final message reconstruction
-                streamStates.clear();
-                if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
+                removeLiveAssistantViews();
                 
                 // Clear any unresolved interactive cards (permission, diff)
                 floatingCardQueue = [];
@@ -3871,8 +3965,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 removeReplayBanners();
                 clearActiveSubagentViews();
                 setGenerating(false);
-                streamStates.clear();
-                if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
+                removeLiveAssistantViews();
                 
                 // Clear any unresolved interactive cards
                 floatingCardQueue = [];
@@ -4088,16 +4181,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const replayedSteps = Array.isArray(msg.steps) ? msg.steps : [];
                 if (msg.isGenerating) {
                     setGenerating(true);
-                    streamStates.clear();
-                    if (currentAssistantDiv) currentAssistantDiv.remove();
+                    removeLiveAssistantViews();
                     currentAssistantDiv = initLiveAssistantDiv();
                     chatArea.appendChild(currentAssistantDiv);
                     for (const step of replayedSteps) {
                         applyLiveStep(step);
                     }
                 } else if (replayedSteps.length > 0) {
-                    if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }
-                    streamStates.clear();
+                    removeLiveAssistantViews();
                     chatArea.appendChild(buildAssistantMessage('', replayedSteps, Date.now()));
                 }
                 scrollBottom();
@@ -4413,6 +4504,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const isOrchestratorPlan = msg.mode === 'orchestrator';
                 const card = document.createElement('div');
                 card.className = `plan-file-card ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`;
+                prepareSingleFileArtifactCard(card, 'plan', msg.filePath, msg.relPath);
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin(isOrchestratorPlan ? 'bot' : 'clipboard')}</div>
                     <div class="plan-file-info">
@@ -4461,6 +4553,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'walkthroughFileSaved': {
                 const card = document.createElement('div');
                 card.className = 'plan-file-card walkthrough-file-card';
+                prepareSingleFileArtifactCard(card, 'walkthrough', msg.filePath, msg.relPath);
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin('flag')}</div>
                     <div class="plan-file-info">
@@ -4481,6 +4574,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'blueprintFileSaved': {
                 const card = document.createElement('div');
                 card.className = 'plan-file-card blueprint-file-card';
+                prepareSingleFileArtifactCard(card, 'blueprint', msg.filePath, msg.relPath);
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin('layers')}</div>
                     <div class="plan-file-info">

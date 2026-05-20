@@ -94,7 +94,8 @@ describe('webview smoke checks', () => {
         expect(css).to.include('@media (max-height: 620px)');
         expect(css).to.include('.floating-card-area { max-height: calc(100vh - var(--composer-popup-bottom) - 48px); overflow-y: auto; }');
         expect(script).to.include('function scheduleComposerScrollSync()');
-        expect(script).to.include('requestAnimationFrame(applyScroll)');
+        expect(script).to.include('let scrollBottomPending = false;');
+        expect(script).to.include('let subagentScrollPending = false;');
     });
 
     it('chat clear resets stale topic workspace panels', () => {

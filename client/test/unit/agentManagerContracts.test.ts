@@ -2,6 +2,14 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Override fs.readFileSync via CommonJS to support Windows CRLF normalization
+const rawFs = require('fs');
+const originalRead = rawFs.readFileSync;
+rawFs.readFileSync = function(p: any, opts: any) {
+    const res = originalRead(p, opts);
+    return typeof res === 'string' ? res.replace(/\r\n/g, '\n') : res;
+};
+
 describe('agent manager cross-surface contracts', () => {
     const root = path.resolve(__dirname, '../../..');
 

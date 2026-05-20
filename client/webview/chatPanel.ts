@@ -2550,7 +2550,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     //   2. [Tool calls block] — list of tool-pair rows (call + result)
     //   3. [Text response]   — the final markdown answer
 
-    function buildAssistantMessage(content: string, steps: any[], msgTime: number | null) {
+    function buildAssistantMessage(content: string, steps: any[], msgTime: number | null, isSubagentView = false) {
         const div = document.createElement('div');
         div.className = 'message assistant';
 
@@ -2561,7 +2561,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             '<span class="msg-role">CWTools AI</span>' +
             '<span class="msg-time">' + (msgTime || '') + '</span>';
         div.appendChild(hdr);
-        if (steps && steps.length > 0) {
+        if (steps && steps.length > 0 && !isSubagentView) {
             const summaryWrap = document.createElement('div');
             summaryWrap.innerHTML = renderRunSummaryHtml(makeRunSummary(steps, content), false);
             div.appendChild(summaryWrap.firstElementChild || summaryWrap);
@@ -2667,7 +2667,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             `;
             
             // Recursively render the content of the sub-Agent without msgTime to avoid multiple timestamps
-            const innerMsg = buildAssistantMessage('', groupSteps, null);
+            const innerMsg = buildAssistantMessage('', groupSteps, null, true);
             fullscreen.querySelector('.subagent-body')!.appendChild(innerMsg);
             
             div.appendChild(fullscreen);
@@ -2685,11 +2685,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     // ── Global Drill-Down Functions ───────────────────────────────────────────
     (window as any).openSubagentView = (id: string) => {
         const el = document.getElementById(id);
-        if (el) el.classList.add('active');
+        if (el) {
+            el.classList.add('active');
+            document.body.classList.add('has-active-subagent');
+        }
     };
     (window as any).closeSubagentView = (id: string) => {
         const el = document.getElementById(id);
-        if (el) el.classList.remove('active');
+        if (el) {
+            el.classList.remove('active');
+            document.body.classList.remove('has-active-subagent');
+        }
     };
 
     // ── Live thinking/tool state builders ─────────────────────────────────────
@@ -2821,8 +2827,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function ensureSubagentTicker() {
         if (subagentTicker) return;
         subagentTicker = setInterval(() => {
+            let activeCount = 0;
             for (const [key, state] of streamStates.entries()) {
-                if (key !== '__main__' && !state.isComplete) updateSubagentCard(state);
+                if (key !== '__main__') {
+                    if (!state.isComplete) {
+                        activeCount++;
+                        updateSubagentCard(state);
+                    }
+                }
+            }
+            // 💡 Performance Optimization: If no active subagents are currently running,
+            // tear down the interval ticker to release main thread CPU cycles.
+            if (activeCount === 0 && subagentTicker) {
+                clearInterval(subagentTicker);
+                subagentTicker = null;
             }
         }, 5000);
     }
@@ -3729,6 +3747,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'addUserMessage':
                 removeReplayBanners();
                 setGenerating(true);
+                if (subagentTicker) {
+                    clearInterval(subagentTicker);
+                    subagentTicker = null;
+                }
                 streamStates.clear();
                 addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts);
                 currentAssistantDiv = initLiveAssistantDiv();
@@ -3739,6 +3761,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'startBackgroundGeneration':
                 removeReplayBanners();
                 setGenerating(true);
+                if (subagentTicker) {
+                    clearInterval(subagentTicker);
+                    subagentTicker = null;
+                }
                 streamStates.clear();
                 // Do not add user message bubble, but still render the assistant div
                 currentAssistantDiv = initLiveAssistantDiv();
@@ -3753,6 +3779,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'generationComplete': {
                 removeReplayBanners();
                 setGenerating(false);
+                if (subagentTicker) {
+                    clearInterval(subagentTicker);
+                    subagentTicker = null;
+                }
                 // Clear all streaming status to prevent residual liveThinkBlock and other references from interfering with final message reconstruction
                 streamStates.clear();
                 if (currentAssistantDiv) { currentAssistantDiv.remove(); currentAssistantDiv = null; }

@@ -38,8 +38,8 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     // LSP / CWTools query tools — 45s (LSP can be queued behind heavy indexing)
     query_scope: 45_000,
     query_types: 45_000,
-    query_localisation_index: 10_000,
-    query_workspace_index: 10_000,
+    query_localisation_index: 45_000,
+    query_workspace_index: 45_000,
     query_rules: 45_000,
     query_references: 45_000,
     // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics

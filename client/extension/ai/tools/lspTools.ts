@@ -1003,41 +1003,90 @@ export class LspToolHandler {
                 previewOptions: { matchLines: 1, charsPerLine: 120 },
             };
 
-            const fileMatches = new Map<string, Array<{ line: number; content: string }>>();
-            
-            try {
-                await (vs.workspace as any).findTextInFiles(query, options, (result: any) => {
-                    if (fileMatches.size >= limit && !fileMatches.has(result.uri.fsPath)) {
-                        limitReached = true;
-                        return;
-                    }
-                    if (!fileMatches.has(result.uri.fsPath)) {
-                        fileMatches.set(result.uri.fsPath, []);
-                    }
-                    const arr = fileMatches.get(result.uri.fsPath)!;
-                    if (arr.length < 10) {
-                        if ('preview' in result) {
-                            arr.push({
-                                line: result.ranges[0]!.startLineNumber,
-                                content: result.preview.text.trim()
-                            });
-                        } else {
-                            // TextSearchMatch
-                            arr.push({
-                                line: result.ranges instanceof vs.Range ? result.ranges.start.line : result.ranges[0]!.start.line,
-                                content: result.preview.text.trim()
-                            });
-                        }
-                    }
-                });
+            // Strategy 1: Try native findTextInFiles (older VSCode versions)
+            let usedNativeApi = false;
+            const fileMatches = new Map();
 
-                for (const [fsPath, matchingLines] of fileMatches.entries()) {
-                    results.push({
-                        logicalPath: path.relative(this.ctx.workspaceRoot, fsPath).replace(/\\/g, '/'),
-                        matchingLines
+            if (typeof (vs.workspace as any).findTextInFiles === 'function') {
+                try {
+                    await (vs.workspace as any).findTextInFiles(query, options, (result: any) => {
+                        if (fileMatches.size >= limit && !fileMatches.has(result.uri.fsPath)) {
+                            limitReached = true;
+                            return;
+                        }
+                        if (!fileMatches.has(result.uri.fsPath)) {
+                            fileMatches.set(result.uri.fsPath, []);
+                        }
+                        const arr = fileMatches.get(result.uri.fsPath);
+                        if (arr.length < 10) {
+                            if ('preview' in result) {
+                                arr.push({
+                                    line: result.ranges[0].startLineNumber,
+                                    content: result.preview.text.trim()
+                                });
+                            } else {
+                                arr.push({
+                                    line: result.ranges instanceof vs.Range ? result.ranges.start.line : result.ranges[0].start.line,
+                                    content: result.preview.text.trim()
+                                });
+                            }
+                        }
                     });
+
+                    for (const [fsPath, matchingLines] of fileMatches.entries()) {
+                        results.push({
+                            logicalPath: path.relative(this.ctx.workspaceRoot, fsPath).replace(/\\\\/g, '/'),
+                            matchingLines
+                        });
+                    }
+                    usedNativeApi = results.length > 0;
+                } catch {
+                    // findTextInFiles unavailable or broken
                 }
-            } catch { /* skip */ }
+            }
+
+            // Strategy 2: Fallback — findFiles + manual regex scan (VSCode 1.95+)
+            if (!usedNativeApi) {
+                try {
+                    const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob);
+                    const uris = await vs.workspace.findFiles(globPattern, '**/node_modules/**', limit * 20);
+                    const regex = new RegExp(finalPattern, args.caseSensitive ? '' : 'i');
+
+                    const CHUNK_SIZE = 30;
+                    for (let i = 0; i < uris.length; i += CHUNK_SIZE) {
+                        if (results.length >= limit) { limitReached = true; break; }
+                        const chunk = uris.slice(i, i + CHUNK_SIZE);
+                        await Promise.all(chunk.map(async (uri) => {
+                            if (results.length >= limit) return;
+                            try {
+                                const fileContent: string = await fs.promises.readFile(uri.fsPath, 'utf-8');
+                                if (!regex.test(fileContent)) return;
+                                regex.lastIndex = 0;
+
+                                const fLines = fileContent.split('\n');
+                                const matchingLines = [];
+                                for (let j = 0; j < fLines.length; j++) {
+                                    const lineStr = fLines[j]!;
+                                    if (regex.test(lineStr)) {
+                                        regex.lastIndex = 0;
+                                        matchingLines.push({ line: j, content: lineStr.trim().substring(0, 120) });
+                                    }
+                                    if (matchingLines.length >= 10) break;
+                                }
+
+                                if (matchingLines.length > 0 && results.length < limit) {
+                                    results.push({
+                                        logicalPath: path.relative(this.ctx.workspaceRoot, uri.fsPath).replace(/\\\\/g, '/'),
+                                        matchingLines,
+                                    });
+                                } else if (results.length >= limit) {
+                                    limitReached = true;
+                                }
+                            } catch { /* skip unreadable */ }
+                        }));
+                    }
+                } catch { /* skip */ }
+            }
         }
 
         if (ctxStr === 'vanilla' || ctxStr === 'both') {
@@ -1617,31 +1666,75 @@ export class LspToolHandler {
             previewOptions: { matchLines: 1, charsPerLine: 150 },
         };
 
-        try {
-            await (vs.workspace as any).findTextInFiles(query, options, (result: any) => {
-                if (matches.length >= limit) {
-                    truncated = true;
-                    return;
-                }
-                let lineStr = '';
-                let lineNumber = 0;
+        // Strategy 1: Try native findTextInFiles (older VSCode versions)
+        let usedNativeApi = false;
+        if (typeof (vs.workspace as any).findTextInFiles === 'function') {
+            try {
+                await (vs.workspace as any).findTextInFiles(query, options, (result: any) => {
+                    if (matches.length >= limit) {
+                        truncated = true;
+                        return;
+                    }
+                    let lineStr = '';
+                    let lineNumber = 0;
 
-                if ('preview' in result) {
-                    lineStr = result.preview.text.trim();
-                    lineNumber = result.ranges[0]?.startLineNumber ?? 0;
-                } else {
-                    lineStr = result.preview.text.trim();
-                    lineNumber = result.ranges instanceof vs.Range ? result.ranges.start.line : result.ranges[0]?.start.line ?? 0;
-                }
+                    if ('preview' in result) {
+                        lineStr = result.preview.text.trim();
+                        lineNumber = result.ranges[0]?.startLineNumber ?? 0;
+                    } else {
+                        lineStr = result.preview.text.trim();
+                        lineNumber = result.ranges instanceof vs.Range ? result.ranges.start.line : result.ranges[0]?.start.line ?? 0;
+                    }
 
-                matches.push({
-                    file: path.relative(this.ctx.workspaceRoot, result.uri.fsPath).replace(/\\/g, '/'),
-                    line: lineNumber,
-                    content: lineStr,
+                    matches.push({
+                        file: path.relative(this.ctx.workspaceRoot, result.uri.fsPath).replace(/\\\\/g, '/'),
+                        line: lineNumber,
+                        content: lineStr,
+                    });
+                    totalMatches++;
                 });
-                totalMatches++;
-            });
-        } catch { /* skip */ }
+                usedNativeApi = matches.length > 0;
+            } catch {
+                // findTextInFiles unavailable or broken in this VSCode version
+            }
+        }
+
+        // Strategy 2: Fallback — findFiles + manual regex scan (VSCode 1.95+)
+        if (!usedNativeApi) {
+            try {
+                const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includePattern);
+                const uris = await vs.workspace.findFiles(globPattern, '**/node_modules/**', limit * 20);
+                const regex = new RegExp(pattern, args.caseSensitive ? '' : 'i');
+
+                const CHUNK_SIZE = 30;
+                for (let i = 0; i < uris.length; i += CHUNK_SIZE) {
+                    if (matches.length >= limit) { truncated = true; break; }
+                    const chunk = uris.slice(i, i + CHUNK_SIZE);
+                    await Promise.all(chunk.map(async (uri) => {
+                        if (matches.length >= limit) return;
+                        try {
+                            const fileContent: string = await fs.promises.readFile(uri.fsPath, 'utf-8');
+                            if (!regex.test(fileContent)) return;
+                            regex.lastIndex = 0;
+
+                            const fLines = fileContent.split('\n');
+                            for (let j = 0; j < fLines.length && matches.length < limit; j++) {
+                                const lineStr = fLines[j]!;
+                                if (regex.test(lineStr)) {
+                                    regex.lastIndex = 0;
+                                    matches.push({
+                                        file: path.relative(this.ctx.workspaceRoot, uri.fsPath).replace(/\\\\/g, '/'),
+                                        line: j,
+                                        content: lineStr.trim().substring(0, 150),
+                                    });
+                                    totalMatches++;
+                                }
+                            }
+                        } catch { /* skip unreadable */ }
+                    }));
+                }
+            } catch { /* skip */ }
+        }
 
         const returnObj: any = {
             matches,

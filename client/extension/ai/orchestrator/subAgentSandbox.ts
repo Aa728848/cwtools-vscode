@@ -137,28 +137,47 @@ export function enforceSubAgentSafety(
             return { allowed: true }; // 参数为空时不作硬路径拦截，防止报错
         }
 
-        const normalizedTarget = path.normalize(targetFile).toLowerCase();
+        // 将目标物理路径规格化为统一的工作区正斜杠相对路径
+        const absTarget = path.isAbsolute(targetFile) ? targetFile : path.resolve(workspaceRoot, targetFile);
+        const relTarget = path.relative(workspaceRoot, absTarget).replace(/\\/g, '/').toLowerCase();
 
         // 如果存在具体的限制范围，验证写入是否越权越界
         if (sandbox.writeScope && sandbox.writeScope.length > 0) {
             let matchesScope = false;
             for (const scope of sandbox.writeScope) {
-                const normScope = scope.toLowerCase();
+                // 将许可范围也规格化为统一的工作区正斜杠相对路径
+                const absScope = path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope);
+                const relScope = path.relative(workspaceRoot, absScope).replace(/\\/g, '/').toLowerCase();
 
                 // 1) 后缀或子片段模糊约束 (如 '.gui' 或 'localisation')
-                if (normScope.startsWith('.') && normalizedTarget.endsWith(normScope)) {
+                if (scope.startsWith('.') && relTarget.endsWith(scope.toLowerCase())) {
                     matchesScope = true;
                     break;
                 }
-                if (normScope === 'localisation' && normalizedTarget.includes('localisation')) {
+                if (scope.toLowerCase() === 'localisation' && relTarget.includes('localisation')) {
                     matchesScope = true;
                     break;
                 }
 
-                // 2) 绝对路径或相对工作区前缀比对
-                if (normalizedTarget.includes(normScope)) {
+                // 2) 物理相对路径完全或前缀匹配
+                if (relTarget.includes(relScope) || relTarget === relScope) {
                     matchesScope = true;
                     break;
+                }
+
+                // 3) 允许在其父目录下进行写入（即同属于一个模块目录，如 common/buildings）
+                if (!scope.startsWith('.') && scope.toLowerCase() !== 'localisation') {
+                    const ext = path.extname(relScope);
+                    if (ext) {
+                        const relScopeDir = path.dirname(relScope).replace(/\\/g, '/');
+                        if (relScopeDir && relScopeDir !== '.' && relScopeDir !== '/' && relScopeDir !== '') {
+                            const requiredPrefix = relScopeDir.endsWith('/') ? relScopeDir : relScopeDir + '/';
+                            if (relTarget.startsWith(requiredPrefix) || relTarget === relScopeDir) {
+                                matchesScope = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
 

@@ -1361,3 +1361,47 @@ body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
     border-color: var(--vscode-focusBorder);
     background: rgba(255, 255, 255, 0.05);
 }
+
+/* ── 双 Agent 视图并排分栏模式 (Side-by-Side Dual-Agent Mode) ── */
+@media (min-width: 800px) {
+    /* 当子 Agent 激活时，主 Agent 缩减至左侧 50% */
+    body.has-active-subagent .chat-area {
+        margin-right: 50% !important;
+        width: auto !important;
+        max-width: none !important;
+        border-right: 1px solid var(--border);
+        transition: margin-right 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    
+    /* 输入框组件同样缩进至左侧 50% */
+    body.has-active-subagent .input-wrapper {
+        right: 50% !important;
+        transition: right 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    
+    /* 浮动卡片与快捷指令弹窗也需要缩进 */
+    body.has-active-subagent .floating-card-area,
+    body.has-active-subagent .slash-popup {
+        right: 50% !important;
+        transition: right 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    
+    /* 子 Agent 视图脱离局部流限制，以 fixed 固定于右侧 50% */
+    body.has-active-subagent .subagent-fullscreen-view.active {
+        position: fixed !important;
+        top: 42px !important; /* 刚好贴在 Header 下方 */
+        left: 50% !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        z-index: 130 !important;
+        background: var(--vscode-editor-background);
+        border-left: 1px solid var(--border) !important;
+        box-shadow: -10px 0 30px rgba(0, 0, 0, 0.18) !important;
+        animation: slideInRightSplit 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    }
+}
+
+@keyframes slideInRightSplit {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}

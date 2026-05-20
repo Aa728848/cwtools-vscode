@@ -860,11 +860,12 @@ body.agent-manager-shell .manager-task-mark {
     background: var(--bg);
     background: color-mix(in srgb, var(--bg) 88%, #2b2b2b);
     border-left: 1px solid rgba(255, 255, 255, 0.14);
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    border-right: none;
     display: flex;
     flex-direction: column;
     z-index: 200;
-    transition: width 0.2s ease;
+    visibility: hidden;
+    transition: width 0.2s ease, visibility 0.2s ease;
     pointer-events: none;
     box-shadow: -24px 0 42px rgba(0, 0, 0, 0.36);
 }
@@ -872,6 +873,7 @@ body.agent-manager-shell .manager-task-mark {
 .run-inspector-slider.open {
     width: clamp(280px, 24vw, 440px);
     pointer-events: auto;
+    visibility: visible;
 }
 
 .run-inspector-slider-header {

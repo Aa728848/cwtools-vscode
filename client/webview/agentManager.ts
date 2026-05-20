@@ -3,7 +3,7 @@ import { escapeHtml } from './chat/formatters';
 import { renderInspectorHTML } from './chat/runInspector';
 import { groupTimelineEvents, renderTimelineHTML } from './chat/runTimeline';
 import { getChatI18n, normalizeChatLocale } from './chat/i18n';
-import { svgIcon } from './svgIcons';
+import { svgIcon, svgIconNoMargin } from './svgIcons';
 import type { ManagerSnapshotMessage, OrchestratorProgressMessage } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
 
@@ -95,7 +95,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     inspectorSlider.innerHTML = `
         <div class="run-inspector-slider-header">
             <span class="run-inspector-slider-title">${svgIcon('layers')}${m.runs.eventDetail}</span>
-            <button type="button" class="run-inspector-slider-close" data-run-action="close-inspector" title="${m.runs.closeInspector}">${svgIcon('x')}</button>
+            <button type="button" class="run-inspector-slider-close" data-run-action="close-inspector" title="${m.runs.closeInspector}">${svgIconNoMargin('x')}</button>
         </div>
         <div class="run-inspector-slider-body" id="runInspectorSliderBody"></div>
     `;
@@ -230,6 +230,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             // 动态定位：侧滑栏 right = artifactDrawer 的 offsetWidth，从其左边界向左弹出
             const drawerRect = artifactDrawerEl.getBoundingClientRect();
             inspectorSlider.style.right = `${window.innerWidth - drawerRect.left}px`;
+            inspectorSlider.style.top = `${drawerRect.top}px`;
+        } else {
+            inspectorSlider.style.top = '';
         }
     }
 
@@ -569,6 +572,21 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     }
 
     window.addEventListener('message', event => applyHostMessage(event.data));
+
+    // 监听 body 的 class 变化，若右侧抽屉被关掉，联动收起左侧 Event Detail 侧滑栏
+    const drawerObserver = new MutationObserver(mutations => {
+        for (const mutation of mutations) {
+            if (mutation.attributeName === 'class') {
+                const hasDrawer = document.body.classList.contains('artifact-drawer-open');
+                if (!hasDrawer && state.inspectorPanelOpen) {
+                    state.inspectorPanelOpen = false;
+                    updateInspectorSliderVisibility();
+                    markSelectedRunEvent();
+                }
+            }
+        }
+    });
+    drawerObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
     renderOverview();
     renderInspector();

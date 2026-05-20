@@ -157,6 +157,12 @@ export async function routeWebviewMessage(
         case 'openArtifact':
             await provider.openArtifact(msg.artifactId, msg.file);
             break;
+        case 'openRunResult':
+            await provider.openRunResult(msg.filePath);
+            break;
+        case 'cleanupRunArtifacts':
+            await provider.cleanupRunArtifacts(msg.maxAgeDays, msg.maxFiles);
+            break;
         case 'submitPlanAnnotations': {
             provider.markLatestInteractiveCardApproved(['plan_card', 'blueprint_card']);
             provider.postMessage({ type: 'floatingCardResolved', card: 'plan' });
@@ -254,5 +260,41 @@ export async function routeWebviewMessage(
             provider.usageTracker.clearStats();
             provider.postMessage({ type: 'usageStats', stats: provider.usageTracker.getStats() });
             break;
+        case 'requestCompactedMemory': {
+            const activeTopicId = provider.topicManager.currentTopic?.id || 'default';
+            // wsRoot is resolved from getProjectWorkspaceRoot
+            const { getProjectWorkspaceRoot, getTopicStorageDir } = await import('../workspacePaths');
+            const root = getProjectWorkspaceRoot();
+            const topicStorage = getTopicStorageDir(activeTopicId, root);
+            
+            let markdownContent = '';
+            if (topicStorage) {
+                const fs = await import('fs');
+                const pathModule = await import('path');
+                const runsDir = pathModule.join(topicStorage, 'runs');
+                if (fs.existsSync(runsDir)) {
+                    try {
+                        const runs = fs.readdirSync(runsDir)
+                            .map(name => ({ name, time: fs.statSync(pathModule.join(runsDir, name)).mtimeMs }))
+                            .sort((a, b) => b.time - a.time);
+                        if (runs.length > 0) {
+                            const latestRunId = runs[0]!.name;
+                            const summaryMdPath = pathModule.join(runsDir, latestRunId, 'summary.md');
+                            if (fs.existsSync(summaryMdPath)) {
+                                markdownContent = fs.readFileSync(summaryMdPath, 'utf8');
+                            }
+                        }
+                    } catch {
+                        // ignore fs read error
+                    }
+                }
+            }
+
+            provider.postMessage({
+                type: 'compactedMemoryResult',
+                content: markdownContent || '✨ 暂无结构化压缩记忆数据。请先执行任何 AI 任务，系统将自动提炼并激活您的 Compacted Memory 看板！'
+            });
+            break;
+        }
     }
 }

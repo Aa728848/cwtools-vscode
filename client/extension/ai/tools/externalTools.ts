@@ -7,6 +7,8 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { TodoItem, TodoWriteResult } from '../types';
+import { preflightCommand } from '../runner/commandPreflight';
+import { PermissionPolicyStore } from '../runner/permissionPolicy';
 import { getAiStorageRoot, getAiStorageRootCandidates, getTopicScratchDir, getTopicStorageDir } from '../workspacePaths';
 import {
     escapeRegExp,
@@ -839,21 +841,55 @@ export class ExternalToolHandler {
             escalationReason = escalationReason || '跨工作区路径访问';
         }
 
-        const safeAutoApprove = isAutoApproveSafeCommand && !hasShellControlOperator && !args.requestEscalation && !escalationReason;
-        const utilityAutoApprove = isUtilityMode && fileWriteMode === 'auto' && !args.requestEscalation && !escalationReason;
+        // Preflight shell command segment risk analysis
+        const preflight = preflightCommand(args.command);
+        let currentEscalationReason = escalationReason || (preflight.requiresEscalation ? preflight.blockedReason : '');
+        
+        // Destructive check
+        if (!preflight.safe && !args.requestEscalation && !bypassSandbox) {
+            return { 
+                stdout: '', 
+                stderr: `Prohibited destructive shell operation. Command: "${args.command}". Error: ${preflight.blockedReason ?? 'High risk segment detected.'}`, 
+                exitCode: 1 
+            };
+        }
+
+        const approvedByPolicy = PermissionPolicyStore.getInstance().isApproved(
+            'run_command',
+            { CommandLine: args.command, Cwd: cwd },
+            preflight.riskLevel
+        );
+        const safeAutoApprove = isAutoApproveSafeCommand && !hasShellControlOperator && !args.requestEscalation && !currentEscalationReason;
+        const utilityAutoApprove = isUtilityMode && fileWriteMode === 'auto' && !args.requestEscalation && !currentEscalationReason;
+        // Command auto-runs only when the tool classifies it as safe or it matches pre-approved session policy
+        let requiresPermission = (isInterpreterInline || !(safeAutoApprove || utilityAutoApprove)) && !approvedByPolicy;
+        
+        // Escalation overrides MUST always prompt user regardless of policy/auto configurations
+        if (preflight.requiresEscalation || currentEscalationReason) {
+            requiresPermission = true;
+        }
         // Interpreter inline commands (python -c, node -e) always require explicit user permission,
         // even in auto mode, to prevent silent arbitrary code execution.
-        const requiresPermission = isInterpreterInline || !(safeAutoApprove || utilityAutoApprove);
+        // let requiresPermission resolved by preflight store above
         const onPermissionRequest = context?.onPermissionRequest;
 
         if (requiresPermission && onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            const description = escalationReason 
-                ? `[ESCALATION] AI requests a sandbox override (${escalationReason}): ${args.command}`
+            // Build rich detailed telemetry payload for Webview visual enhancement
+            const preflightPayload = {
+                command: args.command,
+                cwd,
+                classification: preflight.segments.map(s => s.classification),
+                riskLevel: preflight.riskLevel,
+                escalation: !!currentEscalationReason,
+                reasons: preflight.segments.map(s => s.reason)
+            };
+            const description = currentEscalationReason 
+                ? `[ESCALATION] AI requests a sandbox override (${currentEscalationReason}): ${args.command}`
                 : `AI 请求执行终端命令：${args.command}`;
             
             const allowed = await this.requestPermissionWithAbort(
-                onPermissionRequest, permId, 'run_command', description, context, args.command
+                onPermissionRequest, permId, 'run_command', description, { ...context, preflight: preflightPayload } as any, args.command
             );
             if (!allowed) {
                 return { stdout: '', stderr: '用户拒绝了此命令的执行权限', exitCode: 1 };

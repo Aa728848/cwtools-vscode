@@ -331,7 +331,11 @@ export class Orchestrator {
             ?? profile.suggestedModel
             ?? orchestratorOptions.model;
 
+        const { buildSubAgentSandbox } = require('./subAgentSandbox');
+        const sandbox = buildSubAgentSandbox(taskNode, this.agentRunner.toolExecutor?.workspaceRoot || '');
+
         const runnerOptions: AgentRunnerOptions = {
+            sandbox,
             providerId,
             model,
             mode: profile.mode,

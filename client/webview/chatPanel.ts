@@ -125,6 +125,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const chatI18n = getChatI18n(document.documentElement.lang || navigator.language);
     const renderMarkdown = createMarkdownRenderer(chatI18n.markdown);
     const vscode = acquireVsCodeApi();
+    (window as any).__cwtoolsVscode = vscode;
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
     const input = document.getElementById('input') as HTMLDivElement;
     const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement;
@@ -3592,7 +3593,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     // ── Permission request card ─────────────────────────────────────────────────
-    function showPermissionCard(permissionId: string, tool: string, description: string, command: string, allowAlways?: boolean) {
+    function showPermissionCard(permissionId: string, tool: string, description: string, command: string, allowAlways?: boolean, preflight?: any) {
         if (!permissionId || floatingPermissionIds.has(permissionId)) return;
         floatingPermissionIds.add(permissionId);
         const div = document.createElement('div');
@@ -3605,11 +3606,58 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}拒绝</button>`;
             
         if (tool === 'run_command' && allowAlways) {
-            actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" style="margin-left:auto; font-size:0.8em; opacity:0.8" title="当前会话期间一直允许">${svgIcon('check')}一直允许</button>`;
+            const labelText = preflight && preflight.riskLevel <= 1 ? '一直允许 (只读前缀)' : '一直允许';
+            actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" style="margin-left:auto; font-size:0.8em; opacity:0.9" title="当前会话期间一直允许相同类型的只读指令">${svgIcon('check')}${labelText}</button>`;
         }
         actionsHtml += `</div>`;
         
+        // Modern Safety Assessment Telemetry panel
+        let preflightHtml = '';
+        if (preflight) {
+            const riskMap: Record<number, { text: string, color: string, bg: string }> = {
+                0: { text: '低风险 (Low Risk)', color: '#4caf50', bg: 'rgba(76,175,80,0.1)' },
+                1: { text: '中风险 (Medium Risk)', color: '#ff9800', bg: 'rgba(255,152,0,0.1)' },
+                2: { text: '高风险 (High Risk / Escalation)', color: '#f44336', bg: 'rgba(244,67,54,0.1)' }
+            };
+            const risk = riskMap[preflight.riskLevel] || riskMap[1] || { text: '中风险 (Medium Risk)', color: '#ff9800', bg: 'rgba(255,152,0,0.1)' };
+            
+            const classLabels: Record<string, string> = {
+                read: '只读查询',
+                write: '写入修改',
+                network: '网络访问',
+                script: '内联执行',
+                destructive: '高危破坏'
+            };
+            const badges = (preflight.classification || []).map((c: string) => 
+                `<span class="preflight-badge" style="background:var(--vscode-badge-background,rgba(128,128,128,0.1)); color:var(--vscode-badge-foreground); padding:2px 6px; border-radius:3px; font-size:10px; font-weight:600; margin-right:4px;">[${classLabels[c] || c}]</span>`
+            ).join('');
+
+            const details = (preflight.reasons || []).map((r: string) => 
+                `<li style="margin-bottom:2px; font-size:11px; opacity:0.85; text-align:left;">${escapeHtml(r)}</li>`
+            ).join('');
+
+            preflightHtml = 
+                `<div class="preflight-assessment-panel" style="margin-top:8px; border:1px solid var(--border, rgba(128,128,128,0.2)); border-radius:4px; padding:8px; background:var(--vscode-editor-background, #1e1e1e); text-align:left;">` +
+                `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border, rgba(128,128,128,0.1)); padding-bottom:4px; margin-bottom:6px;">` +
+                `<span style="font-weight:600; font-size:11px; color:var(--vscode-descriptionForeground, #a0a0a0);">🛡️ AI 安全预检评估</span>` +
+                `<span style="color:${risk.color}; background:${risk.bg}; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:bold;">${risk.text}</span>` +
+                `</div>` +
+                `<div style="margin-bottom:6px;">${badges}</div>` +
+                (preflight.cwd ? `<div style="font-size:10px; opacity:0.7; font-family:monospace; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">工作区: ${escapeHtml(preflight.cwd)}</div>` : '') +
+                (details ? `<ul style="margin:4px 0 0 0; padding-left:14px; color:var(--vscode-editor-foreground);">${details}</ul>` : '') +
+                `</div>`;
+        }
+
         div.innerHTML =
+            `<div class="permission-card-header">` +
+            `<span class="permission-card-icon">${svgIconNoMargin('key')}</span>` +
+            `<div class="permission-card-body">` +
+            `<div class="permission-card-title">${escapeHtml(description)}</div>` +
+            (command ? `<div class="permission-card-cmd" style="font-family:var(--vscode-editor-font-family,monospace); background:var(--vscode-textCodeBlock-background,rgba(0,0,0,0.2)); padding:6px; border-radius:4px; font-size:11px; margin-top:4px; overflow-x:auto; white-space:pre-wrap; word-break:break-all; text-align:left;">${escapeHtml(command)}</div>` : '') +
+            preflightHtml +
+            `</div></div>` +
+            actionsHtml;
+        if (false) div.innerHTML =
             `<div class="permission-card-header">` +
             `<span class="permission-card-icon">${svgIconNoMargin('key')}</span>` +
             `<div class="permission-card-body">` +
@@ -3942,7 +3990,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
 
             case 'permissionRequest': {
-                showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways);
+                showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways, msg.preflight);
                 break;
             }
 

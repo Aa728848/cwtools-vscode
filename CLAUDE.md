@@ -105,7 +105,7 @@ The AI module lives in `client/extension/ai/`.
 | Path | Purpose |
 | --- | --- |
 | `agentRunner.ts` | Main reasoning loop and execution flow coordinator |
-| `runner/` | Orchestration helpers: `compaction.ts`, `checkpoint.ts`, `writeCoordinator.ts`, `fallbackPolicy.ts`, `cancellation.ts`, `stepEmitter.ts`, `toolScheduler.ts`, and `doomLoopDetector.ts` |
+| `runner/` | Orchestration helpers: `compaction.ts`, `checkpoint.ts`, `writeCoordinator.ts`, `fallbackPolicy.ts`, `cancellation.ts`, `stepEmitter.ts`, `toolScheduler.ts`, `doomLoopDetector.ts`, `toolInvocation.ts`, `commandPreflight.ts`, `permissionPolicy.ts`, `runLedger.ts`, and `contextMemory.ts` |
 | `chat/` | Extracted Webview host bridge: `bridge.ts` for sandboxed message routing |
 | `agentSessionCoordinator.ts` | Shared chat/manager session state holder |
 | `agentUiBroadcaster.ts` | Broadcasts host messages to chat and manager surfaces |
@@ -131,7 +131,7 @@ The AI module lives in `client/extension/ai/`.
 | `toolCallParser.ts` / `jsonRepair.ts` | Non-standard tool call and malformed JSON recovery |
 | `mcpClient.ts` | MCP stdio/SSE client |
 | `inlineProvider.ts` | AI inline completion provider |
-| `orchestrator/` | DAG-based multi-agent orchestration, blackboard, conflict detection, quality gate |
+| `orchestrator/` | DAG-based multi-agent orchestration, blackboard, conflict detection, quality gate, and `subAgentSandbox.ts` |
 
 Agent modes are defined in `types.ts`:
 
@@ -160,6 +160,42 @@ Specialist roles are registered in `client/extension/ai/orchestrator/agentRegist
 and currently include `explorer`, `architect`, `builder`, `locWriter`, `reviewer`,
 `assetGen`, `guiExpert`, and `locTranslator`.
 
+`orchestrator/subAgentSandbox.ts` builds a per-sub-agent `SubAgentSandbox`
+(allowed tools, write-scope path constraints, planned entities, permission
+policy) from the `TaskNode` and the agent profile, and `enforceSubAgentSafety`
+hard-blocks excluded privileged tools and out-of-scope writes before dispatch.
+
+## Run Ledger, Checkpoints, And Compacted Memory
+
+`runner/runLedger.ts` is a singleton `RunLedger` that records every agent run as
+an `AgentRunRecord` plus an append-only `AgentRunEvent` stream
+(`status_changed`, `model_call_start/end`, `tool_call_start/end`,
+`permission_requested/resolved`, `file_change`, `compaction_start/end`,
+`subagent_start/end`, `checkpoint_saved`, ...). Events have monotonically
+increasing per-run `sequence` numbers (not timestamps), persist to
+`.cwtools-ai/<topic>/runs/<runId>/events.jsonl`, and the ledger emits
+`onChange(runId)` which `AIChatPanelProvider` rebroadcasts to the chat and
+manager Webviews as `runSnapshot`.
+
+`runner/checkpoint.ts` produces V2 resume state (`AgentResumeState` with
+`version: 2`, `runId`, `summaryRef`, `pendingToolCalls`, `lastStableEventId`,
+`tailMessageCount`, `compacted`). `prepareMessagesForResume` injects synthetic
+"interrupted" replies for any orphaned `tool_call` so the OpenAI API does not
+reject the resumed transcript; `buildResumeMessages` prepends a compacted
+summary as a user message and limits the message tail to
+`RESUME_TAIL_MESSAGE_LIMIT = 24`.
+
+`runner/contextMemory.ts` produces a structured `CompactedSummary` (goal,
+constraints, done/inProgress/blocked, decisions, nextSteps, criticalContext,
+relevantFiles, artifactRefs, lastStableRunEventId) via an LLM summarization
+pass. The runner triggers mid-loop compaction roughly every
+`MID_LOOP_COMPACTION_INTERVAL` model turns once the prompt approaches
+`COMPACTION_THRESHOLD_RATIO`. Summaries are persisted under the run storage
+directory so `promptBuilder.ts` can inject them into resumed sessions.
+
+Cleanup of large persisted run artifacts is exposed through
+`cleanupRunArtifacts` (`maxAgeDays`, `maxFiles`).
+
 ## AI Tool Rules
 
 When adding or changing an AI tool, update the coordinated surfaces together:
@@ -174,9 +210,21 @@ Important current tool details:
 
 - The schema file defines more than 50 tools.
 - `tools/registry.ts`, not `agentRunner.ts`, is the source of truth for
-  `WRITE_TOOLS`, `READ_ONLY_TOOLS`, and tool-mode gating.
+  `WRITE_TOOLS`, `READ_ONLY_TOOLS`, and tool-mode gating. Each registry entry
+  also carries a derived `effect` (`workspace_read|workspace_write|network|shell|git|media|memory|mcp|none`),
+  `riskLevel` (0–3), and `concurrencyClass` (`parallel|lsp-limited|network-limited|per-file-write|global-exclusive|interactive`).
 - `tools/permissions.ts` validates mode and sub-agent access from the registry.
 - `tools/argRepair.ts` repairs common malformed tool-call arguments before execution.
+- `runner/toolInvocation.ts` wraps each model tool call into a `ToolInvocation`
+  envelope (case-insensitive name normalization, repaired args, derived
+  effect/riskLevel/concurrencyClass, extracted `targetPaths`, stable
+  `invocationId`).
+- `runner/toolScheduler.ts` enforces per-class concurrency limits and global/file
+  exclusion based on the registry's `concurrencyClass`.
+- `runner/commandPreflight.ts` classifies `run_command` shell commands into risk
+  tiers and escalation flags; high-risk commands always require user permission.
+- `runner/permissionPolicy.ts` stores low-risk pre-approval rules with hardened
+  `cwdScope` validation (uses `path.relative` to prevent prefix-bypass attacks).
 - File writes are serialized by `PartitionedWriteQueue` per target file.
 - Multi-file writes must acquire file locks in sorted path order.
 - `todo_write` is intentionally excluded from the global file-write lock path.
@@ -203,7 +251,10 @@ The chat UI and detached Agent Manager share host-side state through
 `AgentSessionCoordinator`, `AgentUiBroadcaster`, and `ArtifactStore`. Shared
 browser helpers live under `client/webview/chat/`, including message contracts,
 workflow, topic, artifact, markdown, annotation, i18n, and live-step modules.
-Keep additional extractions aligned with that split.
+`runTimeline.ts` and `runInspector.ts` render the agent-run event timeline
+(grouped by `model | tools | files | permissions | validation | context |
+subagents`) and the per-event detail inspector consumed by the Agent Manager
+panel. Keep additional extractions aligned with that split.
 
 Webview CSS must use VS Code theme variables such as
 `var(--vscode-editor-background)` and should support `prefers-reduced-motion`.

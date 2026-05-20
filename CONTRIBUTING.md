@@ -101,7 +101,7 @@ Webview 调试：
 client/
   extension/                  VS Code Extension Host
     ai/                       AI assistant, providers, tools, workflows, orchestrator
-      runner/                 compaction, checkpoint, write coordinator, fallback, cancel, emitter, scheduler, doomLoop
+      runner/                 compaction, checkpoint, write coordinator, fallback, cancel, emitter, scheduler, doomLoop, toolInvocation, commandPreflight, permissionPolicy, runLedger, contextMemory
       chat/                   extracted webview message bridge (bridge.ts)
       prompt/                 extracted base/mode prompt sections
       providers/              model defaults, capabilities, pricing helpers
@@ -211,11 +211,13 @@ Webview 代码运行在浏览器沙盒中：
 
 工具设计注意点：
 
-- `tools/registry.ts` 是模式门控、读写分类和子 Agent 可用性的事实来源。
+- `tools/registry.ts` 是模式门控、读写分类和子 Agent 可用性的事实来源；同时也是 `effect`、`riskLevel`、`concurrencyClass` 的派生源，不要绕开。
 - `tools/permissions.ts` 统一读取 registry 元数据做访问校验。
 - `tools/argRepair.ts` 负责常见工具参数名/类型修复；新增 schema 字段时留意是否需要 alias。
 - 结构化读取优先级高于原始命令读取：先考虑 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context`，再考虑全文读取或 shell。
-- `run_command` 适合执行、构建、批处理和兜底查询，不应成为理解 PDXScript 结构的默认入口。
+- `run_command` 必须经过 `runner/commandPreflight.ts` 风险分级；高危/升级类命令禁止经预批准规则自动放行。
+- `runner/permissionPolicy.ts` 仅放行低风险预批准命令；新增豁免类型时必须保留 `path.relative` 形式的 `cwdScope` 校验，禁止退回 `startsWith`。
+- 新增并发敏感工具时，给注册条目正确分类 `concurrencyClass`，避免 LSP / 网络 / 全局排他类工具被错误地并行调度。
 
 并发写入规则：
 
@@ -229,8 +231,16 @@ Workflow 与多 Agent 协作：
 - 当前 workflow 注册表在 `client/extension/ai/workflowRegistry.ts`。
 - 当前协作模式使用 `dispatch_agents`、`query_blackboard`、`merge_results`。
 - 角色注册在 `client/extension/ai/orchestrator/agentRegistry.ts`。
+- 子 Agent 分派必须经 `orchestrator/subAgentSandbox.ts` 构造的沙盒；新增高危工具时同步检查其默认黑名单与只读角色禁写名单。
 - 大上下文应通过 `contextFiles` 或 Blackboard key 传递，不要塞进子 Agent prompt。
 - 如果 workflow 会新增 UI 元数据，请同步检查 `workflowI18n.ts`、`workflowViewModel.ts` 和 webview workflow 模块。
+
+运行账本与恢复：
+
+- 任何会产生用户可见步骤的新流程都应通过 `runner/runLedger.ts` 写事件，让 Agent Manager 时间轴与 Inspector 可见。
+- 新增 `AgentRunEventType` 时同步更新 `runInspector.ts` 的 `formatEventPayload` 与 `runTimeline.ts` 的分组逻辑，避免事件落到 `other`。
+- 修改 `AgentResumeState` 结构必须保持 V2 向下兼容，并扩充 `resumeStateV2.test.ts`；恢复时务必让 `prepareMessagesForResume` 处理新增的 tool_call 形态，避免 OpenAI 风格 API 拒绝。
+- 触发 `runner/contextMemory.ts` 压缩的新策略需确保 `CompactedSummary` 的 11 个维度仍然可解析，并跑 `contextMemory.test.ts`。
 
 ## 测试
 
@@ -246,13 +256,23 @@ npm run test:unit
 
 - `agentToolSafety.test.ts`
 - `agentRunnerState.test.ts` (状态机、Token 估算与 API 回退测试)
+- `agentRunnerToolRepair.test.ts`
 - `agentSessionCoordinator.test.ts`
 - `agentUiBroadcaster.test.ts`
 - `agentManagerContracts.test.ts`
+- `agentManagerRunSnapshot.test.ts`
 - `artifactStore.test.ts`
 - `argRepair.test.ts`
+- `commandPreflight.test.ts`
+- `contextMemory.test.ts`
+- `permissionPolicy.test.ts`
 - `promptBuilderSnapshot.test.ts` (系统提示词防漂移快照测试)
+- `resumeStateV2.test.ts`
+- `runLedger.test.ts`
 - `runnerPolicy.test.ts`
+- `subAgentSandbox.test.ts`
+- `toolInvocation.test.ts`
+- `toolScheduler.test.ts`
 - `contextBudget.test.ts`
 - `gameProfiles.test.ts`
 - `indexService.test.ts`
@@ -296,13 +316,16 @@ npm run test
 - [ ] 相关构建或测试已运行，或在 PR 中说明未运行原因。
 - [ ] 新增用户可见文本已放入合适的 message / i18n 模块。
 - [ ] Webview 变更没有引入 Node.js 或 VS Code API 直接访问。
-- [ ] 新 AI 工具同步更新了 schema、类型、registry 和 dispatch。
+- [ ] 新 AI 工具同步更新了 schema、类型、registry 和 dispatch；并在 registry 上设置了正确的 `effect` / `riskLevel` / `concurrencyClass`。
 - [ ] 文件写入逻辑不会绕过 `PartitionedWriteQueue`。
 - [ ] 本地化写入使用 `write_localisation`。
 - [ ] 新的游戏差异优先进入 `gameProfiles.ts`。
 - [ ] 新的 localisation / symbol / asset 查询优先复用 `IndexService`。
 - [ ] WebGL/Three.js 资源有明确释放路径。
 - [ ] 大型缓存、索引、扫描结果有边界或清理策略。
+- [ ] 新 `run_command` 用法已经过 `commandPreflight` 风险分级；高风险命令不会进入 `permissionPolicy` 自动豁免。
+- [ ] 修改 `AgentResumeState` 或事件 schema 时保持兼容并扩充 `resumeStateV2.test.ts` / `runLedger.test.ts`。
+- [ ] 子 Agent 调度走 `subAgentSandbox`，没有引入绕过 `enforceSubAgentSafety` 的直连执行路径。
 - [ ] 没有无关格式化、生成文件或大范围重排。
 
 ## 打包

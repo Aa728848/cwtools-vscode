@@ -233,7 +233,7 @@ export interface OrchestratorOptions {
     /** Todo list update callback */
     onTodoUpdate?: (todos: import('../types').TodoItem[]) => void;
     /** Permission approval callback, the sub-Agent uses this callback to request permission from the user to perform sensitive operations */
-    onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
+    onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
 }
 
 /** Quality gate test results */

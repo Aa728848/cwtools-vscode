@@ -39,6 +39,8 @@ import { ErrorReporter } from './errorReporter';
 import { UI, SOURCE } from './messages';
 import { ContextReferenceManager } from './contextReferences';
 import { AgentSessionCoordinator } from './agentSessionCoordinator';
+import { runLedger } from './runner/runLedger';
+import { PermissionPolicyStore } from './runner/permissionPolicy';
 import { AgentUiBroadcaster } from './agentUiBroadcaster';
 import { ArtifactStore } from './artifactStore';
 import { getAllWorkflows, getWorkflow } from './workflowRegistry';
@@ -53,6 +55,14 @@ import {
     getTopicStorageDirCandidates,
 } from './workspacePaths';
 
+const activePendingInteractions = new Map<string, string>();
+
+export function getPendingInteractions(): string[] {
+    return Array.from(activePendingInteractions.values());
+}
+
+type PendingWriteCardMessage = Extract<HostMessage, { type: 'pendingWriteFile' }>;
+type PendingPermissionCardMessage = Extract<HostMessage, { type: 'permissionRequest' }>;
 type FileSnapshot = { filePath: string; previousContent: string | null; _tooLarge?: boolean };
 const MAX_ARTIFACT_DIFF_CONTENT = 500000;
 const TEMP_DIFF_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh']);
@@ -76,6 +86,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private view?: vs.WebviewView;
     private managerPanel?: vs.WebviewPanel;
+    private currentRunId?: string;
     public readonly session = new AgentSessionCoordinator();
     public readonly broadcaster = new AgentUiBroadcaster();
     public readonly artifactStore = new ArtifactStore(() => this.topicManager.currentTopic?.id ?? 'session');
@@ -161,6 +172,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
         this.contextReferences = new ContextReferenceManager(() => this.agentRunner.toolExecutor.blackboard);
+        runLedger.onChange((runId) => {
+            const snapshot = runLedger.getSnapshot(runId);
+            if (snapshot) {
+                this.postMessage({
+                    type: 'runSnapshot',
+                    snapshot: snapshot.run,
+                    events: snapshot.events
+                });
+            }
+        });
     }
 
     /**
@@ -251,6 +272,24 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.sendWorkflowState(send);
         // 4. Restore model lists and settings bindings
         void this.settingsManager.buildAndSendSettingsData(false, targetSurface);
+        if (this.topicManager.currentTopic?.id) {
+            runLedger.loadLatestRunForTopic(this.topicManager.currentTopic.id).then(record => {
+                if (record) {
+                    const snapshot = runLedger.getSnapshot(record.runId);
+                    send({ type: 'runSnapshot', snapshot: snapshot?.run ?? record, events: snapshot?.events ?? [] });
+                }
+            }).catch(() => {});
+        }
+        this.restorePendingInteractionCards(send);
+    }
+
+    private restorePendingInteractionCards(send: (msg: HostMessage) => void): void {
+        for (const card of this.pendingWriteCards.values()) {
+            send(card);
+        }
+        for (const card of this.pendingPermissionCards.values()) {
+            send(card);
+        }
     }
 
     private _syncViewChromeState(targetSurface?: 'chat' | 'manager'): void {
@@ -561,7 +600,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         };
 
         try {
-            const rawResult = await this.agentRunner.run(
+            const runPromise = this.agentRunner.run(
                 text,
                 { ...context, topicId: this.topicManager.currentTopic?.id },
                 this.conversationMessages,
@@ -576,14 +615,20 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     },
                     abortSignal: this.abortController!.signal,
                     // Permission callback for run_command tool (OpenCode strategy)
-                    onPermissionRequest: (id, tool, description, command) =>
-                        this.requestPermission(id, tool, description, command),
+                    onPermissionRequest: (id: string, tool: string, description: string, command?: string, ctx?: any) =>
+                        this.requestPermission(id, tool, description, command, ctx),
                     onTodoUpdate: (todos) => this.sendTodoUpdate(todos),
                     resumeFromState,
                     workflowId: this.currentWorkflowId ?? undefined,
                 },
                 images  // pass images to build ContentPart[] user turn
             );
+
+            this.agentRunner.getActiveRunRecordPromise()?.then((r: any) => {
+                this.currentRunId = r.runId;
+            }).catch(() => {});
+
+            const rawResult = await runPromise;
             const result = this.ensureDispatchAgentFeedbackVisible(rawResult);
 
             // ── Update conversation history ───────────────────────────────────────
@@ -1093,6 +1138,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public resolveArtifactFilePath(filePath: string): string | null {
         // Check direct paths first
         if (fs.existsSync(filePath)) return filePath;
+        if (!path.isAbsolute(filePath)) {
+            const workspacePath = path.join(getProjectWorkspaceRoot(), filePath);
+            if (fs.existsSync(workspacePath)) return workspacePath;
+        }
 
         // Extract the file name from the path and search in the candidate location
         const fileName = path.basename(filePath);
@@ -1114,6 +1163,27 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         return null;
+    }
+
+    public async openRunResult(filePath: string): Promise<void> {
+        const resolvedPath = this.resolveArtifactFilePath(filePath);
+        if (!resolvedPath) {
+            vs.window.showWarningMessage(`Unable to find run result: ${path.basename(filePath)}`);
+            return;
+        }
+        await vs.commands.executeCommand('vscode.open', vs.Uri.file(resolvedPath), { preview: true });
+    }
+
+    public async cleanupRunArtifacts(maxAgeDays = 14, maxFiles = 50): Promise<void> {
+        const topicId = this.topicManager.currentTopic?.id || 'default';
+        const result = await runLedger.cleanupLargeResultArtifacts(topicId, { maxAgeDays, maxFiles });
+        this.postMessage({
+            type: 'runArtifactsCleanupResult',
+            deletedCount: result.deletedCount,
+            keptCount: result.keptCount,
+            reclaimedBytes: result.reclaimedBytes,
+        });
+        vs.window.showInformationMessage(`Cleaned ${result.deletedCount} large run result file(s).`);
     }
 
     private findGeneratedTopicFile(topicId: string, fileName: string): string | null {
@@ -1325,6 +1395,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // ─── File Write Confirmation ──────────────────────────────────────────────
 
     private pendingWriteResolvers = new Map<string, (confirmed: boolean) => void>();
+    private pendingWriteCards = new Map<string, PendingWriteCardMessage>();
     /** Maps messageId → temp file path used for the diff view (for cleanup) */
     private pendingDiffTempFiles = new Map<string, string>();
     handleAutoWritten(file: string, isNewFile: boolean) {
@@ -1379,8 +1450,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to prepare inline diff view', e);
             }
 
+            const card: PendingWriteCardMessage = { type: 'pendingWriteFile', file, messageId, isNewFile, diffPreview, additions, deletions, diffLines };
+            this.pendingWriteCards.set(messageId, card);
+            if (this.currentRunId) {
+                runLedger.appendEvent(
+                    this.currentRunId,
+                    'write_confirmation_requested',
+                    { file, messageId, isNewFile, diffPreview, additions, deletions },
+                    { invocationId: messageId }
+                ).catch(() => {});
+            }
+
             // Tell the WebView to show a simple Accept/Reject card
-            this.postMessage({ type: 'pendingWriteFile', file, messageId, isNewFile, diffPreview, additions, deletions, diffLines });
+            this.postMessage(card);
         });
     }
 
@@ -1389,6 +1471,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (resolver) {
             this.pendingWriteResolvers.delete(messageId);
             resolver(confirmed);
+        }
+        const card = this.pendingWriteCards.get(messageId);
+        this.pendingWriteCards.delete(messageId);
+        if (this.currentRunId) {
+            runLedger.appendEvent(
+                this.currentRunId,
+                'write_confirmation_resolved',
+                { confirmed, file: card?.file, messageId },
+                { invocationId: messageId }
+            ).catch(() => {});
         }
 
         // Close the diff/preview tab and remove the temp file
@@ -1653,12 +1745,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         this.pendingPermissionResolvers.clear();
         this.pendingPermissionModes.clear();
+        this.pendingPermissionDetails.clear();
+        this.pendingPermissionCards.clear();
 
         // Clean up any pending file write confirmations resolver
         for (const resolver of this.pendingWriteResolvers.values()) {
             resolver(false);
         }
         this.pendingWriteResolvers.clear();
+        this.pendingWriteCards.clear();
+        for (const tempPath of this.pendingDiffTempFiles.values()) {
+            void fs.promises.unlink(tempPath).catch(() => {});
+        }
+        this.pendingDiffTempFiles.clear();
     }
 
     /**
@@ -1711,7 +1810,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private pendingPermissionResolvers = new Map<string, (allowed: boolean) => void>();
     private pendingPermissionModes = new Map<string, AgentMode>();
-    private alwaysAllowRunCommand = false;
+    private pendingPermissionDetails = new Map<string, { command?: string, cwd?: string, preflight?: any }>();
+    private pendingPermissionCards = new Map<string, PendingPermissionCardMessage>();
 
     /**
      * Request permission from the user (for run_command tool).
@@ -1721,18 +1821,49 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         id: string,
         tool: string,
         description: string,
-        command?: string
+        command?: string,
+        context?: any
     ): Promise<boolean> {
+        if (this.currentRunId) {
+            runLedger.appendEvent(this.currentRunId, 'permission_requested', { tool, command, description }, { invocationId: id }).catch(() => {});
+        }
+        activePendingInteractions.set(id, command ? `[run_command] ${command}` : `[${tool}] ${description}`);
         const requestMode = this.currentMode;
         const isEscalationRequest = /\[ESCALATION\]|escalation/i.test(description);
-        if (tool === 'run_command' && this.alwaysAllowRunCommand && !isEscalationRequest) {
+        const resolveAutomatically = (reason: string): Promise<boolean> => {
+            activePendingInteractions.delete(id);
+            if (this.currentRunId) {
+                runLedger.appendEvent(
+                    this.currentRunId,
+                    'permission_resolved',
+                    { allowed: true, alwaysAllow: false, autoApproved: true, reason },
+                    { invocationId: id }
+                ).catch(() => {});
+            }
             return Promise.resolve(true);
+        };
+        
+        // 联动 PermissionPolicyStore 进行高精细粒度低风险命令豁免，保障安全边界
+        if (tool === 'run_command' && !isEscalationRequest) {
+            const riskLevel = context?.preflight?.riskLevel ?? 0;
+            const approved = PermissionPolicyStore.getInstance().isApproved(
+                'run_command',
+                {
+                    CommandLine: command || '',
+                    Cwd: context?.preflight?.cwd || context?.cwd || ''
+                },
+                riskLevel
+            );
+            if (approved) {
+                return resolveAutomatically('policy');
+            }
         }
+
         if (tool === 'run_command' && requestMode === 'utility') {
             const autoWriteMode = this.aiService.getConfig().agentFileWriteMode === 'auto';
             if (autoWriteMode && !isEscalationRequest) {
                 // Auto-approve Utility mode commands when the session or global auto mode allows it.
-                return Promise.resolve(true);
+                return resolveAutomatically('utility-auto-mode');
             }
         }
 
@@ -1741,25 +1872,59 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 resolve(allowed);
             });
             this.pendingPermissionModes.set(id, requestMode);
+            this.pendingPermissionDetails.set(id, {
+                command,
+                cwd: context?.preflight?.cwd,
+                preflight: context?.preflight
+            });
 
-            this.postMessage({
+            const card: PendingPermissionCardMessage = {
                 type: 'permissionRequest',
                 permissionId: id,
                 tool,
                 description,
                 command,
-                allowAlways: tool === 'run_command' && !isEscalationRequest,
-            });
+                preflight: context?.preflight,
+                // 只有低风险 (riskLevel <= 1) 指令才允许点击 always allow
+                allowAlways: tool === 'run_command' && !isEscalationRequest && (context?.preflight?.riskLevel ?? 0) <= 1,
+            };
+            this.pendingPermissionCards.set(id, card);
+            this.postMessage(card);
         });
     }
 
     public resolvePermissionRequest(permissionId: string, allowed: boolean, alwaysAllow?: boolean): void {
+        activePendingInteractions.delete(permissionId);
+        if (this.currentRunId) {
+            runLedger.appendEvent(this.currentRunId, 'permission_resolved', { allowed, alwaysAllow }, { invocationId: permissionId }).catch(() => {});
+        }
+        this.pendingPermissionCards.delete(permissionId);
         const resolver = this.pendingPermissionResolvers.get(permissionId);
         if (resolver) {
             this.pendingPermissionResolvers.delete(permissionId);
             this.pendingPermissionModes.delete(permissionId);
+            
+            const details = this.pendingPermissionDetails.get(permissionId);
+            this.pendingPermissionDetails.delete(permissionId);
+
             if (alwaysAllow && allowed) {
-                this.alwaysAllowRunCommand = true;
+                if (details?.command) {
+                    const cmd = details.command.trim().replace(/\s+/g, ' ');
+                    const words = cmd.split(' ');
+                    const prefixWords = (words[0]?.toLowerCase() === 'git' && words[1])
+                        ? [words[0], words[1]]
+                        : [words[0] || ''];
+                    if (prefixWords[0]) {
+                        const riskLevel = details.preflight?.riskLevel ?? 1;
+                        PermissionPolicyStore.getInstance().addRule({
+                            tool: 'run_command',
+                            commandPrefix: prefixWords,
+                            cwdScope: details.cwd || getProjectWorkspaceRoot(),
+                            riskMax: Math.max(1, riskLevel) as any,
+                            sessionOnly: true
+                        });
+                    }
+                }
             }
             resolver(allowed);
         }

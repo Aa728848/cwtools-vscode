@@ -44,17 +44,19 @@ function loadToolModules() {
             externalTools: require('../../extension/ai/tools/externalTools') as typeof import('../../extension/ai/tools/externalTools'),
             agentTools: require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools'),
             agentRunner: require('../../extension/ai/agentRunner') as typeof import('../../extension/ai/agentRunner'),
+            permissionPolicy: require('../../extension/ai/runner/permissionPolicy') as typeof import('../../extension/ai/runner/permissionPolicy'),
         };
     } finally {
         moduleLoader._load = originalLoad;
     }
 }
 
-const { fileTools, externalTools, agentTools, agentRunner } = loadToolModules();
+const { fileTools, externalTools, agentTools, agentRunner, permissionPolicy } = loadToolModules();
 const { FileToolHandler } = fileTools;
 const { ExternalToolHandler } = externalTools;
 const { AgentToolExecutor, TOOL_DEFINITIONS } = agentTools;
 const { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } = agentRunner;
+const { PermissionPolicyStore } = permissionPolicy;
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
 
 function makeWorkspace(): string {
@@ -791,6 +793,38 @@ describe('agent tool topic artifacts', () => {
 
         expect(permissionRequested).to.equal(false);
         expect(result.stderr).to.not.include('no permission handler configured');
+    });
+
+    it('does not let a low-risk permission rule bypass higher-risk command preflight', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const policy = PermissionPolicyStore.getInstance();
+        policy.clear();
+        policy.addRule({
+            tool: 'run_command',
+            commandPrefix: ['node'],
+            cwdScope: workspaceRoot,
+            riskMax: 1,
+            sessionOnly: true,
+        });
+
+        let permissionRequested = false;
+        const result = await handler.runCommand({
+            command: 'node -e "console.log(\'should not auto approve\')"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => {
+                permissionRequested = true;
+                return false;
+            },
+        } as any);
+
+        expect(permissionRequested).to.equal(true);
+        expect(result.exitCode).to.equal(1);
+        policy.clear();
     });
 
     it('records project file changes made by a command for the diff panel', async () => {

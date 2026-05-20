@@ -19,6 +19,25 @@ export type AgentToolName =
     | 'write_localisation' | 'write_design_blueprint' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results';
 
+export type ToolEffect =
+    | 'none'
+    | 'memory'
+    | 'workspace_read'
+    | 'workspace_write'
+    | 'network'
+    | 'shell'
+    | 'git'
+    | 'media'
+    | 'mcp';
+
+export type ToolConcurrencyClass =
+    | 'parallel'
+    | 'lsp-limited'
+    | 'network-limited'
+    | 'per-file-write'
+    | 'global-exclusive'
+    | 'interactive';
+
 export interface ToolRegistryEntry {
     name: AgentToolName;
     schema: ToolDefinition;
@@ -26,6 +45,9 @@ export interface ToolRegistryEntry {
     isReadOnly: boolean;
     allowSubAgent: boolean;
     allowedModes: Set<AgentMode>;
+    effect: ToolEffect;
+    riskLevel: 0 | 1 | 2 | 3;
+    concurrencyClass: ToolConcurrencyClass;
 }
 
 export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
@@ -78,6 +100,57 @@ for (const schema of SCHEMA_DEFINITIONS) {
     // For general and utility mode, we do inverse exclusions:
     if (!['todo_write', ...ORCHESTRATION].includes(name)) allowed.add('general');
     if (!ORCHESTRATION.includes(name)) allowed.add('utility');
+
+    // 动态推演 effect、riskLevel 与 concurrencyClass 以维护单一事实源
+    let effect: ToolEffect = 'none';
+    let riskLevel: 0 | 1 | 2 | 3 = 0;
+    let concurrencyClass: ToolConcurrencyClass = 'parallel';
+
+    if (BASE_READ.includes(name)) {
+        effect = 'workspace_read';
+        riskLevel = 0;
+        if (['document_symbols', 'workspace_symbols', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition'].includes(name)) {
+            concurrencyClass = 'lsp-limited';
+        } else {
+            concurrencyClass = 'parallel';
+        }
+    } else if (EDIT.includes(name)) {
+        effect = 'workspace_write';
+        riskLevel = 2;
+        concurrencyClass = 'per-file-write';
+    } else if (MEMORY.includes(name)) {
+        effect = 'memory';
+        riskLevel = 0;
+        concurrencyClass = 'parallel';
+    } else if (NETWORK.includes(name)) {
+        effect = 'network';
+        riskLevel = 1;
+        concurrencyClass = 'network-limited';
+    } else if (name === 'run_command') {
+        effect = 'shell';
+        riskLevel = 2;
+        concurrencyClass = 'interactive';
+    } else if (name === 'git_ops') {
+        effect = 'git';
+        riskLevel = 2;
+        concurrencyClass = 'global-exclusive';
+    } else if (MEDIA.includes(name)) {
+        effect = 'media';
+        riskLevel = 2;
+        concurrencyClass = 'interactive';
+    } else if (name === 'mcp_call') {
+        effect = 'mcp';
+        riskLevel = 1;
+        concurrencyClass = 'interactive';
+    } else if (ORCHESTRATION.includes(name)) {
+        effect = 'none';
+        riskLevel = 0;
+        concurrencyClass = 'parallel';
+    } else {
+        effect = 'none';
+        riskLevel = 2;
+        concurrencyClass = 'global-exclusive';
+    }
     
     TOOL_REGISTRY.set(name, {
         name,
@@ -85,7 +158,10 @@ for (const schema of SCHEMA_DEFINITIONS) {
         isWrite: WRITE_TOOLS_SET.has(name),
         isReadOnly: !WRITE_TOOLS_SET.has(name),
         allowSubAgent: !SUB_AGENT_EXCLUDES_SET.has(name),
-        allowedModes: allowed
+        allowedModes: allowed,
+        effect,
+        riskLevel,
+        concurrencyClass
     });
 }
 

@@ -594,7 +594,7 @@ export interface AgentToolContext {
     agentRunner?: import('./agentRunner').AgentRunner;
     tokenAccumulator?: TokenUsage;
     onStep?: (step: AgentStep) => void;
-    onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
+    onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
 }
@@ -999,11 +999,21 @@ export interface AgentCheckpoint {
  * with the complete tool call context and reasoning history.
  */
 export interface AgentResumeState {
+    /** V2 resume state includes version discriminator for dual-version compat */
+    version?: 2;
     timestamp: number;
     mode: AgentMode;
     messages: ChatMessage[];
     todos: TodoItem[];
     topicId: string;
+    runId?: string;
+    status?: AgentRunStatus;
+    summaryRef?: string;
+    fullTranscriptRef?: string;
+    pendingToolCalls?: any[];
+    lastStableEventId?: string;
+    tailMessageCount?: number;
+    compacted?: boolean;
 }
 
 // ─── Agent Execution ─────────────────────────────────────────────────────────
@@ -1054,6 +1064,8 @@ export interface AgentStep {
     iterationInfo?: string;
     /** Child Agent node ID, used for UI group display */
     agentId?: string;
+    /** Unique ID identifying a specific tool execution within this run */
+    invocationId?: string;
     /** UI-only lifecycle marker for persisted interactive cards restored from history. */
     uiState?: 'pending' | 'approved';
 }
@@ -1277,6 +1289,10 @@ export type WebViewMessage =
     | { type: 'openPlanFile'; filePath: string }
     /** Open an artifact action, such as a native diff for file-change artifacts */
     | { type: 'openArtifact'; artifactId: string; file?: string }
+    /** Open a run event artifact/result stored on local disk */
+    | { type: 'openRunResult'; filePath: string }
+    /** Clean retained large run result files for the active topic */
+    | { type: 'cleanupRunArtifacts'; maxAgeDays?: number; maxFiles?: number }
     /** WebView is fully loaded and ready to receive messages */
     | { type: 'ready' }
     /** Request the list of workspace files for @ mention */
@@ -1295,7 +1311,8 @@ export type WebViewMessage =
     | { type: 'rejectTransaction'; txId: string }
     | { type: 'clearUsageStats' }
     | { type: 'requestMentionSearch'; query: string }
-    | { type: 'requestManagerSnapshot' };
+    | { type: 'requestManagerSnapshot' }
+    | { type: 'requestCompactedMemory' };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
@@ -1321,7 +1338,7 @@ export type HostMessage =
     | { type: 'autoWriteFile'; file: string; isNewFile: boolean }
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
-    | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string; allowAlways?: boolean }
+    | { type: 'permissionRequest'; permissionId: string; tool: string; description: string; command?: string; allowAlways?: boolean; preflight?: any }
     | { type: 'floatingCardResolved'; card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     /** Restore mode state after webview rebuild (panel visibility change) */
     | { type: 'setMode'; mode: AgentMode }
@@ -1351,6 +1368,7 @@ export type HostMessage =
     | { type: 'artifactList'; artifacts: AgentArtifact[] }
     /** Multi-Agent coordinator progress push — Agent Lane UI */
     | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
+    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }> }
     | { type: 'mentionSearchResults'; results: Array<{
         type?: ContextItemType;
         uri?: string;
@@ -1378,7 +1396,8 @@ export type HostMessage =
         isGenerating: boolean;
         liveStepCount: number;
         artifacts: AgentArtifact[];
-    };
+    } | { type: 'compactedMemoryResult'; content: string }
+    | { type: 'runArtifactsCleanupResult'; deletedCount: number; keptCount: number; reclaimedBytes: number };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {
@@ -1486,4 +1505,105 @@ export interface OrchestratorProgressPayload {
     lanes: AgentLaneInfo[];
     /** Latest event description */
     latestEvent?: string;
+}
+
+export type AgentRunStatus =
+    | 'created'
+    | 'initializing'
+    | 'planning'
+    | 'awaiting_approval'
+    | 'running_model'
+    | 'running_tool'
+    | 'running'
+    | 'waiting_permission'
+    | 'waiting_write_confirmation'
+    | 'verifying'
+    | 'compacting'
+    | 'blocked'
+    | 'paused'
+    | 'cancelled'
+    | 'failed'
+    | 'completed';
+
+export interface AgentRunRecord {
+    runId: string;
+    topicId: string;
+    parentRunId?: string;
+    agentId?: string;
+    status: AgentRunStatus;
+    mode: AgentMode | string;
+    workflowId?: string | null;
+    providerId?: string;
+    model?: string;
+    userPromptPreview: string;
+    startedAt: number;
+    /** @deprecated Use startedAt */
+    createdAt: number;
+    updatedAt: number;
+    completedAt?: number;
+    steps: AgentStep[];
+    metrics: {
+        totalTokens: number;
+        promptTokens: number;
+        completionTokens: number;
+        cachedTokens?: number;
+        costCny: number;
+        iterations: number;
+        maxIterations?: number;
+        toolCalls: number;
+        modelCallCount?: number;
+        compactionCount?: number;
+        repeatedToolSignatureCount?: number;
+        failedToolCount?: number;
+        permissionRequested?: number;
+        permissionApproved?: number;
+        permissionDenied?: number;
+        artifactizedResultCount?: number;
+    };
+    context?: {
+        estimatedPromptTokens?: number;
+        contextLimit?: number;
+        latestSummaryRef?: string;
+        transcriptRef?: string;
+    };
+    writtenFiles: string[];
+    error?: string;
+}
+
+export type ToolEffect =
+  | 'none'
+  | 'memory'
+  | 'workspace_read'
+  | 'workspace_write'
+  | 'network'
+  | 'shell'
+  | 'git'
+  | 'media'
+  | 'mcp';
+
+export type ToolConcurrencyClass =
+  | 'parallel'
+  | 'lsp-limited'
+  | 'network-limited'
+  | 'per-file-write'
+  | 'global-exclusive'
+  | 'interactive';
+
+export interface ToolInvocation {
+  invocationId: string;
+  runId: string;
+  modelToolCallId?: string;
+  name: string;
+  originalName: string;
+  rawArgs: string;
+  args: Record<string, any>;
+  argRepairs: string[];
+  parseError?: string;
+  effect: ToolEffect;
+  riskLevel: 0 | 1 | 2 | 3;
+  concurrencyClass: ToolConcurrencyClass;
+  targetPaths: string[];
+  permissionId?: string;
+  resultRef?: string;
+  resultPreview?: any;
 }

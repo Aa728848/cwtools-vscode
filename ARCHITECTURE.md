@@ -126,12 +126,17 @@ sequenceDiagram
 | --- | --- |
 | `agentRunner.ts` | 推理循环、工具权限、workflow 应用、上下文压缩、检查点、回退 |
 | `runner/compaction.ts` | 历史压缩与上下文窗口辅助 |
-| `runner/checkpoint.ts` | 断点恢复元数据 |
+| `runner/checkpoint.ts` | V2 断点恢复元数据，孤儿 tool_call 自动补齐合成 reply，对话尾部限长 |
 | `runner/writeCoordinator.ts` | `PartitionedWriteQueue` 写入协调 |
 | `runner/fallbackPolicy.ts` | 模型备选字典及 API 报错备选重试管理 |
 | `runner/cancellation.ts` | 大模型生成终止判定与异常抛出 |
 | `runner/stepEmitter.ts` | 细粒度步骤与 Token 增量流式实时广播 |
-| `runner/toolScheduler.ts` | 工具运行排它锁及跨平台路径安全规约 |
+| `runner/toolScheduler.ts` | 按 `concurrencyClass` 调度并发：LSP / 网络 / per-file-write / global-exclusive / interactive |
+| `runner/toolInvocation.ts` | 把模型 tool_call 包装为 `ToolInvocation` 信封（名称归一、参数修复、effect / riskLevel / 目标文件、稳定 `invocationId`） |
+| `runner/commandPreflight.ts` | `run_command` 命令分词与风险分级（readonly / write / network / interpreter / destructive 与升级位） |
+| `runner/permissionPolicy.ts` | 单例权限规则存储；用 `path.relative` 做硬化的 `cwdScope` 校验，防止前缀绕过 |
+| `runner/runLedger.ts` | 单例 `RunLedger`：记录 `AgentRunRecord` 与 `AgentRunEvent` 序列流，按 run 持久化为 JSONL，发送 `runSnapshot` 给前端 |
+| `runner/contextMemory.ts` | LLM 驱动的结构化历史压缩，产出 `CompactedSummary` 并落盘供恢复时注入 |
 | `runner/doomLoopDetector.ts` | 基于 FNV-1a 哈希的两阶段防死循环语义检测 |
 | `chat/bridge.ts` | 隔离沙盒 WebView 与 Extension Host 的高内聚通信桥接器 |
 | `agentSessionCoordinator.ts` | chat / manager 共用会话状态、模式、workflow、live steps |
@@ -198,7 +203,7 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 | 文件 | 作用 |
 | --- | --- |
 | `tools/definitions.ts` | 工具 JSON Schema |
-| `tools/registry.ts` | 工具注册表、模式门控、`WRITE_TOOLS` / `READ_ONLY_TOOLS` |
+| `tools/registry.ts` | 工具注册表、模式门控、`WRITE_TOOLS` / `READ_ONLY_TOOLS`，并派生出 `effect` / `riskLevel` / `concurrencyClass` 元数据 |
 | `tools/permissions.ts` | 工具模式、写权限和子 Agent 沙盒访问校验 |
 | `tools/argRepair.ts` | 工具调用参数名修复、类型转换和默认推断 |
 | `tools/fileTools.ts` | 文件读写、精确替换、补丁、本地化写入、资产部署 |
@@ -219,9 +224,13 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 
 当前注意事项：
 
-- `tools/registry.ts` 是工具读写分类和 mode gating 的事实来源。
+- `tools/registry.ts` 是工具读写分类和 mode gating 的事实来源；每个 entry 同时携带 `effect`、`riskLevel` 和 `concurrencyClass`，用于运行期权限、并发与风险决策。
 - `tools/permissions.ts` 从 registry 读取权限元数据，统一执行 mode/sub-agent 访问校验。
 - `tools/argRepair.ts` 在 Runner 执行工具前修复常见参数名和类型漂移。
+- `runner/toolInvocation.ts` 在执行前把每个模型 tool_call 包装为 `ToolInvocation` 信封：名称纠错、参数修复、effect / riskLevel / concurrencyClass 派生、目标文件提取与稳定 `invocationId`。
+- `runner/toolScheduler.ts` 根据 `concurrencyClass` 实施并发上限：`parallel` 完全并行，`lsp-limited` 最多 4 并发，`network-limited` 最多 2 并发，`per-file-write` 按目标文件互斥，`global-exclusive` 与 `interactive` 串行。
+- `runner/commandPreflight.ts` 对 `run_command` 做分词与风险分级；任何被标记为 destructive 或 escalated 的命令必须经由用户授权。
+- `runner/permissionPolicy.ts` 单例存储低风险预批准规则，`isApproved` 用 `path.relative` 做严格的 `cwdScope` 父子目录判定，避免 `startsWith` 前缀绕过。
 - `write_file`、`multi_replace_file_content`、`replace_lines`、`apply_patch`、`write_localisation` 等写工具经由 `PartitionedWriteQueue` 管理。
 - `todo_write` 是纯内存/UI 计划工具，故意不进入写文件锁。
 - `.yml` 本地化文件必须使用 `write_localisation`；通用写工具会拒绝本地化写入。
@@ -242,8 +251,19 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 | `orchestrator.ts` | 调度入口、上下文注入、质量门整合 |
 | `conflictDetector.ts` | 基于黑板的写意图和实体注册冲突检测 |
 | `qualityGate.ts` | 审查和自动修复流程 |
+| `subAgentSandbox.ts` | 由 `TaskNode` + agent profile 构造 `SubAgentSandbox`（allowed tools、writeScope、planned entities、permissionPolicy），并通过 `enforceSubAgentSafety` 在分派前硬拦截特权工具与作用域外写入 |
 
 已注册角色包括 `explorer`、`architect`、`builder`、`locWriter`、`reviewer`、`assetGen`、`guiExpert` 和 `locTranslator`。
+
+### Run Ledger、Checkpoint 与 Compacted Memory
+
+`runner/runLedger.ts` 提供单例 `RunLedger`，把每次 Agent 运行抽象为 `AgentRunRecord` + 追加式 `AgentRunEvent` 序列流（事件类型包括 `status_changed`、`model_call_start/end`、`tool_call_start/end`、`permission_requested/resolved`、`file_change`、`compaction_start/end`、`subagent_start/end`、`checkpoint_saved` 等）。事件用 per-run 单调递增的 `sequence` 而非时间戳排序，落盘到 `.cwtools-ai/<topic>/runs/<runId>/events.jsonl`，并通过 `onChange(runId)` 通知 `AIChatPanelProvider`，后者以 `runSnapshot` 消息广播到聊天与 Agent Manager 面板。
+
+`runner/checkpoint.ts` 产出 V2 `AgentResumeState`（带 `version: 2`、`runId`、`summaryRef`、`pendingToolCalls`、`lastStableEventId`、`tailMessageCount`、`compacted` 等字段）。`prepareMessagesForResume` 为孤儿 `tool_call` 注入合成 "interrupted" 回复，避免 OpenAI 风格 API 拒绝恢复请求；`buildResumeMessages` 把压缩摘要作为 user message 前置，并将上下文尾部限制到 `RESUME_TAIL_MESSAGE_LIMIT = 24`。
+
+`runner/contextMemory.ts` 定义 11 维 `CompactedSummary`（goal / constraints / done / inProgress / blocked / decisions / nextSteps / criticalContext / relevantFiles / artifactRefs / lastStableRunEventId），由 LLM 总结产出并落盘。Runner 在上下文逼近 `COMPACTION_THRESHOLD_RATIO` 且累积模型调用达到 `MID_LOOP_COMPACTION_INTERVAL` 时触发中段压缩，恢复时由 `promptBuilder.ts` 注入。
+
+ChatPanel 通过 `cleanupRunArtifacts`（含 `maxAgeDays`、`maxFiles` 配置）回收过期的大型 run 结果文件，并通过 `requestCompactedMemory` 回送当前 Topic 的最近一次压缩摘要给前端展示。
 
 ## Webview 层
 
@@ -276,6 +296,7 @@ Runner 会在模式工具集基础上继续应用 workflow tool policy，并把 
 - `messages.chat.ts`
 - `messages.manager.ts`
 - `messages.shared.ts`
+- `runTimeline.ts` / `runInspector.ts`（基于 `runSnapshot` 的事件分组时间轴 + 单事件详情面板，主要服务 Agent Manager）
 
 `client/test/unit/webviewSmoke.test.ts` 当前承担 chat Webview 与 Agent Manager 的结构契约 smoke 检查，为后续真实浏览器回归提供基础。
 
@@ -360,6 +381,22 @@ Webview 与 Extension Host 是不同运行环境。Webview 只能发送消息，
 ### 写入并发
 
 `PartitionedWriteQueue` 按目标文件串行化写入，不同文件可并行。多文件写入应按路径字典序获取锁，避免 AB/BA 死锁。
+
+### 工具并发与风险
+
+`tools/registry.ts` 为每个工具派生 `effect`（读 / 写 / 网络 / shell / git / 媒体 / mcp / memory / none）、`riskLevel`（0–3）和 `concurrencyClass`（`parallel` / `lsp-limited` / `network-limited` / `per-file-write` / `global-exclusive` / `interactive`）。`runner/toolInvocation.ts` 把模型 tool_call 封装为带 `invocationId` 的 `ToolInvocation`，`runner/toolScheduler.ts` 据此按类分配并发额度并对 per-file-write 工具按目标文件互斥。
+
+### 权限与命令安全
+
+`run_command` 命令进入执行前先由 `runner/commandPreflight.ts` 分词分类（readonly / write / network / interpreter / destructive 与升级位）；`runner/permissionPolicy.ts` 单例规则存储用 `path.relative` 做严格的 `cwdScope` 父子目录判定（避免 `/workspace` 与 `/workspace-malicious` 之类前缀绕过），仅放行预批准的低风险命令，其余必须经由用户授权。
+
+### 子 Agent 沙盒
+
+`orchestrator/subAgentSandbox.ts` 在分派每个子任务时构造 `SubAgentSandbox`：默认排除高危/交互式特权工具（`web_fetch`、`search_web`、`run_command`、`git_ops`、`mmx_*`、`convert_*`、`deploy_mod_asset`），对只读/计划角色彻底禁用所有写工具，并根据角色与 `taskNode.plannedFiles` 收紧 `writeScope`。`enforceSubAgentSafety` 在 Host 层做最终拦截。
+
+### 运行账本与恢复
+
+每次 Agent 运行通过 `runner/runLedger.ts` 写入 `AgentRunRecord` 与 `AgentRunEvent` 序列；事件 `sequence` 单调递增、按 JSONL 持久化，`runSnapshot` 消息驱动前端时间轴与详情面板的实时更新。`runner/checkpoint.ts` 在关键转换点保存 V2 resume state，孤儿 `tool_call` 会被合成 `tool` 回复以保证恢复时 API 接受。`runner/contextMemory.ts` 产出结构化压缩摘要，`promptBuilder.ts` 在恢复时把它作为上下文注入。
 
 ### 本地化写入
 

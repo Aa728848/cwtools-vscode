@@ -4,6 +4,9 @@ import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidat
 import type { AgentResumeState, ChatMessage, AgentMode } from '../types';
 import type { AgentToolExecutor } from '../agentTools';
 
+export const RESUME_TAIL_MESSAGE_LIMIT = 24;
+const RESUME_SUMMARY_CHAR_LIMIT = 12000;
+
 function cloneChatMessage(message: ChatMessage): ChatMessage {
     return {
         ...message,
@@ -67,6 +70,97 @@ export function prepareMessagesForResume(messages: ChatMessage[]): ChatMessage[]
     return normalized;
 }
 
+function findLatestSummaryRef(resumeDir: string, runId?: string): string | undefined {
+    if (runId) {
+        const currentSummary = pathModule.join(resumeDir, 'runs', runId, 'summary.md');
+        if (fs.existsSync(currentSummary)) return currentSummary;
+        const currentJson = pathModule.join(resumeDir, 'runs', runId, 'summary.json');
+        if (fs.existsSync(currentJson)) return currentJson;
+    }
+
+    const runsDir = pathModule.join(resumeDir, 'runs');
+    if (!fs.existsSync(runsDir)) return undefined;
+    try {
+        return fs.readdirSync(runsDir)
+            .map(name => {
+                const summaryMd = pathModule.join(runsDir, name, 'summary.md');
+                const summaryJson = pathModule.join(runsDir, name, 'summary.json');
+                const summaryPath = fs.existsSync(summaryMd) ? summaryMd : fs.existsSync(summaryJson) ? summaryJson : undefined;
+                if (!summaryPath) return undefined;
+                return { summaryPath, time: fs.statSync(summaryPath).mtimeMs };
+            })
+            .filter((entry): entry is { summaryPath: string; time: number } => !!entry)
+            .sort((a, b) => b.time - a.time)[0]?.summaryPath;
+    } catch {
+        return undefined;
+    }
+}
+
+function readSummarySnippet(summaryRef?: string): string {
+    if (!summaryRef || !fs.existsSync(summaryRef)) return '';
+    try {
+        const raw = fs.readFileSync(summaryRef, 'utf-8').trim();
+        return raw.length > RESUME_SUMMARY_CHAR_LIMIT
+            ? raw.slice(0, RESUME_SUMMARY_CHAR_LIMIT) + '\n\n[summary truncated for resume]'
+            : raw;
+    } catch {
+        return '';
+    }
+}
+
+function findTailStart(messages: ChatMessage[], tailLimit: number): number {
+    if (messages.length <= tailLimit) return 0;
+    let start = Math.max(0, messages.length - tailLimit);
+    while (start < messages.length && messages[start]?.role === 'tool') {
+        start++;
+    }
+    return Math.min(start, messages.length);
+}
+
+export function buildResumeMessages(
+    messages: ChatMessage[],
+    summaryText = '',
+    tailLimit = RESUME_TAIL_MESSAGE_LIMIT
+): ChatMessage[] {
+    const normalized = prepareMessagesForResume(messages);
+    const firstSystem = normalized.find(message => message.role === 'system');
+    const tailStart = findTailStart(normalized, tailLimit);
+    const tail = normalized
+        .slice(tailStart)
+        .filter((message, index) => !(index === 0 && message.role === 'system'))
+        .map(cloneChatMessage);
+
+    const resumeMessages: ChatMessage[] = [];
+    if (firstSystem) {
+        resumeMessages.push(cloneChatMessage(firstSystem));
+    }
+    if (summaryText.trim()) {
+        resumeMessages.push({
+            role: 'user',
+            content: [
+                '[SYSTEM RESUME MEMORY]',
+                'Use this compacted memory as the authoritative summary of earlier work, then continue from the recent transcript tail below.',
+                summaryText.trim()
+            ].join('\n\n')
+        });
+    }
+    resumeMessages.push(...tail);
+    return prepareMessagesForResume(resumeMessages);
+}
+
+function archiveFullTranscript(resumeDir: string, runId: string | undefined, normalizedMessages: ChatMessage[]): string | undefined {
+    if (!runId) return undefined;
+    try {
+        const runDir = pathModule.join(resumeDir, 'runs', runId);
+        if (!fs.existsSync(runDir)) fs.mkdirSync(runDir, { recursive: true });
+        const transcriptPath = pathModule.join(runDir, 'resume_transcript.json');
+        fs.writeFileSync(transcriptPath, JSON.stringify(normalizedMessages, null, 2), 'utf-8');
+        return transcriptPath;
+    } catch {
+        return undefined;
+    }
+}
+
 /** 
 * Save the current Agent state to disk for recovery in the event of an IDE restart or crash. 
 * (Checkpoint/Resume) 
@@ -75,7 +169,9 @@ export async function saveResumeState(
     topicId: string,
     mode: AgentMode,
     messages: ChatMessage[],
-    toolExecutor: AgentToolExecutor
+    toolExecutor: AgentToolExecutor,
+    runId?: string,
+    pendingToolCalls?: any[]
 ): Promise<void> {
     try {
         const wsRoot = getProjectWorkspaceRoot();
@@ -85,12 +181,26 @@ export async function saveResumeState(
         if (!resumeDir) return;
         if (!fs.existsSync(resumeDir)) fs.mkdirSync(resumeDir, { recursive: true });
 
+        const normalizedMessages = prepareMessagesForResume(messages);
+        const summaryRef = findLatestSummaryRef(resumeDir, runId);
+        const summaryText = readSummarySnippet(summaryRef);
+        const compactedMessages = buildResumeMessages(normalizedMessages, summaryText);
+        const fullTranscriptRef = archiveFullTranscript(resumeDir, runId, normalizedMessages);
+
         const resumeState: AgentResumeState = {
+            version: 2,
             timestamp: Date.now(),
             mode,
-            messages: prepareMessagesForResume(messages),
+            messages: compactedMessages,
             todos: toolExecutor.getTodos(),
             topicId,
+            runId,
+            summaryRef,
+            fullTranscriptRef,
+            pendingToolCalls,
+            lastStableEventId: 'evt_latest',
+            tailMessageCount: compactedMessages.length,
+            compacted: true,
         };
 
         fs.writeFileSync(
@@ -103,30 +213,29 @@ export async function saveResumeState(
     }
 }
 
-/** 
-* Read the resumable download status under the specified topicId. 
-*/
+/**
+ * Read the resumable state under the specified topicId.
+ * Supports both V2 (with version: 2) and legacy format.
+ */
 export async function loadResumeState(topicId: string): Promise<AgentResumeState | null> {
     try {
         const wsRoot = getProjectWorkspaceRoot();
-
         const resumePath = getTopicStorageDirCandidates(topicId, wsRoot)
             .map(dir => pathModule.join(dir, 'resume_state.json'))
             .find(candidate => fs.existsSync(candidate));
         if (!resumePath) return null;
-
         const raw = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
         if (!raw || !raw.messages || !Array.isArray(raw.messages)) return null;
-
+        raw.messages = prepareMessagesForResume(raw.messages);
         return raw as AgentResumeState;
     } catch {
         return null;
     }
 }
 
-/** 
-* Determine whether there is a breakpoint resume state. 
-*/
+/**
+ * Determine whether there is a breakpoint resume state.
+ */
 export async function hasResumeState(topicId: string): Promise<boolean> {
     if (!topicId) return false;
     try {
@@ -139,16 +248,15 @@ export async function hasResumeState(topicId: string): Promise<boolean> {
     }
 }
 
-/** 
-* Clean up the resumption status (when a new task starts). 
-*/
+/**
+ * Clean up the resumption status (when a new task starts).
+ */
 export async function clearResumeState(topicId: string): Promise<void> {
     if (!topicId) return;
     try {
         const wsRoot = getProjectWorkspaceRoot();
         const resumePaths = getTopicStorageDirCandidates(topicId, wsRoot)
             .map(dir => pathModule.join(dir, 'resume_state.json'));
-
         for (const candidate of resumePaths) {
             if (fs.existsSync(candidate)) {
                 fs.unlinkSync(candidate);

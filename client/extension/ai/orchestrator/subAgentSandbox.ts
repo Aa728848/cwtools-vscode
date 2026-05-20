@@ -1,0 +1,175 @@
+import * as path from 'path';
+import { getAgentProfile } from './agentRegistry';
+import type { TaskNode } from './types';
+import type { AgentMode } from '../types';
+
+/**
+ * Orchestrator 子 Agent 物理沙盒隔离规范 (Sub-Agent Sandbox)
+ */
+export interface SubAgentSandbox {
+    agentId: string;
+    role: string;
+    mode: AgentMode;
+    allowedTools?: Set<string>;
+    readScope?: string[];
+    writeScope?: string[];
+    plannedEntities?: string[];
+    permissionPolicy: 'deny' | 'delegate_to_parent' | 'allow_readonly';
+    vfsOverlay?: Map<string, string>;
+}
+
+/**
+ * 根据 TaskNode 任务节点与项目环境动态构造子 Agent 隔离沙盒
+ */
+export function buildSubAgentSandbox(
+    taskNode: TaskNode,
+    workspaceRoot: string
+): SubAgentSandbox {
+    const profile = getAgentProfile(taskNode.agentType);
+    const role = taskNode.agentType;
+
+    const sandbox: SubAgentSandbox = {
+        agentId: taskNode.id,
+        role,
+        mode: profile.mode,
+        permissionPolicy: 'deny',
+    };
+
+    // ─── 1. 计算允许的工具集 ───
+    // 默认黑名单拦截高危/交互型特权工具
+    const defaultExcludes = new Set<string>([
+        'web_fetch', 'search_web', 'codesearch',
+        'run_command', 'git_ops',
+        'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
+        'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
+    ]);
+
+    // 如果是只读或者 plan 规划角色，额外禁止所有物理写入工具
+    if (profile.toolBudget === 'read_only' || profile.toolBudget === 'plan') {
+        const writeTools = ['write_file', 'replace_file_content', 'multi_replace_file_content', 'write_localisation', 'replace_lines'];
+        writeTools.forEach(t => defaultExcludes.add(t));
+    }
+
+    // 假设注册的完整工具白名单（基于可用工具过滤去重）
+    // 后续在 enforce 中主要使用此黑名单做直接防御，以简化集成
+
+    // ─── 2. 计算写入作用域 (Write Scope) ───
+    // 如果是只读性质的角色，其 writeScope 直接设为空数组（绝对禁止任何写物理文件操作）
+    if (profile.toolBudget === 'read_only' || profile.toolBudget === 'plan') {
+        sandbox.writeScope = [];
+    } else {
+        const scopes: string[] = [];
+        const roleStr: string = role;
+        const modeStr: string = profile.mode;
+
+        // 2.1 融合 locWriter / locTranslator 的本地化写约束
+        if (roleStr === 'locWriter' || roleStr === 'locTranslator' || modeStr === 'loc_writer' || modeStr === 'loc_translator') {
+            scopes.push('localisation'); // 仅允许包含 localisation 的目录写入
+        }
+
+        // 2.2 融合 guiExpert 的界面文件写入约束
+        if (roleStr === 'guiExpert' || modeStr === 'gui_expert') {
+            scopes.push('.gui'); // 仅允许以 .gui 结尾或在 gui 目录下的路径写入
+        }
+
+        // 2.3 融合 taskNode.plannedFiles 明确规划的物理变更文件路径
+        if (taskNode.plannedFiles && taskNode.plannedFiles.length > 0) {
+            taskNode.plannedFiles.forEach(f => {
+                scopes.push(path.normalize(f).toLowerCase());
+            });
+        }
+
+        sandbox.writeScope = scopes;
+    }
+
+    // ─── 3. 设定读作用域 (Read Scope) ───
+    // 默认子 Agent 读操作开放，但如果声明了 readScope，可以做相应限制，默认不开启硬拦截
+    sandbox.readScope = undefined;
+
+    return sandbox;
+}
+
+/**
+ * 在 Host 层拦截子 Agent 的工具与路径调用，执行沙盒安全强校验
+ */
+export function enforceSubAgentSafety(
+    sandbox: SubAgentSandbox,
+    toolName: string,
+    args: any,
+    workspaceRoot: string
+): { allowed: boolean; reason?: string } {
+    // W7 fix: 针对 excluded 敏感特权工具直接物理阻断
+    const excludedTools = new Set<string>([
+        'web_fetch', 'search_web', 'codesearch',
+        'run_command', 'git_ops',
+        'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
+        'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
+    ]);
+
+    if (excludedTools.has(toolName)) {
+        return {
+            allowed: false,
+            reason: `子 Agent 沙盒已拒绝执行敏感特权工具 '${toolName}'`
+        };
+    }
+
+    // ─── 1. 判断是否属于文件写入类工具 ───
+    const writeTools = new Set<string>([
+        'write_file', 'replace_file_content', 'multi_replace_file_content', 'write_localisation', 'replace_lines'
+    ]);
+
+    if (writeTools.has(toolName)) {
+        // 如果子 Agent 本身就是只读角色（如 explorer, reviewer），直接断开拦截
+        if (sandbox.writeScope && sandbox.writeScope.length === 0) {
+            return {
+                allowed: false,
+                reason: `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用物理写入工具 '${toolName}'`
+            };
+        }
+
+        // 提取写入文件的具体路径参数
+        let targetFile: string = '';
+        if (args && typeof args === 'object') {
+            targetFile = args.TargetFile || args.filePath || args.targetRelativePath || args.file || '';
+        }
+
+        if (!targetFile) {
+            return { allowed: true }; // 参数为空时不作硬路径拦截，防止报错
+        }
+
+        const normalizedTarget = path.normalize(targetFile).toLowerCase();
+
+        // 如果存在具体的限制范围，验证写入是否越权越界
+        if (sandbox.writeScope && sandbox.writeScope.length > 0) {
+            let matchesScope = false;
+            for (const scope of sandbox.writeScope) {
+                const normScope = scope.toLowerCase();
+
+                // 1) 后缀或子片段模糊约束 (如 '.gui' 或 'localisation')
+                if (normScope.startsWith('.') && normalizedTarget.endsWith(normScope)) {
+                    matchesScope = true;
+                    break;
+                }
+                if (normScope === 'localisation' && normalizedTarget.includes('localisation')) {
+                    matchesScope = true;
+                    break;
+                }
+
+                // 2) 绝对路径或相对工作区前缀比对
+                if (normalizedTarget.includes(normScope)) {
+                    matchesScope = true;
+                    break;
+                }
+            }
+
+            if (!matchesScope) {
+                return {
+                    allowed: false,
+                    reason: `子 Agent 沙盒物理拦截：写入目标文件路径 '${targetFile}' 不在许可的作用域范围 [${sandbox.writeScope.join(', ')}] 内，拒绝操作。`
+                };
+            }
+        }
+    }
+
+    return { allowed: true };
+}

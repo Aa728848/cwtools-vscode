@@ -107,7 +107,21 @@ export class PromptBuilder {
      * @param providerId - provider id for model-specific supplements
      * @param languageId - override game language id (auto-detected if not provided)
      */
-    buildSystemPromptForMode(mode: AgentMode = 'build', providerId?: string, languageId?: string): string {
+    buildSystemPromptForMode(
+        mode: AgentMode = 'build', 
+        providerId?: string, 
+        languageId?: string,
+        topicId?: string,
+        runId?: string,
+        pinned?: {
+            todos?: import('./types').TodoItem[];
+            diagnostics?: Array<{ file: string; message: string; line: number }>;
+            pendingInteractions?: string[];
+            recentWrittenFiles?: string[];
+            blockedSubAgents?: string[];
+            decisions?: string[];
+        }
+    ): string {
         const gameId = languageId ?? this.detectGameLanguageId();
         const gameKnowledge = getGameKnowledge(gameId);
         const gameName = getGameDisplayName(gameId);
@@ -119,6 +133,65 @@ export class PromptBuilder {
         const forcedThinkingMode = config.get<boolean>('forcedThinkingMode') === true;
         
         let finalPrompt = '';
+
+        // 2. Compacted Summary (来自 Phase 4 结构化记忆压缩)
+        if (topicId && runId) {
+            const wsRoot = this.workspaceRoot;
+            const summaryMdPath = path.join(wsRoot, '.cwtools-ai', topicId, 'runs', runId, 'summary.md');
+            if (fs.existsSync(summaryMdPath)) {
+                try {
+                    const summaryContent = fs.readFileSync(summaryMdPath, 'utf8').trim();
+                    if (summaryContent) {
+                        finalPrompt += `<compacted-summary>\n\n${summaryContent}\n\n</compacted-summary>\n\n`;
+                    }
+                } catch {
+                    // Ignore summary read error
+                }
+            }
+        }
+
+        // 3. Pinned Context (活跃钉选状态与实时断点)
+        if (pinned) {
+            let pinnedText = '## 📌 活跃钉选状态与实时断点 (Pinned Context)\n';
+            let hasPinned = false;
+
+            if (pinned.pendingInteractions && pinned.pendingInteractions.length > 0) {
+                pinnedText += `### ⏳ 挂起中的交互操作 (Pending Approvals)\n${pinned.pendingInteractions.map(pi => `- ${pi}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (pinned.todos && pinned.todos.length > 0) {
+                const activeTodos = pinned.todos.filter(t => t.status === 'pending');
+                if (activeTodos.length > 0) {
+                    pinnedText += `### 📋 剩余待完成子任务 (Remaining Todos)\n${activeTodos.map(t => `- [ ] ${t.content}${(t as any).filePath ? ` (关联文件: ${(t as any).filePath})` : ''}`).join('\n')}\n`;
+                    hasPinned = true;
+                }
+            }
+
+            if (pinned.diagnostics && pinned.diagnostics.length > 0) {
+                pinnedText += `### ⚠️ 未解决的代码诊断报错 (Active Diagnostics)\n${pinned.diagnostics.map(d => `- **${path.basename(d.file)}** [第 ${d.line} 行]: ${d.message}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (pinned.recentWrittenFiles && pinned.recentWrittenFiles.length > 0) {
+                pinnedText += `### 📝 最近写入的文件 (Recent Written Files)\n${pinned.recentWrittenFiles.map(f => `- ${path.basename(f)}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (pinned.blockedSubAgents && pinned.blockedSubAgents.length > 0) {
+                pinnedText += `### 🚧 子 Agent 阻塞待决 (Blocked Sub-Agent Clarifications)\n${pinned.blockedSubAgents.map(b => `- ${b}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (pinned.decisions && pinned.decisions.length > 0) {
+                pinnedText += `### 💡 关键技术决策 (Key Decisions)\n${pinned.decisions.map(d => `- ${d}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (hasPinned) {
+                finalPrompt += `<pinned-context>\n\n${pinnedText.trim()}\n\n</pinned-context>\n\n`;
+            }
+        }
         if (projectRules) finalPrompt += projectRules + '\n';
 
         const memoryPrompt = this.memoryParser.getMemoryPrompt();
@@ -152,12 +225,26 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
      * The first call builds and caches the prompt; subsequent calls return the cached string
      * verbatim, ensuring byte-level stability across API calls for prefix cache hits.
      */
-    buildFrozenSystemPrompt(mode: AgentMode = 'build', providerId?: string, languageId?: string): string {
-        const cacheKey = `${mode}|${providerId ?? ''}|${languageId ?? ''}`;
+    buildFrozenSystemPrompt(
+        mode: AgentMode = 'build', 
+        providerId?: string, 
+        languageId?: string,
+        topicId?: string,
+        runId?: string,
+        pinned?: {
+            todos?: import('./types').TodoItem[];
+            diagnostics?: Array<{ file: string; message: string; line: number }>;
+            pendingInteractions?: string[];
+            recentWrittenFiles?: string[];
+            blockedSubAgents?: string[];
+            decisions?: string[];
+        }
+    ): string {
+        const cacheKey = `${mode}|${providerId ?? ''}|${languageId ?? ''}|${topicId ?? ''}|${runId ?? ''}`;
         const cached = this._frozenPromptCache.get(cacheKey);
         if (cached !== undefined) return cached;
 
-        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId);
+        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId, topicId, runId, pinned);
         this._frozenPromptCache.set(cacheKey, prompt);
         return prompt;
     }

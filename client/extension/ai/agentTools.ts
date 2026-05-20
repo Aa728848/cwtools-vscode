@@ -22,6 +22,7 @@ import { ExternalToolHandler } from './tools/externalTools';
 import { MemoryToolHandler } from './tools/memoryTools';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess } from './tools/permissions';
+import { runLedger } from './runner/runLedger';
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
 
@@ -763,6 +764,9 @@ export class AgentToolExecutor {
 
             // Instantiate Orchestrator
             const orchestrator = new Orchestrator(this.parentAgentRunner);
+            const parentRunPromise = context?.agentRunner?.getActiveRunRecordPromise?.()
+                ?? this.parentAgentRunner.getActiveRunRecordPromise?.();
+            const parentRun = await parentRunPromise?.catch(() => undefined);
 
             // Build execution options (read first from AgentToolContext, fallback to old instance fields)
             const runnerOpts = context?.runnerOptions ?? this.parentRunnerOptions;
@@ -790,6 +794,22 @@ export class AgentToolExecutor {
                 content: `🎯 协调器启动: 分派 ${tasks.length} 个子 Agent 任务`,
                 timestamp: Date.now(),
             });
+            if (parentRun) {
+                for (const task of tasks) {
+                    await runLedger.appendEvent(
+                        parentRun.runId,
+                        'subagent_start',
+                        {
+                            taskNodeId: task.id,
+                            agentType: task.agentType,
+                            plannedFiles: task.plannedFiles ?? [],
+                            plannedEntities: task.plannedEntities ?? [],
+                            dependencies: task.dependencies ?? [],
+                        },
+                        { agentId: task.id, status: 'running' }
+                    ).catch(() => {});
+                }
+            }
 
             let result;
             try {
@@ -836,6 +856,23 @@ export class AgentToolExecutor {
             for (const [id, agentResult] of result.agentResults) {
                 if (agentResult.needsClarification && agentResult.clarification) {
                     clarifications.push({ id, clarification: agentResult.clarification.slice(0, 4000) });
+                }
+                if (parentRun) {
+                    await runLedger.appendEvent(
+                        parentRun.runId,
+                        'subagent_end',
+                        {
+                            taskNodeId: id,
+                            success: agentResult.success,
+                            filesWritten: agentResult.writtenFiles,
+                            tokenUsage: agentResult.tokenUsage,
+                            stepCount: agentResult.stepCount,
+                            error: agentResult.error,
+                            needsClarification: agentResult.needsClarification,
+                            clarification: agentResult.clarification,
+                        },
+                        { agentId: id, status: agentResult.success ? 'done' : 'failed' }
+                    ).catch(() => {});
                 }
                 agentSummaries.push({
                     id,

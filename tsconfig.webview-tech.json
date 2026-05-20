@@ -5,7 +5,8 @@
     "extends": "./tsconfig.json",
     "include": [
         "client/webview/techTreePreview.ts",
-        "client/webview/vscode.d.ts"
+        "client/webview/vscode.d.ts",
+        "client/webview/svgIcons.ts"
     ],
     "exclude": [
         "client/extension/**",

@@ -42,10 +42,12 @@ import { filterToolDefinitionsForMode, resolveMaxToolIterations } from './runner
 import { getWorkflow } from './workflowRegistry';
 import { WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
-import { prepareMessagesForResume, loadResumeState, hasResumeState } from './runner/checkpoint';
+import { runLedger } from './runner/runLedger';
+import { prepareMessagesForResume, loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
 import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT } from './runner/compaction';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
-import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles } from './runner/toolScheduler';
+import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
+import { buildToolInvocation } from './runner/toolInvocation';
 import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash } from './runner/doomLoopDetector';
 
 export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
@@ -174,7 +176,7 @@ export interface AgentRunnerOptions {
      * Permission callback for bash/run_command tool (OpenCode strategy).
      * Resolve with true=allow, false=deny.
      */
-    onPermissionRequest?: (id: string, tool: string, description: string, command?: string) => Promise<boolean>;
+    onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
     /** If provided, file mutations are written to this memory overlay instead of disk. */
     vfsOverlay?: Map<string, string>;
     /** Topic ID for checkpoint persistence — threaded from run() context */
@@ -195,6 +197,8 @@ export interface AgentRunnerOptions {
 * Prevent child Agents from falling into meaningless search loops. 
 */
     excludeTools?: string[];
+    /** Sub-Agent sandboxing scope configuration (Phase 5) */
+    sandbox?: import('./orchestrator/subAgentSandbox').SubAgentSandbox;
     /** Force file-mutating tools to bypass interactive diff confirmation. Used by orchestrator sub-agents. */
     forceAutoApplyWrites?: boolean;
     /** Max time a write tool may wait for another file lock before returning a structured error. */
@@ -314,12 +318,17 @@ const globalPartitionedWriteQueue = new PartitionedWriteQueue();
 
 export class AgentRunner {
     private writeQueue = globalPartitionedWriteQueue;
+    private activeRunRecordPromise?: Promise<import('./types').AgentRunRecord>;
     constructor(
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
         private promptBuilder: PromptBuilder
     ) {
         this.toolExecutor.parentAgentRunner = this;
+    }
+
+    public getActiveRunRecordPromise(): Promise<import('./types').AgentRunRecord> | undefined {
+        return this.activeRunRecordPromise;
     }
 
     // ─── Transaction Management ────────────────────────────────────────────────
@@ -428,34 +437,11 @@ export class AgentRunner {
     private async saveResumeState(
         topicId: string,
         messages: ChatMessage[],
-        mode: AgentMode
+        mode: AgentMode,
+        runId?: string,
+        pendingToolCalls?: any[]
     ): Promise<void> {
-        try {
-            const fs = await import('fs');
-            const pathModule = await import('path');
-            const wsRoot = getProjectWorkspaceRoot();
-            if (!topicId) return;
-
-            const resumeDir = getTopicStorageDir(topicId, wsRoot);
-            if (!resumeDir) return;
-            if (!fs.existsSync(resumeDir)) fs.mkdirSync(resumeDir, { recursive: true });
-
-            const resumeState: import('./types').AgentResumeState = {
-                timestamp: Date.now(),
-                mode,
-                messages: prepareMessagesForResume(messages),
-                todos: this.toolExecutor.getTodos(),
-                topicId,
-            };
-
-            fs.writeFileSync(
-                pathModule.join(resumeDir, 'resume_state.json'),
-                JSON.stringify(resumeState),
-                'utf-8'
-            );
-        } catch {
-            // Non-critical — silently ignore save failures
-        }
+        await saveCheckpointResumeState(topicId, mode, messages, this.toolExecutor, runId, pendingToolCalls);
     }
 
     /** 
@@ -538,10 +524,40 @@ export class AgentRunner {
     ): Promise<GenerationResult> {
         const steps: AgentStep[] = [];
         let mode = options?.mode ?? 'build';
+        const topicId = context.topicId || 'default';
+        const userPromptPreview = userMessage.substring(0, 100);
+        const runRecordPromise = runLedger.createRun(topicId, mode, userPromptPreview).then(async r => {
+            await runLedger.appendEvent(r.runId, 'status_changed', { status: 'planning' });
+            return r;
+        });
+        this.activeRunRecordPromise = runRecordPromise;
+
         const emitStep = (step: AgentStep) => {
             steps.push(step);
             options?.onStep?.(step);
+            runRecordPromise.then(r => {
+                runLedger.appendEvent(r.runId, 'step_appended', { step }).catch(() => {});
+            }).catch(() => {});
         };
+        const updateRunStatus = (status: import('./types').AgentRunStatus) => {
+            runRecordPromise.then(r => {
+                runLedger.appendEvent(r.runId, 'status_changed', { status }).catch(() => {});
+                if (status === 'completed' || status === 'failed') {
+                    runLedger.appendEvent(r.runId, 'metrics_updated', {
+                        metrics: {
+                            totalTokens: tokenAccumulator.total,
+                            promptTokens: tokenAccumulator.input,
+                            completionTokens: tokenAccumulator.output,
+                            costCny: tokenAccumulator.estimatedCostCny,
+                            iterations: runMetrics.iterations,
+                            toolCalls: runMetrics.toolCallCount
+                        }
+                    }).catch(() => {});
+                }
+            }).catch(() => {});
+        };
+            // Empty
+        // Empty
 
         // Accumulate token usage across all API calls in this generation
         // (declared here so compaction call and sub-agent dispatch can also contribute to the total)
@@ -693,6 +709,63 @@ export class AgentRunner {
                   ]
                 : effectiveUserMessage;
 
+        const runRecord = await runRecordPromise;
+        const runId = runRecord.runId;
+        // topicId is already declared in function scope
+
+        // 收集 Pinned Context 实时数据 (Todos & Diagnostics)
+        let pinnedData: any = undefined;
+        if (topicId) {
+            const todos = this.toolExecutor.getExternalToolHandler().getTodos();
+            const diagnostics: Array<{ file: string; message: string; line: number }> = [];
+            try {
+                const vsDiags = vs.languages.getDiagnostics();
+                for (const [uri, diags] of vsDiags) {
+                    const rel = path.relative(getProjectWorkspaceRoot(), uri.fsPath);
+                    if (rel && !rel.includes('node_modules') && !rel.startsWith('.')) {
+                        for (const d of diags) {
+                            if (d.severity === vs.DiagnosticSeverity.Error) {
+                                diagnostics.push({
+                                    file: uri.fsPath,
+                                    message: d.message,
+                                    line: d.range.start.line + 1
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch {
+                // Ignore diag errors
+            }
+
+            const { getPendingInteractions } = require('./chatPanel');
+            const pendingInteractions = getPendingInteractions();
+            const pinnedSummary = this.loadPinnedContextSummary(topicId, runId);
+
+            pinnedData = {
+                todos,
+                diagnostics: diagnostics.slice(0, 10),
+                pendingInteractions,
+                recentWrittenFiles: runRecord.writtenFiles.slice(-10),
+                blockedSubAgents: pinnedSummary?.blocked?.slice(0, 8) ?? [],
+                decisions: pinnedSummary?.decisions?.slice(0, 8) ?? []
+            };
+        }
+
+        // 异步静默触发一次 Context Memory Compaction 看板压缩
+        if (topicId && runId) {
+            const runRec = runLedger.getRun(runId);
+            if (runRec) {
+                import('./runner/contextMemory').then(async ({ compactHistory }) => {
+                    await runLedger.appendEvent(runId, 'compaction_start', { kind: 'structured_summary', trigger: 'background' }).catch(() => {});
+                    const summary = await compactHistory(topicId, runId, conversationHistory, runRec.steps || [], this.aiService);
+                    await runLedger.appendEvent(runId, 'compaction_end', { kind: 'structured_summary', success: true, summary }).catch(() => {});
+                }).catch((error) => {
+                    runLedger.appendEvent(runId, 'compaction_end', { kind: 'structured_summary', success: false, error: error instanceof Error ? error.message : String(error) }).catch(() => {});
+                }).catch(() => {});
+            }
+        }
+
         const providerForPrompt = options?.providerId ?? this.aiService.getConfig().provider;
         const supportsPrefixCache = providerForPrompt.startsWith('deepseek') || providerForPrompt.startsWith('openai');
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
@@ -700,8 +773,8 @@ export class AgentRunner {
         let systemPrompt = options?.useSlimPrompt
             ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt)
             : supportsPrefixCache
-                ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt)
-                : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt);
+                ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined, topicId, runId, pinnedData)
+                : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt, undefined, topicId, runId, pinnedData);
 
         // Inject workflow prompt supplement if running within a workflow
         const activeWorkflowForPrompt = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
@@ -720,6 +793,9 @@ export class AgentRunner {
                 options = { ...options, mode };
                 if (resumeState.todos && resumeState.todos.length > 0) {
                     void this.toolExecutor.getExternalToolHandler().todoWrite({ todos: resumeState.todos });
+                }
+                if (resumeState.pendingToolCalls && resumeState.pendingToolCalls.length > 0) {
+                    (this as any).initialPendingToolCalls = resumeState.pendingToolCalls;
                 }
                 emitStep({
                     type: 'thinking',
@@ -745,7 +821,7 @@ export class AgentRunner {
 
         if (context.topicId) {
             options = { ...options, topicId: context.topicId, mode };
-            await this.saveResumeState(context.topicId, messages, mode);
+            await this.saveResumeState(context.topicId, messages, mode, runId);
         }
 
         const modeLabel: Record<string, string> = {
@@ -771,6 +847,7 @@ export class AgentRunner {
             }
 
             // Phase 1: Agent reasoning loop (with tool calls)
+            updateRunStatus('running');
             const finalMessage = await this.reasoningLoop(messages, emitStep, mode, options, tokenAccumulator, options?.onBeforeFileWrite, runMetrics);
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
 
@@ -782,6 +859,7 @@ export class AgentRunner {
 
             // Plan / Explore / General / Review / Orchestrator mode — or no code generated — just an explanation
             if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator') {
+                updateRunStatus('completed');
                 await clearResumeStateIfComplete();
                 return {
                     code: '',
@@ -800,6 +878,7 @@ export class AgentRunner {
             // Orchestrator has an independent QualityGate mechanism, and subagents do not need to be repeatedly verified.
             // In addition, the validation loop will continue to generate steps after the reasoning ends, causing the external judgment card to be inconsistent with the internal state.
             if (options?.skipValidation) {
+                updateRunStatus('completed');
                 await clearResumeStateIfComplete();
                 return {
                     code,
@@ -818,6 +897,7 @@ export class AgentRunner {
                 code, targetFile, messages, emitStep, options
             );
 
+            updateRunStatus('completed');
             await clearResumeStateIfComplete();
             return {
                 ...validationResult,
@@ -827,6 +907,7 @@ export class AgentRunner {
                 runMetrics,
             };
         } catch (e) {
+            updateRunStatus('failed');
             const errorMsg = e instanceof Error ? e.message : String(e);
 
             if (errorMsg.includes('aborted') || errorMsg.includes('cancel')) {
@@ -836,7 +917,7 @@ export class AgentRunner {
             }
 
             if (context.topicId) {
-                await this.saveResumeState(context.topicId, messages, mode);
+                await this.saveResumeState(context.topicId, messages, mode, runId);
             }
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
 
@@ -901,6 +982,148 @@ export class AgentRunner {
      * estimates cumulative message size and compacts older tool results in-place
      * if they exceed MID_LOOP_COMPACTION_RATIO of the context window.
      */
+    /**
+     * Process tool result to detect and automatically truncate massive payloads,
+     * archiving the full result into the local topic run snapshot directory.
+     */
+    private async processToolResult(
+        toolName: string,
+        invocationId: string,
+        runId: string,
+        topicId: string,
+        result: any
+    ): Promise<any> {
+        if (!result) return result;
+
+        const strContent = this.serializeToolResult(result);
+
+        // Auto-truncation threshold: 16000 chars (approx. 4000-8000 tokens)
+        const LIMIT = 16000;
+        if (strContent.length <= LIMIT) {
+            await runLedger.appendEvent(
+                runId,
+                'tool_output_delta',
+                {
+                    toolName,
+                    preview: strContent.substring(0, 1000),
+                    resultSize: strContent.length,
+                    truncated: false
+                },
+                { invocationId, status: 'done' }
+            ).catch(() => {});
+            return result;
+        }
+
+        try {
+            const fs = await import('fs');
+            const pathModule = await import('path');
+            const wsRoot = getProjectWorkspaceRoot();
+            const runDir = pathModule.join(getTopicStorageDir(topicId, wsRoot), 'runs', runId, 'large_results');
+            if (!fs.existsSync(runDir)) {
+                fs.mkdirSync(runDir, { recursive: true });
+            }
+
+            const filePath = pathModule.join(runDir, `${invocationId}_result.json`);
+            fs.writeFileSync(filePath, typeof result === 'string' ? result : JSON.stringify(result, null, 2), 'utf-8');
+
+            const relativeDiskPath = pathModule.relative(wsRoot, filePath);
+            const preview = strContent.substring(0, 1000);
+            await runLedger.appendEvent(
+                runId,
+                'artifact_created',
+                {
+                    kind: 'tool_result',
+                    title: `${toolName} result`,
+                    filePath: relativeDiskPath,
+                    resultRef: relativeDiskPath,
+                    toolName,
+                    resultSize: strContent.length
+                },
+                { invocationId, status: 'done' }
+            ).catch(() => {});
+            await runLedger.appendEvent(
+                runId,
+                'tool_output_delta',
+                {
+                    toolName,
+                    preview,
+                    resultSize: strContent.length,
+                    truncated: true,
+                    resultRef: relativeDiskPath
+                },
+                { invocationId, status: 'done' }
+            ).catch(() => {});
+            return {
+                ok: true,
+                truncated: true,
+                message: `[WARNING: The result of tool ${toolName} was automatically truncated to 1000 characters to prevent context window overflow (Original size was ${strContent.length} chars). The full, un-truncated output has been securely archived on local disk for safety.]`,
+                preview,
+                fullResultLocalPath: relativeDiskPath,
+                resultRef: relativeDiskPath
+            };
+        } catch {
+            await runLedger.appendEvent(
+                runId,
+                'tool_output_delta',
+                {
+                    toolName,
+                    preview: strContent.substring(0, 1000),
+                    resultSize: strContent.length,
+                    truncated: true
+                },
+                { invocationId, status: 'failed' }
+            ).catch(() => {});
+            return {
+                ok: true,
+                truncated: true,
+                message: `[WARNING: The result of tool ${toolName} was truncated due to massive size (${strContent.length} chars).]`,
+                preview: strContent.substring(0, 1000)
+            };
+        }
+    }
+
+    private serializeToolResult(result: any): string {
+        if (typeof result === 'string') return result;
+        try {
+            return JSON.stringify(result);
+        } catch {
+            return String(result);
+        }
+    }
+
+    private summarizeToolResultForLedger(toolName: string, result: any): Record<string, unknown> {
+        const resultRecord = result && typeof result === 'object' ? result as Record<string, any> : undefined;
+        const strContent = this.serializeToolResult(result);
+        const error = resultRecord?.error;
+        const skipped = !!resultRecord?.skipped;
+        const resultRef = resultRecord?.resultRef || resultRecord?.fullResultLocalPath;
+        const previewSource = typeof resultRecord?.preview === 'string' ? resultRecord.preview : strContent;
+        return {
+            toolName,
+            success: !error && !skipped && resultRecord?.success !== false,
+            error,
+            skipped,
+            truncated: !!resultRecord?.truncated,
+            resultRef,
+            resultSize: strContent.length,
+            preview: previewSource.substring(0, 1000)
+        };
+    }
+
+    private loadPinnedContextSummary(topicId: string, runId: string): { blocked?: string[]; decisions?: string[] } | undefined {
+        try {
+            const summaryPath = path.join(getTopicStorageDir(topicId, getProjectWorkspaceRoot()), 'runs', runId, 'summary.json');
+            if (!fs.existsSync(summaryPath)) return undefined;
+            const parsed = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'));
+            return {
+                blocked: Array.isArray(parsed?.blocked) ? parsed.blocked.map(String) : [],
+                decisions: Array.isArray(parsed?.decisions) ? parsed.decisions.map(String) : []
+            };
+        } catch {
+            return undefined;
+        }
+    }
+
     private async reasoningLoop(
         messages: ChatMessage[],
         emitStep: (step: AgentStep) => void,
@@ -910,6 +1133,7 @@ export class AgentRunner {
         onFileWrite?: (filePath: string, prevContent: string | null) => void,
         runMetrics?: AgentRunMetrics
     ): Promise<string> {
+        const runRecord = await this.activeRunRecordPromise!;
         let iteration = 0;
         const supportsPrefixCache = (options?.providerId ?? '').startsWith('deepseek') || (options?.providerId ?? '').startsWith('openai');
 
@@ -1020,8 +1244,24 @@ export class AgentRunner {
             iteration++;
             if (runMetrics) runMetrics.iterations = iteration;
             if (options?.topicId) {
-                await this.saveResumeState(options.topicId, messages, mode);
+                await this.saveResumeState(options.topicId, messages, mode, runRecord.runId);
             }
+
+            let toolCalls: any[] | undefined = undefined;
+            let needsHashValidation = false;
+            let currentPairKey: string | undefined = undefined;
+            let softLoopGuidancePending = false;
+
+            const initialPending = (this as any).initialPendingToolCalls;
+            if (iteration === 1 && initialPending && initialPending.length > 0) {
+                (this as any).initialPendingToolCalls = undefined;
+                toolCalls = initialPending;
+                emitStep({
+                    type: 'thinking',
+                    content: '正在恢复并重新审批上一次会话遗留的敏感交互操作...',
+                    timestamp: Date.now(),
+                });
+            } else {
 
             // Batch 2.3: Periodic checkpoint save for crash recovery
             if (iteration > 1 && iteration % CHECKPOINT_INTERVAL === 0) {
@@ -1044,7 +1284,20 @@ export class AgentRunner {
                         content: AGENT.COMPACTION_MID_LOOP(loopTokens, midLoopThreshold),
                         timestamp: Date.now(),
                     });
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'compaction_start',
+                        { kind: 'mid_loop', beforeTokens: loopTokens, threshold: midLoopThreshold },
+                        { status: 'running' }
+                    );
                     this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: supportsPrefixCache });
+                    const afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'compaction_end',
+                        { kind: 'mid_loop', success: true, beforeTokens: loopTokens, afterTokens },
+                        { status: 'done' }
+                    );
                 }
             }
 
@@ -1085,6 +1338,33 @@ export class AgentRunner {
             }
 
             let response;
+            const modelCallId = `model_${runRecord.runId}_${iteration}`;
+            let lastModelDeltaEventAt = 0;
+            const activeProviderConfig = this.aiService.getConfig();
+            const appendModelDeltaEvent = (kind: string, text: string) => {
+                const now = Date.now();
+                if (now - lastModelDeltaEventAt < 1000) return;
+                lastModelDeltaEventAt = now;
+                runLedger.appendEvent(
+                    runRecord.runId,
+                    'model_call_delta',
+                    { iteration, kind, preview: text.substring(0, 240), size: text.length },
+                    { invocationId: modelCallId, status: 'running' }
+                ).catch(() => {});
+            };
+            await runLedger.appendEvent(
+                runRecord.runId,
+                'model_call_start',
+                {
+                    iteration,
+                    providerId: options?.providerId ?? activeProviderConfig.provider,
+                    model: options?.model ?? activeProviderConfig.model,
+                    messageCount: messages.length,
+                    toolCount: availableTools.length
+                },
+                { invocationId: modelCallId, status: 'running' }
+            );
+            let fallbackFromError: string | undefined;
             try {
                 response = await this.aiService.chatCompletion(messages, {
                     tools: availableTools,
@@ -1096,6 +1376,7 @@ export class AgentRunner {
                     abortSignal: options?.abortSignal,
                     // Stream thinking tokens to UI in real-time (OpenCode-style)
                     onThinking: options?.streaming ? (text) => {
+                        appendModelDeltaEvent('thinking', text);
                         emitStep({
                             type: 'thinking_content',
                             content: text,
@@ -1104,6 +1385,7 @@ export class AgentRunner {
                     } : undefined,
                     // Stream text content tokens for typewriter effect
                     onTextDelta: options?.streaming ? (text) => {
+                        appendModelDeltaEvent('text', text);
                         if (text.includes('<tool_call>')) isInsideDsml = true;
                         if (text.includes('</tool_call>')) {
                             isInsideDsml = false;
@@ -1131,6 +1413,12 @@ export class AgentRunner {
                 });
             } catch (err: any) {
                 if (err && err.message && (err.message.includes('terminated') || err.message.includes('socket hang up') || err.message.includes('ECONNRESET'))) {
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'model_call_end',
+                        { iteration, success: false, error: err.message },
+                        { invocationId: modelCallId, status: 'failed' }
+                    );
                     emitStep({
                         type: 'error',
                         content: `服务端异常断开 (${err.message}). 这通常是因为输出超出物理上限。自动触发切片恢复...`,
@@ -1152,16 +1440,43 @@ export class AgentRunner {
                     );
                     if (fallbackResponse) {
                         response = fallbackResponse;
+                        fallbackFromError = err instanceof Error ? err.message : String(err);
                         // Fall through to normal processing below
                     } else {
+                        await runLedger.appendEvent(
+                            runRecord.runId,
+                            'model_call_end',
+                            { iteration, success: false, error: err instanceof Error ? err.message : String(err) },
+                            { invocationId: modelCallId, status: 'failed' }
+                        );
                         throw err; // All fallbacks exhausted
                     }
                 } else {
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'model_call_end',
+                        { iteration, success: false, error: err instanceof Error ? err.message : String(err) },
+                        { invocationId: modelCallId, status: 'failed' }
+                    );
                     throw err;
                 }
             } finally {
                 if (modelHeartbeatId) clearInterval(modelHeartbeatId);
             }
+
+            await runLedger.appendEvent(
+                runRecord.runId,
+                'model_call_end',
+                {
+                    iteration,
+                    success: true,
+                    model: response.model,
+                    usage: response.usage,
+                    finishReason: response.choices?.[0]?.finish_reason,
+                    fallbackFromError
+                },
+                { invocationId: modelCallId, status: 'done' }
+            );
 
             // Accumulate token usage from this API call
             if (tokenAccumulator) {
@@ -1223,7 +1538,7 @@ export class AgentRunner {
 
             // Try OpenAI-style tool_calls first, then fall back to DSML/XML parsing
             // (must happen before stripping, since strip removes the DSML tags we need)
-            let toolCalls = assistantMessage.tool_calls;
+            toolCalls = assistantMessage.tool_calls;
             if (!toolCalls || toolCalls.length === 0) {
                 toolCalls = this.parseDsmlToolCalls(rawContent);
             }
@@ -1305,9 +1620,9 @@ export class AgentRunner {
             // Track (prevSig → currSig) pairs. If the same pair repeats
             // ≥ DOOM_LOOP_PAIR_THRESHOLD times, flag for phase-2 hash check.
             const callSignature = toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`).join('|');
-            let needsHashValidation = false;
-            let softLoopGuidancePending = false;
-            let currentPairKey: string | undefined;
+            needsHashValidation = false;
+            softLoopGuidancePending = false;
+            currentPairKey = undefined;
             if (prevCallSignature) {
                 const pairKey = `${prevCallSignature}->${callSignature}`;
                 currentPairKey = pairKey;
@@ -1327,7 +1642,9 @@ export class AgentRunner {
                 if (pairFreq >= DOOM_LOOP_PAIR_THRESHOLD) needsHashValidation = true;
             }
             prevCallSignature = callSignature;
+            }
 
+            if (!toolCalls) toolCalls = [];
             // ── Deduplicate file-write calls ──────────────────────────────────
             // If the model emitted multiple write/edit calls targeting the same file
             // in one response, only keep the LAST one for each file.
@@ -1350,10 +1667,42 @@ export class AgentRunner {
             const useDsmlToolRole = useDsmlToolRole0;
 
             // Emit all tool_call steps upfront (preserves UI ordering)
-            const parsedCalls: Array<{ toolName: AgentToolName; toolArgs: Record<string, unknown>; toolArgsParseError?: string; toolCall: typeof toolCalls[0] }> = [];
+            const parsedCalls: Array<{ 
+                invocationId: string; 
+                toolName: AgentToolName; 
+                toolArgs: Record<string, unknown>; 
+                toolArgsParseError?: string; 
+                toolCall: typeof toolCalls[0];
+                concurrencyClass: import('./types').ToolConcurrencyClass;
+                effect: import('./types').ToolEffect;
+                targetPaths: string[];
+            }> = [];
             for (const toolCall of toolCalls) {
                 options?.abortSignal?.throwIfAborted();
-                const toolName = toolCall.function.name as AgentToolName;
+                // runRecord is resolved at reasoningLoop entry
+                const invocation = buildToolInvocation({
+                    runId: runRecord.runId,
+                    toolCall,
+                    availableTools,
+                    workspaceRoot: this.toolExecutor.workspaceRoot,
+                    topicId: options?.topicId
+                });
+                const invocationId = invocation.invocationId;
+                let toolName = toolCall.function.name as AgentToolName;
+                const knownNames = availableTools.map(t => t.function.name);
+                if (!knownNames.includes(toolName)) {
+                    const matched = knownNames.find(n => n.toLowerCase() === toolName.toLowerCase());
+                    if (matched) {
+                        emitStep({
+                            type: 'thinking',
+                            content: `修复工具名: ${toolName} → ${matched}`,
+                            invocationId,
+                            timestamp: Date.now(),
+                        });
+                        toolCall.function.name = matched;
+                        toolName = matched as AgentToolName;
+                    }
+                }
                 if (runMetrics) {
                     runMetrics.toolCallCount++;
                     runMetrics.toolCallsByName[toolName] = (runMetrics.toolCallsByName[toolName] ?? 0) + 1;
@@ -1381,19 +1730,37 @@ export class AgentRunner {
                         emitStep({
                             type: 'thinking',
                             content: `[Tool Arg Repair] ${argRepair.repairs.join('; ')}`,
+                            invocationId,
                             timestamp: Date.now(),
                         });
                     }
                 }
 
-                emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now(), stepIndex: ++globalToolCallIndex, iterationInfo: `Iteration ${iteration}/${maxToolIterations}` });
-                parsedCalls.push({ toolName, toolArgs, toolArgsParseError, toolCall });
+                emitStep({ type: 'tool_call', content: `调用工具: ${toolName}`, toolName, toolArgs, timestamp: Date.now(), stepIndex: ++globalToolCallIndex, iterationInfo: `Iteration ${iteration}/${maxToolIterations}`, invocationId });
+                if (invocation.argRepairs.length > 0) {
+                    emitStep({
+                        type: 'thinking',
+                        content: `[Tool Arg Repair] ${invocation.argRepairs.join('; ')}`,
+                        invocationId,
+                        timestamp: Date.now(),
+                    });
+                }
+                parsedCalls.push({ 
+                    invocationId, 
+                    toolName, 
+                    toolArgs, 
+                    toolArgsParseError, 
+                    toolCall,
+                    concurrencyClass: invocation.concurrencyClass,
+                    effect: invocation.effect,
+                    targetPaths: invocation.targetPaths
+                });
             }
 
             // Tool Call Repair: case-insensitive correction of hallucinated tool names.
             // Prevents doom-loop false positives when LLM emits slightly misspelled names.
             const knownNames = availableTools.map(t => t.function.name);
-            for (const tc of toolCalls) {
+            for (const tc of [] as any[]) {
                 const raw = tc.function.name;
                 // Quick check: if exact match, skip
                 if (knownNames.includes(raw)) continue;
@@ -1412,7 +1779,16 @@ export class AgentRunner {
                 // error, which triggers analyze_diagnostic_error reflection rather than doom-loop.
             }
 
-            const toolResults: unknown[] = new Array(parsedCalls.length);
+            const toolResults: any[] = new Array(parsedCalls.length);
+
+            for (const ci of parsedCalls) {
+                await runLedger.appendEvent(
+                    runRecord.runId,
+                    'tool_call_created',
+                    { toolName: ci.toolName, toolArgs: ci.toolArgs, concurrencyClass: ci.concurrencyClass, effect: ci.effect },
+                    { invocationId: ci.invocationId }
+                );
+            }
 
             // Fetch fs module lazily if we need it for snapshots
             let fsModule: typeof import('fs') | undefined;
@@ -1420,6 +1796,21 @@ export class AgentRunner {
             for (let i = 0; i < parsedCalls.length; i++) {
                 options?.abortSignal?.throwIfAborted();
                 const ci = parsedCalls[i]!;
+                
+                // Phase 5: 子 Agent 物理沙盒安全强硬拦截
+                if (options?.sandbox) {
+                    const { enforceSubAgentSafety } = require('./orchestrator/subAgentSandbox');
+                    const safetyCheck = enforceSubAgentSafety(options.sandbox, ci.toolName, ci.toolArgs, this.toolExecutor.workspaceRoot);
+                    if (!safetyCheck.allowed) {
+                        emitStep({
+                            type: 'validation',
+                            content: `🔴 [子 Agent 沙盒物理强拦截] ${safetyCheck.reason}`,
+                            timestamp: Date.now()
+                        });
+                        toolResults[i] = { success: false, error: safetyCheck.reason };
+                        continue;
+                    }
+                }
                 const { toolName, toolArgs } = ci;
 
                 if (ci.toolArgsParseError) {
@@ -1444,23 +1835,49 @@ export class AgentRunner {
                         batchIndices.push(i);
                     }
                     await Promise.all(batchIndices.map(async idx => {
+                        const callInfo = parsedCalls[idx]!;
+                        const releaseLock = await toolScheduler.acquireLock(callInfo.concurrencyClass);
                         try {
                             options?.abortSignal?.throwIfAborted();
-                            const callInfo = parsedCalls[idx]!;
-                            toolResults[idx] = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs, agentToolContext);
+                            await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: callInfo.toolName }, { invocationId: callInfo.invocationId });
+                            const rawRes = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs, agentToolContext);
+                            toolResults[idx] = await this.processToolResult(
+                                callInfo.toolName,
+                                callInfo.invocationId,
+                                runRecord.runId,
+                                options?.topicId || 'default',
+                                rawRes
+                            );
+                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
                         } catch (e: any) {
                             if (e?.name === 'AbortError') throw e;
                             toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
+                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
+                        } finally {
+                            releaseLock();
                         }
                     }));
                 } else {
                     if (!WRITE_TOOLS.has(toolName)) {
+                        const releaseLock = await toolScheduler.acquireLock(ci.concurrencyClass);
                         try {
                             options?.abortSignal?.throwIfAborted();
-                            toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
+                            await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
+                            const rawRes = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
+                            toolResults[i] = await this.processToolResult(
+                                toolName,
+                                ci.invocationId,
+                                runRecord.runId,
+                                options?.topicId || 'default',
+                                rawRes
+                            );
+                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(ci.toolName, toolResults[i]), { invocationId: ci.invocationId });
                         } catch (e: any) {
                             if (e?.name === 'AbortError') throw e;
                             toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
+                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(ci.toolName, toolResults[i]), { invocationId: ci.invocationId });
+                        } finally {
+                            releaseLock();
                         }
                         continue;
                     }
@@ -1478,8 +1895,10 @@ export class AgentRunner {
 
                     try {
                         await this.writeQueue.enqueue(lockPaths, async () => {
-                        try {
-                            options?.abortSignal?.throwIfAborted();
+                            const releaseLock = await toolScheduler.acquireLock(ci.concurrencyClass);
+                            try {
+                                options?.abortSignal?.throwIfAborted();
+                                await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
                             
                             // Sub-agent snapshot isolate hook
                             if (onFileWrite && primaryFilePath) {
@@ -1501,23 +1920,62 @@ export class AgentRunner {
                                     toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). This almost ALWAYS means your code output was truncated due to API length limits. DO NOT retry write_file with the same massive file! Instead, split your task using todo_write, or use multi_replace_file_content to apply the changes incrementally.` };
                                 } else {
                                     const args = (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite) ? { ...toolArgs, _autoApply: true } : toolArgs;
-                                    toolResults[i] = await this.toolExecutor.execute(toolName, args, agentToolContext);
+                                    const rawRes = await this.toolExecutor.execute(toolName, args, agentToolContext);
+                                    toolResults[i] = await this.processToolResult(
+                                        toolName,
+                                        ci.invocationId,
+                                        runRecord.runId,
+                                        options?.topicId || 'default',
+                                        rawRes
+                                    );
                                     const r = toolResults[i] as Record<string, unknown>;
                                     if (r && (r.success || r.confirmed) && primaryFilePath) confirmedWrittenFiles.add(primaryFilePath);
                                 }
                             } else if (WRITE_TOOLS.has(toolName) && primaryFilePath && (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite)) {
-                                toolResults[i] = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true }, agentToolContext);
+                                const rawRes = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true }, agentToolContext);
+                                toolResults[i] = await this.processToolResult(
+                                    toolName,
+                                    ci.invocationId,
+                                    runRecord.runId,
+                                    options?.topicId || 'default',
+                                    rawRes
+                                );
                             } else {
-                                toolResults[i] = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
+                                const rawRes = await this.toolExecutor.execute(toolName, toolArgs, agentToolContext);
+                                toolResults[i] = await this.processToolResult(
+                                    toolName,
+                                    ci.invocationId,
+                                    runRecord.runId,
+                                    options?.topicId || 'default',
+                                    rawRes
+                                );
                                 if (WRITE_TOOLS.has(toolName) && primaryFilePath) {
                                     const r = toolResults[i] as Record<string, unknown>;
                                     if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(primaryFilePath);
                                 }
                             }
                         } catch (e: any) {
-                            if (e?.name === 'AbortError') throw e;
-                            toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
-                        }
+                                if (e?.name === 'AbortError') throw e;
+                                toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
+                            } finally {
+                                const res = toolResults[i] as any;
+                                const success = res && !res.error && !res.skipped;
+                                await runLedger.appendEvent(
+                                    runRecord.runId,
+                                    'tool_call_end',
+                                    { ...this.summarizeToolResultForLedger(ci.toolName, res), success },
+                                    { invocationId: ci.invocationId }
+                                );
+                                if (success && primaryFilePath) {
+                                    await runLedger.appendEvent(
+                                        runRecord.runId,
+                                        'file_change',
+                                        { filePath: primaryFilePath },
+                                        { invocationId: ci.invocationId }
+                                    );
+                                }
+                                releaseLock();
+                            }
                         }, {
                             waitTimeoutMs,
                             timeoutMessage: `Write queue wait timed out for ${toolName} (${lockPaths.join(', ')}) after ${Math.round(waitTimeoutMs / 1000)}s. Another write or orchestration task is holding the file lock. Report this blocker to the parent agent instead of retrying in a loop.`,
@@ -1579,7 +2037,20 @@ export class AgentRunner {
                     content: AGENT.COMPACTION_EMERGENCY(emergencyTokens, contextLimit),
                     timestamp: Date.now(),
                 });
+                await runLedger.appendEvent(
+                    runRecord.runId,
+                    'compaction_start',
+                    { kind: 'emergency', beforeTokens: emergencyTokens, contextLimit },
+                    { status: 'running' }
+                );
                 this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: supportsPrefixCache });
+                const afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
+                await runLedger.appendEvent(
+                    runRecord.runId,
+                    'compaction_end',
+                    { kind: 'emergency', success: true, beforeTokens: emergencyTokens, afterTokens: afterEmergencyTokens },
+                    { status: 'done' }
+                );
             }
 
             // If forceStop was set in the inner loop, exit the outer while now
@@ -1588,7 +2059,7 @@ export class AgentRunner {
             // Emit results in original order and feed back to AI
             for (let j = 0; j < parsedCalls.length; j++) {
                 // Fix #10: use _prefix for intentionally unused destructured vars
-                const { toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j]!;  
+                const { invocationId, toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j]!;  
                 const toolResult = toolResults[j];
                 if (runMetrics) {
                     runMetrics.maxToolResultChars = Math.max(
@@ -1597,7 +2068,7 @@ export class AgentRunner {
                     );
                 }
 
-                emitStep({ type: 'tool_result', content: `${AGENT.TOOL_RESULT_PREFIX}: ${toolName}`, toolName, toolResult, timestamp: Date.now() });
+                emitStep({ type: 'tool_result', content: `${AGENT.TOOL_RESULT_PREFIX}: ${toolName}`, toolName, toolResult, timestamp: Date.now(), invocationId });
 
                 // Track consecutive errors
                 if (typeof toolResult === 'object' && toolResult !== null &&
@@ -1640,7 +2111,7 @@ export class AgentRunner {
             }
 
             if (options?.topicId && !forceStop) {
-                await this.saveResumeState(options.topicId, messages, mode);
+                await this.saveResumeState(options.topicId, messages, mode, runRecord.runId);
             }
 
             // If forceStop was set in the emit-results loop, exit outer while now
@@ -1678,10 +2149,37 @@ export class AgentRunner {
 
         });
 
+        const finalModelCallId = `model_${runRecord.runId}_final`;
+        await runLedger.appendEvent(
+            runRecord.runId,
+            'model_call_start',
+            {
+                iteration,
+                purpose: 'max_iteration_summary',
+                providerId: options?.providerId ?? this.aiService.getConfig().provider,
+                model: options?.model ?? this.aiService.getConfig().model,
+                messageCount: messages.length,
+                toolCount: 0
+            },
+            { invocationId: finalModelCallId, status: 'running' }
+        );
         const finalResponse = await this.aiService.chatCompletion(messages, {
             providerId: options?.providerId,
             model: options?.model,
         });
+        await runLedger.appendEvent(
+            runRecord.runId,
+            'model_call_end',
+            {
+                iteration,
+                purpose: 'max_iteration_summary',
+                success: true,
+                model: finalResponse.model,
+                usage: finalResponse.usage,
+                finishReason: finalResponse.choices?.[0]?.finish_reason
+            },
+            { invocationId: finalModelCallId, status: 'done' }
+        );
 
         const finalContent = contentToString(finalResponse.choices[0]?.message?.content);
         updateFinalPromptMetric();
@@ -1733,6 +2231,27 @@ export class AgentRunner {
         let currentCode = initialCode;
         let retryCount = 0;
         let lastErrors: ValidationError[] = [];
+        const validationRunRecord = await this.activeRunRecordPromise?.catch(() => undefined);
+        let validationEndEmitted = false;
+        if (validationRunRecord) {
+            await runLedger.appendEvent(
+                validationRunRecord.runId,
+                'validation_start',
+                { targetFile, maxRetries: MAX_VALIDATION_RETRIES },
+                { status: 'running' }
+            );
+        }
+        const appendValidationEnd = async (payload: Record<string, unknown>, status: 'done' | 'failed' = 'done') => {
+            if (!validationRunRecord) return;
+            if (validationEndEmitted) return;
+            validationEndEmitted = true;
+            await runLedger.appendEvent(
+                validationRunRecord.runId,
+                'validation_end',
+                { targetFile, retryCount, ...payload },
+                { status }
+            ).catch(() => {});
+        };
 
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
@@ -1791,6 +2310,7 @@ export class AgentRunner {
                     content: 'Validation passed.',
                     timestamp: Date.now(),
                 });
+                await appendValidationEnd({ isValid: true, errorCount: 0 });
 
                 return {
                     code: currentCode,
@@ -1807,6 +2327,7 @@ export class AgentRunner {
                     content: `Validation still failed after ${MAX_VALIDATION_RETRIES} retries.`,
                     timestamp: Date.now(),
                 });
+                await appendValidationEnd({ isValid: false, errorCount: result.errors.length }, 'failed');
                 break;
             }
 
@@ -1857,6 +2378,7 @@ export class AgentRunner {
             }
         }
 
+        await appendValidationEnd({ isValid: false, errorCount: lastErrors.length }, 'failed');
         return {
             code: currentCode,
             validationErrors: lastErrors,

@@ -47,6 +47,34 @@ function normalizeSearchLine(result: any): number {
     return 0;
 }
 
+function isLocalisationDirectory(value?: string): boolean {
+    if (!value) return false;
+    const normalized = value.replace(/\\/g, '/').toLowerCase();
+    return normalized.split('/').some(part =>
+        part === 'localisation' ||
+        part === 'localisation_synced' ||
+        part === 'localization'
+    );
+}
+
+function isYmlExtension(ext?: string): boolean {
+    return (ext ?? '').replace(/^\./, '').toLowerCase() === 'yml';
+}
+
+function isLocalisationSearch(args: {
+    directory?: string;
+    path?: string;
+    include?: string;
+    fileExtension?: string;
+    fileExtensions?: string[];
+}): boolean {
+    return isLocalisationDirectory(args.directory)
+        || isLocalisationDirectory(args.path)
+        || isLocalisationDirectory(args.include)
+        || isYmlExtension(args.fileExtension)
+        || !!args.fileExtensions?.some(isYmlExtension);
+}
+
 // ─── Context type ────────────────────────────────────────────────────────────
 
 /** Structural type for the properties LspToolHandler reads from the executor. */
@@ -984,6 +1012,7 @@ export class LspToolHandler {
 
         if (ctxStr === 'mod' || ctxStr === 'both') {
             searchedRoots.push(...workspaceFolders);
+            const localisationSearch = isLocalisationSearch(args);
             const pattern = args.isRegex ? args.query : escapeRegex(args.query);
             let finalPattern = pattern;
             if (args.exactMatch) {
@@ -999,10 +1028,10 @@ export class LspToolHandler {
 
             let includeGlob = '';
             if (args.fileExtensions && args.fileExtensions.length > 0) {
-                const exts = args.fileExtensions.map(e => e.replace(/^\./, '')).join(',');
-                includeGlob = `**/*.{${exts}}`;
+                const exts = args.fileExtensions.map(e => e.replace(/^\./, ''));
+                includeGlob = exts.length === 1 ? `**/*.${exts[0]}` : `**/*.{${exts.join(',')}}`;
             } else {
-                includeGlob = `**/*${args.fileExtension || '.txt'}`;
+                includeGlob = `**/*${args.fileExtension || (localisationSearch ? '.yml' : '.txt')}`;
             }
 
             if (args.directory) {
@@ -1106,6 +1135,45 @@ export class LspToolHandler {
                         }));
                     }
                 } catch { /* skip */ }
+            }
+
+            // Strategy 3: localisation index fallback. This catches common cases
+            // where the agent knows only a key prefix/fragment, or VS Code text
+            // search misses YML files due to glob/API differences.
+            if (localisationSearch && results.length < limit && this.ctx.indexService && !args.isRegex) {
+                let entries = this.ctx.indexService.queryLocalisation({
+                    key: args.query,
+                    contains: !args.exactMatch,
+                    prefix: !args.exactMatch,
+                    caseSensitive: args.caseSensitive ?? false,
+                    limit: Math.max(limit * 10, 50),
+                });
+                if (entries.length === 0 && args.exactMatch) {
+                    entries = this.ctx.indexService.queryLocalisation({
+                        key: args.query,
+                        contains: true,
+                        caseSensitive: args.caseSensitive ?? false,
+                        limit: Math.max(limit * 10, 50),
+                    });
+                }
+                const byFile = new Map<string, Array<{ line: number; content: string }>>();
+                for (const entry of entries) {
+                    if (results.length + byFile.size >= limit && !byFile.has(entry.file)) {
+                        limitReached = true;
+                        break;
+                    }
+                    const arr = byFile.get(entry.file) ?? [];
+                    if (arr.length < 10) {
+                        arr.push({
+                            line: Math.max(0, entry.line - 1),
+                            content: `${entry.key}:0 "${entry.value}"`.substring(0, 120),
+                        });
+                    }
+                    byFile.set(entry.file, arr);
+                }
+                for (const [file, matchingLines] of byFile.entries()) {
+                    mergeFileResult(file, matchingLines);
+                }
             }
         }
 
@@ -1658,6 +1726,7 @@ export class LspToolHandler {
 
         const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const pattern = args.isRegex ? args.query : escapeRegex(args.query);
+        const localisationSearch = isLocalisationSearch({ path: args.path, include: args.include }) || (!args.path && !args.include);
 
         const query: any = {
             pattern,
@@ -1752,6 +1821,26 @@ export class LspToolHandler {
                     }));
                 }
             } catch { /* skip */ }
+        }
+
+        if (localisationSearch && matches.length < limit && this.ctx.indexService && !args.isRegex) {
+            const entries = this.ctx.indexService.queryLocalisation({
+                key: args.query,
+                contains: true,
+                caseSensitive: args.caseSensitive ?? false,
+                limit: Math.max(limit * 2, 50),
+            });
+            for (const entry of entries) {
+                if (matches.length >= limit) {
+                    truncated = true;
+                    break;
+                }
+                pushMatch(
+                    entry.file,
+                    Math.max(0, entry.line - 1),
+                    `${entry.key}:0 "${entry.value}"`.substring(0, 150)
+                );
+            }
         }
 
         const returnObj: any = {
@@ -2194,6 +2283,8 @@ export class LspToolHandler {
             key: args.key,
             language: args.language,
             prefix: !!args.prefix,
+            contains: !!args.contains,
+            caseSensitive: args.caseSensitive ?? false,
             limit,
         });
 

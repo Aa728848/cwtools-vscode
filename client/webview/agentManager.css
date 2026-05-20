@@ -260,6 +260,12 @@ body.agent-manager-shell.side-workspace-open {
     --manager-active-right-width: var(--active-side-workspace-width);
 }
 
+body.agent-manager-shell.has-active-subagent .subagent-fullscreen-view.active {
+    left: calc(var(--manager-active-left-width) + ((100vw - var(--manager-active-left-width) - var(--manager-active-right-width)) / 2) + 12px) !important;
+    right: var(--manager-active-right-width) !important;
+    width: calc((100vw - var(--manager-active-left-width) - var(--manager-active-right-width)) / 2 - 12px) !important;
+}
+
 body.agent-manager-shell.artifact-drawer-open .artifact-drawer {
     width: auto;
     border-left: 1px solid var(--border);

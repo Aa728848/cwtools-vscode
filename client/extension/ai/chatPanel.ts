@@ -2027,21 +2027,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const topic = this.topicManager.currentTopic;
         if (!topic) return;
 
+        let changed = false;
         for (let messageIndex = topic.messages.length - 1; messageIndex >= 0; messageIndex--) {
             const steps = topic.messages[messageIndex]?.steps;
             if (!steps) continue;
-            let changed = false;
             for (let stepIndex = steps.length - 1; stepIndex >= 0; stepIndex--) {
                 const step = steps[stepIndex] as any;
                 if (!step || !types.includes(step.type as any) || step.uiState === 'approved') continue;
                 step.uiState = 'approved';
                 changed = true;
             }
-            if (changed) {
-                this.topicManager.saveTopics();
-                return;
-            }
         }
+        if (changed) this.topicManager.saveTopics();
     }
 
 

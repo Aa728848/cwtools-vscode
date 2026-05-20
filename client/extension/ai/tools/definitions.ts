@@ -47,9 +47,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    key: { type: 'string', description: 'Exact key or prefix to search for.' },
+                    key: { type: 'string', description: 'Exact key, prefix, or substring to search for.' },
                     language: { type: 'string', description: 'Optional localisation language tag, e.g. l_english or l_simp_chinese.' },
                     prefix: { type: 'boolean', description: 'If true, key is treated as a prefix. Default false.' },
+                    contains: { type: 'boolean', description: 'If true, key is treated as a case-insensitive substring. Useful when you only know part of a localisation key.' },
+                    caseSensitive: { type: 'boolean', description: 'Only applies to prefix/contains searches. Default false.' },
                     limit: { type: 'number', description: 'Maximum entries to return. Default 20, max 100.' },
                 },
                 required: [],

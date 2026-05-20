@@ -167,6 +167,12 @@ describe('Localisation Parser (indexing)', () => {
             expect(results[0]!.value).to.equal('Goodbye');
         });
 
+        it('contains match is case-insensitive by default', () => {
+            const results = queryLocIndex(index, { key: 'NAME', contains: true });
+            expect(results).to.have.lengthOf(1);
+            expect(results[0]!.key).to.equal('mod_name');
+        });
+
         it('returns empty for non-existent key', () => {
             const results = queryLocIndex(index, { key: 'nonexistent' });
             expect(results).to.have.lengthOf(0);

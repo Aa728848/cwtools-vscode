@@ -72,6 +72,44 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     const locale = normalizeChatLocale((document.body as HTMLElement).dataset.locale);
     const i18n = getChatI18n(locale);
     const m = i18n.manager;
+    const RUN_MAX_RENDERED_EVENTS = 300;
+    const RUN_MAX_RENDERED_STEPS = 160;
+    const RUN_STEP_PREVIEW_CHARS = 1800;
+
+    function truncatePreview(text: string, maxChars = RUN_STEP_PREVIEW_CHARS): string {
+        if (text.length <= maxChars) return text;
+        return `${text.substring(0, maxChars)}\n... (${text.length - maxChars} chars truncated)`;
+    }
+
+    function stringifyPreview(value: unknown, maxChars = RUN_STEP_PREVIEW_CHARS): string {
+        try {
+            const raw = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+            return truncatePreview(String(raw ?? ''), maxChars);
+        } catch {
+            return truncatePreview(String(value ?? ''), maxChars);
+        }
+    }
+
+    function isNoisyRunEvent(evt: any): boolean {
+        if (evt?.type === 'model_call_delta') return true;
+        if (evt?.type !== 'step_appended') return false;
+        const stepType = evt.payload?.step?.type;
+        return stepType === 'text_delta' || stepType === 'thinking_content' || stepType === 'orchestrator_progress';
+    }
+
+    function getRenderableRunEvents(events: any[]): any[] {
+        const filtered = events.filter(evt => !isNoisyRunEvent(evt));
+        return filtered.length > RUN_MAX_RENDERED_EVENTS
+            ? filtered.slice(filtered.length - RUN_MAX_RENDERED_EVENTS)
+            : filtered;
+    }
+
+    function getRenderableRunSteps(steps: any[]): any[] {
+        const filtered = steps.filter(step => step?.type !== 'text_delta' && step?.type !== 'orchestrator_progress');
+        return filtered.length > RUN_MAX_RENDERED_STEPS
+            ? filtered.slice(filtered.length - RUN_MAX_RENDERED_STEPS)
+            : filtered;
+    }
 
     const overview = document.createElement('div');
     overview.className = 'manager-overview';
@@ -285,8 +323,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             }
 
             const metrics = run.metrics || { totalTokens: 0, promptTokens: 0, completionTokens: 0, costCny: 0, iterations: 0, toolCalls: 0 };
-            const steps = run.steps || [];
-            const events = Array.isArray(state.runEvents) ? state.runEvents : [];
+            const steps = getRenderableRunSteps(run.steps || []);
+            const events = getRenderableRunEvents(Array.isArray(state.runEvents) ? state.runEvents : []);
             if (events.length > 0 && (!state.selectedRunEventId || !events.some((evt: any) => evt.eventId === state.selectedRunEventId))) {
                 state.selectedRunEventId = events[events.length - 1]?.eventId;
             }
@@ -334,26 +372,30 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 if (step.type === 'thinking') {
                     icon = svgIcon('sparkles');
                     title = m.runs.steps.thinking;
-                    body = escapeHtml(step.content || '');
-                } else if (step.type === 'tool_call' || step.toolName) {
-                    icon = svgIcon('gear');
-                    title = `${m.runs.steps.toolCall}: ${escapeHtml(step.toolName)}`;
-                    contentClass = 'run-step-tool';
-                    const argsStr = step.toolArgs ? JSON.stringify(step.toolArgs, null, 2) : '';
-                    body = `<pre class="run-step-code"><code>${escapeHtml(argsStr)}</code></pre>`;
+                    body = escapeHtml(truncatePreview(step.content || ''));
+                } else if (step.type === 'thinking_content') {
+                    icon = svgIcon('sparkles');
+                    title = m.runs.steps.thinking;
+                    body = `<pre class="run-step-code"><code>${escapeHtml(truncatePreview(step.content || ''))}</code></pre>`;
                 } else if (step.type === 'tool_result') {
                     icon = svgIcon('package');
                     title = `${m.runs.steps.toolResult}: ${escapeHtml(step.toolName)}`;
                     contentClass = 'run-step-result';
-                    const resStr = typeof step.toolResult === 'object' ? JSON.stringify(step.toolResult, null, 2) : String(step.toolResult || '');
+                    const resStr = stringifyPreview(step.toolResult);
                     body = `<pre class="run-step-code"><code>${escapeHtml(resStr)}</code></pre>`;
+                } else if (step.type === 'tool_call' || step.toolName) {
+                    icon = svgIcon('gear');
+                    title = `${m.runs.steps.toolCall}: ${escapeHtml(step.toolName)}`;
+                    contentClass = 'run-step-tool';
+                    const argsStr = step.toolArgs ? stringifyPreview(step.toolArgs) : '';
+                    body = `<pre class="run-step-code"><code>${escapeHtml(argsStr)}</code></pre>`;
                 } else if (step.type === 'error') {
                     icon = svgIcon('warning');
                     title = m.runs.steps.execError;
                     contentClass = 'run-step-error';
-                    body = escapeHtml(step.content || '');
+                    body = escapeHtml(truncatePreview(step.content || ''));
                 } else if (step.content) {
-                    body = escapeHtml(step.content);
+                    body = escapeHtml(truncatePreview(step.content));
                 }
 
                 return `

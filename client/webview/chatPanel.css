@@ -1412,6 +1412,12 @@ body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
         box-shadow: -6px 0 20px rgba(0, 0, 0, 0.15) !important;
         animation: slideInRightSplit 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
     }
+
+    body.has-active-subagent.side-workspace-open .subagent-fullscreen-view.active {
+        left: calc((100vw - var(--active-side-workspace-width)) / 2 + 12px) !important;
+        right: var(--active-side-workspace-width) !important;
+        width: calc((100vw - var(--active-side-workspace-width)) / 2 - 12px) !important;
+    }
 }
 
 @keyframes slideInRightSplit {

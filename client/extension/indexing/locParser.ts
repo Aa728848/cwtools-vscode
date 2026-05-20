@@ -97,12 +97,14 @@ export function removeFileFromIndex(
  */
 export function queryLocIndex(
 	index: Map<string, LocEntry[]>,
-	query: { key?: string; language?: string; prefix?: boolean; limit?: number },
+	query: { key?: string; language?: string; prefix?: boolean; contains?: boolean; caseSensitive?: boolean; limit?: number },
 ): LocEntry[] {
 	const limit = query.limit ?? 100;
 	const results: LocEntry[] = [];
+	const queryKey = query.key ?? '';
+	const queryComparable = query.caseSensitive ? queryKey : queryKey.toLowerCase();
 
-	if (query.key && !query.prefix) {
+	if (query.key && !query.prefix && !query.contains) {
 		// Exact match
 		const entries = index.get(query.key) ?? [];
 		for (const entry of entries) {
@@ -110,11 +112,14 @@ export function queryLocIndex(
 			results.push(entry);
 			if (results.length >= limit) break;
 		}
-	} else if (query.key && query.prefix) {
-		// Prefix match
-		const prefix = query.key;
+	} else if (query.key && (query.prefix || query.contains)) {
+		// Prefix / contains match
 		for (const [key, entries] of index.entries()) {
-			if (!key.startsWith(prefix)) continue;
+			const comparable = query.caseSensitive ? key : key.toLowerCase();
+			const matched = query.contains
+				? comparable.includes(queryComparable)
+				: comparable.startsWith(queryComparable);
+			if (!matched) continue;
 			for (const entry of entries) {
 				if (query.language && entry.language !== query.language) continue;
 				results.push(entry);

@@ -234,6 +234,8 @@ export interface QueryLocalisationIndexArgs {
     key?: string;
     language?: string;
     prefix?: boolean;
+    contains?: boolean;
+    caseSensitive?: boolean;
     limit?: number;
 }
 

@@ -60,6 +60,9 @@ export interface LocQuery {
 	language?: string;
 	/** If true, key is treated as a prefix match. */
 	prefix?: boolean;
+	/** If true, key is treated as a case-insensitive substring match. */
+	contains?: boolean;
+	caseSensitive?: boolean;
 	limit?: number;
 }
 

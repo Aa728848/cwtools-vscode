@@ -22,6 +22,22 @@ export interface RunInspectorState {
 import type { ChatI18nText } from './i18n';
 import { svgIcon } from '../svgIcons';
 
+const INSPECTOR_PREVIEW_CHARS = 3000;
+
+function truncateInspectorText(text: string, maxChars = INSPECTOR_PREVIEW_CHARS): string {
+    if (text.length <= maxChars) return text;
+    return `${text.substring(0, maxChars)}\n... (${text.length - maxChars} chars truncated)`;
+}
+
+function stringifyInspectorPreview(value: unknown, maxChars = INSPECTOR_PREVIEW_CHARS): string {
+    try {
+        const raw = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+        return truncateInspectorText(String(raw ?? ''), maxChars);
+    } catch {
+        return truncateInspectorText(String(value ?? ''), maxChars);
+    }
+}
+
 /**
  * Formats an event payload for display in the inspector panel.
  */
@@ -38,7 +54,7 @@ export function formatEventPayload(event: any, i18n?: ChatI18nText): string {
         const args = payload.args || payload.arguments || {};
         let html = `<div class="inspector-tool-call">`;
         html += `<h4>${svgIcon('gear')} ${toolName}</h4>`;
-        html += `<div class="inspector-section"><strong>${t?.args ?? 'Args'}:</strong><pre>${escapeHtml(JSON.stringify(args, null, 2))}</pre></div>`;
+        html += `<div class="inspector-section"><strong>${t?.args ?? 'Args'}:</strong><pre>${escapeHtml(stringifyInspectorPreview(args))}</pre></div>`;
         if (payload.argRepairs && payload.argRepairs.length > 0) {
             html += `<div class="inspector-section inspector-repairs"><strong>${t?.argRepairs ?? 'Arg repairs'}:</strong><ul>${payload.argRepairs.map((r: string) => `<li>${escapeHtml(r)}</li>`).join('')}</ul></div>`;
         }
@@ -61,8 +77,8 @@ export function formatEventPayload(event: any, i18n?: ChatI18nText): string {
         }
         const preview = payload.preview || payload.result;
         if (preview) {
-            const str = typeof preview === 'string' ? preview : JSON.stringify(preview, null, 2);
-            html += `<div class="inspector-section"><strong>${t?.preview ?? 'Preview'}:</strong><pre>${escapeHtml(str.substring(0, 2000))}${str.length > 2000 ? `\n... (${t?.truncated ?? 'truncated'})` : ''}</pre></div>`;
+            const str = stringifyInspectorPreview(preview, 2000);
+            html += `<div class="inspector-section"><strong>${t?.preview ?? 'Preview'}:</strong><pre>${escapeHtml(str)}</pre></div>`;
         }
         html += `</div>`;
         return html;
@@ -87,7 +103,7 @@ export function formatEventPayload(event: any, i18n?: ChatI18nText): string {
             html += `<div class="inspector-section"><strong>${t?.changeset ?? 'Changeset'}:</strong><ul>${payload.filesWritten.map((file: string) => `<li><code>${escapeHtml(file)}</code></li>`).join('')}</ul></div>`;
         }
         if (payload.error) {
-            html += `<div class="inspector-section inspector-error"><strong>${t?.error ?? 'Error'}:</strong><pre>${escapeHtml(String(payload.error))}</pre></div>`;
+            html += `<div class="inspector-section inspector-error"><strong>${t?.error ?? 'Error'}:</strong><pre>${escapeHtml(truncateInspectorText(String(payload.error)))}</pre></div>`;
         }
         html += `<div class="inspector-section"><strong>${t?.steps ?? 'Steps'}:</strong> ${Number(payload.stepCount || 0)} / <strong>${t?.tokens ?? 'Tokens'}:</strong> ${Number(payload.tokenUsage?.total || 0)}</div>`;
         html += `</div>`;
@@ -109,7 +125,7 @@ export function formatEventPayload(event: any, i18n?: ChatI18nText): string {
     }
 
     // Default: JSON dump
-    return `<pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>`;
+    return `<pre>${escapeHtml(stringifyInspectorPreview(payload))}</pre>`;
 }
 
 /**

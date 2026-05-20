@@ -501,7 +501,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const normalizedText = text.trim().toLowerCase();
         if (!resumeFromState
             && this.topicManager.currentTopic?.id
-            && /^(continue|resume|继续|继续执行|接着来)$/.test(normalizedText)
+            && /^(continue|resume|继续|继续执行)$/.test(normalizedText)
             && await this.agentRunner.hasResumeState(this.topicManager.currentTopic.id)) {
             resumeFromState = true;
         }

@@ -1258,6 +1258,7 @@ export type WebViewMessage =
     | { type: 'saveSettings'; settings: PanelSettings }
     | { type: 'detectOllamaModels'; endpoint: string }
     | { type: 'fetchApiModels'; providerId: string; endpoint: string; apiKey: string }
+    | { type: 'deleteApiKey'; providerId: string }
     | { type: 'testConnection'; settings: PanelSettings } | { type: 'deleteDynamicModel'; providerId: string; modelId: string }
     | { type: 'installSkill'; source: string }
     | { type: 'deleteSkill'; skill: string }

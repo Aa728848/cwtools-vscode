@@ -1599,6 +1599,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     bindBtn('saveSettingsBtn', saveSettings);
     bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey') as HTMLInputElement | null; if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
     bindBtn('fetchApiModelsBtn', () => { fetchApiModels(); });
+    bindBtn('deleteApiKeyBtn', () => { deleteApiKey(); });
     bindBtn('detectBtn', detectOllamaModels);
     
     bindBtn('installSkillBtn', () => {
@@ -4984,11 +4985,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const status = document.getElementById('apiKeyStatus')!;
         const group = document.getElementById('apiKeyGroup')!;
         const providerHint = document.getElementById('providerHint')!;
-        if (p && p.requiresApiKey === false) { group.style.display = 'none'; providerHint.innerHTML = ''; refreshSettingsOverview(); return; }
+        const deleteBtn = document.getElementById('deleteApiKeyBtn') as HTMLButtonElement | null;
+        if (p && p.requiresApiKey === false) {
+            group.style.display = 'none';
+            providerHint.innerHTML = '';
+            if (deleteBtn) deleteBtn.disabled = true;
+            refreshSettingsOverview();
+            return;
+        }
         group.style.display = '';
         
         if (p && p.hasKey) { status.innerHTML = svgIcon('check') + '已配置 API Key'; status.style.color = '#4caf50'; }
         else { status.innerHTML = svgIcon('warning') + '尚未配置 API Key'; status.style.color = '#ff9800'; }
+        if (deleteBtn) deleteBtn.disabled = !(p && p.hasKey);
         
         if (p && p.registerUrl) {
             providerHint.innerHTML = `<a href="${p.registerUrl}" style="color:var(--vscode-textLink-foreground);">申请 API Key 地址</a>`;
@@ -5169,6 +5178,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     document.getElementById('detectBtn')!.addEventListener('click', detectOllamaModels);
     document.getElementById('fetchApiModelsBtn')!.addEventListener('click', fetchApiModels);
+
+    function deleteApiKey() {
+        const providerId = (document.getElementById('settingsProvider') as HTMLSelectElement).value;
+        if (!providerId) return;
+
+        const keyInput = document.getElementById('settingsApiKey') as HTMLInputElement | null;
+        if (keyInput) keyInput.value = '';
+        const status = document.getElementById('apiKeyStatus');
+        if (status) {
+            status.textContent = '正在移除 API Key...';
+            status.style.color = 'inherit';
+        }
+        vscode.postMessage({ type: 'deleteApiKey', providerId });
+    }
 
     function fetchApiModels() {
         const btn = document.getElementById('fetchApiModelsBtn') as HTMLButtonElement;

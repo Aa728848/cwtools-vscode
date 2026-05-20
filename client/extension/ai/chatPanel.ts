@@ -342,6 +342,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'fetchApiModels':
                 await this.settingsManager.fetchApiModels(msg.providerId, msg.endpoint, msg.apiKey);
                 break;
+            case 'deleteApiKey':
+                await this.settingsManager.deleteApiKey(msg.providerId, sourceSurface);
+                break;
             case 'testConnection':
                 await this.settingsManager.testConnection(msg.settings);
                 break;

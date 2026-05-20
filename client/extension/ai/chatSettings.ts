@@ -161,9 +161,7 @@ export class ChatSettingsManager {
             const trimmedKey = settings.apiKey.trim();
             if (trimmedKey.length > 0 && !trimmedKey.startsWith('•')) {
                 await this.aiService.getKeyManager().setKey(settings.provider, trimmedKey);
-                try { await cfg.update('apiKey', '', vs.ConfigurationTarget.Global); } catch {}
-            } else if (trimmedKey.length === 0) {
-                await this.aiService.getKeyManager().setKey(settings.provider, '');
+                await this.clearLegacyApiKeySettings();
             }
         }
         if (settings.braveSearchApiKey && settings.braveSearchApiKey.trim().length > 0
@@ -204,6 +202,50 @@ export class ChatSettingsManager {
         lastAISettingsWriteTime = Date.now();
         vs.window.showInformationMessage('Eddy CWTool Code 设置已保存，部分 MCP 连接更改可能需要重载窗口生效');
         await this.openSettingsPage(targetSurface);
+    }
+
+    async deleteApiKey(providerId: string, targetSurface?: 'chat' | 'manager'): Promise<void> {
+        if (!providerId) return;
+        const { getProvider } = await import('./providers');
+        const provider = getProvider(providerId);
+        const confirmed = await vs.window.showWarningMessage(
+            `确定移除 ${provider.name} 已保存的 API Key？`,
+            { modal: true },
+            '移除 Key'
+        );
+        if (confirmed !== '移除 Key') {
+            await this.openSettingsPage(targetSurface);
+            return;
+        }
+
+        await this.aiService.getKeyManager().deleteKey(providerId);
+        await this.clearLegacyApiKeySettings();
+
+        vs.window.showInformationMessage(`${provider.name} API Key 已移除。`);
+        await this.openSettingsPage(targetSurface);
+    }
+
+    private async clearLegacyApiKeySettings(): Promise<void> {
+        const baseConfig = vs.workspace.getConfiguration('cwtools.ai');
+        const clear = async (config: vs.WorkspaceConfiguration, target: vs.ConfigurationTarget): Promise<void> => {
+            try {
+                await config.update('apiKey', undefined, target);
+            } catch {
+                // Some targets may be unavailable depending on whether a workspace/folder is open.
+            }
+        };
+
+        const updates: Promise<void>[] = [
+            clear(baseConfig, vs.ConfigurationTarget.Global),
+            clear(baseConfig, vs.ConfigurationTarget.Workspace),
+        ];
+
+        for (const folder of vs.workspace.workspaceFolders ?? []) {
+            const folderConfig = vs.workspace.getConfiguration('cwtools.ai', folder.uri);
+            updates.push(clear(folderConfig, vs.ConfigurationTarget.WorkspaceFolder));
+        }
+
+        await Promise.all(updates);
     }
 
     async detectOllamaModels(endpoint: string): Promise<void> {

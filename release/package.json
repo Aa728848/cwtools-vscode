@@ -537,11 +537,11 @@
 						"%configuration.cwtools.ai.provider.enum.github%",
 						"%configuration.cwtools.ai.provider.enum.together%",
 						"%configuration.cwtools.ai.provider.enum.deepinfra%",
-						"Google (Gemini)",
-						"MiMo (Xiaomi)",
-						"MiniMax Token Plan",
-						"MiMo Token Plan (Xiaomi)",
-						"OpenCode Zen"
+						"%configuration.cwtools.ai.provider.enum.google%",
+						"%configuration.cwtools.ai.provider.enum.mimo%",
+						"%configuration.cwtools.ai.provider.enum.minimax-token-plan%",
+						"%configuration.cwtools.ai.provider.enum.mimo-token-plan%",
+						"%configuration.cwtools.ai.provider.enum.opencode%"
 					],
 					"default": "openai",
 					"markdownDescription": "%configuration.cwtools.ai.provider.description%"
@@ -683,11 +683,11 @@
 						"%configuration.cwtools.ai.provider.enum.github%",
 						"%configuration.cwtools.ai.provider.enum.together%",
 						"%configuration.cwtools.ai.provider.enum.deepinfra%",
-						"Google (Gemini)",
-						"MiMo (Xiaomi)",
-						"MiniMax Token Plan",
-						"MiMo Token Plan (Xiaomi)",
-						"OpenCode Zen"
+						"%configuration.cwtools.ai.provider.enum.google%",
+						"%configuration.cwtools.ai.provider.enum.mimo%",
+						"%configuration.cwtools.ai.provider.enum.minimax-token-plan%",
+						"%configuration.cwtools.ai.provider.enum.mimo-token-plan%",
+						"%configuration.cwtools.ai.provider.enum.opencode%"
 					],
 					"default": "",
 					"description": "%configuration.cwtools.ai.inlineCompletion.provider.description%"

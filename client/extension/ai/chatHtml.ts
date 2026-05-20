@@ -222,6 +222,7 @@ ${stylesheetLinks}
                         <input class="settings-input" id="settingsApiKey" type="password" placeholder="输入新 Key（留空保留已有）" autocomplete="off" />
                         <button class="key-toggle-btn" id="keyToggleBtn">${svgIconNoMargin('eye')}</button>
                         <button class="detect-btn" id="fetchApiModelsBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="用此 Key 去对应端点拉取模型">${svgIcon('cloud')}获取模型</button>
+                        <button class="detect-btn" id="deleteApiKeyBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="移除当前 Provider 已保存的 API Key">${svgIcon('trash')}移除 Key</button>
                     </div>
                 </div>
                 <div class="settings-group">

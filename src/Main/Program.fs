@@ -824,6 +824,8 @@ type Server(client: ILanguageClient) =
             let parserErrors =
                 match filetext with
                 | None -> []
+                | Some _ when name.EndsWith(".shader", StringComparison.OrdinalIgnoreCase) -> []
+                | Some _ when name.EndsWith(".fxh", StringComparison.OrdinalIgnoreCase) -> []
                 | Some t ->
                     let parsed = CKParser.parseString t name
 
@@ -1234,16 +1236,22 @@ type Server(client: ILanguageClient) =
                             let parent = 
                                 let p = System.IO.Directory.GetParent(vp)
                                 if p <> null then p.FullName else vp
-                            let checkPaths = [
-                                vp
-                                parent
-                                System.IO.Path.Combine(vp, "common")
-                                System.IO.Path.Combine(vp, "events")
-                                System.IO.Path.Combine(vp, "checksum_manifest.txt")
-                                System.IO.Path.Combine(parent, "checksum_manifest.txt")
-                                System.IO.Path.Combine(vp, "launcher-settings.json")
-                                System.IO.Path.Combine(parent, "launcher-settings.json")
-                            ]
+                            let cacheSchemaInputs =
+                                match activeGame with
+                                | STL ->
+                                    let cwtoolsAssembly = typeof<PdxShaderFeatures.ShaderSource>.Assembly.Location
+                                    if String.IsNullOrWhiteSpace cwtoolsAssembly then [] else [ cwtoolsAssembly ]
+                                | _ -> []
+                            let checkPaths =
+                                [ vp
+                                  parent
+                                  System.IO.Path.Combine(vp, "common")
+                                  System.IO.Path.Combine(vp, "events")
+                                  System.IO.Path.Combine(vp, "checksum_manifest.txt")
+                                  System.IO.Path.Combine(parent, "checksum_manifest.txt")
+                                  System.IO.Path.Combine(vp, "launcher-settings.json")
+                                  System.IO.Path.Combine(parent, "launcher-settings.json") ]
+                                @ cacheSchemaInputs
                             let latestTime =
                                 checkPaths
                                 |> List.choose (fun p ->
@@ -1255,7 +1263,7 @@ type Server(client: ILanguageClient) =
                                     | times -> times |> List.max
                             if latestTime > cacheTime then
                                 isOutdated <- true
-                                logInfo (sprintf "Vanilla cache %s is outdated. Latest vanilla update: %O, Cache time: %O" cacheFilePath latestTime cacheTime)
+                                logInfo (sprintf "Vanilla cache %s is outdated. Latest cache input update: %O, Cache time: %O" cacheFilePath latestTime cacheTime)
                         | None -> ()
                     with e -> 
                         logInfo (sprintf "Failed to check cache outdated status: %A" e)
@@ -1743,6 +1751,7 @@ type Server(client: ILanguageClient) =
                                 Some defaultCompletionOptions
                             codeActionProvider = true
                             codeLensProvider = Some { resolveProvider = true }
+                            documentLinkProvider = Some defaultDocumentLinkOptions
                             documentSymbolProvider = true
                             workspaceSymbolProvider = true
                             executeCommandProvider =
@@ -2315,35 +2324,68 @@ type Server(client: ILanguageClient) =
                 return
                     match gameObj with
                     | Some game ->
-                        let types = game.Types()
+                        let filePath = p.textDocument.uri.LocalPath
 
-                        let (all: DocumentSymbol seq) =
-                            types
-                            |> Map.toList
-                            |> Seq.collect (fun (k, vs) ->
-                                vs
-                                |> Seq.filter (fun tdi -> tdi.range.FileName = p.textDocument.uri.LocalPath)
-                                |> Seq.map (fun tdi -> createDocumentSymbol tdi.id k (symbolKindForType k) tdi.range))
-                            |> Seq.rev
-                            |> Seq.filter (fun ds -> not (ds.detail.Contains(".")))
+                        if PdxShaderFeatures.isShaderFile filePath then
+                            let text = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
 
-                        all
-                        |> Seq.fold
-                            (fun (acc: DocumentSymbol list) (next: DocumentSymbol) ->
-                                if
-                                    acc
-                                    |> List.exists (fun a -> isRangeInRange a.range next.range && a.name <> next.name)
-                                then
-                                    acc
-                                    |> List.map (fun (a: DocumentSymbol) ->
-                                        if isRangeInRange a.range next.range && a.name <> next.name then
-                                            { a with
-                                                children = (next :: a.children) }
-                                        else
-                                            a)
-                                else
-                                    next :: acc)
-                            []
+                            let shaderSymbolKind =
+                                function
+                                | PdxShaderFeatures.IncludesSymbol
+                                | PdxShaderFeatures.SamplersSymbol
+                                | PdxShaderFeatures.CodeBlockSymbol -> SymbolKind.Namespace
+                                | PdxShaderFeatures.IncludeFileSymbol -> SymbolKind.File
+                                | PdxShaderFeatures.VertexStructSymbol
+                                | PdxShaderFeatures.ConstantBufferSymbol -> SymbolKind.Class
+                                | PdxShaderFeatures.ShaderBlockSymbol -> SymbolKind.Module
+                                | PdxShaderFeatures.MainCodeSymbol -> SymbolKind.Function
+                                | PdxShaderFeatures.EffectSymbol -> SymbolKind.Method
+                                | PdxShaderFeatures.BlendStateSymbol
+                                | PdxShaderFeatures.DepthStencilStateSymbol
+                                | PdxShaderFeatures.RasterizerStateSymbol -> SymbolKind.Interface
+                                | PdxShaderFeatures.SamplerSymbol -> SymbolKind.Field
+
+                            let rec shaderDocumentSymbol (item: PdxShaderFeatures.ShaderDocumentSymbol) =
+                                { name = item.name
+                                  detail = item.detail
+                                  kind = shaderSymbolKind item.kind
+                                  deprecated = false
+                                  range = convRangeToLSPRange item.range
+                                  selectionRange = convRangeToLSPRange item.selectionRange
+                                  children = item.children |> List.map shaderDocumentSymbol }
+
+                            PdxShaderFeatures.documentSymbols filePath text
+                            |> List.map shaderDocumentSymbol
+                        else
+                            let types = game.Types()
+
+                            let (all: DocumentSymbol seq) =
+                                types
+                                |> Map.toList
+                                |> Seq.collect (fun (k, vs) ->
+                                    vs
+                                    |> Seq.filter (fun tdi -> tdi.range.FileName = filePath)
+                                    |> Seq.map (fun tdi -> createDocumentSymbol tdi.id k (symbolKindForType k) tdi.range))
+                                |> Seq.rev
+                                |> Seq.filter (fun ds -> not (ds.detail.Contains(".")))
+
+                            all
+                            |> Seq.fold
+                                (fun (acc: DocumentSymbol list) (next: DocumentSymbol) ->
+                                    if
+                                        acc
+                                        |> List.exists (fun a -> isRangeInRange a.range next.range && a.name <> next.name)
+                                    then
+                                        acc
+                                        |> List.map (fun (a: DocumentSymbol) ->
+                                            if isRangeInRange a.range next.range && a.name <> next.name then
+                                                { a with
+                                                    children = (next :: a.children) }
+                                            else
+                                                a)
+                                    else
+                                        next :: acc)
+                                []
                     | None -> []
             }
             |> catchError []
@@ -2706,47 +2748,54 @@ type Server(client: ILanguageClient) =
             async {
                 return
                     match gameObj with
-                    | Some _ ->
+                    | Some game ->
                         let filePath = p.textDocument.uri.LocalPath
                         let text = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
-                        let workspaceRoot =
-                            workspaceFolders
-                            |> List.tryHead
-                            |> Option.map (fun f -> f.uri.LocalPath)
-                            |> Option.defaultValue ""
 
-                        // Match quoted strings that look like file paths (contain / and common extensions)
-                        let pathRegex =
-                            System.Text.RegularExpressions.Regex(
-                                @"""([^""]+\.(?:dds|tga|png|gfx|gui|txt|yml|asset|sfx))""",
-                                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                        if PdxShaderFeatures.isShaderFile filePath then
+                            PdxShaderFeatures.documentLinks (game.AllFiles()) filePath text
+                            |> List.map (fun link ->
+                                { range = convRangeToLSPRange link.range
+                                  target = Some(Uri(link.targetFilepath)) })
+                        else
+                            let workspaceRoot =
+                                workspaceFolders
+                                |> List.tryHead
+                                |> Option.map (fun f -> f.uri.LocalPath)
+                                |> Option.defaultValue ""
 
-                        let getLineCol (offset: int) =
-                            let mutable line = 0
-                            let mutable col = 0
-                            for i = 0 to min (offset - 1) (text.Length - 1) do
-                                if text.[i] = '\n' || (text.[i] = '\r' && i + 1 < text.Length && text.[i + 1] = '\n') then
-                                    if text.[i] = '\r' then () // skip \r in \r\n
-                                    else line <- line + 1; col <- 0
-                                else col <- col + 1
-                            (line, col)
+                            // Match quoted strings that look like file paths (contain / and common extensions)
+                            let pathRegex =
+                                System.Text.RegularExpressions.Regex(
+                                    @"""([^""]+\.(?:dds|tga|png|gfx|gui|txt|yml|asset|sfx))""",
+                                    System.Text.RegularExpressions.RegexOptions.IgnoreCase)
 
-                        pathRegex.Matches(text)
-                        |> Seq.cast<System.Text.RegularExpressions.Match>
-                        |> Seq.choose (fun m ->
-                            let relativePath = m.Groups.[1].Value
-                            let fullPath = System.IO.Path.Combine(workspaceRoot, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar))
-                            if System.IO.File.Exists(fullPath) then
-                                let startOffset = m.Groups.[1].Index
-                                let endOffset = startOffset + m.Groups.[1].Length
-                                let (sl, sc) = getLineCol startOffset
-                                let (el, ec) = getLineCol endOffset
-                                Some {
-                                    range = { ``start`` = { line = sl; character = sc }; ``end`` = { line = el; character = ec } }
-                                    target = Some (Uri(fullPath))
-                                }
-                            else None)
-                        |> List.ofSeq
+                            let getLineCol (offset: int) =
+                                let mutable line = 0
+                                let mutable col = 0
+                                for i = 0 to min (offset - 1) (text.Length - 1) do
+                                    if text.[i] = '\n' || (text.[i] = '\r' && i + 1 < text.Length && text.[i + 1] = '\n') then
+                                        if text.[i] = '\r' then () // skip \r in \r\n
+                                        else line <- line + 1; col <- 0
+                                    else col <- col + 1
+                                (line, col)
+
+                            pathRegex.Matches(text)
+                            |> Seq.cast<System.Text.RegularExpressions.Match>
+                            |> Seq.choose (fun m ->
+                                let relativePath = m.Groups.[1].Value
+                                let fullPath = System.IO.Path.Combine(workspaceRoot, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar))
+                                if System.IO.File.Exists(fullPath) then
+                                    let startOffset = m.Groups.[1].Index
+                                    let endOffset = startOffset + m.Groups.[1].Length
+                                    let (sl, sc) = getLineCol startOffset
+                                    let (el, ec) = getLineCol endOffset
+                                    Some {
+                                        range = { ``start`` = { line = sl; character = sc }; ``end`` = { line = el; character = ec } }
+                                        target = Some (Uri(fullPath))
+                                    }
+                                else None)
+                            |> List.ofSeq
                     | None -> []
             }
             |> catchError []

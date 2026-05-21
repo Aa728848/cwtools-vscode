@@ -449,7 +449,7 @@ type CompletionOptions =
 
 let defaultCompletionOptions =
     { resolveProvider = false
-      triggerCharacters = [ "."; "|"; "$" ] }
+      triggerCharacters = [ "."; "|"; "$"; "\""; "="; "{"; ":" ] }
 
 type SignatureHelpOptions = { triggerCharacters: char list }
 

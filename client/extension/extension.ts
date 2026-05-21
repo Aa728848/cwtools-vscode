@@ -27,7 +27,6 @@ import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
 import { registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
-import { registerShaderProviders } from './shaderSupport/shaderProvider';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getRulesRemoteUrl, getGameInfoMap, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import { IndexService } from './indexing/indexService';
@@ -581,9 +580,6 @@ export async function activate(context: ExtensionContext) {
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
 	registerGraphicsFeatures(context);
 
-	// ── Paradox Shader Features: includes link, outline, F12 jumps, hover and auto-complete ──
-	registerShaderProviders(context);
-
 	// ── Vanilla Code Comparison: block-level and file-level diff against vanilla game ──
 	registerVanillaCompare(context);
 
@@ -639,6 +635,7 @@ export async function activate(context: ExtensionContext) {
 			workspace.createFileSystemWatcher("**/{events,common,map,map_data,prescripted_countries,flags,decisions,missions}/**/*.txt"),
 			workspace.createFileSystemWatcher("**/{interface,gfx}/**/*.gui"),
 			workspace.createFileSystemWatcher("**/{interface,gfx}/**/*.gfx"),
+			workspace.createFileSystemWatcher("**/gfx/**/*.{shader,fxh}"),
 			workspace.createFileSystemWatcher("**/{interface}/**/*.sfx"),
 			workspace.createFileSystemWatcher("**/{interface,gfx,fonts,music,sound}/**/*.asset"),
 			workspace.createFileSystemWatcher("**/{localisation,localisation_synced,localization}/**/*.yml")
@@ -649,7 +646,7 @@ export async function activate(context: ExtensionContext) {
 			// Register the server for F# documents
 			documentSelector: [{ scheme: 'file', language: 'paradox' }, { scheme: 'file', language: 'yaml' }, { scheme: 'file', language: 'stellaris' },
 			{ scheme: 'file', language: 'hoi4' }, { scheme: 'file', language: 'eu4' }, { scheme: 'file', language: 'ck2' }, { scheme: 'file', language: 'imperator' }
-				, { scheme: 'file', language: 'vic2' }, { scheme: 'file', language: 'vic3' }, { scheme: 'file', language: 'ck3' }, { scheme: 'file', language: 'eu5' }, { scheme: 'file', language: 'paradox' }],
+				, { scheme: 'file', language: 'vic2' }, { scheme: 'file', language: 'vic3' }, { scheme: 'file', language: 'ck3' }, { scheme: 'file', language: 'eu5' }, { scheme: 'file', language: 'pdx-shader' }, { scheme: 'file', language: 'paradox' }],
 			synchronize: {
 				// Synchronize the setting section 'cwtools' to the server
 				configurationSection: 'cwtools',

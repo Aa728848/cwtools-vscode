@@ -98,6 +98,28 @@ describe('SubAgentSandbox', () => {
             expect(normalizedPaths).to.include(path.normalize('interface/gfx.gui').toLowerCase());
             expect(normalizedPaths).to.include('.cwtools-ai');
         });
+
+        it('lets general build workers write workspace files when plannedFiles are omitted', () => {
+            const mockNode: TaskNode = {
+                id: 'unplanned_builder_task',
+                agentType: 'build',
+                prompt: 'implement script values',
+                dependencies: [],
+                priority: 'normal',
+                status: 'pending',
+                retryCount: 0,
+                maxRetries: 1
+            };
+            const sandbox = buildSubAgentSandbox(mockNode, process.cwd());
+
+            expect(sandbox.writeScope).to.equal(undefined);
+            expect(enforceSubAgentSafety(
+                sandbox,
+                'replace_lines',
+                { filePath: 'common/script_values/exe_kuat_value.txt' },
+                process.cwd()
+            ).allowed).to.equal(true);
+        });
     });
 
     // ── 2. 沙盒物理拦截逻辑校验 ──

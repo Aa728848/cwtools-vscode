@@ -30,6 +30,7 @@ import {
     buildSubagentHeaderMetricsHtml,
     buildSubagentMetaHtml,
     buildThinkingSummaryHtml,
+    hasVisibleLiveContent,
     latestLiveToolName,
 } from './chat/liveSteps';
 import { applySettingsOverview, buildSettingsOverviewModel } from './chat/settingsOverview';
@@ -3028,6 +3029,29 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
     }
 
+    function finishLiveThinking(state: AgentStreamState) {
+        if (!state.liveThinkBlock) return;
+
+        const content = state.liveThinkContent.trim();
+        if (!content) {
+            state.liveThinkBlock.remove();
+        } else {
+            if (state.liveThinkBody) {
+                state.liveThinkBody.innerHTML = renderMarkdown(clipLiveMarkdownContent(state.liveThinkContent));
+            }
+            if (state.liveThinkSum) {
+                state.liveThinkSum.innerHTML = buildThinkingSummaryHtml(state.liveThinkContent, chatI18n);
+            }
+            const pulse = state.liveThinkBlock.querySelector('.think-pulse');
+            if (pulse) pulse.classList.remove('spinning');
+        }
+
+        state.liveThinkBlock = null;
+        state.liveThinkBody = null;
+        state.liveThinkSum = null;
+        state.liveThinkContent = '';
+    }
+
     function scheduleTextRender(state: AgentStreamState) {
         if (state.pendingTextRender) return;
         state.pendingTextRender = true;
@@ -3050,6 +3074,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!currentAssistantDiv) return;
 
         const state = getStreamState(s.agentId);
+        if ((s.type === 'thinking' || s.type === 'thinking_content') && !state.liveThinkBlock && !hasVisibleLiveContent(s)) {
+            if (s.transactionCard && s.transactionCard.status === 'pending') {
+                showTransactionCard(s.transactionCard);
+            }
+            return;
+        }
         const coalesced = coalesceLiveStep(state, s);
         ensureLiveSummary(state, s, coalesced);
         state.lastStepAt = Date.now();
@@ -3077,12 +3107,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             // Terminate all active streaming states - the child agent has completed and there will be no new steps
             // 1. Terminate the Thinking block: stop the spinning indicator
             if (state.liveThinkBlock) {
-                const pulse = state.liveThinkBlock.querySelector('.think-pulse');
-                if (pulse) pulse.classList.remove('spinning');
-                state.liveThinkBlock = null;
-                state.liveThinkBody = null;
-                state.liveThinkSum = null;
-                state.liveThinkContent = '';
+                finishLiveThinking(state);
             }
             // 2. End text bubble
             if (state.liveTextBubble) flushLiveText(state);
@@ -3105,11 +3130,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
             // Finalize previous thinking block if transitioning away from thinking
             if (state.livePhase === 'thinking' && state.liveThinkBlock) {
-                const pulse = state.liveThinkBlock.querySelector('.think-pulse');
-                if (pulse) pulse.classList.remove('spinning');
-                // Clear refs so a new thinking block will be created on next thinking phase
-                state.liveThinkBlock = null; state.liveThinkBody = null; state.liveThinkSum = null;
-                state.liveThinkContent = '';
+                finishLiveThinking(state);
             }
             // Clear tool timeline ref if transitioning away from tool
             if (state.livePhase === 'tool' && newPhase !== 'tool') {

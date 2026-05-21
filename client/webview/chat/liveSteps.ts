@@ -23,6 +23,10 @@ export function latestLiveToolName(
     return fallback;
 }
 
+export function hasVisibleLiveContent(step: { content?: unknown }): boolean {
+    return typeof step.content === 'string' && step.content.trim().length > 0;
+}
+
 export function buildLiveProcessSummaryHtml(
     iconName: string,
     title: string,

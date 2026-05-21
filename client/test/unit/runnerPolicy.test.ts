@@ -1,5 +1,10 @@
 import { expect } from 'chai';
-import { filterToolDefinitionsForMode, resolveMaxToolIterations } from '../../extension/ai/runnerPolicy';
+import {
+    filterToolDefinitionsForMode,
+    resolveMaxToolIterations,
+    resolveRunMaxOutputTokens,
+    SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS,
+} from '../../extension/ai/runnerPolicy';
 import type { ToolDefinition } from '../../extension/ai/types';
 
 const toolDefinitions = [
@@ -11,6 +16,10 @@ const toolDefinitions = [
     'mcp_call',
     'mmx_generate_image',
     'run_command',
+    'write_file',
+    'apply_patch',
+    'multi_replace_file_content',
+    'write_localisation',
 ].map(name => ({
     type: 'function',
     function: { name, description: '', parameters: {} },
@@ -40,6 +49,21 @@ describe('runnerPolicy', () => {
         const names = filtered.map(t => t.function.name);
         expect(names).to.include('replace_lines');
         expect(names).to.not.include('run_command');
+    });
+
+    it('keeps localisation modes off generic yml patch paths', () => {
+        const filtered = filterToolDefinitionsForMode(toolDefinitions, 'loc_writer', { useSlimPrompt: true });
+        const names = filtered.map(t => t.function.name);
+        expect(names).to.include('write_localisation');
+        expect(names).to.include('write_file');
+        expect(names).to.not.include('apply_patch');
+        expect(names).to.not.include('multi_replace_file_content');
+        expect(names).to.not.include('replace_lines');
+    });
+
+    it('caps model output only for slim sub-agent runs', () => {
+        expect(resolveRunMaxOutputTokens()).to.equal(undefined);
+        expect(resolveRunMaxOutputTokens({ useSlimPrompt: true })).to.equal(SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS);
     });
 
     it('resolves conservative build iteration caps', () => {

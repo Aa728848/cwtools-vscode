@@ -255,7 +255,7 @@ export class AgentToolExecutor {
         if (isSubAgent && toolName === 'run_command') {
             return {
                 success: false,
-                message: 'run_command is disabled for orchestrator sub-agents. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.',
+                message: 'run_command is disabled for orchestrator sub-agents. Do not create or run helper scripts for it. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.',
             };
         }
         const mode = context?.runnerOptions?.mode ?? 

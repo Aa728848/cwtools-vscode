@@ -80,7 +80,7 @@ const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops']);
 const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops']);
 const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY]);
 const LOC_MODES = new Set([
-    'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
+    'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
     'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references', 'todo_write', 'write_localisation', 'git_ops'

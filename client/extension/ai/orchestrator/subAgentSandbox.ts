@@ -81,9 +81,15 @@ export function buildSubAgentSandbox(
             });
         }
 
-        // Topic-local artifacts stay workspace-owned without broadening project write scope.
-        scopes.push(TOPIC_ARTIFACT_SCOPE);
-        sandbox.writeScope = scopes;
+        if (scopes.length > 0) {
+            // Topic-local artifacts stay workspace-owned without broadening a restricted project scope.
+            scopes.push(TOPIC_ARTIFACT_SCOPE);
+            sandbox.writeScope = scopes;
+        } else {
+            // General writable workers still stay inside file-tool workspace safety checks.
+            // Avoid reducing them to topic artifacts only when the plan omitted plannedFiles.
+            sandbox.writeScope = undefined;
+        }
     }
 
     // ─── 3. 设定读作用域 (Read Scope) ───

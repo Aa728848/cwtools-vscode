@@ -46,6 +46,22 @@ describe('Localisation Parser (indexing)', () => {
         expect(modName!.value).to.equal('My Mod');
     });
 
+    it('parses unindented entries from loose mod localisation files', () => {
+        const entries = parseLocFile(`l_english:
+building_kuat_command_center_auto:0 "Command Center"
+`, '/test.yml');
+        expect(entries).to.have.lengthOf(1);
+        expect(entries[0]!.key).to.equal('building_kuat_command_center_auto');
+    });
+
+    it('parses entries with comments after the value', () => {
+        const entries = parseLocFile(`l_english:
+ building_kuat_resource_center_auto:0 "Resource Center" # generated
+`, '/test.yml');
+        expect(entries).to.have.lengthOf(1);
+        expect(entries[0]!.value).to.equal('Resource Center');
+    });
+
     it('detects language from header', () => {
         const entries = parseLocFile(SAMPLE_LOC_SIMP_CHINESE, '/test.yml');
         expect(entries[0]!.language).to.equal('l_simp_chinese');

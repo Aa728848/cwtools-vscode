@@ -275,8 +275,8 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
         
-        const skillsPrompt = this.getAgentSkillsPrompt();
-        if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;
+        // Installed skills are invoked through run_command, which is intentionally
+        // unavailable to slim orchestrator sub-agents.
 
         return finalPrompt;
     }
@@ -578,16 +578,22 @@ ${trimmed}
         selectedText?: string;
         fileContent?: string;
         topicId?: string;
+        commandToolsAvailable?: boolean;
     }): ChatMessage[] {
         const contextParts: string[] = [];
         const workspaceRel = this.workspaceRoot.replace(/\\/g, '/');
         contextParts.push(`**Project Workspace Root**: \`${workspaceRel}\``);
-        contextParts.push('**run_command cwd**: defaults to Project Workspace Root. Agent Workspace Dir is for temporary artifacts only.');
+        const commandToolsAvailable = options.commandToolsAvailable !== false;
+        if (commandToolsAvailable) {
+            contextParts.push('**run_command cwd**: defaults to Project Workspace Root. Agent Workspace Dir is for temporary artifacts only.');
+        }
 
         if (options.topicId) {
             contextParts.push(`**Agent Workspace Dir**: \`.cwtools-ai/${options.topicId}/\``);
             contextParts.push(`**Agent Scratch Dir**: \`.cwtools-ai/${options.topicId}/scratch/\``);
-            contextParts.push(`**Agent Helper Script**: \`.cwtools-ai/${options.topicId}/scratch/agent_helper.py\` (reuse/overwrite for temporary Python helpers; delete only temporary execution/verification helpers, never user-requested deliverables)`);
+            if (commandToolsAvailable) {
+                contextParts.push(`**Agent Helper Script**: \`.cwtools-ai/${options.topicId}/scratch/agent_helper.py\` (reuse/overwrite for temporary Python helpers; delete only temporary execution/verification helpers, never user-requested deliverables)`);
+            }
             contextParts.push(`**Agent Media Dir**: \`.cwtools-ai/${options.topicId}/media/\``);
         }
 

@@ -61,6 +61,10 @@ function isYmlExtension(ext?: string): boolean {
     return (ext ?? '').replace(/^\./, '').toLowerCase() === 'yml';
 }
 
+function mentionsYmlPattern(value?: string): boolean {
+    return !!value && value.replace(/\\/g, '/').toLowerCase().includes('.yml');
+}
+
 function isLocalisationSearch(args: {
     directory?: string;
     path?: string;
@@ -72,7 +76,20 @@ function isLocalisationSearch(args: {
         || isLocalisationDirectory(args.path)
         || isLocalisationDirectory(args.include)
         || isYmlExtension(args.fileExtension)
-        || !!args.fileExtensions?.some(isYmlExtension);
+        || !!args.fileExtensions?.some(isYmlExtension)
+        || mentionsYmlPattern(args.path)
+        || mentionsYmlPattern(args.include);
+}
+
+function normalizeWorkspaceIncludeGlob(include?: string): string {
+    const trimmed = include?.trim();
+    if (!trimmed) return '**/*';
+
+    const normalized = trimmed.replace(/\\/g, '/');
+    if (normalized.includes('/')) return normalized;
+    if (/^\.[a-z0-9]+$/i.test(normalized)) return `**/*${normalized}`;
+    if (/^\*\.[^/]+$/i.test(normalized)) return `**/${normalized}`;
+    return normalized;
 }
 
 // ─── Context type ────────────────────────────────────────────────────────────
@@ -1735,7 +1752,7 @@ export class LspToolHandler {
         };
 
         const searchPath = args.path ? path.resolve(this.ctx.workspaceRoot, args.path) : this.ctx.workspaceRoot;
-        let includePattern = args.include ?? '**/*';
+        let includePattern = normalizeWorkspaceIncludeGlob(args.include);
         
         // Ensure path stays within workspace boundaries to use findTextInFiles
         let relativePath = '';

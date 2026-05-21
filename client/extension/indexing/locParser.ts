@@ -29,8 +29,8 @@ export function parseLocFile(content: string, filePath: string): LocEntry[] {
 		language = headerMatch[1]!;
 	}
 
-	// Parse key-value pairs: "  key:0 \"value\""
-	const kvRegex = /^\s+(\S+?):\d*\s+"(.*)"\s*$/;
+	// Mods are not always consistent about indenting entries or trailing comments.
+	const kvRegex = /^\s*(\S+?):\d*\s+"(.*)"\s*(?:#.*)?$/;
 	for (let i = 0; i < lines.length; i++) {
 		const match = lines[i]!.match(kvRegex);
 		if (!match) continue;

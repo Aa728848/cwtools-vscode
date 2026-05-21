@@ -38,7 +38,13 @@ import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compa
 import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
 import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from './workspacePaths';
-import { filterToolDefinitionsForMode, resolveMaxToolIterations } from './runnerPolicy';
+import {
+    filterToolDefinitionsForMode,
+    resolveMaxToolIterations,
+    resolveRunMaxOutputTokens,
+    SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT,
+    SLIM_SUB_AGENT_THINKING_CHAR_LIMIT,
+} from './runnerPolicy';
 import { getWorkflow } from './workflowRegistry';
 import { WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
@@ -805,7 +811,10 @@ export class AgentRunner {
             } else {
                 messages = [
                     { role: 'system', content: systemPrompt },
-                    ...this.promptBuilder.buildContextMessages(context),
+                    ...this.promptBuilder.buildContextMessages({
+                        ...context,
+                        commandToolsAvailable: options?.useSlimPrompt !== true,
+                    }),
                     ...compactedHistory,
                     { role: 'user', content: userContent },
                 ];
@@ -813,7 +822,10 @@ export class AgentRunner {
         } else {
             messages = [
                 { role: 'system', content: systemPrompt },
-                ...this.promptBuilder.buildContextMessages(context),
+                ...this.promptBuilder.buildContextMessages({
+                    ...context,
+                    commandToolsAvailable: options?.useSlimPrompt !== true,
+                }),
                 ...compactedHistory,
                 { role: 'user', content: userContent },
             ];
@@ -1238,6 +1250,21 @@ export class AgentRunner {
 
         // Global tool call counter for timeline step indexing (Phase 4)
         let globalToolCallIndex = 0;
+        let slimOutputBudgetRecoveries = 0;
+        const recoverSlimOutputBudget = (reason: 'thinking' | 'length'): boolean => {
+            if (options?.useSlimPrompt !== true) return false;
+            if (slimOutputBudgetRecoveries >= SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT) return false;
+            slimOutputBudgetRecoveries++;
+            messages.push({
+                role: 'user',
+                content: reason === 'thinking'
+                    ? '[SYSTEM] Sub-agent reasoning exceeded the bounded thinking budget before a tool step completed. Stop extended reasoning now. If the task is still actionable, emit exactly one bounded structured tool call next; for localisation writes use write_localisation only. If the requested work is already done, return a concise final summary. If neither is safe, return BLOCKED_FOR_ORCHESTRATOR.'
+                    : '[SYSTEM] Sub-agent output hit the bounded max_tokens limit. Do not continue a long explanation or a large patch. Continue with one smaller structured tool call now; for localisation writes use write_localisation only. If the requested work is already done, return a concise final summary. If neither is safe, return BLOCKED_FOR_ORCHESTRATOR.',
+            });
+            return true;
+        };
+        const stopForSlimOutputBudget = () =>
+            'BLOCKED_FOR_ORCHESTRATOR:\n- Sub-agent output exceeded its bounded thinking/output budget before it could complete a safe concise step. The parent agent should narrow the task or retry with a concise/non-thinking model.';
 
         while (iteration < maxToolIterations) {
             options?.abortSignal?.throwIfAborted();
@@ -1340,6 +1367,16 @@ export class AgentRunner {
             let response;
             const modelCallId = `model_${runRecord.runId}_${iteration}`;
             let lastModelDeltaEventAt = 0;
+            let streamedThinkingChars = 0;
+            let slimThinkingBudgetExceeded = false;
+            const modelAbortController = new AbortController();
+            const parentAbortSignal = options?.abortSignal;
+            const abortModelFromParent = () => modelAbortController.abort(parentAbortSignal?.reason);
+            if (parentAbortSignal?.aborted) {
+                abortModelFromParent();
+            } else {
+                parentAbortSignal?.addEventListener('abort', abortModelFromParent, { once: true });
+            }
             const activeProviderConfig = this.aiService.getConfig();
             const appendModelDeltaEvent = (kind: string, text: string) => {
                 const now = Date.now();
@@ -1370,12 +1407,29 @@ export class AgentRunner {
                     tools: availableTools,
                     providerId: options?.providerId,
                     model: options?.model,
+                    maxTokens: resolveRunMaxOutputTokens({ useSlimPrompt: options?.useSlimPrompt }),
+                    disableThinking: options?.useSlimPrompt === true && (mode === 'loc_writer' || mode === 'loc_translator'),
                     // 🔴 Key fix: propagate abort signal to HTTP request layer
                     // The absence of this parameter will cause the child agent to wait for the LLM streaming response
                     // Cannot be interrupted at all by the parent's cancelGeneration/abort
-                    abortSignal: options?.abortSignal,
+                    abortSignal: modelAbortController.signal,
                     // Stream thinking tokens to UI in real-time (OpenCode-style)
                     onThinking: options?.streaming ? (text) => {
+                        if (
+                            options?.useSlimPrompt === true
+                            && !slimThinkingBudgetExceeded
+                            && streamedThinkingChars + text.length > SLIM_SUB_AGENT_THINKING_CHAR_LIMIT
+                        ) {
+                            slimThinkingBudgetExceeded = true;
+                            emitStep({
+                                type: 'validation',
+                                content: 'Sub-agent thinking budget reached; stopping this oversized model response and retrying with one bounded step.',
+                                timestamp: Date.now(),
+                            });
+                            modelAbortController.abort(new Error('Slim sub-agent thinking budget exceeded.'));
+                            return;
+                        }
+                        streamedThinkingChars += text.length;
                         appendModelDeltaEvent('thinking', text);
                         emitStep({
                             type: 'thinking_content',
@@ -1412,6 +1466,18 @@ export class AgentRunner {
                     }
                 });
             } catch (err: any) {
+                if (slimThinkingBudgetExceeded) {
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'model_call_end',
+                        { iteration, success: false, error: 'Slim sub-agent thinking budget exceeded.' },
+                        { invocationId: modelCallId, status: 'failed' }
+                    );
+                    if (recoverSlimOutputBudget('thinking')) {
+                        continue;
+                    }
+                    return stopForSlimOutputBudget();
+                }
                 if (err && err.message && (err.message.includes('terminated') || err.message.includes('socket hang up') || err.message.includes('ECONNRESET'))) {
                     await runLedger.appendEvent(
                         runRecord.runId,
@@ -1462,6 +1528,7 @@ export class AgentRunner {
                 }
             } finally {
                 if (modelHeartbeatId) clearInterval(modelHeartbeatId);
+                parentAbortSignal?.removeEventListener('abort', abortModelFromParent);
             }
 
             await runLedger.appendEvent(
@@ -1581,6 +1648,12 @@ export class AgentRunner {
                     content: '模型输出因长度限制(max_tokens)被截断。不抛出致命解析错误，自动触发切片引导...',
                     timestamp: Date.now(),
                 });
+                if (recoverSlimOutputBudget('length')) {
+                    continue;
+                }
+                if (options?.useSlimPrompt === true) {
+                    return stopForSlimOutputBudget();
+                }
                 messages.push({
                     role: 'user',
                     content: `[SYSTEM] Your previous response was truncated by the API max_tokens length limit. Please DO NOT output massive blocks of text. Break down your modifications into smaller steps. Use todo_write to plan them, and execute a single multi_replace_file_content/apply_patch per response.`
@@ -1595,7 +1668,7 @@ export class AgentRunner {
 
             // ── Delay emit thinking_content: emit only when it is confirmed that there are subsequent tool_calls ──
             // This avoids redundant Thinking blocks after the final answer.
-            if (thinkContent.trim()) {
+            if (thinkContent.trim() && streamedThinkingChars === 0) {
                 emitStep({
                     type: 'thinking_content',
                     content: thinkContent.trim(),

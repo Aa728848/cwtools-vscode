@@ -89,4 +89,25 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('NEVER Delete Vanilla Elements');
         expect(prompt).to.include('Template Reference Methodology');
     });
+
+    it('tells orchestrators to declare known builder write targets', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSystemPromptForMode('orchestrator');
+
+        expect(prompt).to.include('plannedFiles');
+        expect(prompt).to.include('Builder task');
+        expect(prompt).to.include('dispatch the Explorer batch first');
+    });
+
+    it('keeps slim localisation writers on write_localisation and concise completion', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSlimSystemPromptForMode('loc_writer');
+
+        expect(prompt).to.include('write_localisation` is the only mutation path');
+        expect(prompt).to.include('Do not use `apply_patch`');
+        expect(prompt).to.include('non-localisation deliverable');
+        expect(prompt).to.include('return a concise summary immediately');
+    });
 });

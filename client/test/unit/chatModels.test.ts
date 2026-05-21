@@ -15,7 +15,7 @@ import {
     shortenText,
     type TopicPanelItem,
 } from '../../webview/chat/topics';
-import { buildSubagentCardHtml, buildSubagentMetaHtml, latestLiveToolName } from '../../webview/chat/liveSteps';
+import { buildSubagentCardHtml, buildSubagentMetaHtml, hasVisibleLiveContent, latestLiveToolName } from '../../webview/chat/liveSteps';
 import { buildSettingsOverviewModel } from '../../webview/chat/settingsOverview';
 import { getChatI18n } from '../../webview/chat/i18n';
 import { applyModeUi } from '../../webview/chat/modes';
@@ -182,6 +182,11 @@ describe('chat i18n and command helpers', () => {
 });
 
 describe('chat view contract helpers', () => {
+    it('ignores blank live content when deciding whether a step can start a visible block', () => {
+        expect(hasVisibleLiveContent({ content: '  \n ' })).to.equal(false);
+        expect(hasVisibleLiveContent({ content: 'reasoning' })).to.equal(true);
+    });
+
     it('builds settings overview copy without touching DOM', () => {
         const i18n = getChatI18n('zh-cn');
         const model = buildSettingsOverviewModel({

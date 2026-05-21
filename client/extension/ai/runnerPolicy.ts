@@ -14,6 +14,14 @@ export interface IterationLimitOptions {
     override?: number;
 }
 
+export const SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS = 16_384;
+export const SLIM_SUB_AGENT_THINKING_CHAR_LIMIT = 24_000;
+export const SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT = 1;
+
+export function resolveRunMaxOutputTokens(options: Pick<ToolFilterOptions, 'useSlimPrompt'> = {}): number | undefined {
+    return options.useSlimPrompt ? SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS : undefined;
+}
+
 export function filterToolDefinitionsForMode(
     tools: readonly ToolDefinition[],
     mode: AgentMode,

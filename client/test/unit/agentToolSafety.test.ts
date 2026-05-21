@@ -474,6 +474,16 @@ describe('agent sprite candidate tool contract', () => {
         expect(definition.function.parameters.properties).to.have.property('source');
     });
 
+    it('tells dispatch_agents to declare known Builder plannedFiles', () => {
+        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'dispatch_agents');
+        if (!definition) {
+            throw new Error('dispatch_agents tool definition is missing');
+        }
+
+        const taskProperties = (definition.function.parameters.properties as any).tasks.items.properties;
+        expect(taskProperties.plannedFiles.description).to.include('Provide this for Builder tasks');
+    });
+
     it('queries the shared localisation index when IndexService is provided', async () => {
         const fakeIndexService = {
             status: 'ready',

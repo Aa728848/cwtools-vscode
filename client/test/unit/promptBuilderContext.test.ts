@@ -93,10 +93,20 @@ describe('PromptBuilder context budgeting', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSlimSystemPromptForMode('build');
+        const context = builder.buildContextMessages({
+            topicId: 'topic-123',
+            commandToolsAvailable: false,
+        });
 
         expect(prompt).to.include('NEVER use `run_command`');
         expect(prompt).to.include('For bulk file changes');
         expect(prompt).to.include('structured tools');
+        expect(prompt).to.include('Do NOT create helper scripts');
+        expect(prompt).to.include('SUB-AGENT COMMAND BOUNDARY');
+        expect(prompt).to.not.include('COMMAND PERMISSION');
+        expect(prompt).to.not.include('Agent Helper Script');
         expect(prompt).to.include('BLOCKED_FOR_ORCHESTRATOR');
+        expect(String(context[0]!.content)).to.not.include('run_command cwd');
+        expect(String(context[0]!.content)).to.not.include('Agent Helper Script');
     });
 });

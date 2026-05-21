@@ -1045,12 +1045,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                                 contextFiles: {
                                     type: 'array',
                                     items: { type: 'string' },
-                                    description: '(可选) 包含详细设计蓝图或上下文的文件路径或 Blackboard Key。**严禁在 prompt 中直接粘贴数百字的蓝图文本**，请将文件路径写在这里，系统会自动预读并注入给子 Agent。',
+                                    description: 'Optional file paths or Blackboard Keys containing detailed design blueprints or context. **CRITICAL: Do NOT paste hundreds of words of blueprint text directly into the prompt.** Instead, list the file paths here, and the system will automatically read and inject them into the child agent.',
                                 },
                                 plannedFiles: {
                                     type: 'array',
                                     items: { type: 'string' },
-                                    description: 'Optional list of files this sub-task expects to modify. Used by the orchestrator to avoid running conflicting write tasks in the same batch.',
+                                    description: 'Expected project files this sub-task will modify. Provide this for Builder tasks whenever the approved plan, blueprint, diagnostics, or file manifest already identifies the targets. It lets the orchestrator avoid concurrent write conflicts and narrow child write scope when files are known. If exploration must discover the files first, dispatch that exploration before the Builder task.',
                                 },
                                 plannedEntities: {
                                     type: 'array',

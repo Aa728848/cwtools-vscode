@@ -313,32 +313,66 @@ const DEPTHSTENCIL_ENUMS: Record<string, string[]> = {
 };
 
 export class PdxShaderCompletionProvider implements vs.CompletionItemProvider {
-    provideCompletionItems(
+    constructor(private readonly index: ShaderIndex) {}
+
+    async provideCompletionItems(
         document: vs.TextDocument,
         position: vs.Position,
         _token: vs.CancellationToken,
         _context: vs.CompletionContext
-    ): vs.CompletionItem[] {
+    ): Promise<vs.CompletionItem[]> {
         const lineText = document.lineAt(position).text;
         const textBeforeCursor = lineText.substring(0, position.character);
         const doc = getCachedParse(document);
 
-        // Context A: Effect block shaders auto-completion -> suggest MainCodes
+        // Context A: Effect block shaders auto-completion -> suggest MainCodes (local + global)
         if (/\bVertexShader\s*=\s*"([^"]*)$/.test(textBeforeCursor) || /\bPixelShader\s*=\s*"([^"]*)$/.test(textBeforeCursor)) {
-            return doc.allMainCodes.map(mc => {
-                const item = new vs.CompletionItem(mc.name!, vs.CompletionItemKind.Function);
-                item.detail = 'MainCode Shader Entry';
-                return item;
-            });
+            const names = new Set<string>();
+            const items: vs.CompletionItem[] = [];
+            // Local file first
+            for (const mc of doc.allMainCodes) {
+                if (mc.name && !names.has(mc.name)) {
+                    names.add(mc.name);
+                    const item = new vs.CompletionItem(mc.name, vs.CompletionItemKind.Function);
+                    item.detail = 'MainCode (current file)';
+                    items.push(item);
+                }
+            }
+            // Then global index
+            await this.index.ensureReady();
+            for (const name of this.index.findAllMainCodeNames()) {
+                if (!names.has(name)) {
+                    names.add(name);
+                    const item = new vs.CompletionItem(name, vs.CompletionItemKind.Function);
+                    item.detail = 'MainCode (workspace/vanilla)';
+                    items.push(item);
+                }
+            }
+            return items;
         }
 
-        // Context B: ConstantBuffers list auto-completion inside MainCode
+        // Context B: ConstantBuffers list auto-completion inside MainCode (local + global)
         if (/\bConstantBuffers\s*=\s*\{[^}]*$/.test(textBeforeCursor)) {
-            return doc.constantBuffers.map(cb => {
-                const item = new vs.CompletionItem(cb.name!, vs.CompletionItemKind.Struct);
-                item.detail = 'ConstantBuffer';
-                return item;
-            });
+            const names = new Set<string>();
+            const items: vs.CompletionItem[] = [];
+            for (const cb of doc.constantBuffers) {
+                if (cb.name && !names.has(cb.name)) {
+                    names.add(cb.name);
+                    const item = new vs.CompletionItem(cb.name, vs.CompletionItemKind.Struct);
+                    item.detail = 'ConstantBuffer (current file)';
+                    items.push(item);
+                }
+            }
+            await this.index.ensureReady();
+            for (const name of this.index.findAllConstantBufferNames()) {
+                if (!names.has(name)) {
+                    names.add(name);
+                    const item = new vs.CompletionItem(name, vs.CompletionItemKind.Struct);
+                    item.detail = 'ConstantBuffer (workspace/vanilla)';
+                    items.push(item);
+                }
+            }
+            return items;
         }
 
         // Context C: Sampler property enum completion
@@ -507,33 +541,7 @@ export class PdxShaderDiagnosticsManager {
 
 // ─── Registration Entry ──────────────────────────────────────────────────────
 
-/**
- * Ensure .shader and .fxh files are associated with pdx-shader language.
- * This defeats ShaderLab or other extensions that may claim .shader files.
- */
-function ensureShaderFileAssociation(): void {
-    const config = vs.workspace.getConfiguration('files');
-    const assoc = config.get<Record<string, string>>('associations') ?? {};
-
-    let changed = false;
-    const rules: Record<string, string> = {
-        '*.fxh': 'pdx-shader',
-        '**/gfx/FX/**/*.shader': 'pdx-shader'
-    };
-    for (const [pattern, lang] of Object.entries(rules)) {
-        if (assoc[pattern] !== lang) {
-            assoc[pattern] = lang;
-            changed = true;
-        }
-    }
-    if (changed) {
-        void config.update('associations', assoc, vs.ConfigurationTarget.Workspace);
-    }
-}
-
 export function registerShaderProviders(context: vs.ExtensionContext): void {
-    // Force file association at activation time
-    ensureShaderFileAssociation();
 
     const selector: vs.DocumentSelector = [
         { scheme: 'file', language: 'pdx-shader' }
@@ -548,7 +556,7 @@ export function registerShaderProviders(context: vs.ExtensionContext): void {
         vs.languages.registerDocumentSymbolProvider(selector, new PdxShaderDocumentSymbolProvider()),
         vs.languages.registerDefinitionProvider(selector, new PdxShaderDefinitionProvider(index)),
         vs.languages.registerHoverProvider(selector, new PdxShaderHoverProvider()),
-        vs.languages.registerCompletionItemProvider(selector, new PdxShaderCompletionProvider(), '"', '=', '{', ' ')
+        vs.languages.registerCompletionItemProvider(selector, new PdxShaderCompletionProvider(index), '"', '=', '{', ' ')
     );
 
     // File watcher for incremental index updates

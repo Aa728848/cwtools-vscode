@@ -30,20 +30,6 @@
 	],
 	"main": "./bin/client/extension/extension.js",
 	"contributes": {
-		"languages": [
-			{
-				"id": "pdx-shader",
-				"aliases": [
-					"PDX Shader",
-					"Paradox Shader"
-				],
-				"extensions": [
-					".shader",
-					".fxh"
-				],
-				"configuration": "./language-configuration-pdxshader.json"
-			}
-		],
 		"grammars": [
 			{
 				"language": "pdx-shader",
@@ -872,6 +858,18 @@
 				]
 			},
 			{
+				"id": "pdx-shader",
+				"aliases": [
+					"PDX Shader",
+					"Paradox Shader"
+				],
+				"extensions": [
+					".shader",
+					".fxh"
+				],
+				"configuration": "./language-configuration-pdxshader.json"
+			},
+			{
 				"id": "hoi4",
 				"aliases": [
 					"",
@@ -1203,9 +1201,8 @@
 				"editor.wordWrap": "on"
 			},
 			"files.associations": {
-				"**/gfx/FX/**/*.shader": "pdx-shader",
-				"**/gfx/FX/**/*.fxh": "pdx-shader",
-				"**/*.fxh": "pdx-shader"
+				"*.shader": "pdx-shader",
+				"*.fxh": "pdx-shader"
 			}
 		}
 	},

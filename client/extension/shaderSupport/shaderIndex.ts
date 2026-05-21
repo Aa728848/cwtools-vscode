@@ -10,6 +10,7 @@
  */
 import * as vs from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { parsePdxShader, PdxShaderDocument, PdxShaderNode } from './shaderParser';
 
 // ─── Document Cache (version-keyed) ─────────────────────────────────────────
@@ -62,19 +63,54 @@ export class ShaderIndex {
         if (this.ready || this.building) return;
         this.building = true;
         try {
+            // 1. Scan workspace .shader/.fxh files
             const files = await vs.workspace.findFiles('**/*.{shader,fxh}', '**/node_modules/**', 500);
             for (const file of files) {
-                try {
-                    const content = fs.readFileSync(file.fsPath, 'utf8');
-                    const doc = parsePdxShader(file.toString(), content);
-                    this.documents.set(file.toString(), doc);
-                } catch {
-                    // Skip unreadable files silently
-                }
+                this.indexFile(file.fsPath, file.toString());
             }
+
+            // 2. Scan vanilla Stellaris gfx/FX directory
+            this.scanVanillaFxDirectory();
+
             this.ready = true;
         } finally {
             this.building = false;
+        }
+    }
+
+    /** Scan the vanilla Stellaris installation's gfx/FX directory for shared shader definitions. */
+    private scanVanillaFxDirectory(): void {
+        const config = vs.workspace.getConfiguration('cwtools');
+        const gamePath = config.get<string>('cache.stellaris');
+        if (!gamePath) return;
+
+        const fxDir = path.join(gamePath, 'gfx', 'FX');
+        if (!fs.existsSync(fxDir)) return;
+
+        try {
+            const entries = fs.readdirSync(fxDir);
+            for (const entry of entries) {
+                if (entry.endsWith('.shader') || entry.endsWith('.fxh')) {
+                    const filePath = path.join(fxDir, entry);
+                    const uri = vs.Uri.file(filePath).toString();
+                    if (!this.documents.has(uri)) {
+                        this.indexFile(filePath, uri);
+                    }
+                }
+            }
+        } catch {
+            // Vanilla directory unreadable — skip silently
+        }
+    }
+
+    /** Parse and index a single file. */
+    private indexFile(fsPath: string, uri: string): void {
+        try {
+            const content = fs.readFileSync(fsPath, 'utf8');
+            const doc = parsePdxShader(uri, content);
+            this.documents.set(uri, doc);
+        } catch {
+            // Skip unreadable files silently
         }
     }
 
@@ -151,6 +187,16 @@ export class ShaderIndex {
         for (const doc of this.documents.values()) {
             for (const mc of doc.allMainCodes) {
                 if (mc.name) names.add(mc.name);
+            }
+        }
+        return Array.from(names);
+    }
+
+    findAllConstantBufferNames(): string[] {
+        const names = new Set<string>();
+        for (const doc of this.documents.values()) {
+            for (const cb of doc.constantBuffers) {
+                if (cb.name) names.add(cb.name);
             }
         }
         return Array.from(names);

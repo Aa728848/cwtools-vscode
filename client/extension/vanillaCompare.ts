@@ -99,7 +99,57 @@ const LANG_TO_CACHE_KEY: Record<string, string> = {
 };
 
 function getGamePath(languageId: string): string | null {
-    const cacheKey = LANG_TO_CACHE_KEY[languageId];
+    let targetLang = languageId;
+    if (targetLang === 'pdxshader') {
+        const possibleGames = ['stellaris', 'hoi4', 'eu4', 'ck3', 'vic3', 'imperator', 'ck2', 'vic2', 'eu5'];
+        
+        // 1. Try to infer the game from the workspace .cwtools rules configuration folders
+        for (const game of possibleGames) {
+            for (const wf of vs.workspace.workspaceFolders ?? []) {
+                const wsConfig = path.join(wf.uri.fsPath, '.cwtools', game, 'config');
+                if (fs.existsSync(wsConfig)) {
+                    targetLang = game;
+                    break;
+                }
+            }
+            if (targetLang !== 'pdxshader') break;
+        }
+
+        // 2. Try to infer from visible text editors with a known Paradox language ID
+        if (targetLang === 'pdxshader') {
+            for (const editor of vs.window.visibleTextEditors) {
+                const lang = editor.document.languageId;
+                if (lang && lang !== 'pdxshader' && LANG_TO_CACHE_KEY[lang]) {
+                    targetLang = lang;
+                    break;
+                }
+            }
+        }
+
+        // 3. Try to locate the vanilla path that actually contains a 'gfx/FX' folder
+        if (targetLang === 'pdxshader') {
+            const config = vs.workspace.getConfiguration('cwtools');
+            for (const game of possibleGames) {
+                const cacheKey = LANG_TO_CACHE_KEY[game];
+                if (cacheKey) {
+                    const configPath = config.get<string>(cacheKey);
+                    if (configPath && fs.existsSync(configPath)) {
+                        if (fs.existsSync(path.join(configPath, 'gfx', 'FX'))) {
+                            targetLang = game;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Default fallback
+        if (targetLang === 'pdxshader') {
+            targetLang = 'stellaris';
+        }
+    }
+
+    const cacheKey = LANG_TO_CACHE_KEY[targetLang];
     if (!cacheKey) return null;
     const config = vs.workspace.getConfiguration('cwtools');
     const configPath = config.get<string>(cacheKey);

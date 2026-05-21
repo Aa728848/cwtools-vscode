@@ -113,14 +113,14 @@
 				},
 				{
 					"command": "cwtools.vanillaCompare.fileDiff",
-					"when": "resourceExtname == .txt",
+					"when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
 					"group": "navigation"
 				}
 			],
 			"editor/context": [
 				{
 					"command": "cwtools.vanillaCompare.diff",
-					"when": "resourceExtname == .txt",
+					"when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
 					"group": "cwtools@1"
 				},
 				{

@@ -147,41 +147,45 @@ function findTopLevelBlocks(text: string, _idKeys: Set<string> = new Set()): Pdx
     const blocks: PdxBlock[] = [];
     const lines = text.split('\n');
     let depth = 0;
-    let pendingKey: string | null = null;
-    let pendingKeyLine = 0;
 
     for (let i = 0; i < tokens.length; i++) {
         const tok = tokens[i]!;
         if (tok.type === TokenType.LBrace) {
-            if (depth === 0 && pendingKey !== null) {
-                const blockStartLine = pendingKeyLine;
-                let braceDepth = 1;
-                let endLine = tok.line - 1;
-                for (let j = i + 1; j < tokens.length; j++) {
-                    const inner = tokens[j]!;
-                    if (inner.type === TokenType.LBrace) braceDepth++;
-                    else if (inner.type === TokenType.RBrace) {
-                        braceDepth--;
-                        if (braceDepth === 0) { endLine = inner.line - 1; break; }
-                    }
+            if (depth === 0) {
+                let resolvedKey: string | null = null;
+                let resolvedLine = 0;
+
+                if (i >= 2 && tokens[i - 1]!.type === TokenType.Equals && tokens[i - 2]!.type === TokenType.Identifier) {
+                    resolvedKey = tokens[i - 2]!.value;
+                    resolvedLine = tokens[i - 2]!.line - 1;
+                } else if (i >= 1 && tokens[i - 1]!.type === TokenType.Identifier) {
+                    resolvedKey = tokens[i - 1]!.value;
+                    resolvedLine = tokens[i - 1]!.line - 1;
                 }
-                const startIdx = blockStartLine;
-                const endIdx = Math.min(endLine, lines.length - 1);
-                const content = lines.slice(startIdx, endIdx + 1).join('\n');
-                const blockId = extractBlockField(tokens, i, 'id');
-                const blockName = extractBlockField(tokens, i, 'name');
-                blocks.push({ key: pendingKey, id: blockId, name: blockName, startLine: startIdx, endLine: endIdx, content });
-                pendingKey = null;
+
+                if (resolvedKey !== null) {
+                    const blockStartLine = resolvedLine;
+                    let braceDepth = 1;
+                    let endLine = tok.line - 1;
+                    for (let j = i + 1; j < tokens.length; j++) {
+                        const inner = tokens[j]!;
+                        if (inner.type === TokenType.LBrace) braceDepth++;
+                        else if (inner.type === TokenType.RBrace) {
+                            braceDepth--;
+                            if (braceDepth === 0) { endLine = inner.line - 1; break; }
+                        }
+                    }
+                    const startIdx = blockStartLine;
+                    const endIdx = Math.min(endLine, lines.length - 1);
+                    const content = lines.slice(startIdx, endIdx + 1).join('\n');
+                    const blockId = extractBlockField(tokens, i, 'id');
+                    const blockName = extractBlockField(tokens, i, 'name');
+                    blocks.push({ key: resolvedKey, id: blockId, name: blockName, startLine: startIdx, endLine: endIdx, content });
+                }
             }
             depth++;
         } else if (tok.type === TokenType.RBrace) {
             depth--;
-        } else if (depth === 0 && tok.type === TokenType.Identifier) {
-            const nextTok = tokens[i + 1];
-            if (nextTok?.type === TokenType.Equals) {
-                pendingKey = tok.value;
-                pendingKeyLine = tok.line - 1;
-            }
         }
     }
     return blocks;
@@ -213,12 +217,13 @@ function blockIdentity(block: PdxBlock, idKeys: Set<string>): string | null {
 
 /**
  * Scan vanilla directory and build a unified block index.
- * Maps block identity → { block, filePath } across ALL vanilla .txt files.
+ * Maps block identity → { block, filePath } across vanilla files matching the current extension.
  */
 async function buildVanillaBlockIndex(
     vanillaRoot: string,
     relDir: string,
     idKeys: Set<string>,
+    ext: string = '.txt',
 ): Promise<Map<string, { block: PdxBlock; filePath: string }>> {
     const index = new Map<string, { block: PdxBlock; filePath: string }>();
     const vanillaDir = path.join(vanillaRoot, relDir);
@@ -226,7 +231,7 @@ async function buildVanillaBlockIndex(
 
     let entries: string[];
     try {
-        entries = fs.readdirSync(vanillaDir).filter(f => f.endsWith('.txt'));
+        entries = fs.readdirSync(vanillaDir).filter(f => f.endsWith(ext));
     } catch {
         return index;
     }
@@ -274,6 +279,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
 
                 const doc = await vs.workspace.openTextDocument(uri);
                 const langId = doc.languageId;
+                const ext = path.extname(doc.uri.fsPath).toLowerCase();
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
                     vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');
@@ -292,7 +298,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const relDir = path.dirname(relPath);
 
                 // Build vanilla block index for the directory
-                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys);
+                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
                 const identity = blockIdentity(modBlock, idKeys);
                 if (!identity) {
                     vs.window.showInformationMessage(`无法确定当前代码块的唯一标识（缺少 id 或 name）`);
@@ -351,10 +357,11 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const idKeys = getEventLikeKeys(langId);
                 const relPath = vs.workspace.asRelativePath(doc.uri, false);
                 const relDir = path.dirname(relPath);
+                const ext = path.extname(doc.uri.fsPath).toLowerCase();
                 const modBlocks = findTopLevelBlocks(doc.getText(), idKeys);
 
                 // Build vanilla block index for the directory
-                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys);
+                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
 
                 // Build a vanilla-side file with only blocks that have matches in the mod
                 // Right side = real mod file (edits sync directly to the actual document)

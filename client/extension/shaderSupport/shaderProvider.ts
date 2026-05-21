@@ -507,7 +507,34 @@ export class PdxShaderDiagnosticsManager {
 
 // ─── Registration Entry ──────────────────────────────────────────────────────
 
+/**
+ * Ensure .shader and .fxh files are associated with pdx-shader language.
+ * This defeats ShaderLab or other extensions that may claim .shader files.
+ */
+function ensureShaderFileAssociation(): void {
+    const config = vs.workspace.getConfiguration('files');
+    const assoc = config.get<Record<string, string>>('associations') ?? {};
+
+    let changed = false;
+    const rules: Record<string, string> = {
+        '*.fxh': 'pdx-shader',
+        '**/gfx/FX/**/*.shader': 'pdx-shader'
+    };
+    for (const [pattern, lang] of Object.entries(rules)) {
+        if (assoc[pattern] !== lang) {
+            assoc[pattern] = lang;
+            changed = true;
+        }
+    }
+    if (changed) {
+        void config.update('associations', assoc, vs.ConfigurationTarget.Workspace);
+    }
+}
+
 export function registerShaderProviders(context: vs.ExtensionContext): void {
+    // Force file association at activation time
+    ensureShaderFileAssociation();
+
     const selector: vs.DocumentSelector = [
         { scheme: 'file', language: 'pdx-shader' }
     ];

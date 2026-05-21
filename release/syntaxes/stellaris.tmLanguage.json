@@ -10,7 +10,7 @@
                 {
                     "name": "keyword.event.paradox",
                     "match": "^(event|country_event|planet_event|fleet_event|ship_event|pop_faction_event|pop_event)\\b"
-                }
+                },
                 {
                     "name": "variable.language.condition_scopes.paradox",
                     "match": "\\b(any_sector|count_pops|any_system_within_border|any_war|any_tile|any_neighboring_tile|any_neighbor_system|tile|any_system|any_ship|any_owned_ship|any_pop|any_owned_pop|any_planet_within_border|ruler|any_controlled_planet|species|any_ship_in_system|any_owned_planet|any_planet|any_moon|any_owned_leader|any_owned_fleet|any_bordering_country|any_attacker|any_country|any_neighbor_country|any_defender|research_leader)\\b"

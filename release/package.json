@@ -1201,6 +1201,11 @@
 				"editor.insertSpaces": true,
 				"editor.autoIndent": "none",
 				"editor.wordWrap": "on"
+			},
+			"files.associations": {
+				"**/gfx/FX/**/*.shader": "pdx-shader",
+				"**/gfx/FX/**/*.fxh": "pdx-shader",
+				"**/*.fxh": "pdx-shader"
 			}
 		}
 	},

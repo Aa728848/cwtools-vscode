@@ -1,0 +1,213 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "PDX Shader",
+  "scopeName": "source.pdx-shader",
+  "uuid": "4f553a1a-3089-4abb-8b82-9974e337ad9a",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#embedded-hlsl"
+    },
+    {
+      "include": "#preprocessors"
+    },
+    {
+      "include": "#named-declarations"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#semantics"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.pdx-shader",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.pdx-shader",
+          "begin": "/\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.number-sign.pdx-shader",
+          "match": "#(?!(define|ifdef|ifndef|else|elif|endif|include|pragma|undef|error|warning|line)\\b).*$"
+        }
+      ]
+    },
+    "embedded-hlsl": {
+      "patterns": [
+        {
+          "begin": "\\[\\[",
+          "end": "\\]\\]",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.embedded.begin.pdx-shader"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.embedded.end.pdx-shader"
+            }
+          },
+          "contentName": "source.hlsl",
+          "patterns": [
+            {
+              "include": "source.hlsl"
+            }
+          ]
+        }
+      ]
+    },
+    "preprocessors": {
+      "patterns": [
+        {
+          "name": "keyword.control.preprocessor.at.pdx-shader",
+          "match": "@(ifdef|ifndef|else|endif|define|undef)\\b"
+        },
+        {
+          "name": "keyword.control.preprocessor.hash.pdx-shader",
+          "match": "#(define|ifdef|ifndef|else|elif|endif|include|pragma|undef|error|warning|line)\\b"
+        }
+      ]
+    },
+    "named-declarations": {
+      "patterns": [
+        {
+          "comment": "Effect EffectName",
+          "match": "\\b(Effect)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.pdx-shader" },
+            "2": { "name": "entity.name.function.effect.pdx-shader" }
+          }
+        },
+        {
+          "comment": "MainCode ShaderEntryName",
+          "match": "\\b(MainCode)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.pdx-shader" },
+            "2": { "name": "entity.name.function.maincode.pdx-shader" }
+          }
+        },
+        {
+          "comment": "VertexStruct StructName",
+          "match": "\\b(VertexStruct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.struct.pdx-shader" },
+            "2": { "name": "entity.name.type.struct.pdx-shader" }
+          }
+        },
+        {
+          "comment": "ConstantBuffer( BufferName, slot, offset )",
+          "match": "\\b(ConstantBuffer)\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.buffer.pdx-shader" },
+            "2": { "name": "entity.name.type.buffer.pdx-shader" }
+          }
+        },
+        {
+          "comment": "BlendState StateName",
+          "match": "\\b(BlendState)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.pdx-shader" },
+            "2": { "name": "entity.name.type.state.pdx-shader" }
+          }
+        },
+        {
+          "comment": "DepthStencilState StateName",
+          "match": "\\b(DepthStencilState)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.pdx-shader" },
+            "2": { "name": "entity.name.type.state.pdx-shader" }
+          }
+        },
+        {
+          "comment": "RasterizerState StateName",
+          "match": "\\b(RasterizerState)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.pdx-shader" },
+            "2": { "name": "entity.name.type.state.pdx-shader" }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.pdx-shader",
+          "match": "\\b(Includes|VertexStruct|ConstantBuffer|VertexShader|PixelShader|Code|MainCode|Effect|BlendState|DepthStencilState|RasterizerState|Samplers|ConstantBuffers|Defines)\\b"
+        },
+        {
+          "name": "variable.parameter.pdx-shader",
+          "match": "\\b(Index|MagFilter|MinFilter|MipFilter|MipMapLodBias|MaxAnisotropy|AddressU|AddressV|Type|BlendEnable|SourceBlend|DestBlend|SourceAlpha|DestAlpha|BlendOp|BlendOpAlpha|WriteMask|AlphaTest|DepthEnable|DepthFunction|DepthWriteMask|CullMode|FillMode|FrontCCW|StencilEnable|FrontStencilFunc|FrontStencilPassOp|FrontStencilFailOp|FrontStencilDepthFailOp)\\b"
+        },
+        {
+          "name": "constant.language.boolean.pdx-shader",
+          "match": "\\b(yes|no|true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.hlsl.pdx-shader",
+          "match": "\\b(float|float2|float3|float4|float2x2|float3x3|float4x4|int|int2|int3|int4|uint|uint2|uint3|uint4|half|half2|half3|half4|bool|void|static|const|struct|sampler2D|sampler2DShadow|samplerCube|Texture2D|Texture2DArray|TextureCube|SamplerState|SamplerComparisonState)\\b"
+        }
+      ]
+    },
+    "semantics": {
+      "patterns": [
+        {
+          "name": "variable.other.semantic.pdx-shader",
+          "match": "(?<=:)\\s*[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.pdx-shader",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.pdx-shader",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.pdx-shader",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.pdx-shader",
+          "match": "\\b[0-9]+\\.[0-9]+(f)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.pdx-shader",
+          "match": "\\b[0-9]+(f)?\\b"
+        }
+      ]
+    }
+  }
+}

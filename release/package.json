@@ -30,6 +30,30 @@
 	],
 	"main": "./bin/client/extension/extension.js",
 	"contributes": {
+		"languages": [
+			{
+				"id": "pdx-shader",
+				"aliases": [
+					"PDX Shader",
+					"Paradox Shader"
+				],
+				"extensions": [
+					".shader",
+					".fxh"
+				],
+				"configuration": "./language-configuration-pdxshader.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "pdx-shader",
+				"scopeName": "source.pdx-shader",
+				"path": "./syntaxes/pdxshader.tmLanguage.json",
+				"embeddedLanguages": {
+					"source.hlsl": "hlsl"
+				}
+			}
+		],
 		"views": {
 			"explorer": [
 				{

@@ -442,10 +442,11 @@ let loadSTL serverSettings =
 
     let game = CWTools.Games.Stellaris.STLGame(stlsettings)
     
-    // Set vanilla scripted variables path for hover
+    // Set vanilla scripted variables path for hover and load vanilla FX shader sources
     match serverSettings.stlVanillaPath with
     | Some vp ->
         stlVanillaScriptedVarsPath <- Some(System.IO.Path.Combine(vp, "common", "scripted_variables"))
+        CWTools.Games.PdxShaderFeatures.loadVanillaFxSources vp
     | None -> ()
     
     game

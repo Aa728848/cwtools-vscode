@@ -3909,6 +3909,28 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         card.dataset.cardPath = key;
     }
 
+    function restorePendingInteractiveCardsFromSteps(steps: any[] | undefined): void {
+        if (!Array.isArray(steps) || steps.length === 0) return;
+        const pCard = steps.find((s: any) => s.type === 'plan_card' && s.uiState === 'pending');
+        if (pCard && pCard.toolResult) {
+            window.dispatchEvent(new MessageEvent('message', {
+                data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content, mode: pCard.mode }
+            }));
+        }
+        const wtCard = steps.find((s: any) => s.type === 'walkthrough_card' && s.uiState === 'pending');
+        if (wtCard && wtCard.toolResult) {
+            window.dispatchEvent(new MessageEvent('message', {
+                data: { type: 'renderWalkthrough', sections: wtCard.toolResult }
+            }));
+        }
+        const bpCard = steps.find((s: any) => s.type === 'blueprint_card' && s.uiState === 'pending');
+        if (bpCard && bpCard.toolResult) {
+            window.dispatchEvent(new MessageEvent('message', {
+                data: { type: 'renderBlueprint', sections: bpCard.toolResult, planText: bpCard.content }
+            }));
+        }
+    }
+
     // ── Message handler ────────────────────────────────────────────────────────
     window.addEventListener('message', event => {
         const msg = event.data;
@@ -3971,6 +3993,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     Date.now()
                 );
                 chatArea.appendChild(completedMsg);
+                restorePendingInteractiveCardsFromSteps(r.steps);
 
                 // Batch 3.4: Extract question cards to the floating card queue
                 const allQCards = Array.from(completedMsg.querySelectorAll('.question-card')) as HTMLElement[];
@@ -4151,26 +4174,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         chatArea.appendChild(buildAssistantMessage(m.content, m.steps, null));
                         scrollBottom();
                         // Restore custom UI cards from steps
-                        if (m.steps) {
-                            const pCard = m.steps.find((s: any) => s.type === 'plan_card' && s.uiState === 'pending');
-                            if (pCard && pCard.toolResult) {
-                                window.dispatchEvent(new MessageEvent('message', {
-                                    data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content, mode: pCard.mode }
-                                }));
-                            }
-                            const wtCard = m.steps.find((s: any) => s.type === 'walkthrough_card' && s.uiState === 'pending');
-                            if (wtCard && wtCard.toolResult) {
-                                window.dispatchEvent(new MessageEvent('message', {
-                                    data: { type: 'renderWalkthrough', sections: wtCard.toolResult }
-                                }));
-                            }
-                            const bpCard = m.steps.find((s: any) => s.type === 'blueprint_card' && s.uiState === 'pending');
-                            if (bpCard && bpCard.toolResult) {
-                                window.dispatchEvent(new MessageEvent('message', {
-                                    data: { type: 'renderBlueprint', sections: bpCard.toolResult, planText: bpCard.content }
-                                }));
-                            }
-                        }
+                        restorePendingInteractiveCardsFromSteps(m.steps);
                     }
                 });
                 break;

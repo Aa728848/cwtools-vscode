@@ -831,6 +831,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const usedDispatchAgents = result.steps.some(s => s.toolName === 'dispatch_agents');
             const uiSteps = this.compactStepsForUi(result.steps);
             const uiResult = { ...result, steps: uiSteps };
+            const topicId = this.topicManager.currentTopic?.id || 'default';
+            const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
+            if (wtPath) {
+                await this.renderWalkthroughUI(wtPath, topicId, uiSteps);
+            }
 
             if ((this.currentMode === 'plan' || (this.currentMode === 'orchestrator' && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
                 // Chat shows only tool-call steps (no full plan text)
@@ -854,13 +859,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 });
             }
             this.topicManager.saveTopics();
-
-            // ── Check if Walkthrough was generated ──
-            const topicId = this.topicManager.currentTopic?.id || 'default';
-            const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
-            if (wtPath) {
-                void this.renderWalkthroughUI(wtPath, topicId, uiSteps);
-            }
 
             const bpPath = this.findGeneratedTopicFile(topicId, 'design_blueprint.md');
             if (bpPath && this.currentMode !== 'orchestrator') {

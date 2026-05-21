@@ -122,15 +122,18 @@ describe('agent manager cross-surface contracts', () => {
     it('restored interactive cards and live replay stay idempotent', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
         const hostBridge = fs.readFileSync(path.join(root, 'client/extension/ai/chat/bridge.ts'), 'utf8');
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
         const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
 
         expect(hostTypes).to.include("uiState?: 'pending' | 'approved'");
         expect(hostBridge).to.include('markLatestInteractiveCardApproved');
         expect(hostBridge).to.include("['plan_card', 'blueprint_card']");
         expect(hostBridge).to.include("['walkthrough_card']");
-        expect(webview).to.include("pCard = m.steps.find((s: any) => s.type === 'plan_card' && s.uiState === 'pending')");
-        expect(webview).to.include("wtCard = m.steps.find((s: any) => s.type === 'walkthrough_card' && s.uiState === 'pending')");
-        expect(webview).to.include("bpCard = m.steps.find((s: any) => s.type === 'blueprint_card' && s.uiState === 'pending')");
+        expect(webview).to.include("pCard = steps.find((s: any) => s.type === 'plan_card' && s.uiState === 'pending')");
+        expect(webview).to.include("wtCard = steps.find((s: any) => s.type === 'walkthrough_card' && s.uiState === 'pending')");
+        expect(webview).to.include("bpCard = steps.find((s: any) => s.type === 'blueprint_card' && s.uiState === 'pending')");
+        expect(webview).to.include('restorePendingInteractiveCardsFromSteps(r.steps);');
+        expect(hostPanel).to.include('await this.renderWalkthroughUI(wtPath, topicId, uiSteps);');
         expect(webview).to.include('function removeReplayBanners(): void');
         expect(webview).to.include("window.addEventListener('focus', removeReplayBanners);");
         expect(webview).to.include('currentAssistantDiv = initLiveAssistantDiv();');

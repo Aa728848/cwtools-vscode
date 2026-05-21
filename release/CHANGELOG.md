@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.0] - 2026-05-21
+### 🛡️ 安全沙盒机制升级与本地化模式效率重构
+- **[安全] Orchestrator 子代理沙盒强效加固**：重构了子代理安全沙盒模型 `subAgentSandbox.ts`，将敏感特权工具 `'run_command'` 正式加入全局工具黑名单，直接物理阻断子代理未经提权直接在终端执行任意脚本的行为。如遇到文件修改需求强制引导其使用带有脏检测的并发写队列结构，或上报 `BLOCKED_FOR_ORCHESTRATOR` 由父级统筹器提权，显著增强了多 Agent 协同任务执行时的系统级环境防护能力。
+- **[特权] 本地化与翻译代理模式特权修复**：在工具注册表 `registry.ts` 的本地化运行模式（`LOC_MODES`，包含 `loc_writer` / `loc_translator`）所授权调用的工具集中，显式增设了 `'write_file'` 的运行许可。彻底突破了此前翻译代理只能使用局部逐条 `write_localisation` 覆盖的低效局限，支持其在沙盒限定目录的写约束保障下，对大型本地化翻译文件进行更高效的整块落盘重构与直接生成。
+- **[交互] AI 搜索去重调优与时间轴防重纠偏**：
+  - **LSP 搜索级联优化**：重塑了 `lspTools.ts` 级联多层搜索算法，增加了零索引跳转精确校准器 `normalizeSearchLine` 并合并了单文件结果去重上限，在保障不同版本 VS Code API 结果高度对齐的前提下，大幅削减了多源级联检索时的冗余 Token 损耗。
+  - **分栏与下钻滑入物理阻断**：精修了 `.subagent-fullscreen-view` 在双 Agent 极速分栏滑入时的视觉和手势交互体验，添加了 `overscroll-behavior: contain` 覆盖以在并排模式下彻底阻断背景滚动串透；重构时间轴加载函数 `loadTopic`，过滤丢弃了无用或已处理的异步任务恢复快照，彻底消除了由卡片叠加引发的伪误报。
+
 ## [2.1.26] - 2026-05-20
 ### 🌐 AI 设置本地化与 VSIX 构建链优化
 - **[本地化] AI 提供商设置汉化适配**：将 `package.json` 中的新增 AI 服务提供商（谷歌 Gemini、小米 MiMo、MiniMax 额度套餐、OpenCode 等）描述从硬编码文本拆分迁移至 `package.nls.zh.json`，确保 VS Code 配置页面在多语言环境下获得一致的 premium 显示体验。

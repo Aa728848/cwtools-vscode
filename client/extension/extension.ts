@@ -27,6 +27,7 @@ import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
 import { registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
+import { registerShaderProviders } from './shaderSupport/shaderProvider';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getRulesRemoteUrl, getGameInfoMap, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import { IndexService } from './indexing/indexService';
@@ -579,6 +580,9 @@ export async function activate(context: ExtensionContext) {
 
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
 	registerGraphicsFeatures(context);
+
+	// ── Paradox Shader Features: includes link, outline, F12 jumps, hover and auto-complete ──
+	registerShaderProviders(context);
 
 	// ── Vanilla Code Comparison: block-level and file-level diff against vanilla game ──
 	registerVanillaCompare(context);

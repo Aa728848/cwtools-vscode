@@ -39,7 +39,7 @@ import { ErrorReporter } from './errorReporter';
 import { UI, SOURCE } from './messages';
 import { ContextReferenceManager } from './contextReferences';
 import { AgentSessionCoordinator } from './agentSessionCoordinator';
-import { runLedger } from './runner/runLedger';
+import { runLedger, type AgentRunEvent } from './runner/runLedger';
 import { PermissionPolicyStore } from './runner/permissionPolicy';
 import { AgentUiBroadcaster } from './agentUiBroadcaster';
 import { ArtifactStore } from './artifactStore';
@@ -47,6 +47,7 @@ import { getAllWorkflows, getWorkflow } from './workflowRegistry';
 import { toWorkflowViewModel } from './workflowViewModel';
 import { getWorkflowUiLabels } from './workflowI18n';
 import { computeLineDiff } from './diffEngine';
+import { budgetToolResult } from './contextBudget';
 import {
     getAiStorageRoot,
     getProjectWorkspaceRoot,
@@ -65,6 +66,13 @@ type PendingWriteCardMessage = Extract<HostMessage, { type: 'pendingWriteFile' }
 type PendingPermissionCardMessage = Extract<HostMessage, { type: 'permissionRequest' }>;
 type FileSnapshot = { filePath: string; previousContent: string | null; _tooLarge?: boolean };
 const MAX_ARTIFACT_DIFF_CONTENT = 500000;
+const UI_HISTORY_STEP_LIMIT = 220;
+const UI_REPLAY_STEP_LIMIT = 160;
+const UI_RUN_EVENT_LIMIT = 220;
+const UI_STEP_CONTENT_LIMIT = 4000;
+const UI_TOOL_ARG_BUDGET = 6000;
+const UI_TOOL_RESULT_BUDGET = 6000;
+const RUN_SNAPSHOT_THROTTLE_MS = 1000;
 const TEMP_DIFF_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh']);
 const TEMP_DIFF_SCRIPT_DIR_NAMES = new Set(['.tmp', 'scratch', 'temp', 'tmp']);
 const TEMP_DIFF_SCRIPT_NAME_PATTERN = /^(?:agent_helper|helper|tmp|temp|scratch|batch|bulk|replace|rewrite|fix|verify|check|search|scan)(?:[_\-.].*)?\.(?:bat|cmd|cjs|js|mjs|ps1|py|sh)$/i;
@@ -118,6 +126,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private _viewDisposables: vs.Disposable[] = [];
     /** Disposables for detached Agent Manager panel listeners */
     private _managerDisposables: vs.Disposable[] = [];
+    private readonly pendingRunSnapshotTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private readonly lastRunSnapshotSentAt = new Map<string, number>();
     public topicManager!: ChatTopicManager;
     public settingsManager!: ChatSettingsManager;
     public contextReferences: ContextReferenceManager;
@@ -172,16 +182,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
         this.contextReferences = new ContextReferenceManager(() => this.agentRunner.toolExecutor.blackboard);
-        runLedger.onChange((runId) => {
-            const snapshot = runLedger.getSnapshot(runId);
-            if (snapshot) {
-                this.postMessage({
-                    type: 'runSnapshot',
-                    snapshot: snapshot.run,
-                    events: snapshot.events
-                });
-            }
-        });
+        runLedger.onChange((runId) => this.queueRunSnapshot(runId));
     }
 
     /**
@@ -216,6 +217,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this._viewDisposables = [];
         this._managerDisposables.forEach(d => d.dispose());
         this._managerDisposables = [];
+        for (const timer of this.pendingRunSnapshotTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.pendingRunSnapshotTimers.clear();
+        this.lastRunSnapshotSentAt.clear();
     }
 
     resolveWebviewView(
@@ -255,16 +261,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.postMessage(msg);
             }
         };
-        // 1. Restore persisted topic messages
+        // 1. Restore persisted topic messages with compacted step payloads.
+        // Full tool/result history can grow large enough to block WebView startup.
         if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
-            send({ type: 'loadTopicMessages', messages: this.topicManager.currentTopic.messages, targetSurface });
+            send({ type: 'loadTopicMessages', messages: this.compactMessagesForWebview(this.topicManager.currentTopic.messages), targetSurface });
         }
         // 2. Restore current mode
         send({ type: 'setMode', mode: this.currentMode });
         // 3. If a generation was running when the panel was hidden, replay steps
         //    so the user can see what the AI has done so far and cancel if needed
         if (replayLiveSteps && this._isGenerating && this._liveSteps.length > 0) {
-            send({ type: 'replaySteps', steps: this._liveSteps, isGenerating: true });
+            send({ type: 'replaySteps', steps: this.compactStepsForUi(this._liveSteps, UI_REPLAY_STEP_LIMIT), isGenerating: true });
         }
         if (this.artifactStore.size > 0) {
             send({ type: 'artifactList', artifacts: this.artifactStore.list() });
@@ -272,11 +279,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.sendWorkflowState(send);
         // 4. Restore model lists and settings bindings
         void this.settingsManager.buildAndSendSettingsData(false, targetSurface);
-        if (this.topicManager.currentTopic?.id) {
+        if (targetSurface === 'manager' && this.topicManager.currentTopic?.id) {
             runLedger.loadLatestRunForTopic(this.topicManager.currentTopic.id).then(record => {
                 if (record) {
-                    const snapshot = runLedger.getSnapshot(record.runId);
-                    send({ type: 'runSnapshot', snapshot: snapshot?.run ?? record, events: snapshot?.events ?? [] });
+                    const snapshot = this.buildRunSnapshotMessage(record.runId);
+                    if (snapshot) send(snapshot);
                 }
             }).catch(() => {});
         }
@@ -290,6 +297,158 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         for (const card of this.pendingPermissionCards.values()) {
             send(card);
         }
+    }
+
+    private clipUiText(value: unknown, maxChars = UI_STEP_CONTENT_LIMIT): string {
+        const text = typeof value === 'string' ? value : String(value ?? '');
+        if (text.length <= maxChars) return text;
+        return `${text.slice(0, maxChars)}\n... (${text.length - maxChars} chars truncated)`;
+    }
+
+    private compactObjectForUi(value: unknown, maxChars: number, keepKeys: string[] = []): unknown {
+        if (value == null) return value;
+        if (typeof value === 'string') return this.clipUiText(value, maxChars);
+        let raw = '';
+        try {
+            raw = JSON.stringify(value);
+        } catch {
+            return this.clipUiText(String(value), maxChars);
+        }
+        if (raw.length <= maxChars) return value;
+        const kept: Record<string, unknown> = { _truncated: true, preview: budgetToolResult(value, maxChars) };
+        if (value && typeof value === 'object') {
+            const source = value as Record<string, unknown>;
+            for (const key of keepKeys) {
+                if (source[key] === undefined) continue;
+                kept[key] = typeof source[key] === 'string'
+                    ? this.clipUiText(source[key], Math.min(1200, maxChars))
+                    : source[key];
+            }
+        }
+        return kept;
+    }
+
+    private compactToolResultForUi(value: unknown): unknown {
+        return this.compactObjectForUi(value, UI_TOOL_RESULT_BUDGET, [
+            'success', 'error', 'message', 'file', 'filePath', 'path', 'files',
+            'resultRef', 'preview', 'summary', 'diff', 'changes',
+        ]);
+    }
+
+    private compactToolArgsForUi(value: unknown): unknown {
+        return this.compactObjectForUi(value, UI_TOOL_ARG_BUDGET, [
+            'file', 'filePath', 'path', 'TargetFile', 'CommandLine', 'Cwd',
+            'query', 'key', 'typeName', 'pattern',
+        ]);
+    }
+
+    private compactStepForUi(step: any): any | undefined {
+        if (!step || typeof step !== 'object') return step;
+        const type = String(step.type || '');
+        if (type === 'text_delta' || type === 'thinking_content') return undefined;
+        if (type === 'orchestrator_progress' && /waiting|等待模型返回/i.test(String(step.content || ''))) return undefined;
+
+        const copy: any = { ...step };
+        if (typeof copy.content === 'string') copy.content = this.clipUiText(copy.content);
+        if (copy.toolArgs !== undefined) copy.toolArgs = this.compactToolArgsForUi(copy.toolArgs);
+        if (copy.toolResult !== undefined) copy.toolResult = this.compactToolResultForUi(copy.toolResult);
+        if (copy.transactionCard?.summary) {
+            copy.transactionCard = { ...copy.transactionCard, summary: this.clipUiText(copy.transactionCard.summary, 1200) };
+        }
+        return copy;
+    }
+
+    private compactStepsForUi(steps: any[] | undefined, limit = UI_HISTORY_STEP_LIMIT): any[] {
+        if (!Array.isArray(steps) || steps.length === 0) return [];
+        const cards: any[] = [];
+        const regular: any[] = [];
+        const latestSubAgentStep = new Map<string, any>();
+        for (const step of steps) {
+            const compact = this.compactStepForUi(step);
+            if (!compact) continue;
+            if (['plan_card', 'walkthrough_card', 'blueprint_card'].includes(String(compact.type || ''))) {
+                cards.push(compact);
+            } else {
+                regular.push(compact);
+                if (typeof compact.agentId === 'string' && compact.agentId) {
+                    latestSubAgentStep.set(compact.agentId, compact);
+                }
+            }
+        }
+        const tail = regular.length > limit ? regular.slice(regular.length - limit) : regular;
+        const tailedSubAgents = new Set(tail.map(step => step?.agentId).filter(Boolean));
+        const subAgentMarkers = [...latestSubAgentStep.entries()]
+            .filter(([agentId]) => !tailedSubAgents.has(agentId))
+            .map(([, step]) => step);
+        return [...cards, ...subAgentMarkers, ...tail].sort((a, b) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
+    }
+
+    private compactMessagesForWebview(messages: any[] | undefined): any[] {
+        if (!Array.isArray(messages)) return [];
+        return messages.map(message => {
+            if (!message || typeof message !== 'object' || !Array.isArray(message.steps)) return message;
+            return { ...message, steps: this.compactStepsForUi(message.steps) };
+        });
+    }
+
+    private compactRunEventForUi(event: AgentRunEvent): AgentRunEvent | undefined {
+        if (event.type === 'model_call_delta') return undefined;
+        if (event.type === 'step_appended') {
+            const step = this.compactStepForUi(event.payload?.step);
+            if (!step) return undefined;
+            return { ...event, payload: { step } };
+        }
+        let payload = event.payload;
+        if (event.type === 'tool_call_start' || event.type === 'tool_call_created') {
+            const args = this.compactToolArgsForUi(payload?.args ?? payload?.arguments);
+            payload = { ...payload, args, arguments: args };
+        } else if (event.type === 'tool_call_end') {
+            payload = { ...payload, result: this.compactToolResultForUi(payload?.result) };
+        } else if (event.type === 'file_change' && payload?.diff) {
+            payload = { ...payload, diff: this.clipUiText(payload.diff, 5000) };
+        } else if (event.type === 'subagent_end' && payload?.error) {
+            payload = { ...payload, error: this.clipUiText(payload.error, 2000) };
+        } else {
+            payload = this.compactObjectForUi(payload, UI_TOOL_RESULT_BUDGET) as any;
+        }
+        return { ...event, payload };
+    }
+
+    private buildRunSnapshotMessage(runId: string): Extract<HostMessage, { type: 'runSnapshot' }> | undefined {
+        const snapshot = runLedger.getSnapshot(runId);
+        if (!snapshot) return undefined;
+        const compactEvents = snapshot.events
+            .map(event => this.compactRunEventForUi(event))
+            .filter((event): event is AgentRunEvent => !!event);
+        const events = compactEvents.length > UI_RUN_EVENT_LIMIT
+            ? compactEvents.slice(compactEvents.length - UI_RUN_EVENT_LIMIT)
+            : compactEvents;
+        const run = {
+            ...snapshot.run,
+            steps: [],
+        };
+        return {
+            type: 'runSnapshot',
+            snapshot: run,
+            events,
+            eventCount: snapshot.events.length,
+            truncatedEventCount: Math.max(0, compactEvents.length - events.length),
+        } as any;
+    }
+
+    private queueRunSnapshot(runId: string, immediate = false): void {
+        if (!this.managerPanel?.visible) return;
+        if (this.pendingRunSnapshotTimers.has(runId)) return;
+        const elapsed = Date.now() - (this.lastRunSnapshotSentAt.get(runId) ?? 0);
+        const delay = immediate ? 0 : Math.max(0, RUN_SNAPSHOT_THROTTLE_MS - elapsed);
+        const timer = setTimeout(() => {
+            this.pendingRunSnapshotTimers.delete(runId);
+            const msg = this.buildRunSnapshotMessage(runId);
+            if (!msg) return;
+            this.lastRunSnapshotSentAt.set(runId, Date.now());
+            this.postMessageToSurface('manager', msg);
+        }, delay);
+        this.pendingRunSnapshotTimers.set(runId, timer);
     }
 
     private _syncViewChromeState(targetSurface?: 'chat' | 'manager'): void {
@@ -610,7 +769,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     streaming: true,  // Enable typewriter text effect
                     topicId: this.topicManager.currentTopic?.id,
                     onStep: (step) => {
-                        this._liveSteps.push(step);
+                        const replayStep = this.compactStepForUi(step);
+                        if (replayStep) {
+                            this._liveSteps.push(replayStep);
+                            if (this._liveSteps.length > UI_REPLAY_STEP_LIMIT * 2) {
+                                this._liveSteps.splice(0, this._liveSteps.length - UI_REPLAY_STEP_LIMIT * 2);
+                            }
+                        }
                         this.postMessage({ type: 'agentStep', step });
                     },
                     abortSignal: this.abortController!.signal,
@@ -664,26 +829,28 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // Treat it as a conversational turn.
             const isJustAskingQuestions = this.detectClarificationPhase(result);
             const usedDispatchAgents = result.steps.some(s => s.toolName === 'dispatch_agents');
+            const uiSteps = this.compactStepsForUi(result.steps);
+            const uiResult = { ...result, steps: uiSteps };
 
             if ((this.currentMode === 'plan' || (this.currentMode === 'orchestrator' && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
                 // Chat shows only tool-call steps (no full plan text)
-                this.postMessage({ type: 'generationComplete', result: { ...result, explanation: '', code: '' } });
+                this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({
                     role: 'assistant',
                     content: '计划已生成，已在批注视图中打开',
                     timestamp: Date.now(),
-                    steps: result.steps,
+                    steps: uiSteps,
                 });
-                void this.savePlanFile(result.explanation, text, result.steps);
+                void this.savePlanFile(result.explanation, text, uiSteps);
             } else {
-                this.postMessage({ type: 'generationComplete', result });
+                this.postMessage({ type: 'generationComplete', result: uiResult });
                 this.topicManager.addHistoryMessage({
                     role: 'assistant',
                     content: result.explanation,
                     code: result.code || undefined,
                     isValid: result.isValid,
                     timestamp: Date.now(),
-                    steps: result.steps,
+                    steps: uiSteps,
                 });
             }
             this.topicManager.saveTopics();
@@ -692,15 +859,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const topicId = this.topicManager.currentTopic?.id || 'default';
             const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
             if (wtPath) {
-                void this.renderWalkthroughUI(wtPath, topicId, result.steps);
+                void this.renderWalkthroughUI(wtPath, topicId, uiSteps);
             }
 
             const bpPath = this.findGeneratedTopicFile(topicId, 'design_blueprint.md');
             if (bpPath && this.currentMode !== 'orchestrator') {
-                void this.renderBlueprintUI(bpPath, topicId, result.steps);
+                void this.renderBlueprintUI(bpPath, topicId, uiSteps);
             }
 
-            this.collectArtifactsFromResult(result);
+            this.collectArtifactsFromResult(uiResult);
 
             // ── Send token usage stats to UI ────────────────────────────────────
             if (result.tokenUsage && result.tokenUsage.total > 0) {
@@ -1304,6 +1471,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             if (steps) {
                 steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode: this.currentMode, uiState: 'pending', timestamp: Date.now() });
+                this.topicManager.saveTopics();
             }
 
         }
@@ -1656,7 +1824,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     public async loadTopic(topicId: string): Promise<void> {
         this.clearArtifacts();
-        this.conversationMessages = this.topicManager.loadTopic(topicId);
+        const topic = this.topicManager.topics.find(t => t.id === topicId);
+        this.conversationMessages = this.topicManager.loadTopic(
+            topicId,
+            topic ? this.compactMessagesForWebview(topic.messages) as any : undefined
+        );
         const resumeState = await this.agentRunner.loadResumeState(topicId);
         if (resumeState) {
             const topic = this.topicManager.currentTopic;
@@ -1992,7 +2164,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             .filter(topic => this.topicManager.showArchived || !topic.archived);
         const archivedCount = this.topicManager.topics.filter(topic => topic.archived).length;
 
-        this.postMessage({
+        this.postMessageToSurface('manager', {
             type: 'managerSnapshot',
             topics: visibleTopics.map(topic => ({
                 id: topic.id,
@@ -2014,7 +2186,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 currentTopicId: this.topicManager.currentTopic?.id ?? null,
                 currentTopicTitle: this.topicManager.currentTopic?.title ?? null,
             },
-            messages: this.topicManager.currentTopic?.messages ?? [],
+            messages: [],
+            messageCount: (this.topicManager.currentTopic?.messages ?? []).filter(message => !message.isHidden).length,
             mode: this.currentMode,
             workflowId: this.currentWorkflowId,
             isGenerating: this._isGenerating,

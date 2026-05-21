@@ -144,7 +144,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'edit_pdx_block',
-            description: '🌟 ZERO-READ EDIT: Replace a specific PDX AST block entirely by its symbol name, without needing to read the file first. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Uses LSP to find block boundaries automatically. If the symbol is not found, the error response includes a full list of available symbols so you can retry immediately. ⚠️ WARNING: on_actions files may have DUPLICATE top-level names (e.g. multiple "on_entering_battle") — only the FIRST match will be edited. For duplicates, use replaceLines with explicit line ranges instead.',
+            description: '🌟 ZERO-READ EDIT: Replace a specific PDX AST block entirely by its symbol name, without needing to read the file first. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Uses LSP to find block boundaries automatically. newContent must keep the full outer block and PDX brace structure intact; unsafe brace-breaking writes are rejected before the file changes. If the symbol is not found, the error response includes a full list of available symbols so you can retry immediately. ⚠️ WARNING: on_actions files may have DUPLICATE top-level names (e.g. multiple "on_entering_battle") — only the FIRST match will be edited. For duplicates, use replaceLines with explicit line ranges instead.',
             parameters: {
                 type: 'object',
                 properties: {

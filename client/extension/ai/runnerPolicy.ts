@@ -31,7 +31,10 @@ export function filterToolDefinitionsForMode(
     });
 
     if (options.useSlimPrompt) {
-        filtered = filtered.filter(t => t.function.name !== 'git_ops');
+        filtered = filtered.filter(t => {
+            const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
+            return entry?.allowSubAgent === true;
+        });
     }
 
     if (options.excludeTools && options.excludeTools.length > 0) {

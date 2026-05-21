@@ -18,6 +18,7 @@ export interface ManagerSnapshotMessage {
     topics: TopicListItem[];
     stats?: TopicStats;
     messages: ChatHistoryMessageView[];
+    messageCount?: number;
     mode: string;
     workflowId?: string | null;
     isGenerating: boolean;

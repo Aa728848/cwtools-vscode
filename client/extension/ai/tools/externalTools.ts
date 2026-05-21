@@ -444,7 +444,13 @@ export class ExternalToolHandler {
     }
 
     private async requestPermissionWithAbort(
-        onPermissionRequest: (id: string, tool: string, description: string, command?: string) => Promise<boolean>,
+        onPermissionRequest: (
+            id: string,
+            tool: string,
+            description: string,
+            command?: string,
+            context?: import('../types').AgentToolContext,
+        ) => Promise<boolean>,
         id: string, tool: string, description: string,
         context?: import('../types').AgentToolContext,
         command?: string
@@ -452,7 +458,7 @@ export class ExternalToolHandler {
         const abortSignal = context?.runnerOptions?.abortSignal;
         if (abortSignal?.aborted) return false;
         if (!abortSignal) {
-            return onPermissionRequest(id, tool, description, command);
+            return onPermissionRequest(id, tool, description, command, context);
         }
         let onAbort: (() => void) | undefined;
         const abortDeny = new Promise<boolean>((resolve) => {
@@ -461,7 +467,7 @@ export class ExternalToolHandler {
         });
         try {
             return await Promise.race([
-                onPermissionRequest(id, tool, description, command),
+                onPermissionRequest(id, tool, description, command, context),
                 abortDeny,
             ]);
         } finally {

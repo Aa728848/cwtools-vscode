@@ -96,6 +96,7 @@ describe('SubAgentSandbox', () => {
             const normalizedPaths = sandbox.writeScope!.map(p => p.toLowerCase());
             expect(normalizedPaths).to.include(path.normalize('common/events/test_event.txt').toLowerCase());
             expect(normalizedPaths).to.include(path.normalize('interface/gfx.gui').toLowerCase());
+            expect(normalizedPaths).to.include('.cwtools-ai');
         });
     });
 
@@ -152,7 +153,7 @@ describe('SubAgentSandbox', () => {
             expect(goodResult.allowed).to.be.true;
         });
 
-        it('高危敏感特权工具无视角色属性，必须被直接物理拦截阻断', () => {
+        it('keeps command and parent-owned tools blocked for sub-agents', () => {
             const sandbox = {
                 agentId: 'super_builder',
                 role: 'builder',
@@ -161,14 +162,32 @@ describe('SubAgentSandbox', () => {
                 permissionPolicy: 'deny' as const
             };
 
-            // 1) 敏感终端工具，被拦截
             const cmdResult = enforceSubAgentSafety(sandbox, 'run_command', { CommandLine: 'rm -rf /' }, process.cwd());
             expect(cmdResult.allowed).to.be.false;
-            expect(cmdResult.reason).to.include('敏感特权工具');
+            expect(cmdResult.reason).to.include('run_command is disabled');
+            expect(cmdResult.reason).to.include('BLOCKED_FOR_ORCHESTRATOR');
 
-            // 2) 敏感 git 工具，被拦截
             const gitResult = enforceSubAgentSafety(sandbox, 'git_ops', { operation: 'reset' }, process.cwd());
             expect(gitResult.allowed).to.be.false;
+        });
+
+        it('allows writable workers to store topic walkthrough artifacts', () => {
+            const sandbox = {
+                agentId: 'builder_topic_artifact',
+                role: 'build',
+                mode: 'build' as any,
+                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools-ai'],
+                permissionPolicy: 'delegate_to_parent' as const
+            };
+
+            const result = enforceSubAgentSafety(
+                sandbox,
+                'write_file',
+                { TargetFile: '.cwtools-ai/topic_123/walkthrough.md' },
+                process.cwd()
+            );
+
+            expect(result.allowed).to.be.true;
         });
 
         it('非写入且无害的工具，应该在默认沙盒下放行', () => {

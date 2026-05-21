@@ -203,6 +203,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const originalParents = new Map<HTMLElement, { parent: Node; nextSibling: ChildNode | null }>();
     let activeResponsiveWorkspace: ResponsiveWorkspacePanel | null = null;
     let responsiveWorkspacePinnedClosed = false;
+    let responsiveWorkspaceLayoutPending = false;
     let wasWideWorkspace = shouldUseSideWorkspace();
     
     function hasConversationContent(): boolean {
@@ -258,8 +259,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
     updateComposerStackHeight();
 
+    function currentViewportWidth(): number {
+        return document.documentElement.clientWidth || document.body?.clientWidth || window.innerWidth;
+    }
+
     function shouldUseSideWorkspace(): boolean {
-        return (window.innerWidth || document.documentElement.clientWidth) >= 1180;
+        return currentViewportWidth() >= 1180;
     }
 
     function isManagerShell(): boolean {
@@ -276,7 +281,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function isManagerTopicsRailMode(): boolean {
-        return isManagerShell() && (window.innerWidth || document.documentElement.clientWidth) >= 980;
+        return isManagerShell() && currentViewportWidth() >= 980;
     }
 
     function updateManagerTopicsToggleState(): void {
@@ -464,7 +469,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function scheduleResponsiveWorkspaceLayoutSync(): void {
+        if (responsiveWorkspaceLayoutPending) return;
+        responsiveWorkspaceLayoutPending = true;
         requestAnimationFrame(() => {
+            responsiveWorkspaceLayoutPending = false;
             syncResponsiveWorkspaceLayout();
             updateComposerStackHeight();
             positionComposerMenus();
@@ -827,7 +835,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
     }
 
-    window.addEventListener('resize', syncResponsiveWorkspaceLayout);
+    const responsiveWorkspaceResizeObserver = new ResizeObserver(scheduleResponsiveWorkspaceLayoutSync);
+    responsiveWorkspaceResizeObserver.observe(document.documentElement);
+    window.addEventListener('resize', scheduleResponsiveWorkspaceLayoutSync);
     updateWorkspaceToggleState();
 
     function textFromComposerNode(node: Node): string {
@@ -2194,6 +2204,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let isUserScrolledUp = false;
     let scrollBottomPending = false;
     let subagentScrollPending = false;
+    const subagentUserScrolledUp = new WeakMap<HTMLElement, boolean>();
     const jumpLatestBtn = document.createElement('button');
     jumpLatestBtn.className = 'jump-latest-btn';
     jumpLatestBtn.type = 'button';
@@ -2208,15 +2219,32 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         jumpLatestBtn.classList.toggle('show', isUserScrolledUp);
     });
 
+    function bindSubagentScroll(fullscreen: HTMLElement): void {
+        if (fullscreen.dataset.scrollBound === 'true') return;
+        fullscreen.dataset.scrollBound = 'true';
+        fullscreen.addEventListener('scroll', () => {
+            const scrolledUp = fullscreen.scrollHeight - fullscreen.scrollTop - fullscreen.clientHeight > 65;
+            subagentUserScrolledUp.set(fullscreen, scrolledUp);
+        });
+    }
+
+    function scrollSubagentBottom(fullscreen: HTMLElement): void {
+        if (subagentScrollPending) return;
+        subagentScrollPending = true;
+        requestAnimationFrame(() => {
+            subagentScrollPending = false;
+            fullscreen.scrollTop = fullscreen.scrollHeight;
+            subagentUserScrolledUp.set(fullscreen, false);
+        });
+    }
+
     function scrollBottom(force = false) {
         const activeSubagent = document.querySelector('.subagent-fullscreen-view.active') as HTMLElement | null;
-        if (!force && activeSubagent) {
-            if (subagentScrollPending) return;
-            subagentScrollPending = true;
-            requestAnimationFrame(() => {
-                subagentScrollPending = false;
-                activeSubagent.scrollTop = activeSubagent.scrollHeight;
-            });
+        if (activeSubagent) {
+            bindSubagentScroll(activeSubagent);
+            if (force || !subagentUserScrolledUp.get(activeSubagent)) {
+                scrollSubagentBottom(activeSubagent);
+            }
             return;
         }
         if (force || !isUserScrolledUp) {
@@ -2678,6 +2706,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 </div>
                 <div class="subagent-body"></div>
             `;
+            bindSubagentScroll(fullscreen);
             
             // Recursively render the content of the sub-Agent without msgTime to avoid multiple timestamps
             const innerMsg = buildAssistantMessage('', groupSteps, null, true);
@@ -2716,6 +2745,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (active !== el) active.classList.remove('active');
             });
             el.classList.add('active');
+            bindSubagentScroll(el);
+            scrollSubagentBottom(el);
             document.body.classList.add('has-active-subagent');
         }
     };
@@ -2834,6 +2865,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 fullscreen.id = uniqueId;
                 fullscreen.className = 'subagent-fullscreen-view';
                 fullscreen.innerHTML = buildSubagentFullscreenHtml(agentId, uniqueId, chatI18n);
+                bindSubagentScroll(fullscreen);
                 currentAssistantDiv.appendChild(fullscreen);
                 
                 state.container = fullscreen.querySelector('.subagent-body') as HTMLElement;

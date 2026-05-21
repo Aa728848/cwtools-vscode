@@ -3,7 +3,11 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { getTopicStorageDir } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
-import { AgentStep, AgentRunRecord, AgentRunStatus } from '../types';
+import { AgentRunRecord, AgentRunStatus } from '../types';
+
+const RUN_LEDGER_FIELD_MAX_CHARS = 6000;
+const RUN_STATE_MAX_LOAD_BYTES = 4_000_000;
+const RUN_EVENTS_MAX_LOAD_BYTES = 4_000_000;
 
 export type AgentRunEventType =
     | 'run_created'
@@ -142,44 +146,47 @@ export class RunLedger {
             ErrorReporter.debug('RunLedger', `Attempted to append event to non-existent run: ${runId}`);
             return;
         }
+        if (this.shouldSkipPersistedEvent(type, payload)) {
+            run.updatedAt = Date.now();
+            return;
+        }
 
         const timestamp = Date.now();
         run.updatedAt = timestamp;
+        const storedPayload = this.compactPayloadForLedger(type, payload);
 
         // Apply event to state
         if (type === 'status_changed') {
-            run.status = payload.status;
-        } else if (type === 'step_appended') {
-            run.steps.push(payload.step);
-        } else if (type === 'file_change' && payload.filePath) {
-            if (!run.writtenFiles.includes(payload.filePath)) {
-                run.writtenFiles.push(payload.filePath);
+            run.status = storedPayload.status;
+        } else if (type === 'file_change' && storedPayload.filePath) {
+            if (!run.writtenFiles.includes(storedPayload.filePath)) {
+                run.writtenFiles.push(storedPayload.filePath);
             }
-        } else if (type === 'subagent_end' && Array.isArray(payload?.filesWritten)) {
-            for (const filePath of payload.filesWritten) {
+        } else if (type === 'subagent_end' && Array.isArray(storedPayload?.filesWritten)) {
+            for (const filePath of storedPayload.filesWritten) {
                 if (typeof filePath === 'string' && filePath && !run.writtenFiles.includes(filePath)) {
                     run.writtenFiles.push(filePath);
                 }
             }
         } else if (type === 'metrics_updated') {
-            run.metrics = { ...run.metrics, ...payload.metrics };
+            run.metrics = { ...run.metrics, ...storedPayload.metrics };
         }
         const metrics = run.metrics;
         if (type === 'model_call_start') {
             metrics.modelCallCount = (metrics.modelCallCount ?? 0) + 1;
-        } else if (type === 'tool_call_end' && payload?.success === false && !payload?.skipped) {
+        } else if (type === 'tool_call_end' && storedPayload?.success === false && !storedPayload?.skipped) {
             metrics.failedToolCount = (metrics.failedToolCount ?? 0) + 1;
         } else if (type === 'permission_requested') {
             metrics.permissionRequested = (metrics.permissionRequested ?? 0) + 1;
         } else if (type === 'permission_resolved') {
-            if (payload?.allowed) {
+            if (storedPayload?.allowed) {
                 metrics.permissionApproved = (metrics.permissionApproved ?? 0) + 1;
             } else {
                 metrics.permissionDenied = (metrics.permissionDenied ?? 0) + 1;
             }
         } else if (type === 'artifact_created') {
             metrics.artifactizedResultCount = (metrics.artifactizedResultCount ?? 0) + 1;
-        } else if (type === 'compaction_end' && payload?.success !== false) {
+        } else if (type === 'compaction_end' && storedPayload?.success !== false) {
             metrics.compactionCount = (metrics.compactionCount ?? 0) + 1;
         }
 
@@ -196,7 +203,7 @@ export class RunLedger {
             status: metadata?.status,
             invocationId: metadata?.invocationId,
             agentId: metadata?.agentId,
-            payload
+            payload: storedPayload
         };
 
         // Store in memory
@@ -209,6 +216,63 @@ export class RunLedger {
 
         // Notify subscribers of the change
         this.emitter.emit('change', runId);
+    }
+
+    private shouldSkipPersistedEvent(type: AgentRunEventType, payload: any): boolean {
+        if (type === 'model_call_delta' || type === 'tool_output_delta') return true;
+        return type === 'step_appended';
+    }
+
+    private clipText(value: unknown, maxChars = RUN_LEDGER_FIELD_MAX_CHARS): string {
+        const text = typeof value === 'string' ? value : String(value ?? '');
+        if (text.length <= maxChars) return text;
+        return `${text.slice(0, maxChars)}\n... (${text.length - maxChars} chars truncated)`;
+    }
+
+    private compactUnknown(value: unknown, maxChars = RUN_LEDGER_FIELD_MAX_CHARS): unknown {
+        if (value == null) return value;
+        if (typeof value === 'string') return this.clipText(value, maxChars);
+        let raw = '';
+        try {
+            raw = JSON.stringify(value);
+        } catch {
+            return this.clipText(String(value), maxChars);
+        }
+        if (raw.length <= maxChars) return value;
+        return { _truncated: true, preview: this.clipText(raw, maxChars) };
+    }
+
+    private compactStep(step: any): any | undefined {
+        if (!step || typeof step !== 'object') return step;
+        const type = String(step.type || '');
+        if (type === 'text_delta' || type === 'thinking_content') return undefined;
+        if (type === 'orchestrator_progress' && /waiting|等待模型返回/i.test(String(step.content || ''))) return undefined;
+        const copy: any = { ...step };
+        if (typeof copy.content === 'string') copy.content = this.clipText(copy.content);
+        if (copy.toolArgs !== undefined) copy.toolArgs = this.compactUnknown(copy.toolArgs);
+        if (copy.toolResult !== undefined) copy.toolResult = this.compactUnknown(copy.toolResult);
+        return copy;
+    }
+
+    private compactPayloadForLedger(type: AgentRunEventType, payload: any): any {
+        if (!payload || typeof payload !== 'object') return this.compactUnknown(payload);
+        if (type === 'step_appended') {
+            return { ...payload, step: this.compactStep(payload.step) };
+        }
+        if (type === 'tool_call_created' || type === 'tool_call_start') {
+            const args = this.compactUnknown(payload.args ?? payload.arguments);
+            return { ...payload, args, arguments: args };
+        }
+        if (type === 'tool_call_end') {
+            return { ...payload, result: this.compactUnknown(payload.result) };
+        }
+        if (type === 'file_change' && payload.diff) {
+            return { ...payload, diff: this.clipText(payload.diff) };
+        }
+        if (type === 'compaction_end' && payload.summary) {
+            return { ...payload, summary: this.compactUnknown(payload.summary) };
+        }
+        return this.compactUnknown(payload);
     }
 
     /**
@@ -256,7 +320,26 @@ export class RunLedger {
         if (!fs.existsSync(file)) return [];
 
         const events: AgentRunEvent[] = [];
-        const text = await fs.promises.readFile(file, 'utf8');
+        const stat = await fs.promises.stat(file);
+        let text = '';
+        if (stat.size <= RUN_EVENTS_MAX_LOAD_BYTES) {
+            text = await fs.promises.readFile(file, 'utf8');
+        } else {
+            const start = Math.max(0, stat.size - RUN_EVENTS_MAX_LOAD_BYTES);
+            const length = stat.size - start;
+            const handle = await fs.promises.open(file, 'r');
+            try {
+                const buffer = Buffer.alloc(length);
+                await handle.read(buffer, 0, length, start);
+                text = buffer.toString('utf8');
+                if (start > 0) {
+                    const firstNewline = text.indexOf('\n');
+                    text = firstNewline >= 0 ? text.slice(firstNewline + 1) : '';
+                }
+            } finally {
+                await handle.close();
+            }
+        }
         for (const line of text.split(/\r?\n/)) {
             const trimmed = line.trim();
             if (!trimmed) continue;
@@ -276,6 +359,39 @@ export class RunLedger {
         }
 
         return events.sort((a, b) => (a.sequence - b.sequence) || (a.timestamp - b.timestamp));
+    }
+
+    private createLargeRunPlaceholder(topicId: string, runId: string, mtimeMs: number, size: number): AgentRunRecord {
+        return {
+            runId,
+            topicId,
+            status: 'running',
+            mode: 'unknown',
+            userPromptPreview: `Run state is large (${Math.round(size / 1024)} KB); showing a compact recovery view.`,
+            startedAt: mtimeMs,
+            createdAt: mtimeMs,
+            updatedAt: mtimeMs,
+            steps: [],
+            metrics: {
+                totalTokens: 0,
+                promptTokens: 0,
+                completionTokens: 0,
+                cachedTokens: 0,
+                costCny: 0,
+                iterations: 0,
+                maxIterations: 0,
+                toolCalls: 0,
+                modelCallCount: 0,
+                compactionCount: 0,
+                repeatedToolSignatureCount: 0,
+                failedToolCount: 0,
+                permissionRequested: 0,
+                permissionApproved: 0,
+                permissionDenied: 0,
+                artifactizedResultCount: 0,
+            },
+            writtenFiles: [],
+        };
     }
 
     /**
@@ -306,9 +422,29 @@ export class RunLedger {
             const stateFile = path.join(runDir, 'run_state.json');
             if (!fs.existsSync(stateFile)) return undefined;
 
-            const data = await fs.promises.readFile(stateFile, 'utf8');
-            const record = JSON.parse(data) as AgentRunRecord;
+            const stateStat = await fs.promises.stat(stateFile);
+            let record: AgentRunRecord;
+            if (stateStat.size > RUN_STATE_MAX_LOAD_BYTES) {
+                record = this.createLargeRunPlaceholder(topicId, latestRunId, stateStat.mtimeMs, stateStat.size);
+            } else {
+                const data = await fs.promises.readFile(stateFile, 'utf8');
+                record = JSON.parse(data) as AgentRunRecord;
+                record.steps = [];
+            }
             const events = await this.readEventsFromDisk(runDir, record.runId);
+            for (const event of events) {
+                if (event.type === 'status_changed' && event.payload?.status) {
+                    record.status = event.payload.status;
+                } else if (event.type === 'complete') {
+                    record.status = 'completed';
+                } else if (event.type === 'file_change' && event.payload?.filePath && !record.writtenFiles.includes(event.payload.filePath)) {
+                    record.writtenFiles.push(event.payload.filePath);
+                } else if (event.type === 'subagent_end' && Array.isArray(event.payload?.filesWritten)) {
+                    for (const filePath of event.payload.filesWritten) {
+                        if (typeof filePath === 'string' && !record.writtenFiles.includes(filePath)) record.writtenFiles.push(filePath);
+                    }
+                }
+            }
             const latestSequence = events.reduce((max, event) => Math.max(max, event.sequence), 0);
             this.activeRuns.set(record.runId, record);
             this.runEvents.set(record.runId, events);

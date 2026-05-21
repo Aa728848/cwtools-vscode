@@ -359,7 +359,8 @@ export class Orchestrator {
             // 3. If the subtask requires network information, it should be searched by Orchestrator and injected through contextFiles before dispatching.
             excludeTools: [
                 'web_fetch', 'search_web', 'codesearch', 
-                'run_command', 'git_ops',
+                'run_command',
+                'git_ops',
                 'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech', 
                 'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
             ],
@@ -390,13 +391,38 @@ export class Orchestrator {
         const wrappedOnStep = (step: AgentStep) => forwardStep(step, true);
 
         runnerOptions.onStep = wrappedOnStep;
-        runnerOptions.onPermissionRequest = async (_id, tool, description) => {
+        runnerOptions.onPermissionRequest = async (id, tool, description, command, permissionContext) => {
+            const requestPermission = orchestratorOptions.onPermissionRequest;
             forwardStep({
                 type: 'validation',
-                content: `子 Agent 已阻止交互式权限请求: ${tool}${description ? ` — ${description}` : ''}`,
+                content: requestPermission
+                    ? `子 Agent 等待用户授权: ${tool}${description ? ` - ${description}` : ''}`
+                    : `子 Agent 无法请求用户授权: ${tool}${description ? ` - ${description}` : ''}`,
                 timestamp: Date.now(),
-            }, false);
-            return false;
+            });
+            if (!requestPermission) return false;
+            try {
+                const allowed = await requestPermission(
+                    id,
+                    tool,
+                    `[${taskNode.id}] ${description}`,
+                    command,
+                    permissionContext,
+                );
+                forwardStep({
+                    type: 'validation',
+                    content: `子 Agent 权限请求${allowed ? '已批准' : '被拒绝'}: ${tool}`,
+                    timestamp: Date.now(),
+                });
+                return allowed;
+            } catch (error) {
+                forwardStep({
+                    type: 'validation',
+                    content: `子 Agent 权限请求失败: ${tool} (${error instanceof Error ? error.message : String(error)})`,
+                    timestamp: Date.now(),
+                });
+                return false;
+            }
         };
         
         // Record file snapshot

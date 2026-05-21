@@ -10,6 +10,7 @@ const toolDefinitions = [
     'query_blackboard',
     'mcp_call',
     'mmx_generate_image',
+    'run_command',
 ].map(name => ({
     type: 'function',
     function: { name, description: '', parameters: {} },
@@ -32,6 +33,13 @@ describe('runnerPolicy', () => {
         const names = filtered.map(t => t.function.name);
         expect(names).to.include('dispatch_agents');
         expect(names).to.include('query_blackboard');
+    });
+
+    it('hides command tools from slim sub-agent toolsets', () => {
+        const filtered = filterToolDefinitionsForMode(toolDefinitions, 'build', { useSlimPrompt: true });
+        const names = filtered.map(t => t.function.name);
+        expect(names).to.include('replace_lines');
+        expect(names).to.not.include('run_command');
     });
 
     it('resolves conservative build iteration caps', () => {

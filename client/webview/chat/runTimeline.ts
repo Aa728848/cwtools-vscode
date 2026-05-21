@@ -158,7 +158,7 @@ export function renderTimelineHTML(groups: TimelineGroup[], collapsible = false)
     let html = '<div class="run-timeline">';
     for (const group of groups) {
         const collapseAttr = collapsible ? ' tabindex="0" role="button"' : '';
-        html += `<div class="timeline-group" data-group="${group.id}">`;
+        html += `<div class="timeline-group${collapsible ? ' collapsed' : ''}" data-group="${group.id}">`;
         html += `<h3 class="timeline-group-header"${collapseAttr}>${group.icon} ${group.label} <span class="count">(${group.events.length})</span></h3>`;
         html += '<ul class="timeline-events">';
         for (const evt of group.events) {

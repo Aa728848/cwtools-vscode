@@ -31,14 +31,13 @@ describe('RunLedger Unit Tests', () => {
         expect(updatedRun!.topicId).to.equal('topic_test');
         expect(updatedRun!.mode).to.equal('build');
 
-        // Append step events which populate run.steps
+        // Runs keep structured events only; chat steps stay in the conversation surface.
         await runLedger.appendEvent(runId, 'step_appended', { step: { type: 'thinking', content: 'drafting', timestamp: 1 } });
         await runLedger.appendEvent(runId, 'step_appended', { step: { type: 'validation', content: 'passed', timestamp: 2 } });
 
         const finalRun = runLedger.getRun(runId);
-        expect(finalRun!.steps).to.have.lengthOf(2);
-        expect((finalRun!.steps as any[])[0].type).to.equal('thinking');
-        expect((finalRun!.steps as any[])[1].type).to.equal('validation');
+        expect(finalRun!.steps).to.have.lengthOf(0);
+        expect(runLedger.getSnapshot(runId)?.events.map(event => event.type)).to.deep.equal(['run_created']);
     });
 
     it('correctly tracks status transition events', async () => {
@@ -53,6 +52,21 @@ describe('RunLedger Unit Tests', () => {
         await runLedger.appendEvent(runId, 'status_changed', { status: 'completed' });
         updated = runLedger.getRun(runId);
         expect(updated!.status).to.equal('completed');
+    });
+
+    it('filters chat step events from persisted run state', async () => {
+        const { runLedger } = loadRunLedgerModule();
+        const run = await runLedger.createRun('topic_streaming', 'orchestrator', 'stream prompt');
+        const runId = run.runId;
+
+        await runLedger.appendEvent(runId, 'step_appended', { step: { type: 'text_delta', content: 'hello', timestamp: 1 } });
+        await runLedger.appendEvent(runId, 'step_appended', { step: { type: 'thinking_content', content: 'thought', timestamp: 2 } });
+        await runLedger.appendEvent(runId, 'step_appended', { step: { type: 'orchestrator_progress', content: '正在等待模型返回 (30s)...', timestamp: 3 } });
+        await runLedger.appendEvent(runId, 'step_appended', { step: { type: 'validation', content: 'passed', timestamp: 4 } });
+
+        const snapshot = runLedger.getSnapshot(runId);
+        expect(snapshot?.run.steps).to.deep.equal([]);
+        expect(snapshot?.events.map(event => event.type)).to.deep.equal(['run_created']);
     });
 
     it('reloads persisted events and continues sequence numbers after restart', async () => {

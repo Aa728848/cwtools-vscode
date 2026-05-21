@@ -1370,7 +1370,7 @@ export type HostMessage =
     | { type: 'artifactList'; artifacts: AgentArtifact[] }
     /** Multi-Agent coordinator progress push — Agent Lane UI */
     | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
-    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }> }
+    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; eventCount?: number; truncatedEventCount?: number; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }> }
     | { type: 'mentionSearchResults'; results: Array<{
         type?: ContextItemType;
         uri?: string;
@@ -1393,6 +1393,7 @@ export type HostMessage =
         topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; pinned?: boolean; workspaceId?: string; workspaceLabel?: string; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>;
         stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null };
         messages: ChatHistoryMessage[];
+        messageCount?: number;
         mode: AgentMode;
         workflowId?: string | null;
         isGenerating: boolean;

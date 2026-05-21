@@ -254,12 +254,10 @@ export class AgentToolExecutor {
         }
         if (isSubAgent && toolName === 'run_command') {
             return {
-                stdout: '',
-                stderr: 'run_command is disabled for orchestrator sub-agents. Report the need to the main agent instead of running shell commands or requesting permission.',
-                exitCode: 1,
+                success: false,
+                message: 'run_command is disabled for orchestrator sub-agents. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.',
             };
         }
-
         const mode = context?.runnerOptions?.mode ?? 
             ((['dispatch_agents', 'merge_results', 'query_blackboard'].includes(toolName)) ? 'orchestrator' : 'build');
         const isDynamicMcpTool = toolName.startsWith('mcp_') && toolName !== 'mcp_call';
@@ -789,8 +787,9 @@ export class AgentToolExecutor {
                 onStep: context?.onStep,
                 onBeforeFileWrite,
                 onTodoUpdate: context?.onTodoUpdate || runnerOpts?.onTodoUpdate,
-                // Do not pass the parent permission callback into orchestrator workers.
-                // Sub-agents are non-interactive and install their own deny callback.
+                onPermissionRequest: context?.onPermissionRequest
+                    ?? runnerOpts?.onPermissionRequest
+                    ?? this.onPermissionRequest,
             };
 
             // Push initial progress

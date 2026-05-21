@@ -103,6 +103,9 @@ describe('agent manager cross-surface contracts', () => {
         expect(webview).to.include("document.body.classList.toggle('manager-topics-collapsed', collapsed);");
         expect(webview).to.include("vscode.postMessage({ type: 'openAgentManager' })");
         expect(webview).to.include("window.addEventListener('resize', positionComposerMenus);");
+        expect(webview).to.include('function currentViewportWidth(): number');
+        expect(webview).to.include('new ResizeObserver(scheduleResponsiveWorkspaceLayoutSync)');
+        expect(webview).to.include("window.addEventListener('resize', scheduleResponsiveWorkspaceLayoutSync);");
         expect(webview).to.include('menu.style.left =');
         expect(manager).to.include('taskStatusMark(');
         expect(managerCss).to.include('.manager-task-mark');

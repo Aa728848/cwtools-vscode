@@ -18,6 +18,8 @@ export interface SubAgentSandbox {
     vfsOverlay?: Map<string, string>;
 }
 
+const TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
+
 /**
  * 根据 TaskNode 任务节点与项目环境动态构造子 Agent 隔离沙盒
  */
@@ -32,7 +34,7 @@ export function buildSubAgentSandbox(
         agentId: taskNode.id,
         role,
         mode: profile.mode,
-        permissionPolicy: 'deny',
+        permissionPolicy: 'delegate_to_parent',
     };
 
     // ─── 1. 计算允许的工具集 ───
@@ -79,6 +81,8 @@ export function buildSubAgentSandbox(
             });
         }
 
+        // Topic-local artifacts stay workspace-owned without broadening project write scope.
+        scopes.push(TOPIC_ARTIFACT_SCOPE);
         sandbox.writeScope = scopes;
     }
 
@@ -101,12 +105,19 @@ export function enforceSubAgentSafety(
     // W7 fix: 针对 excluded 敏感特权工具直接物理阻断
     const excludedTools = new Set<string>([
         'web_fetch', 'search_web', 'codesearch',
-        'run_command', 'git_ops',
+        'run_command',
+        'git_ops',
         'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
         'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
     ]);
 
     if (excludedTools.has(toolName)) {
+        if (toolName === 'run_command') {
+            return {
+                allowed: false,
+                reason: 'run_command is disabled for orchestrator sub-agents. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.'
+            };
+        }
         return {
             allowed: false,
             reason: `子 Agent 沙盒已拒绝执行敏感特权工具 '${toolName}'`
@@ -150,7 +161,18 @@ export function enforceSubAgentSafety(
                 const relScope = path.relative(workspaceRoot, absScope).replace(/\\/g, '/').toLowerCase();
 
                 // 1) 后缀或子片段模糊约束 (如 '.gui' 或 'localisation')
-                if (scope.startsWith('.') && relTarget.endsWith(scope.toLowerCase())) {
+                if (
+                    scope.startsWith('.') &&
+                    scope.toLowerCase() !== TOPIC_ARTIFACT_SCOPE &&
+                    relTarget.endsWith(scope.toLowerCase())
+                ) {
+                    matchesScope = true;
+                    break;
+                }
+                if (
+                    scope.toLowerCase() === TOPIC_ARTIFACT_SCOPE &&
+                    (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`))
+                ) {
                     matchesScope = true;
                     break;
                 }

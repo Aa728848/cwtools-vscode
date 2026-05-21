@@ -88,4 +88,15 @@ describe('PromptBuilder context budgeting', () => {
         expect(prompt).to.not.include('cmd.exe');
         expect(prompt).to.not.include('%VAR%');
     });
+
+    it('tells slim sub-agents to use structured edits instead of commands', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSlimSystemPromptForMode('build');
+
+        expect(prompt).to.include('NEVER use `run_command`');
+        expect(prompt).to.include('For bulk file changes');
+        expect(prompt).to.include('structured tools');
+        expect(prompt).to.include('BLOCKED_FOR_ORCHESTRATOR');
+    });
 });

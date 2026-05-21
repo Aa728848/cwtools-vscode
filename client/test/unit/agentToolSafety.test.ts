@@ -258,6 +258,81 @@ describe('agent tool file path safety', () => {
         expect(fs.readFileSync(ymlAbs, 'utf8')).to.equal(original);
     });
 
+    it('rejects generic PDX edits that would unbalance brace structure', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'common', 'buildings', 'guarded_buildings.txt');
+        const original = 'building_guarded = {\n\tcost = { minerals = 100 }\n}\n';
+        fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
+        fs.writeFileSync(fileAbs, original, 'utf8');
+
+        const writeResult = await handler.writeFile({
+            file: fileAbs,
+            content: 'building_guarded = {\n\tcost = { minerals = 200 }\n',
+        }, makeContext()) as any;
+        expect(writeResult.success).to.equal(false);
+        expect(writeResult.message).to.include('PDX brace structure');
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal(original);
+
+        const replaceResult = await handler.replaceLines({
+            filePath: fileAbs,
+            startLine: 3,
+            endLine: 3,
+            newContent: '',
+        }, makeContext()) as any;
+        expect(replaceResult.success).to.equal(false);
+        expect(replaceResult.message).to.include('PDX brace structure');
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal(original);
+
+        const multiReplaceResult = await handler.multiReplaceFileContent({
+            TargetFile: fileAbs,
+            Instruction: 'remove the block terminator',
+            ReplacementChunks: [{
+                StartLine: 3,
+                EndLine: 3,
+                TargetContent: '}',
+                ReplacementContent: '',
+            }],
+        }, makeContext()) as any;
+        expect(multiReplaceResult.success).to.equal(false);
+        expect(multiReplaceResult.message).to.include('PDX brace structure');
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal(original);
+
+        const patchResult = await handler.applyPatch({
+            patch: [
+                '--- a/common/buildings/guarded_buildings.txt',
+                '+++ b/common/buildings/guarded_buildings.txt',
+                '@@',
+                '-building_guarded = {',
+                '-\tcost = { minerals = 100 }',
+                '-}',
+                '+building_guarded = {',
+                '+\tcost = { minerals = 100 }',
+                '',
+            ].join('\n'),
+        }, makeContext());
+        expect(patchResult.success).to.equal(false);
+        expect(patchResult.errors.join('\n')).to.include('PDX brace structure');
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal(original);
+    });
+
+    it('ignores PDX brace-like text in strings and comments during edit safety checks', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'events', 'string_braces_events.txt');
+        const original = 'country_event = {\n\ttitle = "old { title }"\n\t# } comment brace\n}\n';
+        fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
+        fs.writeFileSync(fileAbs, original, 'utf8');
+
+        const result = await handler.replaceLines({
+            filePath: fileAbs,
+            startLine: 2,
+            endLine: 3,
+            newContent: '\ttitle = "new } title {"\n\t# { comment brace',
+        }, makeContext()) as any;
+
+        expect(result.success).to.equal(true);
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.include('title = "new } title {"');
+    });
+
     it('rejects write_localisation targets outside real localisation folders', async () => {
         const handler = createFileHandler();
         const result = await handler.writeLocalisation({
@@ -1051,12 +1126,12 @@ describe('agent tool progress and aborts', () => {
         expect(executeInternal.called).to.equal(false);
     });
 
-    it('blocks sub-agents from manually invoking git_ops or run_command at runtime', async () => {
+    it('keeps sub-agent git and command tools out of the runtime', async () => {
         const executor = createExecutor();
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true });
         const context = {
             runnerOptions: {
-                mode: 'orchestrator',
+                mode: 'build',
                 useSlimPrompt: true,
             },
         } as any;
@@ -1066,8 +1141,9 @@ describe('agent tool progress and aborts', () => {
 
         expect(gitResult.success).to.equal(false);
         expect(gitResult.message).to.include('git_ops is disabled');
-        expect(commandResult.exitCode).to.equal(1);
-        expect(commandResult.stderr).to.include('run_command is disabled');
+        expect(commandResult.success).to.equal(false);
+        expect(commandResult.message).to.include('run_command is disabled');
+        expect(commandResult.message).to.include('BLOCKED_FOR_ORCHESTRATOR');
         expect(executeInternal.called).to.equal(false);
     });
 });

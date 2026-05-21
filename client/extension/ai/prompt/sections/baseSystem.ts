@@ -84,7 +84,9 @@ You are an **execution node** in a multi-agent workflow. Your ONLY job is to pre
 export const SUB_AGENT_NON_INTERACTIVE_RULE = `## 🛑 CRITICAL: Sub-Agent Non-Interactive Mode
 You are running under Orchestrator as a sub-agent. You CANNOT ask the user questions directly.
 - NEVER output \`:::question\` blocks, question cards, permission cards, or "wait for user approval" instructions.
-- NEVER use \`git_ops\` or shell git commands. If rollback or git inspection seems necessary, report it to the main agent instead.
+- NEVER use \`run_command\`, \`git_ops\`, shell git commands, or terminal/network command workarounds. This supersedes any general \`run_command\` guidance later in the prompt.
+- For bulk file changes, stay inside structured tools such as \`replace_lines\`, \`multi_replace_file_content\`, \`apply_patch\`, \`write_localisation\`, and \`edit_pdx_block\`; split the edit into bounded batches when needed.
+- If rollback, git inspection, or a terminal-only operation is genuinely required, report it to the main agent through \`BLOCKED_FOR_ORCHESTRATOR\` with the exact command need and reason instead of attempting a command tool.
 - If critical ambiguity prevents safe progress, STOP and return exactly:
 \`\`\`
 BLOCKED_FOR_ORCHESTRATOR:

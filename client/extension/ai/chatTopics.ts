@@ -84,7 +84,7 @@ export class ChatTopicManager {
         this.sendTopicList();
     }
 
-    loadTopic(topicId: string): ChatMessage[] {
+    loadTopic(topicId: string, webviewMessages?: ChatHistoryMessage[]): ChatMessage[] {
         const topic = this.topics.find(t => t.id === topicId);
         if (!topic) return [];
 
@@ -97,7 +97,7 @@ export class ChatTopicManager {
             }));
 
         this.postMessage({ type: 'clearChat' });
-        this.postMessage({ type: 'loadTopicMessages', messages: topic.messages });
+        this.postMessage({ type: 'loadTopicMessages', messages: webviewMessages ?? topic.messages });
         this.sendTopicList();
         return conversationMessages;
     }

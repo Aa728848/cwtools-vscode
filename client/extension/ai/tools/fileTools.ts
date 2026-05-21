@@ -11,6 +11,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as readline from 'readline';
 import { parsePdx, PdxNode } from '../../guiParser';
+import { tokenize, TokenType } from '../../pdxTokenizer';
 import type { ValidationError } from '../types';
 import { getCachedFile, setCachedFile } from '../fileCache';
 import { getToolResultBudget } from '../contextBudget';
@@ -234,6 +235,62 @@ export class FileToolHandler {
             return `write_localisation refused '${this.workspaceRelativePath(filePath)}'. Localisation files must be written under localisation/, localisation_synced/, or localization/, never under .cwtools-ai scratch/topic folders.`;
         }
         return null;
+    }
+
+    private isPdxStructureGuardedPath(filePath: string): boolean {
+        return ['.txt', '.gui', '.gfx', '.asset', '.entity'].includes(path.extname(filePath).toLowerCase());
+    }
+
+    private inspectPdxBraceStructure(content: string): {
+        balanced: boolean;
+        openCount: number;
+        closeCount: number;
+        unmatchedOpenCount: number;
+        firstExtraCloseLine?: number;
+    } {
+        let depth = 0;
+        let openCount = 0;
+        let closeCount = 0;
+        let firstExtraCloseLine: number | undefined;
+
+        for (const token of tokenize(content)) {
+            if (token.type === TokenType.LBrace) {
+                depth++;
+                openCount++;
+            } else if (token.type === TokenType.RBrace) {
+                depth--;
+                closeCount++;
+                if (depth < 0 && firstExtraCloseLine === undefined) {
+                    firstExtraCloseLine = token.line;
+                }
+            }
+        }
+
+        return {
+            balanced: depth === 0 && firstExtraCloseLine === undefined,
+            openCount,
+            closeCount,
+            unmatchedOpenCount: Math.max(depth, 0),
+            firstExtraCloseLine,
+        };
+    }
+
+    private rejectUnsafePdxStructureWrite(toolName: string, filePath: string, originalContent: string, newContent: string): string | null {
+        if (!this.isPdxStructureGuardedPath(filePath) || originalContent === newContent) return null;
+
+        const originalStructure = this.inspectPdxBraceStructure(originalContent);
+        if (!originalStructure.balanced) {
+            // Existing broken files still need to be repairable.
+            return null;
+        }
+
+        const nextStructure = this.inspectPdxBraceStructure(newContent);
+        if (nextStructure.balanced) return null;
+
+        const problem = nextStructure.firstExtraCloseLine !== undefined
+            ? `first unmatched "}" at line ${nextStructure.firstExtraCloseLine}`
+            : `${nextStructure.unmatchedOpenCount} unmatched "{" brace(s) remain`;
+        return `${toolName} refused to write ${path.basename(filePath)} because it would unbalance the PDX brace structure (${problem}; openings: ${nextStructure.openCount}, closings: ${nextStructure.closeCount}). Re-read the exact block/context and retry with the surrounding braces intact.`;
     }
 
     private readTextFile(filePath: string, context?: import('../types').AgentToolContext): { content: string; hasBom: boolean } {
@@ -522,6 +579,11 @@ export class FileToolHandler {
                 const { content: originalContent, hasBom } = this.readTextFile(args.file, context);
                 (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(args.file, originalContent);
 
+                const pdxStructureReject = this.rejectUnsafePdxStructureWrite('write_file', args.file, originalContent, args.content);
+                if (pdxStructureReject) {
+                    return { success: false, message: pdxStructureReject };
+                }
+
                 const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
 
                 const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
@@ -647,6 +709,10 @@ export class FileToolHandler {
         }
 
         const newContent = newLines.join('\n');
+        const pdxStructureReject = this.rejectUnsafePdxStructureWrite('ast_mutate', filePath, originalContent, newContent);
+        if (pdxStructureReject) {
+            return { success: false, message: pdxStructureReject };
+        }
         const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
 
         if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
@@ -760,6 +826,10 @@ export class FileToolHandler {
             }
 
             content = lines.join(ending);
+            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('multi_replace_file_content', filePath, originalContent, content);
+            if (pdxStructureReject) {
+                return { success: false, message: pdxStructureReject } as any;
+            }
             const diff = this.buildUnifiedDiff(filePath, originalContent, content);
 
             const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
@@ -872,6 +942,11 @@ export class FileToolHandler {
 
             if (newContent === originalContent) {
                 return { success: true, message: `replace_lines made no changes to ${path.basename(filePath)}.` };
+            }
+
+            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('replace_lines', filePath, originalContent, newContent);
+            if (pdxStructureReject) {
+                return { success: false, message: pdxStructureReject };
             }
 
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
@@ -1025,6 +1100,18 @@ export class FileToolHandler {
             }
             if (errors.length === 0) {
                 pendingWrites.push({ filePath, newContent: currentContent, hasBom });
+            }
+        }
+
+        if (errors.length > 0) {
+            return { success: false, filesChanged: [], errors };
+        }
+
+        for (const { filePath, newContent } of pendingWrites) {
+            const originalContent = byFile.get(filePath)?.content ?? '';
+            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('apply_patch', filePath, originalContent, newContent);
+            if (pdxStructureReject) {
+                errors.push(pdxStructureReject);
             }
         }
 

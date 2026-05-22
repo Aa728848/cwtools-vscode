@@ -87,7 +87,99 @@ type LintRequestMsg =
     | WorkComplete of DateTime
 
 /// Shared token computation — walks AST, classifies tokens, encodes to delta int[].
-let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) =
+let computeShaderTokens (game: IGame<_>) (filePath: string) (fileText: string) =
+    let tokens = ResizeArray<struct (int * int * int * int * int)>()
+    let lines: string[] = fileText.Split('\n')
+    
+    let sources = CWTools.Games.PdxShaderFeatures.getShaderSources (game.AllFiles()) filePath fileText
+    
+    let globalVariables = System.Collections.Generic.HashSet<string>(CWTools.Games.PdxShaderFeatures.builtinVariablesSet.Value)
+    let globalFunctions = System.Collections.Generic.HashSet<string>(CWTools.Games.PdxShaderFeatures.builtinFunctionsSet.Value)
+    
+    let parsedGlobals = CWTools.Games.PdxShaderFeatures.parseGlobalVariables sources
+    for v in parsedGlobals do
+        globalVariables.Add(v) |> ignore
+        
+    let parsedFuncs = CWTools.Games.PdxShaderFeatures.parseGlobalFunctions sources
+    for f: CWTools.Games.CompletionResponse in parsedFuncs do
+        match f with
+        | CWTools.Games.CompletionResponse.Snippet(label, _, _, _, _) -> globalFunctions.Add(label) |> ignore
+        | CWTools.Games.CompletionResponse.Simple(label, _, _) -> globalFunctions.Add(label) |> ignore
+        | CWTools.Games.CompletionResponse.Detailed(label, _, _, _) -> globalFunctions.Add(label) |> ignore
+        
+    let wordRegex = System.Text.RegularExpressions.Regex(@"\b([A-Za-z_][A-Za-z0-9_]*)\b", System.Text.RegularExpressions.RegexOptions.Compiled)
+    
+    let verifyAndAdd (line: int) (col: int) (len: int) (tokenType: int) =
+        if line >= 0 && line < lines.Length then
+            let srcLine = lines.[line]
+            if col >= 0 && col + len <= srcLine.Length then
+                tokens.Add(struct (line, col, len, tokenType, 0))
+                
+    let getInsideStringIntervals (lineText: string) (limit: int) =
+        let stringIntervals = ResizeArray<int * int>()
+        let mutable inString = false
+        let mutable strStart = -1
+        let mutable i = 0
+        while i < limit do
+            if lineText.[i] = '"' && (i = 0 || lineText.[i - 1] <> '\\') then
+                if inString then
+                    stringIntervals.Add((strStart, i))
+                    inString <- false
+                else
+                    strStart <- i
+                    inString <- true
+            i <- i + 1
+        stringIntervals
+
+    let isInsideIntervals (intervals: ResizeArray<int * int>) (col: int) (len: int) =
+        let mutable found = false
+        let mutable idx = 0
+        while idx < intervals.Count && not found do
+            let sStart, sEnd = intervals.[idx]
+            if col >= sStart && (col + len - 1) <= sEnd then
+                found <- true
+            idx <- idx + 1
+        found
+                
+    lines |> Array.iteri (fun lineIdx (lineText: string) ->
+        let commentIdx = lineText.IndexOf("//")
+        let limit = if commentIdx >= 0 then commentIdx else lineText.Length
+        if commentIdx >= 0 then
+            verifyAndAdd lineIdx commentIdx (lineText.Length - commentIdx) 10
+            
+        let intervals = getInsideStringIntervals lineText limit
+        let subText = lineText.Substring(0, limit)
+        let matches = wordRegex.Matches(subText)
+        for i = 0 to matches.Count - 1 do
+            let m = matches.[i]
+            if m.Success && m.Groups.Count >= 2 then
+                let word = m.Groups.[1].Value
+                let col = m.Index
+                let len = word.Length
+                if not (isInsideIntervals intervals col len) then
+                    if globalVariables.Contains(word) then
+                        verifyAndAdd lineIdx col len 3
+                    elif globalFunctions.Contains(word) then
+                        verifyAndAdd lineIdx col len 2
+    )
+    
+    let sorted = tokens |> Seq.toArray |> Array.sortBy (fun struct (l, c, _, _, _) -> l, c)
+    let data = ResizeArray<int>()
+    let mutable prevLine = 0
+    let mutable prevChar = 0
+    for struct (line, col, len, tokenType, mods) in sorted do
+        let deltaLine = line - prevLine
+        let deltaChar = if deltaLine = 0 then col - prevChar else col
+        data.Add(deltaLine)
+        data.Add(deltaChar)
+        data.Add(len)
+        data.Add(tokenType)
+        data.Add(mods)
+        prevLine <- line
+        prevChar <- col
+    data |> Seq.toArray
+
+let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
     let entityOpt =
         game.AllEntities()
         |> Seq.tryPick (fun struct (e, _) ->
@@ -218,6 +310,17 @@ let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) 
             prevLine <- line
             prevChar <- col
         data |> Seq.toArray
+
+let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) =
+    let isShaderFile (path: string) =
+        let ext = System.IO.Path.GetExtension(path)
+        ext.Equals(".shader", System.StringComparison.OrdinalIgnoreCase) || ext.Equals(".fxh", System.StringComparison.OrdinalIgnoreCase)
+        
+    if isShaderFile filePath then
+        computeShaderTokens game filePath fileText
+    else
+        computeScriptTokens game filePath fileText
+
 
 //──Diagnostic freshness state machine──────────────────────────────────────────────────────
 // After AI writes the file, it uses epoch + freshness to determine whether the current diagnosis corresponds to the latest file version

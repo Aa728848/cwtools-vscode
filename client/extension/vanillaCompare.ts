@@ -98,9 +98,24 @@ const LANG_TO_CACHE_KEY: Record<string, string> = {
     ck3: 'cache.ck3', vic3: 'cache.vic3', eu5: 'cache.eu5',
 };
 
+function normalizeParadoxRelativeDir(fsPath: string): string {
+    const normalized = fsPath.replace(/\\/g, '/');
+    const parts = normalized.split('/');
+    const standardDirs = new Set([
+        'common', 'events', 'gfx', 'interface', 'localisation', 'localization',
+        'map', 'history', 'decisions', 'missions', 'flags', 'prescripted_countries'
+    ]);
+    for (let i = 0; i < parts.length; i++) {
+        if (standardDirs.has(parts[i]!.toLowerCase())) {
+            return parts.slice(i).join('/');
+        }
+    }
+    return '';
+}
+
 function getGamePath(languageId: string): string | null {
     let targetLang = languageId;
-    if (targetLang === 'pdxshader') {
+    if (!LANG_TO_CACHE_KEY[targetLang]) {
         const possibleGames = ['stellaris', 'hoi4', 'eu4', 'ck3', 'vic3', 'imperator', 'ck2', 'vic2', 'eu5'];
         
         // 1. Try to infer the game from the workspace .cwtools rules configuration folders
@@ -112,14 +127,14 @@ function getGamePath(languageId: string): string | null {
                     break;
                 }
             }
-            if (targetLang !== 'pdxshader') break;
+            if (targetLang !== languageId) break;
         }
 
         // 2. Try to infer from visible text editors with a known Paradox language ID
-        if (targetLang === 'pdxshader') {
+        if (targetLang === languageId) {
             for (const editor of vs.window.visibleTextEditors) {
                 const lang = editor.document.languageId;
-                if (lang && lang !== 'pdxshader' && LANG_TO_CACHE_KEY[lang]) {
+                if (lang && lang !== languageId && LANG_TO_CACHE_KEY[lang]) {
                     targetLang = lang;
                     break;
                 }
@@ -127,7 +142,7 @@ function getGamePath(languageId: string): string | null {
         }
 
         // 3. Try to locate the vanilla path that actually contains a 'gfx/FX' folder
-        if (targetLang === 'pdxshader') {
+        if (targetLang === languageId) {
             const config = vs.workspace.getConfiguration('cwtools');
             for (const game of possibleGames) {
                 const cacheKey = LANG_TO_CACHE_KEY[game];
@@ -144,7 +159,7 @@ function getGamePath(languageId: string): string | null {
         }
 
         // 4. Default fallback
-        if (targetLang === 'pdxshader') {
+        if (targetLang === languageId) {
             targetLang = 'stellaris';
         }
     }
@@ -344,8 +359,11 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
                 if (!modBlock) return;
 
-                const relPath = vs.workspace.asRelativePath(uri, false);
-                const relDir = path.dirname(relPath);
+                let relDir = normalizeParadoxRelativeDir(path.dirname(uri.fsPath));
+                if (!relDir) {
+                    const relPath = vs.workspace.asRelativePath(uri, false);
+                    relDir = path.dirname(relPath);
+                }
 
                 // Build vanilla block index for the directory
                 const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
@@ -406,7 +424,10 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
 
                 const idKeys = getEventLikeKeys(langId);
                 const relPath = vs.workspace.asRelativePath(doc.uri, false);
-                const relDir = path.dirname(relPath);
+                let relDir = normalizeParadoxRelativeDir(path.dirname(doc.uri.fsPath));
+                if (!relDir) {
+                    relDir = path.dirname(relPath);
+                }
                 const ext = path.extname(doc.uri.fsPath).toLowerCase();
                 const modBlocks = findTopLevelBlocks(doc.getText(), idKeys);
 
@@ -486,6 +507,186 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 setTimeout(() => {
                     try { fs.unlinkSync(vanillaTmpPath); } catch { /* */ }
                 }, 120_000);
+            }
+        )
+    );
+
+    // ── Command: Block-level migration (right-click context menu) ────────
+    context.subscriptions.push(
+        vs.commands.registerCommand('cwtools.vanillaCompare.migrateBlockFromVanilla',
+            async (uri?: vs.Uri, startLine?: number, endLine?: number, key?: string) => {
+                let modBlock: PdxBlock | null = null;
+                const editor = vs.window.activeTextEditor;
+
+                if (!uri || startLine == null || !key) {
+                    if (!editor) return;
+                    uri = editor.document.uri;
+                    const doc = editor.document;
+                    const idKeys = getEventLikeKeys(doc.languageId);
+                    const blocks = findTopLevelBlocks(doc.getText(), idKeys);
+                    modBlock = findEnclosingBlock(blocks, editor.selection.active.line);
+                    if (!modBlock) {
+                        vs.window.showInformationMessage('光标不在任何代码块内');
+                        return;
+                    }
+                    startLine = modBlock.startLine;
+                    endLine = modBlock.endLine;
+                    key = modBlock.key;
+                }
+
+                const doc = await vs.workspace.openTextDocument(uri);
+                const langId = doc.languageId;
+                const ext = path.extname(doc.uri.fsPath).toLowerCase();
+                const vanillaRoot = getGamePath(langId);
+                if (!vanillaRoot) {
+                    vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');
+                    return;
+                }
+
+                const idKeys = getEventLikeKeys(langId);
+
+                if (!modBlock) {
+                    const blocks = findTopLevelBlocks(doc.getText(), idKeys);
+                    modBlock = blocks.find(b => b.startLine === startLine && b.key === key) ?? null;
+                }
+                if (!modBlock) return;
+
+                let relDir = normalizeParadoxRelativeDir(path.dirname(uri.fsPath));
+                if (!relDir) {
+                    const relPath = vs.workspace.asRelativePath(uri, false);
+                    relDir = path.dirname(relPath);
+                }
+
+                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
+                const identity = blockIdentity(modBlock, idKeys);
+                if (!identity) {
+                    vs.window.showInformationMessage(`无法确定当前代码块的唯一标识（缺少 id 或 name）`);
+                    return;
+                }
+
+                const match = vanillaIndex.get(identity);
+                if (!match) {
+                    vs.window.showInformationMessage(`原版中未找到代码块: ${identity}`);
+                    return;
+                }
+
+                if (modBlock.content === match.block.content) {
+                    vs.window.showInformationMessage(`当前代码块已与原版内容一致`);
+                    return;
+                }
+
+                const edit = new vs.WorkspaceEdit();
+                const endLineText = doc.lineAt(endLine!).text;
+                const range = new vs.Range(startLine!, 0, endLine!, endLineText.length);
+                edit.replace(uri, range, match.block.content);
+
+                const success = await vs.workspace.applyEdit(edit);
+                if (success) {
+                    vs.window.showInformationMessage(`已成功从原版迁移代码块: ${identity}`);
+                } else {
+                    vs.window.showErrorMessage(`迁移代码块失败`);
+                }
+            }
+        )
+    );
+
+    // ── Command: File-level bulk interactive migration (editor title bar) ─
+    context.subscriptions.push(
+        vs.commands.registerCommand('cwtools.vanillaCompare.migrateChangedFromVanilla',
+            async () => {
+                const editor = vs.window.activeTextEditor;
+                if (!editor) return;
+                const doc = editor.document;
+                const langId = doc.languageId;
+                const vanillaRoot = getGamePath(langId);
+                if (!vanillaRoot) {
+                    vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');
+                    return;
+                }
+
+                const idKeys = getEventLikeKeys(langId);
+                const relPath = vs.workspace.asRelativePath(doc.uri, false);
+                let relDir = normalizeParadoxRelativeDir(path.dirname(doc.uri.fsPath));
+                if (!relDir) {
+                    relDir = path.dirname(relPath);
+                }
+                const ext = path.extname(doc.uri.fsPath).toLowerCase();
+                const modBlocks = findTopLevelBlocks(doc.getText(), idKeys);
+
+                const vanillaIndex = await buildVanillaBlockIndex(vanillaRoot, relDir, idKeys, ext);
+
+                const changedBlocks: { modBlock: PdxBlock; vanillaBlock: PdxBlock; identity: string }[] = [];
+
+                for (const modBlock of modBlocks) {
+                    const identity = blockIdentity(modBlock, idKeys);
+                    if (!identity) continue;
+
+                    const match = vanillaIndex.get(identity);
+                    if (!match) continue;
+
+                    if (modBlock.content !== match.block.content) {
+                        changedBlocks.push({
+                            modBlock,
+                            vanillaBlock: match.block,
+                            identity
+                        });
+                    }
+                }
+
+                if (changedBlocks.length === 0) {
+                    vs.window.showInformationMessage('当前文件中所有匹配块已与原版内容一致');
+                    return;
+                }
+
+                const items = changedBlocks.map(item => {
+                    const linesChanged = item.modBlock.endLine - item.modBlock.startLine + 1;
+                    return {
+                        label: item.identity,
+                        description: `行: ${item.modBlock.startLine + 1}-${item.modBlock.endLine + 1} (${linesChanged}行)`,
+                        picked: true,
+                        item
+                    };
+                });
+
+                const selectedItems = await vs.window.showQuickPick(items, {
+                    canPickMany: true,
+                    placeHolder: '选择要从原版迁移的代码块（默认全选）',
+                    ignoreFocusOut: true
+                });
+
+                if (!selectedItems || selectedItems.length === 0) {
+                    return;
+                }
+
+                if (selectedItems.length >= 10) {
+                    const confirm = await vs.window.showWarningMessage(
+                        `确认要从原版迁移这 ${selectedItems.length} 个代码块吗？这将会覆盖当前文件中的对应内容。`,
+                        { modal: true },
+                        '继续迁移'
+                    );
+                    if (confirm !== '继续迁移') {
+                        return;
+                    }
+                }
+
+                // 从后往前排序，避免行偏移影响
+                selectedItems.sort((a, b) => b.item.modBlock.startLine - a.item.modBlock.startLine);
+
+                const edit = new vs.WorkspaceEdit();
+                for (const selected of selectedItems) {
+                    const modBlock = selected.item.modBlock;
+                    const vanillaBlock = selected.item.vanillaBlock;
+                    const endLineText = doc.lineAt(modBlock.endLine).text;
+                    const range = new vs.Range(modBlock.startLine, 0, modBlock.endLine, endLineText.length);
+                    edit.replace(doc.uri, range, vanillaBlock.content);
+                }
+
+                const success = await vs.workspace.applyEdit(edit);
+                if (success) {
+                    vs.window.showInformationMessage(`已成功从原版迁移 ${selectedItems.length} 个代码块`);
+                } else {
+                    vs.window.showErrorMessage(`批量迁移代码块失败`);
+                }
             }
         )
     );

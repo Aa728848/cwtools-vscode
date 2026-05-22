@@ -115,6 +115,11 @@
 					"command": "cwtools.vanillaCompare.fileDiff",
 					"when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
 					"group": "navigation"
+				},
+				{
+					"command": "cwtools.vanillaCompare.migrateChangedFromVanilla",
+					"when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
+					"group": "navigation@3"
 				}
 			],
 			"editor/context": [
@@ -122,6 +127,11 @@
 					"command": "cwtools.vanillaCompare.diff",
 					"when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
 					"group": "cwtools@1"
+				},
+				{
+					"command": "cwtools.vanillaCompare.migrateBlockFromVanilla",
+					"when": "resourceExtname == .txt || resourceExtname == .shader || resourceExtname == .fxh",
+					"group": "cwtools@2"
 				},
 				{
 					"command": "cwtools.ai.sendSelectionToChat",
@@ -274,6 +284,17 @@
 				"title": "%commands.cwtools.vanillaCompare.fileDiff.title%",
 				"category": "cwtools",
 				"icon": "$(diff-multiple)"
+			},
+			{
+				"command": "cwtools.vanillaCompare.migrateBlockFromVanilla",
+				"title": "%commands.cwtools.vanillaCompare.migrateBlockFromVanilla.title%",
+				"category": "cwtools"
+			},
+			{
+				"command": "cwtools.vanillaCompare.migrateChangedFromVanilla",
+				"title": "%commands.cwtools.vanillaCompare.migrateChangedFromVanilla.title%",
+				"category": "cwtools",
+				"icon": "$(pass-filled)"
 			},
 			{
 				"command": "cwtools.previewEntity",

@@ -36,6 +36,10 @@
     "comments": {
       "patterns": [
         {
+          "name": "comment.line.section.pdx-shader",
+          "match": "#\\s*S\\s+.*$"
+        },
+        {
           "name": "comment.line.double-slash.pdx-shader",
           "match": "//.*$"
         },
@@ -67,6 +71,18 @@
           },
           "contentName": "source.hlsl",
           "patterns": [
+            {
+              "name": "support.variable.readwrite.hlsl.pdx",
+              "match": "\\b(WorldMatrix|ViewMatrix|ProjectionMatrix|ViewProjectionMatrix|InvViewMatrix|ShadowProjectionMatrix|ShadowMatrix|CameraPosition|CameraDirection|HdrRange_Time_ClipHeight|LightPosition|LightDirection|SunColor|AmbientColor|vPosition|vPos|vNormal|vTangent|vBitangent|vSphere|vUV|vUV0|vUV1|vObjectNormal|vBoneWeight|vBoneIndex|vSkinnedPosition|vSkinnedNormal|vSkinnedTangent|vSkinnedBitangent|vOffset|vCamPos|vCamLookAtDir|vCamRightDir|vCamUpDir|Transform|ViewProjectionMatrix_Duplicate)\\b"
+            },
+            {
+              "name": "support.variable.other.hlsl.pdx",
+              "match": "\\b(scrollingSpeed|scrollingUV|matBones|vUVAnimationDir|vUVAnimationTime|vBloomFactor|vDamage|PrimaryColor|AtmosphereColor|AtmosphereIntensity|AtmosphereWidth|vPlanetDissolveTime|vPlanetDissolveColorMult|vProgressBarValue|vHPBarPadding|vHealth|vAlphaOverrideMult|vConstructionProgress|vAuraColor|vAuraRadius|LavaBrightColor|LavaHotStoneColor|LavaColdStoneColor|StarAtmosphereIntensity|StarAtmosphereWidth|StarAtmosphereColor|WPODirection|WPOSpeed|OffsetStrength|WPOScale|WPOBigScale|WPOTime|ObjectPos|ObjectDir|ObjectScale|vOverValue|vDownValue|vSelectedValue|vIntelValue|Sensor|Colonized|vEmissiveRecolorCrunch|vEmissiveRecolorCrunch_Construction|ConstructionColor|PrimaryColor_Construction|PortraitScale|PortraitMipLevel|CustomDiffuseTexture|FlowMapIntensity|HueShift|UVStep|Glossiness_|Specular_|Metalness_|vNumLoops|vTimePerLoop|vObjectTime|LavaNoise|LavaDiffuse|StoneDiffuse|NormalMap|SpecularMap|Time|SystemLightPosRadius|SystemLightColorFalloff|Erosion|BARPrimaryColor|ProgressBarPrimaryColor|CubemapIntensity|ShipVars|DiffuseMap|CustomTexture|CustomTexture2|LightDataMap|LightIndexMap|WPOTexture|EnvironmentMap|PortraitClothes|PortraitHair|PortraitCharacter|PortraitEvolutionDecal)\\b"
+            },
+            {
+              "name": "support.function.hlsl.pdx",
+              "match": "\\b(CastTo3x3|Create3x3|GetMatrixData|tex2Dlod0)\\b"
+            },
             {
               "include": "source.hlsl"
             }
@@ -185,6 +201,10 @@
           "begin": "\"",
           "end": "\"",
           "patterns": [
+            {
+              "name": "support.constant.state.pdx-shader",
+              "match": "\\b(SRC_ALPHA|INV_SRC_ALPHA|ONE|ZERO|SRC_COLOR|INV_SRC_COLOR|DEST_ALPHA|INV_DEST_ALPHA|DEST_COLOR|INV_DEST_COLOR|RED|GREEN|BLUE|ALPHA|RED\\|GREEN\\|BLUE|RED\\|GREEN\\|BLUE\\|ALPHA|none|cw|ccw|CULL_NONE|CULL_BACK|CULL_FRONT|solid|wireframe|FILL_SOLID|FILL_WIREFRAME|DEPTH_WRITE_ALL|DEPTH_WRITE_ZERO)\\b"
+            },
             {
               "name": "constant.character.escape.pdx-shader",
               "match": "\\\\."

@@ -116,6 +116,8 @@
   "configuration.cwtools.ai.performance.includeFullSmallFiles.description": "对 100 行以下当前文件注入完整内容，而不是文件头和局部上下文。",
   "commands.cwtools.vanillaCompare.diff.title": "与原版对比代码块",
   "commands.cwtools.vanillaCompare.fileDiff.title": "与原版对比文件",
+  "commands.cwtools.vanillaCompare.migrateBlockFromVanilla.title": "从原版迁移当前代码块",
+  "commands.cwtools.vanillaCompare.migrateChangedFromVanilla.title": "从原版迁移所有变更块",
   "commands.cwtools.previewEntity.title": "预览模型资产",
   "configuration.cwtools.vanillaCompare.showGutterDecorations.description": "在编辑器行号区域显示与原版不同的行级差异装饰。使用与 Git SCM 不同的颜色样式以作区分。"
 }

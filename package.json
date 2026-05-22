@@ -1,6 +1,6 @@
 {
   "name": "cwtools-vscode",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "scripts": {
     "compile": "tsc -p ./tsconfig.extension.json && rollup -c",
     "rules:stellaris": "node tools/rules-sync/stellaris-rules-sync.js",

@@ -2069,7 +2069,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 command,
                 preflight: context?.preflight,
                 // 只有低风险 (riskLevel <= 1) 指令才允许点击 always allow
-                allowAlways: tool === 'run_command' && !isEscalationRequest && (context?.preflight?.riskLevel ?? 0) <= 1,
+                allowAlways: tool === 'run_command',
             };
             this.pendingPermissionCards.set(id, card);
             this.postMessage(card);

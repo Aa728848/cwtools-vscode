@@ -3785,8 +3785,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             `<button class="permission-deny-btn" data-permid="${safeId}">${svgIcon('x')}拒绝</button>`;
             
         if (tool === 'run_command' && allowAlways) {
-            const labelText = preflight && preflight.riskLevel <= 1 ? '一直允许 (只读前缀)' : '一直允许';
-            actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" style="margin-left:auto; font-size:0.8em; opacity:0.9" title="当前会话期间一直允许相同类型的只读指令">${svgIcon('check')}${labelText}</button>`;
+            const isHighRisk = preflight && preflight.riskLevel > 1;
+            const labelText = isHighRisk ? '本次对话一直允许' : (preflight && preflight.riskLevel <= 1 ? '一直允许 (只读前缀)' : '一直允许');
+            const titleText = isHighRisk ? '当前会话期间一直允许相同类型的高风险指令' : '当前会话期间一直允许相同类型的只读指令';
+            actionsHtml += `<button class="permission-always-btn" data-permid="${safeId}" style="margin-left:auto; font-size:0.8em; opacity:0.9" title="${escapeHtml(titleText)}">${svgIcon('check')}${labelText}</button>`;
         }
         actionsHtml += `</div>`;
         

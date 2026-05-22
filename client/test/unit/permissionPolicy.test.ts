@@ -50,6 +50,25 @@ describe('PermissionPolicyStore Unit Tests', () => {
         // Escalation attempt with high risk level (2 > riskMax 1) -> must reject
         expect(store.isApproved('run_command', { CommandLine: 'npm run deploy', Cwd: 'C:/project' }, 2)).to.be.false;
     });
+
+    it('allows high-risk (riskLevel=2) commands when riskMax is configured to 2', () => {
+        const { PermissionPolicyStore } = loadPermissionPolicyModule();
+        const store = PermissionPolicyStore.getInstance();
+        
+        store.addRule({
+            tool: 'run_command',
+            cwdScope: 'C:/project',
+            commandPrefix: ['python'],
+            riskMax: 2,
+            sessionOnly: true
+        });
+
+        // Exact match with riskLevel=2 should pass
+        expect(store.isApproved('run_command', { CommandLine: 'python build.py', Cwd: 'C:/project' }, 2)).to.be.true;
+
+        // Command with higher riskLevel than rule's riskMax (e.g. 3) should still fail
+        expect(store.isApproved('run_command', { CommandLine: 'python build.py', Cwd: 'C:/project' }, 3)).to.be.false;
+    });
 });
 
 function loadPermissionPolicyModule() {

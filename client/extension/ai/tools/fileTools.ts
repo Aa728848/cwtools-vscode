@@ -184,22 +184,29 @@ export class FileToolHandler {
 
     private async resolveAndAuthorizeWrite(filePath: string, toolName: string, context?: import('../types').AgentToolContext): Promise<string> {
         const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), false, context);
-        if (isSecuritySandboxDisabled()) {
-            return resolution.resolved;
+        if (!isSecuritySandboxDisabled()) {
+            if (!resolution.isWithinAnyWorkspace) {
+                throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
+            }
+            if (resolution.scope === 'workspace') {
+                const allowed = await this.requestPermissionWithAbort(
+                    `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                    toolName,
+                    `[ESCALATION] AI requests permission to modify another workspace root: ${resolution.resolved}`,
+                    context,
+                    resolution.resolved
+                );
+                if (!allowed) {
+                    throw new Error(`Access denied: User denied cross-workspace write for '${resolution.resolved}'.`);
+                }
+            }
         }
-        if (!resolution.isWithinAnyWorkspace) {
-            throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
-        }
-        if (resolution.scope === 'workspace') {
-            const allowed = await this.requestPermissionWithAbort(
-                `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                toolName,
-                `[ESCALATION] AI requests permission to modify another workspace root: ${resolution.resolved}`,
-                context,
-                resolution.resolved
-            );
-            if (!allowed) {
-                throw new Error(`Access denied: User denied cross-workspace write for '${resolution.resolved}'.`);
+        // 🌟 ReadTracker 写门禁安全拦截 (D1)
+        const readTracker = (context?.agentRunner as any)?.readTracker;
+        if (readTracker) {
+            const check = readTracker.canWrite(resolution.resolved);
+            if (!check.ok) {
+                throw new Error(`ReadTracker Blocked: ${check.reason}. You must read the file context first using read_file or get_file_context. If you have already read it, the file might have been modified externally; please perform a fresh read_file to synchronize, and then retry your edit.`);
             }
         }
         return resolution.resolved;
@@ -323,6 +330,8 @@ export class FileToolHandler {
         }
 
         const finalContent = shouldAddBom ? '\uFEFF' + content : content;
+        const readTracker = (context?.agentRunner as any)?.readTracker;
+        if (readTracker) { readTracker.markWritten(filePath); }
         const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
         if (vfsOverlay) {
             vfsOverlay.set(filePath, finalContent);
@@ -336,6 +345,8 @@ export class FileToolHandler {
     async readFile(args: { file: string; startLine?: number; endLine?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
             args.file = this.resolveAndAssertInWorkspace(args.file, context);
+            const readTracker = (context?.agentRunner as any)?.readTracker;
+            if (readTracker) { readTracker.markRead(args.file); }
 
             const ext = path.extname(args.file).toLowerCase();
             const IMAGE_EXTS = ['.dds', '.tga', '.png', '.jpg', '.jpeg', '.bmp'];

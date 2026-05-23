@@ -1051,6 +1051,7 @@ export interface AgentStep {
         totalTokens: number;
         hitRate: number;
         savedCostCny: number;
+        cacheCreationTokens?: number;
     };
     content: string;
     toolName?: AgentToolName | string;

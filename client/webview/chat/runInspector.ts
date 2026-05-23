@@ -124,6 +124,49 @@ export function formatEventPayload(event: any, i18n?: ChatI18nText): string {
         return html;
     }
 
+    if (event.type === 'cache_stats') {
+        const payload = event.payload || {};
+        const cs = event.cacheStats || payload.cacheStats || {};
+        const cached = cs.cachedTokens || 0;
+        const created = cs.cacheCreationTokens || 0;
+        const total = cs.totalTokens || 0;
+        const miss = Math.max(0, total - cached - created);
+
+        const cachedPct = total > 0 ? (cached / total) * 100 : 0;
+        const createdPct = total > 0 ? (created / total) * 100 : 0;
+        const missPct = total > 0 ? (miss / total) * 100 : 0;
+
+        let html = `<div class="inspector-cache-stats">`;
+        html += `<h4>${svgIcon('sparkles')} 前缀缓存效能审计</h4>`;
+        
+        // 三柱图
+        html += `<div class="inspector-section">`;
+        html += `<strong>缓存效能分布:</strong>`;
+        html += `<div class="cache-sparkline" style="max-width: 100%; height: 10px; margin: 8px 0;" title="缓存命中: ${cached} | 缓存新建: ${created} | 穿透/未命中: ${miss}">`;
+        if (cachedPct > 0) html += `<div class="spark-bar spark-hit" style="width: ${cachedPct}%"></div>`;
+        if (createdPct > 0) html += `<div class="spark-bar spark-create" style="width: ${createdPct}%"></div>`;
+        if (missPct > 0) html += `<div class="spark-bar spark-miss" style="width: ${missPct}%"></div>`;
+        html += `</div>`;
+        html += `</div>`;
+
+        // 细节列表
+        html += `<div class="inspector-section">`;
+        html += `<strong>详细统计:</strong>`;
+        html += `<ul>`;
+        html += `<li><strong>缓存命中 (Hit):</strong> <code style="color:var(--vscode-charts-green); font-weight:bold;">${cached} tokens</code> (${cachedPct.toFixed(1)}%)</li>`;
+        html += `<li><strong>缓存新建 (Create):</strong> <code style="color:var(--vscode-charts-blue); font-weight:bold;">${created} tokens</code> (${createdPct.toFixed(1)}%)</li>`;
+        html += `<li><strong>缓存穿透 (Miss):</strong> <code style="color:var(--vscode-charts-orange); font-weight:bold;">${miss} tokens</code> (${missPct.toFixed(1)}%)</li>`;
+        html += `<li><strong>总上下文大小:</strong> <code>${total} tokens</code></li>`;
+        html += `<li><strong>本次推断成本节省:</strong> <span class="cache-savings" style="color:var(--vscode-charts-green); font-weight:bold;">¥${(cs.savedCostCny || 0).toFixed(6)}</span></li>`;
+        html += `</ul>`;
+        html += `</div>`;
+
+        // 原生日志内容
+        html += `<div class="inspector-section"><strong>审计日志:</strong><pre>${escapeHtml(event.content || '')}</pre></div>`;
+        html += `</div>`;
+        return html;
+    }
+
     // Default: JSON dump
     return `<pre>${escapeHtml(stringifyInspectorPreview(payload))}</pre>`;
 }

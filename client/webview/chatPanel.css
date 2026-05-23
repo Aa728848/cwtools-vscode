@@ -1424,3 +1424,82 @@ body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
     from { transform: translateX(100%); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
 }
+
+/* ⚡ D3 Cache Sparkline UI Styles */
+.special-step.cache_stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--vscode-editor-inactiveSelectionBackground, rgba(0, 122, 255, 0.05));
+    border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.15));
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: 6px 0;
+    font-size: 11px;
+    font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.cache-title {
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+}
+
+.cache-sparkline {
+    display: flex;
+    height: 6px;
+    flex-grow: 1;
+    max-width: 150px;
+    background: var(--vscode-progressBar-background, rgba(128, 128, 128, 0.1));
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 0 4px;
+}
+
+.spark-bar {
+    height: 100%;
+    transition: width 0.3s ease;
+}
+
+.spark-hit {
+    background: var(--vscode-charts-green, #388a34);
+}
+
+.spark-create {
+    background: var(--vscode-charts-blue, #007acc);
+}
+
+.spark-miss {
+    background: var(--vscode-charts-orange, #d97706);
+}
+
+.cache-label-group {
+    display: flex;
+    gap: 4px;
+}
+
+.c-lbl {
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: bold;
+}
+
+.c-lbl.c-hit {
+    background: rgba(56, 138, 52, 0.15);
+    color: var(--vscode-charts-green, #388a34);
+}
+
+.c-lbl.c-create {
+    background: rgba(0, 122, 255, 0.15);
+    color: var(--vscode-charts-blue, #007acc);
+}
+
+.c-lbl.c-miss {
+    background: rgba(217, 119, 6, 0.15);
+    color: var(--vscode-charts-orange, #d97706);
+}
+
+.cache-savings {
+    font-weight: bold;
+    color: var(--vscode-charts-green, #388a34);
+}

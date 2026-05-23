@@ -562,6 +562,7 @@ export class AgentRunner {
                             totalTokens: tokenAccumulator.total,
                             promptTokens: tokenAccumulator.input,
                             completionTokens: tokenAccumulator.output,
+                            cachedTokens: tokenAccumulator.cachedTokens || 0,
                             costCny: tokenAccumulator.estimatedCostCny,
                             iterations: runMetrics.iterations,
                             toolCalls: runMetrics.toolCallCount
@@ -1595,20 +1596,22 @@ export class AgentRunner {
                 tokenAccumulator.cachedTokens = (tokenAccumulator.cachedTokens ?? 0) + cachedTokens;
                 tokenAccumulator.contextWindowTokens = promptTokens;
 
-                // Emit cache hit rate and saved costs for real-time auditing in the UI
-                if (cachedTokens > 0) {
+                // Emit cache hit rate, cache creation, and saved costs for real-time auditing in the UI
+                const cacheCreationTokens = response.usage?.cache_creation_tokens ?? 0;
+                if (cachedTokens > 0 || cacheCreationTokens > 0) {
                     const hitRate = promptTokens > 0 ? (cachedTokens / promptTokens) : 0;
                     const savedCostCny = (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
                     
                     emitStep({
                         type: 'cache_stats',
-                        content: `Prefix Cache Hit: ${cachedTokens} tokens (${(hitRate * 100).toFixed(1)}% hit rate). Saved approx. ¥${savedCostCny.toFixed(4)}.`,
+                        content: `Prefix Cache: Hit ${cachedTokens} tokens (${(hitRate * 100).toFixed(1)}% hit), Created ${cacheCreationTokens} tokens. Saved approx. ¥${savedCostCny.toFixed(4)}.`,
                         timestamp: Date.now(),
                         cacheStats: {
                             cachedTokens,
                             totalTokens: promptTokens,
                             hitRate,
-                            savedCostCny
+                            savedCostCny,
+                            cacheCreationTokens
                         }
                     });
                 }

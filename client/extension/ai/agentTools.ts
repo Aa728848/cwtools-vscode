@@ -246,6 +246,7 @@ export class AgentToolExecutor {
      * to prevent hangs on network filesystems, LSP deadlocks, or unresponsive external services.
      */
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
+        const readTracker = (context?.agentRunner as any)?.readTracker;
         const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
         if (isSubAgent && toolName === 'git_ops') {
             return {
@@ -272,12 +273,6 @@ export class AgentToolExecutor {
             }
         }
 
-        // 🌟 ReadTracker 写门禁拦截器 (T2.2)
-        const runner = context?.agentRunner;
-        const readTracker = (runner as any)?.readTracker;
-        const entry = TOOL_REGISTRY.get(toolName as import('./tools/registry').AgentToolName);
-        const isWrite = entry?.isWrite || false;
-
         // T4.1 — replay short-circuit. When a ReplaySession is attached, serve recorded
         // results from the original run's ledger instead of executing live. Misses
         // fall through to live execution (caller can still validate divergence).
@@ -290,49 +285,6 @@ export class AgentToolExecutor {
             }
             // Miss is recorded inside the session; live execution continues below
             // so the replay doesn't completely fail when the model diverges.
-        }
-
-        if (isWrite && readTracker) {
-            const filesToWrite: string[] = [];
-            const path = require('path');
-            
-            if (toolName === 'write_file' && typeof args.file === 'string') {
-                filesToWrite.push(args.file);
-            } else if (toolName === 'multi_replace_file_content' && typeof args.TargetFile === 'string') {
-                filesToWrite.push(args.TargetFile);
-            } else if (toolName === 'replace_lines' && typeof args.filePath === 'string') {
-                filesToWrite.push(args.filePath);
-            } else if (toolName === 'write_localisation' && typeof args.filePath === 'string') {
-                filesToWrite.push(args.filePath);
-            } else if (toolName === 'write_design_blueprint' && typeof args.filePath === 'string') {
-                filesToWrite.push(args.filePath);
-            } else if (toolName === 'edit_pdx_block' && typeof args.file === 'string') {
-                filesToWrite.push(args.file);
-            } else if (toolName === 'apply_patch' && typeof args.patch === 'string') {
-                const lines = args.patch.split('\n');
-                for (const line of lines) {
-                    if (line.startsWith('+++ b/')) {
-                        const relPath = line.substring(6).trim();
-                        filesToWrite.push(path.resolve(this.workspaceRoot, relPath));
-                    }
-                }
-            }
-
-            for (const file of filesToWrite) {
-                let absPath = file;
-                if (!path.isAbsolute(absPath)) {
-                    absPath = path.resolve(this.workspaceRoot, absPath);
-                }
-                
-                const check = readTracker.canWrite(absPath);
-                if (!check.ok) {
-                    return {
-                        success: false,
-                        error: `ReadTracker Blocked: ${check.reason}`,
-                        hint: `You must read the file context first using read_file or get_file_context. If you have already read it, the file might have been modified externally; please perform a fresh read_file to synchronize, and then retry your edit.`
-                    };
-                }
-            }
         }
 
         let timeout = TOOL_TIMEOUTS[toolName];
@@ -423,35 +375,6 @@ export class AgentToolExecutor {
                 // 🌟 ReadTracker 读写同步与黑板 invalidated 级联（T2.2 & B3）
                 if (readTracker) {
                     const path = require('path');
-                    if (isWrite) {
-                        if (toolName === 'write_file' && typeof args.file === 'string') {
-                            readTracker.markWritten(path.resolve(this.workspaceRoot, args.file));
-                        } else if (toolName === 'multi_replace_file_content' && typeof args.TargetFile === 'string') {
-                            readTracker.markWritten(path.resolve(this.workspaceRoot, args.TargetFile));
-                        } else if (toolName === 'replace_lines' && typeof args.filePath === 'string') {
-                            readTracker.markWritten(path.resolve(this.workspaceRoot, args.filePath));
-                        } else if (toolName === 'write_localisation' && typeof args.filePath === 'string') {
-                            readTracker.markWritten(path.resolve(this.workspaceRoot, args.filePath));
-                        } else if (toolName === 'write_design_blueprint' && typeof args.filePath === 'string') {
-                            readTracker.markWritten(path.resolve(this.workspaceRoot, args.filePath));
-                        } else if (toolName === 'edit_pdx_block' && typeof args.file === 'string') {
-                            readTracker.markWritten(path.resolve(this.workspaceRoot, args.file));
-                        } else if (toolName === 'apply_patch' && typeof args.patch === 'string') {
-                            const lines = args.patch.split('\n');
-                            for (const line of lines) {
-                                if (line.startsWith('+++ b/')) {
-                                    readTracker.markWritten(path.resolve(this.workspaceRoot, line.substring(6).trim()));
-                                }
-                            }
-                        }
-                    } else {
-                        if (toolName === 'read_file' && typeof args.file === 'string') {
-                            readTracker.markRead(path.resolve(this.workspaceRoot, args.file));
-                        } else if (toolName === 'get_file_context' && typeof args.file === 'string') {
-                            readTracker.markRead(path.resolve(this.workspaceRoot, args.file));
-                        }
-                    }
-
                     // 多 Agent 级联失效 (B3)
                     if (toolName === 'merge_results' && result && typeof result === 'object') {
                         const writtenFiles = (result as any).writtenFiles;

@@ -26,6 +26,13 @@ export interface RendererStep {
     permissionId?: string;
     allowAlways?: boolean;
     agentId?: string;
+    cacheStats?: {
+        cachedTokens: number;
+        totalTokens: number;
+        hitRate: number;
+        savedCostCny: number;
+        cacheCreationTokens?: number;
+    };
 }
 
 export interface ClassifiedSteps {
@@ -534,6 +541,39 @@ export function buildAssistantMessageHtml(
         const phase = stepPhase(s.type);
 
         if (phase === 'special') {
+            if (s.type === 'cache_stats' && s.cacheStats) {
+                const cs = s.cacheStats;
+                const cached = cs.cachedTokens || 0;
+                const created = cs.cacheCreationTokens || 0;
+                const total = cs.totalTokens || 0;
+                const miss = Math.max(0, total - cached - created);
+
+                const cachedPct = total > 0 ? (cached / total) * 100 : 0;
+                const createdPct = total > 0 ? (created / total) * 100 : 0;
+                const missPct = total > 0 ? (miss / total) * 100 : 0;
+
+                let statsHtml = `<div class="cache-sparkline" title="缓存命中: ${cached} (${cachedPct.toFixed(1)}%) | 缓存新建: ${created} (${createdPct.toFixed(1)}%) | 穿透/未命中: ${miss} (${missPct.toFixed(1)}%)">`;
+                if (cachedPct > 0) statsHtml += `<div class="spark-bar spark-hit" style="width: ${cachedPct}%"></div>`;
+                if (createdPct > 0) statsHtml += `<div class="spark-bar spark-create" style="width: ${createdPct}%"></div>`;
+                if (missPct > 0) statsHtml += `<div class="spark-bar spark-miss" style="width: ${missPct}%"></div>`;
+                statsHtml += `</div>`;
+
+                let labelHtml = `<span class="cache-label-group">`;
+                if (cached > 0) labelHtml += `<span class="c-lbl c-hit">命 ${cached}</span>`;
+                if (created > 0) labelHtml += `<span class="c-lbl c-create">新 ${created}</span>`;
+                if (miss > 0) labelHtml += `<span class="c-lbl c-miss">漏 ${miss}</span>`;
+                labelHtml += `</span>`;
+
+                html += `<div class="special-step cache_stats">` +
+                            `<span class="ss-icon">⚡</span> ` +
+                            `<span class="cache-title">缓存效能</span>` +
+                            `${statsHtml}` +
+                            `${labelHtml}` +
+                            `<span class="cache-savings" style="margin-left:auto;">省 ¥${(cs.savedCostCny || 0).toFixed(4)}</span>` +
+                        `</div>`;
+                continue;
+            }
+
             // Special steps render inline without breaking flow
             let icon = '⚙';
             if (s.type === 'error') icon = '✗';

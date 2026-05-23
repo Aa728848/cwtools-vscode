@@ -363,7 +363,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     <div class="artifact-item-title">${m.runs.runId}: ${escapeHtml(run.runId)}</div>
                     <div class="artifact-item-summary">${m.runs.status}: <span class="run-status-pill run-status-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span></div>
                     <div class="run-metrics-grid">
-                        <div class="run-metric-cell">${m.runs.metrics.tokens}: <strong>${metrics.totalTokens}</strong> (${metrics.promptTokens} in / ${metrics.completionTokens} out)</div>
+                        <div class="run-metric-cell">${m.runs.metrics.tokens}: <strong>${metrics.totalTokens}</strong> (${metrics.promptTokens} in / ${metrics.completionTokens} out${metrics.cachedTokens ? (locale === 'zh-cn' ? `, ⚡ ${metrics.cachedTokens} 缓存` : `, ⚡ ${metrics.cachedTokens} cached`) : ''})</div>
                         <div class="run-metric-cell">${m.runs.metrics.cost}: <strong>¥${metrics.costCny?.toFixed(4) || '0.0000'}</strong></div>
                         <div class="run-metric-cell">${m.runs.metrics.tools}: <strong>${metrics.toolCalls} ${m.runs.metrics.calls}</strong></div>
                     </div>

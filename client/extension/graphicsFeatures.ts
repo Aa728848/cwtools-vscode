@@ -135,6 +135,75 @@ class ImageHoverProvider implements vs.HoverProvider {
     }
 }
 
+// ─── Image Path Ctrl+Click → Reveal in Explorer ─────────────────────────────
+
+const REVEAL_CMD = 'cwtools.revealImageInExplorer';
+
+/**
+ * DocumentLinkProvider for image file paths (e.g. textureFile = "gfx/...").
+ * Ctrl+Click on the path opens the **file** in the OS file explorer.
+ * If the resolved file lives in the mod workspace, the mod copy is revealed;
+ * if it lives in the vanilla game directory, the vanilla copy is revealed.
+ *
+ * Performance notes:
+ * - `provideDocumentLinks` does regex-only scanning (zero I/O).
+ * - `resolveDocumentLink` does the actual path resolution (fs.existsSync)
+ *   and is only called when the user hovers / clicks a specific link.
+ */
+class ImagePathLinkProvider implements vs.DocumentLinkProvider {
+    provideDocumentLinks(document: vs.TextDocument): vs.DocumentLink[] {
+        const links: vs.DocumentLink[] = [];
+        const lineCount = document.lineCount;
+
+        for (let i = 0; i < lineCount; i++) {
+            const lineText = document.lineAt(i).text;
+
+            // Quoted paths: textureFile = "gfx/foo.dds"
+            const quotedRe = new RegExp(IMAGE_PATH_QUOTED_RE.source, 'gi');
+            let m: RegExpExecArray | null;
+            while ((m = quotedRe.exec(lineText)) !== null) {
+                const start = m.index + 1; // skip opening quote
+                const end = start + m[1]!.length;
+                const link = new vs.DocumentLink(
+                    new vs.Range(i, start, i, end),
+                );
+                link.tooltip = '在资源管理器中显示此文件 (Ctrl+Click)';
+                links.push(link);
+            }
+
+            // Unquoted paths: textureFile = gfx/foo.dds
+            const unquotedRe = new RegExp(IMAGE_PATH_UNQUOTED_RE.source, 'gi');
+            while ((m = unquotedRe.exec(lineText)) !== null) {
+                const full = m[0]!;
+                const p = m[1]!;
+                const pStart = m.index + full.indexOf(p);
+                const pEnd = pStart + p.length;
+                const link = new vs.DocumentLink(
+                    new vs.Range(i, pStart, i, pEnd),
+                );
+                link.tooltip = '在资源管理器中显示此文件 (Ctrl+Click)';
+                links.push(link);
+            }
+        }
+        return links;
+    }
+
+    resolveDocumentLink(link: vs.DocumentLink): vs.DocumentLink | null {
+        const doc = vs.window.activeTextEditor?.document;
+        if (!doc) return null;
+
+        const relativePath = doc.getText(link.range);
+        const fullPath = resolveAssetPath(doc, relativePath);
+        if (!fullPath || !fs.existsSync(fullPath)) return null;
+
+        // Build a command URI that calls our registered reveal command
+        link.target = vs.Uri.parse(
+            `command:${REVEAL_CMD}?${encodeURIComponent(JSON.stringify([fullPath]))}`,
+        );
+        return link;
+    }
+}
+
 // ─── GFX Sprite Index ───────────────────────────────────────────────────────
 
 interface GfxEntry {
@@ -691,9 +760,17 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
         { scheme: 'file', pattern: '**/*.asset' },
     ];
 
-    // 1. DDS/TGA image hover preview (file paths)
+    // 0. Command: reveal an image file in the OS file explorer
+    context.subscriptions.push(
+        vs.commands.registerCommand(REVEAL_CMD, (fsPath: string) => {
+            void vs.commands.executeCommand('revealFileInOS', vs.Uri.file(fsPath));
+        }),
+    );
+
+    // 1. DDS/TGA image hover preview + Ctrl+Click → reveal file in OS explorer
     context.subscriptions.push(
         vs.languages.registerHoverProvider(gfxSelector, new ImageHoverProvider()),
+        vs.languages.registerDocumentLinkProvider(gfxSelector, new ImagePathLinkProvider()),
     );
 
     // 2. GFX sprite GoToDefinition + hover image preview

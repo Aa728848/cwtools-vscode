@@ -7,7 +7,7 @@ trigger: always_on
 作为 AI 编程助手 (Antigravity)，在处理本项目（Eddy's Stellaris CWTools）时，你必须严格遵循以下开发规范：
 
 ## 0. 📖 项目理解先行
-- **阅读文档**：在对项目进行任何代码或架构改动前，必须先阅读项目根目录下的 `README.md`、`ARCHITECTURE.md`、`CONTRIBUTING.md` 确保对项目的业务逻辑和架构有充分的理解。
+- **阅读文档**：在对项目进行任何代码或架构改动前，必须先阅读项目根目录下的 `CLAUDE.md`、`ARCHITECTURE.md` 确保对项目的业务逻辑和架构有充分的理解。
 
 ## 1. 🌍 语言与本地化规范
 - **UI 文本**：所有用户可见的 VS Code 界面文本（如信息提示、报错、状态栏）应当考虑中英双语兼容，核心中文文本应存放于统一文件（如 `ai/messages.ts`）。

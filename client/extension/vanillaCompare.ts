@@ -330,10 +330,34 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     if (!editor) return;
                     uri = editor.document.uri;
                     const doc = editor.document;
+                    
+                    const ext = path.extname(uri.fsPath).toLowerCase();
+                    const isShader = ext === '.shader' || ext === '.fxh';
+                    if (isShader) {
+                        vs.window.showInformationMessage('Shader 文件不支持块级对比，已自动为您打开文件级全量对比');
+                        vs.commands.executeCommand('cwtools.vanillaCompare.fileDiff');
+                        return;
+                    }
+
                     const idKeys = getEventLikeKeys(doc.languageId);
                     const blocks = findTopLevelBlocks(doc.getText(), idKeys);
                     modBlock = findEnclosingBlock(blocks, editor.selection.active.line);
                     if (!modBlock) {
+                        const relFilePath = normalizeParadoxRelativeDir(uri.fsPath);
+                        const langId = doc.languageId;
+                        const vanillaRoot = getGamePath(langId);
+                        const vanillaFilePath = (relFilePath && vanillaRoot) ? path.join(vanillaRoot, relFilePath) : null;
+                        if (vanillaFilePath && fs.existsSync(vanillaFilePath)) {
+                            const action = await vs.window.showInformationMessage(
+                                '当前光标不在任何有效的 Paradox 代码块内，是否要进行文件级全量对比？',
+                                '打开全量对比'
+                            );
+                            if (action === '打开全量对比') {
+                                vs.commands.executeCommand('cwtools.vanillaCompare.fileDiff');
+                            }
+                            return;
+                        }
+
                         vs.window.showInformationMessage('光标不在任何代码块内');
                         return;
                     }
@@ -345,6 +369,14 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const doc = await vs.workspace.openTextDocument(uri);
                 const langId = doc.languageId;
                 const ext = path.extname(doc.uri.fsPath).toLowerCase();
+                
+                const isShader = ext === '.shader' || ext === '.fxh';
+                if (isShader) {
+                    vs.window.showInformationMessage('Shader 文件不支持块级对比，已自动为您打开文件级全量对比');
+                    vs.commands.executeCommand('cwtools.vanillaCompare.fileDiff');
+                    return;
+                }
+
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
                     vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');
@@ -429,6 +461,20 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     relDir = path.dirname(relPath);
                 }
                 const ext = path.extname(doc.uri.fsPath).toLowerCase();
+
+                // 优先使用 Git 风格的物理同名文件进行全量直接比对
+                const relFilePath = normalizeParadoxRelativeDir(doc.uri.fsPath);
+                const vanillaFilePath = relFilePath ? path.join(vanillaRoot, relFilePath) : null;
+                if (vanillaFilePath && fs.existsSync(vanillaFilePath)) {
+                    await vs.commands.executeCommand('vscode.diff',
+                        vs.Uri.file(vanillaFilePath), doc.uri,
+                        `Vanilla vs Mod (Full): ${path.basename(doc.uri.fsPath)}`,
+                        { preview: true, viewColumn: vs.ViewColumn.Beside }
+                    );
+                    return;
+                }
+
+                // 只有原版无同名物理文件时，才 Fallback 使用 block 对齐拼装对比
                 const modBlocks = findTopLevelBlocks(doc.getText(), idKeys);
 
                 // Build vanilla block index for the directory
@@ -521,6 +567,14 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 if (!uri || startLine == null || !key) {
                     if (!editor) return;
                     uri = editor.document.uri;
+                    
+                    const ext = path.extname(uri.fsPath).toLowerCase();
+                    const isShader = ext === '.shader' || ext === '.fxh';
+                    if (isShader) {
+                        vs.window.showWarningMessage('Shader 文件不支持块级迁移');
+                        return;
+                    }
+
                     const doc = editor.document;
                     const idKeys = getEventLikeKeys(doc.languageId);
                     const blocks = findTopLevelBlocks(doc.getText(), idKeys);
@@ -537,6 +591,13 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 const doc = await vs.workspace.openTextDocument(uri);
                 const langId = doc.languageId;
                 const ext = path.extname(doc.uri.fsPath).toLowerCase();
+
+                const isShader = ext === '.shader' || ext === '.fxh';
+                if (isShader) {
+                    vs.window.showWarningMessage('Shader 文件不支持块级迁移');
+                    return;
+                }
+
                 const vanillaRoot = getGamePath(langId);
                 if (!vanillaRoot) {
                     vs.window.showWarningMessage('未配置原版游戏路径，请在设置中配置 cwtools.cache.*');

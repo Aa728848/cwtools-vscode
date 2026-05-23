@@ -47,44 +47,54 @@
 以下为项目的整体模块交互与数据流拓扑，清晰展现了各层级之间的隔离屏障与通信管道：
 
 ```mermaid
-flowchart TD
-    subgraph VSCode [VS Code Extension Host]
-        Extension["插件主入口\nextension.ts"]
-        GP["游戏 Profile 注册表\ngameProfiles.ts"]
-        IDX["本地化与符号索引层\nIndexService.ts"]
-        AI["AI 协处理器核心\nagentRunner.ts"]
-        Queue["写入安全锁队列\nPartitionedWriteQueue"]
+flowchart LR
+    %% 前端沙盒层
+    subgraph Webview ["Webview 隔离前端 (HTML / JS / Three.js)"]
+        UI["智能对话 & 任务看板\nchatPanel.ts"]
+        Canvas["GUI 实时画布预览\nguiPreview.ts"]
+        TD3D["星系/实体 3D 渲染\nentityPreview.ts"]
+        Graph["科技/事件依赖拓扑\ntechTreePreview.ts"]
     end
 
-    subgraph Webview [Webview 隔离沙盒 (Rollup 捆绑)]
-        UI["Chat & Manager UI"]
-        Canvas["GUI 实时画布"]
-        3D["恒星系 / Asset 3D 渲染"]
-        Graph["科技/事件依赖图"]
+    %% VS Code 宿主层
+    subgraph VSCode ["VS Code 扩展宿主 (运行中枢与 AI 协处理器)"]
+        Extension["命令注册与激活\nextension.ts"]
+        GP["游戏 Profile 注册\ngameProfiles.ts"]
+        IDX["本地化与全局索引\nIndexService.ts"]
+        AI["多 Agent 协同核心\nagentRunner.ts"]
+        Queue["安全锁写入队列\nPartitionedWriteQueue"]
     end
 
-    subgraph Backend [.NET 9 / F# 语言服务器]
-        LSP["CWTools LSP Server\nsrc/Main.exe"]
-        Lib["CWTools F# 库\nsubmodules/cwtools"]
+    %% .NET 编译器后端
+    subgraph Backend [".NET 9 / F# 编译器后端"]
+        LSP["LSP 极速解析器\nsrc/Main.exe"]
+        Lib["CWTools F# 解析库\nsubmodules/cwtools"]
     end
 
-    %% 连接关系
+    %% 前端与宿主双向事件管道
+    UI <-->|postMessage 事件流| Extension
+    Canvas <-->|postMessage 事件流| Extension
+    TD3D <-->|postMessage 事件流| Extension
+    Graph <-->|postMessage 事件流| Extension
+
+    %% 宿主内部协同
     Extension --> GP
     Extension --> IDX
     Extension --> AI
     AI --> IDX
     AI --> Queue
-    Queue -->| sorted path locks| IDX
+    Queue -->|顺序写入锁保护| IDX
 
-    Extension <-->|postMessage \n 双向事件管道| UI & Canvas & 3D & Graph
-    Extension <-->|LSP JSON-RPC \n over stdio| LSP
+    %% 宿主与后端语言服务通信
+    Extension <-->|LSP JSON-RPC 通信| LSP
     LSP --> Lib
-    
+
+    %% 样式表定制
     classDef vscode fill:#1e1e24,stroke:#007acc,stroke-width:2px,color:#fff;
-    classDef webview fill:#2d2d30,stroke:#3c3c3c,stroke-width:2px,color:#fff;
+    classDef webview fill:#2d2d30,stroke:#2b8a3e,stroke-width:2px,color:#fff;
     classDef backend fill:#171717,stroke:#512bd4,stroke-width:2px,color:#fff;
     class VSCode,Extension,GP,IDX,AI,Queue vscode;
-    class Webview,UI,Canvas,3D,Graph webview;
+    class Webview,UI,Canvas,TD3D,Graph webview;
     class Backend,LSP,Lib backend;
 ```
 

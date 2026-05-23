@@ -135,67 +135,6 @@ class ImageHoverProvider implements vs.HoverProvider {
     }
 }
 
-// ─── Image Path Ctrl+Click → Reveal in Explorer ─────────────────────────────
-
-/**
- * Extracts the image-path under the cursor position.
- * Returns only the relative path or null.
- */
-function extractImagePathAt(
-    lineText: string,
-    position: vs.Position,
-): string | null {
-    // Quoted paths: "gfx/interface/icons/AAR_edict_ACADEMY.dds"
-    const quotedRe = new RegExp(IMAGE_PATH_QUOTED_RE.source, 'gi');
-    let match: RegExpExecArray | null;
-    while ((match = quotedRe.exec(lineText)) !== null) {
-        const start = match.index + 1;
-        const end = start + match[1]!.length;
-        if (position.character >= start && position.character <= end) {
-            return match[1]!;
-        }
-    }
-
-    // Unquoted paths: = gfx/interface/icons/AAR_edict_ACADEMY.dds
-    const unquotedRe = new RegExp(IMAGE_PATH_UNQUOTED_RE.source, 'gi');
-    while ((match = unquotedRe.exec(lineText)) !== null) {
-        const fullMatch = match[0]!;
-        const pathStr = match[1]!;
-        const pathStart = match.index + fullMatch.indexOf(pathStr);
-        const pathEnd = pathStart + pathStr.length;
-        if (position.character >= pathStart && position.character <= pathEnd) {
-            return pathStr;
-        }
-    }
-    return null;
-}
-
-/**
- * DefinitionProvider for image file paths (e.g. textureFile = "gfx/...").
- * On Ctrl+hover: VS Code queries definition and resolves the file location to show hover links.
- * On Ctrl+Click: VS Code opens the file location. The active editor listener captures
- * this opening, reveals the file in OS explorer, and closes the blank tab.
- *
- * This is 100% lag-free and has ZERO impact on CodeLens loading speed, as it only
- * evaluates the text at the cursor range on demand.
- */
-class ImagePathDefinitionProvider implements vs.DefinitionProvider {
-    async provideDefinition(
-        document: vs.TextDocument,
-        position: vs.Position,
-    ): Promise<vs.Location | null> {
-        const lineText = document.lineAt(position).text;
-        const relativePath = extractImagePathAt(lineText, position);
-        if (!relativePath) return null;
-
-        const fullPath = resolveAssetPath(document, relativePath);
-        if (!fullPath || !fs.existsSync(fullPath)) return null;
-
-        // Return the physical Location of the file.
-        return new vs.Location(vs.Uri.file(fullPath), new vs.Position(0, 0));
-    }
-}
-
 // ─── GFX Sprite Index ───────────────────────────────────────────────────────
 
 interface GfxEntry {
@@ -752,29 +691,9 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
         { scheme: 'file', pattern: '**/*.asset' },
     ];
 
-    // 1. DDS/TGA image hover preview + Ctrl+Click → reveal file in OS explorer
+    // 1. DDS/TGA image hover preview (file paths)
     context.subscriptions.push(
         vs.languages.registerHoverProvider(gfxSelector, new ImageHoverProvider()),
-        vs.languages.registerDefinitionProvider(gfxSelector, new ImagePathDefinitionProvider()),
-    );
-
-    // Active editor listener to intercept Ctrl+Click navigation to .dds/.tga/.png files,
-    // revealing them in OS Explorer and auto-closing the empty binary tab.
-    context.subscriptions.push(
-        vs.window.onDidChangeActiveTextEditor(editor => {
-            if (!editor) return;
-            const fsPath = editor.document.uri.fsPath;
-            const ext = path.extname(fsPath).toLowerCase();
-            if (ext === '.dds' || ext === '.tga' || ext === '.png') {
-                const isAssetPath = fsPath.includes('gfx') || fsPath.includes('interface');
-                if (isAssetPath && fs.existsSync(fsPath)) {
-                    // Reveal the exact file (highlit) in explorer
-                    void vs.commands.executeCommand('revealFileInOS', editor.document.uri);
-                    // Instantly close the meaningless binary tab
-                    void vs.commands.executeCommand('workbench.action.closeActiveEditor');
-                }
-            }
-        })
     );
 
     // 2. GFX sprite GoToDefinition + hover image preview

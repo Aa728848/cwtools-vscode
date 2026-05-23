@@ -51,7 +51,7 @@
 				{
 					"type": "webview",
 					"id": "cwtools.aiChat",
-					"name": "AI Assistant"
+					"name": "%views.cwtools.aiChat.name%"
 				}
 			]
 		},
@@ -143,7 +143,7 @@
 		"commands": [
 			{
 				"command": "cwtools.ai.replayRun",
-				"title": "Replay Recorded Run (with optional override)",
+				"title": "%commands.cwtools.ai.replayRun.title%",
 				"category": "CWTools AI"
 			},
 			{
@@ -233,7 +233,7 @@
 			},
 			{
 				"command": "cwtools.ai.openAgentManager",
-				"title": "Open Agent Manager",
+				"title": "%commands.cwtools.ai.openAgentManager.title%",
 				"category": "CWTools AI",
 				"icon": "$(layout)"
 			},

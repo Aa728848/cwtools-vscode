@@ -6,8 +6,8 @@
 */
 
 import type { SubAgentResult } from './types';
-
 import type { QualityGateResult } from './types';
+import { runLedger, RunLedger } from '../runner/runLedger';
 
 /** Quality gate configuration */
 export interface QualityGateConfig {
@@ -174,6 +174,17 @@ export class QualityGate {
         const totalLogicIssues = parsed.logicIssuesCount || 0;
         
         const passed = diagnosticErrorCount === 0 && totalLogicIssues === 0;
+
+        const latestRunId = RunLedger.getLatestActiveRunId();
+        if (latestRunId) {
+            runLedger.appendEvent(latestRunId, 'quality_gate_decision', {
+                passed,
+                diagnosticErrors: diagnosticErrorCount,
+                logicIssues: totalLogicIssues,
+                filesChecked: writtenFiles,
+                fixSuggestions: parsed.fixSuggestions || []
+            }).catch(() => {});
+        }
 
         return {
             passed,

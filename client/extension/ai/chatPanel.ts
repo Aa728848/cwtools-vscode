@@ -427,12 +427,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             ...snapshot.run,
             steps: [],
         };
+        // T3.3 — derive cache stats from the full event list (not truncated copy)
+        // so the badge shows the lifetime hit rate, not just the visible window.
+        const { reduceCacheStats } = require('./runner/runReducers') as typeof import('./runner/runReducers');
+        const cacheStats = reduceCacheStats(snapshot.events);
         return {
             type: 'runSnapshot',
             snapshot: run,
             events,
             eventCount: snapshot.events.length,
             truncatedEventCount: Math.max(0, compactEvents.length - events.length),
+            cacheStats,
         } as any;
     }
 

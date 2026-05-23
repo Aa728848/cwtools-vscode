@@ -3,6 +3,7 @@ import { tryRepairJson } from '../jsonRepair';
 import { repairToolArgs } from '../tools/argRepair';
 import { getAgentToolTargetFiles } from './toolScheduler';
 import { TOOL_REGISTRY, AgentToolName } from '../tools/registry';
+import { nestArguments } from '../tools/schemaFlatten';
 
 /**
  * Derives metadata (effect, riskLevel, concurrencyClass) for a given tool name.
@@ -136,6 +137,17 @@ export function buildToolInvocation(input: {
         } else {
             parseError = `JSON parse failed: ${e instanceof Error ? e.message : String(e)}`;
         }
+    }
+
+    // 🌟 Schema Re-nest 还原管线 (T2.1)
+    if (!parseError) {
+        try {
+            const entry = TOOL_REGISTRY.get(name as AgentToolName);
+            if (entry && entry.flatSchema) {
+                args = nestArguments(args);
+                argRepairs.push('Nested schema reconstructed');
+            }
+        } catch { /* ignore */ }
     }
 
     // 4. Semantic fuzzy name matching & coercion

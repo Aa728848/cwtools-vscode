@@ -46,7 +46,7 @@ import {
     SLIM_SUB_AGENT_THINKING_CHAR_LIMIT,
 } from './runnerPolicy';
 import { getWorkflow } from './workflowRegistry';
-import { WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
+import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { prepareMessagesForResume, loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
@@ -54,7 +54,8 @@ import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERV
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
 import { buildToolInvocation } from './runner/toolInvocation';
-import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash } from './runner/doomLoopDetector';
+import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash, DoomLoopState } from './runner/doomLoopDetector';
+import { ReadTracker } from './runner/readTracker';
 
 export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
 export { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } from './runner/toolScheduler';
@@ -187,6 +188,12 @@ export interface AgentRunnerOptions {
     vfsOverlay?: Map<string, string>;
     /** Topic ID for checkpoint persistence — threaded from run() context */
     topicId?: string;
+    /** T4.1 — replay session. When present, tool calls are served from the ledger instead of live execution. */
+    replaySession?: import('./runner/runReplay').ReplaySession;
+    /** T4.1 — id of the original run being replayed (recorded in ledger meta for traceability). */
+    replayOf?: string;
+    /** T4.1 — rebuild the system prompt this turn (clears frozen cache key so promptBuilder edits take effect). */
+    rebuildSystemPrompt?: boolean;
     /** Hook called before a file is written, allowing the caller to take a snapshot for rollback */
     onBeforeFileWrite?: (filePath: string, prevContent: string | null) => void;
     /** Callback when a sub-agent creates or modifies a todo list plan */
@@ -323,6 +330,7 @@ const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
 const globalPartitionedWriteQueue = new PartitionedWriteQueue();
 
 export class AgentRunner {
+    public readonly readTracker = new ReadTracker();
     private writeQueue = globalPartitionedWriteQueue;
     private activeRunRecordPromise?: Promise<import('./types').AgentRunRecord>;
     constructor(
@@ -779,7 +787,7 @@ export class AgentRunner {
         let systemPrompt = options?.useSlimPrompt
             ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt)
             : supportsPrefixCache
-                ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined, topicId, runId, pinnedData)
+                ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined)
                 : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt, undefined, topicId, runId, pinnedData);
 
         // Inject workflow prompt supplement if running within a workflow
@@ -787,6 +795,11 @@ export class AgentRunner {
         if (activeWorkflowForPrompt?.promptSupplement) {
             systemPrompt = activeWorkflowForPrompt.promptSupplement + '\n\n' + systemPrompt;
         }
+
+        // Build the dynamic prompt block containing pinned data / summaries
+        const dynamicBlock = supportsPrefixCache
+            ? this.promptBuilder.buildDynamicPromptBlock(pinnedData, topicId, runId)
+            : [];
 
         // Build the message array
         let messages: ChatMessage[];
@@ -816,6 +829,7 @@ export class AgentRunner {
                         commandToolsAvailable: options?.useSlimPrompt !== true,
                     }),
                     ...compactedHistory,
+                    ...dynamicBlock,
                     { role: 'user', content: userContent },
                 ];
             }
@@ -827,6 +841,7 @@ export class AgentRunner {
                     commandToolsAvailable: options?.useSlimPrompt !== true,
                 }),
                 ...compactedHistory,
+                ...dynamicBlock,
                 { role: 'user', content: userContent },
             ];
         }
@@ -1146,6 +1161,7 @@ export class AgentRunner {
         runMetrics?: AgentRunMetrics
     ): Promise<string> {
         const runRecord = await this.activeRunRecordPromise!;
+        this.readTracker.reset();
         let iteration = 0;
         const supportsPrefixCache = (options?.providerId ?? '').startsWith('deepseek') || (options?.providerId ?? '').startsWith('openai');
 
@@ -1159,12 +1175,10 @@ export class AgentRunner {
             onTodoUpdate: options?.onTodoUpdate
         };
 
-        // Two-phase doom-loop detection:
-        // phase1: track (prevSig -currSig) pair frequency
+        // Two-phase doom-loop detection (T1.2a — state encapsulated in DoomLoopState):
+        // phase1: track (prevSig → currSig) pair frequency
         // phase2: compare normalized result hashes for same-name calls
-        const pairFrequency = new Map<string, number>();
-        const lastResultHash = new Map<string, number>(); // sig -fnv32a(normalized result)
-        let prevCallSignature = '';
+        const doomLoop = new DoomLoopState();
         let consecutiveErrorCount = 0;
         // Flag set to true when we need to exit the outer while loop
         let forceStop = false;
@@ -1199,6 +1213,12 @@ export class AgentRunner {
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
             legacyFullToolset,
+        });
+
+        // 🌟 核心优化：若开启了扁平化并且工具注册了展平 schema，则展现给模型的 availableTools 使用扁平化版本
+        availableTools = availableTools.map(t => {
+            const entry = TOOL_REGISTRY.get(t.function.name as any);
+            return (entry && entry.flatSchema) ? entry.flatSchema : t;
         });
 
         // Apply workflow tool policy if running within a workflow
@@ -1276,7 +1296,6 @@ export class AgentRunner {
 
             let toolCalls: any[] | undefined = undefined;
             let needsHashValidation = false;
-            let currentPairKey: string | undefined = undefined;
             let softLoopGuidancePending = false;
 
             const initialPending = (this as any).initialPendingToolCalls;
@@ -1559,8 +1578,10 @@ export class AgentRunner {
                 const totalTokens = response.usage?.total_tokens ?? (promptTokens + completionTokens);
 
                 const pricing = getModelPricing(response.model ?? options?.model ?? '');
-                // Cache-aware cost calculation: cached tokens billed at 0.1× input rate
-                const cachedTokens = response.usage?.cached_tokens ?? 0;
+                 // Cache-aware cost calculation: cached tokens billed at discounted rate
+                const cachedTokens = response.usage?.cached_tokens ?? 
+                                     (response.usage as any)?.prompt_tokens_details?.cached_tokens ?? 
+                                     (response.usage as any)?.prompt_cache_hit_tokens ?? 0;
                 const uncachedInputTokens = promptTokens - cachedTokens;
                 const cacheDiscount = getCacheDiscountFactor(response.model ?? options?.model ?? '');
                 const cachedCost = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount;
@@ -1573,6 +1594,24 @@ export class AgentRunner {
                 tokenAccumulator.estimatedCostCny += cachedCost + uncachedCost + outputCost;
                 tokenAccumulator.cachedTokens = (tokenAccumulator.cachedTokens ?? 0) + cachedTokens;
                 tokenAccumulator.contextWindowTokens = promptTokens;
+
+                // Emit cache hit rate and saved costs for real-time auditing in the UI
+                if (cachedTokens > 0) {
+                    const hitRate = promptTokens > 0 ? (cachedTokens / promptTokens) : 0;
+                    const savedCostCny = (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
+                    
+                    emitStep({
+                        type: 'cache_stats',
+                        content: `Prefix Cache Hit: ${cachedTokens} tokens (${(hitRate * 100).toFixed(1)}% hit rate). Saved approx. ¥${savedCostCny.toFixed(4)}.`,
+                        timestamp: Date.now(),
+                        cacheStats: {
+                            cachedTokens,
+                            totalTokens: promptTokens,
+                            hitRate,
+                            savedCostCny
+                        }
+                    });
+                }
             }
 
             const choice = response.choices[0];
@@ -1695,12 +1734,22 @@ export class AgentRunner {
             const callSignature = toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`).join('|');
             needsHashValidation = false;
             softLoopGuidancePending = false;
-            currentPairKey = undefined;
-            if (prevCallSignature) {
-                const pairKey = `${prevCallSignature}->${callSignature}`;
-                currentPairKey = pairKey;
-                const pairFreq = (pairFrequency.get(pairKey) || 0) + 1;
-                pairFrequency.set(pairKey, pairFreq);
+            doomLoop.currentPairKey = undefined;
+
+            let hasStormExempt = false;
+            for (const tc of toolCalls) {
+                const reg = TOOL_REGISTRY.get(tc.function.name as import('./tools/registry').AgentToolName);
+                if (reg?.stormExempt) {
+                    hasStormExempt = true;
+                    break;
+                }
+            }
+
+            if (doomLoop.prevCallSignature && !hasStormExempt) {
+                const pairKey = `${doomLoop.prevCallSignature}->${callSignature}`;
+                doomLoop.currentPairKey = pairKey;
+                const pairFreq = (doomLoop.pairFrequency.get(pairKey) || 0) + 1;
+                doomLoop.pairFrequency.set(pairKey, pairFreq);
                 if (runMetrics && pairFreq > 1) {
                     runMetrics.repeatedToolSignatureCount++;
                 }
@@ -1714,7 +1763,9 @@ export class AgentRunner {
                 }
                 if (pairFreq >= DOOM_LOOP_PAIR_THRESHOLD) needsHashValidation = true;
             }
-            prevCallSignature = callSignature;
+            if (!hasStormExempt) {
+                doomLoop.prevCallSignature = callSignature;
+            }
             }
 
             if (!toolCalls) toolCalls = [];
@@ -1880,6 +1931,14 @@ export class AgentRunner {
                             content: `🔴 [子 Agent 沙盒物理强拦截] ${safetyCheck.reason}`,
                             timestamp: Date.now()
                         });
+                        // B4: 结构化拒绝事件,供 reducer 投影聚合,而非只发字符串 step。
+                        runLedger.appendEvent(runRecord.runId, 'subagent_refused', {
+                            agentId: options.sandbox?.agentId,
+                            tool: ci.toolName,
+                            reason: 'SANDBOX_VIOLATION',
+                            detail: safetyCheck.reason,
+                            toolArgs: ci.toolArgs,
+                        }).catch(() => {});
                         toolResults[i] = { success: false, error: safetyCheck.reason };
                         continue;
                     }
@@ -2065,6 +2124,33 @@ export class AgentRunner {
                 }
             }
 
+            // ── Mutating write progress check ──
+            // If a mutating tool call succeeded, clear only the pair entries that
+            // reference its target files. Global clear was over-eager: writing file
+            // A would silently wipe the loop signal for unrelated file B.
+            const mutatedFilePaths = new Set<string>();
+            let hasFilelessMutating = false;
+            for (let j = 0; j < parsedCalls.length; j++) {
+                const pc = parsedCalls[j]!;
+                const reg = TOOL_REGISTRY.get(pc.toolName as import('./tools/registry').AgentToolName);
+                if (!reg?.mutating) continue;
+                if (!toolResults[j] || (toolResults[j] as any).success === false) continue;
+                if (pc.targetPaths && pc.targetPaths.length > 0) {
+                    for (const fp of pc.targetPaths) mutatedFilePaths.add(fp);
+                } else {
+                    // mutating without a file target (set_memory / save_memory / merge_results / git_ops 等)
+                    hasFilelessMutating = true;
+                }
+            }
+            if (mutatedFilePaths.size > 0) {
+                doomLoop.clearForFiles(mutatedFilePaths);
+            }
+            if (hasFilelessMutating && mutatedFilePaths.size === 0) {
+                // Pure fileless mutation (e.g. memory / git): no path scoping possible,
+                // fall back to global clear so verify reads aren't suppressed.
+                doomLoop.clearAllPairs();
+            }
+
             // ── Two-phase doom-loop detection: phase 2 (post-exec hash check) ──
             if (needsHashValidation) {
                 let allHashesMatch = true;
@@ -2072,14 +2158,14 @@ export class AgentRunner {
                     const { toolName, toolCall } = parsedCalls[j]!;
                     const sig = `${toolCall.function.name}:${toolCall.function.arguments}`;
                     const resultHash = fnv32a(normalizeToolResultHash(toolName, toolResults[j]));
-                    const prevHash = lastResultHash.get(sig);
+                    const prevHash = doomLoop.lastResultHash.get(sig);
                     if (prevHash !== undefined && prevHash !== resultHash) {
                         // Hash differs — meaningful progress, not a doom-loop.
                         // Reset the pair counter for this pair.
-                        if (currentPairKey) pairFrequency.set(currentPairKey, 0);
+                        if (doomLoop.currentPairKey) doomLoop.pairFrequency.set(doomLoop.currentPairKey, 0);
                         allHashesMatch = false;
                     }
-                    lastResultHash.set(sig, resultHash);
+                    doomLoop.lastResultHash.set(sig, resultHash);
                 }
                 if (allHashesMatch) {
                     emitStep({
@@ -2094,7 +2180,7 @@ export class AgentRunner {
                 for (let j = 0; j < parsedCalls.length; j++) {
                     const { toolName, toolCall } = parsedCalls[j]!;
                     const sig = `${toolCall.function.name}:${toolCall.function.arguments}`;
-                    lastResultHash.set(sig, fnv32a(normalizeToolResultHash(toolName, toolResults[j])));
+                    doomLoop.lastResultHash.set(sig, fnv32a(normalizeToolResultHash(toolName, toolResults[j])));
                 }
             }
 

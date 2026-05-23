@@ -38,7 +38,13 @@ export type AgentRunEventType =
     | 'metrics_updated'
     | 'error'
     | 'cancelled'
-    | 'complete';
+    | 'complete'
+    | 'cache_stats'
+    | 'blackboard_write'
+    | 'blackboard_read'
+    | 'conflict_detected'
+    | 'quality_gate_decision'
+    | 'subagent_refused';
 
 export interface AgentRunEvent {
     eventId: string;
@@ -65,6 +71,12 @@ export class RunLedger {
     private runSequences = new Map<string, number>();
     private emitter = new EventEmitter();
 
+    private static latestActiveRunId: string | undefined;
+
+    public static getLatestActiveRunId(): string | undefined {
+        return RunLedger.latestActiveRunId;
+    }
+
     private constructor() {}
 
     public static getInstance(): RunLedger {
@@ -78,6 +90,12 @@ export class RunLedger {
         this.emitter.on('change', listener);
     }
 
+    /** List runs newest-first (in-memory cache only — does not scan disk). T4.2 uses this for the replay picker. */
+    public listRecentRuns(): AgentRunRecord[] {
+        return Array.from(this.activeRuns.values())
+            .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    }
+
     public getRun(runId: string): AgentRunRecord | undefined {
         return this.activeRuns.get(runId);
     }
@@ -89,6 +107,7 @@ export class RunLedger {
         parentRunId?: string
     ): Promise<AgentRunRecord> {
         const runId = `run_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        RunLedger.latestActiveRunId = runId;
         const now = Date.now();
         const record: AgentRunRecord = {
             runId,

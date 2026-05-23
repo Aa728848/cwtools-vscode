@@ -28,6 +28,14 @@ type ManagerEnhancementState = {
     compactedMemoryContent?: string;
     cleanupResult?: { deletedCount: number; keptCount: number; reclaimedBytes: number };
     copiedEventAt?: number;
+    /** T3.3 — Cache hit / saving badge on the run overview row. */
+    cacheStats?: {
+        totalCachedTokens: number;
+        totalInputTokens: number;
+        totalSavedCostCny: number;
+        aggregateHitRate: number;
+        byAgent: Array<{ agentId: string; cachedTokens: number; inputTokens: number; hitRate: number; callCount: number }>;
+    };
 };
 
 const DEFAULT_STATE: ManagerEnhancementState = {
@@ -192,6 +200,15 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         const runPill = state.run
             ? `<span class="manager-pill manager-pill-run">${m.overview.run}: ${escapeHtml(state.run.runId.substring(0, 10))} (${escapeHtml(state.run.status)})</span>`
             : '';
+        // T3.3 — cache hit-rate badge. Only show when we have at least one cache_stats event.
+        let cachePill = '';
+        const cs = state.cacheStats;
+        if (cs && cs.totalInputTokens > 0) {
+            const pct = Math.round(cs.aggregateHitRate * 100);
+            const saved = cs.totalSavedCostCny.toFixed(3);
+            const cls = pct >= 70 ? 'manager-pill-cache-good' : pct >= 30 ? 'manager-pill-cache-mid' : 'manager-pill-cache-low';
+            cachePill = `<span class="manager-pill manager-pill-cache ${cls}" title="cached ${cs.totalCachedTokens} / ${cs.totalInputTokens} input tokens · saved ≈ ¥${saved}">Cache ${pct}% · ¥${saved}</span>`;
+        }
         overview.innerHTML = `
             <div class="manager-overview-row">
                 <span class="manager-pill">${state.stats.visible} ${m.overview.topics}</span>
@@ -199,6 +216,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 <span class="manager-pill">${state.liveStepCount} ${m.overview.steps}</span>
                 <span class="manager-pill">${currentTopicMessageCount()} ${m.overview.messages}</span>
                 ${runPill}
+                ${cachePill}
             </div>
             <div class="manager-overview-row">
                 <span class="manager-meta">${m.overview.mode}: ${escapeHtml(state.mode)}</span>
@@ -442,6 +460,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             case 'runSnapshot':
                 state.run = msg.snapshot;
                 state.runEvents = Array.isArray(msg.events) ? msg.events : [];
+                state.cacheStats = msg.cacheStats;
                 renderOverview();
                 renderInspector();
                 break;

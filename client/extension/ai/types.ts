@@ -186,6 +186,8 @@ export interface ChatCompletionResponse {
         total_tokens: number;
         /** Provider prefix-cache hit tokens (DeepSeek, Claude, etc.) */
         cached_tokens?: number;
+        /** Anthropic-only: tokens written into the prompt cache this turn (billed at 1.25x). */
+        cache_creation_tokens?: number;
     };
 }
 
@@ -1043,7 +1045,13 @@ export interface AgentStep {
     | 'code_generated' | 'validation' | 'error' | 'compaction'
     | 'todo_update' | 'permission_request'
     | 'subtask_start' | 'subtask_complete' | 'diff_summary'
-    | 'plan_card' | 'blueprint_card' | 'walkthrough_card' | 'transaction_card' | 'orchestrator_progress';
+    | 'plan_card' | 'blueprint_card' | 'walkthrough_card' | 'transaction_card' | 'orchestrator_progress' | 'cache_stats';
+    cacheStats?: {
+        cachedTokens: number;
+        totalTokens: number;
+        hitRate: number;
+        savedCostCny: number;
+    };
     content: string;
     toolName?: AgentToolName | string;
     toolArgs?: Record<string, unknown>;
@@ -1370,7 +1378,7 @@ export type HostMessage =
     | { type: 'artifactList'; artifacts: AgentArtifact[] }
     /** Multi-Agent coordinator progress push — Agent Lane UI */
     | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
-    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; eventCount?: number; truncatedEventCount?: number; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }> }
+    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; eventCount?: number; truncatedEventCount?: number; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }>; cacheStats?: import('./runner/runReducers').CacheStatsSnapshot }
     | { type: 'mentionSearchResults'; results: Array<{
         type?: ContextItemType;
         uri?: string;

@@ -1,5 +1,6 @@
 import type { ToolDefinition, AgentMode } from '../types';
 import { TOOL_DEFINITIONS as SCHEMA_DEFINITIONS } from './definitions';
+import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
     | 'query_scope' | 'query_types' | 'query_rules' | 'remove_ignored_diagnostic'
@@ -48,6 +49,10 @@ export interface ToolRegistryEntry {
     effect: ToolEffect;
     riskLevel: 0 | 1 | 2 | 3;
     concurrencyClass: ToolConcurrencyClass;
+    mutating?: boolean;
+    stormExempt?: boolean;
+    noFlatten?: boolean;
+    flatSchema?: ToolDefinition;
 }
 
 export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
@@ -74,6 +79,28 @@ const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', '
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_fetch', 'search_web', 'codesearch', 'run_command', 'git_ops', ...MEDIA]);
+
+// Mutating tools: 改变工作区 / 记忆 / 黑板状态的工具。doom-loop 检测见到 mutating 成功
+// 后会清空对应文件的 pairFrequency 窗口,避免把 verify-after-write 误判为重复。
+const MUTATING_TOOLS_SET = new Set<string>([
+    ...EDIT,
+    'deploy_mod_asset',
+    'git_ops',
+    'set_memory',
+    'save_memory',
+    'merge_results',
+]);
+
+// Storm-exempt tools: 廉价状态检查 / 协作信号,允许在同一轮反复调用,不计入 doom-loop 窗口。
+const STORM_EXEMPT_TOOLS_SET = new Set<string>([
+    'get_diagnostics',
+    'get_ignored_diagnostics',
+    'query_scope',
+    'document_symbols',
+    'workspace_symbols',
+    'list_directory',
+    'query_blackboard',
+]);
 
 const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, 'todo_write', 'write_design_blueprint', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops']);
@@ -152,6 +179,18 @@ for (const schema of SCHEMA_DEFINITIONS) {
         concurrencyClass = 'global-exclusive';
     }
     
+    const mutating = MUTATING_TOOLS_SET.has(name);
+    const stormExempt = STORM_EXEMPT_TOOLS_SET.has(name);
+
+    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write'].includes(name);
+    let flatSchema: ToolDefinition | undefined = undefined;
+    if (!noFlatten) {
+        const analysis = analyzeSchema(schema);
+        if (analysis.shouldFlatten) {
+            flatSchema = flattenSchema(schema);
+        }
+    }
+
     TOOL_REGISTRY.set(name, {
         name,
         schema,
@@ -161,7 +200,11 @@ for (const schema of SCHEMA_DEFINITIONS) {
         allowedModes: allowed,
         effect,
         riskLevel,
-        concurrencyClass
+        concurrencyClass,
+        mutating,
+        stormExempt,
+        noFlatten,
+        flatSchema
     });
 }
 

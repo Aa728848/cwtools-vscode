@@ -103,13 +103,40 @@ export async function maybeCompactHistory(
     try {
         const keepN = Math.min(COMPACTION_KEEP_LAST_N, Math.max(1, history.length - 1));
         const splitIndex = history.length - keepN;
-        const olderMessages = history.slice(0, splitIndex);
+        let olderMessages = history.slice(0, splitIndex);
         const recentMessages = history.slice(splitIndex);
 
         let existingSummaryText = '';
+        const existingSummaryPairs: ChatMessage[] = [];
         if (olderMessages[0]?.role === 'system' && String(olderMessages[0].content).includes('Conversation Summary (compacted)')) {
             existingSummaryText = String(olderMessages[0].content).replace(/^## Conversation Summary \(compacted\)\n/, '');
             olderMessages.shift();
+        } else {
+            // 🌟 核心升级：遍历并安全提取所有老摘要消息对，保留它们 (T2.3)
+            let i = 0;
+            const toRemoveIndices = new Set<number>();
+            while (i < olderMessages.length) {
+                const m = olderMessages[i];
+                if (m && m.role === 'user' && String(m.content).includes('[Context Recovery]')) {
+                    const nextM = olderMessages[i + 1];
+                    if (nextM && nextM.role === 'assistant' && String(nextM.content).includes('## Conversation Summary (compacted)')) {
+                        existingSummaryPairs.push(m, nextM);
+                        toRemoveIndices.add(i);
+                        toRemoveIndices.add(i + 1);
+                        i += 2;
+                        continue;
+                    }
+                }
+                i++;
+            }
+            // 从 olderMessages 中踢出这些老摘要消息对，以防止它们合并到 messageContext 参与二次重复压缩
+            olderMessages = olderMessages.filter((_, idx) => !toRemoveIndices.has(idx));
+            
+            // 将历史所有已存摘要作为背景提供给模型，用于生成精准的增量摘要段
+            existingSummaryText = existingSummaryPairs
+                .filter(m => m.role === 'assistant')
+                .map(m => String(m.content).replace(/^## Conversation Summary \(compacted\)\n/, ''))
+                .join('\n\n---\n\n');
         }
 
         const pinnedContext: string[] = [];
@@ -193,16 +220,21 @@ export async function maybeCompactHistory(
             const supportsPrefixCache = (options?.providerId ?? '').startsWith('deepseek') || (options?.providerId ?? '').startsWith('openai');
 
             if (supportsPrefixCache) {
-                // ── DeepSeek prefix-cache optimization path ──
-                // Rules:
-                //   1. system message stays unchanged (frozen prefix)
-                //   2. summary injected as user+assistant pair (append-only)
-                //   3. recent messages preserved with byte-stable order
                 const systemMsg = history[0]?.role === 'system' ? history[0] : undefined;
+                const newSummaryUser = {
+                    role: 'user' as const,
+                    content: `[Context Recovery] Please review the incremental conversation summary Part ${existingSummaryPairs.length / 2 + 1} below and continue.`
+                };
+                const newSummaryAssistant = {
+                    role: 'assistant' as const,
+                    content: `## Conversation Summary (compacted)\n${summary}${pinnedSection}`
+                };
+
                 return [
                     ...(systemMsg ? [systemMsg] : []),
-                    { role: 'user', content: '[Context Recovery] Please review the conversation summary below and continue.' },
-                    { role: 'assistant', content: `## Conversation Summary (compacted)\n${summary}${pinnedSection}` },
+                    ...existingSummaryPairs,
+                    newSummaryUser,
+                    newSummaryAssistant,
                     ...recentMessages,
                 ];
             }

@@ -253,6 +253,74 @@ export async function activate(context: ExtensionContext) {
 		vs.window.registerWebviewViewProvider(AIChatPanelProvider.viewType, chatPanelProvider)
 	);
 
+	// T4.2 — Replay a recorded agent run with optional overrides.
+	// Side-by-side diff of original vs new event streams is opened in the editor.
+	safeRegisterCommand(context, 'cwtools.ai.replayRun', async () => {
+		try {
+			const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
+			const { replayRun } = require('./ai/runner/runReplay') as typeof import('./ai/runner/runReplay');
+			const recentRuns = runLedger.listRecentRuns();
+			if (recentRuns.length === 0) {
+				vs.window.showInformationMessage('CWTools: no recorded runs available to replay.');
+				return;
+			}
+			const pick = await vs.window.showQuickPick(
+				recentRuns.slice(0, 30).map((r: any) => ({
+					label: `${(r.runId ?? '').substring(0, 12)}  ·  ${r.mode ?? 'build'}  ·  ${r.status ?? 'unknown'}`,
+					description: r.userPrompt ? String(r.userPrompt).substring(0, 80) : '',
+					runId: r.runId,
+				})),
+				{ placeHolder: 'Select a run to replay (recorded tool results will be reused)' }
+			);
+			if (!pick) return;
+
+			const overrideChoice = await vs.window.showQuickPick(
+				[
+					{ label: 'Replay with current prompt (no override)', op: 'none' as const },
+					{ label: 'Replay with rebuilt system prompt', op: 'rebuild' as const },
+					{ label: 'Replay with different model…', op: 'model' as const },
+				],
+				{ placeHolder: 'Replay overrides' }
+			);
+			if (!overrideChoice) return;
+
+			const overrides: any = {};
+			if (overrideChoice.op === 'rebuild') overrides.rebuildSystemPrompt = true;
+			if (overrideChoice.op === 'model') {
+				const modelInput = await vs.window.showInputBox({ placeHolder: 'Model id (e.g. claude-3-5-sonnet)' });
+				if (!modelInput) return;
+				overrides.model = modelInput;
+			}
+
+			const result = await replayRun(pick.runId, agentRunner, overrides);
+
+			const origSnap = runLedger.getSnapshot(pick.runId);
+			const newSnap = runLedger.getSnapshot(result.newRun.runId);
+			const origDoc = await vs.workspace.openTextDocument({
+				language: 'jsonc',
+				content: JSON.stringify(origSnap?.events ?? [], null, 2),
+			});
+			const newDoc = await vs.workspace.openTextDocument({
+				language: 'jsonc',
+				content: JSON.stringify(newSnap?.events ?? [], null, 2),
+			});
+			await vs.commands.executeCommand(
+				'vscode.diff',
+				origDoc.uri,
+				newDoc.uri,
+				`Replay: ${pick.runId.substring(0, 8)} ↔ ${result.newRun.runId.substring(0, 8)}`,
+			);
+
+			if (result.missedToolCalls > 0) {
+				vs.window.showWarningMessage(
+					`Replay finished with ${result.missedToolCalls} tool-call miss(es) — model diverged from recorded run.`,
+				);
+			}
+		} catch (e) {
+			vs.window.showErrorMessage(`CWTools replayRun failed: ${(e as Error)?.message ?? e}`);
+		}
+	});
+
 	// ─── Wire up AgentToolExecutor callbacks ─────────────────────────────────
 	// onPendingWrite: route file-write confirmations through the WebView panel
 	toolExecutor.onPendingWrite = (file, newContent, messageId) =>

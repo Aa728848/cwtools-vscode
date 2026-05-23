@@ -287,7 +287,9 @@ describe('toClaudeRequest', () => {
             ],
         };
         const result = toClaudeRequest(req);
-        expect(result.system).to.equal('You are helpful.');
+        expect(result.system).to.be.an('array');
+        const systemArray = result.system as any[];
+        expect(systemArray[0].text).to.equal('You are helpful.');
         expect(result.messages).to.have.length(1);
         expect((result.messages as ChatMessage[])[0]!.role).to.equal('user');
     });
@@ -411,7 +413,9 @@ describe('toClaudeRequest', () => {
             ],
         };
         const result = toClaudeRequest(req);
-        expect(result.system).to.equal('Part 1\n\nPart 2');
+        expect(result.system).to.be.an('array');
+        const systemArray = result.system as any[];
+        expect(systemArray[0].text).to.equal('Part 1\n\nPart 2');
     });
 });
 

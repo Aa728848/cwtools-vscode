@@ -142,6 +142,11 @@
 		},
 		"commands": [
 			{
+				"command": "cwtools.ai.replayRun",
+				"title": "Replay Recorded Run (with optional override)",
+				"category": "CWTools AI"
+			},
+			{
 				"command": "outputerrors",
 				"title": "%commands.outputerrors.title%",
 				"category": "cwtools"

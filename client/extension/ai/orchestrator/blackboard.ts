@@ -15,6 +15,7 @@ import type {
     BlackboardWriteResult,
     SerializedBlackboard,
 } from './types';
+import { runLedger, RunLedger } from '../runner/runLedger';
 
 /** Cancellation handle of subscription callback */
 export interface BlackboardDisposable {
@@ -60,12 +61,23 @@ export class Blackboard {
 
     /** Read an entry */
     read(key: string): BlackboardEntry | undefined {
-        return this.entries.get(key);
+        const entry = this.entries.get(key);
+        const latestRunId = RunLedger.getLatestActiveRunId();
+        if (latestRunId && entry) {
+            runLedger.appendEvent(latestRunId, 'blackboard_read', {
+                key,
+                type: entry.type,
+                version: entry.version,
+                authorAgentId: entry.authorAgentId
+            }).catch(() => {});
+        }
+        return entry;
     }
 
     /** Read the value of an entry (convenience method) */
     readValue(key: string): string | undefined {
-        return this.entries.get(key)?.value;
+        const entry = this.read(key);
+        return entry?.value;
     }
 
     /** Query all entries by type */
@@ -164,6 +176,18 @@ export class Blackboard {
 
         // Notify subscribers
         this.notifyWatchers(key, entry);
+
+        // 🌟 记录黑板写入事件至 Ledger
+        const latestRunId = RunLedger.getLatestActiveRunId();
+        if (latestRunId) {
+            runLedger.appendEvent(latestRunId, 'blackboard_write', {
+                key,
+                type,
+                version: newVersion,
+                authorAgentId: agentId,
+                valuePreview: value.length > 200 ? value.substring(0, 200) + '...' : value
+            }).catch(() => {});
+        }
 
         return { success: true, newVersion };
     }

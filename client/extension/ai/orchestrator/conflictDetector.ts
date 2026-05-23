@@ -6,6 +6,7 @@
 */
 
 import { Blackboard } from './blackboard';
+import { runLedger, RunLedger } from '../runner/runLedger';
 
 /** Conflict detection results */
 export interface ConflictResult {
@@ -52,6 +53,16 @@ export class ConflictDetector {
         const existing = blackboard.read(intentKey);
 
         if (existing && existing.authorAgentId !== agentId) {
+            const latestRunId = RunLedger.getLatestActiveRunId();
+            if (latestRunId) {
+                runLedger.appendEvent(latestRunId, 'conflict_detected', {
+                    conflictType: 'file_write',
+                    agentId,
+                    conflictAgentId: existing.authorAgentId,
+                    target: filePath,
+                    details: `文件 ${filePath} 已被 Agent ${existing.authorAgentId} 声明写入意图`
+                }).catch(() => {});
+            }
             return {
                 hasConflict: true,
                 conflictType: 'file_write',
@@ -79,6 +90,16 @@ export class ConflictDetector {
         const existing = blackboard.read(entityKey);
 
         if (existing && existing.authorAgentId !== agentId) {
+            const latestRunId = RunLedger.getLatestActiveRunId();
+            if (latestRunId) {
+                runLedger.appendEvent(latestRunId, 'conflict_detected', {
+                    conflictType: 'entity_id',
+                    agentId,
+                    conflictAgentId: existing.authorAgentId,
+                    target: entityId,
+                    details: `实体 ${entityId} 已被 Agent ${existing.authorAgentId} 注册`
+                }).catch(() => {});
+            }
             return {
                 hasConflict: true,
                 conflictType: 'entity_id',

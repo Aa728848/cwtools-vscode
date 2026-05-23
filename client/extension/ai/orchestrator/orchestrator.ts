@@ -30,6 +30,7 @@ import { QualityGate } from './qualityGate';
 import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG } from '../messages';
+import { runLedger, RunLedger } from '../runner/runLedger';
 
 // Type references of AgentRunner and AgentToolExecutor (to avoid circular dependencies, use import type)
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
@@ -414,6 +415,17 @@ export class Orchestrator {
                     content: `子 Agent 权限请求${allowed ? '已批准' : '被拒绝'}: ${tool}`,
                     timestamp: Date.now(),
                 });
+                if (!allowed) {
+                    const latestRunId = RunLedger.getLatestActiveRunId();
+                    if (latestRunId) {
+                        runLedger.appendEvent(latestRunId, 'subagent_refused', {
+                            agentId: taskNode.id,
+                            tool,
+                            command,
+                            reason: 'USER_PERMISSION_DENIED'
+                        }).catch(() => {});
+                    }
+                }
                 return allowed;
             } catch (error) {
                 forwardStep({

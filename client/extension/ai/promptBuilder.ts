@@ -75,6 +75,12 @@ export class PromptBuilder {
     /** Frozen system prompt cache for prefix-cache optimization (DeepSeek etc.).
      *  Key: `${mode}|${providerId}` — value is the cached prompt string.
      *  Once built, the same string is returned on subsequent calls within the session. */
+    /** Frozen system prompt cache for prefix-cache optimization (DeepSeek etc.).
+     *  Key: `${mode}|${providerId}|${languageId}` — value is the cached prompt string.
+     *  Bounded by FROZEN_PROMPT_CACHE_MAX to guard against runaway growth from
+     *  unexpected key explosion (e.g. providerId variations). LRU eviction relies
+     *  on Map's insertion-order semantics. */
+    private static readonly FROZEN_PROMPT_CACHE_MAX = 32;
     private _frozenPromptCache = new Map<string, string>();
 
     constructor(
@@ -224,13 +230,37 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
      * Build a frozen (session-cached) system prompt for DeepSeek prefix-cache optimization.
      * The first call builds and caches the prompt; subsequent calls return the cached string
      * verbatim, ensuring byte-level stability across API calls for prefix cache hits.
+     * 
+     * Kept byte-stable by excluding transient/dynamic parameters (pinned context, topic, run summaries).
      */
     buildFrozenSystemPrompt(
         mode: AgentMode = 'build', 
         providerId?: string, 
-        languageId?: string,
-        topicId?: string,
-        runId?: string,
+        languageId?: string
+    ): string {
+        const cacheKey = `${mode}|${providerId ?? ''}|${languageId ?? ''}`;
+        const cached = this._frozenPromptCache.get(cacheKey);
+        if (cached !== undefined) return cached;
+
+        // Force stable mode by leaving topicId, runId, and pinned undefined
+        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId);
+        // LRU eviction: drop oldest entry once we exceed the cap (Map iterates in insertion order).
+        if (this._frozenPromptCache.size >= PromptBuilder.FROZEN_PROMPT_CACHE_MAX) {
+            const oldestKey = this._frozenPromptCache.keys().next().value;
+            if (oldestKey !== undefined) {
+                this._frozenPromptCache.delete(oldestKey);
+            }
+        }
+        this._frozenPromptCache.set(cacheKey, prompt);
+        return prompt;
+    }
+
+    /**
+     * Build the dynamic prompt block containing pinned context and compacted run summary.
+     * This block is appended after the static system prompt to maximize prefix caching.
+     * Wrapped in a <system-reminder> user message to maintain high cognitive weight for the LLM.
+     */
+    buildDynamicPromptBlock(
         pinned?: {
             todos?: import('./types').TodoItem[];
             diagnostics?: Array<{ file: string; message: string; line: number }>;
@@ -238,15 +268,75 @@ You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error f
             recentWrittenFiles?: string[];
             blockedSubAgents?: string[];
             decisions?: string[];
-        }
-    ): string {
-        const cacheKey = `${mode}|${providerId ?? ''}|${languageId ?? ''}|${topicId ?? ''}|${runId ?? ''}`;
-        const cached = this._frozenPromptCache.get(cacheKey);
-        if (cached !== undefined) return cached;
+        },
+        topicId?: string,
+        runId?: string
+    ): ChatMessage[] {
+        const dynamicParts: string[] = [];
 
-        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId, topicId, runId, pinned);
-        this._frozenPromptCache.set(cacheKey, prompt);
-        return prompt;
+        // 1. Compacted Summary (来自历史会话看板的压缩)
+        if (topicId && runId) {
+            const wsRoot = this.workspaceRoot;
+            const summaryMdPath = path.join(wsRoot, '.cwtools-ai', topicId, 'runs', runId, 'summary.md');
+            if (fs.existsSync(summaryMdPath)) {
+                try {
+                    const summaryContent = fs.readFileSync(summaryMdPath, 'utf8').trim();
+                    if (summaryContent) {
+                        dynamicParts.push(`<compacted-summary>\n\n${summaryContent}\n\n</compacted-summary>`);
+                    }
+                } catch {
+                    // Ignore summary read error
+                }
+            }
+        }
+
+        // 2. Pinned Context (活跃钉选状态与实时断点)
+        if (pinned) {
+            let pinnedText = '## 📌 活跃钉选状态与实时断点 (Pinned Context)\n';
+            let hasPinned = false;
+
+            if (pinned.pendingInteractions && pinned.pendingInteractions.length > 0) {
+                pinnedText += `### ⏳ 挂起中的交互操作 (Pending Approvals)\n${pinned.pendingInteractions.map(pi => `- ${pi}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (pinned.todos && pinned.todos.length > 0) {
+                const activeTodos = pinned.todos.filter(t => t.status === 'pending');
+                if (activeTodos.length > 0) {
+                    pinnedText += `### 📋 剩余待完成子任务 (Remaining Todos)\n${activeTodos.map(t => `- [ ] ${t.content}${(t as any).filePath ? ` (关联文件: ${(t as any).filePath})` : ''}`).join('\n')}\n`;
+                    hasPinned = true;
+                }
+            }
+
+            if (pinned.diagnostics && pinned.diagnostics.length > 0) {
+                pinnedText += `### ⚠️ 未解决的代码诊断报错 (Active Diagnostics)\n${pinned.diagnostics.map(d => `- **${path.basename(d.file)}** [第 ${d.line} 行]: ${d.message}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (pinned.recentWrittenFiles && pinned.recentWrittenFiles.length > 0) {
+                pinnedText += `### 📝 最近写入的文件 (Recent Written Files)\n${pinned.recentWrittenFiles.map(f => `- ${path.basename(f)}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (pinned.blockedSubAgents && pinned.blockedSubAgents.length > 0) {
+                pinnedText += `### 🚧 子 Agent 阻塞待决 (Blocked Sub-Agent Clarifications)\n${pinned.blockedSubAgents.map(b => `- ${b}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (pinned.decisions && pinned.decisions.length > 0) {
+                pinnedText += `### 💡 关键技术决策 (Key Decisions)\n${pinned.decisions.map(d => `- ${d}`).join('\n')}\n`;
+                hasPinned = true;
+            }
+
+            if (hasPinned) {
+                dynamicParts.push(`<pinned-context>\n\n${pinnedText.trim()}\n\n</pinned-context>`);
+            }
+        }
+
+        if (dynamicParts.length === 0) return [];
+
+        const reminderContent = `<system-reminder>\n\n${dynamicParts.join('\n\n')}\n\n</system-reminder>`;
+        return [{ role: 'user', content: reminderContent }];
     }
 
     /** Clear the frozen prompt cache (e.g., when starting a new session). */

@@ -273,7 +273,7 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
     const systemPrompt = systemMessages.map(m => contentToString(m.content)).join('\n\n');
 
     // Convert non-system messages
-    const claudeMessages: Array<Record<string, unknown>> = [];
+    const claudeMessages: Array<Record<string, any>> = [];
     for (const msg of request.messages) {
         if (msg.role === 'system') continue;
 
@@ -345,16 +345,92 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
         }
     }
 
+    // 🌟 自动注入 Anthropic cache_control 断点 (T3.1)
+    // breakpoint 1: System prompt 末尾
+    let claudeSystem: any = undefined;
+    if (systemPrompt) {
+        claudeSystem = [
+            {
+                type: 'text',
+                text: systemPrompt,
+                cache_control: { type: 'ephemeral' }
+            }
+        ];
+    }
+
     // Convert tools
     const claudeTools = request.tools?.map(t => ({
         name: t.function.name,
         description: t.function.description,
         input_schema: t.function.parameters,
+        cache_control: undefined as any
     }));
+
+    // breakpoint 2: 最后一个 tool 定义上打 breakpoint
+    if (claudeTools && claudeTools.length > 0) {
+        const lastTool = claudeTools[claudeTools.length - 1];
+        if (lastTool) {
+            lastTool.cache_control = { type: 'ephemeral' };
+        }
+    }
+
+    // breakpoint 3: 寻找第一个包含 Context Recovery 或 system-reminder 的 user 消息
+    let recoveryIdx = -1;
+    for (let i = 0; i < claudeMessages.length; i++) {
+        const m = claudeMessages[i];
+        if (m && m.role === 'user') {
+            const txt = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            if (txt.includes('[Context Recovery]') || txt.includes('<system-reminder>')) {
+                recoveryIdx = i;
+                if (typeof m.content === 'string') {
+                    m.content = [
+                        {
+                            type: 'text',
+                            text: m.content,
+                            cache_control: { type: 'ephemeral' }
+                        }
+                    ];
+                } else if (Array.isArray(m.content) && m.content.length > 0) {
+                    const lastContentPart = m.content[m.content.length - 1];
+                    if (lastContentPart) {
+                        lastContentPart.cache_control = { type: 'ephemeral' };
+                    }
+                }
+                break; // 只打第一个
+            }
+        }
+    }
+
+    // breakpoint 4: 滚动历史前缀。在 claudeMessages 倒数第二条 user 消息（非最新 user 消息）上打 breakpoint
+    let userCount = 0;
+    for (let i = claudeMessages.length - 1; i >= 0; i--) {
+        const m = claudeMessages[i];
+        if (m && m.role === 'user') {
+            userCount++;
+            // 倒数第二条 user 消息，且其索引必须大于 recoveryIdx（避免与 breakpoint 3 碰撞）
+            if (userCount === 2 && i > recoveryIdx) {
+                if (typeof m.content === 'string') {
+                    m.content = [
+                        {
+                            type: 'text',
+                            text: m.content,
+                            cache_control: { type: 'ephemeral' }
+                        }
+                    ];
+                } else if (Array.isArray(m.content) && m.content.length > 0) {
+                    const lastContentPart = m.content[m.content.length - 1];
+                    if (lastContentPart) {
+                        lastContentPart.cache_control = { type: 'ephemeral' };
+                    }
+                }
+                break;
+            }
+        }
+    }
 
     const claudeRequest: Record<string, unknown> = {
         model: request.model,
-        system: systemPrompt || undefined,
+        system: claudeSystem,
         messages: claudeMessages,
         max_tokens: request.max_tokens ?? 4096,
     };

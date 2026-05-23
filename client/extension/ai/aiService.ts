@@ -27,6 +27,7 @@ import {
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
+import { runLedger, RunLedger } from './runner/runLedger';
 
 // ─── Module-level constants ──────────────────────────────────────────────────
 
@@ -861,7 +862,7 @@ export class AIService {
         let contentBuf = '';
         let reasoningBuf = '';
         let finishReason: string | null = null;
-        let usageBuf: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens?: number } | undefined;
+        let usageBuf: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cached_tokens?: number; cache_creation_tokens?: number } | undefined;
         let modelBuf = '';
         // tool_calls reassembly: index → { id, type, function.name, function.arguments(buf) }
         const toolCallMap: Record<number, { id: string; type: string; function: { name: string; arguments: string } }> = {};
@@ -882,7 +883,7 @@ export class AIService {
                 const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
                 // Capture model name and usage from any chunk
                 if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
-                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const cached = u.prompt_cache_hit_tokens ?? u.cached_tokens ?? u.cache_read_input_tokens ?? 0; usageBuf = { prompt_tokens: u.prompt_tokens ?? u.input_tokens ?? 0, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? ((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)), cached_tokens: cached }; }
+                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const cached = u.prompt_cache_hit_tokens ?? u.cached_tokens ?? u.cache_read_input_tokens ?? 0; const cacheCreation = u.cache_creation_input_tokens ?? 0; usageBuf = { prompt_tokens: u.prompt_tokens ?? u.input_tokens ?? 0, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? ((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
                 if (!choices || choices.length === 0) continue;
                 const delta = choices[0]!.delta as Record<string, unknown> | undefined;  
                 if (!delta) { finishReason = (choices[0]!.finish_reason as string) ?? finishReason; continue; }  
@@ -1011,6 +1012,7 @@ export class AIService {
         let inputTokens = 0;
         let outputTokens = 0;
         let cachedTokens = 0;
+        let cacheCreationTokens = 0;
 
         // Tool-use blocks: index → { id, name, argsBuf }
         const toolBlocks: Record<number, { id: string; name: string; argsBuf: string }> = {};
@@ -1043,6 +1045,7 @@ export class AIService {
                         if (u) {
                             inputTokens = u.input_tokens ?? 0;
                             cachedTokens = u.cache_read_input_tokens ?? 0;
+                            cacheCreationTokens = u.cache_creation_input_tokens ?? 0;
                         }
                         break;
                     }
@@ -1118,6 +1121,20 @@ export class AIService {
             reasoning_content: reasoningBuf || null,
         };
         if (toolCalls && toolCalls.length > 0) message.tool_calls = toolCalls;
+
+        // 🌟 记录 Claude 的 Cache 命中率及消费数据
+        const latestRunId = RunLedger.getLatestActiveRunId();
+        if (latestRunId) {
+            runLedger.appendEvent(latestRunId, 'cache_stats', {
+                providerId: 'anthropic',
+                model: modelBuf || 'claude-3-5-sonnet',
+                inputTokens,
+                cachedTokens,
+                cacheCreationTokens,
+                outputTokens,
+                hitRate: inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0
+            }).catch(() => {});
+        }
 
         return {
             model: modelBuf || undefined,

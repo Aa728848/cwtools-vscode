@@ -1,9 +1,14 @@
 /**
  * CWTools AI Module — Doom Loop Detector
- * 
+ *
  * Protects the reasoning loop from redundant iteration cycles (hallucinations,
  * repeating the same tools with the same args or results) using light-weight FNV hashing
  * and semantic result normalization.
+ *
+ * T1.2a — DoomLoopState encapsulates the loop state previously held in reasoningLoop
+ * local variables. Pure container + a few convenience methods; logic still lives in
+ * agentRunner.ts (no behavior change). Lets us test state transitions in isolation
+ * and unblocks reducer-driven cache audit (T3.2).
  */
 
 export const DOOM_LOOP_SOFT_THRESHOLD = 4;
@@ -55,4 +60,45 @@ export function normalizeToolResultHash(toolName: string, result: unknown): stri
     }
     // Generic fallback: first 256 chars of JSON
     return `${toolName}:${JSON.stringify(obj).substring(0, 256)}`;
+}
+
+/**
+ * Per-reasoning-loop state container. Holds the two maps and the rolling signature
+ * previously declared as local variables in agentRunner.reasoningLoop.
+ */
+export class DoomLoopState {
+    public readonly pairFrequency = new Map<string, number>();
+    public readonly lastResultHash = new Map<string, number>();
+    public prevCallSignature = '';
+    public currentPairKey: string | undefined;
+
+    /** Clear all loop state — call at the start of a new reasoning run. */
+    reset(): void {
+        this.pairFrequency.clear();
+        this.lastResultHash.clear();
+        this.prevCallSignature = '';
+        this.currentPairKey = undefined;
+    }
+
+    /**
+     * Drop only pairFrequency entries whose key contains any of the given file
+     * paths — used after mutating writes so unrelated loop signals aren't wiped.
+     */
+    clearForFiles(filePaths: Set<string> | string[]): void {
+        const set = filePaths instanceof Set ? filePaths : new Set(filePaths);
+        if (set.size === 0) return;
+        for (const key of Array.from(this.pairFrequency.keys())) {
+            for (const fp of set) {
+                if (key.includes(fp)) {
+                    this.pairFrequency.delete(key);
+                    break;
+                }
+            }
+        }
+    }
+
+    /** Fallback global clear for fileless mutating tools (memory / git). */
+    clearAllPairs(): void {
+        this.pairFrequency.clear();
+    }
 }

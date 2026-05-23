@@ -426,6 +426,23 @@ body.agent-manager-shell .manager-task-mark {
     background: color-mix(in srgb, var(--vscode-charts-purple) 8%, transparent) !important;
 }
 
+/* T3.3 — Prefix-cache hit rate badge (green/amber/red tiers). */
+.manager-pill-cache {
+    border-color: var(--vscode-charts-green) !important;
+    color: var(--vscode-charts-green) !important;
+    background: color-mix(in srgb, var(--vscode-charts-green) 8%, transparent) !important;
+}
+.manager-pill-cache-mid {
+    border-color: var(--vscode-charts-yellow, var(--vscode-charts-orange)) !important;
+    color: var(--vscode-charts-yellow, var(--vscode-charts-orange)) !important;
+    background: color-mix(in srgb, var(--vscode-charts-yellow, var(--vscode-charts-orange)) 8%, transparent) !important;
+}
+.manager-pill-cache-low {
+    border-color: var(--vscode-charts-red) !important;
+    color: var(--vscode-charts-red) !important;
+    background: color-mix(in srgb, var(--vscode-charts-red) 8%, transparent) !important;
+}
+
 .manager-run-summary {
     background: color-mix(in srgb, var(--vscode-editor-background) 95%, #2a2d32);
     border: 1px solid var(--vscode-widget-border, var(--vscode-border));

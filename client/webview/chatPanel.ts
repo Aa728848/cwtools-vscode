@@ -4379,6 +4379,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 html += `<div style="margin-bottom: 10px; font-weight: 600; font-size: 13px;">
                     总计消耗: <span style="color:var(--accent);">${stats.totalTokens.toLocaleString()}</span> tokens<br>
                     预估成本: <span style="color:#4caf50;">¥${typeof stats.totalCostCny === 'number' ? stats.totalCostCny.toFixed(2) : '0.00'}</span><br>
+                    ${(stats.cacheStats && stats.cacheStats.totalCachedTokens > 0) ? `累计缓存命中: <span style="color:var(--vscode-charts-green, #388a34);">${stats.cacheStats.totalCachedTokens.toLocaleString()}</span> tokens <span style="font-size:11px; opacity:0.6;">(命中率 ${stats.cacheStats.cacheHitRate.toFixed(1)}%, 约省 ¥${stats.cacheStats.estimatedSavingsCny.toFixed(2)})</span><br>` : ''}
                     <span style="font-size:11px; opacity:0.6;">共 ${stats.totalCalls ?? 0} 次调用</span>
                 </div>`;
 
@@ -4726,11 +4727,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     // Completely replace the label with token + cost info
                     const label = document.getElementById('tokenUsageLabel');
                     if (label) {
-                        const base = `~${formatNum(gaugeUsage)} / ${formatNum(contextLimit)} tokens`;
+                        const cacheText = u.cachedTokens ? `, <span style="display:inline-flex; align-items:center; gap:2px; vertical-align:middle; color:var(--vscode-charts-green, #388a34); margin-top:-2px;">${svgIconNoMargin('zap')} ${formatNum(u.cachedTokens)} 缓存</span>` : '';
+                        const base = `~${formatNum(gaugeUsage)} / ${formatNum(contextLimit)} tokens` + cacheText;
                         const cost = u.estimatedCostCny > 0
                             ? '  ·  ' + (u.estimatedCostCny < 0.01 ? '<¥0.01' : '¥' + u.estimatedCostCny.toFixed(2))
                             : '';
-                        label.textContent = base + cost;
+                        label.innerHTML = base + cost;
                     }
                 }
                 break;

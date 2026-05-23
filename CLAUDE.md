@@ -134,13 +134,16 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
 
 - `runner/runLedger.ts` records each run as an `AgentRunRecord` plus append-only
   `AgentRunEvent` JSONL. Events use per-run sequence numbers, and snapshots feed
-  chat and Agent Manager UI.
+  chat and Agent Manager UI. Supports `cache_stats` events carrying `cachedTokens`,
+  `cacheCreationTokens`, `hitRate`, and `savedCostCny` for real-time sparkline cards.
 - `runner/checkpoint.ts` owns V2 resume state and synthetic interrupted tool
   replies for orphaned `tool_call`s. Keep V2 resume compatibility.
 - `runner/contextMemory.ts` produces structured compacted summaries that
   `promptBuilder.ts` can inject on resume.
 - `client/webview/chat/runTimeline.ts` and `runInspector.ts` render run events.
-  New event types should update both.
+  New event types (such as `cache_stats`) should update both.
+- ReadTracker & File I/O is constrained in Extension Host. Webviews must only
+  request files via IPC; do not perform direct raw file handling or I/O tracking inside the browser sandbox.
 - Orchestrator sub-agents must be constrained through
   `orchestrator/subAgentSandbox.ts` and `enforceSubAgentSafety`.
 

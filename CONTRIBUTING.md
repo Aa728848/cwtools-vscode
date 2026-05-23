@@ -157,6 +157,9 @@ Webview 运行在浏览器沙盒中：
 - Three.js/WebGL 面板必须在销毁时释放 renderer、geometry、material、texture、worker、事件监听器和动画循环。
 - 新增 chat UI 逻辑时，优先沿用 `client/webview/chat/` 的拆分模式。
 - Chat 面板和 Agent Manager 面板共享 host-side state；涉及跨 surface 同步时检查 `AgentUiBroadcaster`、`AgentSessionCoordinator`、`ArtifactStore` 和 `ai/chat/bridge.ts`。
+- **沙盒与 I/O 隔离边界 (ReadTracker)**：严禁在 Webview 端直接操作文件或通过任何越权手段绕过 IPC 抓取文件树与文件元数据。所有的 I/O 跟踪逻辑（如 `ReadTracker`）已全部收敛在 Extension Host 扩展宿主进程中，前端仅处理数据展现并遵循纯粹的数据驱动模型，防止浏览器沙盒漏洞越权。
+- **前缀缓存审计卡片与度量显示 (Prompt Cache)**：当大模型支持缓存并成功命中或新建前缀缓存（如 DeepSeek, Claude），会由后端发射 `cache_stats` 事件。前端渲染器 `messageRenderer.ts` 会将该事件编译拦截，并渲染为高颜值的“绿色 (命中) / 蓝色 (新建) / 橙黄色 (穿透) 三柱微图卡片 (Cache Sparkline)”。任何针对缓存费率打折因子（例如 DeepSeek/Claude 的 0.1× 优惠）或持久化的修改，应同步查验 `pricing.ts`、`UsageTracker` 与前端 `agentManager.ts` / `chatPanel.ts` 的自适应渲染区块。
+- **UI 图标高保真原则**：在任何 Token 使用看板或 UI 文字标注区域中，严禁混用裸 Emojis 符号（如 ⚡），必须物理升级为带内联样式修饰的高保真 SVG 矢量图标（支持 `stroke="currentColor"` 主题色自适应与垂直对齐），保持编辑器的现代精致质感。
 
 ### 平台与索引层
 

@@ -327,7 +327,11 @@ npx @vscode/vsce package
 
 ### Webview 隔离
 
-Webview 与 Extension Host 是不同运行环境。Webview 只能发送消息，不能直接访问工作区文件、VS Code API 或 Node.js。
+Webview 与 Extension Host 是完全隔离的运行环境。由于 Webview 运行在受限的 Chromium 沙盒中，**绝对禁止在其前端引入任何 Node.js 原生 API (如 fs, path) 或 vscode 模块**。
+
+为了确保沙盒的物理安全等级：
+- **底层 I/O 完全收敛**：原本散落在 Webview 安全边界内的多文件并发文件写入和 ReadTracker 的 I/O 跟踪逻辑已被完全移出到了 Extension Host 中。
+- **文件读取与操作代理化**：Webview 前端（如 ChatPanel 和 AgentManager）已退化为纯数据驱动的展示壳。如果需要获取或监控工作区的文件元数据、文件树或是写操作动作，前端必须通过标准的 `vscode.postMessage` 异步 IPC 机制向 Extension 宿主发起委托，由宿主执行安全校验后再将数据流式返回。这彻底杜绝了前端由于受限沙盒的间接引用漏洞导致宿主文件系统泄漏的风险。
 
 ### 写入并发
 
@@ -383,6 +387,24 @@ Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。�
 - `client/extension/ai/workflowI18n.ts`
 - `client/webview/chat/i18n.ts`
 - `client/webview/chat/messages.*.ts`
+
+### 前缀缓存（Prompt Cache）度量审计与高保真展现 (D3 重构)
+
+针对现代长上下文 AI 推理中的成本与效能问题，系统内建了完善的 **前缀缓存度量审计与高保真展现** 体系：
+
+1. **多厂商缓存向后兼容嗅探**：
+   在 `agentRunner.ts` 的执行流中，系统会自动提取大模型回传响应里的缓存计量。采用极其健壮的兼容性设计，支持包括 `usage.cached_tokens`、`prompt_tokens_details.cached_tokens`（OpenAI/DeepSeek 格式）、以及 `prompt_cache_hit_tokens`（Anthropic 格式）等多源字段，同时精准解析并获取 Claude 3.5 和 DeepSeek 特有的“新建缓存字节（`cache_creation_tokens`）”。
+
+2. **打折费率与成本精算 (Pricing Engine)**：
+   `providers/models/pricing.ts` 中集成了模型缓存节省的精算公式。系统能精准识别模型类型并应用差异化打折率（例如：识别为 `deepseek` 或 `claude` 则触发 0.1× 的 1 折特惠计费，识别为 `gpt-` 系列则触发 0.5× 的 5 折优惠），并将每一轮推断在物理上节省的真实人民币金额（CNY）通过 `savedCostCny` 字段流式发射。
+
+3. **三柱微图 (Cache Sparkline) 极致展现**：
+   在前端 Webview（`messageRenderer.ts`）中，系统拦截 `cache_stats` 事件，将“缓存命中数”、“新建缓存数”、“穿透数”三者按比例编译并渲染为视觉效果惊艳的“绿色 (命中) / 蓝色 (新建) / 橙黄色 (穿透) 三柱微图进度条”，并在右侧醒目高亮展现为用户节省的具体金额。
+
+4. **全局指标与实时会话双重覆写**：
+   - **全局统计**：全局多轮历史运行统计通过 `UsageTracker` 模块对 `UsageRecord` 进行累加与持久化。在设置界面的“消耗统计”中，动态汇总并渲染出总消耗、预估成本、累计缓存命中量、整体命中率以及累计省钱金额，做到彻底的数据透明度。
+   - **会话仪表盘 (Context Gauge)**：在聊天面板顶部的会话上下文进度条区域中，我们通过拦截 `tokenUsage` 消息，实时为标签覆写类似于 `, ⚡ X,XXX 缓存` 的字样，让当前实时会话的缓存状态触手可得。
+   - **高保真 SVG 替换规范**：所有涉及缓存命中的 UI 展现（包括仪表盘和运行管理器卡片）均杜绝了非标准的裸 Emoji（如 ⚡），必须升级并内联高清晰度的 SVG 矢量闪电图标（支持亮暗色主题自适应与垂直排版像素对齐）。
 
 ## 目录概览
 

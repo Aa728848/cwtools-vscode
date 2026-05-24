@@ -423,7 +423,7 @@ function detectLocalisation(root: string): ProjectProfile['localisation'] {
     const sampleFiles = roots.flatMap(rel => collectFiles(path.join(root, rel), 12, ['.yml']).map(file => toRelative(root, file)));
     const languages = Array.from(new Set(sampleFiles.map(file => {
         const base = path.basename(file);
-        const lang = base.match(/l_([a-z_]+)\.yml$/i)?.[1]
+        const lang = base.match(/(?:\b|_)l_((?:(?!(?:\b|_)l_)[a-z_])+)\.yml$/i)?.[1]
             ?? file.split(/[\\/]/).find(part => /^l?_[a-z_]+$/i.test(part));
         if (!lang) return undefined;
         return lang.startsWith('l_') ? lang : `l_${lang}`;

@@ -12,8 +12,9 @@ Paradox modding, with Stellaris as the primary target.
 The main runtime layers are:
 
 - `client/extension/`: VS Code extension host code in TypeScript.
-- `client/extension/ai/`: integrated AI assistant, tools, workflows, providers,
-  runner, and orchestrator.
+- `client/extension/ai/`: integrated AI assistant — providers, tools, workflows,
+  runner, orchestrator, project profile, game knowledge, memory, and prompt
+  construction.
 - `client/webview/`: browser-sandboxed Webview UIs bundled by Rollup.
 - `src/LSP/` and `src/Main/`: .NET 9 / F# language server protocol layer and
   `CWTools Server` executable.
@@ -68,23 +69,144 @@ checks.
 
 ## High-Value Paths
 
+### Extension Core
+
 | Path | Purpose |
 | --- | --- |
 | `client/extension/extension.ts` | Activation, command registration, LSP client setup |
 | `client/extension/gameProfiles.ts` | Shared game profile registry and helpers |
-| `client/extension/indexing/` | Localisation and workspace-symbol index layer |
+| `client/extension/indexing/indexService.ts` | Shared incremental index service |
+| `client/extension/indexing/locParser.ts` | Localisation YML parsing and query helpers |
+| `client/extension/indexing/workspaceSymbolParser.ts` | PDXScript / asset / gui symbol parsing and queries |
 | `client/extension/codeActions.ts` | AI quick fixes and diagnostic explanations |
 | `client/extension/*Panel.ts` / `*Parser.ts` | GUI, solar system, event chain, tech tree, and entity previews |
 | `client/extension/vanillaCompare.ts` | Vanilla file diff and block migration commands |
 | `client/extension/locDecorations.ts` | Localisation editor features backed by `IndexService` |
+| `client/extension/graphicsFeatures.ts` | Graphics resource editor features |
+| `client/extension/ddsDecoder.ts` | DDS/TGA texture decoding |
+| `client/extension/pdxTokenizer.ts` | PDX script shared tokenizer |
+
+### AI Agent Core
+
+| Path | Purpose |
+| --- | --- |
 | `client/extension/ai/agentRunner.ts` | Main AI reasoning and tool execution loop |
-| `client/extension/ai/runner/` | Compaction, checkpoints, scheduling, permissions, ledger, memory |
-| `client/extension/ai/tools/` | Tool schemas, registry, permissions, handlers, argument repair |
-| `client/extension/ai/orchestrator/` | Multi-agent DAG, blackboard, sandbox, conflict and quality gates |
-| `client/webview/chat/` | Extracted chat and Agent Manager browser modules |
+| `client/extension/ai/agentTools.ts` | Tool dispatch, timeout, shared blackboard, and orchestrator tool entry |
+| `client/extension/ai/aiService.ts` | Multi-provider HTTP/SSE AI client, request adaptation, and fallback |
+| `client/extension/ai/promptBuilder.ts` | Prompt facade, project context, and mode system prompts |
+| `client/extension/ai/prompt/sections/baseSystem.ts` | Base system prompt section |
+| `client/extension/ai/prompt/sections/modePrompts.ts` | Per-mode prompt sections |
+| `client/extension/ai/types.ts` | Messages, tools, modes, context, artifact, and settings types |
+| `client/extension/ai/providers.ts` | Provider facade, defaults, and capabilities |
+| `client/extension/ai/providers/models/defaults.ts` | Default model configs per provider |
+| `client/extension/ai/providers/models/capabilities.ts` | Model capability detection |
+| `client/extension/ai/providers/models/pricing.ts` | Pricing engine with cache discount rates |
+
+### AI Agent — Project Profile & Knowledge
+
+| Path | Purpose |
+| --- | --- |
+| `client/extension/ai/projectProfile.ts` | `/init` project scanning, profile build/read/write, language/encoding detection |
+| `client/extension/ai/chatInit.ts` | `/init` command handler, profile generation and CWTOOLS.md rendering |
+| `client/extension/ai/gameKnowledge.ts` | Per-game PDXScript knowledge blocks (Stellaris, HOI4, EU4, CK2/3, VIC2/3, Imperator, EU5) |
+| `client/extension/ai/memoryParser.ts` | `.cwtools-ai-memory.md` long-term workspace memory read/write/prune |
+| `client/extension/ai/contextBudget.ts` | Token budget management and tool result trimming |
+| `client/extension/ai/contextReferences.ts` | `@file`, `@folder`, `@symbol`, `@blackboard` reference resolution |
+
+### AI Agent — Runner Pipeline
+
+| Path | Purpose |
+| --- | --- |
+| `client/extension/ai/runnerPolicy.ts` | Mode-based tool filtering, iteration limits, and slim sub-agent budget |
+| `client/extension/ai/runner/compaction.ts` | History compaction and context window helpers |
+| `client/extension/ai/runner/checkpoint.ts` | V2 resume state and orphan `tool_call` synthetic replies |
+| `client/extension/ai/runner/writeCoordinator.ts` | `PartitionedWriteQueue` write coordination |
+| `client/extension/ai/runner/fallbackPolicy.ts` | Model fallback and API error retry management |
+| `client/extension/ai/runner/cancellation.ts` | LLM generation termination and exception throwing |
+| `client/extension/ai/runner/stepEmitter.ts` | Fine-grained step and token delta streaming broadcast |
+| `client/extension/ai/runner/toolScheduler.ts` | Concurrency class-based scheduling and per-file write exclusion |
+| `client/extension/ai/runner/toolInvocation.ts` | Tool call normalization, risk metadata, target path extraction, stable IDs |
+| `client/extension/ai/runner/commandPreflight.ts` | `run_command` tokenization and risk classification |
+| `client/extension/ai/runner/permissionPolicy.ts` | Low-risk pre-approval rules and `cwdScope` validation |
+| `client/extension/ai/runner/runLedger.ts` | Run accounting, event JSONL, and frontend `runSnapshot` data source |
+| `client/extension/ai/runner/runReducers.ts` | Pure event-projection reducers: run state, tool timeline, agent graph, cache stats |
+| `client/extension/ai/runner/runReplay.ts` | Run replay engine — recorded-tool mode with LLM re-invocation |
+| `client/extension/ai/runner/readTracker.ts` | File read/write integrity tracking (mtime + SHA-256 hash) |
+| `client/extension/ai/runner/contextMemory.ts` | LLM-driven structured history compaction |
+| `client/extension/ai/runner/doomLoopDetector.ts` | Anti-loop semantic detection |
+
+### AI Agent — Tools
+
+| Path | Purpose |
+| --- | --- |
+| `client/extension/ai/tools/definitions.ts` | Tool JSON Schema definitions (all tools) |
+| `client/extension/ai/tools/registry.ts` | Mode gating, read/write classification, effect/risk/concurrency metadata |
+| `client/extension/ai/tools/permissions.ts` | Mode and sub-agent access control |
+| `client/extension/ai/tools/argRepair.ts` | Pre-execution argument name and type drift repair |
+| `client/extension/ai/tools/externalTools.ts` | `run_command` and external process tool handlers |
+| `client/extension/ai/tools/fileTools.ts` | File read/write/edit tool handlers |
+| `client/extension/ai/tools/lspTools.ts` | LSP query, diagnostics, completion, and deep API tool handlers |
+| `client/extension/ai/tools/memoryTools.ts` | Memory read/write tool handlers |
+| `client/extension/ai/tools/replacerSuite.ts` | 10-strategy fuzzy string replacement engine (Levenshtein, block anchor, similarity, etc.) |
+| `client/extension/ai/tools/schemaFlatten.ts` | Tool schema auto-flattening for weak-tool-call providers |
+
+### AI Agent — Orchestrator
+
+| Path | Purpose |
+| --- | --- |
+| `client/extension/ai/orchestrator/orchestrator.ts` | Multi-agent dispatch entry, context injection, quality gate integration |
+| `client/extension/ai/orchestrator/agentRegistry.ts` | Sub-agent roles, modes, budgets, and default configs |
+| `client/extension/ai/orchestrator/blackboard.ts` | Cross-agent shared data with key/prefix/type queries |
+| `client/extension/ai/orchestrator/taskGraphEngine.ts` | DAG construction, topological sort, ready nodes, cycle detection |
+| `client/extension/ai/orchestrator/parallelExecutor.ts` | Dependency-batched parallel sub-task execution |
+| `client/extension/ai/orchestrator/conflictDetector.ts` | Blackboard-based write intent and entity registration conflict detection |
+| `client/extension/ai/orchestrator/qualityGate.ts` | Review and auto-fix pipeline |
+| `client/extension/ai/orchestrator/subAgentSandbox.ts` | `SubAgentSandbox` construction and `enforceSubAgentSafety` interception |
+
+### AI Agent — Workspace & Chat Infrastructure
+
+| Path | Purpose |
+| --- | --- |
+| `client/extension/ai/workspacePaths.ts` | AI storage root resolution, topic/scratch dir helpers |
+| `client/extension/ai/workspaceSandbox.ts` | Path sanitization, scope resolution, and sandbox trust classification |
+| `client/extension/ai/chat/bridge.ts` | Webview ↔ Extension Host communication bridge |
+| `client/extension/ai/chatPanel.ts` | Extension-side chat host and Webview HTML template |
+| `client/extension/ai/chatSettings.ts` | AI settings persistence |
+| `client/extension/ai/chatTopics.ts` | Session topic persistence |
+| `client/extension/ai/agentSessionCoordinator.ts` | Chat/manager shared session state, mode, workflow, live steps |
+| `client/extension/ai/agentUiBroadcaster.ts` | Multi-Webview surface broadcast and directed send |
+| `client/extension/ai/artifactStore.ts` | Agent artifact session-level storage, sorting, and stable IDs |
+| `client/extension/ai/usageTracker.ts` | Cumulative token usage, cost, and cache statistics persistence |
+| `client/extension/ai/diffEngine.ts` | Structural diff engine for file edits |
+| `client/extension/ai/fileCache.ts` | Bounded file content cache for AI tools |
+| `client/extension/ai/errorReporter.ts` | Structured error reporting (fatal/warn/debug) |
+| `client/extension/ai/toolCallParser.ts` | Non-standard tool call format parsing (DSML, Qwen, etc.) |
+| `client/extension/ai/jsonRepair.ts` | Incomplete JSON repair |
+| `client/extension/ai/mcpClient.ts` | MCP stdio/SSE client |
+
+### Webview
+
+| Path | Purpose |
+| --- | --- |
+| `client/webview/chatPanel.ts` | AI chat UI, workflow, settings, artifacts, plan cards, diff display |
+| `client/webview/agentManager.ts` | Detached Agent Manager: runs, agents, artifacts, tasks |
+| `client/webview/messageRenderer.ts` | Message rendering including cache sparkline cards |
+| `client/webview/svgIcons.ts` | High-fidelity SVG icon library |
+| `client/webview/chat/` | Extracted chat and Agent Manager browser modules (21 files) |
 | `client/webview/entityPreview.ts` | Three.js entity renderer |
+| `client/webview/guiPreview.ts` | `.gui` Canvas preview, drag editing, DDS/TGA display |
+| `client/webview/solarSystemPreview.ts` | Star system, orbit, planet interactive preview |
+| `client/webview/eventChainPreview.ts` | Cytoscape.js event reference graph |
+| `client/webview/techTreePreview.ts` | Cytoscape.js tech dependency graph |
+
+### F# Backend
+
+| Path | Purpose |
+| --- | --- |
 | `src/LSP/` | Reusable LSP protocol and parser layer |
-| `src/Main/` | `CWTools Server` executable entry point and feature bridge |
+| `src/Main/Program.fs` | `CWTools Server` entry, semantic tokens, document symbols, shader bridge |
+| `src/Main/GameLoader.fs` | Vanilla FX source loading |
+| `submodules/cwtools/CWTools/Game/PdxShaderFeatures.fs` | Shader parsing and feature extraction |
 
 ## Editing Guardrails
 
@@ -126,6 +248,11 @@ Important constraints:
   locks in sorted path order.
 - Generic write tools reject `.yml` localisation writes; use
   `write_localisation`.
+- `tools/replacerSuite.ts` provides a 10-strategy fuzzy replacement engine for
+  `edit_file`; changes to replacement strategies should update
+  `editFileReplacer.test.ts`.
+- `tools/schemaFlatten.ts` auto-flattens deep tool schemas for weak providers;
+  `nestArguments()` reverses the flattening before tool execution.
 
 The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
 `merge_results`. Do not revive older `spawn_sub_agents` naming.
@@ -136,6 +263,17 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
   `AgentRunEvent` JSONL. Events use per-run sequence numbers, and snapshots feed
   chat and Agent Manager UI. Supports `cache_stats` events carrying `cachedTokens`,
   `cacheCreationTokens`, `hitRate`, and `savedCostCny` for real-time sparkline cards.
+- `runner/runReducers.ts` contains pure event-projection reducers:
+  `reduceRunState`, `reduceToolTimeline`, `reduceAgentGraph`, `reduceCacheStats`,
+  and `reduceAll`. These are side-effect-free and designed for unit testing and
+  JSONL replay. New event types must update the relevant reducer.
+- `runner/runReplay.ts` enables re-running a recorded agent run with new
+  prompt/model/provider overrides. Mode A (recorded-tool) answers tool calls
+  from the original ledger; Mode B (full-replay) is deferred. `ReplaySession`
+  indexes tool call results by canonicalized args.
+- `runner/readTracker.ts` tracks file reads with mtime + SHA-256 hash and
+  prevents writes to files not yet read or modified externally since last read.
+  Sits in Extension Host only — never in Webview.
 - `runner/checkpoint.ts` owns V2 resume state and synthetic interrupted tool
   replies for orphaned `tool_call`s. Keep V2 resume compatibility.
 - `runner/contextMemory.ts` produces structured compacted summaries that
@@ -146,6 +284,41 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
   request files via IPC; do not perform direct raw file handling or I/O tracking inside the browser sandbox.
 - Orchestrator sub-agents must be constrained through
   `orchestrator/subAgentSandbox.ts` and `enforceSubAgentSafety`.
+
+## Project Profile & `/init`
+
+- `chatInit.ts` handles the `/init` slash command: scans workspace, builds
+  `ProjectProfile`, writes `.cwtools-ai/project/profile.json`, and renders
+  `CWTOOLS.md` markdown rules.
+- `projectProfile.ts` contains all scanning logic: directory detection,
+  localisation language/encoding detection, namespace/identifier sampling,
+  game detection, prompt card generation, and the `queryProjectProfile` tool handler.
+- Language detection regex uses word-boundary + negative lookahead to extract the
+  rightmost `l_<lang>` tag from `.yml` filenames (e.g., `_l_simp_chinese.yml`
+  → `l_simp_chinese`). Do not regress to greedy `l_([a-z_]+)\.yml$`.
+- `promptBuilder.ts` caches the profile and injects it as a `PROJECT PROFILE`
+  block in the system prompt when available.
+
+## AI Workspace Paths & Sandbox
+
+- `workspacePaths.ts` resolves AI storage root (`.cwtools-ai/`), topic dirs,
+  scratch dirs, and multi-candidate paths across workspace folders.
+- `workspaceSandbox.ts` sanitizes path input, resolves workspace folder aliases,
+  classifies path scope (`project`/`ai`/`workspace`/`outside`), and provides
+  `isPathInsideOrEqual` using `path.relative`.
+- `runnerPolicy.ts` centralizes mode-based tool filtering, per-mode iteration
+  limits, slim sub-agent output budget, and tool exclusion logic.
+
+## Game Knowledge & Memory
+
+- `gameKnowledge.ts` provides per-game PDXScript knowledge blocks for 9 games
+  (Stellaris, HOI4, EU4, CK2, CK3, VIC2, VIC3, Imperator, EU5) plus a generic
+  Paradox fallback. `getGameKnowledge(languageId)` returns the appropriate block.
+- `memoryParser.ts` manages `.cwtools-ai-memory.md` long-term workspace memory:
+  reads with caching, appends new entries, and auto-prunes by priority when
+  exceeding `MAX_MEMORY_CHARS` (4000 chars / ~1000 tokens).
+- `usageTracker.ts` persists cumulative token usage, cost, and cache statistics
+  across sessions. Used by the settings overview and Agent Manager dashboard.
 
 ## Webview Rules
 
@@ -195,6 +368,4 @@ Use the narrowest validation that matches the change:
 - Webview changes: `npm run compile`; inspect the relevant panel in an Extension
   Development Host when UI behavior changes.
 - F# LSP changes: `dotnet build src/LSP/` or `dotnet build src/Main/`.
-- Release-sensitive changes: `npm run verify`.
-- Packaging: follow `.agents/workflows/package.md`; the root currently has no
-  `package.ps1`.
+- Packaging: follow `.agents/workflows/package.md`, or run `package.ps1` (or npm run pack:install) to build and install locally.

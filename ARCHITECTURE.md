@@ -114,39 +114,70 @@ sequenceDiagram
 | 文件 | 作用 |
 | --- | --- |
 | `agentRunner.ts` | 推理循环、工具权限、workflow 应用、上下文压缩、检查点、回退 |
-| `runner/compaction.ts` | 历史压缩与上下文窗口辅助 |
-| `runner/checkpoint.ts` | V2 断点恢复元数据和孤儿 `tool_call` 补齐 |
-| `runner/writeCoordinator.ts` | `PartitionedWriteQueue` 写入协调 |
-| `runner/fallbackPolicy.ts` | 模型备选及 API 报错重试管理 |
-| `runner/cancellation.ts` | 大模型生成终止判定与异常抛出 |
-| `runner/stepEmitter.ts` | 细粒度步骤与 token 增量流式广播 |
-| `runner/toolScheduler.ts` | 按 `concurrencyClass` 调度并发和互斥 |
-| `runner/toolInvocation.ts` | 把模型 tool call 包装为带风险元数据和稳定 ID 的 `ToolInvocation` |
-| `runner/commandPreflight.ts` | `run_command` 命令分词与风险分级 |
-| `runner/permissionPolicy.ts` | 低风险预批准规则和 `cwdScope` 校验 |
-| `runner/runLedger.ts` | 运行账本、事件 JSONL 和前端 `runSnapshot` 数据源 |
-| `runner/contextMemory.ts` | LLM 驱动的结构化历史压缩 |
-| `runner/doomLoopDetector.ts` | 防循环语义检测 |
+| `agentTools.ts` | 工具分发、超时、共享黑板和 orchestrator 工具入口 |
+| `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配和回退 |
+| `promptBuilder.ts` / `prompt/sections/` | Prompt facade、项目上下文和模式系统提示词 |
+| `providers.ts` / `providers/models/` | Provider facade、默认模型、能力、价格和缓存折扣 |
+| `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
+| `runnerPolicy.ts` | 模式级工具过滤、迭代上限和 slim sub-agent 输出预算 |
+| `projectProfile.ts` | `/init` 项目扫描、profile 构建/读写、语言/编码检测 |
+| `chatInit.ts` | `/init` 命令处理器、profile 生成和 CWTOOLS.md 渲染 |
+| `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
+| `memoryParser.ts` | `.cwtools-ai-memory.md` 长期工作区记忆读写与自动裁剪 |
+| `workspacePaths.ts` | AI 存储根解析、topic/scratch 目录、多 workspace folder 支持 |
+| `workspaceSandbox.ts` | 路径输入清洗、作用域分类（project/ai/workspace/outside）和信任判定 |
+| `usageTracker.ts` | 跨会话 token 用量、成本和缓存统计持久化 |
+| `diffEngine.ts` | 结构化 diff 引擎 |
+| `fileCache.ts` | 有界文件内容缓存 |
+| `errorReporter.ts` | 结构化错误报告（fatal/warn/debug） |
+| `contextBudget.ts` | Token 预算和工具结果裁剪 |
+| `contextReferences.ts` | `@file`、`@folder`、`@symbol`、`@blackboard` 引用解析 |
 | `chat/bridge.ts` | Webview 与 Extension Host 的通信桥接 |
 | `agentSessionCoordinator.ts` | chat / manager 共用会话状态、模式、workflow、live steps |
 | `agentUiBroadcaster.ts` | 多 Webview surface 广播与定向发送 |
 | `artifactStore.ts` | Agent Artifact 的会话级存储、排序和稳定 ID |
-| `agentManagerHtml.ts` | detached Agent Manager 面板 HTML 模板 |
-| `agentTools.ts` | 工具分发、超时、共享黑板和 orchestrator 工具入口 |
-| `tools/` | 工具 schema、registry、permissions、arg repair 和具体 handler |
-| `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配和回退 |
-| `providers.ts` / `providers/models/` | Provider facade、默认模型、能力和价格 |
-| `promptBuilder.ts` / `prompt/sections/` | Prompt facade、项目上下文和模式系统提示词 |
-| `workflowRegistry.ts` | workflow 元数据、工具策略和阶段定义 |
-| `workflowI18n.ts` / `workflowViewModel.ts` | workflow 的本地化与 UI 视图模型 |
-| `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
-| `contextBudget.ts` | Token 预算和工具结果裁剪 |
-| `contextReferences.ts` | `@file`、`@folder`、`@symbol`、`@blackboard` 引用解析 |
 | `chatPanel.ts` / `chatHtml.ts` | Extension 侧聊天宿主与 Webview HTML 模板 |
 | `chatSettings.ts` / `chatTopics.ts` | AI 设置和会话主题持久化 |
+| `workflowRegistry.ts` / `workflowI18n.ts` | workflow 元数据、工具策略、阶段定义和本地化 |
 | `inlineProvider.ts` | AI 内联补全 |
 | `mcpClient.ts` | MCP stdio/SSE 客户端 |
 | `toolCallParser.ts` / `jsonRepair.ts` | 非标准工具调用和不完整 JSON 修复 |
+
+### Runner 执行管线（`runner/`）
+
+| 文件 | 作用 |
+| --- | --- |
+| `compaction.ts` | 历史压缩与上下文窗口辅助 |
+| `checkpoint.ts` | V2 断点恢复元数据和孤儿 `tool_call` 补齐 |
+| `writeCoordinator.ts` | `PartitionedWriteQueue` 写入协调 |
+| `fallbackPolicy.ts` | 模型备选及 API 报错重试管理 |
+| `cancellation.ts` | 大模型生成终止判定与异常抛出 |
+| `stepEmitter.ts` | 细粒度步骤与 token 增量流式广播 |
+| `toolScheduler.ts` | 按 `concurrencyClass` 调度并发和互斥 |
+| `toolInvocation.ts` | 把模型 tool call 包装为带风险元数据和稳定 ID 的 `ToolInvocation` |
+| `commandPreflight.ts` | `run_command` 命令分词与风险分级 |
+| `permissionPolicy.ts` | 低风险预批准规则和 `cwdScope` 校验 |
+| `runLedger.ts` | 运行账本、事件 JSONL 和前端 `runSnapshot` 数据源 |
+| `runReducers.ts` | 纯事件投影 reducer：run 状态、工具时间线、Agent 拓扑图、缓存统计 |
+| `runReplay.ts` | 运行回放引擎 — 模式 A (recorded-tool) 从 ledger 回答工具调用 |
+| `readTracker.ts` | 文件读写完整性跟踪（mtime + SHA-256 hash） |
+| `contextMemory.ts` | LLM 驱动的结构化历史压缩 |
+| `doomLoopDetector.ts` | 防循环语义检测 |
+
+### 工具系统（`tools/`）
+
+| 文件 | 作用 |
+| --- | --- |
+| `definitions.ts` | 所有工具的 JSON Schema 定义 |
+| `registry.ts` | 模式门控、读写分类、effect/risk/concurrency 元数据 |
+| `permissions.ts` | 模式和子 Agent 访问控制 |
+| `argRepair.ts` | 执行前参数名和类型漂移修复 |
+| `externalTools.ts` | `run_command` 和外部进程工具处理器 |
+| `fileTools.ts` | 文件读写编辑工具处理器 |
+| `lspTools.ts` | LSP 查询、诊断、补全和深层 API 工具处理器 |
+| `memoryTools.ts` | 记忆读写工具处理器 |
+| `replacerSuite.ts` | 10 策略模糊替换引擎（Levenshtein、块锚定、Jaccard 相似度等） |
+| `schemaFlatten.ts` | 深层 schema 自动展平及 `nestArguments()` 反向还原 |
 
 ### Agent 模式与 Workflow
 
@@ -218,6 +249,100 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 `runner/checkpoint.ts` 产出 V2 `AgentResumeState`。`prepareMessagesForResume` 为孤儿 `tool_call` 注入合成 interrupted 回复，避免 OpenAI 风格 API 拒绝恢复请求；`buildResumeMessages` 把压缩摘要前置，并限制上下文尾部。
 
 `runner/contextMemory.ts` 产出结构化 `CompactedSummary`，由 `promptBuilder.ts` 在恢复时注入。Agent Manager 的 `runTimeline.ts` 和 `runInspector.ts` 消费 run snapshot 展示事件时间轴和单事件详情。
+
+### Run Reducers
+
+`runner/runReducers.ts` 包含纯函数式的事件投影 reducer，对 `AgentRunEvent[]` 做单遍扫描产出不可变快照：
+
+- `reduceRunState` — 运行进度、token 计数、状态
+- `reduceToolTimeline` — 逐轮工具调用列表，可按 agentId 过滤
+- `reduceAgentGraph` — 父/子 Agent 拓扑图与沙盒拒绝标记
+- `reduceCacheStats` — 按 Agent 聚合前缀缓存命中数据
+- `reduceAll` — 一次性聚合以上四个快照
+
+Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新增事件类型时必须更新对应 reducer。
+
+### Run Replay
+
+`runner/runReplay.ts` 支持对已记录的 Agent 运行进行回放：
+
+- **模式 A（recorded-tool）**：用新的 prompt/model/provider 重新调用 LLM，但工具调用结果从原始 ledger 回答。成本低，差异隔离到 LLM 推理层。
+- **模式 B（full-replay）**：工具也重新执行——需要工作区快照，暂缓实现。
+- `ReplaySession` 按 `(toolName, canonicalize(args))` 索引工具结果。
+- `maybeServeFromReplay` 供工具执行器短路。
+
+### ReadTracker
+
+`runner/readTracker.ts` 在 Extension Host 中跟踪每个文件的读取状态（mtime + SHA-256 hash），提供三个核心操作：
+
+- `markRead(filePath)` — 记录文件已读
+- `canWrite(filePath)` — 检查是否允许写入（未读或外部修改则拦截）
+- `markWritten(filePath)` — 写操作后更新跟踪数据
+
+严禁在 Webview 中使用此模块。
+
+### Workspace Paths 与 Sandbox
+
+- `workspacePaths.ts` 解析 AI 存储根目录（`.cwtools-ai/`），支持多 workspace folder 场景下的 topic 目录、scratch 目录和多候选路径。
+- `workspaceSandbox.ts` 负责路径输入清洗（去引号、去 code span、去自然语言前缀）、workspace folder 别名解析、`.cwtools-ai` 路径别名解析、以及四级作用域分类（`project`/`ai`/`workspace`/`outside`）和信任判定。
+
+### Runner Policy
+
+`runnerPolicy.ts` 集中管理：
+
+- `filterToolDefinitionsForMode` — 根据模式、sub-agent 标志和排除列表过滤工具
+- `resolveMaxToolIterations` — 按模式和上下文窗口大小计算迭代上限
+- `resolveRunMaxOutputTokens` — slim sub-agent 的输出 token 预算
+- `MODE_ITERATION_LIMITS` — 每种模式的 min/base/cap 配置
+
+### Project Profile 与 `/init`
+
+`projectProfile.ts` 处理 `/init` 命令的项目扫描逻辑：
+
+- 目录检测（events/、common/、localisation/ 等）
+- 本地化语言和编码检测（使用负向先行断言正则提取最右侧 `l_<lang>` 标签）
+- 命名空间和标识符采样
+- 游戏检测和 prompt card 生成
+- `queryProjectProfile` 工具处理器
+
+`chatInit.ts` 是 `/init` 命令的入口处理器，负责调用 `projectProfile.ts` 生成 profile 并渲染 `CWTOOLS.md`。
+
+### Game Knowledge
+
+`gameKnowledge.ts` 为 9 款 Paradox 游戏提供 PDXScript 知识块（Stellaris、HOI4、EU4、CK2、CK3、VIC2、VIC3、Imperator、EU5），外加一个通用 Paradox 回退。`promptBuilder.ts` 通过 `getGameKnowledge(languageId)` 动态选择注入。
+
+### Memory Parser
+
+`memoryParser.ts` 管理 `.cwtools-ai-memory.md` 长期工作区记忆文件：
+
+- 缓存读取（按 mtime 检查刷新）
+- 追加新记忆条目（含日期和优先级标签）
+- 超出 `MAX_MEMORY_CHARS`（~4000 字符）时按优先级自动裁剪
+
+### Usage Tracker
+
+`usageTracker.ts` 跨会话持久化累计 token 用量、成本和缓存统计数据。被设置概览和 Agent Manager 仪表盘消费。
+
+### Replacer Suite
+
+`tools/replacerSuite.ts` 提供 10 种递进式模糊字符串替换策略：
+
+1. 直接匹配
+2. Unicode 归一化（BOM、CRLF、全角/半角、智能引号）
+3. 行级 trim
+4. 块锚定（首末行 + Levenshtein 内部评分）
+5. 空白归一化
+6. 缩进弹性
+7. 转义归一化
+8. 边界 trim
+9. 上下文感知
+10. Jaccard 相似度滑动窗口
+
+匹配失败时 `findNearestMatch` 返回最佳部分匹配信息，帮助 AI 自我纠正。
+
+### Schema Flatten
+
+`tools/schemaFlatten.ts` 为弱工具调用能力的 Provider 自动展平深层嵌套的 tool schema（深度 > 2 或叶子 > 10 时触发），执行工具前由 `nestArguments()` 反向还原为嵌套结构。
 
 ## Webview 层
 
@@ -321,7 +446,7 @@ dotnet build src/Main/
 npx @vscode/vsce package
 ```
 
-打包前需要准备 TypeScript/Webview 输出和三平台服务端输出。不要引用根目录 `package.ps1`，当前仓库没有该脚本。
+打包前需要准备 TypeScript/Webview 输出和三平台服务端输出。推荐在根目录下运行 `package.ps1` 脚本（或使用快捷指令 `npm run pack:install` / `npm run pack:quick`），可一键自动化执行所有环境的编译、静态资源复制、包体打包及本地强制升级安装。
 
 ## 关键设计约束
 
@@ -413,20 +538,39 @@ cwtools-vscode/
   client/
     extension/
       ai/
-        orchestrator/
-        runner/
-        chat/
-        tools/
+        orchestrator/         DAG 任务图、黑板、沙盒、冲突检测、质量门
+        runner/               执行管线：压缩、检查点、调度、权限、账本、
+                              reducer、回放、读跟踪、记忆
+        chat/                 Webview ↔ Host 通信桥
+        tools/                schema、registry、permissions、handlers、
+                              模糊替换引擎、schema 展平
         prompt/
-          sections/
+          sections/           baseSystem.ts, modePrompts.ts
         providers/
-          models/
+          models/             defaults.ts, capabilities.ts, pricing.ts
+        agentRunner.ts        主推理循环
+        agentTools.ts         工具分发入口
+        aiService.ts          多 Provider AI 客户端
+        promptBuilder.ts      Prompt 构建门面
+        projectProfile.ts     /init 项目扫描和 profile
+        chatInit.ts           /init 命令处理器
+        gameKnowledge.ts      9 款游戏 PDXScript 知识块
+        memoryParser.ts       长期工作区记忆
+        workspacePaths.ts     AI 存储路径解析
+        workspaceSandbox.ts   路径沙盒和作用域分类
+        runnerPolicy.ts       模式级工具过滤和迭代上限
+        usageTracker.ts       token 用量和成本跟踪
+        diffEngine.ts         结构化 diff 引擎
+        fileCache.ts          有界文件缓存
+        types.ts              所有 AI 类型定义
       indexing/
       extension.ts
       gameProfiles.ts
       vanillaCompare.ts
     webview/
-      chat/
+      chat/                   21 个提取的浏览器模块
+      messageRenderer.ts      消息渲染（含缓存 sparkline）
+      svgIcons.ts             高保真 SVG 图标库
       agentManager.ts
       chatPanel.ts
       guiPreview.ts
@@ -435,7 +579,7 @@ cwtools-vscode/
       techTreePreview.ts
       entityPreview.ts
     test/
-      unit/
+      unit/                   46 个单元测试文件
       suite/
   src/
     LSP/
@@ -446,9 +590,14 @@ cwtools-vscode/
     cwtools/
     cwtools-stellaris-config/
   .agents/
-    workflows/
+    rules/                    coding-guidelines.md
+    workflows/                package.md
+  tools/
+    check-release.js
+    rules-sync/
   release/
     bin/
+    syntaxes/                 TextMate 语法（paradox, stellaris, pdxshader）
   rollup.config.mjs
   eslint.config.mjs
   global.json

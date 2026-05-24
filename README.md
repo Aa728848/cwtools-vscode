@@ -194,7 +194,7 @@ npm run verify
 npx @vscode/vsce package
 ```
 > [!IMPORTANT]
-> 项目没有根目录的 `package.ps1`，打包前必须确保前端 `npm run compile` 及各平台的 .NET 服务端可执行文件已正确就位在 `release/bin/` 中。具体步骤请参阅 [.agents/workflows/package.md](file:///c:/Users/A/Documents/cwtools-vscode/.agents/workflows/package.md)。
+> 打包具体步骤请参阅 [.agents/workflows/package.md](file:///c:/Users/A/Documents/cwtools-vscode/.agents/workflows/package.md)，也可以使用 `package.ps1` 进行打包。
 
 ---
 

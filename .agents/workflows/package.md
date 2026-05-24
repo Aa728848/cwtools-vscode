@@ -9,9 +9,30 @@ description: 打包 CWTools VSCode 插件为 .vsix 格式（含 Win/Linux/macOS 
 
 ---
 
+## 💡 自动化打包捷径 (推荐)
+
+项目根目录提供了全自动一键打包与安装脚本 [package.ps1](file:///c:/Users/A/Documents/cwtools-vscode/package.ps1)，可以通过集成在 `package.json` 中的快捷命令随时在终端调用：
+
+* **完整一键打包安装**（自动依次执行下述第 0 至 6 步，并将最新版本强制升级部署至当前系统的 VSCode）：
+  ```bash
+  npm run pack:install
+  ```
+* **极速更新调试模式**（跳过第 1 步 .NET 服务端的编译，仅快速重编译 TypeScript 和 Webview 前端，打包并强制升级仅需 30 秒，极力推荐在仅调试修改前端 UI/逻辑时使用）：
+  ```bash
+  npm run pack:quick
+  ```
+* **仅一键打包通用包**（自动执行编译与打包，不执行最后的本地安装）：
+  ```bash
+  npm run pack
+  ```
+
+如果您需要对流程进行更细粒度的控制，或者查验手动编译细节，请依次参阅下述各步：
+
+---
+
 ## 0. 更新版本号与变更日志（可选项）
 
-在开始打包前，如果需要发布新版本，请确保已手动或通过脚本更新 `release/package.json` 中的 `version` 字段，并在 `release/CHANGELOG.md` 记录本次更新内容。
+在开始打包前，如果需要发布新版本，请确保已手动或通过脚本更新 `release/package.json` 中的 `version` 字段，并在 `release/CHANGELOG.md` 记录本次更新内容。也可通过 `package.ps1 -Version <version>` 传参一键更新。
 
 // turbo
 ```powershell

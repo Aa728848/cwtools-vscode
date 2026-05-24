@@ -199,8 +199,8 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .side-workspace-body .settings-footer { width: 100%; max-width: none; margin-left: 0; margin-right: 0; }
 .side-workspace-body .settings-page { display: flex; align-items: stretch; background: transparent; animation: none; }
 .side-workspace-body .settings-overview { width: calc(100% - 24px); max-width: none; }
-.workspace-empty { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 24px; color: var(--fg); background: rgba(255,255,255,0.012); }
-.workspace-empty-title { font-size: 13px; font-weight: 700; opacity: 0.86; }
+.workspace-empty { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 28px 22px; color: var(--fg); background: transparent; }
+.workspace-empty-title { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; opacity: 0.86; }
 .workspace-empty-text { max-width: 360px; font-size: 11.5px; line-height: 1.55; opacity: 0.56; }
 
 @media (min-width: 1180px) {

@@ -42,6 +42,16 @@ let private scriptedParamRegex =
         @"\$([A-Za-z_][A-Za-z0-9_]*)\$",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private codeLensDefinitionKeyPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*(""?[A-Za-z0-9_.$:@-]+""?)\s*=",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private codeLensNameFieldPattern =
+    System.Text.RegularExpressions.Regex(
+        @"(?:^|[\s{])\b(name|id|key)\b\s*=\s*(""?[A-Za-z0-9_.$:@-]+""?)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
+
 [<assembly: AssemblyDescription("CWTools language server for PDXScript")>]
 do ()
 
@@ -488,6 +498,7 @@ type Server(client: ILanguageClient) =
     /// without rereading the file on the first editor switch.
     let codeLensPrecacheHash = Int32.MinValue
     let codeLensCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * CodeLens list>()
+    let typeReferenceResultCache = System.Collections.Concurrent.ConcurrentDictionary<string, range list>()
 
     /// InlayHint cache: filePath -> (contentHash, hints)
     let inlayHintCache = System.Collections.Concurrent.ConcurrentDictionary<string, int * InlayHint list>()
@@ -504,6 +515,10 @@ type Server(client: ILanguageClient) =
 
     let completionListCacheKey filePath textHash line character debugMode supportsInsertReplaceEdit =
         $"{normaliseCachePath filePath}|{textHash}|{line}|{character}|{debugMode}|{supportsInsertReplaceEdit}"
+
+    let typeReferenceResultCacheKey (typeName: string) (id: string) =
+        let baseTypeName = typeName.Split('.').[0]
+        $"{baseTypeName}\u001f{id}"
 
     let clearCompletionListCacheForFile (filePath: string) =
         let prefix = normaliseCachePath filePath + "|"
@@ -571,12 +586,14 @@ type Server(client: ILanguageClient) =
             (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
             (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
             clearCompletionListCacheForFile key
+        typeReferenceResultCache.Clear()
 
     /// Clear the type index related cache (called after the type-defining file changes)
     let clearTypeCaches () =
         clearTypeIndexCache ()
         completionListCache.Clear()
         codeLensCache.Clear()  // CodeLens depends on type index
+        typeReferenceResultCache.Clear()
 
     /// Clean localization related cache (called after .yml changes)
     let clearLocalisationCaches () =
@@ -589,6 +606,7 @@ type Server(client: ILanguageClient) =
         inlayHintCache.Clear()
         clearTypeIndexCache ()
         completionListCache.Clear()
+        typeReferenceResultCache.Clear()
 
     /// Maximum entries before eviction.  512 files covers even very large mods;
     /// each entry is small (hash + delta-encoded int list / CodeLens list).
@@ -626,6 +644,119 @@ type Server(client: ILanguageClient) =
     let forgetFileCaches filePath =
         clearFileCaches filePath
         clearCacheWriteTimesForFile filePath
+
+    let codeLensPositionJson line character =
+        JsonValue.Record
+            [| "line", JsonValue.Number(decimal line)
+               "character", JsonValue.Number(decimal character) |]
+
+    let looksLikePath (value: string) =
+        value.Contains("\\")
+        || value.Contains("/")
+        || value.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)
+        || value.EndsWith(".gui", StringComparison.OrdinalIgnoreCase)
+        || value.EndsWith(".gfx", StringComparison.OrdinalIgnoreCase)
+        || value.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)
+        || value.EndsWith(".cwt", StringComparison.OrdinalIgnoreCase)
+
+    let tryDefinitionKeyAtLine (sourceText: string option) lineIndex =
+        sourceText
+        |> Option.bind (fun text ->
+            if lineIndex < 0 then None
+            else
+                let lines = text.Split('\n')
+                if lineIndex >= lines.Length then None
+                else
+                    let line = lines.[lineIndex].TrimEnd('\r')
+                    let m = codeLensDefinitionKeyPattern.Match(line)
+                    if m.Success then
+                        let key = m.Groups.[1].Value.Trim('"')
+                        if String.IsNullOrWhiteSpace key then None else Some key
+                    else
+                        None)
+
+    let tryDefinitionKeyAtRange (sourceText: string option) (tdi: TypeDefInfo) =
+        tryDefinitionKeyAtLine sourceText (int tdi.range.StartLine - 1)
+
+    let tryDefinitionNameFieldAtRange (sourceText: string option) (tdi: TypeDefInfo) =
+        sourceText
+        |> Option.bind (fun text ->
+            let lines = text.Split('\n')
+            let startLine = max 0 (int tdi.range.StartLine - 1)
+            if startLine >= lines.Length then None
+            else
+                let endLine =
+                    let rangeEnd = max startLine (int tdi.range.EndLine - 1)
+                    min (lines.Length - 1) (min rangeEnd (startLine + 80))
+
+                let priority field =
+                    match field with
+                    | "name" -> 0
+                    | "id" -> 1
+                    | "key" -> 2
+                    | _ -> 3
+
+                [ startLine .. endLine ]
+                |> List.choose (fun lineIndex ->
+                    let line = lines.[lineIndex].TrimEnd('\r')
+                    let m = codeLensNameFieldPattern.Match(line)
+                    if m.Success then
+                        let field = m.Groups.[1].Value.ToLowerInvariant()
+                        let value = m.Groups.[2].Value.Trim('"')
+                        if String.IsNullOrWhiteSpace value then None else Some(priority field, lineIndex, value)
+                    else
+                        None)
+                |> List.sortBy (fun (rank, lineIndex, _) -> rank, lineIndex)
+                |> List.tryHead
+                |> Option.map (fun (_, _, value) -> value))
+
+    let resolveCodeLensIdentity sourceText typeName id (tdi: TypeDefInfo) =
+        let resolvedTypeName =
+            if looksLikePath typeName && not (looksLikePath id) then id else typeName
+
+        let definitionKey = tryDefinitionKeyAtRange sourceText tdi
+        let idLooksBroad =
+            looksLikePath id
+            || id = resolvedTypeName
+            || (definitionKey |> Option.exists ((=) id))
+
+        let resolvedId =
+            if idLooksBroad then
+                match tryDefinitionNameFieldAtRange sourceText tdi with
+                | Some fieldValue -> fieldValue
+                | None ->
+                    match definitionKey with
+                    | Some key when key <> resolvedTypeName -> key
+                    | _ -> id
+            else
+                id
+
+        resolvedTypeName, resolvedId
+
+    let makeTypeCodeLens sourceText typeName id filePath (tdi: TypeDefInfo) : LSP.Types.CodeLens =
+        let typeName, id = resolveCodeLensIdentity sourceText typeName id tdi
+        let range = convRangeToLSPRange tdi.range
+        let line = range.start.line
+        let character = range.start.character
+        let uri = Uri(filePath).ToString()
+
+        { range = range
+          command =
+            Some
+                { title = $"%s{typeName}: %s{id}"
+                  command = "cwtools.showTypeReferences"
+                  arguments =
+                    [ JsonValue.String uri
+                      codeLensPositionJson line character
+                      JsonValue.String typeName
+                      JsonValue.String id ] }
+          data =
+            JsonValue.Record
+                [| "typeName", JsonValue.String typeName
+                   "id", JsonValue.String id
+                   "filePath", JsonValue.String filePath
+                   "line", JsonValue.Number(decimal line)
+                   "character", JsonValue.Number(decimal character) |] }
 
     /// Compute a SemanticTokens delta between two encoded int arrays.
     /// Each token occupies 5 ints (deltaLine, deltaChar, length, tokenType, tokenModifiers).
@@ -1463,18 +1594,12 @@ type Server(client: ILanguageClient) =
                 for (filePath, items) in groupedTypes |> Map.toSeq do
                     let lenses =
                         items
-                        |> List.map (fun (typeName, id, tdi) ->
-                            let range = convRangeToLSPRange tdi.range
-                            { LSP.Types.CodeLens.range = range
-                              command = None
-                              data =
-                                JsonValue.Record
-                                    [| "typeName", JsonValue.String typeName
-                                       "id", JsonValue.String id
-                                       "filePath", JsonValue.String filePath
-                                       "line", JsonValue.Number(decimal range.start.line)
-                                       "character", JsonValue.Number(decimal range.start.character) |] })
+                        |> List.map (fun (typeName, id, tdi) -> makeTypeCodeLens None typeName id filePath tdi)
                     cachePut codeLensCache filePath (codeLensPrecacheHash, lenses)
+
+                // Warm the direct reference index during the loading/precache phase
+                // so CodeLens clicks do not pay an all-project scan later.
+                game.TypeReferenceIndex() |> ignore
 
             with e -> eprintfn $"Precache failed: %A{e}"
             client.CustomNotification(
@@ -1809,7 +1934,7 @@ type Server(client: ILanguageClient) =
                             completionProvider =
                                 Some defaultCompletionOptions
                             codeActionProvider = true
-                            codeLensProvider = Some { resolveProvider = true }
+                            codeLensProvider = Some { resolveProvider = false }
                             documentLinkProvider = Some defaultDocumentLinkOptions
                             documentSymbolProvider = true
                             workspaceSymbolProvider = true
@@ -1829,6 +1954,7 @@ type Server(client: ILanguageClient) =
                                           "gettech"
                                           "getGraphData"
                                           "exportTypes"
+                                          "cwtools.findTypeReferences"
                                           // A2 Fix: declare ALL implemented AI commands so
                                           // strict LSP clients don't reject them.
                                           "cwtools.ai.getScopeAtPosition"
@@ -2532,36 +2658,28 @@ type Server(client: ILanguageClient) =
                             match docs.GetTextByPath(filePath) with
                             | Some t -> t
                             | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
-                        let buildLenses hash =
+                        let buildLenses fileText =
+                            let hash = contentHash fileText
                             // Use cached type index for O(1) lookup per file
                             let grouped = getOrBuildGroupedTypes game
                             let lenses =
                                 match grouped.TryFind(filePath) with
                                 | Some items ->
                                     items
-                                    |> List.map (fun (typeName, id, tdi) ->
-                                        let range = convRangeToLSPRange tdi.range
-                                        { range = range
-                                          command = None
-                                          data =
-                                            JsonValue.Record
-                                                [| "typeName", JsonValue.String typeName
-                                                   "id", JsonValue.String id
-                                                   "filePath", JsonValue.String filePath
-                                                   "line", JsonValue.Number(decimal range.start.line)
-                                                   "character", JsonValue.Number(decimal range.start.character) |] })
+                                    |> List.map (fun (typeName, id, tdi) -> makeTypeCodeLens (Some fileText) typeName id filePath tdi)
                                 | None -> []
                             cachePut codeLensCache filePath (hash, lenses)
                             evictIfNeeded codeLensCache
                             lenses
                         match codeLensCache.TryGetValue(filePath) with
                         | true, (cachedHash, cachedLenses) when cachedHash = codeLensPrecacheHash ->
-                            cachedLenses
+                            readFileText () |> buildLenses
                         | true, (cachedHash, cachedLenses) ->
-                            let hash = readFileText () |> contentHash
-                            if cachedHash = hash then cachedLenses else buildLenses hash
+                            let fileText = readFileText ()
+                            let hash = contentHash fileText
+                            if cachedHash = hash then cachedLenses else buildLenses fileText
                         | _ ->
-                            readFileText () |> contentHash |> buildLenses
+                            readFileText () |> buildLenses
                     | None -> []
             }
             |> catchError []
@@ -2577,18 +2695,28 @@ type Server(client: ILanguageClient) =
                             let filePath = p.data.Item("filePath").AsString()
                             let line = p.data.Item("line").AsInteger()
                             let character = p.data.Item("character").AsInteger()
-                            let title = $"%s{typeName}: %s{id} | references"
+                            let fileText =
+                                match docs.GetTextByPath(filePath) with
+                                | Some t -> Some t
+                                | None -> try Some(System.IO.File.ReadAllText(filePath)) with _ -> None
+                            let typeName =
+                                if looksLikePath typeName && not (looksLikePath id) then id else typeName
+                            let id =
+                                match tryDefinitionKeyAtLine fileText line with
+                                | Some key when key <> typeName -> key
+                                | _ -> id
+                            let title = $"%s{typeName}: %s{id}"
 
                             { p with
                                 command =
                                     Some
                                         { title = title
-                                          command = "cwtools.showReferences"
+                                          command = "cwtools.showTypeReferences"
                                           arguments =
                                             [ JsonValue.String(Uri(filePath).ToString())
-                                              JsonValue.Record
-                                                  [| "line", JsonValue.Number(decimal line)
-                                                     "character", JsonValue.Number(decimal character) |] ] } }
+                                              codeLensPositionJson line character
+                                              JsonValue.String typeName
+                                              JsonValue.String id ] } }
                         with _ -> p
                     | None -> p
             }
@@ -2988,7 +3116,39 @@ type Server(client: ILanguageClient) =
                 return
                     match gameObj with
                     | Some game ->
+                        let locationToJson (r: CWTools.Utilities.Position.range) =
+                            let lspRange = convRangeToLSPRange r
+                            JsonValue.Record
+                                [| "uri", JsonValue.String(Uri(r.FileName).ToString())
+                                   "range",
+                                   JsonValue.Record
+                                       [| "start", codeLensPositionJson lspRange.start.line lspRange.start.character
+                                          "end", codeLensPositionJson lspRange.``end``.line lspRange.``end``.character |] |]
+
                         match p with
+                        | { command = "cwtools.findTypeReferences"
+                            arguments = typeNameArg :: idArg :: _ } ->
+                            let typeName = typeNameArg.AsString().Split('.').[0]
+                            let id = idArg.AsString()
+                            let cacheKey = typeReferenceResultCacheKey typeName id
+
+                            let refs =
+                                match typeReferenceResultCache.TryGetValue(cacheKey) with
+                                | true, cached -> cached
+                                | false, _ ->
+                                    let result =
+                                        match game.TypeReferenceIndex() |> Map.tryFind (typeName, id) with
+                                        | Some refs when not refs.IsEmpty -> refs
+                                        | _ -> game.FindAllRefsByType typeName id
+
+                                    typeReferenceResultCache.[cacheKey] <- result
+                                    result
+
+                            refs
+                            |> List.map locationToJson
+                            |> Array.ofList
+                            |> JsonValue.Array
+                            |> Some
                         | { command = "genlocfile"
                             arguments = x :: _ } ->
                             let les =

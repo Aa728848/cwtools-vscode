@@ -42,7 +42,7 @@ export function renderTopicPanelSummary(
             <div class="topics-panel-summary-subtitle">${
                 mode === 'search'
                     ? `关键字 ${escapeHtml(query || '空')} · ${totalCount ?? summaryModel.visibleCount} 条结果`
-                    : '按更新时间自动分组，支持分叉、归档、置顶和导出'
+                    : '支持分组、分叉、归档、置顶和导出'
             }</div>
         </div>
         <div class="topics-panel-summary-chips">
@@ -244,11 +244,11 @@ function appendTopicActions(
     const workspaceBtn = document.createElement('button');
     workspaceBtn.className = 'topic-action-btn topic-workspace-btn';
     workspaceBtn.innerHTML = svgIconNoMargin('folder');
-    workspaceBtn.title = '设置工作区分组';
+    workspaceBtn.title = '设置话题分组';
     workspaceBtn.addEventListener('click', event => {
         event.stopPropagation();
         const current = topic.workspaceLabel || topic.workspaceId || '';
-        const nextValue = window.prompt('输入工作区分组名（留空清除）', current);
+        const nextValue = window.prompt('输入话题分组名（留空清除）', current);
         if (nextValue === null) return;
         const next = nextValue.trim();
         callbacks.postMessage({
@@ -279,7 +279,7 @@ function appendTopicActions(
 function groupTopicsByWorkspace(topics: TopicPanelItem[]): Array<{ label: string; items: TopicPanelItem[] }> {
     const groups = new Map<string, TopicPanelItem[]>();
     for (const topic of topics) {
-        const label = topic.workspaceLabel || topic.workspaceId || '默认工作区';
+        const label = topic.workspaceLabel || topic.workspaceId || '未分组';
         const items = groups.get(label) || [];
         items.push(topic);
         groups.set(label, items);

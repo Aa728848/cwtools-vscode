@@ -316,6 +316,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
             let isReadCmd =
                 match p.command with
                 | "cwtools.ai.getScopeAtPosition"
+                | "cwtools.findTypeReferences"
                 | "cwtools.ai.queryTypes"
                 | "cwtools.ai.queryDefinition"
                 | "cwtools.ai.queryDefinitionByName"

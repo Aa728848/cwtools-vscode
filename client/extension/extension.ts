@@ -199,6 +199,44 @@ export async function activate(context: ExtensionContext) {
 		await vs.commands.executeCommand('editor.action.showReferences', uri, position, locations);
 	});
 
+	safeRegisterCommand(context, 'cwtools.showTypeReferences', async (uriStr: string, pos: any, typeName: string, id: string) => {
+		const uri = vs.Uri.parse(uriStr);
+		const position = new vs.Position(pos?.line ?? 0, pos?.character ?? 0);
+
+		let rawLocations: any[] = [];
+		let usedTypeQuery = false;
+		try {
+			const response = await defaultClient.sendRequest<any>('workspace/executeCommand', {
+				command: 'cwtools.findTypeReferences',
+				arguments: [typeName, id]
+			});
+			usedTypeQuery = true;
+			rawLocations = Array.isArray(response) ? response : [];
+		} catch (error) {
+			ErrorReporter.debug('Extension', 'Failed to query type references for CodeLens', error);
+		}
+
+		let locations = rawLocations.map((loc: any) => {
+			const locUri = vs.Uri.parse(loc.uri);
+			const range = new vs.Range(
+				new vs.Position(loc.range?.start?.line ?? 0, loc.range?.start?.character ?? 0),
+				new vs.Position(loc.range?.end?.line ?? 0, loc.range?.end?.character ?? 0)
+			);
+			return new vs.Location(locUri, range);
+		});
+
+		if (!usedTypeQuery) {
+			locations = await vs.commands.executeCommand<vs.Location[]>('vscode.executeReferenceProvider', uri, position) || [];
+		}
+
+		if (locations.length === 0) {
+			void vs.window.showInformationMessage(`No references found for ${typeName}: ${id}`);
+			return;
+		}
+
+		await vs.commands.executeCommand('editor.action.showReferences', uri, position, locations);
+	});
+
 
 	class CwtoolsProvider implements vs.TextDocumentContentProvider {
 		private disposables: Disposable[] = [];

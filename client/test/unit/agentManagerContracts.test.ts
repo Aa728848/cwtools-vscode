@@ -73,7 +73,8 @@ describe('agent manager cross-surface contracts', () => {
         expect(hostBridge).to.include('provider.settingsManager.saveSettings(msg.settings, sourceSurface)');
         expect(settingsHost).to.include("targetSurface?: 'chat' | 'manager'");
         expect(webview).to.include('isCurrentSurface(msg.targetSurface)');
-        expect(webview).to.include('&& !isManagerShell()');
+        expect(webview).to.include('if (shouldUseSideWorkspace())');
+        expect(webview).to.include("openSideWorkspace({ title: 'AI 设置'");
         expect(webview).to.include("document.getElementById('exaApiKey')");
         expect(webview).to.include('exaApiKey: ((document.getElementById');
     });

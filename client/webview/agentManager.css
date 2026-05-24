@@ -1,6 +1,6 @@
 /* Agent Manager shell: keep chat logic, but present as a three-pane workspace. */
 body.agent-manager-shell {
-    --manager-left-width: clamp(260px, 20vw, 340px);
+    --manager-left-width: clamp(248px, 18vw, 300px);
     --manager-active-left-width: var(--manager-left-width);
     --manager-right-width: clamp(300px, 24vw, 420px);
     --manager-active-right-width: 0px;
@@ -103,6 +103,9 @@ body.agent-manager-shell .topics-export-btn:hover {
 body.agent-manager-shell .topic-item {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 9px;
     transition: background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 
@@ -119,6 +122,23 @@ body.agent-manager-shell .topic-item-active {
 
 body.agent-manager-shell .topic-state {
     border: 1px solid var(--border);
+}
+
+body.agent-manager-shell .topic-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 5px;
+    opacity: 0.72;
+}
+
+body.agent-manager-shell .topic-action-btn {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0 6px;
+}
+
+body.agent-manager-shell .topic-workspace-btn {
+    opacity: 0.55;
 }
 
 
@@ -317,6 +337,26 @@ body.agent-manager-shell .settings-body {
     padding-bottom: 24px;
 }
 
+body.agent-manager-shell .side-workspace-body .settings-page.active {
+    grid-column: auto;
+    grid-row: auto;
+    align-items: stretch;
+    padding: 0;
+    z-index: auto;
+}
+
+body.agent-manager-shell .side-workspace-body .settings-header,
+body.agent-manager-shell .side-workspace-body .settings-body,
+body.agent-manager-shell .side-workspace-body .settings-footer {
+    width: 100%;
+    max-width: none;
+}
+
+body.agent-manager-shell .side-workspace-body .settings-overview {
+    width: calc(100% - 24px);
+    max-width: none;
+}
+
 body.agent-manager-shell .manager-task-line {
     display: flex;
     align-items: flex-start;
@@ -342,7 +382,7 @@ body.agent-manager-shell .manager-task-mark {
 
 @media (max-width: 1280px) {
     body.agent-manager-shell {
-        --manager-left-width: 280px;
+        --manager-left-width: 250px;
         grid-template-columns: var(--manager-active-left-width) minmax(420px, 1fr);
     }
 

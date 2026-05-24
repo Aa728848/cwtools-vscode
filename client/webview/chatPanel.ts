@@ -321,8 +321,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const view = document.createElement('div');
         view.className = 'workspace-empty';
         view.innerHTML = `
-            <div class="workspace-empty-title">${svgIconNoMargin('folder')} 工作区</div>
-            <div class="workspace-empty-text">当前没有可在右侧显示的文件变更或批注文档。产生计划、Walkthrough、蓝图或文件变更后，这里会自动承载详情。</div>
+            <div class="workspace-empty-title">${svgIconNoMargin('folder')} 暂无工作区内容</div>
+            <div class="workspace-empty-text">当前没有文件变更、计划或批注需要展示。等本轮产生可跟踪内容后，这里会自动显示详情。</div>
         `;
         return view;
     }
@@ -5193,7 +5193,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         updateModelUI(current.provider, current.model, ollamaModels);
         updateApiKeyStatus(current.provider, providers);
         settingsPage.classList.add('active');
-        if (shouldUseSideWorkspace() && !isManagerShell()) {
+        if (shouldUseSideWorkspace()) {
             settingsInSideWorkspace = true;
             responsiveWorkspacePinnedClosed = !!activeResponsiveWorkspace;
             openSideWorkspace({ title: 'AI 设置', subtitle: '模型、上下文、API 和工具', content: settingsPage });

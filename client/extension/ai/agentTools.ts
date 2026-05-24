@@ -10,7 +10,13 @@
 
 import * as vs from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
-import type { TodoItem } from './types';
+import type {
+    AnalyzeDiagnosticErrorResult,
+    DiagnosticAnalysisCategory,
+    DiagnosticEntry,
+    GetDiagnosticsResult,
+    TodoItem,
+} from './types';
 
 // Re-export the canonical tool definitions (unchanged public API)
 export { TOOL_DEFINITIONS } from './tools/definitions';
@@ -143,6 +149,7 @@ export class AgentToolExecutor {
     private lspHandler: LspToolHandler;
     private externalHandler: ExternalToolHandler;
     private memoryHandler: MemoryToolHandler;
+    private readonly diagnosticAnalysisCounts = new Map<string, { count: number; lastSeen: number }>();
 
     private readonly clientGetter: () => LanguageClient;
     public readonly workspaceRoot: string;
@@ -524,12 +531,7 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.deployModAsset(args as any, context); break;
 
             case 'analyze_diagnostic_error':
-                result = {
-                    success: true,
-                    acknowledged: true,
-                    message: "Reflection recorded. Proceed with your planned fix in the next step."
-                };
-                break;
+                result = await this.analyzeDiagnosticError(args); break;
             case 'set_memory':
                 result = await this.memoryHandler.setMemory(args as any, context); break;
             case 'set_memory_disabled': break;
@@ -571,6 +573,315 @@ export class AgentToolExecutor {
                 }
         }
         return result;
+    }
+
+    private async analyzeDiagnosticError(args: Record<string, unknown>): Promise<AnalyzeDiagnosticErrorResult> {
+        const snapshot = args.diagnosticsSnapshot ?? args.toolResult ?? args.diagnostics;
+        let source: AnalyzeDiagnosticErrorResult['source'] = snapshot === undefined ? 'message' : 'snapshot';
+        let diagnostics = snapshot === undefined ? [] : this.extractDiagnostics(snapshot);
+        let freshness = this.extractFreshness(snapshot);
+        let pendingGlobalKinds = this.extractPendingGlobalKinds(snapshot);
+
+        const file = this.asString(args.file);
+        if (diagnostics.length === 0 && file) {
+            try {
+                const queried = await this.lspHandler.getDiagnostics({
+                    file,
+                    severity: 'error',
+                    limit: 20,
+                }) as GetDiagnosticsResult;
+                diagnostics = this.extractDiagnostics(queried);
+                freshness = queried.freshness ?? freshness;
+                pendingGlobalKinds = queried.pendingGlobalKinds ?? pendingGlobalKinds;
+                source = 'get_diagnostics';
+            } catch {
+                source = 'message';
+            }
+        }
+
+        if (diagnostics.length === 0) {
+            const fallbackMessage = [
+                this.asString(args.errorCode),
+                this.asString(args.message),
+                this.asString(args.previousAttempt),
+                this.asString(args.reflection),
+            ].filter(Boolean).join('\n');
+            if (fallbackMessage) {
+                diagnostics = [{
+                    file,
+                    logicalPath: file,
+                    severity: 'error',
+                    message: fallbackMessage,
+                    line: 0,
+                    column: 0,
+                    code: this.asString(args.errorCode),
+                }];
+                source = 'message';
+            }
+        }
+
+        const analysisText = [
+            this.asString(args.toolName),
+            this.asString(args.errorCode),
+            this.asString(args.message),
+            this.asString(args.previousAttempt),
+            this.asString(args.reflection),
+            ...diagnostics.map(d => `${d.code ?? ''} ${d.file ?? ''} ${d.message}`),
+        ].filter(Boolean).join('\n');
+
+        const category = this.classifyDiagnosticText(analysisText, diagnostics, freshness);
+        const suspectedStaleCache = freshness === 'pending'
+            || freshness === 'stale'
+            || /stale|cache|pending global|validation\s+pending/i.test(analysisText);
+        const requiredFreshRead = category === 'read_tracker_stale'
+            || /readtracker|fresh read|was not read|modified externally|get_file_context/i.test(analysisText);
+        const route = this.buildDiagnosticRoute(category, suspectedStaleCache, requiredFreshRead);
+        const diagnosticHash = this.hashText(JSON.stringify({
+            category,
+            diagnostics: diagnostics.slice(0, 10).map(d => ({
+                file: d.logicalPath || d.file,
+                code: d.code,
+                message: d.message,
+            })),
+            toolName: this.asString(args.toolName),
+        }));
+        const repeatCount = this.recordDiagnosticAnalysis(diagnosticHash);
+        const stopReason = repeatCount >= 3
+            ? `Same diagnostic route seen ${repeatCount} times. Stop blind retries; broaden context or report the blocker with the diagnostic details.`
+            : undefined;
+
+        return {
+            success: true,
+            acknowledged: true,
+            message: `Diagnostic classified as ${category}; follow recommendedTools before retrying writes.`,
+            category,
+            confidence: this.diagnosticConfidence(category, diagnostics.length, source),
+            source,
+            diagnosticHash,
+            repeatCount,
+            diagnosticsAnalyzed: diagnostics.length,
+            freshness,
+            pendingGlobalKinds,
+            suspectedStaleCache,
+            requiredFreshRead,
+            recommendedTools: route.recommendedTools,
+            avoidTools: route.avoidTools,
+            nextInstruction: stopReason ? `${route.nextInstruction} ${stopReason}` : route.nextInstruction,
+            stopReason,
+            diagnostics: diagnostics.slice(0, 5),
+        };
+    }
+
+    private extractDiagnostics(value: unknown, inheritedFile = '', out: DiagnosticEntry[] = []): DiagnosticEntry[] {
+        if (out.length >= 30 || value === null || value === undefined) return out;
+        if (typeof value === 'string') {
+            const message = value.trim();
+            if (message) {
+                out.push({ file: inheritedFile, logicalPath: inheritedFile, severity: 'error', message, line: 0, column: 0 });
+            }
+            return out;
+        }
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                this.extractDiagnostics(item, inheritedFile, out);
+                if (out.length >= 30) break;
+            }
+            return out;
+        }
+        if (typeof value !== 'object') return out;
+
+        const obj = value as Record<string, unknown>;
+        const file = this.asString(obj.file) || this.asString(obj.filePath) || this.asString(obj.TargetFile) || inheritedFile;
+        const message = this.asString(obj.message) || this.asString(obj.error) || this.asString(obj.reason);
+        const looksLikeDiagnostic = !!message && (
+            obj.severity !== undefined
+            || obj.code !== undefined
+            || obj.line !== undefined
+            || obj.column !== undefined
+            || obj.logicalPath !== undefined
+            || obj.file !== undefined
+            || obj.filePath !== undefined
+        );
+        if (looksLikeDiagnostic) {
+            out.push({
+                file,
+                logicalPath: this.asString(obj.logicalPath) || file,
+                severity: this.normalizeSeverity(obj.severity),
+                message,
+                line: this.asNumber(obj.line),
+                column: this.asNumber(obj.column),
+                code: this.asString(obj.code) || undefined,
+            });
+        }
+
+        for (const key of ['diagnostics', 'errors', 'validationErrors', 'items', 'results']) {
+            if (obj[key] !== undefined) {
+                this.extractDiagnostics(obj[key], file, out);
+            }
+        }
+        return out;
+    }
+
+    private extractFreshness(value: unknown): AnalyzeDiagnosticErrorResult['freshness'] | undefined {
+        if (!value || typeof value !== 'object') return undefined;
+        const obj = value as Record<string, unknown>;
+        const freshness = this.asString(obj.freshness);
+        if (freshness === 'fresh' || freshness === 'pending' || freshness === 'stale') return freshness;
+        for (const key of ['diagnostics', 'items', 'results']) {
+            const nested = this.extractFreshness(obj[key]);
+            if (nested) return nested;
+        }
+        return undefined;
+    }
+
+    private extractPendingGlobalKinds(value: unknown): string[] | undefined {
+        if (!value || typeof value !== 'object') return undefined;
+        const obj = value as Record<string, unknown>;
+        if (Array.isArray(obj.pendingGlobalKinds)) {
+            return obj.pendingGlobalKinds.map(v => String(v));
+        }
+        for (const key of ['diagnostics', 'items', 'results']) {
+            const nested = this.extractPendingGlobalKinds(obj[key]);
+            if (nested) return nested;
+        }
+        return undefined;
+    }
+
+    private classifyDiagnosticText(
+        text: string,
+        diagnostics: DiagnosticEntry[],
+        freshness?: AnalyzeDiagnosticErrorResult['freshness'],
+    ): DiagnosticAnalysisCategory {
+        const lower = text.toLowerCase();
+        if (/readtracker|was not read|modified externally|fresh read|get_file_context/.test(lower)) return 'read_tracker_stale';
+        if (/json parse|tool argument|targetcontent|target content|replacementchunks|output length limit|same massive file|truncated/.test(lower)) return 'tool_argument_error';
+        if (/cw001|syntax|unexpected token|unexpected end|unbalanced|missing closing|brace|parse error/.test(lower)) return 'brace_or_syntax_error';
+        if (/expected value of type sprite|spritetype|gfx_|picture\s*=|sprite/.test(lower)) return 'unknown_sprite';
+        if (/show_sound|expected value of type sound|type sound|sound\s*=|music|\.asset/.test(lower)) return 'unknown_sound';
+        if (/missing localisation|missing localization|localisation key|localization key|not localised|not localized/.test(lower)) return 'missing_localisation';
+        if (/invalid scope|scope mismatch|expected scope|not valid in this scope|current scope|root scope/.test(lower)) return 'scope_mismatch';
+        if (/unknown (trigger|effect)|invalid (trigger|effect)|not a valid (trigger|effect)|trigger_docs|effects\.cwt/.test(lower)) return 'unknown_trigger_effect';
+        if ((freshness === 'pending' || freshness === 'stale') && diagnostics.length === 0) return 'stale_lsp_cache';
+        return 'unknown';
+    }
+
+    private buildDiagnosticRoute(
+        category: DiagnosticAnalysisCategory,
+        suspectedStaleCache: boolean,
+        requiredFreshRead: boolean,
+    ): Pick<AnalyzeDiagnosticErrorResult, 'recommendedTools' | 'avoidTools' | 'nextInstruction'> {
+        const staleHint = suspectedStaleCache
+            ? ' If freshness is pending/stale, treat zero diagnostics cautiously and avoid duplicating already-created references.'
+            : '';
+        switch (category) {
+            case 'read_tracker_stale':
+                return {
+                    recommendedTools: ['read_file', 'get_file_context'],
+                    avoidTools: ['write_file', 'multi_replace_file_content', 'replace_lines'],
+                    nextInstruction: 'Refresh the target file with read_file or get_file_context, then retry the smallest guarded edit.',
+                };
+            case 'tool_argument_error':
+                return {
+                    recommendedTools: ['read_file', 'get_file_context', 'replace_lines'],
+                    avoidTools: ['multi_replace_file_content with the same TargetContent', 'write_file with a large whole-file payload'],
+                    nextInstruction: 'Do not retry the same malformed arguments. Re-read exact current text or switch to line-based replacement with anchors.',
+                };
+            case 'brace_or_syntax_error':
+                return {
+                    recommendedTools: ['get_file_context', 'document_symbols', 'query_rules', 'get_diagnostics'],
+                    avoidTools: ['large write_file rewrites'],
+                    nextInstruction: `Inspect the local syntax context and fix the smallest malformed block before re-running diagnostics.${staleHint}`,
+                };
+            case 'unknown_sprite':
+                return {
+                    recommendedTools: ['find_sprite_candidates', 'search_mod_files', 'replace_lines', 'get_diagnostics'],
+                    avoidTools: ['inventing GFX_* names', 'raw .dds paths in sprite fields'],
+                    nextInstruction: 'Resolve the sprite through verified project or vanilla .gfx candidates before editing the offending line.',
+                };
+            case 'unknown_sound':
+                return {
+                    recommendedTools: ['find_sound_candidates', 'search_mod_files', 'replace_lines', 'get_diagnostics'],
+                    avoidTools: ['inventing sound names', 'raw audio paths where an asset name is expected'],
+                    nextInstruction: 'Resolve the sound/music asset through verified .asset candidates before editing the offending line.',
+                };
+            case 'missing_localisation':
+                return {
+                    recommendedTools: ['query_localisation_index', 'search_mod_files', 'write_localisation', 'get_diagnostics'],
+                    avoidTools: ['write_file on .yml localisation files', 'duplicating keys without searching first'],
+                    nextInstruction: `Search for the key first; if absent, use write_localisation on a real localisation path, then verify diagnostics.${staleHint}`,
+                };
+            case 'scope_mismatch':
+                return {
+                    recommendedTools: ['query_scope', 'query_rules', 'get_file_context', 'document_symbols'],
+                    avoidTools: ['guessing scope transitions'],
+                    nextInstruction: 'Use CWTools scope/rule queries to verify the legal scope chain before changing triggers or effects.',
+                };
+            case 'unknown_trigger_effect':
+                return {
+                    recommendedTools: ['query_rules', 'query_scripted_triggers', 'query_scripted_effects', 'query_definition_by_name', 'workspace_symbols'],
+                    avoidTools: ['web_search as first step', 'renaming identifiers by guesswork'],
+                    nextInstruction: 'Check local CWT rules and workspace definitions first, then edit only the invalid trigger/effect reference.',
+                };
+            case 'stale_lsp_cache':
+                return {
+                    recommendedTools: ['get_diagnostics', 'search_mod_files', 'query_definition_by_name'],
+                    avoidTools: ['duplicate localisation/entity creation', 'blind retries'],
+                    nextInstruction: 'Verify whether the referenced entity/key already exists before writing again; wait for fresh diagnostics if global checks are pending.',
+                };
+            default:
+                return {
+                    recommendedTools: requiredFreshRead ? ['read_file', 'get_file_context', 'get_diagnostics'] : ['get_file_context', 'query_rules', 'get_diagnostics'],
+                    avoidTools: ['blind write retries'],
+                    nextInstruction: `Gather narrower file context and rule data, then choose the smallest safe edit.${staleHint}`,
+                };
+        }
+    }
+
+    private diagnosticConfidence(
+        category: DiagnosticAnalysisCategory,
+        diagnosticCount: number,
+        source: AnalyzeDiagnosticErrorResult['source'],
+    ): number {
+        if (category === 'unknown') return diagnosticCount > 0 ? 0.45 : 0.3;
+        if (source === 'snapshot') return 0.9;
+        if (source === 'get_diagnostics') return 0.85;
+        return 0.65;
+    }
+
+    private recordDiagnosticAnalysis(hash: string): number {
+        const now = Date.now();
+        for (const [key, entry] of Array.from(this.diagnosticAnalysisCounts.entries())) {
+            if (now - entry.lastSeen > 30 * 60_000) {
+                this.diagnosticAnalysisCounts.delete(key);
+            }
+        }
+        const current = this.diagnosticAnalysisCounts.get(hash);
+        const next = { count: (current?.count ?? 0) + 1, lastSeen: now };
+        this.diagnosticAnalysisCounts.set(hash, next);
+        return next.count;
+    }
+
+    private hashText(text: string): string {
+        let hash = 2166136261;
+        for (let i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(16).padStart(8, '0');
+    }
+
+    private asString(value: unknown): string {
+        return typeof value === 'string' ? value.trim() : '';
+    }
+
+    private asNumber(value: unknown): number {
+        return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    }
+
+    private normalizeSeverity(value: unknown): DiagnosticEntry['severity'] {
+        const severity = String(value ?? 'error').toLowerCase();
+        if (severity === 'warning' || severity === 'info' || severity === 'hint') return severity;
+        return 'error';
     }
 
     // ─── MCP Connection Pool ─────────────────────────────────────────────────

@@ -110,9 +110,10 @@ const LOC_MODES = new Set([
     'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
     'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
-    'query_types', 'query_rules', 'query_references', 'todo_write', 'write_localisation', 'git_ops'
+    'query_types', 'query_rules', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
+    'analyze_diagnostic_error'
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', ...ORCHESTRATION, 'git_ops']);
+const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;

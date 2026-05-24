@@ -1903,7 +1903,7 @@ export class AgentRunner {
                     tc.function.name = matched;
                 }
                 // If completely unmatched, leave as-is — the tool will fail with a clear
-                // error, which triggers analyze_diagnostic_error reflection rather than doom-loop.
+                // error, which can be routed through analyze_diagnostic_error rather than becoming a doom-loop.
             }
 
             const toolResults: any[] = new Array(parsedCalls.length);

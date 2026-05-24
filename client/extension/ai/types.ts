@@ -92,8 +92,6 @@ export interface AIUserConfig {
     maxContextTokens: number;
     /** Agent file write mode */
     agentFileWriteMode: 'confirm' | 'auto';
-    /** Forced Reflection/Thinking Mode */
-    forcedThinkingMode: boolean;
     /** Reasoning effort / thinking depth (used by DeepSeek, OpenAI, Qwen, Gemini etc.) */
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     inlineCompletion: {
@@ -904,10 +902,38 @@ export interface WriteDesignBlueprintResult {
     filePath: string;
 }
 
+export type DiagnosticAnalysisCategory =
+    | 'stale_lsp_cache'
+    | 'missing_localisation'
+    | 'unknown_sprite'
+    | 'unknown_sound'
+    | 'scope_mismatch'
+    | 'unknown_trigger_effect'
+    | 'brace_or_syntax_error'
+    | 'read_tracker_stale'
+    | 'tool_argument_error'
+    | 'unknown';
+
 export interface AnalyzeDiagnosticErrorResult {
     success: boolean;
     acknowledged: boolean;
     message: string;
+    /** Deterministic routing category. This is not a final validation result. */
+    category: DiagnosticAnalysisCategory;
+    confidence: number;
+    source: 'snapshot' | 'get_diagnostics' | 'message';
+    diagnosticHash: string;
+    repeatCount: number;
+    diagnosticsAnalyzed: number;
+    freshness?: 'fresh' | 'pending' | 'stale';
+    pendingGlobalKinds?: string[];
+    suspectedStaleCache: boolean;
+    requiredFreshRead: boolean;
+    recommendedTools: string[];
+    avoidTools: string[];
+    nextInstruction: string;
+    stopReason?: string;
+    diagnostics: DiagnosticEntry[];
 }
 
 /** Single diagnostic entry from CWTools LSP */
@@ -1437,7 +1463,6 @@ export interface PanelSettings {
     endpoint: string;
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
-    forcedThinkingMode: boolean;
     /** Reasoning effort / thinking depth (multi-provider) */
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     /** Brave Search API key for web_search tool (optional) */

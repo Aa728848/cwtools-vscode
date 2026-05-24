@@ -453,15 +453,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'analyze_diagnostic_error',
-            description: 'MANDATORY on file modification errors. Perform deep reflection before retrying: explain root cause, trace context, outline fix plan. Forces a thinking step. ⚠️ Prioritize checking local rules (query_rules) and vanilla examples (workspace_symbols) before using web searches.',
+            description: 'Classify an existing diagnostic or tool/write failure and return routing advice. Use after a write, validation, ReadTracker, or tool-argument failure. Prefer passing diagnosticsSnapshot/toolResult from get_diagnostics or a write tool so this does not re-query diagnostics.',
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'File where the error occurred' },
-                    errorCode: { type: 'string', description: 'The error code or message' },
-                    reflection: { type: 'string', description: 'Detailed analysis of why the error occurred and how to fix it' }
+                    file: { type: 'string', description: 'Optional file where the diagnostic or failed tool operation occurred. Used only to scope a fallback get_diagnostics call if no snapshot is supplied.' },
+                    errorCode: { type: 'string', description: 'Optional diagnostic code or compact error message.' },
+                    message: { type: 'string', description: 'Optional raw failure message from a tool or validation step.' },
+                    previousAttempt: { type: 'string', description: 'Optional summary of the last attempted fix. Helps detect repeated blind retries.' },
+                    toolName: { type: 'string', description: 'Optional name of the tool that failed, e.g. multi_replace_file_content, write_localisation, get_diagnostics.' },
+                    diagnosticsSnapshot: { type: 'object', description: 'Optional raw get_diagnostics result, write-tool diagnostics payload, or compact diagnostic object to classify without querying diagnostics again.' },
+                    toolResult: { type: 'object', description: 'Optional raw failed tool result to classify without querying diagnostics again.' },
+                    reflection: { type: 'string', description: 'Optional legacy free-form analysis from the model. Kept for backward compatibility; the host still returns deterministic routing advice.' }
                 },
-                required: ['file', 'reflection'],
+                required: [],
             },
         },
     },

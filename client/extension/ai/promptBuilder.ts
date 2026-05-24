@@ -135,9 +135,6 @@ export class PromptBuilder {
         const supplement = this.getModelSupplement(providerId);
         const projectRules = this.getProjectRulesPrompt(mode);
         
-        const config = vs.workspace.getConfiguration('cwtools.ai');
-        const forcedThinkingMode = config.get<boolean>('forcedThinkingMode') === true;
-        
         let finalPrompt = '';
 
         // 2. Compacted Summary (来自 Phase 4 结构化记忆压缩)
@@ -211,14 +208,6 @@ export class PromptBuilder {
 
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
-
-        if (forcedThinkingMode) {
-            finalPrompt += `
-
-## Forced Thinking Mode Active
-You MUST use the \`analyze_diagnostic_error\` tool before attempting ANY error fix. Do not guess or modify code blindly upon encountering an issue. First, reflect on the error using the tool, and only then proceed.
-`;
-        }
         
         const skillsPrompt = this.getAgentSkillsPrompt();
         if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;

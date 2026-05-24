@@ -183,17 +183,19 @@ export async function activate(context: ExtensionContext) {
 	);
 
 	// CodeLens click command — properly converts JSON args to VSCode types
-	safeRegisterCommand(context, 'cwtools.showReferences', async (uriStr: string, pos: any, locs: any[]) => {
+	safeRegisterCommand(context, 'cwtools.showReferences', async (uriStr: string, pos: any, locs?: any[]) => {
 		const uri = vs.Uri.parse(uriStr);
 		const position = new vs.Position(pos.line || 0, pos.character || 0);
-		const locations = (locs || []).map((loc: any) => {
-			const locUri = vs.Uri.parse(loc.uri);
-			const range = new vs.Range(
-				new vs.Position(loc.range?.start?.line || 0, loc.range?.start?.character || 0),
-				new vs.Position(loc.range?.end?.line || 0, loc.range?.end?.character || 0)
-			);
-			return new vs.Location(locUri, range);
-		});
+		const locations = Array.isArray(locs)
+			? locs.map((loc: any) => {
+				const locUri = vs.Uri.parse(loc.uri);
+				const range = new vs.Range(
+					new vs.Position(loc.range?.start?.line || 0, loc.range?.start?.character || 0),
+					new vs.Position(loc.range?.end?.line || 0, loc.range?.end?.character || 0)
+				);
+				return new vs.Location(locUri, range);
+			})
+			: await vs.commands.executeCommand<vs.Location[]>('vscode.executeReferenceProvider', uri, position) || [];
 		await vs.commands.executeCommand('editor.action.showReferences', uri, position, locations);
 	});
 

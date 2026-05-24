@@ -809,15 +809,18 @@ ${trimmed}
 
     // W6 fix: no longer inject complete code blocks repeatedly (AI has already seen its own generated code in the previous round).
     //Only list the error lines and guide the AI   to use replace_lines for directed repair to avoid wasting thousands of tokens on large files.
-    buildValidationRetryMessage(code: string, errors: Array<{ message: string; line: number }>): ChatMessage {
+    buildValidationRetryMessage(code: string, errors: Array<{ message: string; line: number }>, diagnosticAdvice?: string): ChatMessage {
         const errorList = errors.map(e => `  - Line ${e.line}: ${e.message}`).join('\n');
         const hasSpriteError = errors.some(e => /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(e.message));
         const hasSoundError = errors.some(e => /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(e.message));
         const spriteGuidance = hasSpriteError
             ? `\n\n${SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL}\n`
             : '';
-        const soundGuidance = hasSoundError
+        let soundGuidance = hasSoundError
             ? `\n\n${SOUND_DIAGNOSTIC_REPAIR_PROTOCOL}\n`
+            : '';
+        soundGuidance += diagnosticAdvice
+            ? `\n\n**Diagnostic routing advice:**\n${diagnosticAdvice}\n`
             : '';
         return {
             role: 'user',

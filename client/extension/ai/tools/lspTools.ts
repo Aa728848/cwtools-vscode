@@ -956,17 +956,29 @@ export class LspToolHandler {
             });
         }
 
-        //Query the global diagnostic freshness status
+        // Query the global diagnostic freshness status. This is metadata only:
+        // Problems-panel diagnostics above remain the fact source even if this
+        // status request times out.
         let freshness: 'fresh' | 'pending' | 'stale' = 'pending';
         let pendingGlobalKinds: string[] = [];
         let lastEpoch = 0;
+        let diagnosticService: import('../types').GetDiagnosticsResult['diagnosticService'] = {
+            status: 'unavailable',
+            responded: false,
+            message: 'CWTools validation status request was not attempted.',
+        };
         try {
             const client = this.clientGetter();
             if (client) {
-                const statusResult = await client.sendRequest('workspace/executeCommand', {
-                    command: 'cwtools.ai.getValidationStatus',
-                    arguments: [],
-                }) as Record<string, unknown> | null;
+                const statusResult = await this.lspRequest<Record<string, unknown> | null>(
+                    'cwtools.ai.getValidationStatus',
+                    [],
+                    2000,
+                );
+                diagnosticService = {
+                    status: 'available',
+                    responded: true,
+                };
                 if (statusResult && typeof statusResult === 'object') {
                     freshness = (statusResult.freshness as any) || 'pending';
                     pendingGlobalKinds = Array.isArray(statusResult.pendingGlobalKinds)
@@ -974,7 +986,14 @@ export class LspToolHandler {
                     lastEpoch = typeof statusResult.epoch === 'number' ? statusResult.epoch : 0;
                 }
             }
-        } catch { /* LSP command is not available, keep the default pending */ }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            diagnosticService = {
+                status: /timed out|timeout/i.test(message) ? 'timeout' : 'error',
+                responded: false,
+                message,
+            };
+        }
 
         return {
             summary,
@@ -985,6 +1004,7 @@ export class LspToolHandler {
             freshness,
             pendingGlobalKinds,
             lastEpoch,
+            diagnosticService,
         };
     }
 

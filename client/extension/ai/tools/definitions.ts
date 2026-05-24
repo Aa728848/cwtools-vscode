@@ -453,7 +453,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'analyze_diagnostic_error',
-            description: 'Classify an existing diagnostic or tool/write failure and return routing advice. Use after a write, validation, ReadTracker, or tool-argument failure. Prefer passing diagnosticsSnapshot/toolResult from get_diagnostics or a write tool so this does not re-query diagnostics.',
+            description: 'Classify an existing diagnostic or tool/write failure and return routing advice. Use after a write, validation, ReadTracker, or tool-argument failure. Prefer passing diagnosticsSnapshot/toolResult from get_diagnostics or a write tool so this does not re-query diagnostics. When a concrete identifier/sprite/sound/localisation key appears, the result tells the agent to verify it against project + vanilla sources; when LSP has no feedback, it avoids blind searches.',
             parameters: {
                 type: 'object',
                 properties: {

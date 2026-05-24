@@ -868,9 +868,14 @@ export interface CodesearchArgs {
 }
 
 export interface AnalyzeDiagnosticErrorArgs {
-    file: string;
-    errorCode: string;
-    reflection: string;
+    file?: string;
+    errorCode?: string;
+    message?: string;
+    previousAttempt?: string;
+    toolName?: string;
+    diagnosticsSnapshot?: unknown;
+    toolResult?: unknown;
+    reflection?: string;
 }
 
 // ─── Design Blueprint Tool Types ─────────────────────────────────────────────
@@ -912,6 +917,7 @@ export type DiagnosticAnalysisCategory =
     | 'brace_or_syntax_error'
     | 'read_tracker_stale'
     | 'tool_argument_error'
+    | 'lsp_no_feedback'
     | 'unknown';
 
 export interface AnalyzeDiagnosticErrorResult {
@@ -929,6 +935,9 @@ export interface AnalyzeDiagnosticErrorResult {
     pendingGlobalKinds?: string[];
     suspectedStaleCache: boolean;
     requiredFreshRead: boolean;
+    referenceCandidates: string[];
+    referenceVerificationRequired: boolean;
+    verificationInstruction?: string;
     recommendedTools: string[];
     avoidTools: string[];
     nextInstruction: string;
@@ -963,6 +972,12 @@ export interface GetDiagnosticsResult {
     pendingGlobalKinds?: string[];
     /** Global diagnostic epoch counter */
     lastEpoch?: number;
+    /** Health of the LSP validation-status feedback path used for freshness/epoch metadata. */
+    diagnosticService?: {
+        status: 'available' | 'unavailable' | 'timeout' | 'error';
+        responded: boolean;
+        message?: string;
+    };
 }
 
 // ─── Token Usage & Cost ──────────────────────────────────────────────────────

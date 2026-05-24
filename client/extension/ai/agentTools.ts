@@ -635,9 +635,14 @@ export class AgentToolExecutor {
             || /stale|cache|pending global|validation\s+pending/i.test(analysisText);
         const requiredFreshRead = category === 'read_tracker_stale'
             || /readtracker|fresh read|was not read|modified externally|get_file_context/i.test(analysisText);
-        const route = this.buildDiagnosticRoute(category, suspectedStaleCache, requiredFreshRead);
+        const referenceCandidates = this.extractDiagnosticReferenceCandidates(analysisText);
+        const referenceVerificationRequired = this.shouldVerifyDiagnosticReferences(category, referenceCandidates);
+        const verificationInstruction = referenceVerificationRequired
+            ? this.buildReferenceVerificationInstruction(category, referenceCandidates)
+            : undefined;
         const diagnosticHash = this.hashText(JSON.stringify({
             category,
+            references: referenceCandidates.slice(0, 5),
             diagnostics: diagnostics.slice(0, 10).map(d => ({
                 file: d.logicalPath || d.file,
                 code: d.code,
@@ -646,9 +651,15 @@ export class AgentToolExecutor {
             toolName: this.asString(args.toolName),
         }));
         const repeatCount = this.recordDiagnosticAnalysis(diagnosticHash);
+        const route = this.buildDiagnosticRoute(category, suspectedStaleCache, requiredFreshRead, referenceVerificationRequired);
         const stopReason = repeatCount >= 3
             ? `Same diagnostic route seen ${repeatCount} times. Stop blind retries; broaden context or report the blocker with the diagnostic details.`
             : undefined;
+        const nextInstruction = [
+            route.nextInstruction,
+            verificationInstruction,
+            stopReason,
+        ].filter(Boolean).join(' ');
 
         return {
             success: true,
@@ -664,9 +675,12 @@ export class AgentToolExecutor {
             pendingGlobalKinds,
             suspectedStaleCache,
             requiredFreshRead,
-            recommendedTools: route.recommendedTools,
-            avoidTools: route.avoidTools,
-            nextInstruction: stopReason ? `${route.nextInstruction} ${stopReason}` : route.nextInstruction,
+            referenceCandidates,
+            referenceVerificationRequired,
+            verificationInstruction,
+            recommendedTools: Array.from(new Set(route.recommendedTools)),
+            avoidTools: Array.from(new Set(route.avoidTools)),
+            nextInstruction,
             stopReason,
             diagnostics: diagnostics.slice(0, 5),
         };
@@ -753,6 +767,7 @@ export class AgentToolExecutor {
         freshness?: AnalyzeDiagnosticErrorResult['freshness'],
     ): DiagnosticAnalysisCategory {
         const lower = text.toLowerCase();
+        if (/validation_degraded_lsp_no_feedback|diagnostics?_unavailable|lsp.*no feedback|did not provide fresh diagnostics|diagnostic service:\s*(timeout|error|unavailable)/.test(lower)) return 'lsp_no_feedback';
         if (/readtracker|was not read|modified externally|fresh read|get_file_context/.test(lower)) return 'read_tracker_stale';
         if (/json parse|tool argument|targetcontent|target content|replacementchunks|output length limit|same massive file|truncated/.test(lower)) return 'tool_argument_error';
         if (/cw001|syntax|unexpected token|unexpected end|unbalanced|missing closing|brace|parse error/.test(lower)) return 'brace_or_syntax_error';
@@ -765,14 +780,74 @@ export class AgentToolExecutor {
         return 'unknown';
     }
 
+    private extractDiagnosticReferenceCandidates(text: string): string[] {
+        const candidates: string[] = [];
+        const add = (value: string | undefined) => {
+            if (!value) return;
+            const cleaned = value.trim().replace(/[.,;:)]+$/g, '');
+            if (!/^[A-Za-z0-9_:.@-]{3,}$/.test(cleaned)) return;
+            if (/^(error|warning|info|hint|line|column|fresh|pending|stale|validation|diagnostic|expected|unknown|invalid|type|value)$/i.test(cleaned)) return;
+            candidates.push(cleaned);
+        };
+
+        for (const match of text.matchAll(/['"`]([A-Za-z0-9_:.@-]{3,})['"`]/g)) {
+            add(match[1]);
+        }
+        for (const match of text.matchAll(/\bGFX_[A-Za-z0-9_:.@-]+\b/g)) {
+            add(match[0]);
+        }
+        for (const match of text.matchAll(/\b(?:picture|icon|sprite|show_sound|sound|music|localisation|localization|id)\s*=\s*([A-Za-z0-9_:.@-]+)/gi)) {
+            add(match[1]);
+        }
+        for (const match of text.matchAll(/\b(?:unknown|invalid|missing|unrecognized|unrecognised|not a valid)\s+(?:trigger|effect|value|identifier|localisation|localization|sprite|sound|type|key)?\s*[:=]?\s*([A-Za-z0-9_:.@-]+)/gi)) {
+            add(match[1]);
+        }
+
+        return Array.from(new Set(candidates)).slice(0, 8);
+    }
+
+    private shouldVerifyDiagnosticReferences(
+        category: DiagnosticAnalysisCategory,
+        referenceCandidates: string[],
+    ): boolean {
+        if (referenceCandidates.length === 0) return false;
+        return category === 'unknown_trigger_effect'
+            || category === 'unknown_sprite'
+            || category === 'unknown_sound'
+            || category === 'missing_localisation'
+            || category === 'stale_lsp_cache'
+            || category === 'unknown';
+    }
+
+    private buildReferenceVerificationInstruction(
+        category: DiagnosticAnalysisCategory,
+        referenceCandidates: string[],
+    ): string {
+        const refs = referenceCandidates.slice(0, 5).join(', ');
+        if (category === 'unknown_sprite') {
+            return `Before editing again, verify the concrete sprite reference(s) [${refs}] with find_sprite_candidates(searchContext="both") and only then use a guarded line edit.`;
+        }
+        if (category === 'unknown_sound') {
+            return `Before editing again, verify the concrete sound reference(s) [${refs}] with find_sound_candidates(searchContext="both") and only then use a guarded line edit.`;
+        }
+        if (category === 'missing_localisation') {
+            return `Before creating localisation, verify key(s) [${refs}] with query_localisation_index and search_mod_files(searchContext="both"); only use write_localisation if absent.`;
+        }
+        return `Before editing or creating definitions again, verify reference(s) [${refs}] through query_rules/query_definition_by_name/workspace_symbols, then search_mod_files(searchContext="both") or verify_pdx_identifier(includeVanilla=true) if still unresolved.`;
+    }
+
     private buildDiagnosticRoute(
         category: DiagnosticAnalysisCategory,
         suspectedStaleCache: boolean,
         requiredFreshRead: boolean,
+        referenceVerificationRequired: boolean,
     ): Pick<AnalyzeDiagnosticErrorResult, 'recommendedTools' | 'avoidTools' | 'nextInstruction'> {
         const staleHint = suspectedStaleCache
             ? ' If freshness is pending/stale, treat zero diagnostics cautiously and avoid duplicating already-created references.'
             : '';
+        const referenceTools = referenceVerificationRequired
+            ? ['query_definition_by_name', 'workspace_symbols', 'search_mod_files', 'verify_pdx_identifier']
+            : [];
         switch (category) {
             case 'read_tracker_stale':
                 return {
@@ -818,19 +893,29 @@ export class AgentToolExecutor {
                 };
             case 'unknown_trigger_effect':
                 return {
-                    recommendedTools: ['query_rules', 'query_scripted_triggers', 'query_scripted_effects', 'query_definition_by_name', 'workspace_symbols'],
+                    recommendedTools: ['query_rules', 'query_scripted_triggers', 'query_scripted_effects', 'query_definition_by_name', 'workspace_symbols', ...referenceTools],
                     avoidTools: ['web_search as first step', 'renaming identifiers by guesswork'],
-                    nextInstruction: 'Check local CWT rules and workspace definitions first, then edit only the invalid trigger/effect reference.',
+                    nextInstruction: 'Check local CWT rules and workspace/project/vanilla definitions first, then edit only the invalid trigger/effect reference.',
                 };
             case 'stale_lsp_cache':
                 return {
-                    recommendedTools: ['get_diagnostics', 'search_mod_files', 'query_definition_by_name'],
+                    recommendedTools: ['get_diagnostics', 'query_definition_by_name', 'workspace_symbols', ...referenceTools],
                     avoidTools: ['duplicate localisation/entity creation', 'blind retries'],
-                    nextInstruction: 'Verify whether the referenced entity/key already exists before writing again; wait for fresh diagnostics if global checks are pending.',
+                    nextInstruction: referenceVerificationRequired
+                        ? 'Verify whether the concrete referenced entity/key already exists before writing again; wait for fresh diagnostics if global checks are pending.'
+                        : 'No concrete reference was found. Do not search project/vanilla blindly; wait for fresh diagnostics or report degraded validation.',
+                };
+            case 'lsp_no_feedback':
+                return {
+                    recommendedTools: ['get_diagnostics'],
+                    avoidTools: ['search_mod_files without a concrete identifier', 'duplicate entity/localisation creation', 'blind retries'],
+                    nextInstruction: 'The LSP feedback path did not confirm semantic diagnostics. Do not search project/vanilla without a concrete diagnostic identifier; use the degraded validation warning as a caveat or retry get_diagnostics later.',
                 };
             default:
                 return {
-                    recommendedTools: requiredFreshRead ? ['read_file', 'get_file_context', 'get_diagnostics'] : ['get_file_context', 'query_rules', 'get_diagnostics'],
+                    recommendedTools: requiredFreshRead
+                        ? ['read_file', 'get_file_context', 'get_diagnostics']
+                        : ['get_file_context', 'query_rules', 'get_diagnostics', ...referenceTools],
                     avoidTools: ['blind write retries'],
                     nextInstruction: `Gather narrower file context and rule data, then choose the smallest safe edit.${staleHint}`,
                 };

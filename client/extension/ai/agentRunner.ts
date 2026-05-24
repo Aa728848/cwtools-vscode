@@ -19,6 +19,8 @@ import type {
     ContentPart,
     TokenUsage,
     AgentRunMetrics,
+    AnalyzeDiagnosticErrorResult,
+    GetDiagnosticsResult,
 } from './types';
 import { contentToString } from './types';
 import * as vs from 'vscode';
@@ -66,6 +68,7 @@ export { StepEmitter } from './runner/stepEmitter';
 
 // Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
 const MAX_VALIDATION_RETRIES = 2;
+const VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS = [500, 1500, 3000];
 // Token estimation: Dual-path strategy for balancing speed and accuracy.
 // Path 1 (fast): Short text (<1000 chars) uses character-ratio interpolation.
 // Path 2 (precise): Longer text uses sub-word segmentation heuristic for
@@ -2423,6 +2426,51 @@ export class AgentRunner {
             onTodoUpdate: options?.onTodoUpdate
         };
 
+        const readValidationDiagnostics = async (): Promise<{
+            rawResult: GetDiagnosticsResult;
+            diagnostics: ValidationError[];
+            freshness?: 'fresh' | 'pending' | 'stale';
+            pendingGlobalKinds: string[];
+            lastEpoch?: number;
+            diagnosticService?: GetDiagnosticsResult['diagnosticService'];
+        }> => {
+            const rawResult = await this.toolExecutor.execute('get_diagnostics', {
+                file: targetFile,
+                severity: 'error',
+            }, agentToolContext) as GetDiagnosticsResult;
+
+            const diagnostics: ValidationError[] = [];
+            if (rawResult?.diagnostics && Array.isArray(rawResult.diagnostics)) {
+                for (const d of rawResult.diagnostics) {
+                    diagnostics.push({
+                        code: String(d.code ?? ''),
+                        severity: d.severity ?? 'error',
+                        message: String(d.message ?? ''),
+                        line: Number(d.line ?? 0),
+                        column: Number(d.column ?? 0),
+                    });
+                }
+            }
+
+            const rawFreshness = rawResult?.freshness;
+            const freshness = rawFreshness === 'fresh' || rawFreshness === 'pending' || rawFreshness === 'stale'
+                ? rawFreshness
+                : undefined;
+            const pendingGlobalKinds = Array.isArray(rawResult?.pendingGlobalKinds)
+                ? rawResult.pendingGlobalKinds.map((kind: unknown) => String(kind))
+                : [];
+            const lastEpoch = typeof rawResult?.lastEpoch === 'number' ? rawResult.lastEpoch : undefined;
+
+            return {
+                rawResult,
+                diagnostics,
+                freshness,
+                pendingGlobalKinds,
+                lastEpoch,
+                diagnosticService: rawResult?.diagnosticService,
+            };
+        };
+
         while (retryCount <= MAX_VALIDATION_RETRIES) {
             options?.abortSignal?.throwIfAborted();
 
@@ -2436,32 +2484,105 @@ export class AgentRunner {
 
             // Use get_diagnostics to read directly from the diagnostics panel (zero side effects, ~50ms)
             let result: { isValid: boolean; errors: ValidationError[] };
+            let rawDiagnosticResult: unknown | undefined;
             try {
-                const rawResult = await this.toolExecutor.execute('get_diagnostics', {
-                    file: targetFile,
-                    severity: 'error',
-                }, agentToolContext) as any;
+                let diagnosticRead = await readValidationDiagnostics();
+                rawDiagnosticResult = diagnosticRead.rawResult;
+                let sawDiagnosticEpochProgress = false;
 
-                const diagnostics: ValidationError[] = [];
-                if (rawResult?.diagnostics && Array.isArray(rawResult.diagnostics)) {
-                    for (const d of rawResult.diagnostics) {
-                        diagnostics.push({
-                            code: String(d.code ?? ''),
-                            severity: d.severity ?? 'error',
-                            message: String(d.message ?? ''),
-                            line: Number(d.line ?? 0),
-                            column: Number(d.column ?? 0),
-                        });
+                for (let attempt = 0; diagnosticRead.diagnostics.length === 0
+                    && (diagnosticRead.freshness === 'pending' || diagnosticRead.freshness === 'stale')
+                    && attempt < VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS.length; attempt++) {
+                    const delayMs = VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS[attempt]!;
+                    const previousEpoch = diagnosticRead.lastEpoch;
+                    emitStep({
+                        type: 'validation',
+                        content: `Validation diagnostics are ${diagnosticRead.freshness}; waiting ${delayMs}ms for CWTools LSP to settle.`,
+                        timestamp: Date.now(),
+                    });
+                    await this.delay(delayMs);
+                    options?.abortSignal?.throwIfAborted();
+                    diagnosticRead = await readValidationDiagnostics();
+                    rawDiagnosticResult = diagnosticRead.rawResult;
+                    if (typeof previousEpoch === 'number'
+                        && typeof diagnosticRead.lastEpoch === 'number'
+                        && diagnosticRead.lastEpoch > previousEpoch) {
+                        sawDiagnosticEpochProgress = true;
                     }
                 }
 
-                result = {
-                    isValid: diagnostics.length === 0,
-                    errors: diagnostics,
+                const diagnostics = diagnosticRead.diagnostics;
+                const freshness = diagnosticRead.freshness;
+                const pendingGlobalKinds = diagnosticRead.pendingGlobalKinds;
+                if (diagnostics.length === 0 && (freshness === 'pending' || freshness === 'stale')) {
+                    const fallbackErrors = this.runLocalSyntaxFallbackValidation(
+                        targetFile,
+                        currentCode,
+                        freshness,
+                        pendingGlobalKinds,
+                        diagnosticRead.diagnosticService,
+                        sawDiagnosticEpochProgress,
+                    );
+                    const fallbackErrorCount = fallbackErrors.filter(e => e.severity === 'error').length;
+                    if (fallbackErrorCount === 0) {
+                        emitStep({
+                            type: 'validation',
+                            content: `CWTools LSP diagnostics are still ${freshness}; local syntax fallback passed.`,
+                            timestamp: Date.now(),
+                        });
+                        await appendValidationEnd({
+                            isValid: true,
+                            errorCount: 0,
+                            warningCount: fallbackErrors.length,
+                            validationMode: 'local-syntax-fallback',
+                            diagnosticFreshness: freshness,
+                            pendingGlobalKinds,
+                            diagnosticService: diagnosticRead.diagnosticService?.status,
+                            diagnosticEpochProgress: sawDiagnosticEpochProgress,
+                        });
+                        return {
+                            code: currentCode,
+                            validationErrors: fallbackErrors,
+                            isValid: true,
+                            retryCount,
+                        };
+                    }
+                    emitStep({
+                        type: 'validation',
+                        content: `CWTools LSP diagnostics are still ${freshness}; local syntax fallback found ${fallbackErrorCount} issue(s).`,
+                        timestamp: Date.now(),
+                    });
+                    result = {
+                        isValid: false,
+                        errors: fallbackErrors,
+                    };
+                } else {
+                    result = {
+                        isValid: diagnostics.length === 0,
+                        errors: diagnostics,
+                    };
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const diagnosticError: ValidationError = {
+                    code: 'DIAGNOSTICS_UNAVAILABLE',
+                    severity: 'error',
+                    message: `get_diagnostics failed during validation: ${message}`,
+                    line: 0,
+                    column: 0,
                 };
-            } catch {
-                // The diagnostic mechanism itself failed - considered passed
-                result = { isValid: true, errors: [] };
+                emitStep({
+                    type: 'validation',
+                    content: 'Validation diagnostics unavailable; stopping validation as inconclusive.',
+                    timestamp: Date.now(),
+                });
+                await appendValidationEnd({ isValid: false, errorCount: 1, diagnosticUnavailable: true }, 'failed');
+                return {
+                    code: currentCode,
+                    validationErrors: [diagnosticError],
+                    isValid: false,
+                    retryCount,
+                };
             }
 
             lastErrors = result.errors;
@@ -2495,15 +2616,34 @@ export class AgentRunner {
 
             //Retry: send error list back to AI for correction
             retryCount++;
+            const errorDiagnostics = result.errors.filter(e => e.severity === "error");
             emitStep({
                 type: 'validation',
-                content: "Found " + result.errors.filter(e => e.severity === "error").length + " validation error(s); requesting a focused fix (" + retryCount + "/" + MAX_VALIDATION_RETRIES + ").",
+                content: "Found " + errorDiagnostics.length + " validation error(s); requesting a focused fix (" + retryCount + "/" + MAX_VALIDATION_RETRIES + ").",
                 timestamp: Date.now(),
             });
 
+            let diagnosticAdvice: string | undefined;
+            try {
+                const rawAnalysis = await this.toolExecutor.execute('analyze_diagnostic_error', {
+                    file: targetFile,
+                    toolName: 'get_diagnostics',
+                    diagnosticsSnapshot: rawDiagnosticResult ?? { diagnostics: result.errors },
+                    message: 'validationLoop retry',
+                    previousAttempt: retryCount > 1 ? `Validation retry ${retryCount - 1} did not clear diagnostics.` : undefined,
+                }, agentToolContext);
+                const analysis = rawAnalysis as Partial<AnalyzeDiagnosticErrorResult>;
+                if (analysis.success) {
+                    diagnosticAdvice = this.formatValidationDiagnosticAdvice(analysis);
+                }
+            } catch {
+                // Validation retry can continue without routing advice.
+            }
+
             const retryMessage = this.promptBuilder.buildValidationRetryMessage(
                 currentCode,
-                result.errors.filter(e => e.severity === 'error')
+                errorDiagnostics,
+                diagnosticAdvice
             );
 
             const retryMessages: ChatMessage[] = [
@@ -2550,6 +2690,142 @@ export class AgentRunner {
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private delay(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    private runLocalSyntaxFallbackValidation(
+        targetFile: string,
+        currentCode: string,
+        freshness: 'pending' | 'stale',
+        pendingGlobalKinds: string[],
+        diagnosticService: GetDiagnosticsResult['diagnosticService'],
+        sawDiagnosticEpochProgress: boolean,
+    ): ValidationError[] {
+        const text = this.readValidationFallbackText(targetFile, currentCode);
+        const syntaxErrors = this.scanLocalPdxSyntax(text);
+        if (syntaxErrors.length > 0) {
+            return syntaxErrors;
+        }
+
+        const pendingSuffix = pendingGlobalKinds.length
+            ? ` Pending global checks: ${pendingGlobalKinds.join(', ')}.`
+            : '';
+        const serviceSuffix = diagnosticService
+            ? ` Diagnostic service: ${diagnosticService.status}${diagnosticService.responded ? ', responded' : ', no response'}.`
+            : ' Diagnostic service: unknown.';
+        const epochSuffix = sawDiagnosticEpochProgress
+            ? ' Diagnostic epoch advanced while waiting.'
+            : ' Diagnostic epoch did not advance while waiting.';
+        return [{
+            code: 'VALIDATION_DEGRADED_LSP_NO_FEEDBACK',
+            severity: 'warning',
+            message: `CWTools LSP did not provide fresh diagnostics (${freshness}).${pendingSuffix}${serviceSuffix}${epochSuffix} Local syntax fallback found no brace/string errors, but semantic CWTools validation was not confirmed.`,
+            line: 0,
+            column: 0,
+        }];
+    }
+
+    private readValidationFallbackText(targetFile: string, currentCode: string): string {
+        if (targetFile && fs.existsSync(targetFile)) {
+            try {
+                return fs.readFileSync(targetFile, 'utf8');
+            } catch {
+                // Fall through to the generated code block.
+            }
+        }
+        return currentCode;
+    }
+
+    private scanLocalPdxSyntax(text: string): ValidationError[] {
+        const errors: ValidationError[] = [];
+        const braceStack: Array<{ line: number; column: number }> = [];
+        const lines = text.split(/\r?\n/);
+
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            const line = lines[lineIndex] ?? '';
+            let inString = false;
+            let stringStartColumn = 0;
+            let escaped = false;
+
+            for (let column = 0; column < line.length; column++) {
+                const ch = line[column];
+                if (inString) {
+                    if (escaped) {
+                        escaped = false;
+                    } else if (ch === '\\') {
+                        escaped = true;
+                    } else if (ch === '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (ch === '#') break;
+                if (ch === '"') {
+                    inString = true;
+                    stringStartColumn = column;
+                    continue;
+                }
+                if (ch === '{') {
+                    braceStack.push({ line: lineIndex, column });
+                } else if (ch === '}') {
+                    const opened = braceStack.pop();
+                    if (!opened) {
+                        errors.push({
+                            code: 'LOCAL_SYNTAX_UNEXPECTED_CLOSING_BRACE',
+                            severity: 'error',
+                            message: 'Unexpected closing brace in local syntax fallback validation.',
+                            line: lineIndex,
+                            column,
+                        });
+                    }
+                }
+            }
+
+            if (inString) {
+                errors.push({
+                    code: 'LOCAL_SYNTAX_UNTERMINATED_STRING',
+                    severity: 'error',
+                    message: 'Unterminated string in local syntax fallback validation.',
+                    line: lineIndex,
+                    column: stringStartColumn,
+                });
+            }
+            if (errors.length >= 20) return errors;
+        }
+
+        for (const opened of braceStack.slice(-20)) {
+            errors.push({
+                code: 'LOCAL_SYNTAX_MISSING_CLOSING_BRACE',
+                severity: 'error',
+                message: 'Missing closing brace in local syntax fallback validation.',
+                line: opened.line,
+                column: opened.column,
+            });
+        }
+        return errors;
+    }
+
+    private formatValidationDiagnosticAdvice(analysis: Partial<AnalyzeDiagnosticErrorResult>): string {
+        const recommendedTools = Array.isArray(analysis.recommendedTools) ? analysis.recommendedTools.join(', ') : '';
+        const avoidTools = Array.isArray(analysis.avoidTools) ? analysis.avoidTools.join(', ') : '';
+        const references = Array.isArray(analysis.referenceCandidates) ? analysis.referenceCandidates.join(', ') : '';
+        const lines = [
+            `Category: ${analysis.category ?? 'unknown'}`,
+            `Recommended tools: ${recommendedTools || '(none)'}`,
+            avoidTools ? `Avoid tools/patterns: ${avoidTools}` : '',
+            references ? `Concrete references: ${references}` : '',
+            analysis.referenceVerificationRequired ? 'Reference verification required before another write.' : '',
+            analysis.verificationInstruction ? `Verification instruction: ${analysis.verificationInstruction}` : '',
+            analysis.requiredFreshRead ? 'Fresh read required before writing.' : '',
+            analysis.suspectedStaleCache ? 'Freshness warning: diagnostics may be pending/stale; avoid duplicate writes.' : '',
+            analysis.nextInstruction ? `Next instruction: ${analysis.nextInstruction}` : '',
+            analysis.stopReason ? `Stop reason: ${analysis.stopReason}` : '',
+        ].filter(Boolean);
+        return lines.join('\n');
+    }
 
     /**
      * Extract code blocks from AI response.

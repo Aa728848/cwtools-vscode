@@ -25,7 +25,7 @@ import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelPr
 import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
-import { registerGraphicsFeatures } from './graphicsFeatures';
+import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getRulesRemoteUrl, getGameInfoMap, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
@@ -752,6 +752,13 @@ export async function activate(context: ExtensionContext) {
 						return true;
 					});
 					next(uri, filtered);
+				},
+				provideDocumentLinks: async (document, token, next) => {
+					const links = await next(document, token);
+					if (!links || !document.fileName.toLowerCase().endsWith('.gfx')) {
+						return links;
+					}
+					return links.filter(link => !isImagePathLinkText(document.getText(link.range)));
 				}
 			},
 			initializationOptions: {

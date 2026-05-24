@@ -49,12 +49,60 @@ class LRUCache<K, V> {
  */
 const IMAGE_PATH_QUOTED_RE = /["']([^"']+\.(?:dds|tga|png))["']/gi;
 const IMAGE_PATH_UNQUOTED_RE = /=\s*([^\s"'{}#]+\.(?:dds|tga|png))\b/gi;
+const IMAGE_PATH_EXT_RE = /\.(?:dds|tga|png)$/i;
+const OPEN_IMAGE_PATH_IN_EXPLORER_COMMAND = 'cwtools.openImagePathInExplorer';
+
+export interface ImagePathSpan {
+    path: string;
+    start: number;
+    end: number;
+}
 
 /** Match a word at the cursor that looks like GFX_xxx */
 const GFX_PREFIX_RE = /GFX_[A-Za-z0-9_]+/;
 
 /** Regex to identify `room = ` context (with optional quotes) */
 const ROOM_ASSIGN_RE = /\broom\s*=\s*["']?([A-Za-z0-9_]*)["']?\s*$/;
+
+function findCommentStartOutsideQuotes(lineText: string): number {
+    let quote: '"' | "'" | null = null;
+    for (let i = 0; i < lineText.length; i++) {
+        const ch = lineText[i];
+        if ((ch === '"' || ch === "'") && lineText[i - 1] !== '\\') {
+            quote = quote === ch ? null : (quote ? quote : ch);
+        } else if (ch === '#' && !quote) {
+            return i;
+        }
+    }
+    return lineText.length;
+}
+
+export function findImagePathSpansInLine(lineText: string): ImagePathSpan[] {
+    const spans: ImagePathSpan[] = [];
+    const searchable = lineText.slice(0, findCommentStartOutsideQuotes(lineText));
+
+    const quotedRe = new RegExp(IMAGE_PATH_QUOTED_RE.source, 'gi');
+    let match: RegExpExecArray | null;
+    while ((match = quotedRe.exec(searchable)) !== null) {
+        const imagePath = match[1]!;
+        const start = match.index + 1;
+        spans.push({ path: imagePath, start, end: start + imagePath.length });
+    }
+
+    const unquotedRe = new RegExp(IMAGE_PATH_UNQUOTED_RE.source, 'gi');
+    while ((match = unquotedRe.exec(searchable)) !== null) {
+        const fullMatch = match[0]!;
+        const imagePath = match[1]!;
+        const start = match.index + fullMatch.indexOf(imagePath);
+        spans.push({ path: imagePath, start, end: start + imagePath.length });
+    }
+
+    return spans;
+}
+
+export function isImagePathLinkText(text: string): boolean {
+    return IMAGE_PATH_EXT_RE.test(text.trim().replace(/^["']|["']$/g, ''));
+}
 
 // ─── Vanilla Game Path Helper ───────────────────────────────────────────────
 
@@ -132,6 +180,33 @@ class ImageHoverProvider implements vs.HoverProvider {
         const fullPath = resolveAssetPath(document, relativePath);
         if (!fullPath || !fs.existsSync(fullPath)) return null;
         return createImageHover(fullPath, relativePath, range);
+    }
+}
+
+/**
+ * DocumentLinkProvider for .gfx image paths.
+ * Ctrl+Click reveals the resolved image in the OS file explorer instead of
+ * opening the binary/texture file in an editor tab.
+ */
+class ImagePathDocumentLinkProvider implements vs.DocumentLinkProvider {
+    provideDocumentLinks(document: vs.TextDocument): vs.DocumentLink[] {
+        const links: vs.DocumentLink[] = [];
+        if (!document.fileName.toLowerCase().endsWith('.gfx')) return links;
+
+        for (let line = 0; line < document.lineCount; line++) {
+            const lineText = document.lineAt(line).text;
+            for (const span of findImagePathSpansInLine(lineText)) {
+                const fullPath = resolveAssetPath(document, span.path);
+                if (!fullPath) continue;
+
+                const range = new vs.Range(line, span.start, line, span.end);
+                const link = new vs.DocumentLink(range, createOpenImagePathCommandUri(fullPath));
+                link.tooltip = `Reveal ${path.basename(fullPath)} in File Explorer`;
+                links.push(link);
+            }
+        }
+
+        return links;
     }
 }
 
@@ -557,16 +632,18 @@ class RoomDefinitionProvider implements vs.DefinitionProvider {
  * Searches: workspace folders → document directory → vanilla game path.
  */
 function resolveAssetPath(document: vs.TextDocument, relativePath: string): string | null {
-    const normalized = relativePath.replace(/\//g, path.sep);
+    const normalized = normalizeAssetPathForFs(relativePath);
+    if (path.isAbsolute(normalized) && fs.existsSync(normalized)) return normalized;
+    const rootRelativePath = normalized.replace(/^[\\/]+/, '');
 
     // Search all roots (workspace + vanilla)
     for (const root of getSearchRoots()) {
-        const full = path.join(root, normalized);
+        const full = path.join(root, rootRelativePath);
         if (fs.existsSync(full)) return full;
     }
 
     // Try relative to the document itself (for files outside workspace)
-    const fromDoc = path.join(path.dirname(document.uri.fsPath), normalized);
+    const fromDoc = path.join(path.dirname(document.uri.fsPath), rootRelativePath);
     if (fs.existsSync(fromDoc)) return fromDoc;
 
     return null;
@@ -577,12 +654,31 @@ function resolveAssetPath(document: vs.TextDocument, relativePath: string): stri
  * Searches: workspace folders → vanilla game path.
  */
 function resolveAssetPathRaw(relativePath: string): string | null {
-    const normalized = relativePath.replace(/\//g, path.sep);
+    const normalized = normalizeAssetPathForFs(relativePath);
+    if (path.isAbsolute(normalized) && fs.existsSync(normalized)) return normalized;
+    const rootRelativePath = normalized.replace(/^[\\/]+/, '');
     for (const root of getSearchRoots()) {
-        const full = path.join(root, normalized);
+        const full = path.join(root, rootRelativePath);
         if (fs.existsSync(full)) return full;
     }
     return null;
+}
+
+function normalizeAssetPathForFs(assetPath: string): string {
+    return assetPath.trim().replace(/[\\/]+/g, path.sep);
+}
+
+function createOpenImagePathCommandUri(fullPath: string): vs.Uri {
+    const args = encodeURIComponent(JSON.stringify([fullPath]));
+    return vs.Uri.parse(`command:${OPEN_IMAGE_PATH_IN_EXPLORER_COMMAND}?${args}`);
+}
+
+async function revealImagePathInExplorer(fullPath: string): Promise<void> {
+    if (!fullPath || !fs.existsSync(fullPath)) {
+        await vs.window.showWarningMessage(`Image file not found: ${fullPath}`);
+        return;
+    }
+    await vs.commands.executeCommand('revealFileInOS', vs.Uri.file(fullPath));
 }
 
 // ─── Shared Image Hover Helper ─────────────────────────────────────────────
@@ -683,6 +779,10 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
     // Run background cleanup 5 seconds after activation
     setTimeout(cleanupOldTempFiles, 5000);
 
+    context.subscriptions.push(
+        vs.commands.registerCommand(OPEN_IMAGE_PATH_IN_EXPLORER_COMMAND, revealImagePathInExplorer),
+    );
+
     const gameLanguages = ['stellaris', 'hoi4', 'eu4', 'ck2', 'imperator', 'vic2', 'vic3', 'ck3', 'eu5', 'paradox'];
     const gfxSelector: vs.DocumentSelector = [
         ...gameLanguages.map(lang => ({ scheme: 'file', language: lang })),
@@ -694,6 +794,13 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
     // 1. DDS/TGA image hover preview (file paths)
     context.subscriptions.push(
         vs.languages.registerHoverProvider(gfxSelector, new ImageHoverProvider()),
+    );
+
+    context.subscriptions.push(
+        vs.languages.registerDocumentLinkProvider(
+            [{ scheme: 'file', pattern: '**/*.gfx' }],
+            new ImagePathDocumentLinkProvider(),
+        ),
     );
 
     // 2. GFX sprite GoToDefinition + hover image preview

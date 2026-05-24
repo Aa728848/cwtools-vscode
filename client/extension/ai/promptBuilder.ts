@@ -16,6 +16,13 @@ import { MemoryParser } from './memoryParser';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
 import { getAiStorageRootCandidates } from './workspacePaths';
+import {
+    buildProfileSummary,
+    getProjectProfilePath,
+    getPromptCardForMode,
+    readProjectProfile,
+} from './projectProfile';
+import type { ProjectProfile } from './types';
 
 // ─── Parsed CWTOOLS.md Structure ─────────────────────────────────────────────
 
@@ -331,6 +338,10 @@ export class PromptBuilder {
     /** Clear the frozen prompt cache (e.g., when starting a new session). */
     clearFrozenPromptCache(): void {
         this._frozenPromptCache.clear();
+        this._parsedRulesCache = null;
+        this._parsedRulesMtime = 0;
+        this._projectProfileCache = null;
+        this._projectProfileMtime = 0;
     }
 
     /**
@@ -363,6 +374,31 @@ export class PromptBuilder {
     /** Parsed CWTOOLS.md cache — invalidated when file mtime changes */
     private _parsedRulesCache: ParsedProjectRules | null = null;
     private _parsedRulesMtime: number = 0;
+    private _projectProfileCache: ProjectProfile | null = null;
+    private _projectProfileMtime: number = 0;
+
+    private parseProjectProfile(): ProjectProfile | null {
+        try {
+            if (!this.workspaceRoot) return null;
+            const profilePath = getProjectProfilePath(this.workspaceRoot);
+            if (!fs.existsSync(profilePath)) {
+                this._projectProfileCache = null;
+                return null;
+            }
+            const mtime = fs.statSync(profilePath).mtimeMs;
+            if (this._projectProfileCache && mtime === this._projectProfileMtime) {
+                return this._projectProfileCache;
+            }
+            const profile = readProjectProfile(this.workspaceRoot);
+            this._projectProfileCache = profile;
+            this._projectProfileMtime = mtime;
+            return profile;
+        } catch (e) {
+            ErrorReporter.debug(SOURCE.PROMPT_BUILDER, 'Error reading project profile', e);
+            this._projectProfileCache = null;
+            return null;
+        }
+    }
 
     /**
      * Parse CWTOOLS.md into structured sections for selective injection.
@@ -425,12 +461,27 @@ export class PromptBuilder {
         return content.slice(0, maxChars).trimEnd() + '\n...[truncated; read CWTOOLS.md for the full project rules]';
     }
 
+    private buildProjectProfilePrompt(mode: AgentMode | undefined, profile: ProjectProfile, customRules?: string): string {
+        const activeMode = mode ?? 'build';
+        const promptCard = getPromptCardForMode(profile, activeMode);
+        const workflowHints = profile.routing.recommendedWorkflowByIntent
+            .slice(0, 5)
+            .map(item => `- ${item.intent}: ${item.workflowId} (${item.mode})`)
+            .join('\n');
+        const custom = customRules?.trim()
+            ? `\n\n## Custom Rules (from CWTOOLS.md)\n${this.truncateProjectRuleSection(customRules.trim(), 1800)}`
+            : '';
+        return `<project-premise>\n# PROJECT PROFILE (from .cwtools-ai/project/profile.json)\nUse this compact profile for routing. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}${custom}\n</project-premise>\n`;
+    }
+
     /**
      * Build mode-aware project rules prompt.
      * Different modes include different subsets of CWTOOLS.md to optimize context usage.
      */
     private getProjectRulesPrompt(mode?: AgentMode): string {
+        const profile = this.parseProjectProfile();
         const parsed = this.parseProjectRules();
+        if (profile) return this.buildProjectProfilePrompt(mode, profile, parsed?.customRules);
         if (!parsed) return '';
 
         // Build mode uses a compact summary by default. Full CWTOOLS.md injection is
@@ -479,6 +530,18 @@ export class PromptBuilder {
      * Build a slim project rules prompt for sub-agents — only mod info + namespaces.
      */
     private getSlimProjectRulesPrompt(): string {
+        const profile = this.parseProjectProfile();
+        if (profile) {
+            const namespaces = profile.identifiers.namespaces.slice(0, 30);
+            const parts: string[] = [
+                `Project: ${profile.projectName}`,
+                `Kind: ${profile.workspaceKind}`,
+                `Game: ${profile.game.displayName}`,
+            ];
+            if (namespaces.length) parts.push(`Namespaces: ${namespaces.join(', ')}`);
+            if (profile.localisation.languages.length) parts.push(`Localisation: ${profile.localisation.languages.join(', ')}`);
+            return `<project-hint>${parts.join(' | ')}</project-hint>`;
+        }
         const parsed = this.parseProjectRules();
         if (!parsed) return '';
         const parts: string[] = [];
@@ -615,10 +678,29 @@ ${trimmed}
      */
     buildCompactionPrompt(): string {
         // Inject project entity protection hints from CWTOOLS.md
+        const profile = this.parseProjectProfile();
+        if (profile) {
+            return `You are a conversation summarizer. Follow the template in the user message exactly. Output ONLY the filled template, no preamble, no commentary.${this.buildCompactionProtectionHintFromProfile(profile)}`;
+        }
         const parsed = this.parseProjectRules();
         const projectProtection = parsed ? this.buildCompactionProtectionHint(parsed) : '';
 
         return `You are a conversation summarizer. Follow the template in the user message exactly. Output ONLY the filled template, no preamble, no commentary.${projectProtection}`;
+    }
+
+    private buildCompactionProtectionHintFromProfile(profile: ProjectProfile): string {
+        const parts: string[] = [];
+        if (profile.identifiers.namespaces.length) {
+            parts.push(`Event namespaces: ${profile.identifiers.namespaces.join(', ')}`);
+        }
+        const ids = [
+            ...profile.identifiers.scriptedTriggers,
+            ...profile.identifiers.scriptedEffects,
+            ...profile.identifiers.events,
+        ].filter(Boolean).slice(0, 20);
+        if (ids.length) parts.push(`Key IDs: ${ids.join(', ')}`);
+        if (parts.length === 0) return '';
+        return `\n\nCRITICAL - These project-specific identifiers MUST be preserved verbatim in the summary (never omit or rephrase):\n${parts.join('\n')}`;
     }
 
     /**

@@ -474,6 +474,16 @@ describe('agent sprite candidate tool contract', () => {
         expect(definition.function.parameters.properties).to.have.property('source');
     });
 
+    it('registers query_project_profile as a first-class read-only tool', () => {
+        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'query_project_profile');
+        if (!definition) {
+            throw new Error('query_project_profile tool definition is missing');
+        }
+        expect(definition.function.description).to.include('Agent project profile');
+        expect(definition.function.parameters.properties).to.have.property('section');
+        expect(definition.function.parameters.properties).to.have.property('mode');
+    });
+
     it('tells dispatch_agents to declare known Builder plannedFiles', () => {
         const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'dispatch_agents');
         if (!definition) {
@@ -563,6 +573,46 @@ describe('agent sprite candidate tool contract', () => {
 
         expect(result.status).to.equal('unavailable');
         expect(result.entries).to.deep.equal([]);
+    });
+
+    it('queries the /init project profile without scanning the workspace', async () => {
+        const profileDir = path.join(workspaceRoot, '.cwtools-ai', 'project');
+        fs.mkdirSync(profileDir, { recursive: true });
+        fs.writeFileSync(path.join(profileDir, 'profile.json'), JSON.stringify({
+            schemaVersion: 1,
+            generatedAt: '2026-05-24T00:00:00.000Z',
+            workspaceRoot,
+            workspaceKind: 'paradox_mod',
+            projectName: 'Kuat',
+            game: { id: 'stellaris', displayName: 'Stellaris', confidence: 'high', evidence: ['test'] },
+            keyDirectories: [{ key: 'events', path: 'events', exists: true, fileCount: 1 }],
+            localisation: { roots: ['localisation'], languages: ['l_english'], encoding: 'UTF-8 with BOM', sampleFiles: [] },
+            identifiers: {
+                namespaces: ['kuat'],
+                variablePrefixes: ['@kuat_'],
+                scriptedTriggers: [],
+                scriptedEffects: [],
+                events: ['kuat.1'],
+                onActions: [],
+                staticModifiers: [],
+            },
+            routing: {
+                recommendedWorkflowByIntent: [],
+                preferredReadTools: ['query_project_profile'],
+                avoidPatterns: [],
+            },
+            validation: { lspReady: 'unknown', indexStatus: 'unknown', vanillaCache: 'unknown' },
+            promptCards: { build: 'Build card' },
+            efficiencyHints: ['Use profile first'],
+        }), 'utf8');
+
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const result = await executor.execute('query_project_profile', { section: 'summary', mode: 'build' }) as any;
+
+        expect(result.status).to.equal('ready');
+        expect(result.summary).to.include('Project: Kuat');
+        expect(result.promptCard).to.equal('Build card');
+        expect(result.data.workspaceKind).to.equal('paradox_mod');
     });
 
     it('parses project .gfx spriteType candidates and ranks event pictures', async () => {

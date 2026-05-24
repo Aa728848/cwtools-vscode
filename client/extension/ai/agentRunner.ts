@@ -344,6 +344,10 @@ export class AgentRunner {
         this.toolExecutor.parentAgentRunner = this;
     }
 
+    public clearPromptCache(): void {
+        this.promptBuilder.clearFrozenPromptCache();
+    }
+
     public getActiveRunRecordPromise(): Promise<import('./types').AgentRunRecord> | undefined {
         return this.activeRunRecordPromise;
     }

@@ -1987,10 +1987,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * The file is written to the workspace root and loaded into every future session.
      */
     private async generateInitFile(): Promise<void> {
-        await generateInitFile(
+        const result = await generateInitFile(
             (msg) => this.postMessage(msg),
             (filePath) => this._recordFileSnapshot(filePath)
         );
+        if (result.success) {
+            this.agentRunner.clearPromptCache();
+        }
     }
 
 

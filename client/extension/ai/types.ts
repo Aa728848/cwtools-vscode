@@ -290,6 +290,83 @@ export interface QueryWorkspaceIndexResult {
     _hint?: string;
 }
 
+export type ProjectProfileWorkspaceKind = 'paradox_mod' | 'extension_source' | 'mixed' | 'generic';
+
+export interface ProjectProfile {
+    schemaVersion: 1;
+    generatedAt: string;
+    workspaceRoot: string;
+    workspaceKind: ProjectProfileWorkspaceKind;
+    projectName: string;
+    game: {
+        id: string;
+        displayName: string;
+        confidence: 'high' | 'medium' | 'low';
+        evidence: string[];
+    };
+    modInfo?: {
+        name?: string;
+        version?: string;
+        tags?: string[];
+    };
+    keyDirectories: Array<{
+        key: string;
+        path: string;
+        exists: boolean;
+        fileCount?: number;
+    }>;
+    localisation: {
+        roots: string[];
+        languages: string[];
+        encoding: string;
+        sampleFiles: string[];
+    };
+    identifiers: {
+        namespaces: string[];
+        variablePrefixes: string[];
+        scriptedTriggers: string[];
+        scriptedEffects: string[];
+        events: string[];
+        onActions: string[];
+        staticModifiers: string[];
+    };
+    routing: {
+        recommendedWorkflowByIntent: Array<{
+            intent: string;
+            workflowId: string;
+            mode: AgentMode;
+            reason: string;
+        }>;
+        preferredReadTools: string[];
+        avoidPatterns: string[];
+    };
+    validation: {
+        lspReady: 'unknown' | 'ready' | 'not_ready';
+        indexStatus: 'unknown' | 'ready' | 'indexing' | 'idle' | 'unavailable';
+        vanillaCache: 'unknown' | 'configured' | 'missing';
+    };
+    promptCards: Partial<Record<AgentMode | 'asset', string>>;
+    efficiencyHints: string[];
+}
+
+export interface QueryProjectProfileArgs {
+    section?: 'summary' | 'routing' | 'directories' | 'localisation' | 'identifiers' | 'validation' | 'promptCards' | 'all';
+    mode?: AgentMode | 'asset';
+}
+
+export interface QueryProjectProfileResult {
+    status: 'ready' | 'missing' | 'error';
+    profilePath: string;
+    generatedAt?: string;
+    section?: string;
+    profile?: ProjectProfile;
+    summary?: string;
+    data?: unknown;
+    promptCard?: string;
+    _hint?: string;
+    error?: string;
+}
+
 export interface QueryRulesArgs {
     category: 'trigger' | 'effect' | 'scope_change' | 'modifier';
     name?: string;
@@ -607,6 +684,7 @@ export type ToolArgs =
     | QueryTypesArgs
     | QueryLocalisationIndexArgs
     | QueryWorkspaceIndexArgs
+    | QueryProjectProfileArgs
     | QueryRulesArgs
     | QueryReferencesArgs
     | GetFileContextArgs
@@ -636,6 +714,7 @@ export type ToolResult =
     | QueryTypesResult
     | QueryLocalisationIndexResult
     | QueryWorkspaceIndexResult
+    | QueryProjectProfileResult
     | QueryRulesResult
     | QueryReferencesResult
     | GetFileContextResult
@@ -664,6 +743,7 @@ export type AgentToolName =
     | 'query_types'
     | 'query_localisation_index'
     | 'query_workspace_index'
+    | 'query_project_profile'
     | 'query_rules'
     | 'query_references'
     // validate_code — REMOVED: replaced by get_diagnostics + multi_replace_file_content inline diagnostics

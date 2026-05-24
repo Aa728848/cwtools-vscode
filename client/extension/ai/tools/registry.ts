@@ -4,7 +4,7 @@ import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
     | 'query_scope' | 'query_types' | 'query_rules' | 'remove_ignored_diagnostic'
-    | 'query_localisation_index' | 'query_workspace_index' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
+    | 'query_localisation_index' | 'query_workspace_index' | 'query_project_profile' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file'
@@ -60,7 +60,7 @@ export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_localisation_index', 'query_workspace_index', 'query_references',
-    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'query_project_profile', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',

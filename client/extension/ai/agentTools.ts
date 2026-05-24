@@ -30,6 +30,7 @@ import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess } from './tools/permissions';
 import { runLedger } from './runner/runLedger';
 import { TOOL_REGISTRY } from './tools/registry';
+import { queryProjectProfile } from './projectProfile';
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_types: 45_000,
     query_localisation_index: 45_000,
     query_workspace_index: 45_000,
+    query_project_profile: 5_000,
     query_rules: 45_000,
     query_references: 45_000,
     // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
@@ -424,6 +426,8 @@ export class AgentToolExecutor {
                 result = this.queryLocalisationIndex(args as any); break;
             case 'query_workspace_index':
                 result = await this.queryWorkspaceIndex(args as any); break;
+            case 'query_project_profile':
+                result = queryProjectProfile(this.workspaceRoot, args as any); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_references':

@@ -169,7 +169,7 @@ const EN: ChatI18nText = {
         orchestrator: { label: 'Multi-Agent Execution - DAG dispatch and parallel collaboration', bodyClass: 'orchestrator-mode' },
     },
     slashDescriptions: {
-        '/init': 'Scan the project and generate a CWTOOLS.md rules file',
+        '/init': 'Scan the project and generate Agent profile + CWTOOLS.md',
         '/clear': 'Clear the current conversation and start a new topic',
         '/fork': 'Fork the conversation from the current point',
         '/archive': 'Archive the current topic',
@@ -382,7 +382,7 @@ const ZH_CN: ChatI18nText = {
         orchestrator: { label: '多 Agent 执行 - DAG 分派与并行协作', bodyClass: 'orchestrator-mode' },
     },
     slashDescriptions: {
-        '/init': '扫描项目，生成 CWTOOLS.md 规则文件',
+        '/init': '扫描项目，生成 Agent 画像和 CWTOOLS.md',
         '/clear': '清空当前对话，开始新话题',
         '/fork': '从当前位置分叉对话',
         '/archive': '归档当前话题',

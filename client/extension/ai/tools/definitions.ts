@@ -84,6 +84,29 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'query_project_profile',
+            description: 'Read the /init-generated Agent project profile from .cwtools-ai/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, workflow routing, validation hints, and mode-specific prompt cards.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    section: {
+                        type: 'string',
+                        enum: ['summary', 'routing', 'directories', 'localisation', 'identifiers', 'validation', 'promptCards', 'all'],
+                        description: 'Targeted profile section to return. Default summary. Use all only when you need the whole profile.',
+                    },
+                    mode: {
+                        type: 'string',
+                        enum: ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'asset'],
+                        description: 'Optional mode card to return, e.g. build, plan, loc_writer, asset, orchestrator.',
+                    },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'query_rules',
             description: 'Query syntax rules for triggers, effects, scope changes, or modifiers. Returns valid syntax, parameters, and scopes. Fuzzy-matches if exact name not found.',
             parameters: {

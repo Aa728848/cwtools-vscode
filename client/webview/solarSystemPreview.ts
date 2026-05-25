@@ -188,102 +188,6 @@ function getBodyColor(body: CelestialBody, systemClass: string): string {
 
 // ─── Viewport State ─────────────────────────────────────────────────────────
 
-function isBlackHoleBody(body: CelestialBody, systemClass: string): boolean {
-    return body.planetClass === 'pc_black_hole'
-        || body.planetClass === 'sc_black_hole'
-        || (body.bodyType === 'star' && systemClass === 'sc_black_hole');
-}
-
-function isStellarClass(planetClass: string): boolean {
-    return planetClass === 'star'
-        || planetClass.includes('_star')
-        || planetClass === 'pc_black_hole'
-        || planetClass === 'pc_pulsar'
-        || planetClass === 'sc_pulsar';
-}
-
-function isStellarBody(body: CelestialBody): boolean {
-    return body.bodyType === 'star' || isStellarClass(body.planetClass);
-}
-
-function getStellarGlowColor(body: CelestialBody, systemClass: string, fillColor: string): string {
-    if (body.bodyType === 'star' && body.resolvedOrbitRadius === 0) {
-        return getStarColor(systemClass).glow;
-    }
-
-    const scName = body.planetClass ? body.planetClass.replace(/^pc_/, 'sc_') : '';
-    if (scName && STAR_COLORS[scName]) {
-        return STAR_COLORS[scName].glow;
-    }
-
-    const rgb = hexToRgb(fillColor);
-    if (rgb) return `rgba(${rgb.r},${rgb.g},${rgb.b},0.4)`;
-    if (fillColor.startsWith('rgba')) return fillColor.replace(/[\d.]+\)$/, '0.4)');
-    if (fillColor.startsWith('rgb')) return fillColor.replace('rgb', 'rgba').replace(')', ',0.4)');
-    return 'rgba(255,255,255,0.3)';
-}
-
-function colorWithAlpha(color: string, alpha: number): string {
-    const rgb = hexToRgb(color);
-    if (rgb) return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
-
-    const rgbaMatch = color.match(/^rgba?\(([^)]+)\)$/);
-    if (rgbaMatch) {
-        const parts = rgbaMatch[1]!.split(',').map(p => p.trim());
-        if (parts.length >= 3) {
-            return `rgba(${parts[0]},${parts[1]},${parts[2]},${alpha})`;
-        }
-    }
-
-    return color;
-}
-
-function drawProceduralStarBody(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    radius: number,
-    color: string,
-    planetClass: string,
-) {
-    const highlight = lightenColor(color, 86);
-    const rim = lightenColor(color, -26);
-    const disk = ctx.createRadialGradient(
-        x - radius * 0.35,
-        y - radius * 0.35,
-        radius * 0.08,
-        x,
-        y,
-        radius,
-    );
-    disk.addColorStop(0, 'rgba(255,255,255,0.95)');
-    disk.addColorStop(0.34, highlight);
-    disk.addColorStop(0.78, color);
-    disk.addColorStop(1, rim);
-
-    ctx.fillStyle = disk;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = colorWithAlpha(highlight, 0.56);
-    ctx.lineWidth = Math.max(1, radius * 0.04);
-    ctx.beginPath();
-    ctx.arc(x, y, radius * 0.98, 0, Math.PI * 2);
-    ctx.stroke();
-
-    if (planetClass === 'pc_neutron_star' || planetClass === 'pc_pulsar' || planetClass === 'sc_pulsar') {
-        ctx.save();
-        ctx.strokeStyle = colorWithAlpha(highlight, 0.38);
-        ctx.lineWidth = Math.max(1, radius * 0.18);
-        ctx.beginPath();
-        ctx.moveTo(x - radius * 2.2, y);
-        ctx.lineTo(x + radius * 2.2, y);
-        ctx.stroke();
-        ctx.restore();
-    }
-}
-
 let scale = 1.2;
 let viewRotation = 0; // horizontal rotation around star (degrees)
 let tiltAngle = 55; // vertical tilt (degrees)
@@ -776,12 +680,34 @@ function drawBody(
     // Draw the body
     ctx.save();
 
-    const isBlackHole = isBlackHoleBody(body, systemClass);
-    const isStellar = isStellarBody(body);
-
     // Glow effect for stars
-    if (isStellar && !isBlackHole) {
-        const glowColor = getStellarGlowColor(body, systemClass, color);
+    if (body.bodyType === 'star' || body.planetClass.includes('_star') || body.planetClass === 'star') {
+        let glowColor = 'rgba(255,255,255,0.3)';
+        
+        // If it's the central star, use the system class glow
+        if (body.bodyType === 'star' && body.resolvedOrbitRadius === 0) {
+            glowColor = getStarColor(systemClass).glow;
+        } else {
+            // It's a companion star. Try to find a specific glow.
+            const scName = body.planetClass ? body.planetClass.replace(/^pc_/, 'sc_') : '';
+            if (scName && STAR_COLORS[scName]) {
+                glowColor = STAR_COLORS[scName].glow;
+            } else {
+                // Generate a glow from its fill color
+                const fillHex = color;
+                if (fillHex.startsWith('#') && fillHex.length >= 7) {
+                    const r = parseInt(fillHex.slice(1, 3), 16);
+                    const g = parseInt(fillHex.slice(3, 5), 16);
+                    const b = parseInt(fillHex.slice(5, 7), 16);
+                    glowColor = `rgba(${r},${g},${b},0.4)`;
+                } else if (fillHex.startsWith('rgba')) {
+                    glowColor = fillHex.replace(/[\d.]+\)$/, '0.4)');
+                } else if (fillHex.startsWith('rgb')) {
+                    glowColor = fillHex.replace('rgb', 'rgba').replace(')', ',0.4)');
+                }
+            }
+        }
+
         const glowRadius = screenRadius * 3 * starPulse;
         const gradient = ctx.createRadialGradient(p.x, p.y, screenRadius * 0.5, p.x, p.y, glowRadius);
         gradient.addColorStop(0, glowColor);
@@ -794,7 +720,7 @@ function drawBody(
     }
 
     // Special rendering for black holes
-    if (isBlackHole) {
+    if (body.planetClass === 'pc_black_hole' || body.planetClass === 'sc_black_hole' || (body.bodyType === 'star' && systemClass === 'sc_black_hole')) {
         // Accretion disk
         const diskRadius = screenRadius * 2.5;
         const diskGrad = ctx.createRadialGradient(p.x, p.y, screenRadius, p.x, p.y, diskRadius);
@@ -818,8 +744,6 @@ function drawBody(
         ctx.beginPath();
         ctx.arc(p.x, p.y, screenRadius, 0, Math.PI * 2);
         ctx.stroke();
-    } else if (isStellar) {
-        drawProceduralStarBody(ctx, p.x, p.y, screenRadius, color, body.planetClass);
     } else {
         const dynamic = dynamicClasses.find(c => c.name === body.planetClass);
         let iconName = dynamic?.iconLarge;
@@ -834,24 +758,21 @@ function drawBody(
         if (iconInfo && iconInfo.uri) {
             const img = getCachedIcon(iconInfo.uri);
             if (img.complete && img.naturalWidth > 0) {
-                // Keep visible body diameter tied exactly to script size.
+                // Scale the icon to exactly match the hit circle with a slight padding
                 const drawSize = screenRadius * 2;
-                const source = getTrimmedIconSource(img, iconInfo);
                 
                 // Keep image smoothing enabled for these soft UI icons, but ensure high quality
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = "high";
-                ctx.drawImage(
-                    img,
-                    source.sx,
-                    source.sy,
-                    source.sw,
-                    source.sh,
-                    p.x - drawSize / 2,
-                    p.y - drawSize / 2,
-                    drawSize,
-                    drawSize,
-                );
+                
+                if (iconInfo.noOfFrames && iconInfo.frame) {
+                    const fw = img.naturalWidth / iconInfo.noOfFrames;
+                    const fh = img.naturalHeight;
+                    const sx = (iconInfo.frame - 1) * fw;
+                    ctx.drawImage(img, sx, 0, fw, fh, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
+                } else {
+                    ctx.drawImage(img, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
+                }
             } else {
                 if (!img.onload) {
                     img.onload = () => requestAnimationFrame(render);
@@ -1646,7 +1567,7 @@ function selectBody(
 
     document.getElementById('side-panel')!.classList.remove('hidden');
     if (options.openProperties !== false) {
-        document.getElementById('tab-properties')!.click();
+    document.getElementById('tab-properties')!.click();
     }
     if (options.center) {
         centerBodyInView(body);
@@ -2308,81 +2229,6 @@ function getCachedIcon(uri: string): HTMLImageElement {
     img.src = uri;
     iconImageCache.set(uri, img);
     return img;
-}
-
-interface IconSourceRect {
-    sx: number;
-    sy: number;
-    sw: number;
-    sh: number;
-}
-
-const iconTrimCache = new Map<string, IconSourceRect>();
-
-function getTrimmedIconSource(
-    img: HTMLImageElement,
-    iconInfo: { uri: string; frame?: number; noOfFrames?: number },
-): IconSourceRect {
-    const frameCount = Math.max(1, iconInfo.noOfFrames ?? 1);
-    const frame = Math.max(1, Math.min(iconInfo.frame ?? 1, frameCount));
-    const frameW = Math.max(1, Math.floor(img.naturalWidth / frameCount));
-    const frameH = Math.max(1, img.naturalHeight);
-    const frameX = (frame - 1) * frameW;
-    const cacheKey = `${iconInfo.uri}|${frame}|${frameCount}|${img.naturalWidth}x${img.naturalHeight}`;
-
-    const cached = iconTrimCache.get(cacheKey);
-    if (cached) return cached;
-
-    const fallback = { sx: frameX, sy: 0, sw: frameW, sh: frameH };
-    try {
-        const canvas = document.createElement('canvas');
-        canvas.width = frameW;
-        canvas.height = frameH;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return fallback;
-
-        ctx.drawImage(img, frameX, 0, frameW, frameH, 0, 0, frameW, frameH);
-        const pixels = ctx.getImageData(0, 0, frameW, frameH).data;
-        const alphaThreshold = 18;
-        let minX = frameW;
-        let minY = frameH;
-        let maxX = -1;
-        let maxY = -1;
-
-        for (let y = 0; y < frameH; y++) {
-            for (let x = 0; x < frameW; x++) {
-                const alpha = pixels[(y * frameW + x) * 4 + 3] ?? 0;
-                if (alpha <= alphaThreshold) continue;
-                if (x < minX) minX = x;
-                if (y < minY) minY = y;
-                if (x > maxX) maxX = x;
-                if (y > maxY) maxY = y;
-            }
-        }
-
-        if (maxX < minX || maxY < minY) {
-            iconTrimCache.set(cacheKey, fallback);
-            return fallback;
-        }
-
-        const pad = 1;
-        minX = Math.max(0, minX - pad);
-        minY = Math.max(0, minY - pad);
-        maxX = Math.min(frameW - 1, maxX + pad);
-        maxY = Math.min(frameH - 1, maxY + pad);
-
-        const trimmed = {
-            sx: frameX + minX,
-            sy: minY,
-            sw: Math.max(1, maxX - minX + 1),
-            sh: Math.max(1, maxY - minY + 1),
-        };
-        iconTrimCache.set(cacheKey, trimmed);
-        return trimmed;
-    } catch {
-        iconTrimCache.set(cacheKey, fallback);
-        return fallback;
-    }
 }
 
 // ─── Init ────────────────────────────────────────────────────────────────────

@@ -75,11 +75,16 @@ body {
     background: transparent;
     border: 1px solid var(--border-subtle);
     color: var(--text-secondary);
-    padding: 3px 8px;
+    min-width: 26px;
+    height: 24px;
+    padding: 0 8px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 13px;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     transition: all 0.15s;
 }
 
@@ -99,6 +104,19 @@ body {
     color: var(--border-subtle);
     margin: 0 2px;
     font-size: 14px;
+}
+
+#btn-scale-mode,
+#btn-save {
+    min-width: 58px;
+    font-size: 11px;
+}
+
+#edit-status {
+    min-width: 48px;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-align: left;
 }
 
 #zoom-level, #tilt-level {
@@ -167,7 +185,7 @@ body {
 /* ── Side Panel ──────────────────────────────────────────────── */
 
 #side-panel {
-    width: 280px;
+    width: 320px;
     background: var(--bg-panel);
     border-left: 1px solid var(--border-subtle);
     display: flex;
@@ -213,7 +231,7 @@ body {
 #info-panel, #properties-panel {
     flex: 1;
     overflow-y: auto;
-    padding: 12px;
+    padding: 14px;
 }
 
 #info-panel.hidden, #properties-panel.hidden {
@@ -229,7 +247,7 @@ body {
 /* ── Property Editor ─────────────────────────────────────────── */
 
 .prop-group {
-    margin-bottom: 12px;
+    margin-bottom: 14px;
 }
 
 .prop-group-title {
@@ -247,7 +265,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 3px 0;
+    padding: 4px 0;
     gap: 8px;
 }
 
@@ -269,10 +287,11 @@ body {
     background: var(--bg-primary);
     border: 1px solid var(--border-subtle);
     color: var(--text-primary);
-    padding: 2px 6px;
+    min-height: 24px;
+    padding: 3px 6px;
     border-radius: 3px;
     font-size: 11px;
-    width: 80px;
+    width: 88px;
     text-align: right;
 }
 
@@ -285,10 +304,17 @@ body {
     background: var(--bg-primary);
     border: 1px solid var(--border-subtle);
     color: var(--text-primary);
-    padding: 2px 4px;
+    min-height: 24px;
+    padding: 3px 4px;
     border-radius: 3px;
     font-size: 11px;
     flex: 1;
+}
+
+.empty-state {
+    color: var(--text-muted);
+    padding: 18px 0;
+    text-align: center;
 }
 
 .prop-badge {
@@ -338,52 +364,127 @@ body {
 
 /* ── Body list in info panel ─────────────────────────────────── */
 
+.body-list-header {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    margin: 14px 0 6px;
+}
+
 .body-list {
     list-style: none;
     margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
 }
 
 .body-item {
     display: flex;
     align-items: center;
-    padding: 4px 6px;
+    position: relative;
+    min-height: 42px;
+    padding: 6px 8px;
+    border: 1px solid transparent;
     border-radius: 4px;
     cursor: pointer;
     font-size: 11px;
     gap: 6px;
-    transition: background 0.1s;
+    transition: background 0.1s, border-color 0.1s;
 }
 
 .body-item:hover {
     background: var(--btn-hover);
+    border-color: rgba(74, 158, 255, 0.2);
 }
 
 .body-item.selected {
     background: var(--selection);
+    border-color: rgba(74, 158, 255, 0.65);
+}
+
+.body-item.selected::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+}
+
+.body-branch {
+    width: 12px;
+    flex-shrink: 0;
+    color: rgba(136, 145, 165, 0.5);
+    font-size: 12px;
+    text-align: center;
 }
 
 .body-dot {
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
     flex-shrink: 0;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--body-color) 55%, transparent);
+}
+
+.body-main {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
 }
 
 .body-name {
-    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-primary);
+    font-weight: 600;
 }
 
-.body-class {
+.body-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-muted);
     font-size: 10px;
 }
 
+.body-side {
+    align-items: flex-end;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    gap: 2px;
+    min-width: 42px;
+}
+
+.body-count {
+    background: rgba(74, 158, 255, 0.12);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 999px;
+    color: var(--accent);
+    font-size: 10px;
+    line-height: 1;
+    min-width: 18px;
+    padding: 2px 5px;
+    text-align: center;
+}
+
+.body-orbit {
+    color: var(--text-muted);
+    font-size: 10px;
+    white-space: nowrap;
+}
+
 .body-indent-1 { padding-left: 20px; }
-.body-indent-2 { padding-left: 36px; }
+.body-indent-2 { padding-left: 38px; }
+.body-indent-3 { padding-left: 56px; }
+.body-indent-4 { padding-left: 74px; }
 
 /* ── Tooltip ─────────────────────────────────────────────────── */
 

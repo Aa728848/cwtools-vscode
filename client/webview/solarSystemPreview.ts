@@ -188,6 +188,102 @@ function getBodyColor(body: CelestialBody, systemClass: string): string {
 
 // ─── Viewport State ─────────────────────────────────────────────────────────
 
+function isBlackHoleBody(body: CelestialBody, systemClass: string): boolean {
+    return body.planetClass === 'pc_black_hole'
+        || body.planetClass === 'sc_black_hole'
+        || (body.bodyType === 'star' && systemClass === 'sc_black_hole');
+}
+
+function isStellarClass(planetClass: string): boolean {
+    return planetClass === 'star'
+        || planetClass.includes('_star')
+        || planetClass === 'pc_black_hole'
+        || planetClass === 'pc_pulsar'
+        || planetClass === 'sc_pulsar';
+}
+
+function isStellarBody(body: CelestialBody): boolean {
+    return body.bodyType === 'star' || isStellarClass(body.planetClass);
+}
+
+function getStellarGlowColor(body: CelestialBody, systemClass: string, fillColor: string): string {
+    if (body.bodyType === 'star' && body.resolvedOrbitRadius === 0) {
+        return getStarColor(systemClass).glow;
+    }
+
+    const scName = body.planetClass ? body.planetClass.replace(/^pc_/, 'sc_') : '';
+    if (scName && STAR_COLORS[scName]) {
+        return STAR_COLORS[scName].glow;
+    }
+
+    const rgb = hexToRgb(fillColor);
+    if (rgb) return `rgba(${rgb.r},${rgb.g},${rgb.b},0.4)`;
+    if (fillColor.startsWith('rgba')) return fillColor.replace(/[\d.]+\)$/, '0.4)');
+    if (fillColor.startsWith('rgb')) return fillColor.replace('rgb', 'rgba').replace(')', ',0.4)');
+    return 'rgba(255,255,255,0.3)';
+}
+
+function colorWithAlpha(color: string, alpha: number): string {
+    const rgb = hexToRgb(color);
+    if (rgb) return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+
+    const rgbaMatch = color.match(/^rgba?\(([^)]+)\)$/);
+    if (rgbaMatch) {
+        const parts = rgbaMatch[1]!.split(',').map(p => p.trim());
+        if (parts.length >= 3) {
+            return `rgba(${parts[0]},${parts[1]},${parts[2]},${alpha})`;
+        }
+    }
+
+    return color;
+}
+
+function drawProceduralStarBody(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    radius: number,
+    color: string,
+    planetClass: string,
+) {
+    const highlight = lightenColor(color, 86);
+    const rim = lightenColor(color, -26);
+    const disk = ctx.createRadialGradient(
+        x - radius * 0.35,
+        y - radius * 0.35,
+        radius * 0.08,
+        x,
+        y,
+        radius,
+    );
+    disk.addColorStop(0, 'rgba(255,255,255,0.95)');
+    disk.addColorStop(0.34, highlight);
+    disk.addColorStop(0.78, color);
+    disk.addColorStop(1, rim);
+
+    ctx.fillStyle = disk;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = colorWithAlpha(highlight, 0.56);
+    ctx.lineWidth = Math.max(1, radius * 0.04);
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 0.98, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (planetClass === 'pc_neutron_star' || planetClass === 'pc_pulsar' || planetClass === 'sc_pulsar') {
+        ctx.save();
+        ctx.strokeStyle = colorWithAlpha(highlight, 0.38);
+        ctx.lineWidth = Math.max(1, radius * 0.18);
+        ctx.beginPath();
+        ctx.moveTo(x - radius * 2.2, y);
+        ctx.lineTo(x + radius * 2.2, y);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
 let scale = 1.2;
 let viewRotation = 0; // horizontal rotation around star (degrees)
 let tiltAngle = 55; // vertical tilt (degrees)
@@ -201,6 +297,7 @@ let canvasW = 0, canvasH = 0;
 let showLabels = true;
 let showOrbits = true;
 let editMode = false;
+let scaleMode: 'readable' | 'true' = 'readable';
 
 // Data
 interface CelestialClass {
@@ -223,6 +320,48 @@ let locDict: Record<string, string> = {};
 function getLoc(key: string | undefined, fallback: string = ''): string {
     if (!key) return fallback;
     return locDict[key] || fallback || key;
+}
+
+function escapeHtml(value: unknown): string {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[ch]!));
+}
+
+function orbitToRenderRadius(radius: number): number {
+    return scaleMode === 'readable' ? radius * 1.25 : radius;
+}
+
+function renderRadiusToOrbit(radius: number): number {
+    return scaleMode === 'readable' ? radius / 1.25 : radius;
+}
+
+function getBodyTitle(body: CelestialBody): string {
+    const fallback = body.name || body.planetClass || body.bodyType;
+    return getLoc(body.name, fallback);
+}
+
+function isDirectChild(parent: CelestialBody | null, child: CelestialBody): boolean {
+    if (!parent) return false;
+    return parent.moons.includes(child) || parent.subPlanets.includes(child);
+}
+
+function findParentBody(bodies: CelestialBody[], child: CelestialBody): CelestialBody | null {
+    for (const body of bodies) {
+        if (isDirectChild(body, child)) return body;
+        const nested = findParentBody(body.moons, child) || findParentBody(body.subPlanets, child);
+        if (nested) return nested;
+    }
+    return null;
+}
+
+function setEditStatus(text: string) {
+    const el = document.getElementById('edit-status');
+    if (el) el.textContent = text;
 }
 
 // Drag editing
@@ -357,7 +496,7 @@ function render() {
 
     // Draw asteroid belts
     for (const belt of system.asteroidBelts) {
-        drawOrbitEllipse(ctx, 0, 0, belt.radius, belt.beltType.includes('icy') ? 'rgba(140,180,220,0.2)' : 'rgba(160,140,100,0.2)', true);
+        drawOrbitEllipse(ctx, 0, 0, orbitToRenderRadius(belt.radius), belt.beltType.includes('icy') ? 'rgba(140,180,220,0.2)' : 'rgba(160,140,100,0.2)', true);
     }
 
     // Draw bodies
@@ -391,6 +530,7 @@ function drawOrbitEllipse(
     radius: number,
     color: string,
     isDotted = false,
+    lineWidth = 1,
 ) {
     if (!showOrbits) return;
     if (radius <= 0) return;
@@ -399,11 +539,11 @@ function drawOrbitEllipse(
     const steps = Math.max(60, Math.min(200, Math.round(radius * 2)));
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.lineWidth = isDotted ? 1.5 : 1;
+    ctx.lineWidth = isDotted ? Math.max(1.5, lineWidth) : lineWidth;
     if (isDotted) {
         ctx.setLineDash([3, 6]);
     }
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = lineWidth > 1 ? 0.9 : 0.62;
 
     ctx.beginPath();
     for (let i = 0; i <= steps; i++) {
@@ -428,7 +568,8 @@ function drawRingWorld(
     parentWorldY: number,
     _anchorBody: CelestialBody,
 ) {
-    const orbitR = ringGroup.orbitRadius;
+    const rawOrbitR = ringGroup.orbitRadius;
+    const orbitR = orbitToRenderRadius(rawOrbitR);
     const bandWidth = Math.max(4, orbitR * 0.08); // ring band thickness in world units
 
     // Draw the orbit circle for the ring
@@ -437,7 +578,7 @@ function drawRingWorld(
     // Arc scaling: only during drag. _dragOrigRadius is set at drag start.
     // When not dragging, arcScale = 1 (segments render at their defined angles).
     const dragOrigR = (ringGroup as any)._dragOrigRadius as number | undefined;
-    const arcScale = dragOrigR ? (dragOrigR / Math.max(1, orbitR)) : 1;
+    const arcScale = dragOrigR ? (dragOrigR / Math.max(1, rawOrbitR)) : 1;
 
     // Draw each segment as a colored arc band
     for (const seg of ringGroup.segments) {
@@ -563,8 +704,15 @@ function drawBody(
         return; // ring segments are drawn by drawRingWorld, skip normal body rendering
     }
 
-    const orbitR = body.resolvedOrbitRadius;
+    const rawOrbitR = body.resolvedOrbitRadius;
+    const orbitR = orbitToRenderRadius(rawOrbitR);
     const angleDeg = body.resolvedOrbitAngle;
+    const system = allSystems[currentSystemIndex];
+    const selectedParent = selectedBody && system ? findParentBody(system.bodies, selectedBody) : null;
+    const isSelected = selectedBody === body;
+    const isSelectionParent = selectedParent === body;
+    const isSelectionChild = isDirectChild(selectedBody, body);
+    const isRelatedToSelection = isSelected || isSelectionParent || isSelectionChild;
 
     // World position
     const bodyWorld = orbitalToWorld(orbitR, angleDeg);
@@ -573,17 +721,36 @@ function drawBody(
 
     // Draw orbit
     if (orbitR > 0) {
-        const orbitColor = body.bodyType === 'moon'
+        const orbitColor = isSelected
+            ? 'rgba(98,184,255,0.95)'
+            : isSelectionParent || isSelectionChild
+                ? 'rgba(122,210,255,0.65)'
+                : body.bodyType === 'moon'
             ? 'rgba(120,120,140,0.3)'
             : 'rgba(80,100,140,0.35)';
-        drawOrbitEllipse(ctx, parentWorldX, parentWorldY, orbitR, orbitColor);
+        drawOrbitEllipse(ctx, parentWorldX, parentWorldY, orbitR, orbitColor, false, isRelatedToSelection ? 2 : 1);
     }
 
     // Project to screen
     const p = project(worldX, worldY, 0);
     const baseSize = getDisplaySize(body);
-    const screenRadius = Math.max(3, baseSize * p.scale);
+    // Visual body radius must be based on script `size`, not perspective depth.
+    // Positions still use the tilted/perspective projection, but size remains comparable across stars, planets and moons.
+    const screenRadius = baseSize * scale;
     const color = getBodyColor(body, systemClass);
+
+    if (isRelatedToSelection && orbitR > 0) {
+        const parentP = project(parentWorldX, parentWorldY, 0);
+        ctx.save();
+        ctx.strokeStyle = isSelected ? 'rgba(98,184,255,0.85)' : 'rgba(122,210,255,0.45)';
+        ctx.lineWidth = isSelected ? 1.5 : 1;
+        ctx.setLineDash(isSelected ? [] : [4, 6]);
+        ctx.beginPath();
+        ctx.moveTo(parentP.x, parentP.y);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        ctx.restore();
+    }
 
     // Render the count (ghost copies for count > 1)
     const count = body.resolvedCount;
@@ -597,7 +764,7 @@ function drawBody(
             const gx = parentWorldX + gWorld.x;
             const gy = parentWorldY + gWorld.y;
             const gp = project(gx, gy, 0);
-            const gr = Math.max(2, baseSize * gp.scale * 0.8);
+            const gr = baseSize * scale * 0.8;
             ctx.beginPath();
             ctx.arc(gp.x, gp.y, gr, 0, Math.PI * 2);
             ctx.fillStyle = color;
@@ -609,34 +776,12 @@ function drawBody(
     // Draw the body
     ctx.save();
 
-    // Glow effect for stars
-    if (body.bodyType === 'star' || body.planetClass.includes('_star') || body.planetClass === 'star') {
-        let glowColor = 'rgba(255,255,255,0.3)';
-        
-        // If it's the central star, use the system class glow
-        if (body.bodyType === 'star' && body.resolvedOrbitRadius === 0) {
-            glowColor = getStarColor(systemClass).glow;
-        } else {
-            // It's a companion star. Try to find a specific glow.
-            const scName = body.planetClass ? body.planetClass.replace(/^pc_/, 'sc_') : '';
-            if (scName && STAR_COLORS[scName]) {
-                glowColor = STAR_COLORS[scName].glow;
-            } else {
-                // Generate a glow from its fill color
-                const fillHex = color;
-                if (fillHex.startsWith('#') && fillHex.length >= 7) {
-                    const r = parseInt(fillHex.slice(1, 3), 16);
-                    const g = parseInt(fillHex.slice(3, 5), 16);
-                    const b = parseInt(fillHex.slice(5, 7), 16);
-                    glowColor = `rgba(${r},${g},${b},0.4)`;
-                } else if (fillHex.startsWith('rgba')) {
-                    glowColor = fillHex.replace(/[\d.]+\)$/, '0.4)');
-                } else if (fillHex.startsWith('rgb')) {
-                    glowColor = fillHex.replace('rgb', 'rgba').replace(')', ',0.4)');
-                }
-            }
-        }
+    const isBlackHole = isBlackHoleBody(body, systemClass);
+    const isStellar = isStellarBody(body);
 
+    // Glow effect for stars
+    if (isStellar && !isBlackHole) {
+        const glowColor = getStellarGlowColor(body, systemClass, color);
         const glowRadius = screenRadius * 3 * starPulse;
         const gradient = ctx.createRadialGradient(p.x, p.y, screenRadius * 0.5, p.x, p.y, glowRadius);
         gradient.addColorStop(0, glowColor);
@@ -649,7 +794,7 @@ function drawBody(
     }
 
     // Special rendering for black holes
-    if (body.planetClass === 'pc_black_hole' || body.planetClass === 'sc_black_hole' || (body.bodyType === 'star' && systemClass === 'sc_black_hole')) {
+    if (isBlackHole) {
         // Accretion disk
         const diskRadius = screenRadius * 2.5;
         const diskGrad = ctx.createRadialGradient(p.x, p.y, screenRadius, p.x, p.y, diskRadius);
@@ -673,6 +818,8 @@ function drawBody(
         ctx.beginPath();
         ctx.arc(p.x, p.y, screenRadius, 0, Math.PI * 2);
         ctx.stroke();
+    } else if (isStellar) {
+        drawProceduralStarBody(ctx, p.x, p.y, screenRadius, color, body.planetClass);
     } else {
         const dynamic = dynamicClasses.find(c => c.name === body.planetClass);
         let iconName = dynamic?.iconLarge;
@@ -687,21 +834,24 @@ function drawBody(
         if (iconInfo && iconInfo.uri) {
             const img = getCachedIcon(iconInfo.uri);
             if (img.complete && img.naturalWidth > 0) {
-                // Scale the icon to exactly match the hit circle with a slight padding
-                const drawSize = screenRadius * 2.1;
+                // Keep visible body diameter tied exactly to script size.
+                const drawSize = screenRadius * 2;
+                const source = getTrimmedIconSource(img, iconInfo);
                 
                 // Keep image smoothing enabled for these soft UI icons, but ensure high quality
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = "high";
-                
-                if (iconInfo.noOfFrames && iconInfo.frame) {
-                    const fw = img.naturalWidth / iconInfo.noOfFrames;
-                    const fh = img.naturalHeight;
-                    const sx = (iconInfo.frame - 1) * fw;
-                    ctx.drawImage(img, sx, 0, fw, fh, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
-                } else {
-                    ctx.drawImage(img, p.x - drawSize / 2, p.y - drawSize / 2, drawSize, drawSize);
-                }
+                ctx.drawImage(
+                    img,
+                    source.sx,
+                    source.sy,
+                    source.sw,
+                    source.sh,
+                    p.x - drawSize / 2,
+                    p.y - drawSize / 2,
+                    drawSize,
+                    drawSize,
+                );
             } else {
                 if (!img.onload) {
                     img.onload = () => requestAnimationFrame(render);
@@ -762,7 +912,11 @@ function drawBody(
 
     // Label
     if (showLabels && screenRadius > 2) {
-        const label = body.name || body.planetClass || body.bodyType;
+        const primaryLabel = getBodyTitle(body);
+        const showClassLabel = scale > 1.8 || body === selectedBody || body === hoveredBody;
+        const labels = showClassLabel && body.planetClass !== primaryLabel
+            ? [primaryLabel, body.planetClass]
+            : [primaryLabel];
         const fontSize = Math.max(9, Math.min(13, 10 * p.scale));
         ctx.save();
         ctx.font = `${fontSize}px "Segoe UI", sans-serif`;
@@ -770,7 +924,10 @@ function drawBody(
         ctx.fillStyle = body.bodyType === 'star'
             ? 'rgba(255,255,220,0.9)'
             : 'rgba(200,210,230,0.75)';
-        ctx.fillText(label, p.x, p.y + screenRadius + fontSize + 2);
+        labels.forEach((label, index) => {
+            ctx.fillStyle = index === 0 ? ctx.fillStyle : 'rgba(145,158,190,0.68)';
+            ctx.fillText(label, p.x, p.y + screenRadius + fontSize + 2 + index * (fontSize + 2));
+        });
 
         // Count badge
         if (count > 1) {
@@ -811,8 +968,8 @@ function drawBody(
 
 function getDisplaySize(body: CelestialBody): number {
     const size = Math.max(1, body.resolvedSize);
-    // Unify the scaling factor to ensure that the same size shows exactly the same visual size
-    return Math.max(2, Math.min(40, size * 0.6));
+    // Same script size should render to the same radius regardless of body type.
+    return size * 0.6;
 }
 
 // ─── Color Utilities ────────────────────────────────────────────────────────
@@ -847,6 +1004,12 @@ function setupControls() {
         const id = target.id;
 
         switch (id) {
+            case 'btn-scale-mode':
+                scaleMode = scaleMode === 'readable' ? 'true' : 'readable';
+                target.textContent = scaleMode === 'readable' ? '可读比例' : '真实比例';
+                target.classList.toggle('active', scaleMode === 'readable');
+                fitToView();
+                break;
             case 'btn-zoom-in':
                 scale = Math.min(8, scale + 0.2);
                 updateZoomDisplay();
@@ -879,6 +1042,18 @@ function setupControls() {
                 showOrbits = !showOrbits;
                 target.classList.toggle('active', showOrbits);
                 break;
+            case 'btn-undo':
+                vscode.postMessage({ command: 'vscodeUndo' });
+                setEditStatus('已撤销');
+                break;
+            case 'btn-redo':
+                vscode.postMessage({ command: 'vscodeRedo' });
+                setEditStatus('已重做');
+                break;
+            case 'btn-save':
+                vscode.postMessage({ command: 'saveDocument' });
+                setEditStatus('已保存');
+                break;
             case 'tab-info':
                 target.classList.add('active');
                 document.getElementById('tab-properties')?.classList.remove('active');
@@ -900,6 +1075,7 @@ function setupControls() {
         selectedBody = null;
         updateInfoPanel();
         updatePropertiesPanel();
+        setEditStatus('已同步');
         fitToView();
     });
 
@@ -1021,6 +1197,7 @@ function setupControls() {
                 ringMsg.parentLine = ctxTargetBody.line;
                 ringMsg.parentEndLine = ctxTargetBody.endLine;
             }
+            setEditStatus('正在添加...');
             vscode.postMessage(ringMsg);
             return;
         }
@@ -1034,7 +1211,7 @@ function setupControls() {
             const clickScreenX = (ctxClickX - rect.left) * dpr;
             const clickScreenY = (ctxClickY - rect.top) * dpr;
             const world = screenToWorld(clickScreenX, clickScreenY);
-            const dist = Math.round(Math.sqrt(world.x * world.x + world.y * world.y));
+            const dist = Math.round(renderRadiusToOrbit(Math.sqrt(world.x * world.x + world.y * world.y)));
             const angle = Math.round(Math.atan2(world.y, world.x) * 180 / Math.PI);
 
             const sizeMap: Record<string, number> = {
@@ -1044,6 +1221,7 @@ function setupControls() {
                 'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
             };
 
+            setEditStatus('正在添加...');
             vscode.postMessage({
                 command: 'addPlanet',
                 systemEndLine: system.endLine,
@@ -1057,6 +1235,7 @@ function setupControls() {
         else if (action === 'moon') {
             if (!ctxTargetBody) return;
             const moonCount = ctxTargetBody.moons.length;
+            setEditStatus('正在添加...');
             vscode.postMessage({
                 command: 'addMoon',
                 parentLine: ctxTargetBody.line,
@@ -1076,6 +1255,7 @@ function setupControls() {
                 'pc_g_star': 30, 'pc_b_star': 30, 'pc_a_star': 30,
                 'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
             };
+            setEditStatus('正在添加...');
             vscode.postMessage({
                 command: 'addSibling',
                 siblingLine: ctxTargetBody.line,
@@ -1162,6 +1342,7 @@ function setupControls() {
 
             // Click on empty space → deselect + start view rotation drag
             selectedBody = null;
+            updateInfoPanel();
             updatePropertiesPanel();
             isDragging = true;
             lastMX = e.clientX;
@@ -1219,6 +1400,7 @@ function setupControls() {
             const dx = mouseWorld.x - parentWorld.x;
             const dy = mouseWorld.y - parentWorld.y;
             const orbitDist = Math.sqrt(dx * dx + dy * dy);
+            const rawOrbitDist = renderRadiusToOrbit(orbitDist);
             const orbitAngle = Math.atan2(dy, dx) * 180 / Math.PI;
 
             // If orbit_distance = 0 (same-orbit sibling), lock radius and only change angle
@@ -1227,7 +1409,7 @@ function setupControls() {
                 // Only update angle, keep radius frozen
                 dragBody.resolvedOrbitAngle = ((Math.round(orbitAngle) % 360) + 360) % 360;
             } else {
-                dragBody.resolvedOrbitRadius = Math.max(0, Math.round(orbitDist));
+                dragBody.resolvedOrbitRadius = Math.max(0, Math.round(rawOrbitDist));
                 dragBody.resolvedOrbitAngle = ((Math.round(orbitAngle) % 360) + 360) % 360;
             }
 
@@ -1241,7 +1423,7 @@ function setupControls() {
                 const validN = divisors360.filter(d => d >= 3);
 
                 // Find closest valid segment count to the raw orbit
-                const rawN = N0 * orbitDist / R0;
+                const rawN = N0 * rawOrbitDist / R0;
                 let bestN = N0;
                 let bestDiff = Infinity;
                 for (const n of validN) {
@@ -1310,6 +1492,7 @@ function setupControls() {
 
             // Only commit if mouse actually moved
             if (dragMoved) {
+                setEditStatus('正在应用...');
                 vscode.postMessage({
                     command: 'movePlanetOrbit',
                     bodyLine: body.line,
@@ -1379,16 +1562,39 @@ function setupControls() {
                 showOrbits = !showOrbits;
                 break;
             case 'z':
-                if (e.ctrlKey || e.metaKey) {
+                if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+                    e.preventDefault();
+                    vscode.postMessage({ command: 'vscodeRedo' });
+                    setEditStatus('已重做');
+                } else if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
                     vscode.postMessage({ command: 'vscodeUndo' });
+                    setEditStatus('已撤销');
+                }
+                break;
+            case 'y':
+            case 'Y':
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    vscode.postMessage({ command: 'vscodeRedo' });
+                    setEditStatus('已重做');
+                }
+                break;
+            case 's':
+            case 'S':
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    vscode.postMessage({ command: 'saveDocument' });
+                    setEditStatus('已保存');
                 }
                 break;
             case 'Delete':
                 if (editMode && selectedBody && selectedBody.bodyType !== 'star') {
                     e.preventDefault();
+                    setEditStatus('正在删除...');
                     vscode.postMessage({ command: 'deletePlanet', line: selectedBody.line });
                     selectedBody = null;
+                    updateInfoPanel();
                     updatePropertiesPanel();
                 }
                 break;
@@ -1421,15 +1627,31 @@ function hitTest(clientX: number, clientY: number): RenderedBody | null {
     return null;
 }
 
-function selectBody(body: CelestialBody) {
+function centerBodyInView(body: CelestialBody) {
+    requestAnimationFrame(() => {
+        const rb = renderedBodies.find(r => r.body === body || r.body.line === body.line);
+        if (!rb) return;
+        panX += (canvasW / 2 - rb.screenX) / scale;
+        panY += (canvasH / 2 - rb.screenY) / scale;
+    });
+}
+
+function selectBody(
+    body: CelestialBody,
+    options: { center?: boolean; openProperties?: boolean } = {},
+) {
     selectedBody = body;
+    updateInfoPanel();
     updatePropertiesPanel();
 
-    // Show side panel and switch to properties tab
     document.getElementById('side-panel')!.classList.remove('hidden');
-    document.getElementById('tab-properties')!.click();
+    if (options.openProperties !== false) {
+        document.getElementById('tab-properties')!.click();
+    }
+    if (options.center) {
+        centerBodyInView(body);
+    }
 
-    // Highlight in body list
     document.querySelectorAll('.body-item').forEach(el => {
         el.classList.toggle('selected', el.getAttribute('data-line') === String(body.line));
     });
@@ -1442,18 +1664,18 @@ function fitToView() {
     // Find the maximum orbit radius
     let maxR = 100;
     for (const body of system.bodies) {
-        if (body.resolvedOrbitRadius > maxR) maxR = body.resolvedOrbitRadius;
+        if (orbitToRenderRadius(body.resolvedOrbitRadius) > maxR) maxR = orbitToRenderRadius(body.resolvedOrbitRadius);
         for (const moon of body.moons) {
-            const moonR = body.resolvedOrbitRadius + moon.resolvedOrbitRadius;
+            const moonR = orbitToRenderRadius(body.resolvedOrbitRadius) + orbitToRenderRadius(moon.resolvedOrbitRadius);
             if (moonR > maxR) maxR = moonR;
         }
         for (const sub of body.subPlanets) {
-            const subR = body.resolvedOrbitRadius + sub.resolvedOrbitRadius;
+            const subR = orbitToRenderRadius(body.resolvedOrbitRadius) + orbitToRenderRadius(sub.resolvedOrbitRadius);
             if (subR > maxR) maxR = subR;
         }
     }
     for (const belt of system.asteroidBelts) {
-        if (belt.radius > maxR) maxR = belt.radius;
+        if (orbitToRenderRadius(belt.radius) > maxR) maxR = orbitToRenderRadius(belt.radius);
     }
 
     // Fit the view
@@ -1464,7 +1686,7 @@ function fitToView() {
     const projectedH = maxR * 2 * Math.cos(tiltRad);
     const projectedW = maxR * 2;
 
-    scale = Math.min(viewW / projectedW, viewH / projectedH, 3);
+    scale = Math.min(viewW / projectedW, viewH / projectedH, scaleMode === 'readable' ? 4.5 : 3);
     updateZoomDisplay();
 }
 
@@ -1565,7 +1787,7 @@ function updateInfoPanel() {
     html += `</div>`;
 
     // Body list
-    html += `<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:600;">天体列表</div>`;
+    html += `<div class="body-list-header">天体树</div>`;
     html += `<ul class="body-list">`;
     for (const body of system.bodies) {
         html += renderBodyListItem(body, system.starClass, 0);
@@ -1579,7 +1801,7 @@ function updateInfoPanel() {
         el.addEventListener('click', () => {
             const line = parseInt(el.getAttribute('data-line') ?? '0');
             const body = findBodyByLine(system.bodies, line);
-            if (body) selectBody(body);
+            if (body) selectBody(body, { center: true, openProperties: false });
         });
     });
 }
@@ -1589,19 +1811,30 @@ function renderBodyListItem(body: CelestialBody, systemClass: string, indent: nu
     const pc = getPlanetColor(body.planetClass);
     const localizedClass = getLoc(body.planetClass, pc.name);
     const name = getLoc(body.name, body.name || localizedClass || body.bodyType);
+    const typeNames: Record<string, string> = { star: '恒星', planet: '行星', moon: '卫星' };
+    const depth = Math.min(indent, 4);
+    const childCount = body.moons.length + body.subPlanets.length;
+    const orbitText = body.bodyType === 'star' ? '中心' : `r ${Math.round(body.resolvedOrbitRadius)}`;
     const isSelected = selectedBody === body;
 
-    let html = `<li class="body-item ${isSelected ? 'selected' : ''} body-indent-${indent}" data-line="${body.line}">`;
+    let html = `<li class="body-item ${isSelected ? 'selected' : ''} body-indent-${depth} body-type-${body.bodyType}" style="--depth:${depth};--body-color:${color}" data-line="${body.line}" title="${escapeHtml(name)} · ${escapeHtml(body.planetClass)}">`;
+    html += `<span class="body-branch" aria-hidden="true">${depth > 0 ? '└' : ''}</span>`;
     html += `<span class="body-dot" style="background:${color}"></span>`;
-    html += `<span class="body-name">${name}</span>`;
-    html += `<span class="body-class">${body.planetClass}</span>`;
+    html += `<span class="body-main">`;
+    html += `<span class="body-name">${escapeHtml(name)}</span>`;
+    html += `<span class="body-meta">${escapeHtml(localizedClass || typeNames[body.bodyType] || body.bodyType)} · ${escapeHtml(body.planetClass)}</span>`;
+    html += `</span>`;
+    html += `<span class="body-side">`;
+    if (childCount > 0) html += `<span class="body-count">${childCount}</span>`;
+    html += `<span class="body-orbit">${orbitText}</span>`;
+    html += `</span>`;
     html += `</li>`;
 
     for (const moon of body.moons) {
-        html += renderBodyListItem(moon, systemClass, Math.min(indent + 1, 2));
+        html += renderBodyListItem(moon, systemClass, depth + 1);
     }
     for (const sub of body.subPlanets) {
-        html += renderBodyListItem(sub, systemClass, Math.min(indent + 1, 2));
+        html += renderBodyListItem(sub, systemClass, depth + 1);
     }
 
     return html;
@@ -1630,10 +1863,11 @@ function findBodyByLine(bodies: CelestialBody[], line: number): CelestialBody | 
 
 function updatePropertiesPanel() {
     // Close any open autocomplete dropdown before rebuilding panel
-        const dd = document.getElementById('class-dropdown'); if (dd) dd.style.display = 'none';
+    const dd = document.getElementById('class-dropdown');
+    if (dd) dd.style.display = 'none';
     const panel = document.getElementById('props-content')!;
     if (!selectedBody) {
-        panel.innerHTML = '选择一个天体以编辑属性';
+        panel.innerHTML = '<div class="empty-state">选择一个天体以编辑属性</div>';
         return;
     }
 
@@ -1697,6 +1931,7 @@ function updatePropertiesPanel() {
             const line = parseInt(input.getAttribute('data-line')!);
             let value: string | number = input.value;
             if (input.type === 'number') value = parseFloat(input.value);
+            setEditStatus('正在应用...');
             vscode.postMessage({
                 command: 'updateProperty',
                 line,
@@ -1713,6 +1948,7 @@ function updatePropertiesPanel() {
         select.addEventListener('change', () => {
             const prop = select.getAttribute('data-prop')!;
             const line = parseInt(select.getAttribute('data-line')!);
+            setEditStatus('正在应用...');
             vscode.postMessage({
                 command: 'updateProperty',
                 line,
@@ -1731,6 +1967,7 @@ function updatePropertiesPanel() {
             const otherInput = panel.querySelector<HTMLInputElement>(`.vor-input[data-prop="${prop}"][data-line="${line}"][data-vor-type="${vorType === 'min' ? 'max' : 'min'}"]`);
 
             if (vorType === 'value') {
+                setEditStatus('正在应用...');
                 vscode.postMessage({
                     command: 'updateProperty',
                     line,
@@ -1741,6 +1978,7 @@ function updatePropertiesPanel() {
             } else {
                 const min = vorType === 'min' ? (parseFloat(input.value) || 0) : (parseFloat(otherInput?.value ?? '0') || 0);
                 const max = vorType === 'max' ? (parseFloat(input.value) || 0) : (parseFloat(otherInput?.value ?? '0') || 0);
+                setEditStatus('正在应用...');
                 vscode.postMessage({
                     command: 'updateProperty',
                     line,
@@ -1964,16 +2202,7 @@ window.addEventListener('message', (event) => {
         if (selectedBody) {
             const system = allSystems[currentSystemIndex];
             if (system) {
-                const findBody = (bodies: CelestialBody[]): CelestialBody | null => {
-                    for (const b of bodies) {
-                        if (b.line === selectedBody!.line) return b;
-                        for (const m of b.moons) {
-                            if (m.line === selectedBody!.line) return m;
-                        }
-                    }
-                    return null;
-                };
-                const found = findBody(system.bodies);
+                const found = findBodyByLine(system.bodies, selectedBody.line);
                 selectedBody = found;
             } else {
                 selectedBody = null;
@@ -1982,11 +2211,13 @@ window.addEventListener('message', (event) => {
 
         updateInfoPanel();
         updatePropertiesPanel();
+        setEditStatus('已同步');
 
         if (isFirstRender) {
             // First render: full initialization
             document.getElementById('btn-labels')!.classList.toggle('active', showLabels);
             document.getElementById('btn-orbits')!.classList.toggle('active', showOrbits);
+            document.getElementById('btn-scale-mode')!.classList.toggle('active', scaleMode === 'readable');
             resizeCanvas();
             requestAnimationFrame(() => {
                 fitToView();
@@ -2077,6 +2308,81 @@ function getCachedIcon(uri: string): HTMLImageElement {
     img.src = uri;
     iconImageCache.set(uri, img);
     return img;
+}
+
+interface IconSourceRect {
+    sx: number;
+    sy: number;
+    sw: number;
+    sh: number;
+}
+
+const iconTrimCache = new Map<string, IconSourceRect>();
+
+function getTrimmedIconSource(
+    img: HTMLImageElement,
+    iconInfo: { uri: string; frame?: number; noOfFrames?: number },
+): IconSourceRect {
+    const frameCount = Math.max(1, iconInfo.noOfFrames ?? 1);
+    const frame = Math.max(1, Math.min(iconInfo.frame ?? 1, frameCount));
+    const frameW = Math.max(1, Math.floor(img.naturalWidth / frameCount));
+    const frameH = Math.max(1, img.naturalHeight);
+    const frameX = (frame - 1) * frameW;
+    const cacheKey = `${iconInfo.uri}|${frame}|${frameCount}|${img.naturalWidth}x${img.naturalHeight}`;
+
+    const cached = iconTrimCache.get(cacheKey);
+    if (cached) return cached;
+
+    const fallback = { sx: frameX, sy: 0, sw: frameW, sh: frameH };
+    try {
+        const canvas = document.createElement('canvas');
+        canvas.width = frameW;
+        canvas.height = frameH;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return fallback;
+
+        ctx.drawImage(img, frameX, 0, frameW, frameH, 0, 0, frameW, frameH);
+        const pixels = ctx.getImageData(0, 0, frameW, frameH).data;
+        const alphaThreshold = 18;
+        let minX = frameW;
+        let minY = frameH;
+        let maxX = -1;
+        let maxY = -1;
+
+        for (let y = 0; y < frameH; y++) {
+            for (let x = 0; x < frameW; x++) {
+                const alpha = pixels[(y * frameW + x) * 4 + 3] ?? 0;
+                if (alpha <= alphaThreshold) continue;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+
+        if (maxX < minX || maxY < minY) {
+            iconTrimCache.set(cacheKey, fallback);
+            return fallback;
+        }
+
+        const pad = 1;
+        minX = Math.max(0, minX - pad);
+        minY = Math.max(0, minY - pad);
+        maxX = Math.min(frameW - 1, maxX + pad);
+        maxY = Math.min(frameH - 1, maxY + pad);
+
+        const trimmed = {
+            sx: frameX + minX,
+            sy: minY,
+            sw: Math.max(1, maxX - minX + 1),
+            sh: Math.max(1, maxY - minY + 1),
+        };
+        iconTrimCache.set(cacheKey, trimmed);
+        return trimmed;
+    } catch {
+        iconTrimCache.set(cacheKey, fallback);
+        return fallback;
+    }
 }
 
 // ─── Init ────────────────────────────────────────────────────────────────────

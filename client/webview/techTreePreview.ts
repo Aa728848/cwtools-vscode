@@ -5,7 +5,7 @@
  * Receives data from the extension host via postMessage.
  *
  * Features:
- * - ELK LEFT→RIGHT layered layout (tier-based columns)
+ * - Dependency-aware LEFT→RIGHT layout
  * - Area color coding (physics/society/engineering)
  * - Rare/dangerous styling
  * - Area & tier filter dropdowns
@@ -250,6 +250,7 @@ const areaLabel: Record<string, string> = {
     engineering: '工程学',
     unknown: '未知',
 };
+const areaOrder: TechNode['area'][] = ['physics', 'society', 'engineering', 'unknown'];
 
 function escapeHtml(value: unknown): string {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -272,6 +273,154 @@ function formatTechLabel(node: TechNode): string {
         return `${id}\n${truncateText(node.title, 42)}`;
     }
     return id;
+}
+
+function compareTech(a: TechNode, b: TechNode, ranks: Map<string, number>): number {
+    const rankDiff = (ranks.get(a.id) ?? 0) - (ranks.get(b.id) ?? 0);
+    if (rankDiff !== 0) return rankDiff;
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.category !== b.category) return a.category.localeCompare(b.category);
+    return a.id.localeCompare(b.id);
+}
+
+function computeTechRanks(nodes: TechNode[], edges: TechEdge[]): Map<string, number> {
+    const tierList = [...new Set(nodes.map(n => n.tier))].sort((a, b) => a - b);
+    const tierRank = new Map(tierList.map((tier, index) => [tier, index]));
+    const ranks = new Map(nodes.map(node => [node.id, tierRank.get(node.tier) ?? 0]));
+
+    // Keep tier columns, but push same-tier dependency chains to the right.
+    for (let i = 0; i < nodes.length; i++) {
+        let changed = false;
+        for (const edge of edges) {
+            const sourceRank = ranks.get(edge.source);
+            const targetRank = ranks.get(edge.target);
+            if (sourceRank === undefined || targetRank === undefined) continue;
+            const nextRank = Math.max(targetRank, sourceRank + 1);
+            if (nextRank !== targetRank) {
+                ranks.set(edge.target, nextRank);
+                changed = true;
+            }
+        }
+        if (!changed) break;
+    }
+
+    return ranks;
+}
+
+function findAreaComponents(areaNodes: TechNode[], edges: TechEdge[], ranks: Map<string, number>): TechNode[][] {
+    const nodeById = new Map(areaNodes.map(node => [node.id, node]));
+    const adjacency = new Map(areaNodes.map(node => [node.id, new Set<string>()]));
+
+    for (const edge of edges) {
+        if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) continue;
+        adjacency.get(edge.source)?.add(edge.target);
+        adjacency.get(edge.target)?.add(edge.source);
+    }
+
+    const visited = new Set<string>();
+    const components: TechNode[][] = [];
+
+    for (const start of [...areaNodes].sort((a, b) => compareTech(a, b, ranks))) {
+        if (visited.has(start.id)) continue;
+        const stack = [start.id];
+        const component: TechNode[] = [];
+        visited.add(start.id);
+
+        while (stack.length > 0) {
+            const id = stack.pop()!;
+            const node = nodeById.get(id);
+            if (node) component.push(node);
+            for (const next of adjacency.get(id) ?? []) {
+                if (visited.has(next)) continue;
+                visited.add(next);
+                stack.push(next);
+            }
+        }
+
+        component.sort((a, b) => compareTech(a, b, ranks));
+        components.push(component);
+    }
+
+    components.sort((a, b) => {
+        const aMinRank = Math.min(...a.map(node => ranks.get(node.id) ?? 0));
+        const bMinRank = Math.min(...b.map(node => ranks.get(node.id) ?? 0));
+        if (aMinRank !== bMinRank) return aMinRank - bMinRank;
+        if (a.length !== b.length) return b.length - a.length;
+        return a[0]!.id.localeCompare(b[0]!.id);
+    });
+
+    return components;
+}
+
+function assignComponentLanes(component: TechNode[], edges: TechEdge[], ranks: Map<string, number>) {
+    const ids = new Set(component.map(node => node.id));
+    const predecessors = new Map(component.map(node => [node.id, [] as string[]]));
+
+    for (const edge of edges) {
+        if (ids.has(edge.source) && ids.has(edge.target)) {
+            predecessors.get(edge.target)?.push(edge.source);
+        }
+    }
+
+    const laneById = new Map<string, number>();
+    const usedByRank = new Map<number, Set<number>>();
+
+    for (const node of [...component].sort((a, b) => compareTech(a, b, ranks))) {
+        const rank = ranks.get(node.id) ?? 0;
+        let used = usedByRank.get(rank);
+        if (!used) {
+            used = new Set<number>();
+            usedByRank.set(rank, used);
+        }
+
+        const inheritedLane = (predecessors.get(node.id) ?? [])
+            .map(id => laneById.get(id))
+            .find((lane): lane is number => lane !== undefined && !used.has(lane));
+
+        let lane = inheritedLane;
+        if (lane === undefined) {
+            lane = 0;
+            while (used.has(lane)) lane++;
+        }
+
+        laneById.set(node.id, lane);
+        used.add(lane);
+    }
+
+    const laneCount = Math.max(1, ...Array.from(laneById.values()).map(lane => lane + 1));
+    return { laneById, laneCount };
+}
+
+function computeTechPositions(nodes: TechNode[], edges: TechEdge[]): Map<string, { x: number; y: number }> {
+    const ranks = computeTechRanks(nodes, edges);
+    const posMap = new Map<string, { x: number; y: number }>();
+    const NODE_W = 360;
+    const ROW_H = 76;
+    const COMPONENT_GAP = 44;
+    const AREA_GAP = 120;
+
+    let yCursor = 0;
+    for (const area of areaOrder) {
+        const areaNodes = nodes.filter(node => node.area === area);
+        if (areaNodes.length === 0) continue;
+
+        const components = findAreaComponents(areaNodes, edges, ranks);
+        for (const component of components) {
+            const { laneById, laneCount } = assignComponentLanes(component, edges, ranks);
+            for (const node of component) {
+                const rank = ranks.get(node.id) ?? 0;
+                const lane = laneById.get(node.id) ?? 0;
+                posMap.set(node.id, {
+                    x: rank * NODE_W,
+                    y: yCursor + lane * ROW_H,
+                });
+            }
+            yCursor += laneCount * ROW_H + COMPONENT_GAP;
+        }
+        yCursor += AREA_GAP;
+    }
+
+    return posMap;
 }
 
 function clearFocusClasses() {
@@ -618,12 +767,14 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
     }
 
     const edgeSet = new Set<string>();
+    const layoutEdges: TechEdge[] = [];
     for (const edge of edges) {
         // Only add edge if both endpoints exist as nodes
         if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) continue;
         const key = `${edge.source}→${edge.target}`;
         if (edgeSet.has(key)) continue;
         edgeSet.add(key);
+        layoutEdges.push(edge);
 
         const srcNode = nodeMap.get(edge.source)!;
         elements.push({
@@ -636,57 +787,7 @@ function render(nodes: TechNode[], edges: TechEdge[]) {
         });
     }
 
-    // ── Deterministic Grid Layout ───────────────────────────────────────────
-    // X = tier column (left→right)
-    // Y = area band + sorted slot within band
-    
-    const NODE_W = 320;   // horizontal stride per tier column (px)
-    const NODE_H = 58;    // vertical stride per node within a band (px)
-    const BAND_GAP = 88;  // extra gap between area bands
-
-    const tierList = [...new Set(nodes.map(n => n.tier))].sort((a, b) => a - b);
-    
-    // For each tier, compute how many nodes per area band to define band heights
-    const bandSizes: Record<string, number> = { physics: 0, society: 0, engineering: 0, unknown: 0 };
-    for (const tier of tierList) {
-        const tierNodes = nodes.filter(n => n.tier === tier);
-        for (const area of ['physics', 'society', 'engineering', 'unknown']) {
-            const cnt = tierNodes.filter(n => n.area === area).length;
-            if (cnt > bandSizes[area]!) bandSizes[area] = cnt;
-        }
-    }
-
-    // Compute band Y origins (cumulative, with gaps)
-    const bandOrigin: Record<string, number> = {};
-    let cumY = 0;
-    for (const area of ['physics', 'society', 'engineering', 'unknown']) {
-        bandOrigin[area] = cumY;
-        const h = (bandSizes[area] || 0) * NODE_H;
-        cumY += h + (h > 0 ? BAND_GAP : 0);
-    }
-
-    // Assign positions
-    const posMap = new Map<string, { x: number; y: number }>();
-    for (let ti = 0; ti < tierList.length; ti++) {
-        const tier = tierList[ti]!;
-        const x = ti * NODE_W;
-        const tierNodes = nodes.filter(n => n.tier === tier);
-        
-        for (const area of ['physics', 'society', 'engineering', 'unknown']) {
-            const areaNodes = tierNodes.filter(n => n.area === area);
-            // Sort by category, then ID for stable layout
-            areaNodes.sort((a, b) => {
-                if (a.category !== b.category) return a.category.localeCompare(b.category);
-                return a.id.localeCompare(b.id);
-            });
-            
-            let y = bandOrigin[area]!;
-            for (const n of areaNodes) {
-                posMap.set(n.id, { x, y });
-                y += NODE_H;
-            }
-        }
-    }
+    const posMap = computeTechPositions(nodes, layoutEdges);
 
     // Apply positions to nodes BEFORE adding to cy
     for (const el of elements) {

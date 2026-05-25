@@ -96,6 +96,7 @@ function updateTransform() {
     const c = document.getElementById('canvas-container')!;
     c.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     document.getElementById('zoom-level')!.textContent = `${Math.round(scale * 100)}%`;
+    updateViewportStatus();
 }
 
 // ─── Image Helpers ────────────────────────────────────────────────────────────
@@ -456,6 +457,7 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     const div = document.createElement('div');
     div.className = 'el';
     div.dataset.line = String(el.line);
+    div.dataset.layerLabel = `${el.name || '(unnamed)'} · ${(COLORS[el.type] ?? DEFAULT_COLOR).tag}`;
     
     if (el.alwaysTransparent) {
         div.classList.add('always-transparent');
@@ -803,6 +805,7 @@ function renderAll(elements: GuiElement[], fileName: string) {
         hasRendered = true;
         requestAnimationFrame(fitToView);
     }
+    updateViewportStatus();
 }
 
 // ─── Viewport ───────────────────────────────────────────────────────────────
@@ -838,6 +841,7 @@ function setupControls() {
         // Click on empty area in edit mode → deselect
         if (editMode && e.button === 0 && !e.altKey && (e.target === vp || (e.target as HTMLElement).id === 'canvas-container' || (e.target as HTMLElement).id === 'gui-root' || (e.target as HTMLElement).classList.contains('card-body'))) {
             clearSelection();
+            updateViewportStatus();
         }
     });
     window.addEventListener('mousemove', (e) => {
@@ -912,201 +916,289 @@ function setupControls() {
         document.querySelectorAll('.layer-children').forEach(el => el.classList.remove('collapsed'));
         document.querySelectorAll('.layer-expand').forEach(el => el.textContent = '▾');
     };
+
 }
 
 // ─── Layers Panel ────────────────────────────────────────────────────────────
 
 
+const REPEAT_LAYER_GROUP_MIN = 6;
+
+function isRenderableLayerElement(el: GuiElement): boolean {
+    if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) return false;
+    if (el.sizeExplicit && el.size.width === 0 && el.size.height === 0
+        && (el.type === 'containerWindowType' || el.type === 'windowType')) return false;
+    return true;
+}
+
+function getRepeatLayerStem(el: GuiElement): string | null {
+    if (el.children.length > 0 || !el.name) return null;
+    const match = /^(.*?)(?:[_\-\s]?)(\d+)$/.exec(el.name);
+    if (!match) return null;
+    const stem = match[1]!.replace(/[_\-\s]+$/, '');
+    return stem.length >= 3 ? stem : null;
+}
+
+function collectRepeatLayerGroup(elements: GuiElement[], startIndex: number) {
+    const first = elements[startIndex];
+    if (!first || !isRenderableLayerElement(first)) return null;
+    const stem = getRepeatLayerStem(first);
+    if (!stem) return null;
+
+    const items: GuiElement[] = [];
+    for (let i = startIndex; i < elements.length; i++) {
+        const el = elements[i]!;
+        if (!isRenderableLayerElement(el)) break;
+        if (el.type !== first.type || getRepeatLayerStem(el) !== stem) break;
+        items.push(el);
+    }
+
+    if (items.length < REPEAT_LAYER_GROUP_MIN) return null;
+    return { stem, type: first.type, items };
+}
+
 function buildLayerTree(elements: GuiElement[], container: HTMLElement, depth = 0) {
-    for (const el of elements) {
-        // Skip off-screen elements (position > 5000)
-        if (Math.abs(el.position.x) > 5000 || Math.abs(el.position.y) > 5000) continue;
-        // Skip hidden containerWindowType (explicit size 0x0)
-        if (el.sizeExplicit && el.size.width === 0 && el.size.height === 0
-            && (el.type === 'containerWindowType' || el.type === 'windowType')) continue;
+    for (let i = 0; i < elements.length; i++) {
+        const el = elements[i]!;
+        if (!isRenderableLayerElement(el)) continue;
 
-        const hasChildren = el.children.length > 0;
-        const c = COLORS[el.type] ?? DEFAULT_COLOR;
-
-        // Item row
-        const item = document.createElement('div');
-        item.className = 'layer-item';
-        item.style.paddingLeft = `${6 + depth * 12}px`;
-        item.dataset.line = String(el.line);
-
-        // Expand button (for containers with children)
-        const expand = document.createElement('button');
-        expand.className = 'layer-expand';
-        if (hasChildren) {
-            expand.textContent = '▾';
-            expand.onclick = (e) => {
-                e.stopPropagation();
-                const childContainer = item.nextElementSibling as HTMLElement;
-                if (childContainer?.classList.contains('layer-children')) {
-                    childContainer.classList.toggle('collapsed');
-                    expand.textContent = childContainer.classList.contains('collapsed') ? '▸' : '▾';
-                }
-            };
-        } else {
-            expand.style.visibility = 'hidden';
+        const group = collectRepeatLayerGroup(elements, i);
+        if (group) {
+            appendLayerGroup(group, container, depth);
+            i += group.items.length - 1;
+            continue;
         }
-        item.appendChild(expand);
 
-        // Visibility toggle
-        const toggle = document.createElement('button');
-        toggle.className = 'layer-toggle';
-        toggle.innerHTML = svgIconNoMargin('eye');
-        toggle.title = '切换可见性';
-        toggle.onclick = (e) => {
+        appendLayerElement(el, container, depth);
+    }
+}
+
+function appendLayerGroup(
+    group: { stem: string; type: string; items: GuiElement[] },
+    container: HTMLElement,
+    depth: number,
+) {
+    const c = COLORS[group.type] ?? DEFAULT_COLOR;
+    const item = document.createElement('div');
+    item.className = 'layer-item layer-group';
+    item.style.paddingLeft = `${6 + depth * 12}px`;
+    item.dataset.search = `${group.stem} ${group.type} ${group.items.map(el => el.name).join(' ')}`.toLowerCase();
+
+    const expand = document.createElement('button');
+    expand.className = 'layer-expand';
+    expand.textContent = '▸';
+    item.appendChild(expand);
+
+    const toggle = document.createElement('button');
+    toggle.className = 'layer-toggle';
+    toggle.innerHTML = svgIconNoMargin('eye');
+    toggle.title = '切换整组可见性';
+    toggle.onclick = (e) => {
+        e.stopPropagation();
+        const willShow = group.items.some(el => {
+            const div = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement | null;
+            return div?.style.display === 'none';
+        });
+        for (const el of group.items) {
+            const elDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement | null;
+            const layerItem = document.querySelector(`.layer-item[data-line="${el.line}"]`) as HTMLElement | null;
+            if (elDiv) elDiv.style.display = willShow ? '' : 'none';
+            if (layerItem) {
+                layerItem.classList.toggle('hidden-el', !willShow);
+                const btn = layerItem.querySelector('.layer-toggle');
+                if (btn) btn.innerHTML = willShow ? svgIconNoMargin('eye') : svgIconNoMargin('eyeOff');
+            }
+        }
+        item.classList.toggle('hidden-el', !willShow);
+        toggle.innerHTML = willShow ? svgIconNoMargin('eye') : svgIconNoMargin('eyeOff');
+    };
+    item.appendChild(toggle);
+
+    const icon = document.createElement('span');
+    icon.className = 'layer-icon';
+    icon.style.background = c.border;
+    item.appendChild(icon);
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'layer-name';
+    nameSpan.textContent = `${group.stem} ×${group.items.length}`;
+    nameSpan.title = `${group.items[0]!.name} ... ${group.items[group.items.length - 1]!.name}`;
+    item.appendChild(nameSpan);
+
+    const typeSpan = document.createElement('span');
+    typeSpan.className = 'layer-type';
+    typeSpan.textContent = c.tag;
+    item.appendChild(typeSpan);
+
+    const childContainer = document.createElement('div');
+    childContainer.className = 'layer-children collapsed layer-group-children';
+
+    const toggleGroup = () => {
+        childContainer.classList.toggle('collapsed');
+        expand.textContent = childContainer.classList.contains('collapsed') ? '▸' : '▾';
+    };
+    expand.onclick = (e) => {
+        e.stopPropagation();
+        toggleGroup();
+    };
+    item.onclick = toggleGroup;
+
+    container.appendChild(item);
+    for (const el of group.items) {
+        appendLayerElement(el, childContainer, depth + 1);
+    }
+    container.appendChild(childContainer);
+}
+
+function appendLayerElement(el: GuiElement, container: HTMLElement, depth: number) {
+    const hasChildren = el.children.length > 0;
+    const c = COLORS[el.type] ?? DEFAULT_COLOR;
+
+    const item = document.createElement('div');
+    item.className = 'layer-item';
+    item.style.paddingLeft = `${6 + depth * 12}px`;
+    item.dataset.line = String(el.line);
+    item.dataset.search = `${el.name || '(unnamed)'} ${el.type} ${c.tag}`.toLowerCase();
+
+    const expand = document.createElement('button');
+    expand.className = 'layer-expand';
+    if (hasChildren) {
+        expand.textContent = '▾';
+        expand.onclick = (e) => {
             e.stopPropagation();
-            // Determine which elements to toggle: all selected if this is part of selection, else just this one
-            const isInSelection = editMode && selectedElements.some(s => s.el.line === el.line) && selectedElements.length > 1;
-            const targetLines = isInSelection ? selectedElements.map(s => s.el.line) : [el.line];
-
-            // Decide new state based on the clicked element
-            const clickedDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement;
-            const willShow = clickedDiv?.style.display === 'none';
-
-            for (const line of targetLines) {
-                const elDiv = document.querySelector(`.el[data-line="${line}"]`) as HTMLElement;
-                const layerItem = document.querySelector(`.layer-item[data-line="${line}"]`) as HTMLElement;
-                if (elDiv) {
-                    elDiv.style.display = willShow ? '' : 'none';
-                }
-                if (layerItem) {
-                    layerItem.classList.toggle('hidden-el', !willShow);
-                    const btn = layerItem.querySelector('.layer-toggle');
-                    if (btn) btn.innerHTML = willShow ? svgIconNoMargin('eye') : svgIconNoMargin('eyeOff');
-                }
+            const childContainer = item.nextElementSibling as HTMLElement;
+            if (childContainer?.classList.contains('layer-children')) {
+                childContainer.classList.toggle('collapsed');
+                expand.textContent = childContainer.classList.contains('collapsed') ? '▸' : '▾';
             }
         };
-        item.appendChild(toggle);
+    } else {
+        expand.style.visibility = 'hidden';
+    }
+    item.appendChild(expand);
 
-        // Color icon
-        const icon = document.createElement('span');
-        icon.className = 'layer-icon';
-        icon.style.background = c.border;
-        item.appendChild(icon);
+    const toggle = document.createElement('button');
+    toggle.className = 'layer-toggle';
+    toggle.innerHTML = svgIconNoMargin('eye');
+    toggle.title = '切换可见性';
+    toggle.onclick = (e) => {
+        e.stopPropagation();
+        const isInSelection = editMode && selectedElements.some(s => s.el.line === el.line) && selectedElements.length > 1;
+        const targetLines = isInSelection ? selectedElements.map(s => s.el.line) : [el.line];
+        const clickedDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement;
+        const willShow = clickedDiv?.style.display === 'none';
 
-        // Name
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'layer-name';
-        nameSpan.textContent = el.name || '(unnamed)';
-        nameSpan.title = `${el.name || '(unnamed)'} — ${el.type}`;
-        item.appendChild(nameSpan);
-
-        // Type badge
-        const typeSpan = document.createElement('span');
-        typeSpan.className = 'layer-type';
-        typeSpan.textContent = c.tag;
-        item.appendChild(typeSpan);
-
-        // Click to locate / select
-        item.onclick = (e) => {
-            // Reparent mode: clicking a target container completes the operation
-            if (reparentMode) {
-                e.stopPropagation();
-                handleReparentTargetClick(el.line);
-                return;
+        for (const line of targetLines) {
+            const elDiv = document.querySelector(`.el[data-line="${line}"]`) as HTMLElement;
+            const layerItem = document.querySelector(`.layer-item[data-line="${line}"]`) as HTMLElement;
+            if (elDiv) elDiv.style.display = willShow ? '' : 'none';
+            if (layerItem) {
+                layerItem.classList.toggle('hidden-el', !willShow);
+                const btn = layerItem.querySelector('.layer-toggle');
+                if (btn) btn.innerHTML = willShow ? svgIconNoMargin('eye') : svgIconNoMargin('eyeOff');
             }
-            if (editMode) {
-                const entry = elMap.get(el.line);
-                if (!entry) return;
+        }
+    };
+    item.appendChild(toggle);
 
-                if (e.ctrlKey) {
-                    // Ctrl+Click: toggle this item in the multi-selection
-                    toggleSelection(entry.el, entry.div);
-                } else {
-                    // Plain click: single select
-                    selectElement(entry.el, entry.div);
-                }
-            } else {
-                // Preview mode: highlight + jump to line
-                document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
-                item.classList.add('active');
-                document.querySelectorAll('.el.layer-highlight').forEach(i => i.classList.remove('layer-highlight'));
-                const elDiv = document.querySelector(`.el[data-line="${el.line}"]`) as HTMLElement;
-                if (elDiv) {
-                    elDiv.classList.add('layer-highlight');
-                    const vp = document.getElementById('viewport')!;
-                    const vpRect = vp.getBoundingClientRect();
-                    const elRect = elDiv.getBoundingClientRect();
-                    const cx = elRect.left + elRect.width / 2;
-                    const cy = elRect.top + elRect.height / 2;
-                    const vpCx = vpRect.left + vpRect.width / 2;
-                    const vpCy = vpRect.top + vpRect.height / 2;
-                    if (cx < vpRect.left || cx > vpRect.right || cy < vpRect.top || cy > vpRect.bottom) {
-                        panX += vpCx - cx;
-                        panY += vpCy - cy;
-                        updateTransform();
-                    }
-                }
-                vscode.postMessage({ command: 'goToLine', line: el.line });
-            }
-        };
+    const icon = document.createElement('span');
+    icon.className = 'layer-icon';
+    icon.style.background = c.border;
+    item.appendChild(icon);
 
-        // Drag-and-drop for reparenting
-        item.draggable = true;
-        item.addEventListener('dragstart', (e) => {
-            if (!editMode) { e.preventDefault(); return; }
-            e.dataTransfer!.setData('text/plain', String(el.line));
-            e.dataTransfer!.effectAllowed = 'move';
-            item.classList.add('dragging');
-            // Highlight valid drop targets
-            requestAnimationFrame(() => {
-                document.querySelectorAll('.layer-item').forEach(li => {
-                    const targetLine = parseInt((li as HTMLElement).dataset.line ?? '0');
-                    const targetEl = findElementByLine(targetLine, allElements);
-                    if (targetEl && (targetEl.type === 'containerWindowType' || targetEl.type === 'windowType')
-                        && targetEl.line !== el.line && !findChild(el, targetEl.line)) {
-                        li.classList.add('drop-target-valid');
-                    }
-                });
-            });
-        });
-        item.addEventListener('dragend', () => {
-            item.classList.remove('dragging');
-            document.querySelectorAll('.layer-item.drop-target-valid').forEach(li => li.classList.remove('drop-target-valid'));
-            document.querySelectorAll('.layer-item.drag-over').forEach(li => li.classList.remove('drag-over'));
-        });
-        // Container items accept drops
-        const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
-        if (isContainer) {
-            item.addEventListener('dragover', (e) => {
-                const sourceLine = e.dataTransfer?.types.includes('text/plain') ? true : false;
-                if (!sourceLine) return;
-                e.preventDefault();
-                e.dataTransfer!.dropEffect = 'move';
-                item.classList.add('drag-over');
-            });
-            item.addEventListener('dragleave', () => {
-                item.classList.remove('drag-over');
-            });
-            item.addEventListener('drop', (e) => {
-                e.preventDefault();
-                item.classList.remove('drag-over');
-                const sourceLine = parseInt(e.dataTransfer!.getData('text/plain'));
-                if (isNaN(sourceLine) || sourceLine === el.line) return;
-                const sourceEl = findElementByLine(sourceLine, allElements);
-                if (!sourceEl) return;
-                // Select source and reparent
-                const entry = elMap.get(sourceLine);
-                if (entry) {
-                    selectElement(entry.el, entry.div);
-                    reparentSelectedInto(el);
-                }
-            });
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'layer-name';
+    nameSpan.textContent = el.name || '(unnamed)';
+    nameSpan.title = `${el.name || '(unnamed)'} — ${el.type}`;
+    item.appendChild(nameSpan);
+
+    const typeSpan = document.createElement('span');
+    typeSpan.className = 'layer-type';
+    typeSpan.textContent = c.tag;
+    item.appendChild(typeSpan);
+
+    item.onclick = (e) => {
+        if (reparentMode) {
+            e.stopPropagation();
+            handleReparentTargetClick(el.line);
+            return;
         }
 
-        container.appendChild(item);
-
-        // Children container
-        if (hasChildren) {
-            const childContainer = document.createElement('div');
-            childContainer.className = 'layer-children';
-            buildLayerTree(el.children, childContainer, depth + 1);
-            container.appendChild(childContainer);
+        const entry = elMap.get(el.line);
+        if (editMode) {
+            if (!entry) return;
+            if (e.ctrlKey) toggleSelection(entry.el, entry.div, { focusCanvas: true });
+            else selectElement(entry.el, entry.div, { focusCanvas: true });
+        } else {
+            document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+            document.querySelectorAll('.el.layer-highlight').forEach(i => i.classList.remove('layer-highlight'));
+            if (entry) {
+                entry.div.classList.add('layer-highlight');
+                focusElementInViewport(entry.div);
+                updateViewportStatus(entry.el);
+            }
+            vscode.postMessage({ command: 'goToLine', line: el.line });
         }
+    };
+
+    item.draggable = true;
+    item.addEventListener('dragstart', (e) => {
+        if (!editMode) { e.preventDefault(); return; }
+        e.dataTransfer!.setData('text/plain', String(el.line));
+        e.dataTransfer!.effectAllowed = 'move';
+        item.classList.add('dragging');
+        requestAnimationFrame(() => {
+            document.querySelectorAll('.layer-item').forEach(li => {
+                const targetLine = parseInt((li as HTMLElement).dataset.line ?? '0');
+                const targetEl = findElementByLine(targetLine, allElements);
+                if (targetEl && (targetEl.type === 'containerWindowType' || targetEl.type === 'windowType')
+                    && targetEl.line !== el.line && !findChild(el, targetEl.line)) {
+                    li.classList.add('drop-target-valid');
+                }
+            });
+        });
+    });
+    item.addEventListener('dragend', () => {
+        item.classList.remove('dragging');
+        document.querySelectorAll('.layer-item.drop-target-valid').forEach(li => li.classList.remove('drop-target-valid'));
+        document.querySelectorAll('.layer-item.drag-over').forEach(li => li.classList.remove('drag-over'));
+    });
+
+    const isContainer = el.type === 'containerWindowType' || el.type === 'windowType';
+    if (isContainer) {
+        item.addEventListener('dragover', (e) => {
+            const sourceLine = e.dataTransfer?.types.includes('text/plain') ? true : false;
+            if (!sourceLine) return;
+            e.preventDefault();
+            e.dataTransfer!.dropEffect = 'move';
+            item.classList.add('drag-over');
+        });
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+        item.addEventListener('drop', (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            const sourceLine = parseInt(e.dataTransfer!.getData('text/plain'));
+            if (isNaN(sourceLine) || sourceLine === el.line) return;
+            const sourceEl = findElementByLine(sourceLine, allElements);
+            if (!sourceEl) return;
+            const entry = elMap.get(sourceLine);
+            if (entry) {
+                selectElement(entry.el, entry.div);
+                reparentSelectedInto(el);
+            }
+        });
+    }
+
+    container.appendChild(item);
+
+    if (hasChildren) {
+        const childContainer = document.createElement('div');
+        childContainer.className = 'layer-children';
+        buildLayerTree(el.children, childContainer, depth + 1);
+        container.appendChild(childContainer);
     }
 }
 
@@ -1115,6 +1207,60 @@ function updateLayersPanel(elements: GuiElement[]) {
     if (!tree) return;
     tree.innerHTML = '';
     buildLayerTree(elements, tree);
+}
+
+function revealLayerItem(line: number) {
+    const item = document.querySelector<HTMLElement>(`.layer-item[data-line="${line}"]`);
+    if (!item) return;
+
+    let parent = item.parentElement;
+    while (parent) {
+        if (parent.classList.contains('layer-children')) {
+            parent.classList.remove('collapsed');
+            const row = parent.previousElementSibling as HTMLElement | null;
+            const expand = row?.querySelector<HTMLElement>('.layer-expand');
+            if (expand) expand.textContent = '▾';
+        }
+        parent = parent.parentElement;
+    }
+
+    item.scrollIntoView({ block: 'nearest' });
+}
+
+function focusElementInViewport(div: HTMLElement) {
+    const vp = document.getElementById('viewport')!;
+    const vpRect = vp.getBoundingClientRect();
+    const elRect = div.getBoundingClientRect();
+    const cx = elRect.left + elRect.width / 2;
+    const cy = elRect.top + elRect.height / 2;
+    const vpCx = vpRect.left + vpRect.width / 2;
+    const vpCy = vpRect.top + vpRect.height / 2;
+    const outside = cx < vpRect.left || cx > vpRect.right || cy < vpRect.top || cy > vpRect.bottom;
+    if (!outside) return;
+    panX += vpCx - cx;
+    panY += vpCy - cy;
+    updateTransform();
+}
+
+function updateViewportStatus(override?: GuiElement) {
+    const status = document.getElementById('title-status');
+    if (!status) return;
+    if (override) {
+        const { w, h } = effectiveSize(override);
+        status.textContent = `${override.name || '(unnamed)'} · ${override.type} · x ${override.position.x}, y ${override.position.y} · ${w}×${h} · ${Math.round(scale * 100)}%`;
+        return;
+    }
+    if (selectedElements.length === 0) {
+        status.textContent = `未选择元素 · ${Math.round(scale * 100)}%`;
+        return;
+    }
+    if (selectedElements.length > 1) {
+        status.textContent = `已选择 ${selectedElements.length} 个元素 · ${Math.round(scale * 100)}%`;
+        return;
+    }
+    const el = selectedElements[0]!.el;
+    const { w, h } = effectiveSize(el);
+    status.textContent = `${el.name || '(unnamed)'} · ${el.type} · x ${el.position.x}, y ${el.position.y} · ${w}×${h} · ${Math.round(scale * 100)}%`;
 }
 
 // ─── Search ─────────────────────────────────────────────────────────────────
@@ -1252,20 +1398,22 @@ function toggleEditMode() {
 }
 
 // ── Selection ──
-function selectElement(el: GuiElement, div: HTMLElement) {
+function selectElement(el: GuiElement, div: HTMLElement, options: { focusCanvas?: boolean } = {}) {
     clearSelection();
     selectedElements = [{ el, div }];
     div.classList.add('selected');
     addResizeHandles(div, el);
     updatePropertiesPanel();
     updateAlignButtons();
-    // Highlight in layers
     document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
     const layerItem = document.querySelector(`.layer-item[data-line="${el.line}"]`);
     if (layerItem) layerItem.classList.add('active');
+    revealLayerItem(el.line);
+    if (options.focusCanvas) focusElementInViewport(div);
+    updateViewportStatus();
 }
 
-function toggleSelection(el: GuiElement, div: HTMLElement) {
+function toggleSelection(el: GuiElement, div: HTMLElement, options: { focusCanvas?: boolean } = {}) {
     const idx = selectedElements.findIndex(s => s.el.line === el.line);
     if (idx >= 0) {
         selectedElements[idx]!.div.classList.remove('selected');
@@ -1281,9 +1429,12 @@ function toggleSelection(el: GuiElement, div: HTMLElement) {
         // Highlight in layers
         const layerItem = document.querySelector(`.layer-item[data-line="${el.line}"]`);
         if (layerItem) layerItem.classList.add('active');
+        revealLayerItem(el.line);
+        if (options.focusCanvas) focusElementInViewport(div);
     }
     updatePropertiesPanel();
     updateAlignButtons();
+    updateViewportStatus();
 }
 
 function clearSelection() {
@@ -1296,6 +1447,7 @@ function clearSelection() {
     document.querySelectorAll('.layer-item.active').forEach(i => i.classList.remove('active'));
     updatePropertiesPanel();
     updateAlignButtons();
+    updateViewportStatus();
 }
 
 // ── Resize Handles ──
@@ -1395,6 +1547,7 @@ window.addEventListener('mousemove', (e) => {
         // Show coordinate tooltip
         showDragTooltip(e.clientX, e.clientY, newX, newY);
         updatePropertiesPanel();
+        updateViewportStatus();
         e.preventDefault();
     }
 
@@ -1533,6 +1686,7 @@ function handleResizeMove(e: MouseEvent) {
     const displayH = primary!.useScale ? Math.round((primary!.origH / primary!.origScale) * (primary!.el.scale ?? 1)) : primary!.el.size.height;
     showDragTooltip(e.clientX, e.clientY, displayW, displayH, true);
     updatePropertiesPanel();
+    updateViewportStatus();
 }
 
 function finishResize() {
@@ -1842,7 +1996,7 @@ function updatePropertiesPanel() {
     const content = document.getElementById('props-content');
     if (!content) return;
     if (selectedElements.length === 0) {
-        content.innerHTML = '<div style="padding:20px;text-align:center;color:#5868a0">选择一个元素以编辑属性</div>';
+        content.innerHTML = '<div class="empty-state">选择一个元素以编辑属性</div>';
         return;
     }
     if (selectedElements.length > 1) {
@@ -1850,8 +2004,9 @@ function updatePropertiesPanel() {
         const elems = selectedElements.map(s => s.el);
         const allSameType = elems.every(e => e.type === elems[0]!.type);
         const c = allSameType ? (COLORS[elems[0]!.type] ?? DEFAULT_COLOR) : DEFAULT_COLOR;
-        let html = `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">已选择 ${selectedElements.length} 个元素</div>`;
-        html += `<div style="padding:4px 8px;font-size:11px;color:#6878b0">修改值将应用到所有选中元素（偏移量模式）</div>`;
+        let html = `<div class="prop-summary"><div><strong>已选择 ${selectedElements.length} 个元素</strong><span>${allSameType ? elems[0]!.type : '多种类型'}</span></div></div>`;
+        html += `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">批量移动</div>`;
+        html += `<div class="prop-hint">修改值将作为偏移量应用到所有选中元素。</div>`;
         html += propRow('偏移 X', `<input class="prop-input" type="number" data-prop="batch-offset-x" value="0" step="1" />`);
         html += propRow('偏移 Y', `<input class="prop-input" type="number" data-prop="batch-offset-y" value="0" step="1" />`);
         html += `</div>`;
@@ -1893,17 +2048,20 @@ function updatePropertiesPanel() {
     let html = '';
 
     // Identity
+    html += `<div class="prop-summary" style="--summary-color:${c.border}">`;
+    html += `<span class="summary-dot"></span><div><strong>${escHtml(el.name || '(unnamed)')}</strong><span>${escHtml(el.type)} · ${el.children.length} 子层</span></div>`;
+    html += `</div>`;
     html += `<div class="prop-group"><div class="prop-group-title" style="color:${c.border}">${c.tag}</div>`;
-    html += propRow('name', `<input class="prop-input" data-prop="name" value="${escHtml(el.name)}" />`);
+    html += propRow('名称', `<input class="prop-input" data-prop="name" value="${escHtml(el.name)}" />`);
     html += `</div>`;
 
     // Transform
     html += `<div class="prop-group"><div class="prop-group-title">变换</div>`;
-    html += propRow('position', `<div class="prop-half"><input class="prop-input" type="number" data-prop="pos-x" value="${el.position.x}" step="1" /><input class="prop-input" type="number" data-prop="pos-y" value="${el.position.y}" step="1" /></div>`);
-    html += propRow('size', `<div class="prop-half"><input class="prop-input" type="number" data-prop="size-w" value="${el.size.width}" step="1" /><input class="prop-input" type="number" data-prop="size-h" value="${el.size.height}" step="1" /></div>`);
+    html += propRow('位置', `<div class="prop-half"><input class="prop-input" type="number" data-prop="pos-x" value="${el.position.x}" step="1" /><input class="prop-input" type="number" data-prop="pos-y" value="${el.position.y}" step="1" /></div>`);
+    html += propRow('尺寸', `<div class="prop-half"><input class="prop-input" type="number" data-prop="size-w" value="${el.size.width}" step="1" /><input class="prop-input" type="number" data-prop="size-h" value="${el.size.height}" step="1" /></div>`);
 
     const orientations = ['', 'UPPER_LEFT', 'UPPER_RIGHT', 'LOWER_LEFT', 'LOWER_RIGHT', 'CENTER', 'CENTER_UP', 'CENTER_DOWN', 'CENTER_LEFT', 'CENTER_RIGHT'];
-    html += propRow('orientation', `<select class="prop-select" data-prop="orientation">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.orientation ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
+    html += propRow('锚点', `<select class="prop-select" data-prop="orientation">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.orientation ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
     html += propRow('origo', `<select class="prop-select" data-prop="origo">${orientations.map(o => `<option value="${o}" ${o === normalizeOrientation(el.origo ?? '') ? 'selected' : ''}>${o || '(无)'}</option>`).join('')}</select>`);
     html += `</div>`;
 

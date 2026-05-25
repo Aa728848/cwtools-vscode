@@ -959,7 +959,10 @@ export class GuiPanel {
 </head>
 <body>
     <div id="toolbar">
-        <span id="title">GUI 预览</span>
+        <div id="title-area">
+            <span id="title">GUI 预览</span>
+            <span id="title-status">未选择元素</span>
+        </div>
         <div id="controls">
             <button id="btn-edit" title="切换编辑模式 (E)" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
             <span class="separator">|</span>
@@ -977,7 +980,7 @@ export class GuiPanel {
                 <option value="3840x2160">4K</option>
             </select>
             <button id="btn-search" title="搜索元素 (Ctrl+F)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
-            <button id="btn-layers" title="切换图层面板">☰</button>
+            <button id="btn-layers" title="切换图层面板" class="active">☰</button>
             <span class="separator edit-only">|</span>
             <button id="btn-align-left" title="左对齐" class="edit-only align-btn" disabled>⬅</button>
             <button id="btn-align-hcenter" title="水平居中" class="edit-only align-btn" disabled>⬌</button>
@@ -1016,13 +1019,14 @@ export class GuiPanel {
                 <div id="gui-root"></div>
             </div>
         </div>
-        <div id="side-panel" class="hidden">
+        <div id="side-panel">
             <div id="side-panel-tabs">
                 <button id="tab-layers" class="tab active">图层</button>
                 <button id="tab-properties" class="tab">属性</button>
             </div>
             <div id="layers-panel">
                 <div id="layers-header">
+                    <span>图层</span>
                     <button id="layers-collapse-all" title="全部折叠">▾</button>
                     <button id="layers-expand-all" title="全部展开">▸</button>
                 </div>

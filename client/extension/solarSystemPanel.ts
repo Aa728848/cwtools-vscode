@@ -20,7 +20,9 @@ type SolarPanelMessage =
     | { command: 'addRingWorld'; systemEndLine: number; orbitDistance: number; segmentCount: number; segmentAngle: number; parentLine?: number; parentEndLine?: number }
     | { command: 'addSibling'; siblingLine: number; siblingEndLine: number; bodyType: string; planetClass: string; size: number; orbitAngle: number }
     | { command: 'deletePlanet'; line: number }
-    | { command: 'vscodeUndo' };
+    | { command: 'vscodeUndo' }
+    | { command: 'vscodeRedo' }
+    | { command: 'saveDocument' };
 
 export class SolarSystemPanel {
     public static currentPanel: SolarSystemPanel | undefined;
@@ -38,6 +40,7 @@ export class SolarSystemPanel {
     private _document: vscode.TextDocument | undefined;
     private _skipNextReload = false;
     private _contentSnapshots: string[] = [];
+    private _redoSnapshots: string[] = [];
     private _lastSnapshotTime = 0;
     private static readonly MAX_SNAPSHOTS = 20;
     private _searchRoots: string[] = [];
@@ -54,6 +57,7 @@ export class SolarSystemPanel {
         if (now - this._lastSnapshotTime < 500) return;
         this._lastSnapshotTime = now;
         this._contentSnapshots.push(doc.getText());
+        this._redoSnapshots = [];
         if (this._contentSnapshots.length > SolarSystemPanel.MAX_SNAPSHOTS) {
             this._contentSnapshots.shift();
         }
@@ -151,6 +155,12 @@ export class SolarSystemPanel {
                         break;
                     case 'vscodeUndo':
                         await this._handleVscodeUndo();
+                        break;
+                    case 'vscodeRedo':
+                        await this._handleVscodeRedo();
+                        break;
+                    case 'saveDocument':
+                        if (this._document) await this._document.save();
                         break;
                 }
             }, null, this._disposables),
@@ -1417,6 +1427,31 @@ export class SolarSystemPanel {
         const snapshot = this._contentSnapshots.pop();
         if (!snapshot) return;
         const doc = this._document;
+        this._redoSnapshots.push(doc.getText());
+        if (this._redoSnapshots.length > SolarSystemPanel.MAX_SNAPSHOTS) {
+            this._redoSnapshots.shift();
+        }
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(
+            new vscode.Position(0, 0),
+            doc.lineAt(doc.lineCount - 1).range.end,
+        );
+        edit.replace(doc.uri, fullRange, snapshot);
+        this._skipNextReload = true;
+        await vscode.workspace.applyEdit(edit);
+        await this._loadAndRender(doc);
+        await doc.save();
+    }
+
+    private async _handleVscodeRedo() {
+        if (!this._document) return;
+        const snapshot = this._redoSnapshots.pop();
+        if (!snapshot) return;
+        const doc = this._document;
+        this._contentSnapshots.push(doc.getText());
+        if (this._contentSnapshots.length > SolarSystemPanel.MAX_SNAPSHOTS) {
+            this._contentSnapshots.shift();
+        }
         const edit = new vscode.WorkspaceEdit();
         const fullRange = new vscode.Range(
             new vscode.Position(0, 0),
@@ -1455,6 +1490,8 @@ export class SolarSystemPanel {
         <div id="controls">
             <select id="system-select" title="选择星系"></select>
             <span class="separator">|</span>
+            <button id="btn-scale-mode" title="切换可读比例 / 真实比例" aria-label="切换比例模式">可读比例</button>
+            <span class="separator">|</span>
             <button id="btn-zoom-in" title="放大">+</button>
             <span id="zoom-level">100%</span>
             <button id="btn-zoom-out" title="缩小">−</button>
@@ -1466,13 +1503,18 @@ export class SolarSystemPanel {
             <button id="btn-edit" title="切换编辑模式 (E)" class="edit-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path><path d="m15 5 4 4"></path></svg></button>
             <button id="btn-labels" title="切换标签"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"></path><path d="M7 7h.01"></path></svg></button>
             <button id="btn-orbits" title="切换轨道线">◎</button>
+            <span class="separator">|</span>
+            <button id="btn-undo" title="撤销编辑 (Ctrl+Z)" aria-label="撤销">↶</button>
+            <button id="btn-redo" title="重做编辑" aria-label="重做">↷</button>
+            <button id="btn-save" title="保存当前文件" aria-label="保存">保存</button>
+            <span id="edit-status">已同步</span>
         </div>
     </div>
     <div id="main-layout">
         <div id="viewport">
             <canvas id="solar-canvas"></canvas>
         </div>
-        <div id="side-panel" class="hidden">
+        <div id="side-panel">
             <div id="side-panel-tabs">
                 <button id="tab-info" class="tab active">信息</button>
                 <button id="tab-properties" class="tab">属性</button>

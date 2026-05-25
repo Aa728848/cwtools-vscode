@@ -24,6 +24,7 @@ import type {
     DiffArtifactFile,
     DiffSummaryFile,
     GenerationResult,
+    ContextItem,
 } from './types';
 import { contentToString } from './types';
 import { AgentRunner } from './agentRunner';
@@ -945,9 +946,55 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    /** Retract a user message, its AI response, AND any file changes made during that exchange */
-    public async retractMessage(messageIndex: number): Promise<void> {
+    private async sendUserMessagePayload(text: string, images?: string[], contexts?: ContextItem[]): Promise<void> {
+        if (contexts && contexts.length > 0) {
+            const referencePrompt = await this.contextReferences.buildReferencePrompt(contexts);
+            const displayText = text.trim();
+            const agentText = [
+                referencePrompt,
+                text || 'Please use the referenced context above.',
+            ].filter(Boolean).join('\n\n');
+            await this.handleUserMessage(agentText, images, undefined, false, false, false, displayText, contexts);
+            return;
+        }
+
+        await this.handleUserMessage(text, images);
+    }
+
+    public async editAndResendMessage(messageIndex: number, text: string, images?: string[], contexts?: ContextItem[]): Promise<void> {
         if (!this.topicManager.currentTopic) return;
+        if (this._isGenerating) {
+            vs.window.showWarningMessage('请先等待当前 AI 运行结束，或取消生成后再编辑重发。');
+            return;
+        }
+        const retracted = await this.retractMessage(messageIndex, { restoreInput: false, notify: false });
+        if (!retracted) return;
+        await this.sendUserMessagePayload(text, images, contexts);
+    }
+
+    /** Retract a user message, its AI response, AND any file changes made during that exchange */
+    public async retractMessage(messageIndex: number, options: { restoreInput?: boolean; notify?: boolean } = {}): Promise<boolean> {
+        if (!this.topicManager.currentTopic) return false;
+        if (this._isGenerating) {
+            vs.window.showWarningMessage('请先等待当前 AI 运行结束，或取消生成后再回滚消息。');
+            return false;
+        }
+        if (!Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= this.topicManager.currentTopic.messages.length) {
+            vs.window.showWarningMessage('无法回滚：消息位置已经失效。');
+            return false;
+        }
+        const messageToRestore = this.topicManager.currentTopic.messages[messageIndex];
+        if (messageToRestore?.role !== 'user') {
+            vs.window.showWarningMessage('只能从用户消息开始回滚。');
+            return false;
+        }
+        const shouldRestoreInput = options.restoreInput !== false;
+        const shouldNotify = options.notify !== false;
+        const restoredInput = shouldRestoreInput ? {
+            text: messageToRestore.displayContent ?? messageToRestore.content,
+            images: messageToRestore.images?.length ? [...messageToRestore.images] : undefined,
+            contexts: messageToRestore.contexts?.length ? [...messageToRestore.contexts] : undefined,
+        } : undefined;
 
         // ── P0 Fix: validate file paths are within workspace boundaries ──────
         const workspaceFolders = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
@@ -968,9 +1015,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             .filter(idx => idx >= messageIndex)
             .sort((a, b) => b - a); // descending = newest-first
 
-        // Track which files we've already restored so we don't double-restore
-        const restored = new Set<string>();
         let restoredFiles = 0;
+        const restoredFilePaths = new Set<string>();
         let skippedFiles = 0;
 
         // Also collect the earliest convLength from all retained snapshots so we
@@ -989,9 +1035,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             };
             // Process in reverse order within the same message too
             for (const snap of [...snapshots].reverse()) {
-                if (restored.has(snap.filePath)) continue;
-                restored.add(snap.filePath);
-
                 // P0 Fix: reject paths outside workspace to prevent path traversal
                 if (!isWithinWorkspace(snap.filePath)) {
                     ErrorReporter.debug(SOURCE.CHAT_PANEL, `Retract: Skipping file outside workspace: ${snap.filePath}`);
@@ -1011,11 +1054,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         if (fs.existsSync(snap.filePath)) {
                             await fs.promises.unlink(snap.filePath);
                             restoredFiles++;
+                            restoredFilePaths.add(snap.filePath);
                         }
                     } else {
                         // File existed before — restore original content (async)
                         await fs.promises.writeFile(snap.filePath, snap.previousContent, 'utf-8');
                         restoredFiles++;
+                        restoredFilePaths.add(snap.filePath);
                     }
                 } catch (e) {
                     ErrorReporter.warn(SOURCE.CHAT_PANEL, `Failed to restore ${snap.filePath}`, e);
@@ -1037,15 +1082,20 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.conversationMessages = this.conversationMessages.slice(0, messageIndex);
         }
 
-        this.postMessage({ type: 'messageRetracted', messageIndex });
+        const restoredFileCount = restoredFilePaths.size || restoredFiles;
+        this.postMessage({ type: 'messageRetracted', messageIndex, restoredInput, restoredFiles: restoredFileCount, skippedFiles });
         this.topicManager.saveTopics();
 
-        if (restoredFiles > 0 || skippedFiles > 0) {
-            const msg = skippedFiles > 0
-                ? `已撤回消息并恢复 ${restoredFiles} 个文件的更改（${skippedFiles} 个文件因在工作区外被跳过）。`
-                : `已撤回消息并恢复 ${restoredFiles} 个文件的更改。`;
-            vs.window.showInformationMessage(msg);
+        if (shouldNotify) {
+            const filePart = skippedFiles > 0
+                ? `已恢复 ${restoredFileCount} 个文件，${skippedFiles} 个文件未能恢复。`
+                : restoredFileCount > 0
+                    ? `已恢复 ${restoredFileCount} 个文件。`
+                    : '没有需要恢复的文件快照。';
+            const inputPart = restoredInput ? '原消息已恢复到输入框。' : '';
+            vs.window.showInformationMessage(`已回滚到该消息之前。${filePart}${inputPart}`);
         }
+        return true;
     }
 
     /**

@@ -32,6 +32,9 @@ export async function routeWebviewMessage(
             await provider.handleUserMessage(agentText, msg.images, undefined, false, false, false, displayText, msg.contexts);
             break;
         }
+        case 'editAndResendMessage':
+            await provider.editAndResendMessage(msg.messageIndex, msg.text, msg.images, msg.contexts);
+            break;
         case 'openContextReference':
             await provider.contextReferences.openReference(msg.context);
             break;

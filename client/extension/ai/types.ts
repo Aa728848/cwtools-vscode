@@ -1379,6 +1379,7 @@ export type ContextItem = CodeSelectionContext | FileContext | FolderContext | D
 export type WebViewMessage =
     | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
     | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[] }
+    | { type: 'editAndResendMessage'; messageIndex: number; text: string; contexts?: ContextItem[]; images?: string[] }
     | { type: 'openContextReference'; context: ContextItem }
     | { type: 'insertCode'; code: string }
     | { type: 'copyCode'; code: string }
@@ -1465,7 +1466,7 @@ export type HostMessage =
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
-    | { type: 'messageRetracted'; messageIndex: number }
+    | { type: 'messageRetracted'; messageIndex: number; restoredInput?: { text: string; images?: string[]; contexts?: ContextItem[] }; restoredFiles?: number; skippedFiles?: number }
     | { type: 'pendingWriteFile'; file: string; messageId: string; isNewFile: boolean; diffPreview?: string; additions?: number; deletions?: number; diffLines?: DiffLine[] }
     | { type: 'autoWriteFile'; file: string; isNewFile: boolean }
     | { type: 'topicTitleGenerated'; topicId: string; title: string }

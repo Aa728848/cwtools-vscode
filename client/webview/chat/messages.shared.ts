@@ -24,6 +24,8 @@ export interface ChatHistoryMessageView {
     role: 'user' | 'assistant';
     content: string;
     displayContent?: string;
+    contexts?: unknown[];
+    images?: string[];
     timestamp: number;
     code?: string;
     isHidden?: boolean;

@@ -8,6 +8,7 @@ export type ChatSurfaceHostMessage =
     | { type: 'topicList'; topics: TopicListItem[]; stats?: TopicStats }
     | { type: 'topicSearchResults'; results: TopicListItem[]; stats?: TopicStats; query?: string; totalCount?: number }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessageView[]; targetSurface?: 'chat' | 'manager' }
+    | { type: 'messageRetracted'; messageIndex: number; restoredInput?: { text: string; images?: string[]; contexts?: unknown[] }; restoredFiles?: number; skippedFiles?: number }
     | { type: 'modeChanged' | 'setMode'; mode: string }
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
     | { type: 'floatingCardResolved'; card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }

@@ -15,6 +15,7 @@
 export interface ReadyMessage { type: 'ready' }
 export interface SendMessagePayload { type: 'sendMessage'; text: string; mode: string; images?: string[] }
 export interface SendMessageWithReferencePayload { type: 'sendMessageWithReference'; text: string; mode: string; reference: unknown; images?: string[] }
+export interface EditAndResendMessagePayload { type: 'editAndResendMessage'; messageIndex: number; text: string; contexts?: unknown[]; images?: string[] }
 export interface CancelGenerationMessage { type: 'cancelGeneration' }
 export interface ResumeGenerationMessage { type: 'resumeGeneration' }
 export interface NewTopicMessage { type: 'newTopic' }
@@ -49,6 +50,7 @@ export type WebviewToHostMessage =
     | ReadyMessage
     | SendMessagePayload
     | SendMessageWithReferencePayload
+    | EditAndResendMessagePayload
     | CancelGenerationMessage
     | ResumeGenerationMessage
     | NewTopicMessage

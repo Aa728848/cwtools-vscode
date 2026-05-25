@@ -82,6 +82,12 @@ interface SideDiffFocus {
     file?: string;
 }
 
+interface UserMessageInputPayload {
+    text: string;
+    images?: string[];
+    contexts?: ActiveContext[];
+}
+
 interface ResponsiveWorkspacePanel {
     kind: 'plan' | 'walkthrough' | 'blueprint';
     title: string;
@@ -145,6 +151,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let currentAssistantDiv: HTMLDivElement | null = null;
     let currentMode = 'build';
     const messageIndexMap = new Map<number, HTMLDivElement>();
+    const userMessagePayloadMap = new Map<number, UserMessageInputPayload>();
     let settingsProviders: any[] = [];
     let settingsOllamaModels: any[] = [];
 
@@ -190,6 +197,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let pendingFiles: string[] = [];
     /** Pending structured references to attach to the next sent message */
     let activeContexts: ActiveContext[] = [];
+    let editingMessageIndex: number | null = null;
     let savedInputRange: Range | null = null;
     let artifacts: ArtifactRecord[] = [];
     let artifactFilter: ArtifactFilter = 'all';
@@ -944,6 +952,85 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         activeContexts = [];
         savedInputRange = null;
         autoResizeInput();
+    }
+
+    function cloneInputPayload(payload: UserMessageInputPayload): UserMessageInputPayload {
+        return {
+            text: payload.text || '',
+            images: payload.images ? [...payload.images] : undefined,
+            contexts: payload.contexts ? payload.contexts.map(ctx => ({ ...ctx, id: ctx.id || generateContextId() })) : undefined,
+        };
+    }
+
+    function clearComposerAttachmentPreviews() {
+        pendingImages = [];
+        pendingFiles = [];
+        const preview = document.getElementById('imagePreviewArea');
+        if (preview) preview.innerHTML = '';
+        const fileBadges = document.getElementById('fileBadgeArea');
+        if (fileBadges) fileBadges.innerHTML = '';
+    }
+
+    function renderEditComposerState() {
+        let bar = document.getElementById('editComposerBar') as HTMLElement | null;
+        if (editingMessageIndex === null) {
+            bar?.remove();
+            updateComposerStackHeight();
+            return;
+        }
+
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'editComposerBar';
+            bar.className = 'edit-composer-bar';
+            const container = document.querySelector('.input-container');
+            const inputRow = container?.querySelector('.input-row');
+            if (container && inputRow) container.insertBefore(bar, inputRow);
+            else inputWrapper?.prepend(bar);
+        }
+
+        bar.innerHTML = `
+            <span class="edit-composer-icon">${svgIconNoMargin('pencil')}</span>
+            <span class="edit-composer-text">正在编辑第 ${editingMessageIndex + 1} 条消息，发送后会从这里重新运行</span>
+            <button class="edit-composer-cancel" type="button">取消</button>
+        `;
+        bar.querySelector('.edit-composer-cancel')?.addEventListener('click', () => {
+            editingMessageIndex = null;
+            renderEditComposerState();
+            input.focus();
+        });
+        updateComposerStackHeight();
+    }
+
+    function restoreComposerPayload(payload: UserMessageInputPayload) {
+        const next = cloneInputPayload(payload);
+        clearInput();
+        clearComposerAttachmentPreviews();
+
+        for (const ctx of next.contexts || []) {
+            activeContexts.push(ctx);
+            input.appendChild(buildReferenceChip(ctx));
+            input.appendChild(document.createTextNode(' '));
+        }
+        if (next.text) input.appendChild(document.createTextNode(next.text));
+
+        pendingImages = next.images ? [...next.images] : [];
+        for (const dataUrl of pendingImages) addImagePreview(dataUrl);
+
+        placeCaretAtEnd(input);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        stopPlaceholderRotation();
+        updateComposerStackHeight();
+    }
+
+    function beginEditMessage(messageIdx: number) {
+        if (isGenerating) return;
+        const payload = userMessagePayloadMap.get(messageIdx);
+        if (!payload) return;
+        editingMessageIndex = messageIdx;
+        restoreComposerPayload(payload);
+        renderEditComposerState();
+        input.focus();
     }
 
     function syncContextsFromComposer() {
@@ -2114,34 +2201,40 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const text = getInputText().trim();
         if (!text && pendingImages.length === 0 && activeContexts.length === 0) return;
         setChatEmptyState(false);
-        
-        if (activeContexts.length > 0) {
+
+        const imagesToSend = pendingImages.length > 0 ? [...pendingImages] : undefined;
+        const contextsToSend = activeContexts.length > 0 ? activeContexts.map(ctx => ({ ...ctx })) : undefined;
+
+        if (editingMessageIndex !== null) {
+            vscode.postMessage({
+                type: 'editAndResendMessage',
+                messageIndex: editingMessageIndex,
+                text,
+                contexts: contextsToSend,
+                images: imagesToSend,
+            });
+            editingMessageIndex = null;
+            renderEditComposerState();
+        } else if (activeContexts.length > 0) {
             vscode.postMessage({
                 type: 'sendMessageWithReference',
                 text,
-                contexts: activeContexts,
-                images: pendingImages.length > 0 ? [...pendingImages] : undefined,
+                contexts: contextsToSend || [],
+                images: imagesToSend,
             });
             activeContexts = [];
         } else {
             vscode.postMessage({
                 type: 'sendMessage',
                 text,
-                images: pendingImages.length > 0 ? [...pendingImages] : undefined,
+                images: imagesToSend,
                 attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
             });
         }
         
         clearInput();
         stopPlaceholderRotation();
-        // Clear image previews
-        pendingImages = [];
-        pendingFiles = [];
-        const preview = document.getElementById('imagePreviewArea');
-        if (preview) preview.innerHTML = '';
-        // Clear @file badges
-        const fileBadges = document.getElementById('fileBadgeArea');
-        if (fileBadges) fileBadges.innerHTML = '';
+        clearComposerAttachmentPreviews();
         updateComposerStackHeight();
     }
 
@@ -3485,12 +3578,30 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         div.appendChild(bubble);
 
         if (msgIdx !== undefined && msgIdx >= 0) {
+            userMessagePayloadMap.set(msgIdx, cloneInputPayload({ text, images, contexts }));
+
+            const actions = document.createElement('div');
+            actions.className = 'message-actions user-message-actions';
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'message-action-btn edit-resend-btn';
+            editBtn.type = 'button';
+            editBtn.title = '编辑并重新发送';
+            editBtn.setAttribute('aria-label', '编辑并重新发送此消息');
+            editBtn.innerHTML = `${svgIconNoMargin('pencil')}<span>编辑重发</span>`;
+            editBtn.addEventListener('click', () => beginEditMessage(msgIdx));
+
             const rb = document.createElement('button');
-            rb.className = 'retract-btn';
-            rb.textContent = '↩ 撤回';
-            rb.setAttribute('aria-label', '撤回此消息');
+            rb.className = 'message-action-btn retract-btn';
+            rb.type = 'button';
+            rb.title = '回滚到此处';
+            rb.setAttribute('aria-label', '回滚到此消息之前并恢复输入');
+            rb.innerHTML = `${svgIconNoMargin('refresh')}<span>回滚</span>`;
             rb.addEventListener('click', () => showRetractConfirm(msgIdx));
-            div.appendChild(rb);
+
+            actions.appendChild(editBtn);
+            actions.appendChild(rb);
+            div.appendChild(actions);
             messageIndexMap.set(msgIdx, div);
         }
         // Batch 3: ARIA and virtual scroll
@@ -3501,27 +3612,36 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return div;
     }
 
-    // P3: Retract confirmation dialog
     function showRetractConfirm(messageIdx: number) {
+        if (isGenerating) return;
+        const payload = userMessagePayloadMap.get(messageIdx);
+        const imageCount = payload?.images?.length || 0;
+        const contextCount = payload?.contexts?.length || 0;
         const overlay = document.createElement('div');
         overlay.className = 'retract-confirm';
-        overlay.innerHTML = '<div class="retract-confirm-box">' +
-            '<div class="retract-confirm-title">撤回此消息？</div>' +
-            '<div class="retract-confirm-hint">这将同时撤回后续的 AI 回复，并恢复所有被 AI 修改或创建的文件</div>' +
-
-            '<div class="retract-confirm-btns">' +
-            '<button class="retract-ok">撤回</button>' +
-            '<button class="retract-cancel">取消</button>' +
-            '</div></div>';
+        overlay.innerHTML = `
+            <div class="retract-confirm-box">
+                <div class="retract-confirm-title">回滚到这条消息之前？</div>
+                <div class="retract-confirm-hint">
+                    <div>将删除这条用户消息以及之后的 AI 回复，并尝试恢复这些回复产生的文件改动。</div>
+                    <div>完成后会把原消息放回输入框，包含 ${contextCount} 个引用和 ${imageCount} 张图片。</div>
+                    <div class="retract-confirm-note">文件恢复依赖当前会话快照；无法恢复的项目会在完成后提示。</div>
+                </div>
+                <div class="retract-confirm-btns">
+                    <button class="retract-ok" type="button">回滚并恢复输入</button>
+                    <button class="retract-cancel" type="button">取消</button>
+                </div>
+            </div>`;
         overlay.querySelector('.retract-ok')!.addEventListener('click', () => {
             overlay.remove();
+            editingMessageIndex = null;
+            renderEditComposerState();
             vscode.postMessage({ type: 'retractMessage', messageIndex: messageIdx });
         });
         overlay.querySelector('.retract-cancel')!.addEventListener('click', () => overlay.remove());
         overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
         document.body.appendChild(overlay);
     }
-
     // ── Card dismiss helper ────────────────────────────────────────────────────
     function dismissCard(el: HTMLElement, delay: number, onComplete?: () => void, removeDom: boolean = true) {
         setTimeout(() => {
@@ -4089,10 +4209,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (!isCurrentSurface(msg.targetSurface)) break;
                 clearActiveSubagentViews();
                 clearTopicWorkspaceState();
+                editingMessageIndex = null;
+                renderEditComposerState();
                 while (chatArea.firstChild) chatArea.removeChild(chatArea.firstChild);
                 emptyState.style.display = '';
                 chatArea.appendChild(emptyState);
                 messageIndexMap.clear();
+                userMessagePayloadMap.clear();
                 setGenerating(false);
                 currentAssistantDiv = null;
                 streamStates.clear();
@@ -4166,6 +4289,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 clearActiveSubagentViews();
                 chatArea.innerHTML = '';
                 messageIndexMap.clear();
+                userMessagePayloadMap.clear();
                 restoreArtifactsFromMessages(msg.messages || []);
                 msg.messages.forEach((m: any, idx: number) => {
                     if (m.isHidden === true) return;
@@ -4197,6 +4321,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 // Clear all messageIndexMap entries whose index >= retracted index
                 for (const [idx] of messageIndexMap) {
                     if (idx >= msg.messageIndex) messageIndexMap.delete(idx);
+                }
+                for (const [idx] of userMessagePayloadMap) {
+                    if (idx >= msg.messageIndex) userMessagePayloadMap.delete(idx);
+                }
+                if (msg.restoredInput) {
+                    editingMessageIndex = null;
+                    renderEditComposerState();
+                    restoreComposerPayload(msg.restoredInput);
                 }
                 break;
             }

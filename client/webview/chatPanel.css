@@ -239,11 +239,15 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .msg-bubble code { background: rgba(255,255,255,0.1); border-radius: 3px; padding: 0 3px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12.5px; }
 .msg-bubble pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 6px 0; font-size: 13px; font-family: var(--vscode-editor-font-family, monospace); }
 .msg-bubble pre code { background: none; padding: 0; }
-.retract-btn { display: none; background: none; border: none; cursor: pointer; font-size: 11px; opacity: 0.35; padding: 2px 5px; border-radius: 3px; color: var(--fg); }
-.message.user:hover .retract-btn { display: inline-flex; }
-.retract-btn:hover { opacity: 1; background: var(--btn-hover); }
+.message-actions { display: none; align-items: center; gap: 4px; align-self: flex-end; }
+.message.user:hover .message-actions,
+.message.user:focus-within .message-actions { display: inline-flex; }
+.message-action-btn { min-height: 24px; display: inline-flex; align-items: center; gap: 4px; background: none; border: 1px solid transparent; cursor: pointer; font-size: 11px; opacity: 0.48; padding: 2px 7px; border-radius: 5px; color: var(--fg); font-family: inherit; }
+.message-action-btn:hover { opacity: 1; background: var(--btn-hover); border-color: rgba(255,255,255,0.08); }
+.edit-resend-btn:hover { color: #9fc7ff; }
+.retract-btn:hover { color: #f0b06d; }
 .message.retracted .msg-bubble { opacity: 0.4; font-style: italic; pointer-events: none; }
-.message.retracted .retract-btn { display: none !important; }
+.message.retracted .message-actions { display: none !important; }
 
 /* ── Agent run summary ── */
 .run-summary { margin: 4px 0 8px; border: 1px solid rgba(255,255,255,0.11); border-left-width: 3px; border-radius: 8px; background: rgba(255,255,255,0.035); overflow: hidden; }
@@ -401,6 +405,11 @@ body.chat-empty .input-container { box-shadow: 0 18px 42px rgba(0,0,0,0.18); }
 #imagePreviewArea > div { width: 48px !important; height: 48px !important; }
 #imagePreviewArea img { border-radius: 8px !important; border-color: rgba(255,255,255,0.12) !important; }
 #imagePreviewArea button { top: -7px !important; right: -7px !important; width: 18px !important; height: 18px !important; background: rgba(40,40,43,0.96) !important; border: 1px solid rgba(255,255,255,0.18) !important; color: #fff !important; }
+.edit-composer-bar { display: flex; align-items: center; gap: 7px; padding: 8px 12px 7px; border-bottom: 1px solid rgba(100,166,255,0.16); background: rgba(100,166,255,0.08); color: var(--fg); font-size: 11.5px; }
+.edit-composer-icon { color: #9fc7ff; flex-shrink: 0; line-height: 0; }
+.edit-composer-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.82; }
+.edit-composer-cancel { flex-shrink: 0; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--fg); border-radius: 5px; padding: 2px 7px; font: inherit; font-size: 11px; cursor: pointer; }
+.edit-composer-cancel:hover { background: rgba(255,255,255,0.1); }
 .reference-chip-area { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; max-width: 100%; }
 .reference-chip-area:empty { display: none; }
 .reference-tray-summary { display: none; align-items: center; gap: 5px; min-height: 20px; padding: 0; border: none; background: transparent; color: var(--fg); font-size: 12px; font-family: inherit; opacity: 0.64; cursor: pointer; flex-shrink: 0; }
@@ -644,10 +653,11 @@ body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6
 .topic-date-group { position: sticky; top: 0; z-index: 1; font-size: 10px; opacity: 0.5; padding: 8px 6px 5px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700; background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 94%, #202020), rgba(0,0,0,0)); backdrop-filter: blur(6px); }
 .topic-date-group:first-child { padding-top: 4px; }
 /* Retract confirm */
-.retract-confirm { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 999; display: flex; align-items: center; justify-content: center; }
-.retract-confirm-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 18px 22px; max-width: 260px; text-align: center; }
-.retract-confirm-title { font-size: 13px; margin-bottom: 8px; }
-.retract-confirm-hint { font-size: 11px; opacity: 0.5; margin-bottom: 14px; }
+.retract-confirm { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 18px; }
+.retract-confirm-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; max-width: 390px; text-align: left; box-shadow: 0 18px 42px rgba(0,0,0,0.38); }
+.retract-confirm-title { font-size: 14px; font-weight: 700; margin-bottom: 9px; }
+.retract-confirm-hint { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; opacity: 0.72; margin-bottom: 15px; line-height: 1.5; }
+.retract-confirm-note { color: #f0b06d; opacity: 0.9; }
 .retract-confirm-btns { display: flex; gap: 8px; justify-content: center; }
 .retract-ok { background: var(--error); color: #fff; border: none; border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }
 .retract-cancel { background: none; border: 1px solid var(--border); color: var(--fg); border-radius: 6px; padding: 6px 18px; cursor: pointer; font-size: 12px; }

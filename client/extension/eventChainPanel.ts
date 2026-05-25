@@ -431,6 +431,7 @@ workspaceFolders[0]!,
             <div style="font-size:10px;">请确保工作区包含 events/ 目录</div>
         </div>
         <div id="legend">
+            <div class="legend-title">图例</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#4caf50;"></span> 入口事件</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#42a5f5;"></span> 触发型事件</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#5d4037;border:1px dashed #8d6e63;"></span> MTTH 事件</div>
@@ -443,6 +444,12 @@ workspaceFolders[0]!,
             <div class="legend-item"><span class="legend-swatch" style="background:#ff7043;border:1px dotted #ff7043;"></span> Flag 隐式连接</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ec407a;border:1px dotted #ec407a;"></span> on_action 隐式</div>
         </div>
+        <aside id="details-panel" class="empty" aria-live="polite">
+            <div class="details-empty">
+                <div class="details-empty-title">选择事件节点</div>
+                <div class="details-empty-copy">查看事件标题、来源位置，以及它在链路中的前后关系。</div>
+            </div>
+        </aside>
     </div>
 
     <div id="stats-bar"></div>

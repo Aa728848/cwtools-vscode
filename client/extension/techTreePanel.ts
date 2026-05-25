@@ -294,12 +294,19 @@ export class TechTreePanel {
             <div style="font-size:10px;">请确保工作区包含 common/technology/ 目录</div>
         </div>
         <div id="legend">
+            <div class="legend-title">图例</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#4fc3f7;"></span> 物理学</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#81c784;"></span> 社会学</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ffb74d;"></span> 工程学</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ce93d8; border-style:dashed; border-width:1px;"></span> 稀有科技</div>
             <div class="legend-item"><span class="legend-swatch" style="background:#ef5350;"></span> 危险科技</div>
         </div>
+        <aside id="details-panel" class="empty" aria-live="polite">
+            <div class="details-empty">
+                <div class="details-empty-title">选择科技节点</div>
+                <div class="details-empty-copy">查看领域、层级、费用、来源位置，以及它的前置和后续科技。</div>
+            </div>
+        </aside>
     </div>
 
     <div id="stats-bar"></div>

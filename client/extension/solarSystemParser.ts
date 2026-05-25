@@ -229,7 +229,7 @@ function strProp(nodes: PdxNode[], key: string): string | undefined {
 /**
  * Parse a value that could be: a number, { min = X max = Y }, or "random"
  */
-function parseValueOrRange(nodes: PdxNode[], key: string): ValueOrRange {
+function parseValueOrRange(nodes: PdxNode[], key: string, defaultValue = 0): ValueOrRange {
     // Check for block form: key = { min = X max = Y }
     const blockNode = nodes.find(n => n.key === key && n.children);
     if (blockNode?.children) {
@@ -253,7 +253,7 @@ function parseValueOrRange(nodes: PdxNode[], key: string): ValueOrRange {
         if (!isNaN(parsed)) return { type: 'fixed', value: parsed };
     }
 
-    return { type: 'fixed', value: 0 };
+    return { type: 'fixed', value: defaultValue };
 }
 
 /** Resolve a ValueOrRange to a single number for rendering */
@@ -307,7 +307,7 @@ function buildBody(
     const planetClass = strProp(nodes, 'class') ?? '';
     const orbitDistance = parseValueOrRange(nodes, 'orbit_distance');
     const orbitAngle = parseValueOrRange(nodes, 'orbit_angle');
-    const size = parseValueOrRange(nodes, 'size');
+    const size = parseValueOrRange(nodes, 'size', 15);
     const count = parseValueOrRange(nodes, 'count');
     const hasRing = strProp(nodes, 'has_ring') === 'yes';
     const homePlanet = strProp(nodes, 'home_planet') === 'yes';

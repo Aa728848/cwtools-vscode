@@ -198,6 +198,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     /** Pending structured references to attach to the next sent message */
     let activeContexts: ActiveContext[] = [];
     let editingMessageIndex: number | null = null;
+    let inlineEditSession: {
+        messageIndex: number;
+        container: HTMLElement;
+        bubble: HTMLElement;
+        actions: HTMLElement | null;
+    } | null = null;
     let savedInputRange: Range | null = null;
     let artifacts: ArtifactRecord[] = [];
     let artifactFilter: ArtifactFilter = 'all';
@@ -971,37 +977,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (fileBadges) fileBadges.innerHTML = '';
     }
 
-    function renderEditComposerState() {
-        let bar = document.getElementById('editComposerBar') as HTMLElement | null;
-        if (editingMessageIndex === null) {
-            bar?.remove();
-            updateComposerStackHeight();
-            return;
-        }
-
-        if (!bar) {
-            bar = document.createElement('div');
-            bar.id = 'editComposerBar';
-            bar.className = 'edit-composer-bar';
-            const container = document.querySelector('.input-container');
-            const inputRow = container?.querySelector('.input-row');
-            if (container && inputRow) container.insertBefore(bar, inputRow);
-            else inputWrapper?.prepend(bar);
-        }
-
-        bar.innerHTML = `
-            <span class="edit-composer-icon">${svgIconNoMargin('pencil')}</span>
-            <span class="edit-composer-text">正在编辑第 ${editingMessageIndex + 1} 条消息，发送后会从这里重新运行</span>
-            <button class="edit-composer-cancel" type="button">取消</button>
-        `;
-        bar.querySelector('.edit-composer-cancel')?.addEventListener('click', () => {
-            editingMessageIndex = null;
-            renderEditComposerState();
-            input.focus();
-        });
-        updateComposerStackHeight();
-    }
-
     function restoreComposerPayload(payload: UserMessageInputPayload) {
         const next = cloneInputPayload(payload);
         clearInput();
@@ -1023,14 +998,190 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         updateComposerStackHeight();
     }
 
+    function getInlineEditorText(editor: HTMLElement): string {
+        return (editor.innerText || editor.textContent || '')
+            .replace(/\r\n?/g, '\n')
+            .replace(/\u00a0/g, ' ')
+            .replace(/\u200b/g, '')
+            .replace(/\n$/, '');
+    }
+
+    function cancelInlineEdit(focusBubble = false) {
+        const session = inlineEditSession;
+        if (!session) {
+            editingMessageIndex = null;
+            return;
+        }
+        session.container.remove();
+        session.bubble.style.display = '';
+        if (session.actions) session.actions.style.display = '';
+        messageIndexMap.get(session.messageIndex)?.classList.remove('editing');
+        inlineEditSession = null;
+        editingMessageIndex = null;
+        if (focusBubble) session.bubble.focus();
+    }
+
+    function buildInlineContextChip(ctx: ActiveContext, onRemove: () => void): HTMLElement {
+        const meta = CONTEXT_TYPE_META[ctx.type] || CONTEXT_TYPE_META.file;
+        const range = typeof ctx.startLine === 'number' && typeof ctx.endLine === 'number'
+            ? ` #L${ctx.startLine}-${ctx.endLine}`
+            : typeof ctx.line === 'number'
+                ? ` #L${ctx.line + 1}`
+                : '';
+        const title = ctx.description || ctx.uri || ctx.label;
+        const metaBits = [
+            typeof ctx.tokenEstimate === 'number' && ctx.tokenEstimate > 0 ? `~${formatNum(ctx.tokenEstimate)} tok` : '',
+            ctx.cacheStatus ? ctx.cacheStatus : '',
+        ].filter(Boolean).join(' · ');
+        const el = document.createElement('span');
+        el.className = `reference-chip ref-${ctx.type}`;
+        el.title = title;
+        el.innerHTML = `
+            ${svgIconNoMargin(meta.icon)}
+            <span class="ref-kind">${escapeHtml(meta.label)}</span>
+            <span class="ref-text">${escapeHtml(ctx.label)}${range}</span>
+            ${metaBits ? `<span class="ref-meta">${escapeHtml(metaBits)}</span>` : ''}
+        `;
+        el.classList.add('inline-edit-chip');
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'inline-edit-remove';
+        remove.setAttribute('aria-label', '移除引用');
+        remove.textContent = '×';
+        remove.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove();
+        });
+        el.appendChild(remove);
+        return el;
+    }
+
     function beginEditMessage(messageIdx: number) {
         if (isGenerating) return;
         const payload = userMessagePayloadMap.get(messageIdx);
         if (!payload) return;
+        cancelInlineEdit();
+
+        const message = messageIndexMap.get(messageIdx);
+        const bubble = message?.querySelector<HTMLElement>('.user-bubble');
+        const actions = message?.querySelector<HTMLElement>('.message-actions');
+        if (!message || !bubble) return;
+
+        const draft = cloneInputPayload(payload);
+        let draftContexts = draft.contexts || [];
+        let draftImages = draft.images || [];
+
+        const editorCard = document.createElement('div');
+        editorCard.className = 'inline-message-editor';
+        editorCard.innerHTML = `
+            <div class="inline-edit-top">
+                <span>${svgIconNoMargin('pencil')}</span>
+                <span>编辑第 ${messageIdx + 1} 条消息，发送后会从这里重新运行</span>
+            </div>
+            <div class="inline-edit-context-row"></div>
+            <div class="inline-edit-text" contenteditable="true" role="textbox" aria-multiline="true"></div>
+            <div class="inline-edit-image-row"></div>
+            <div class="inline-edit-actions">
+                <button class="inline-edit-cancel" type="button">取消</button>
+                <button class="inline-edit-submit" type="button">${svgIconNoMargin('pointer')}发送</button>
+            </div>
+        `;
+
+        const textEditor = editorCard.querySelector<HTMLElement>('.inline-edit-text')!;
+        const contextRow = editorCard.querySelector<HTMLElement>('.inline-edit-context-row')!;
+        const imageRow = editorCard.querySelector<HTMLElement>('.inline-edit-image-row')!;
+        const submitBtn = editorCard.querySelector<HTMLButtonElement>('.inline-edit-submit')!;
+        const cancelBtn = editorCard.querySelector<HTMLButtonElement>('.inline-edit-cancel')!;
+        textEditor.textContent = draft.text;
+
+        const renderContexts = () => {
+            contextRow.innerHTML = '';
+            if (draftContexts.length === 0) {
+                contextRow.style.display = 'none';
+                return;
+            }
+            contextRow.style.display = '';
+            draftContexts.forEach(ctx => {
+                contextRow.appendChild(buildInlineContextChip(ctx, () => {
+                    draftContexts = draftContexts.filter(item => item.id !== ctx.id);
+                    renderContexts();
+                }));
+            });
+        };
+
+        const renderImages = () => {
+            imageRow.innerHTML = '';
+            if (draftImages.length === 0) {
+                imageRow.style.display = 'none';
+                return;
+            }
+            imageRow.style.display = '';
+            draftImages.forEach(src => {
+                const wrap = document.createElement('div');
+                wrap.className = 'inline-edit-image';
+                const img = document.createElement('img');
+                img.src = src;
+                img.title = '点击放大';
+                img.addEventListener('click', () => showImageLightbox(src));
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.setAttribute('aria-label', '移除图片');
+                remove.textContent = '×';
+                remove.addEventListener('click', () => {
+                    draftImages = draftImages.filter(item => item !== src);
+                    renderImages();
+                });
+                wrap.appendChild(img);
+                wrap.appendChild(remove);
+                imageRow.appendChild(wrap);
+            });
+        };
+
+        const submit = () => {
+            const text = getInlineEditorText(textEditor).trim();
+            if (!text && draftContexts.length === 0 && draftImages.length === 0) return;
+            submitBtn.disabled = true;
+            cancelBtn.disabled = true;
+            editorCard.classList.add('submitting');
+            vscode.postMessage({
+                type: 'editAndResendMessage',
+                messageIndex: messageIdx,
+                text,
+                contexts: draftContexts.length > 0 ? draftContexts.map(ctx => ({ ...ctx })) : undefined,
+                images: draftImages.length > 0 ? [...draftImages] : undefined,
+            });
+            editingMessageIndex = null;
+        };
+
+        textEditor.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey && !(e as KeyboardEvent).isComposing) {
+                e.preventDefault();
+                submit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelInlineEdit(true);
+            }
+        });
+        submitBtn.addEventListener('click', submit);
+        cancelBtn.addEventListener('click', () => cancelInlineEdit(true));
+
+        renderContexts();
+        renderImages();
+
         editingMessageIndex = messageIdx;
-        restoreComposerPayload(payload);
-        renderEditComposerState();
-        input.focus();
+        bubble.style.display = 'none';
+        if (actions) actions.style.display = 'none';
+        message.classList.add('editing');
+        bubble.insertAdjacentElement('afterend', editorCard);
+        inlineEditSession = { messageIndex: messageIdx, container: editorCard, bubble, actions: actions || null };
+        textEditor.focus();
+        const range = document.createRange();
+        range.selectNodeContents(textEditor);
+        range.collapse(false);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
     }
 
     function syncContextsFromComposer() {
@@ -2205,17 +2356,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const imagesToSend = pendingImages.length > 0 ? [...pendingImages] : undefined;
         const contextsToSend = activeContexts.length > 0 ? activeContexts.map(ctx => ({ ...ctx })) : undefined;
 
-        if (editingMessageIndex !== null) {
-            vscode.postMessage({
-                type: 'editAndResendMessage',
-                messageIndex: editingMessageIndex,
-                text,
-                contexts: contextsToSend,
-                images: imagesToSend,
-            });
-            editingMessageIndex = null;
-            renderEditComposerState();
-        } else if (activeContexts.length > 0) {
+        if (activeContexts.length > 0) {
             vscode.postMessage({
                 type: 'sendMessageWithReference',
                 text,
@@ -3634,8 +3775,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             </div>`;
         overlay.querySelector('.retract-ok')!.addEventListener('click', () => {
             overlay.remove();
-            editingMessageIndex = null;
-            renderEditComposerState();
+            cancelInlineEdit();
             vscode.postMessage({ type: 'retractMessage', messageIndex: messageIdx });
         });
         overlay.querySelector('.retract-cancel')!.addEventListener('click', () => overlay.remove());
@@ -4209,8 +4349,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (!isCurrentSurface(msg.targetSurface)) break;
                 clearActiveSubagentViews();
                 clearTopicWorkspaceState();
-                editingMessageIndex = null;
-                renderEditComposerState();
+                cancelInlineEdit();
                 while (chatArea.firstChild) chatArea.removeChild(chatArea.firstChild);
                 emptyState.style.display = '';
                 chatArea.appendChild(emptyState);
@@ -4287,6 +4426,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'loadTopicMessages':
                 if (!isCurrentSurface(msg.targetSurface)) break;
                 clearActiveSubagentViews();
+                cancelInlineEdit();
                 chatArea.innerHTML = '';
                 messageIndexMap.clear();
                 userMessagePayloadMap.clear();
@@ -4306,6 +4446,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
 
             case 'messageRetracted': {
+                if (inlineEditSession && inlineEditSession.messageIndex >= msg.messageIndex) {
+                    cancelInlineEdit();
+                }
                 // Find the retracted message element and remove it plus ALL subsequent siblings
                 const rd = messageIndexMap.get(msg.messageIndex);
                 if (rd) {
@@ -4326,8 +4469,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     if (idx >= msg.messageIndex) userMessagePayloadMap.delete(idx);
                 }
                 if (msg.restoredInput) {
-                    editingMessageIndex = null;
-                    renderEditComposerState();
+                    cancelInlineEdit();
                     restoreComposerPayload(msg.restoredInput);
                 }
                 break;

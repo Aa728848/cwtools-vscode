@@ -1,6 +1,5 @@
 # 🌌 Eddy's Stellaris CWTools
 
-[![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%209-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen.svg?style=flat-square)]()
 

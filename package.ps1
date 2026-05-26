@@ -45,7 +45,8 @@ if ($Version) {
         $JsonContent = Get-Content -Path $PackageJsonPath -Raw | ConvertFrom-Json
         $OldVersion = $JsonContent.version
         $JsonContent.version = $Version
-        $JsonContent | ConvertTo-Json -Depth 100 | Out-File -FilePath $PackageJsonPath -Encoding utf8
+        $JsonText = $JsonContent | ConvertTo-Json -Depth 100
+        [System.IO.File]::WriteAllText($PackageJsonPath, $JsonText)
         Write-Host "[✓] Successfully updated release/package.json: $OldVersion -> $Version" -ForegroundColor Green
         Write-Host "[!] Remember to log the updates in release/CHANGELOG.md!" -ForegroundColor Yellow
     } else {

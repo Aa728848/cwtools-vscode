@@ -1,0 +1,153 @@
+
+types = {
+	type[crisis_objective] = {
+		path = "game/common/crisis_objectives"
+		localisation = {
+			## required
+			Name = "$_name"
+			## required
+			Description = "$_desc"
+		}
+	}
+	type[crisis_level] = {
+		path = "game/common/crisis_levels"
+		#Todo: localisation?
+	}
+	type[menace_perk] = {
+		path = "game/common/menace_perks"
+		localisation = {
+			## required
+			Name = "$"
+			## required
+			Description = "$_desc"
+		}
+	}
+	type[crisis_path] = {
+		path = "game/common/crisis_paths"
+	}
+	
+	type[cloud_type] = {
+		path = "game/common/dust_clouds"
+	}
+}
+
+## replace_scopes = { this = country root = country }
+crisis_level = {
+	## cardinality = 0..1
+	allow = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	required_crisis_currency = int
+
+	# REWARDS
+	perks = {
+		## cardinality = 0..inf
+		<menace_perk>
+	}
+
+	on_unlock = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+}
+
+crisis_objective = {
+	## cardinality = 0..1
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+
+	reward = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	## cardinality = 0..1
+	recurring = yes
+}
+
+menace_perk = {
+	portrait = <sprite>
+
+	## cardinality = 0..1
+	## replace_scopes = { this = country root = country }
+	resources = {
+		category = <economic_category>
+		alias_name[economic_template_only_produces] = alias_match_left[economic_template_only_produces]
+	}
+
+	## cardinality = 0..1
+	## replace_scopes = { this = country root = country }
+	modifier = {
+		alias_name[modifier] = alias_match_left[modifier]
+	}
+
+	## cardinality = 0..1
+	## replace_scopes = { this = country root = country }
+	on_unlock = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+}
+
+
+crisis_path = {
+	crisis_currency = <resource>
+
+	levels = {
+		## cardinality = 0..inf
+		<crisis_level>
+	}
+
+	objectives = {
+		## cardinality = 0..inf
+		<crisis_objective>
+	}
+}
+
+cloud_type = {
+	textures = {
+		opacity_texture = filepath
+		diffuse_texture = filepath
+		lightning_texture_atlas = filepath
+		lightning_horisontal_tiles = int
+		lightning_vertical_tiles = int
+	}
+
+	parameters = {
+		min_size = float
+		max_size = float
+		size_change_speed = float
+		rotation_speed = float
+		counter_rotation_speed = float
+		min_opacity = float
+		max_opacity = float
+		opacity_change_speed = float
+		lightning_intencity_min = float
+		lightning_intencity_max = float
+		lightning_duration_min = float
+		lightning_duration_max = float
+		lightning_switch_interval_min = float
+		lightning_switch_interval_max = float
+		size_change_reversion = bool
+		opacity_change_reversion = bool
+	}
+
+	## cardinality = 0..1
+	ambient_object = {
+		type = <ambient_object>
+		scale = float
+		centric = bool
+	}
+
+	## replace_scope = { this = galacticobject from = country }
+	## cardinality = 0..1
+	on_system_added = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+
+	## replace_scope = { this = galacticobject from = country }
+	## cardinality = 0..1
+	on_system_removed = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+	
+	## cardinality = 0..1
+	condition = { alias_name[trigger] = alias_match_left[trigger] }
+}

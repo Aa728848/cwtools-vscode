@@ -1,0 +1,192 @@
+types = {
+	type[diplo_phrase] = {
+		path = "game/common/diplo_phrases"
+
+		type_per_file = yes
+		
+		## type_key_filter = greetings
+		subtype[greetings] = {
+		}
+		
+		## type_key_filter = action_ask_to_become
+		subtype[action_ask] = {
+		}
+		
+		## type_key_filter = action_demand_
+		subtype[action_demand] = {
+		}
+
+		## type_key_filter = action_offer_trade_deal
+		subtype[trade_offer] = {
+		}
+
+		## type_key_filter = action_declare_war
+		subtype[declare_war] = {
+		}
+		
+	}
+}
+
+#the types and stuff aren't important as they aren't referred to elsewhere, I am just making sure it validates the triggers and stuff
+
+#TODO: scalar = { should be localisation = {
+
+#TODO: find out whether opinion does anything
+
+#TODO Confirm
+#TODO Document
+diplo_phrase = {
+	## cardinality = 0..1
+	greetings = {
+		## cardinality = 0..inf
+		localisation = {
+			## replace_scope = { root = country this = country from = country }
+			trigger = { alias_name[trigger] = alias_match_left[trigger] }
+			## cardinality = 0..inf
+			weight = {
+				alias_name[modifier_rule] = alias_match_left[modifier_rule]
+			}
+		}
+	}
+	## cardinality = 0..inf
+	action_ask = {
+		enum[diplo_phrase_types] = {
+			## cardinality = 0..inf
+			localisation = {
+				## replace_scope = { root = country this = country from = country }
+				trigger = { alias_name[trigger] = alias_match_left[trigger] }
+				## cardinality = 0..inf
+				weight = {
+					alias_name[modifier_rule] = alias_match_left[modifier_rule]
+				}
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_trade = yes
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_gift = yes
+			}
+		}
+	}
+	## cardinality = 0..inf
+	action_demand = {
+		enum[diplo_phrase_types] = {
+			## cardinality = 0..inf
+			localisation = {
+				## replace_scope = { root = country this = country from = country }
+				trigger = { alias_name[trigger] = alias_match_left[trigger] }
+				## cardinality = 0..inf
+				weight = {
+					alias_name[modifier_rule] = alias_match_left[modifier_rule]
+				}
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_trade = yes
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_gift = yes
+			}
+		}
+	}
+	
+	## cardinality = 0..inf
+	<diplomatic_action> = {
+		## cardinality = 0..inf
+		enum[diplo_phrase_types] = {
+			## cardinality = 0..inf
+			localisation = {
+				## cardinality = 0..1
+				## replace_scope = { root = country this = country from = country }
+				trigger = { alias_name[trigger] = alias_match_left[trigger] }
+				## cardinality = 0..inf
+				weight = {
+					alias_name[modifier_rule] = alias_match_left[modifier_rule]
+				}
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_trade = yes
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_gift = yes
+			}
+		}
+	}
+	
+	## cardinality = 0..inf
+	enum[exclusive_diplomacy_ask] = {
+		## cardinality = 0..inf
+		enum[diplo_phrase_types] = {
+			## cardinality = 0..inf
+			localisation = {
+				## replace_scope = { root = country this = country from = country }
+				trigger = { alias_name[trigger] = alias_match_left[trigger] }
+				## cardinality = 0..inf
+				weight = {
+					alias_name[modifier_rule] = alias_match_left[modifier_rule]
+				}
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_trade = yes
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_gift = yes
+			}
+		}
+	}
+	
+	## cardinality = 0..inf
+	enum[exclusive_diplomacy_demand] = {
+		## cardinality = 0..inf
+		enum[diplo_phrase_types] = {
+			## cardinality = 0..inf
+			localisation = {
+				## replace_scope = { root = country this = country from = country }
+				trigger = { alias_name[trigger] = alias_match_left[trigger] }
+				## cardinality = 0..inf
+				weight = {
+					alias_name[modifier_rule] = alias_match_left[modifier_rule]
+				}
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_trade = yes
+				## cardinality = 0..1
+				###Only with action_offer_trade_deal
+				only_for_gift = yes
+			}
+		}
+	}
+	
+}
+
+enums = {
+	enum[diplo_phrase_types] = {
+		select
+		consider
+		propose
+		accept
+		refuse
+		reject
+		propose_vote
+		opinion
+	}
+	enum[exclusive_diplomacy_ask] = {
+		action_ask_to_become_dominion
+		action_ask_to_become_satellite
+		action_ask_to_become_signatory
+		action_ask_to_become_subsidiary
+		action_ask_to_become_thrall
+		action_ask_to_become_tributary
+		action_ask_to_become_vassalized
+		action_stop_stratified_technological_enlightenment
+		action_stratified_technological_enlightenment
+	}
+	enum[exclusive_diplomacy_demand] = {
+		action_demand_dominion
+		action_demand_satellite
+		action_demand_signatory
+		action_demand_subsidiary
+		action_demand_thrall
+		action_demand_tributary
+		action_demand_vassalization
+	}
+}

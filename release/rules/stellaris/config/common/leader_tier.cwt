@@ -1,0 +1,11 @@
+types = {
+	type[leader_tier] = {
+		path = "game/common/leader_tiers"
+	}
+}
+
+leader_tier = {
+	tier = int
+	## cardinality = 0..1
+	texture_postfix = scalar
+}

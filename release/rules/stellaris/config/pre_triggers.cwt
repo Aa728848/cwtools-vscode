@@ -1,0 +1,81 @@
+#  Information form game common\pop_jobs\000_pretriggers.txt and game events\000_added_pre_triggers_to_planet_events.txt   May be out of date as appears to be missing some pop job ones we have include below that are used.
+
+#planets:
+
+#### whether the  planet has an owner
+alias[planet_pre_trigger:has_owner] = bool
+
+#### whether the planet is its owner's homeworld
+alias[planet_pre_trigger:is_homeworld] = bool
+
+#### whether the planet still belong to its original owner
+alias[planet_pre_trigger:original_owner] = bool
+
+#### whether the planet owner is controlled by the computer (vs controlled by a human)
+alias[planet_pre_trigger:is_ai] = bool
+
+#### whether ground combat is going on the planet
+alias[planet_pre_trigger:has_ground_combat] = bool
+
+#### whether the planet is the capital world of the empire it belongs too
+alias[planet_pre_trigger:is_capital] = bool
+
+#### whether the planet is occupied
+alias[planet_pre_trigger:is_occupied_flag] = bool
+
+
+#pops: 
+
+#### whether the pop planet has an owner
+alias[pop_pre_trigger:has_owner] = bool
+
+#### whether the pop is enslaved
+alias[pop_pre_trigger:is_enslaved] = bool
+
+#### whether the pop is being purged
+alias[pop_pre_trigger:is_being_purged] = bool
+
+#### whether the pop is being assimilated
+alias[pop_pre_trigger:is_being_assimilated] = bool
+
+#### whether the pop is on a planet or not
+alias[pop_pre_trigger:has_planet] = bool
+
+#### whether the pop is sapient
+alias[pop_pre_trigger:is_sapient] = bool
+
+alias[pop_pre_trigger:is_robot_pop] = bool
+
+alias[pop_pre_trigger:is_robotic] = bool
+
+
+# system:
+#### whether the system belongs to anyone
+alias[system_pre_trigger:has_owner] = bool
+#### whether the system has an empire's capital in it
+alias[system_pre_trigger:is_capital] = bool
+#### whether the system is fully occupied
+alias[system_pre_trigger:is_occupied_flag] = bool
+
+
+# starbase:
+#### whether the starbase belongs to anyone
+alias[starbase_pre_trigger:has_owner] = bool
+#### whether the starbase's controller is not its owner
+alias[starbase_pre_trigger:is_occupied_flag] = bool
+
+
+# leader:
+#### whether the leader belongs to anyone
+alias[leader_pre_trigger:has_owner] = bool
+#### whether the leader is idle
+alias[leader_pre_trigger:is_idle] = bool
+
+
+# situation:
+#### whether the situation has a valid owner
+alias[situation_pre_trigger:has_owner] = bool
+
+# country:
+#### whether the situation has a valid owner
+alias[country_pre_trigger:is_ai] = bool

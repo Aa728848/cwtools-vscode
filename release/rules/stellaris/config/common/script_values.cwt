@@ -1,0 +1,2 @@
+alias[value:<script_value>] = value_field
+alias[<script_value>] = value_field

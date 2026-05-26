@@ -1,0 +1,149 @@
+
+scopes = {
+    Country = {
+        aliases = { country }
+    }
+	Leader = {
+        aliases = { leader }
+    }
+    System = {
+        aliases = { galacticobject system galactic_object }
+    }
+    Planet = {
+        aliases = { planet }
+    }
+	Ship = {
+        aliases = { ship }
+    }
+    Fleet = {
+        aliases = { fleet }
+    }
+	Pop = {
+        aliases = { pop }
+    }
+	"Pop Group" = {
+        aliases = { pop_group }
+    }
+	"Pop Job" = {
+        aliases = { job pop_job }
+    }
+	Trait = {
+		aliases = { trait }
+	}
+	"Ambient Object" = {
+        aliases = { ambientobject ambient_object }
+    }
+    Army = {
+        aliases = { army }
+    }
+    Species = {
+        aliases = { species }
+    }
+    "Pop Faction" = {
+        aliases = { popfaction pop_faction }
+    }
+    Sector = {
+        aliases = { sector }
+    }
+    Alliance = {
+        aliases = { alliance }
+    }
+    War = {
+        aliases = { war }
+    }
+    Megastructure = {
+        aliases = { megastructure }
+    }
+    Design = {
+        aliases = { design }
+    }
+    Starbase = {
+        aliases = { starbase }
+    }
+    Star = {
+        aliases = { star }
+    }
+	Deposit = {
+        aliases = { deposit }
+    }
+	"Archaeological Site" = {
+		aliases = { "archaeologicalsite" "archaeological_site" }
+	}
+    Federation = {
+        aliases = { federation }
+    }
+    "First Contact" = {
+        aliases = { first_contact }
+    }
+    "Espionage Operation" = {
+        aliases = { espionage_operation }
+    }
+    "Spy Network" = {
+        aliases = { spy_network spynetwork }
+    }
+    "Espionage Asset" = {
+        aliases = { espionage_asset }
+    }
+	"DLC Recommendation" = {
+		aliases = { dlc_recommendation }
+	}
+    Situation = {
+        aliases = { situation }
+    }
+	Agreement = {
+		aliases = { agreement }
+	}
+	Debris = {
+		aliases = { debris }
+	}
+	Explorer = {
+        aliases = { explorer }
+    }
+	"Background Planet" = {
+        aliases = { "backgroundplanet" "background_planet" }
+    }
+	"Astral Rift" = {
+		aliases = { "astral_rift" }
+	}
+	"Lock Country" = {
+		aliases = { "lockcountry"  "lock_country" }
+	}
+	Bypass = {
+		aliases = { bypass }
+	}
+	"Cosmic Storm" = {
+		aliases = { "cosmic_storm" storms }
+	}
+	"Cosmic Storm Influence Field" = {
+		aliases = { "cosmic_storm_influence_field" }
+	}
+	Exhibit = {
+		aliases = { exhibit }
+	}
+	"Ship Growth Stage" = {
+		aliases = { ship_growth_stage }
+	}
+}
+
+scope_groups = {
+    celestial_coordinate = {
+        planet ship fleet system ambient_object megastructure starbase archaeological_site first_contact
+        deposit pop pop_group pop_job army country leader debris astral_rift bypass
+    }
+    spatial_object = {
+        planet ship fleet ambient_object megastructure starbase archaeological_site debris galactic_object astral_rift bypass
+    }
+    target_species = {
+        country pop pop_group leader planet ship fleet army species first_contact
+    }
+    target_planet = {
+        pop pop_group planet deposit archaeological_site megastructure ship fleet army situation espionage_operation
+    }
+    target_country = {
+        planet fleet system ship pop pop_group pop_job army leader pop_faction country megastructure starbase deposit
+        sector archaeological_site first_contact spy_network agreement debris situation astral_rift bypass exhibit
+    }
+    target_leader = {
+        country fleet ship army leader archaeological_site first_contact espionage_operation spy_network planet
+    }
+}

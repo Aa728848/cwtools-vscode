@@ -1,0 +1,1165 @@
+#I got frustrated at there being SO MANY files, so I have thrown a whole lot together in here -Caligula
+#I like to put separate unless I get worn down by too many then I start putting them here - 17blue17 :)
+
+types = {
+	type[traitcolors] = {
+		path = "game/common/named_colors"
+	}
+	type[ambient_object] = {
+		name_field = "name"
+		path = "game/common/ambient_objects"
+		subtype[show_name] = {
+			show_name = yes
+		}
+		localisation = {
+			subtype[show_name] = {
+				## required
+				name = "$"
+			}
+		}
+		subtype[selectable] = {
+			selectable = yes
+		}
+	}
+	type[asteroid_belt_type] = { #reason for this rename is the way vanilla names stuff, creating ambiguity.
+		path = "game/common/asteroid_belts"
+	}
+	type[attitude] = {
+		path = "game/common/attitudes"
+		localisation = {
+			## required
+			name = "attitude_$"
+		}
+	}
+	type[button_effect] = {
+		path = "game/common/button_effects"
+	}
+	type[country_customization] = {
+		path = "game/common/country_customization"
+	}
+	type[system_type] = {
+		path = "game/common/system_types"
+		localisation = {
+			## required
+			name = "$"
+		}
+	}
+	## type_key_filter = part
+	type[start_screen_message] = {
+		path = "game/common/start_screen_messages"
+	}
+	type[precursors] = {
+		path = "game/common/precursor_civilizations"
+	}
+	## replace_scope = { root = system this = system }
+	type[sector_type] = {
+		path = "game/common/sector_types"
+		localisation = {
+			## required
+			name = "$"
+		}
+	}
+	## replace_scope = { root = sector this = sector }
+	type[sector_focus] = {
+		path = "game/common/sector_focuses"
+		subtype[hidden] = {
+			hidden = yes
+		}
+		localisation = {
+			subtype[!hidden] = {
+				## required
+				name = "st_$"
+				## required
+				desc = "st_$_desc"
+			}
+		}
+	}
+	type[map_mode] = {
+		path = "game/common/map_modes"
+		localisation = {
+			## required
+			name = "$"
+			## required
+			desc = "$_desc"
+		}
+	}
+	type[ai_budget] = {
+		path = "game/common/ai_budget"
+	}
+	type[trade_conversion] = {
+		path = "game/common/trade_conversions"
+	}
+	type[economic_plan] = {
+		path = "game/common/economic_plans"
+	}
+	type[artifact_actions] = {
+		path = "game/common/artifact_actions"
+	}
+	type[diplomacy_economy] = {
+        path = "game/common/diplomacy_economy"
+        type_per_file = yes
+	}
+	type[message_type] = {
+		name_field = key
+		path = "game/common/message_types"
+		subtype[message] = {
+			## cardinality = 0..1
+			default_toast = no
+		}
+		subtype[toast] = {
+			default_toast = yes
+		}
+	}
+	type[scripted_modifier] = {
+		path = "game/common/scripted_modifiers"
+		localisation = {
+			## required
+			name = "mod_$"
+		}
+	}
+	type[concept] = {
+		path = "game/common/game_concepts"
+		localisation = {
+			## required
+			Name = "$"
+			## required
+			Desc = "$_desc"
+		}
+	}
+	type[concept_categories] = {
+		path = "game/common/game_concept_categories"
+	}
+	type[leader_class] = {
+		path = "game/common/leader_classes"
+		localisation = {
+			## required
+			Name = "$"
+			## required
+			"Name w/Icon" = "$_with_icon"
+			## optional
+			Plural = "$_plural"
+			## optional
+			"Plural w/Icon" = "$_plural_with_icon"
+			## optional
+			Desc = "$_description"
+		}
+	}
+	type[targettype] = {
+		path = "game/common/target_types"
+	}
+	type[tradable_actions] = {
+		path = "game/common/tradable_actions" 
+	}
+	type[leader_tiers] = {
+		path = "game/common/leader_tiers"
+	}
+	
+	# Added from rules-sync update report
+	type[ai_espionage_operations] = {
+		path = "game/common/ai_espionage/operations"
+	}
+	type[ai_espionage_spynetworks] = {
+		path = "game/common/ai_espionage/spynetworks"
+	}
+	type[astral_rifts] = {
+		path = "game/common/astral_rifts"
+	}
+	type[cloaking_strength_levels] = {
+		path = "game/common/cloaking_strength_levels"
+	}
+	type[colony_automation_categories] = {
+		path = "game/common/colony_automation_categories"
+	}
+	type[colors] = {
+		path = "game/common/colors"
+	}
+	type[country_container] = {
+		path = "game/common/country_container"
+	}
+	type[dynamic_text] = {
+		path = "game/common/dynamic_text"
+	}
+	type[galactic_community_actions] = {
+		path = "game/common/galactic_community_actions"
+	}
+	type[gamesetup_settings] = {
+		path = "game/common/gamesetup_settings"
+	}
+	type[greeting_overlay_sounds] = {
+		path = "game/common/greeting_overlay_sounds"
+	}
+	type[lawsuits] = {
+		path = "game/common/lawsuits"
+	}
+	type[portrait_categories] = {
+		path = "game/common/portrait_categories"
+	}
+	type[portrait_sets] = {
+		path = "game/common/portrait_sets"
+	}
+	type[random_names_base] = {
+		path = "game/common/random_names/base"
+	}
+	type[resolution_groups] = {
+		path = "game/common/resolution_groups"
+	}
+	type[ship_sets] = {
+		path = "game/common/ship_sets"
+	}
+	type[system_tooltips] = {
+		path = "game/common/system_tooltips"
+	}
+}
+
+ambient_object = {
+	subtype[show_name] = {
+		###A localisation key.
+		name = localisation
+	}
+	subtype[!show_name] = {
+		name = scalar
+	}
+	subtype[selectable] = {
+		description = localisation
+		tooltip = localisation
+	}
+	subtype[!selectable] = {
+		## cardinality = 0..1
+		description = localisation
+		## cardinality = 0..1
+		tooltip = localisation
+	}
+	entity = <model_entity>
+	## cardinality = 0..1
+	selectable = bool
+	## cardinality = 0..1
+	###Determines whether you can read the name of the object ingame.
+	show_name = bool
+}
+
+asteroid_belt_type = {
+	## cardinality = 1..inf
+	mesh = scalar
+	## cardinality = 0..1
+	shader = scalar
+	## cardinality = 0..1
+	width = float
+	## cardinality = 0..1
+	density = float
+}
+
+attitude = {
+	type = scalar
+	behaviour = {
+		## cardinality = 0..1
+		attack = bool
+		## cardinality = 0..1
+		weaken = bool
+		## cardinality = 0..1
+		alliance = bool
+		## cardinality = 0..1
+		vassalize = bool
+		## cardinality = 0..1
+		trade = bool
+		## cardinality = 0..1
+		coexist = bool
+	}
+}
+
+# TODO Confirm
+# TODO Document
+button_effect = {
+	## replace_scope = { this = any root = any from = country }
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## replace_scope = { this = any root = any from = country }
+	allow = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## replace_scope = { this = any root = any from = country }
+	## cardinality = 0..1
+	effect = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+}
+
+#TODO Confirm
+#TODO Document
+#TODO Expand shelter
+country_customization = {
+	colony_shelter = {
+		#the building should be defined as capital! and probably level 0 as well. Please add a check for this
+		#the planet classes should be defined as colonizable!
+		default = <building>
+		## cardinality = 0..inf
+		<planet_class> = <building>
+	}
+	## cardinality = 0..1
+	graphical_culture_for_random_empire = {
+		## cardinality = 0..inf
+		<graphical_culture> = {
+			## cardinality = 0..inf
+			modifier = {
+				add = int
+				## cardinality = 0..1
+				species_portrait = <portrait>
+				## cardinality = 0..1
+				OR = {
+					## cardinality = 0..inf
+					species_portrait = <portrait>
+				}
+			}
+			## cardinality = 0..inf
+			modifier = {
+				add = int
+				graphical_culture = <graphical_culture>
+			}
+		}
+	}
+	## cardinality = 0..1
+	## replace_scope = { this = country root = country }
+	weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+}
+
+system_type = {
+	## replace_scope = { this = system root = system }
+	#TODO: it appears so, but the file uses owner (not space_owner). Check pls
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+
+	## replace_scope = { this = system root = system }
+	#TODO: it appears so, but the file uses owner (not space_owner). Check pls
+	## cardinality = 0..1
+	weight_modifier = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+}
+
+start_screen_message = {
+	location = int
+	localization = localisation
+
+	## replace_scope = { root = country this = country }
+	trigger = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+}
+
+# Sets the chance for a system getting a specific precursor and distributes star flags named after the precursor. Or something like that.
+precursors = {
+	size = int
+	## cardinality = 0..1
+	picture = <sprite>
+
+	## cardinality = 0..1
+	possible = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+}
+
+sector_type = {
+	system_scores = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	local_capital_scores = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	resource_conversion_table = {
+		energy = int
+		minerals = int
+	}
+	## cardinality = 0..1
+	resources = {
+		category = <economic_category>
+	}
+	max_jumps = int
+}
+
+sector_focus = {
+	## cardinality = 0..1
+	hidden = yes
+	## cardinality = 0..1
+	clear_blockers = bool
+
+	## cardinality = 0..1
+	ai_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+
+	## cardinality = 0..inf
+	district = {
+		key = <district>
+		weight = {
+			alias_name[modifier_rule] = alias_match_left[modifier_rule]
+		}
+	}
+
+	## cardinality = 0..inf
+	building = {
+		key = <building>
+		## cardinality = 0..1
+		###only works on buildings and upgrades; puts them at the front of the list (otherwise it will pick a district first, then a building, then an upgrade)
+		priority = yes
+		## cardinality = 0..1
+		###gets built whether or not a pop would work the jobs
+		exempt_from_jobs_check = yes
+		weight = {
+			alias_name[modifier_rule] = alias_match_left[modifier_rule]
+		}
+	}
+}
+
+#TODO Confirm
+#TODO Colours
+map_mode = {
+	icon =  <sprite>
+	enable_terra_incognita = bool
+	## cardinality = 0..1
+	can_change_point_of_view = bool
+	## cardinality = 0..1
+	display_storms = bool
+	## cardinality = 0..1
+	tutorial = STORM_FORECAST_MAP_MODE
+	## cardinality = 0..1
+	shortcut = scalar
+	## cardinality = 0..1
+	display_claims = bool
+	## cardinality = 0..1
+	display_espionage_operations = bool
+	
+	## cardinality = 0..1
+	visible = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+
+	## cardinality = 1..inf
+	color = {
+		## cardinality = 0..1
+		type = country_and_borders
+		## cardinality = 0..1
+		type = country
+		## cardinality = 0..1
+		type = borders
+		## cardinality = 0..1
+		zoom = int
+
+		## cardinality = 1..1
+        value = country
+		## cardinality = 1..1
+        value = union
+		## cardinality = 1..1
+		value = {
+			##cardinality = 3..4
+			float
+		}
+		## cardinality = 0..1
+		custom_tooltip = localisation
+		## cardinality = 0..1
+		hardcoded_tooltip = enum[hardcoded_map_mode_tooltip]
+		## replace_scope = { root = country this = country from = country }
+        condition = {
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+		## cardinality = 0..1
+		filter = enum[hardcoded_map_mode_filters]
+    }
+}
+
+enums = {
+	enum[hardcoded_map_mode_tooltip] = {
+		opinion
+		country
+		intel
+	}
+	enum[hardcoded_map_mode_filters] = {
+		exploration
+		expansion
+		exploitation
+		details
+		unions
+		players
+		sectors
+		trade_routes
+	}
+}
+
+## replace_scope = { this = country root = country }
+ai_budget = {
+	resource = <resource>
+	type = expenditure
+	type = upkeep
+	category = <economic_category>
+
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+
+	## cardinality = 0..1
+	weight = {
+		enum[weight_or_base] = float
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+
+	## cardinality = 0..1
+	desired_max = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+
+	## cardinality = 0..1
+	desired_min = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+}
+
+trade_conversion = {
+	## replace_scope = { this = country from = country }
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	conversion_rate = {
+		## cardinality = 1..inf
+		<resource> = float
+	}
+	economic_category = <economic_category>
+}
+
+economic_plan = {
+	## cardinality = 0..1
+	income = {
+		## cardinality = 1..inf
+		<resource> = int
+	}
+
+	## cardinality = 0..1
+	focus = {
+		## cardinality = 1..inf
+		<resource> = int
+	}
+
+	## cardinality = 1..inf
+	subplan = {
+		## replace_scope = { this = country root = country }
+		## cardinality = 0..1
+		potential = {
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+
+		## cardinality = 0..1
+		income = {
+			## cardinality = 1..inf
+			<resource> = int
+		}
+
+		## cardinality = 0..1
+		focus = {
+			## cardinality = 1..inf
+			<resource> = int
+		}
+		## cardinality = 0..1
+		pops = int
+		## cardinality = 0..1
+		empire_size = float
+		## cardinality = 0..1
+		naval_cap = int
+
+		## cardinality = 0..1
+		set_name = scalar
+		## cardinality = 0..1
+		scaling = bool
+		## cardinality = 0..1
+		optional = bool
+	}
+
+	## cardinality = 0..1
+	pops = int
+	## cardinality = 0..1
+	empire_size = float
+	## cardinality = 0..1
+	naval_cap = int
+
+	## cardinality = 0..1
+	## replace_scope = { this = country root = country }
+	ai_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+}
+
+diplomacy_economy = {
+	once = {
+		## cardinality = 0..inf
+		scalar = {
+			## replace_scopes = { this = country root = country from = country }
+			trigger = {
+				alias_name[trigger] = alias_match_left[trigger]
+			}
+			resources = {
+				category = <economic_category>
+				alias_name[economic_template] = alias_match_left[economic_template]
+			}
+		}
+	}
+	per_relation = {
+		#Not sure if you can define your own stuff here so used an enum
+		## cardinality = 0..inf
+		scalar = {
+			## replace_scopes = { this = country root = country from = country }
+			trigger = {
+				alias_name[trigger] = alias_match_left[trigger]
+			}
+			resources = {
+				category = <economic_category>
+				alias_name[economic_template] = alias_match_left[economic_template]
+			}
+		}
+	}
+}
+
+message_type = {
+	icon =	<sprite>
+	## cardinality = 0..1
+	icon_frame = int
+	### Message key, used from code.
+	key = scalar
+	## cardinality = 0..1
+	### Localization key to use for title, if empty it will use "MESSAGE_<key>_TITLE" instead.
+	name = localisation
+	## cardinality = 0..1
+	sound = <sound_effect>
+	## cardinality = 0..1
+	### Deprecated and does nothing.
+	sound_is_advisor = bool
+	## cardinality = 0..1
+	ping = <pingmap>
+	## cardinality = 0..1
+	### Specifies if the message should be auto opened or not (default: player)
+	### Some messages as events ignore this since they have their own option.
+	auto_opens = enum[auto_open_type]
+	## cardinality = 0..1
+	### Should the message displayed as a toast? (default: no)
+	default_toast = bool
+	## cardinality = 0..1
+	# Should the message type be hidden in the message settings UI? (default: no)
+	hidden_in_message_settings = bool
+	## cardinality = 0..1
+	### Localization key to use in message settings, if empty it will use name instead.
+	message_setting_key = localisation
+	## cardinality = 0..1
+	### Filter category in message settings (default: other)
+	category = enum[message_setting_category]
+	## cardinality = 0..1
+	### Is the message disabled in message settings by default? (default: no)
+	default_disabled = bool
+	## cardinality = 0..1
+	default_notification = bool
+	## cardinality = 0..1
+	default_autopause = bool
+	## cardinality = 0..1
+	default_notification = bool
+	## cardinality = 0..1
+	default_popup = bool
+	## cardinality = 0..1
+	can_disable = bool
+}
+
+enums = {
+	enum[auto_open_type] = {
+		none
+		player
+		others
+		all
+		always
+	}
+	enum[message_setting_category] = {
+		diplomacy
+		military
+		economy
+		government
+		science
+		fleets
+		planets
+		leaders
+		other
+		cosmic_storm
+		focuses
+	}
+	enum[target_type_enum] = {
+		enemy
+		ally
+		controlled
+		owned
+	}
+}
+
+scripted_modifier = {
+	## cardinality = 0..1
+	###name of file in gfx\interface\icons\modifiers (without the .dds). Default is "mod_" + key
+	icon = scalar
+	## cardinality = 0..1
+	###show as a % or not (default: no)
+	percentage = bool
+	## cardinality = 0..1
+	###sets the minimum this modifier can be when used as a multiplier in the source code (so probably not relevant since this modifier will not be applied in the source code - but you could theoretically overwrite a code-generated modifier here). Default 0
+	min_mult = float
+	## cardinality = 0..1
+	###default 2
+	max_decimals = int
+	## cardinality = 0..1
+	###sets if it registers as "good" (i.e. a positive number is green, a negative red). Default no.
+	good = bool
+	## cardinality = 0..1
+	###sets if no value is either good or bad (all is yellow). Default no.
+	neutral = bool
+	## cardinality = 0..1
+	###probably hides it in tooltips? Needs testing. Default no.
+	hidden = bool
+	## cardinality = 0..1
+	###Default no
+	no_diff = bool
+	## cardinality = 0..1
+	###Default no
+	cap_zero_to_one = bool
+	## cardinality = 0..1
+	###Default no
+	localize_with_value_key = bool
+	###sets the modifier category, which is sometimes used to determine whether it is applied to a certain object (so make sure this is set to what you want)
+	category = enum[scripted_modifier_categories]
+}
+
+concept = {
+	
+	## cardinality = 0..1
+	icon = filepath
+	## cardinality = 0..1
+	###Aliases that display the same concept
+	###Used by the base game to add singular/plural variations
+	alias = {
+		## cardinality = 1..inf
+		localisation
+	}
+	## cardinality = 0..1
+	databank = {
+		category = <concept_categories>
+		icon = <sprite>
+		picture = <sprite>
+	}
+	## cardinality = 0..1
+	wiki = scalar
+	## cardinality = 0..1
+	icon = filepath
+	## cardinality = 0..1
+	tooltip_override = localisation
+}
+
+concept_categories = {
+	name = localisation
+	icon = <sprite>
+}
+
+leader_class = {
+	name = localisation
+	name_plural = localisation
+	description = localisation
+	## cardinality = 0..1
+	###default = no
+	can_lead_navy = bool
+	## cardinality = 0..1
+	###default = no
+	can_lead_army = bool
+	## cardinality = 0..1
+	###default = no
+	can_research = bool
+	## cardinality = 0..1
+	###default = no
+	can_govern_planet = bool
+	## cardinality = 0..1
+	###default = no
+	can_be_envoy = bool
+	## cardinality = 0..1
+	###default = 0
+	assignment_cooldown = 360
+	## cardinality = 0..1
+	max_trait_points = int[0..inf]
+	## cardinality = 0..1
+	can_have_traits = bool
+	## cardinality = 0..1
+	## replace_scope = { this = leader root = leader }
+	resources = {
+		## cardinality = 0..1
+		category = <economic_category>
+		alias_name[economic_template] = alias_match_left[economic_template]
+	}
+	## cardinality = 0..1
+	default_category = enum[leader_classes]
+	## cardinality = 0..1
+	## replace_scope = { this = country root = country }
+	ai_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	## cardinality = 0..1
+	## replace_scope = { this = country root = country }
+	ai_location_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	## cardinality = 0..1
+	minimum_ai_target = int[0..inf]
+	## cardinality = 0..1
+	leader_background_job_weight = {
+		## cardinality = 1..inf
+		<job> = int
+	}
+	## cardinality = 0..1
+	can_be_assigned_to_federation = bool
+	## cardinality = 0..1
+	can_be_assigned_to_galactic_community = bool
+	## cardinality = 0..1
+	leader_capacity = @base_leader_cap
+	## cardinality = 0..inf
+	replaces_old_class = enum[old_leader_classes]
+	## cardinality = 0..1
+	icon = int
+	## cardinality = 0..1
+	paragon_background_selector = scalar
+	## cardinality = 0..1
+	can_research_tech = bool
+	## cardinality = 0..1
+	can_research_special_projects = bool
+	## cardinality = 0..1
+	can_crew_science_ship = bool
+	## cardinality = 0..1
+	can_research_anomalies = bool
+	## cardinality = 0..1
+	can_survey = bool
+	## cardinality = 0..1
+	can_boost_cloaking_detection = bool
+	## cardinality = 0..1
+	can_research_archaeology_site = bool
+	## cardinality = 0..1
+	can_explore_rifts = bool
+	## cardinality = 0..1
+	can_conduct_active_reconnaissance = bool
+	## cardinality = 0..1
+	recruitable = bool
+	## cardinality = 0..1
+	can_rule_empire = bool
+	## cardinality = 0..1
+	paragon_background_selector = scalar
+}
+
+artifact_actions = {
+
+	## cardinality = 0..1
+	sound = <sound_effect>
+
+	## cardinality = 0..1
+	resources = {
+		category = artifact_actions
+		cost = {
+			<resource> = int
+			## cardinality = 0..1
+			multiplier = value_field
+		}
+	}
+	
+	## cardinality = 0..1
+	ai_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+		
+	## cardinality = 0..1
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	
+	## cardinality = 0..1
+	allow = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+		
+	## cardinality = 0..1
+	effect = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+}
+
+targettype = {
+	target_type = enum[target_type_enum]
+}
+
+tradable_actions = {
+	## cardinality = 0..1
+	fire_and_forget = bool
+
+	## cardinality = 0..1
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..1
+	active = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..1
+	on_traded_effect = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+	## cardinality = 0..1
+	on_deal_ended_sender_effect = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+	## cardinality = 0..1
+	on_deal_ended_recipient_effect = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+	## cardinality = 0..1
+	ai_weight = {
+		weight = float
+		## cardinality = 0..inf
+		modifier = {
+			## cardinality = 0..1
+			factor = float
+			## cardinality = 0..1
+			weight = float
+			## cardinality = 0..1
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+	}
+}
+
+leader_tiers = {
+	tier = int
+	## cardinality = 0..1
+	texture_postfix = scalar
+}
+
+
+# ====== Auto-added generic schemas for missing types ====== 
+ai_espionage_operations = {
+	weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+}
+
+ai_espionage_spynetworks = {
+	strategy_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	network_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+}
+
+astral_rifts = {
+	name = localisation
+	## cardinality = 0..1
+	randomized = bool
+	## cardinality = 0..1
+	flags = {
+		## cardinality = 0..inf
+		value_set[astral_rift_flag]
+	}
+	## cardinality = 0..1
+	event_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	event = <event>
+	## cardinality = 0..1
+	on_roll_failed = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+}
+
+cloaking_strength_levels = {
+	icon = <sprite>
+	cloaking_strength = int
+	can_cloak = bool
+	## cardinality = 0..1
+	modifier = {
+		alias_name[modifier] = alias_match_left[modifier]
+	}
+}
+
+colony_automation_categories = {
+	## cardinality = 0..1
+	available = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+}
+
+colors = {
+	rgb = {
+		## cardinality = 3..4
+		int
+	}
+}
+
+country_container = {
+	## cardinality = 1..inf
+	scalar = {
+		resources = {
+			category = <economic_category>
+			## cardinality = 0..1
+			alias_name[economic_template] = alias_match_left[economic_template]
+		}
+	}
+}
+
+dynamic_text = {
+	## cardinality = 0..1
+	mandatory = {
+		## cardinality = 0..inf
+		scalar
+	}
+	## cardinality = 0..1
+	relevant = {
+		## cardinality = 0..inf
+		scalar
+	}
+	## cardinality = 0..1
+	add = {
+		## cardinality = 0..inf
+		scalar
+	}
+}
+
+galactic_community_actions = {
+	## cardinality = 0..1
+	resources = {
+		category = <economic_category>
+		alias_name[economic_template] = alias_match_left[economic_template]
+	}
+}
+
+gamesetup_settings = {
+	## cardinality = 0..inf
+	categories = {
+		## cardinality = 0..inf
+		scalar = {
+			name = localisation
+			## cardinality = 0..inf
+			settings = {
+				## cardinality = 0..inf
+				scalar = scalar
+				## cardinality = 0..inf
+				scalar = {
+					## cardinality = 0..inf
+					scalar = scalar
+				}
+			}
+		}
+	}
+}
+
+greeting_overlay_sounds = {
+	soundeffect = <sound_effect>
+	possible = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+}
+
+lawsuits = {
+	effect = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+	cost = {
+		## cardinality = 0..inf
+		<resource> = int
+	}
+	duration = int
+}
+
+portrait_categories = {
+	name = localisation
+	sets = {
+		## cardinality = 0..inf
+		<portrait_sets>
+	}
+}
+
+portrait_sets = {
+	species_class = <species_class>
+	## cardinality = 0..1
+	portraits = {
+		## cardinality = 0..inf
+		<portrait>
+		## cardinality = 0..inf
+		<portrait_group>
+	}
+	## cardinality = 0..inf
+	conditional_portraits = {
+		## cardinality = 0..1
+		randomizable = bool
+		## cardinality = 0..1
+		randomizable = {
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+		## cardinality = 0..1
+		playable = {
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+		## cardinality = 0..1
+		playable = bool
+		## cardinality = 0..1
+		portraits = {
+			## cardinality = 0..inf
+			<portrait>
+			## cardinality = 0..inf
+			<portrait_group>
+		}
+	}
+	## cardinality = 0..1
+	non_randomized_portraits = {
+		## cardinality = 0..inf
+		<portrait>
+		## cardinality = 0..inf
+		<portrait_group>
+	}
+	## cardinality = 0..1
+	non_pre_ftl_portraits = {
+		## cardinality = 0..inf
+		<portrait>
+		## cardinality = 0..inf
+		<portrait_group>
+	}
+	## cardinality = 0..1
+	uplifted_portraits = {
+		## cardinality = 0..inf
+		<portrait>
+		## cardinality = 0..inf
+		<portrait_group>
+	}
+}
+
+random_names_base = {
+	## cardinality = 0..inf
+	scalar
+}
+
+resolution_groups = {
+	color_index = int
+	text_color_code = scalar
+}
+
+ship_sets = {
+	name = localisation
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+}
+
+system_tooltips = {
+	## cardinality = 0..inf
+	custom_tooltip = {
+		## cardinality = 0..1
+		success_text = localisation
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+}

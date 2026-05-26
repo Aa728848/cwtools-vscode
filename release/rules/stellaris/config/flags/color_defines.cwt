@@ -1,0 +1,35 @@
+types = {
+	type[color_define] = {
+		path = "game/flags" #this is stored under flags but it does more than that
+		skip_root_key = colors
+	}
+	## type_key_filter = randomizable_combo
+	type[randomizable_combo] = {
+		path = "game/flags" #this is stored under flags but it does more than that
+	}
+	type[named_color] = {
+		path = "common/named_colors"
+	}
+}
+
+#all defined colors are nestled within a field called colors = { } please see the pertinent file.
+
+color_define = {
+	flag = colour[rgb]
+	flag = colour[hsv]
+	map = colour[rgb]
+	map = colour[hsv]
+	ship = colour[rgb]
+	ship = colour[hsv]
+	## cardinality = 0..1
+	use_as_border_color = no
+}
+
+randomizable_combo = {
+	## cardinality = 3..3
+	<color_define>
+}
+
+named_color = {
+	color = colour[rgb]
+}

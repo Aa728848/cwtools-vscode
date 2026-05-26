@@ -1,0 +1,95 @@
+modifier_categories = {
+    Pops = {
+        supported_scopes = { pop pop_group planet leader galacticobject country }
+    }
+	"Pop Group" = {
+        supported_scopes = { pop pop_group planet leader galacticobject country }
+    }
+	Job = {
+       supported_scopes = { pop_job planet leader country }
+    }
+    Countries = {
+        supported_scopes = { country }
+    }
+    Armies = {
+        supported_scopes = { army planet leader country }
+    }
+    Leaders = {
+        supported_scopes = { leader country }
+    }
+    Planets = {
+        supported_scopes = { planet leader galacticobject country }
+    }
+    "Pop Factions" = {
+        supported_scopes = { popfaction country }
+    }
+    "Deposits" = {
+        supported_scopes = { deposit planet leader country }
+    }
+    "Orbital Stations" = {
+        supported_scopes = { galactic_object country }
+    }
+    "Space Stations" = {
+        supported_scopes = { starbase country }
+    }
+	"Military Ships" = {
+        supported_scopes = { ship starbase fleet leader country }
+    }
+	"Civilian Ships" = {
+        supported_scopes = { ship starbase fleet leader country }
+    }
+	"Science Ships" = {
+        supported_scopes = { ship starbase fleet leader country }
+    }
+	"Transport Ships" = {
+        supported_scopes = { ship starbase fleet leader country }
+    }
+	"Owned Ships" ={
+		supported_scopes = { ship starbase fleet leader country }
+    }
+	Ships = {
+        supported_scopes = { ship starbase fleet leader country }
+    }
+	Fleets = {
+        supported_scopes = { fleet leader country }
+	}
+    Megastructures = {
+        supported_scopes = { megastructure country }
+    }
+    Habitability = {
+        supported_scopes = { species planet country }
+    }
+    Starbases = {
+        supported_scopes = { starbase country }
+    }
+    "Economic Units" = {
+        supported_scopes = { any }
+    }
+    "AI Economy" = {
+        supported_scopes = { any }
+    }
+    "Star Systems" = {
+        supported_scopes = { galacticobject }
+    }
+    Trade = {
+        supported_scopes = { country starbase }
+    }
+    Federations = {
+        supported_scopes = { federation }
+    }
+    Espionage = {
+        supported_scopes = { country spynetwork }
+    }
+	"Ship Design Stats" = {
+		 supported_scopes = { ship starbase fleet country }
+	}
+	"Astral Rift" = {
+		supported_scopes = { astral_rift }
+	}
+	None = {
+		supported_scopes = { any  }
+	}
+    All = {
+		supported_scopes = { any  }
+	}		
+}

@@ -1,0 +1,102 @@
+types = {
+	type[global_ship_design] = {
+		path = "game/common/global_ship_designs"
+		name_field = "name"
+	}
+}
+
+global_ship_design = {
+	## cardinality = 0..1
+	name = localisation
+	## cardinality = 0..1
+	roles = enum[ship_size_ship_roles]
+	## cardinality = 0..1
+	ship_size = <ship_size>
+	## cardinality = 0..1
+	custom_trade_weight = int
+	## cardinality = 0..1
+	hide_size = bool
+	## cardinality = 0..1
+	upgrades_to = localisation
+	## cardinality = 0..1
+	upgrades_to = {
+		## cardinality = 0..inf
+		localisation
+	}
+	## cardinality = 0..1
+	fleet_specialization_tag = enum[component_tags]
+	## cardinality = 0..1
+	graphical_culture = <graphical_culture>
+	## cardinality = 0..1
+	creature_designer_template = bool
+	## cardinality = 0..1
+	newborn_ship_design = localisation
+	## cardinality = 0..1
+	is_event_design = bool
+	## cardinality = 0..1
+	use_design_name = bool
+	## cardinality = 0..1
+	regenerates_when_disabled = bool
+	## cardinality = 0..1
+	### whether this design should be set to automatically upgrade its components (default: no)
+	upgrade_ship_components = bool
+	## cardinality = 0..1
+	### whether this design should be considered auto-generated, aka "auto-best" (default: no)
+	auto_gen_design = bool
+	## cardinality = 0..1
+	country_type = <country_type>
+	#these two triggers are connected. You need to have is_special_builable = yes + a trigger for this to work
+	## cardinality = 0..1
+	is_special_buildable = bool
+	## cardinality = 0..1
+	allow_buildable_trigger = <scripted_trigger>
+
+	## cardinality = 0..inf
+	section = {
+		## cardinality = 0..1
+		custom_military_power = float
+		## cardinality = 0..1
+		template = <section_template>
+		## cardinality = 0..1
+		#TODO Section slots
+		slot = enum[section_slots] #this is connected to ship_sizes and section templates!
+		## cardinality = 0..inf
+		component = {
+			#one slot, of one type! so one of the these two varients- and these need to match the component template as it is defined!
+			## cardinality = 0..1
+			slot = enum[component_slots]
+			## cardinality = 0..1
+			slot = enum[utility_component_slots]
+			## cardinality = 0..1
+			template = <component_template>
+		}
+	}
+	
+	## cardinality = 0..inf
+	required_component = <component_template.utility_component_template>
+
+	## cardinality = 0..1
+	growth_stages = {
+		## cardinality = 0..inf
+		{
+			ship_size = <ship_size>
+			section = {
+				template = <section_template>
+				slot = enum[section_slots]
+
+				## cardinality = 0..inf
+				component = {
+					#one slot, of one type! so one of the these two varients- and these need to match the component template as it is defined!
+					## cardinality = 0..1
+					slot = enum[component_slots]
+					## cardinality = 0..1
+					slot = enum[utility_component_slots]
+					## cardinality = 0..1
+					template = <component_template>
+				}
+			}
+			## cardinality = 0..inf
+			required_component = <component_template.utility_component_template>
+		}
+	}
+}

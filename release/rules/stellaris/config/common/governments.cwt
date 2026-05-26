@@ -1,0 +1,930 @@
+types = {
+	type[authority] = {
+		path = "game/common/governments/authorities"
+		localisation = {
+			## required
+			Name = "$"
+			## required
+			Description = "$_desc"
+		}
+	}
+	type[government] = {
+		path = "game/common/governments"
+		path_strict = yes
+		localisation = {
+			## required
+			Name = "$"
+			## required
+			Description = "$_desc"
+		}
+	}
+	type[civic_or_origin] = {
+		path = "game/common/governments/civics"
+		localisation = {
+			## required
+			Name = "$"
+			## required
+			Description = "$_desc"
+		}
+		subtype[origin] = {
+			is_origin = yes
+		}
+		subtype[civic] = {
+			## cardinality = 0..1
+			is_origin = no
+		}
+	}
+	## type_key_filter = swap_type
+	type[swapped_civic] = {
+		path = "game/common/governments/civics"
+		skip_root_key = any
+		name_field = "name"
+		subtype[localised] = {
+			name = scalar
+		}
+		localisation = {
+			subtype[localised] = {
+				## required
+				Name = "$"
+				## required
+				Description = "$_desc"
+			}
+		}
+	}
+	type[councilor] = {
+		path = "game/common/governments/councilors"
+		localisation = {
+			## required
+			Title = "$"
+			## optional
+			"Title (Female)" = "$_female"
+			## required
+			Description = "$_desc"
+		}
+		subtype[unbound] = {
+			## cardinality = 0..1
+			civic = none
+		}
+		subtype[civic] = {
+			civic = <civic_or_origin.civic>
+		}
+	}
+	type[council_agenda] = {
+		path = "game/common/council_agendas"
+		localisation = {
+			## required
+			Name = "council_agenda_$_name"
+			## required
+			Description = "council_agenda_$_desc"
+			## optional
+			"Alternate Description (Hive)" = "council_agenda_$_desc_hive"
+			## optional
+			"Alternate Description (Machine)" = "council_agenda_$_desc_machine"
+			## optional
+			Effect = "council_agenda_$_effect"
+		}
+	}
+}
+
+authority = {
+	## cardinality = 0..1
+	machine_empire = yes
+	## cardinality = 0..1
+	icon = filepath
+	## cardinality = 0..1
+	potential = {
+		## cardinality = 0..1
+		text = localisation
+		## cardinality = 0..1
+		always = bool
+
+		alias_name[government_trigger] = alias_match_left[government_trigger]
+	}
+	## cardinality = 0..1
+	possible = {
+		## cardinality = 0..1
+		text = localisation
+		## cardinality = 0..1
+		always = bool
+
+		alias_name[government_trigger] = alias_match_left[government_trigger]
+	}
+	## replace_scope = { this = no_scope root = no_scope } #this can check has_dlc and other likewise triggers, but thats it.
+	## cardinality = 0..inf
+	random_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	
+	## cardinality = 0..inf
+	advanced_authority_swap = {
+		name = localisation
+		description = localisation
+		inherit_icon = bool
+		inherit_effects = bool
+		## cardinality = 0..1
+		has_heir = bool
+		## cardinality = 0..1
+		ruler_council_position = <councilor>
+		trigger = {
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+		modifier = {
+			## cardinality = 0..1
+			custom_tooltip = localisation
+			## cardinality = 0..1
+			show_only_custom_tooltip = bool
+			alias_name[modifier] = alias_match_left[modifier]
+		}
+		## cardinality = 0..1
+		tags = {
+			## cardinality = 1..inf
+			localisation
+		}
+	}
+	
+	## cardinality = 0..1
+	traits = {
+		## cardinality = 0..inf
+		trait = <trait>
+	}
+	## cardinality = 0..1
+	## replace_scope = { this = country root = country }
+	country_modifier = {
+		alias_name[modifier] = alias_match_left[modifier]
+		## cardinality = 0..1
+		custom_tooltip = localisation
+		## cardinality = 0..1
+		show_only_custom_tooltip = no
+	}
+	## cardinality = 0..1
+	playable = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..1
+	has_heir = bool
+	## cardinality = 0..1
+	election_type = enum[election_types]
+	## cardinality = 0..1
+	### default = 0, hence required if defined to oligarchic or democratic
+	election_term_years = int
+	## cardinality = 0..1
+	### acts like random = int
+	election_term_variance = int
+	## cardinality = 0..1
+	re_election_allowed = bool
+	## cardinality = 0..1
+	can_have_emergency_elections = bool
+	## cardinality = 0..1
+	### default = -1, which equals limitless
+	max_election_candidates = int
+	## cardinality = 0..1
+	can_reform = bool
+	### is tied to the agenda files if = yes
+	### (note: this property has not been removed from existing authorities, although agendas have been removed as objects)
+	## cardinality = 0..1
+	has_agendas = bool
+	ruler_council_position = <councilor>
+	## cardinality = 0..1
+	has_factions = bool
+	## cardinality = 0..1
+	valid_for_released_vassal = bool
+	## cardinality = 0..1
+	localization_postfix = enum[authority_postfixes]
+	## cardinality = 0..1
+	localization_postfix = scalar
+	## cardinality = 0..1
+	trait_localization_postfix = scalar
+	## cardinality = 0..1
+	uses_mandates = bool
+	## cardinality = 0..1
+	color = {
+		## cardinality = 4..4
+		int
+	}
+
+	## cardinality = 0..1
+	tags = {
+		## cardinality = 1..inf
+		localisation
+	}
+}
+
+enums = {
+	enum[election_types] = {
+		none
+		oligarchic
+		democratic
+	}
+	enum[authority_postfixes] = {
+		hive_mind
+		machine_intelligence
+	}
+}
+
+government = {
+	### Determines if a government name can be chosen. AND trigger, scope: country; valid triggers: has_ethic, has_authority, has_valid_civic; everything else is undefined behavior!
+	## replace_scope = { root = country this = country }
+	possible = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## replace_scope = { this = country root = country }
+	### scriptable value, scope: country; the (possible) government type with the biggest weight is assigned to the country
+	weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	## cardinality = 0..1
+	ruler_title = localisation
+	## cardinality = 0..1
+	ruler_title_female = localisation
+	## cardinality = 0..1
+	heir_title = localisation
+	## cardinality = 0..1
+	heir_title_female = localisation
+	## cardinality = 0..1
+	### (Default = no)
+	use_regnal_names = bool
+	## cardinality = 0..1
+	### (Default = no)
+	dynastic_last_names = bool
+	## cardinality = 0..1
+	### if set to yes, empires changing to or from this government will be renamed even if authority type does not change (Default = no)
+	should_force_rename = bool
+}
+
+civic_or_origin = {
+	## cardinality = 0..1
+	### AND trigger, no scope; use this to prevent the civic from being selectable by the player (UI). Possibly only works with DLC checks.
+	playable = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..1
+	flags = {
+		## cardinality = 0..inf
+		localisation
+	}
+	## cardinality = 0..1
+	### AND trigger, no scope; use this to prevent the civic from being selectable by the AI. Possibly only works with DLC checks.
+	ai_playable = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..1
+	leader_background_job_weight = {
+		## cardinality = 1..inf
+		<job> = int
+	}
+	## cardinality = 0..inf
+	### requirements list, supports country_type, ethics, authority and civics. See ../readme_requirements.txt
+	possible = {	
+		## cardinality = 0..1
+		text = localisation
+		## cardinality = 0..1
+		always = bool
+	
+		alias_name[government_trigger] = alias_match_left[government_trigger]
+	}
+	## cardinality = 0..1
+	### requirements list, supports country_type, ethics, authority and civics. See ../readme_requirements.txt
+	potential = {
+		## cardinality = 0..1
+		text = localisation
+		## cardinality = 0..1
+		always = bool
+
+		alias_name[government_trigger] = alias_match_left[government_trigger]
+	}
+	## cardinality = 0..1
+	modification = {
+		## cardinality = 0..1
+		moddable_conditions_custom_tooltip = localisation
+		## cardinality = 0..1
+		add = {
+			## cardinality = 1..inf
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+		## cardinality = 0..1
+		remove = {
+			## cardinality = 0..1
+			fail_text = localisation
+			## cardinality = 1..inf
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+	}
+	## cardinality = 0..1
+	alternate_civic_version = <civic_or_origin.civic>
+	## cardinality = 0..1
+	icon = filepath
+	## cardinality = 0..inf
+	### localisation of custom effects
+	description = localisation
+	## cardinality = 0..1
+	negative_description = localisation
+	## cardinality = 0..inf
+	## replace_scope = { root = country this = country }
+	### Scriptable weight for randomizing a civic
+	### Note: If omitted, a default weight of 1 is used
+	### Also note: after game start, AI selection of new civics uses the below weight instead
+	random_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	## cardinality = 0..inf
+	## replace_scope = { this = country root = country }
+	### modifier added to the country if the civic is selected and valid
+	modifier = {
+		## cardinality = 0..1
+		alias_name[modifier] = alias_match_left[modifier]
+	}
+	## cardinality = 0..1
+	hide_modifiers = bool
+	## cardinality = 0..1
+	custom_tooltip_with_modifiers = localisation
+	## cardinality = 0..1
+	starting_colony = <planet_class>
+	## cardinality = 0..inf
+	swap_type = {
+		subtype[localised] = {
+			name = scalar
+		}
+		## cardinality = 0..1
+		name = scalar
+		## cardinality = 0..1
+		description = localisation
+		## cardinality = 0..1
+		negative_description = localisation
+		### In empire creation / galaxy setup, this has no scope. During the game, when there are actual countries existing, it is set to country scope.
+		### If you want to use country scope here, you must always check is_scope_valid first (see civic_devouring_swarm), or you will get errors or it won't work as intended.
+		trigger = {
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+		## cardinality = 0..1
+		### modifier that is applied to the country when triggers are evaluated as true
+		modifier = {
+			alias_name[modifier] = alias_match_left[modifier]
+		}
+	}
+	subtype[origin] = {
+		is_origin = yes
+		picture = <sprite>
+		## cardinality = 0..1
+		room = icon[gfx/portraits/city_sets]
+		## cardinality = 0..1
+		city_graphical_culture = <graphical_culture>
+		## cardinality = 0..1
+		portrait = <portrait>
+		## cardinality = 0..1
+		initializers = {
+			## cardinality = 1..inf
+			<solar_system_initializer>
+		}
+		max_once_global = yes
+		## cardinality = 0..1
+		flags = {
+			## cardinality = 0..inf
+			value_set[country_flag]
+		}
+		## cardinality = 0..1
+		advanced_start = bool
+		## cardinality = 0..1
+		blocks_random_machine_empire_generation	= bool
+		## cardinality = 0..1
+		### default: empty; trait set to enforce on the primary species
+		soft_traits = {
+			## cardinality = 0..inf
+			trait = <trait.species_trait>
+		}	
+		## cardinality = 0..1
+		### default: empty; trait set to enforce on the primary species. They cannot be removed, but more can be added if points/picks permit
+		traits = {
+			## cardinality = 0..inf
+			trait = <trait.species_trait>
+		}
+		## cardinality = 0..1
+		###Such a descriptive tag, this.
+		non_colonizable_planet_class_neighbor = yes
+		## cardinality = 0..1
+		### default: none; if present, will enable secondary species customization in empire designer and will create secondary species & pops at galaxy generation time (see empire_init_create_capital_secondary_pops)
+		has_secondary_species = {
+			title = localisation
+			## cardinality = 0..1
+			traits = {
+				## cardinality = 1..5
+				trait = <trait>
+			}
+		}
+		## cardinality = 0..1
+		habitability_preference = <planet_class>
+		## cardinality = 0..1
+		preferred_planet_class_neighbor = no
+		
+		## cardinality = 0..1
+		removed_climate_labels = { 
+			## cardinality = 0..inf
+			scalar
+		}
+		## cardinality = 0..1
+		added_climate_labels = { 
+			## cardinality = 0..inf
+			scalar
+		}
+		## cardinality = 0..1
+		removed_planet_types = { 
+			## cardinality = 0..inf
+			<planet_class>
+		}
+		## cardinality = 0..1
+		added_planet_types = { 
+			## cardinality = 0..inf
+			<planet_class>
+		}
+		
+		## cardinality = 0..1
+		## replace_scope = { this = country root = country }
+		ai_weight = {
+			alias_name[modifier_rule] = alias_match_left[modifier_rule]
+		}
+	}
+	subtype[civic] = {
+		## cardinality = 0..1
+		playable = {
+			alias_name[trigger] = alias_match_left[trigger]
+		}
+		## cardinality = 0..1
+		###default: yes
+		pickable_at_start = bool
+		## cardinality = 0..1
+		###default: yes, set to no to prevent adding or removing this after creation of the empire
+		modification = bool
+		## cardinality = 0..1
+		###default: no
+		can_build_ruler_ship = bool
+		## cardinality = 0..1
+		### default: empty; trait set to enforce on the primary species
+		traits = {
+			## cardinality = 0..inf
+			trait = <trait.species_trait>
+		}
+		## cardinality = 0..1
+		### default: none; if present, will enable secondary species customization in empire designer and will create secondary species & pops at galaxy generation time (see empire_init_create_capital_secondary_pops)
+		has_secondary_species = {
+			title = localisation
+			## cardinality = 0..1
+			traits = {
+				## cardinality = 1..5
+				trait = <trait>
+			}
+		}
+		## cardinality = 0..1
+		removed_climate_labels = { 
+			## cardinality = 0..inf
+			scalar
+		}
+		## cardinality = 0..1
+		added_climate_labels = { 
+			## cardinality = 0..inf
+			scalar
+		}
+		## cardinality = 0..1
+		removed_planet_types = { 
+			## cardinality = 0..inf
+			<planet_class>
+		}
+		## cardinality = 0..1
+		added_planet_types = { 
+			## cardinality = 0..inf
+			<planet_class>
+		}
+		## cardinality = 0..inf
+		multiply_by_habitability_effect_modifier = {
+			alias_name[modifier] = alias_match_left[modifier]
+		}
+		
+		## cardinality = 0..1
+		## replace_scope = { this = country root = country }
+		### Scriptable weight for AI picking civics in-game (when unlocking a new slot)
+		### Note: If omitted, a default weight of 1 is used. Not needed when "modification = no"
+		ai_weight = {
+			alias_name[modifier_rule] = alias_match_left[modifier_rule]
+		}
+	}
+}
+
+councilor = {
+	## cardinality = 0..1
+	### Civic that is required for this council position. Also used by UI. (Default = none)
+	civic = none
+	## cardinality = 0..1
+	### Civic that is required for this council position. Also used by UI. (Default = none)
+	civic = <civic_or_origin.civic>
+	## cardinality = 0..1
+	### Which leader classes can have this council position. Currently only used for the Recruit New Leader buttons. (Default = none)
+	leader_class = none
+	## cardinality = 0..1
+	### Which leader classes can have this council position. Currently only used for the Recruit New Leader buttons. (Default = none)
+	leader_class = {
+		## cardinality = 1..5
+		enum[leader_classes]
+	}
+	## cardinality = 0..1
+	## replace_scope = { this = country root = country }
+	### Country scope triggers to evaluate if the council position is allowed.
+	possible = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..1
+	## replace_scope = { this = leader root = leader }
+	### Leader scope triggers to evaluate if a leader can be assigned to this position.
+	is_leader_possible = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..1
+	## replace_scope = { this = country root = country }
+	### Country modifier, that is multiplied by assigned Leader's level.
+	modifier = {
+		alias_name[modifier] = alias_match_left[modifier]
+	}
+	## cardinality = 0..1
+	### Custom tooltip text shown instead of the auto-generated modifier tooltip text of the council position.
+	custom_tooltip = localisation
+	## cardinality = 0..1
+	### Custom tooltip text shown in addition to the auto-generated modifier tooltip text of the council position.
+	custom_tooltip_with_modifiers = localisation
+	## cardinality = 0..1
+	### Custom text shown instead of "UNLOCK_COUNCIL_POSITION_TOOLTIP" for council positions without a civic.
+	custom_unlock_title = localisation
+	## cardinality = 0..1
+	### Custom tooltip text shown for the requirements of the council position.
+	conditional_tooltip = localisation
+	## cardinality = 0..1
+	### Icon used for the council position, if a civic is not specified. (Default = icon for the corresponding civic)
+	icon = <sprite>
+	## cardinality = 0..1
+	### Is this position forced to be on the council. (Default = no)
+	required = bool
+	## cardinality = 0..1
+	ai_hiring_weight = {
+		## cardinality = 0..1
+		base = int
+		## cardinality = 0..1
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+	## cardinality = 0..1
+	ai_priority = int
+	## cardinality = 0..1
+	optional = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..inf
+	alias_name[triggered_country_modifier_country] = alias_match_left[triggered_country_modifier_country]
+}
+
+## replace_scope = { this = country root = country }
+council_agenda = {
+	agenda_cost = value_field
+	## cardinality = 0..1
+	### Optional, Overrides COUNCIL_AGENDA_COOLDOWN define, how many days until the agenda can be selected again
+	agenda_cooldown = value_field
+	potential = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	allow = {
+		alias_name[trigger] = alias_match_left[trigger]
+	}
+	## cardinality = 0..1
+	### Custom localization for the initial effect, if you're using weird on_actions to have one
+	initial_effect_custom_loc = localisation
+	## cardinality = 0..1
+	###Modifiers applied while the agenda is active (being prepared); usually similar but smaller modifiers compared to the finish_modifier
+	modifier = {
+		alias_name[modifier] = alias_match_left[modifier]
+	}
+	## cardinality = 0..1
+	init_effect = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+	## cardinality = 0..1
+	###Effects executed once the agenda is finished (launched); displayed in the agenda tooltip
+	effect = {
+		alias_name[effect] = alias_match_left[effect]
+	}
+	## cardinality = 0..1
+	### Optional, Overrides COUNCIL_AGENDA_FINISH_MODIFIER_DURATION define how many days the agenda's finish_modifier lasts for
+	agenda_finish_modifier_duration = value_field
+	## cardinality = 0..1
+	###Static modifier applied to the country upon finishing (launching) the agenda
+	finish_modifier = <static_modifier>
+	## cardinality = 0..1
+	ai_weight = {
+		alias_name[modifier_rule] = alias_match_left[modifier_rule]
+	}
+}
+
+#aliases - used in species_classes and perhaps other places.
+
+alias[government_trigger:authority] = {
+	## cardinality = 0..1
+	value = <authority>
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..inf
+		value = <authority>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		## cardinality = 0..inf
+		value = <authority>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..inf
+		value = <authority>
+	}
+}
+alias[government_trigger:country_type] = {
+	## cardinality = 0..1
+	value = <country_type>
+
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <country_type>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <country_type>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <country_type>
+	}
+}
+alias[government_trigger:ethics] = {
+	## cardinality = 0..3
+	value = <ethos>
+
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <ethos>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <ethos>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <ethos>
+	}
+}
+alias[government_trigger:civics] = {
+	## cardinality = 0..3
+	value = <civic_or_origin.civic>
+
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <civic_or_origin.civic>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <civic_or_origin.civic>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <civic_or_origin.civic>
+	}
+}
+
+alias[government_trigger:traits] = {
+	## cardinality = 0..3
+	value = <civic_or_origin.civic>
+
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <trait>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <trait>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <trait>
+	}
+}
+
+alias[government_trigger:preferred_planet_class] = {
+	## cardinality = 0..3
+	value = <civic_or_origin.civic>
+
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <planet_class>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <planet_class>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <planet_class>
+	}
+}
+
+alias[government_trigger:graphical_culture] = {
+	## cardinality = 0..1
+	value = <civic_or_origin.origin>
+
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <civic_or_origin.origin>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <civic_or_origin.origin>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <civic_or_origin.origin>
+		## cardinality = 2..99
+		value = <graphical_culture>
+	}
+}
+alias[government_trigger:origin] = {
+	## cardinality = 0..1
+	value = <civic_or_origin.origin>
+
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <civic_or_origin.origin>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <civic_or_origin.origin>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <civic_or_origin.origin>
+	}
+}
+alias[government_trigger:species_class] = {
+	## cardinality = 0..1
+	value = <species_class>
+	## cardinality = 0..inf	
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <species_class>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <species_class>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <species_class>
+	}
+}
+alias[government_trigger:species_archetype] = {
+	## cardinality = 0..1
+	value = <species_archetype>
+
+	## cardinality = 0..inf
+	OR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <species_archetype>
+	}
+	## cardinality = 0..inf
+	NOT = {
+		## cardinality = 0..1
+		text = localisation
+		value = <species_archetype>
+	}
+	## cardinality = 0..inf
+	NOR = {
+		## cardinality = 0..1
+		text = localisation
+		## severity = info
+		## cardinality = 2..99
+		value = <species_archetype>
+	}
+}
+alias[government_trigger:OR] = {
+	alias_name[government_trigger] = alias_match_left[government_trigger]
+}
+
+alias[government_trigger:AND] = {
+    alias_name[government_trigger] = alias_match_left[government_trigger]
+}
+
+alias[government_trigger:limit] = {
+    ## cardinality = 0..1
+	has_machine_age_dlc = bool
+	## cardinality = 0..1
+	has_synthetic_dawn = bool
+	## cardinality = 0..1
+	has_shroud_dlc = bool
+	## cardinality = 0..1
+	OR = {
+		## cardinality = 0..1
+		has_machine_age_dlc = bool
+		## cardinality = 0..1
+		has_synthetic_dawn = bool
+		## cardinality = 0..1
+		has_shroud_dlc = bool
+	}
+}
+
+alias[government_trigger:host_has_dlc] = enum[DLCs]
+
+alias[government_trigger:always] = bool
+
+alias[government_trigger:text] = localisation
+
+alias[government_trigger:has_synthetic_dawn] = bool
+alias[government_trigger:has_machine_age_dlc] = bool
+alias[government_trigger:has_shroud_dlc] = bool

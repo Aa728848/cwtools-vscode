@@ -30,4 +30,4 @@ Stellaris 模组开发辅助工具，基于 [CWTools](https://github.com/cwtools
 ## 安装
 1. 下载 `.vsix` 文件
 2. VS Code 中按 `Ctrl+Shift+P`，选择 `Extensions: Install from VSIX...`
-3. 首次启动时选择 Stellaris 原版游戏目录以生成缓存
+3. 首次启动时选择 Stellaris 游戏目录以生成缓存

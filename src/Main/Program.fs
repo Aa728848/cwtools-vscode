@@ -466,6 +466,7 @@ type Server(client: ILanguageClient) =
     let mutable validateVanilla: bool = false
     let mutable experimental: bool = false
     let mutable debugMode: bool = false
+    let mutable uiLanguage: string = "en"
     let mutable maxFileSize: int = 2
     let mutable generatedStrings: string = ":0 \"REPLACE_ME\""
     let mutable clientSupportsInsertReplaceEdit: bool = false
@@ -476,6 +477,13 @@ type Server(client: ILanguageClient) =
     let mutable dontLoadPatterns: string array = [||]
     /// key: FileName (use ConcurrentDictionary instead of immutable Map to reduce GC pressure)
     let locCache = System.Collections.Concurrent.ConcurrentDictionary<string, CWError list>()
+
+    let uiIsChinese () =
+        not (String.IsNullOrWhiteSpace uiLanguage)
+        && uiLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+
+    let uiText english chinese =
+        if uiIsChinese () then chinese else english
 
     /// Cached References().Localisation result — invalidated on RefreshLocalisationCaches.
     /// Avoids repeated materialization of ALL loc entries on every InlayHint/Hover request.
@@ -1421,14 +1429,20 @@ type Server(client: ILanguageClient) =
             | false, None ->
                 let fallbackConfigs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath
                 if fallbackConfigs.Length > 0 then
-                    let warningMsg = sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached, bundled, or workspace rules instead." activeGame
+                    let warningMsg =
+                        uiText
+                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached, bundled, or workspace rules instead. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
+                            (sprintf "无法从远程仓库更新 %A 的 CWTools 规则。将改用缓存、内置或工作区规则。若校验结果不完整，请运行“CWTools: 运行安装健康检查”。" activeGame)
                     logWarning warningMsg
                     client.ShowMessage(
                         { ``type`` = MessageType.Warning
                           message = warningMsg }
                     )
                 else
-                    let errorMsg = sprintf "Failed to update or load CWTools rules for %A. Please check folder permissions for %s." activeGame cp
+                    let errorMsg =
+                        uiText
+                            (sprintf "Failed to update or load CWTools rules for %A. No cached or bundled fallback rules were found at %s. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
+                            (sprintf "无法更新或加载 %A 的 CWTools 规则。未在 %s 找到缓存或内置备用规则。请重新安装 VSIX 或重新运行打包脚本，然后运行“CWTools: 运行安装健康检查”。" activeGame cp)
                     logError errorMsg
                     client.ShowMessage(
                         { ``type`` = MessageType.Error
@@ -1867,6 +1881,10 @@ type Server(client: ILanguageClient) =
                     | JsonValue.String "vic3" -> activeGame <- VIC3
                     | JsonValue.String "eu5" -> activeGame <- EU5
                     | JsonValue.String "paradox" -> activeGame <- Custom
+                    | _ -> ()
+
+                    match opt.Item("uiLanguage") with
+                    | JsonValue.String x -> uiLanguage <- x
                     | _ -> ()
 
                     match opt.Item("rulesCache") with

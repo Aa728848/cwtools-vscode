@@ -167,6 +167,24 @@
 				"category": "cwtools"
 			},
 			{
+				"command": "cwtools.openSetup",
+				"title": "%commands.cwtools.openSetup.title%",
+				"category": "cwtools",
+				"icon": "$(tools)"
+			},
+			{
+				"command": "cwtools.runInstallationDoctor",
+				"title": "%commands.cwtools.runInstallationDoctor.title%",
+				"category": "cwtools",
+				"icon": "$(pulse)"
+			},
+			{
+				"command": "cwtools.selectGameFolder",
+				"title": "%commands.cwtools.selectGameFolder.title%",
+				"category": "cwtools",
+				"icon": "$(folder-opened)"
+			},
+			{
 				"command": "listAllFiles",
 				"title": "%commands.listAllFiles.title%",
 				"category": "cwtools"

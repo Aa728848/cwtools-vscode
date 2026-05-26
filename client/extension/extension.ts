@@ -28,7 +28,7 @@ import { registerCodeActions } from './codeActions';
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
-import { getAllLanguageIds, getRulesRemoteUrl, getGameInfoMap, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
+import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import { IndexService } from './indexing/indexService';
 
 export let defaultClient: LanguageClient;
@@ -44,6 +44,386 @@ function safeRegisterCommand(context: ExtensionContext, commandId: string, handl
 	const disposable = commands.registerCommand(commandId, handler);
 	registeredCommands.set(commandId, disposable);
 	context.subscriptions.push(disposable);
+}
+
+type RulesSourceName = 'Manual' | 'Cache' | 'Bundled' | 'Workspace' | 'Missing';
+
+interface RulesSourceStatus {
+	source: RulesSourceName;
+	path?: string;
+	fileCount: number;
+}
+
+interface InstallHealthOptions {
+	context: ExtensionContext;
+	languageId: string;
+	cacheDir: string;
+	bundledRulesPath: string;
+	serverExe: string;
+	isVanillaFolder: boolean;
+	clientStarted: boolean;
+}
+
+let setupPanel: vs.WebviewPanel | undefined;
+
+function isChineseLocale(): boolean {
+	return vs.env.language.toLowerCase().startsWith('zh');
+}
+
+function localize(en: string, zh: string): string {
+	return isChineseLocale() ? zh : en;
+}
+
+function rulesSourceLabel(source: RulesSourceName): string {
+	if (!isChineseLocale()) return source;
+	switch (source) {
+		case 'Manual': return '手动';
+		case 'Cache': return '缓存';
+		case 'Bundled': return '内置';
+		case 'Workspace': return '工作区';
+		case 'Missing': return '缺失';
+	}
+}
+
+function countRuleFiles(folder?: string): number {
+	if (!folder || !fs.existsSync(folder)) return 0;
+	let count = 0;
+	const visit = (dir: string) => {
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			const fullPath = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				visit(fullPath);
+			} else {
+				const ext = path.extname(entry.name).toLowerCase();
+				if (ext === '.cwt' || ext === '.log') count++;
+			}
+		}
+	};
+	visit(folder);
+	return count;
+}
+
+function firstWorkspacePath(): string | undefined {
+	return workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function resolveBundledRulesPath(context: ExtensionContext, languageId: string): string {
+	const packagedPath = context.asAbsolutePath(path.join('rules', languageId, 'config'));
+	if (fs.existsSync(packagedPath)) return packagedPath;
+	if (languageId === 'stellaris') {
+		const devPath = context.asAbsolutePath(path.join('submodules', 'cwtools-stellaris-config', 'config'));
+		if (fs.existsSync(devPath)) return devPath;
+	}
+	return packagedPath;
+}
+
+function getConfiguredGamePath(languageId: string): string | undefined {
+	const key = getCacheSettingKey(languageId);
+	const value = workspace.getConfiguration('cwtools').get<string>(key, '')?.trim();
+	return value || undefined;
+}
+
+function isValidGameDataPath(candidate?: string): boolean {
+	return !!candidate && fs.existsSync(path.join(candidate, 'common'));
+}
+
+function getRulesSourceStatus(languageId: string, cacheDir: string, bundledRulesPath: string): RulesSourceStatus {
+	const config = workspace.getConfiguration('cwtools');
+	const rulesVersion = config.get<string>('rules_version', 'latest');
+	const manualRulesFolder = config.get<string>('rules_folder', '')?.trim();
+	if (rulesVersion === 'manual' && manualRulesFolder) {
+		const fileCount = countRuleFiles(manualRulesFolder);
+		if (fileCount > 0) return { source: 'Manual', path: manualRulesFolder, fileCount };
+	}
+
+	const cachedRulesPath = path.join(cacheDir, languageId);
+	const cachedCount = countRuleFiles(cachedRulesPath);
+	if (cachedCount > 0) return { source: 'Cache', path: cachedRulesPath, fileCount: cachedCount };
+
+	const bundledCount = countRuleFiles(bundledRulesPath);
+	if (bundledCount > 0) return { source: 'Bundled', path: bundledRulesPath, fileCount: bundledCount };
+
+	const workspaceRulesPath = firstWorkspacePath() ? path.join(firstWorkspacePath()!, '.cwtools') : undefined;
+	const workspaceCount = countRuleFiles(workspaceRulesPath);
+	if (workspaceCount > 0) return { source: 'Workspace', path: workspaceRulesPath, fileCount: workspaceCount };
+
+	return { source: 'Missing', fileCount: 0 };
+}
+
+function resolveSelectedGameFolder(selectedPath: string, preferredLanguageId?: string): { languageId: string; dataPath: string } | undefined {
+	if (preferredLanguageId && isValidGameDataPath(selectedPath)) {
+		return { languageId: preferredLanguageId, dataPath: selectedPath };
+	}
+
+	const folderMapping = getGameFolderMapping();
+	const mappedGame = folderMapping.get(path.basename(selectedPath));
+	if (mappedGame) {
+		const dataPath = mappedGame.subdir ? path.join(selectedPath, mappedGame.subdir) : selectedPath;
+		if (isValidGameDataPath(dataPath)) {
+			return { languageId: mappedGame.languageId, dataPath };
+		}
+	}
+
+	if (preferredLanguageId) {
+		const profile = getProfileByLanguageId(preferredLanguageId);
+		const dataPath = profile.folders.steamSubdir ? path.join(selectedPath, profile.folders.steamSubdir) : selectedPath;
+		if (isValidGameDataPath(dataPath)) {
+			return { languageId: preferredLanguageId, dataPath };
+		}
+	}
+
+	for (const profile of getAllProfiles()) {
+		const dataPath = profile.folders.steamSubdir ? path.join(selectedPath, profile.folders.steamSubdir) : selectedPath;
+		if (isValidGameDataPath(dataPath)) {
+			return { languageId: profile.id, dataPath };
+		}
+	}
+
+	return undefined;
+}
+
+async function selectGameFolderFlow(languageHint?: string): Promise<boolean> {
+	let languageId = languageHint && getAllLanguageIds().includes(languageHint) ? languageHint : undefined;
+	if (!languageId) {
+		const picked = await window.showQuickPick(
+			getAllProfiles().map(profile => ({ label: profile.displayName, description: profile.id, id: profile.id })),
+			{ placeHolder: localize('Select the game this workspace targets', '选择此工作区对应的游戏') }
+		);
+		if (!picked) return false;
+		languageId = picked.id;
+	}
+
+	const profile = getProfileByLanguageId(languageId);
+	const detectedPath = await autoDetectGamePath(profile.install.steamFolderName, profile.folders.steamSubdir);
+	let selectedPath: string | undefined;
+	if (detectedPath) {
+		const choice = await window.showQuickPick(
+			[
+				{ label: localize(`Use detected ${profile.displayName} folder`, `使用检测到的 ${profile.displayName} 目录`), description: detectedPath, value: 'detected' },
+				{ label: localize('Browse for another folder...', '浏览其它目录...'), description: localize('Choose the vanilla game data folder manually', '手动选择原版游戏数据目录'), value: 'browse' },
+			],
+			{ placeHolder: localize(`${profile.displayName} installation detected`, `已检测到 ${profile.displayName} 安装目录`) }
+		);
+		if (!choice) return false;
+		if (choice.value === 'detected') selectedPath = detectedPath;
+	}
+
+	if (!selectedPath) {
+		const uri = await window.showOpenDialog({
+			canSelectFiles: false,
+			canSelectFolders: true,
+			canSelectMany: false,
+			openLabel: localize(`Select ${profile.displayName} vanilla folder`, `选择 ${profile.displayName} 原版目录`),
+			title: localize(`Select ${profile.displayName} vanilla installation folder`, `选择 ${profile.displayName} 原版安装目录`),
+		});
+		if (!uri?.[0]) return false;
+		const resolved = resolveSelectedGameFolder(uri[0].fsPath, languageId);
+		if (!resolved) {
+			const retry = await window.showErrorMessage(
+				localize(
+					`The selected folder does not look like a supported ${profile.displayName} game data folder. Pick the folder that contains "common".`,
+					`所选目录不像可用的 ${profile.displayName} 游戏数据目录。请选择包含 "common" 文件夹的目录。`
+				),
+				localize('Choose Again', '重新选择')
+			);
+			if (retry === localize('Choose Again', '重新选择')) return selectGameFolderFlow(languageId);
+			return false;
+		}
+		languageId = resolved.languageId;
+		selectedPath = resolved.dataPath;
+	}
+
+	const finalProfile = getProfileByLanguageId(languageId);
+	await workspace.getConfiguration('cwtools').update(getCacheSettingKey(languageId), selectedPath, true);
+	await reloadExtension(
+		localize(
+			`${finalProfile.displayName} folder saved. Reload CWTools to build the vanilla cache now?`,
+			`${finalProfile.displayName} 目录已保存。现在重新加载 CWTools 以生成原版缓存吗？`
+		),
+		localize('Reload', '重新加载')
+	);
+	return true;
+}
+
+function buildInstallHealth(options: InstallHealthOptions) {
+	const profile = getProfileByLanguageId(options.languageId);
+	const configuredGamePath = getConfiguredGamePath(options.languageId);
+	const rules = getRulesSourceStatus(options.languageId, options.cacheDir, options.bundledRulesPath);
+	const source = rulesSourceLabel(rules.source);
+	const workspacePath = firstWorkspacePath();
+	const checks = [
+		{
+			name: localize('Language server', '语言服务器'),
+			ok: fs.existsSync(options.serverExe) && options.clientStarted,
+			detail: fs.existsSync(options.serverExe)
+				? localize('Server binary found and client started.', '已找到服务端程序，语言客户端已启动。')
+				: localize(`Missing server binary: ${options.serverExe}`, `缺少服务端程序：${options.serverExe}`),
+			action: undefined as string | undefined,
+		},
+		{
+			name: localize('Validation rules', '校验规则'),
+			ok: rules.source !== 'Missing',
+			detail: rules.source === 'Missing'
+				? localize('No cached, bundled, manual, or workspace rules were found.', '未找到缓存、内置、手动或工作区规则。')
+				: localize(
+					`${source} rules: ${rules.fileCount} files${rules.path ? ` at ${rules.path}` : ''}.`,
+					`${source}规则：${rules.fileCount} 个文件${rules.path ? `，位置：${rules.path}` : ''}。`
+				),
+			action: rules.source === 'Missing'
+				? localize('Reinstall the VSIX or run the package script again.', '请重新安装 VSIX，或重新运行打包脚本。')
+				: undefined,
+		},
+		{
+			name: localize('Vanilla game folder', '游戏目录'),
+			ok: options.isVanillaFolder || isValidGameDataPath(configuredGamePath),
+			detail: options.isVanillaFolder
+				? localize('Current workspace looks like a vanilla game folder.', '当前工作区看起来是游戏目录。')
+				: configuredGamePath
+					? localize(`Configured path: ${configuredGamePath}`, `已配置路径：${configuredGamePath}`)
+					: localize(`${profile.displayName} vanilla folder is not configured.`, `尚未配置 ${profile.displayName} 游戏目录。`),
+			action: options.isVanillaFolder ? undefined : localize('Use Select Game Folder to configure it.', '使用“选择游戏目录”进行配置。'),
+		},
+		{
+			name: localize('Workspace', '工作区'),
+			ok: !!workspacePath,
+			detail: workspacePath ? localize(`Workspace: ${workspacePath}`, `工作区：${workspacePath}`) : localize('No folder is open.', '当前未打开文件夹。'),
+			action: workspacePath ? undefined : localize('Open the mod folder with File > Open Folder.', '请通过“文件 > 打开文件夹”打开 Mod 目录。'),
+		},
+	];
+	return { profile, rules, checks };
+}
+
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+function renderSetupHtml(options: InstallHealthOptions): string {
+	const health = buildInstallHealth(options);
+	const source = rulesSourceLabel(health.rules.source);
+	const okText = localize('OK', '正常');
+	const needsSetupText = localize('Needs setup', '需要配置');
+	const rows = health.checks.map(check => `
+		<tr>
+			<td class="${check.ok ? 'ok' : 'warn'}">${check.ok ? okText : needsSetupText}</td>
+			<td>${escapeHtml(check.name)}</td>
+			<td>${escapeHtml(check.detail)}${check.action ? `<div class="hint">${escapeHtml(check.action)}</div>` : ''}</td>
+		</tr>
+	`).join('');
+	const rulesPath = health.rules.path ? `<p class="muted">${escapeHtml(health.rules.path)}</p>` : '';
+	const title = localize('CWTools Setup', 'CWTools 安装配置');
+	return `<!DOCTYPE html>
+	<html lang="${isChineseLocale() ? 'zh-CN' : 'en'}">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>${escapeHtml(title)}</title>
+		<style>
+			body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; }
+			main { max-width: 880px; margin: 0 auto; padding: 28px 24px 40px; }
+			h1 { font-size: 24px; font-weight: 600; margin: 0 0 8px; }
+			h2 { font-size: 15px; font-weight: 600; margin: 28px 0 10px; }
+			p { line-height: 1.5; margin: 0 0 12px; }
+			.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 22px; }
+			button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 0; padding: 7px 12px; border-radius: 3px; cursor: pointer; }
+			button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+			table { width: 100%; border-collapse: collapse; border: 1px solid var(--vscode-panel-border); }
+			td { border-top: 1px solid var(--vscode-panel-border); padding: 10px 12px; vertical-align: top; }
+			tr:first-child td { border-top: 0; }
+			.ok { color: var(--vscode-testing-iconPassed); font-weight: 600; white-space: nowrap; }
+			.warn { color: var(--vscode-testing-iconQueued); font-weight: 600; white-space: nowrap; }
+			.muted, .hint { color: var(--vscode-descriptionForeground); }
+			.hint { margin-top: 4px; }
+			.summary { border-left: 3px solid var(--vscode-focusBorder); padding-left: 12px; margin-top: 18px; }
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>${escapeHtml(title)}</h1>
+			<p class="muted">${escapeHtml(localize(`${health.profile.displayName} workspace health and first-run configuration.`, `${health.profile.displayName} 工作区健康状态与首次运行配置。`))}</p>
+			<div class="summary">
+				<p><strong>${escapeHtml(localize('Rules source:', '规则来源：'))}</strong> ${escapeHtml(source)} (${escapeHtml(localize(`${health.rules.fileCount} files`, `${health.rules.fileCount} 个文件`))})</p>
+				${rulesPath}
+			</div>
+			<div class="toolbar">
+				<button data-command="selectGameFolder">${escapeHtml(localize('Select Game Folder', '选择游戏目录'))}</button>
+				<button class="secondary" data-command="reload">${escapeHtml(localize('Reload CWTools', '重新加载 CWTools'))}</button>
+				<button class="secondary" data-command="settings">${escapeHtml(localize('Open Settings', '打开设置'))}</button>
+				<button class="secondary" data-command="refresh">${escapeHtml(localize('Refresh', '刷新'))}</button>
+			</div>
+			<h2>${escapeHtml(localize('Installation Health', '安装健康检查'))}</h2>
+			<table>${rows}</table>
+		</main>
+		<script>
+			const vscode = acquireVsCodeApi();
+			document.querySelectorAll('button[data-command]').forEach(button => {
+				button.addEventListener('click', () => vscode.postMessage({ command: button.dataset.command }));
+			});
+		</script>
+	</body>
+	</html>`;
+}
+
+async function showSetupPanel(options: InstallHealthOptions): Promise<void> {
+	if (setupPanel) {
+		setupPanel.dispose();
+	}
+	setupPanel = window.createWebviewPanel('cwtoolsSetup', localize('CWTools Setup', 'CWTools 安装配置'), vs.ViewColumn.One, { enableScripts: true });
+	setupPanel.onDidDispose(() => { setupPanel = undefined; }, null, options.context.subscriptions);
+	setupPanel.webview.html = renderSetupHtml(options);
+	setupPanel.webview.onDidReceiveMessage(async message => {
+		switch (message?.command) {
+			case 'selectGameFolder':
+				await selectGameFolderFlow(options.languageId);
+				break;
+			case 'reload':
+				await reloadExtension(localize('Reload CWTools now?', '现在重新加载 CWTools 吗？'), localize('Reload', '重新加载'));
+				break;
+			case 'settings':
+				await commands.executeCommand('workbench.action.openSettings', `@ext:${options.context.extension.id} cwtools`);
+				break;
+			case 'refresh':
+				setupPanel!.webview.html = renderSetupHtml(options);
+				break;
+		}
+	}, undefined, options.context.subscriptions);
+}
+
+async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promise<void> {
+	const version = options.context.extension.packageJSON?.version ?? 'dev';
+	const shownKey = `cwtools.setupPanel.shown.${version}`;
+	if (!options.context.globalState.get<boolean>(shownKey)) {
+		await options.context.globalState.update(shownKey, true);
+		await showSetupPanel(options);
+	}
+
+	const gamePromptKey = `cwtools.gamePathPrompted.${options.languageId}`;
+	const hasGamePath = options.isVanillaFolder || isValidGameDataPath(getConfiguredGamePath(options.languageId));
+	if (!hasGamePath && !options.context.globalState.get<boolean>(gamePromptKey)) {
+		await options.context.globalState.update(gamePromptKey, true);
+		const profile = getProfileByLanguageId(options.languageId);
+		const choice = await window.showInformationMessage(
+			localize(
+				`${profile.displayName} vanilla folder is not configured. Configure it now so CWTools can build the vanilla cache.`,
+				`尚未配置 ${profile.displayName} 游戏目录。现在配置后，CWTools 就可以生成原版缓存。`
+			),
+			localize('Configure', '配置'),
+			localize('Later', '稍后')
+		);
+		if (choice === localize('Configure', '配置')) {
+			await selectGameFolderFlow(options.languageId);
+		}
+	}
 }
 
 export async function activate(context: ExtensionContext) {
@@ -718,7 +1098,7 @@ export async function activate(context: ExtensionContext) {
 		
 		const repoPathStr = getRulesRemoteUrl(language);
 		const repoPath = repoPathStr;
-		const bundledRulesPath = context.asAbsolutePath(path.join('rules', language, 'config'));
+		const bundledRulesPath = resolveBundledRulesPath(context, language);
 		ErrorReporter.debug('Extension', `Language: ${language}, repo: ${repoPath}`);
 
 		// If the extension is launched in debug mode then the debug server options are used
@@ -790,6 +1170,7 @@ export async function activate(context: ExtensionContext) {
 			},
 			initializationOptions: {
 				language: language === 'eu5' ? 'paradox' : language,
+				uiLanguage: vs.env.language,
 				isVanillaFolder: isVanillaFolder,
 				rulesCache: cacheDir,
 				bundledRulesPath: bundledRulesPath,
@@ -801,7 +1182,6 @@ export async function activate(context: ExtensionContext) {
 		}
 
 		const client = new LanguageClient('cwtools', 'Paradox Language Server', serverOptions, clientOptions);
-		const log = client.outputChannel
 		defaultClient = client;
 		client.registerProposedFeatures();
 		interface loadingBarParams { enable: boolean; value: string; percentage?: number }
@@ -943,6 +1323,44 @@ export async function activate(context: ExtensionContext) {
 				debugStatusBar.hide();
 			}
 		})
+
+		let clientStarted = false;
+		const healthOptions = (): InstallHealthOptions => ({
+			context,
+			languageId: language,
+			cacheDir,
+			bundledRulesPath,
+			serverExe,
+			isVanillaFolder,
+			clientStarted,
+		});
+
+		const rulesStatusBar = window.createStatusBarItem(vs.StatusBarAlignment.Left, 90);
+		rulesStatusBar.command = 'cwtools.openSetup';
+		const updateRulesStatusBar = () => {
+			const rules = getRulesSourceStatus(language, cacheDir, bundledRulesPath);
+			const source = rulesSourceLabel(rules.source);
+			rulesStatusBar.text = rules.source === 'Missing'
+				? localize('$(warning) CWTools: Rules Missing', '$(warning) CWTools：规则缺失')
+				: localize(`$(check) CWTools: Rules ${source}`, `$(check) CWTools：规则 ${source}`);
+			rulesStatusBar.tooltip = rules.source === 'Missing'
+				? localize('No CWTools validation rules were found. Open CWTools Setup for details.', '未找到 CWTools 校验规则。打开 CWTools 安装配置查看详情。')
+				: localize(
+					`Validation rules: ${source}\nFiles: ${rules.fileCount}${rules.path ? `\nPath: ${rules.path}` : ''}`,
+					`校验规则：${source}\n文件数：${rules.fileCount}${rules.path ? `\n路径：${rules.path}` : ''}`
+				);
+			rulesStatusBar.show();
+		};
+		context.subscriptions.push(rulesStatusBar);
+		context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
+			if (
+				e.affectsConfiguration('cwtools.rules_version') ||
+				e.affectsConfiguration('cwtools.rules_folder') ||
+				e.affectsConfiguration(getProfileByLanguageId(language).cacheSettingKey)
+			) {
+				updateRulesStatusBar();
+			}
+		}));
 		client.onNotification(createVirtualFile, async (param: CreateVirtualFile) => {
 			const uri = Uri.parse(param.uri);
 			const doc = await workspace.openTextDocument(uri);
@@ -953,65 +1371,14 @@ export async function activate(context: ExtensionContext) {
 			await window.showTextDocument(uri);
 		})
 		client.onNotification(promptReload, async (param: string) => {
-			await reloadExtension(param, "Reload")
+			await reloadExtension(param, localize("Reload", "重新加载"))
 		})
 		client.onNotification(forceReload, async (param: string) => {
 			window.showInformationMessage(param);
 			await commands.executeCommand('workbench.action.reloadWindow');
 		})
 		client.onNotification(promptVanillaPath, async (param: string) => {
-			// ── Game metadata mapping (derived from GameProfile registry) ─────
-			const gameInfoMap = getGameInfoMap();
-			const info = gameInfoMap[param];
-			if (!info) return;
-
-			// ── Phase 1: Try auto-detection ───────────────────────────────────
-			const detectedPath = await autoDetectGamePath(info.steamFolder, info.subdir);
-			if (detectedPath) {
-				ErrorReporter.debug('Extension', `Auto-detected vanilla path for ${param}: ${detectedPath}`);
-				await workspace.getConfiguration("cwtools").update("cache." + param, detectedPath, true);
-				await reloadExtension("Reloading to generate vanilla cache", undefined, true);
-				return;
-			}
-
-			// ── Phase 2: Fall back to manual folder selection ─────────────────
-			const result = await window.showInformationMessage(
-				"未能自动检测到 " + info.display + " 的安装目录，请手动选择",
-				"选择文件夹"
-			);
-			if (!result) return;
-
-			const uri = await window.showOpenDialog({
-				canSelectFiles: false,
-				canSelectFolders: true,
-				canSelectMany: false,
-				openLabel: "Select vanilla installation folder for " + info.display
-			});
-			if (!uri) return;
-
-			 
-			const directory = uri[0]!;
-			const gameFolder = path.basename(directory.fsPath)
-			let dir = directory.fsPath
-			let game = ""
-			const folderMapping = getGameFolderMapping();
-			const mappedGame = folderMapping.get(gameFolder);
-			if (mappedGame) {
-				game = mappedGame.languageId;
-				if (mappedGame.subdir) {
-					dir = path.join(dir, mappedGame.subdir);
-				}
-			}
-			ErrorReporter.debug('Extension', `Game common path: ${path.join(dir, "common")}`);
-			if (game === "" || !(fs.existsSync(path.join(dir, "common")))) {
-				await window.showErrorMessage("The selected folder does not appear to be a supported game folder")
-			}
-			else {
-				log.appendLine("path" + dir)
-				log.appendLine("log" + game)
-				await workspace.getConfiguration("cwtools").update("cache." + game, dir, true)
-				await reloadExtension("Reloading to generate vanilla cache", undefined, true);
-			}
+			await selectGameFolderFlow(param);
 		})
 		client.onNotification(updateFileList, (params: UpdateFileList) => {
 			fileList = params.fileList;
@@ -1033,6 +1400,22 @@ export async function activate(context: ExtensionContext) {
 		// Push the disposable to the context's subscriptions so that the
 		// client can be deactivated on extension deactivation
 		context.subscriptions.push(new CwtoolsProvider());
+
+		safeRegisterCommand(context, "cwtools.openSetup", async () => {
+			await showSetupPanel(healthOptions());
+		});
+
+		safeRegisterCommand(context, "cwtools.runInstallationDoctor", async () => {
+			await showSetupPanel(healthOptions());
+		});
+
+		safeRegisterCommand(context, "cwtools.selectGameFolder", async () => {
+			await selectGameFolderFlow(language);
+			updateRulesStatusBar();
+			if (setupPanel) {
+				setupPanel.webview.html = renderSetupHtml(healthOptions());
+			}
+		});
 
 		const toggleInlineTextFunc = async () => {
 			const config = vs.workspace.getConfiguration("cwtools");
@@ -1147,6 +1530,9 @@ export async function activate(context: ExtensionContext) {
 		});
 
 		await client.start();
+		clientStarted = true;
+		updateRulesStatusBar();
+		void maybeShowFirstRunExperience(healthOptions());
 	}
 
 	let languageId: string;

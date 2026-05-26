@@ -457,12 +457,6 @@
 					"type": "string",
 					"description": "%configuration.cwtools.rules_folder.description%"
 				},
-				"cwtools.rulesProxy": {
-					"scope": "application",
-					"type": "string",
-					"description": "%configuration.cwtools.rulesProxy.description%",
-					"default": ""
-				},
 				"cwtools.ignore_patterns": {
 					"scope": "window",
 					"type": "array",

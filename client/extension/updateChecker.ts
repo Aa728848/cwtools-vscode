@@ -106,20 +106,7 @@ export async function checkForUpdates(context: vscode.ExtensionContext) {
 }
 
 async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string) {
-    let mirrors = [
-        originalUrl, // Prefer direct connection
-        `https://gh-proxy.org/${originalUrl}`,
-        `https://hk.gh-proxy.org/${originalUrl}`,
-        `https://cdn.gh-proxy.org/${originalUrl}`,
-        `https://edgeone.gh-proxy.org/${originalUrl}`,
-        originalUrl.replace('github.com', 'kkgithub.com')
-    ];
-
-    const configProxy = vscode.workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim().toLowerCase();
-    if (configProxy === 'none' || configProxy === 'direct' || process.env.http_proxy || process.env.https_proxy || process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
-        // If the user explicitly specifies not to use a proxy source, or the system has local proxy environment variables, we will not waste time trying invalid images.
-        mirrors = [originalUrl];
-    }
+    const downloadUrls = [originalUrl];
 
     vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -128,12 +115,11 @@ async function downloadAndInstallUpdate(originalUrl: string, fallbackUrl: string
     }, async (progress, token) => {
         const tmpPath = path.join(os.tmpdir(), `cwtools-update-${Date.now()}.vsix`);
 
-        for (const url of mirrors) {
+        for (const url of downloadUrls) {
             if (token.isCancellationRequested) {
                 break;
             }
             try {
-                // Only log mirror name to avoid very long strings
                 const hostname = new URL(url).hostname;
                 progress.report({ message: `通过 ${hostname} 创建连接...` });
                 await downloadFile(url, tmpPath, progress, token);

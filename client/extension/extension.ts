@@ -716,20 +716,9 @@ export async function activate(context: ExtensionContext) {
 			fs.chmodSync(serverExe, '755');
 		}
 		
-		function getBestRepoPath(originalUrl: string): string {
-			const customProxy = workspace.getConfiguration('cwtools').get<string>('rulesProxy', '')?.trim();
-			if (customProxy) {
-				if (customProxy.toLowerCase() === 'none' || customProxy.toLowerCase() === 'direct') {
-					return originalUrl;
-				}
-				return customProxy.endsWith('/') ? customProxy + originalUrl : customProxy + '/' + originalUrl;
-			}
-
-			return originalUrl;
-		}
-
 		const repoPathStr = getRulesRemoteUrl(language);
-		const repoPath = getBestRepoPath(repoPathStr);
+		const repoPath = repoPathStr;
+		const bundledRulesPath = context.asAbsolutePath(path.join('rules', language, 'config'));
 		ErrorReporter.debug('Extension', `Language: ${language}, repo: ${repoPath}`);
 
 		// If the extension is launched in debug mode then the debug server options are used
@@ -803,6 +792,7 @@ export async function activate(context: ExtensionContext) {
 				language: language === 'eu5' ? 'paradox' : language,
 				isVanillaFolder: isVanillaFolder,
 				rulesCache: cacheDir,
+				bundledRulesPath: bundledRulesPath,
 				rules_version: workspace.getConfiguration('cwtools').get('rules_version'),
 				repoPath: repoPath,
 				diagnosticLogging: workspace.getConfiguration('cwtools').get('logging.diagnostic')

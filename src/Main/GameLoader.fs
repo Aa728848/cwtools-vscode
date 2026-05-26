@@ -96,71 +96,51 @@ let getAllFoldersUnion dirs =
         yield! getAllFolders dirs
     }
 
-let getConfigFiles cachePath useManualRules manualRulesFolder =
-    let embeddedConfigFiles =
+let private getRuleFilesFromFolder folder =
+    if Directory.Exists folder then
+        (getAllFoldersUnion ([ folder ] |> Seq.ofList))
+        |> Seq.collect (fun s ->
+            try
+                Directory.EnumerateFiles s
+            with _ ->
+                Seq.empty)
+        |> List.ofSeq
+        |> List.filter (fun f -> Path.GetExtension f = ".cwt" || Path.GetExtension f = ".log")
+    else
+        []
+
+let private readConfigFiles configFiles =
+    configFiles |> List.map (fun f -> f, File.ReadAllText(f))
+
+let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder =
+    let manualConfigFiles =
+        match useManualRules, manualRulesFolder with
+        | true, Some rf when Directory.Exists rf -> getRuleFilesFromFolder rf
+        | true, _ when Directory.Exists "./.cwtools" -> getRuleFilesFromFolder "./.cwtools"
+        | _ -> []
+
+    let cachedConfigFiles =
         match cachePath, useManualRules with
-        | Some path, false ->
-            let configFiles =
-                (getAllFoldersUnion ([ path ] |> Seq.ofList))
-                |> Seq.collect (fun s ->
-                    try
-                        Directory.EnumerateFiles s
-                    with _ ->
-                        Seq.empty)
+        | Some path, false -> getRuleFilesFromFolder path
+        | _ -> []
 
-            let configFiles =
-                configFiles
-                |> List.ofSeq
-                |> List.filter (fun f -> Path.GetExtension f = ".cwt" || Path.GetExtension f = ".log")
+    let bundledConfigFiles =
+        match bundledRulesFolder, useManualRules with
+        | Some path, false -> getRuleFilesFromFolder path
+        | _ -> []
 
-            configFiles |> List.map (fun f -> f, File.ReadAllText(f))
+    let workspaceConfigFiles =
+        match useManualRules with
+        | false when Directory.Exists "./.cwtools" -> getRuleFilesFromFolder "./.cwtools"
         | _ -> []
 
     let configFiles =
-        match useManualRules, manualRulesFolder with
-        | true, Some rf ->
-            let configFiles =
-                if Directory.Exists rf then
-                    getAllFoldersUnion ([ rf ] |> Seq.ofList)
-                else if Directory.Exists "./.cwtools" then
-                    getAllFoldersUnion ([ "./.cwtools" ] |> Seq.ofList)
-                else
-                    Seq.empty
+        if manualConfigFiles.Length > 0 then manualConfigFiles
+        elif cachedConfigFiles.Length > 0 then cachedConfigFiles
+        elif bundledConfigFiles.Length > 0 then bundledConfigFiles
+        else workspaceConfigFiles
 
-            let configFiles =
-                configFiles
-                |> Seq.collect (fun s ->
-                    try
-                        Directory.EnumerateFiles s
-                    with _ ->
-                        Seq.empty)
-
-            configFiles
-            |> List.ofSeq
-            |> List.filter (fun f -> Path.GetExtension f = ".cwt" || Path.GetExtension f = ".log")
-        | _ ->
-            let configFiles =
-                (if Directory.Exists "./.cwtools" then
-                     getAllFoldersUnion ([ "./.cwtools" ] |> Seq.ofList)
-                 else
-                     Seq.empty)
-                |> Seq.collect (fun s ->
-                    try
-                        Directory.EnumerateFiles s
-                    with _ ->
-                        Seq.empty)
-
-            configFiles
-            |> List.ofSeq
-            |> List.filter (fun f -> Path.GetExtension f = ".cwt" || Path.GetExtension f = ".log")
-
-    let configs =
-        match configFiles.Length > 0 with
-        | true -> configFiles |> List.map (fun f -> f, File.ReadAllText(f))
-        //["./config.cwt", File.ReadAllText("./config.cwt")]
-        | false -> embeddedConfigFiles
-
-    configs
+    readConfigFiles configFiles
 
 let getFolderList (filename: string, filetext: string) =
     if Path.GetFileName filename = "folders.cwt" then
@@ -170,6 +150,7 @@ let getFolderList (filename: string, filetext: string) =
 
 type ServerSettings =
     { cachePath: string option
+      bundledRulesPath: string option
       useManualRules: bool
       manualRulesFolder: string option
       isVanillaFolder: bool
@@ -243,7 +224,7 @@ let loadEU4 (serverSettings: ServerSettings) =
         getCachedFiles EU4 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -277,7 +258,7 @@ let loadHOI4 serverSettings =
         getCachedFiles HOI4 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -311,7 +292,7 @@ let loadCK2 serverSettings =
         getCachedFiles CK2 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -345,7 +326,7 @@ let loadIR serverSettings =
         getCachedFiles IR serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -380,7 +361,7 @@ let loadVIC2 serverSettings =
         getCachedFiles VIC2 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -413,7 +394,7 @@ let loadSTL serverSettings =
         getCachedFiles STL serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -456,7 +437,7 @@ let loadCK3 serverSettings =
         getCachedFiles CK3 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -492,7 +473,7 @@ let loadVIC3 serverSettings =
         getCachedFiles VIC3 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -526,7 +507,7 @@ let loadEU5 serverSettings =
         getCachedFiles EU5 serverSettings.cachePath serverSettings.isVanillaFolder
 
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 
@@ -558,7 +539,7 @@ let loadEU5 serverSettings =
 let loadCustom serverSettings =
     // let cached, cachedFiles = getCachedFiles STL serverSettings.cachePath serverSettings.isVanillaFolder
     let configs =
-        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder
+        getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath
 
     let folders = configs |> List.tryPick getFolderList
 

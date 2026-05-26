@@ -458,6 +458,7 @@ type Server(client: ILanguageClient) =
     // Fallback paths for scripted variables hover (user configurable)
 
     let mutable remoteRepoPath: string option = None
+    let mutable bundledRulesPath: string option = None
 
     let mutable rulesChannel: string = "stable"
     let mutable manualRulesFolder: string option = None
@@ -1418,12 +1419,21 @@ type Server(client: ILanguageClient) =
             | false, Some _ ->
                 logInfo "CWTools rules are already up-to-date."
             | false, None ->
-                let errorMsg = sprintf "Failed to update or load CWTools rules for %A. Please check folder permissions for %s." activeGame cp
-                logError errorMsg
-                client.ShowMessage(
-                    { ``type`` = MessageType.Error // Error
-                      message = errorMsg }
-                )
+                let fallbackConfigs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath
+                if fallbackConfigs.Length > 0 then
+                    let warningMsg = sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached, bundled, or workspace rules instead." activeGame
+                    logWarning warningMsg
+                    client.ShowMessage(
+                        { ``type`` = MessageType.Warning
+                          message = warningMsg }
+                    )
+                else
+                    let errorMsg = sprintf "Failed to update or load CWTools rules for %A. Please check folder permissions for %s." activeGame cp
+                    logError errorMsg
+                    client.ShowMessage(
+                        { ``type`` = MessageType.Error
+                          message = errorMsg }
+                    )
             | _ -> ()
 
             client.CustomNotification(
@@ -1623,6 +1633,7 @@ type Server(client: ILanguageClient) =
             try
                 let serverSettings =
                     { cachePath = cachePath
+                      bundledRulesPath = bundledRulesPath
                       useManualRules = useManualRules
                       manualRulesFolder = manualRulesFolder
                       isVanillaFolder = isVanillaFolder
@@ -1877,6 +1888,12 @@ type Server(client: ILanguageClient) =
                     | JsonValue.String x ->
                         logInfo $"repo path %A{x}"
                         remoteRepoPath <- Some x
+                    | _ -> ()
+
+                    match opt.Item("bundledRulesPath") with
+                    | JsonValue.String x when not (String.IsNullOrWhiteSpace x) ->
+                        logInfo $"bundled rules path %A{x}"
+                        bundledRulesPath <- Some x
                     | _ -> ()
 
                     match opt.Item("isVanillaFolder") with
@@ -3244,7 +3261,7 @@ type Server(client: ILanguageClient) =
                             None
                         | { command = "reloadrulesconfig"
                             arguments = _ } ->
-                            let configs = getConfigFiles cachePath useManualRules manualRulesFolder
+                            let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath
                             game.ReplaceConfigRules configs
                             None
                         | { command = "cacheVanilla"

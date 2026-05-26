@@ -111,13 +111,25 @@ if (-not $SkipClient) {
     }
     Write-Host "[✓] Webview bundling completed successfully." -ForegroundColor Green
 
-    Write-Host "[4/5] Copying static webview assets..." -ForegroundColor Yellow
+    Write-Host "[4/5] Copying static webview assets and bundled rules..." -ForegroundColor Yellow
     $DestCssDir = Join-Path $PSScriptRoot "release/bin/client/webview"
     if (-not (Test-Path $DestCssDir)) {
         New-Item -ItemType Directory -Path $DestCssDir -Force | Out-Null
     }
     Copy-Item "client/webview/solarSystemPreview.css" "$DestCssDir/" -Force
     Copy-Item "client/webview/chatPanel.css" "$DestCssDir/" -Force
+    $RulesSourceDir = Join-Path $PSScriptRoot "submodules/cwtools-stellaris-config/config"
+    $RulesDestDir = Join-Path $PSScriptRoot "release/rules/stellaris/config"
+    if (-not (Test-Path $RulesSourceDir)) {
+        Write-Error "Bundled Stellaris rules source not found: $RulesSourceDir"
+        exit 1
+    }
+    if (Test-Path $RulesDestDir) {
+        Remove-Item -LiteralPath $RulesDestDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $RulesDestDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $RulesSourceDir "*") -Destination $RulesDestDir -Recurse -Force
+    Write-Host "[OK] Bundled Stellaris rules copied successfully." -ForegroundColor Green
     Write-Host "[✓] Static CSS assets copied successfully." -ForegroundColor Green
 } else {
     Write-Host "[3/5 & 4/5] (SKIPPED) Skip Webview compilation and asset copying." -ForegroundColor Gray

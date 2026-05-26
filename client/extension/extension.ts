@@ -28,7 +28,8 @@ import { registerCodeActions } from './codeActions';
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
-import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
+import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
+import type { GameProfile } from './gameProfiles';
 import { IndexService } from './indexing/indexService';
 
 export let defaultClient: LanguageClient;
@@ -59,6 +60,7 @@ interface InstallHealthOptions {
 	languageId: string;
 	cacheDir: string;
 	bundledRulesPath: string;
+	rulesRemoteUrl: string;
 	serverExe: string;
 	isVanillaFolder: boolean;
 	clientStarted: boolean;
@@ -83,6 +85,14 @@ function rulesSourceLabel(source: RulesSourceName): string {
 		case 'Workspace': return '工作区';
 		case 'Missing': return '缺失';
 	}
+}
+
+function isKnownGameLanguageId(languageId?: string | null): languageId is string {
+	return !!languageId && getKnownProfileByLanguageId(languageId) !== undefined;
+}
+
+function displayGameName(languageId: string): string {
+	return getKnownProfileByLanguageId(languageId)?.displayName ?? localize('Paradox Script', 'Paradox 脚本');
 }
 
 function countRuleFiles(folder?: string): number {
@@ -124,6 +134,7 @@ function resolveBundledRulesPath(context: ExtensionContext, languageId: string):
 }
 
 function getConfiguredGamePath(languageId: string): string | undefined {
+	if (!isKnownGameLanguageId(languageId)) return undefined;
 	const key = getCacheSettingKey(languageId);
 	const value = workspace.getConfiguration('cwtools').get<string>(key, '')?.trim();
 	return value || undefined;
@@ -131,6 +142,181 @@ function getConfiguredGamePath(languageId: string): string | undefined {
 
 function isValidGameDataPath(candidate?: string): boolean {
 	return !!candidate && fs.existsSync(path.join(candidate, 'common'));
+}
+
+const WORKSPACE_GAME_MARKERS: Record<string, string[]> = {
+	stellaris: [
+		'common/solar_system_initializers',
+		'common/megastructures',
+		'common/pop_faction_types',
+		'common/starbase_buildings',
+		'common/ship_sizes',
+		'common/planet_classes',
+		'map/star_classes',
+	],
+	hoi4: [
+		'common/national_focus',
+		'common/ideas',
+		'common/units',
+		'history/states',
+		'map/strategicregions',
+	],
+	eu4: [
+		'common/countries',
+		'common/country_tags',
+		'common/governments',
+		'common/religions',
+		'history/provinces',
+		'missions',
+	],
+	ck2: [
+		'common/dynasties',
+		'common/landed_titles',
+		'common/religions',
+		'history/characters',
+		'history/titles',
+	],
+	ck3: [
+		'common/dynasties',
+		'common/landed_titles',
+		'common/culture',
+		'common/religion',
+		'history/characters',
+		'history/titles',
+	],
+	vic2: [
+		'common/countries',
+		'history/countries',
+		'history/provinces',
+		'poptypes',
+		'units',
+	],
+	vic3: [
+		'common/country_definitions',
+		'common/interest_groups',
+		'common/laws',
+		'common/production_methods',
+		'common/pop_types',
+	],
+	imperator: [
+		'common/cultures',
+		'common/religions',
+		'common/governments',
+		'common/countries',
+		'setup/main',
+	],
+	eu5: [
+		'common/countries',
+		'common/country_tags',
+		'common/governments',
+		'common/laws',
+		'common/situations',
+	],
+};
+
+const WORKSPACE_GAME_TEXT_HINTS: Record<string, string[]> = {
+	stellaris: ['stellaris', 'solar system', 'megastructure', 'pop faction', 'starbase'],
+	hoi4: ['hoi4', 'hearts of iron', 'national focus', 'strategic region'],
+	eu4: ['eu4', 'europa universalis iv', 'europa universalis 4'],
+	ck2: ['ck2', 'crusader kings ii', 'crusader kings 2'],
+	ck3: ['ck3', 'crusader kings iii', 'crusader kings 3'],
+	vic2: ['vic2', 'victoria ii', 'victoria 2'],
+	vic3: ['vic3', 'victoria 3', 'victoria iii'],
+	imperator: ['imperator', 'imperator rome', 'imperator: rome'],
+	eu5: ['eu5', 'europa universalis v', 'europa universalis 5'],
+};
+
+function normalizeDetectionText(value: string): string {
+	return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function normalizedPath(value: string): string {
+	try {
+		return path.resolve(value).toLowerCase();
+	} catch {
+		return value.toLowerCase();
+	}
+}
+
+function hasRelativePath(rootPath: string, relativePath: string): boolean {
+	return fs.existsSync(path.join(rootPath, ...relativePath.split('/')));
+}
+
+function readWorkspaceGameDescriptor(rootPath: string): string {
+	const chunks: string[] = [];
+	const candidates = [
+		path.join(rootPath, 'descriptor.mod'),
+		path.join(rootPath, '.metadata', 'metadata.json'),
+	];
+	try {
+		for (const entry of fs.readdirSync(rootPath, { withFileTypes: true })) {
+			if (entry.isFile() && entry.name.toLowerCase().endsWith('.mod')) {
+				candidates.push(path.join(rootPath, entry.name));
+			}
+		}
+	} catch {
+		// Ignore unreadable workspaces.
+	}
+	for (const filePath of candidates) {
+		try {
+			if (fs.existsSync(filePath)) {
+				chunks.push(fs.readFileSync(filePath, 'utf8').slice(0, 12000));
+			}
+		} catch {
+			// Ignore unreadable descriptor files.
+		}
+	}
+	return normalizeDetectionText(chunks.join('\n'));
+}
+
+function scoreWorkspaceForGame(rootPath: string, descriptorText: string, profile: GameProfile): number {
+	let score = 0;
+	const rootText = normalizeDetectionText(rootPath);
+	const hints = WORKSPACE_GAME_TEXT_HINTS[profile.id] ?? [];
+	const profileTexts = [
+		profile.id,
+		profile.displayName,
+		profile.install.steamFolderName,
+		profile.install.exeName,
+		...profile.install.alternativeFolderNames,
+		...hints,
+	].map(normalizeDetectionText).filter(Boolean);
+
+	if (profileTexts.some(hint => rootText.includes(hint))) score += 70;
+	if (profileTexts.some(hint => descriptorText.includes(hint))) score += 90;
+
+	const configuredPath = getConfiguredGamePath(profile.id);
+	if (configuredPath) {
+		const root = normalizedPath(rootPath);
+		const configured = normalizedPath(configuredPath);
+		if (root === configured || root.startsWith(configured + path.sep) || configured.startsWith(root + path.sep)) {
+			score += 80;
+		}
+	}
+
+	for (const marker of WORKSPACE_GAME_MARKERS[profile.id] ?? []) {
+		if (hasRelativePath(rootPath, marker)) score += 25;
+	}
+
+	return score;
+}
+
+function inferLanguageIdFromWorkspace(): string | undefined {
+	const rootPath = firstWorkspacePath();
+	if (!rootPath) return undefined;
+	const descriptorText = readWorkspaceGameDescriptor(rootPath);
+	const scores = getAllProfiles()
+		.map(profile => ({ id: profile.id, score: scoreWorkspaceForGame(rootPath, descriptorText, profile) }))
+		.sort((a, b) => b.score - a.score);
+	const best = scores[0];
+	const next = scores[1];
+	if (best && best.score >= 40 && best.score > (next?.score ?? 0)) {
+		return best.id;
+	}
+
+	const configuredProfiles = getAllProfiles()
+		.filter(profile => isValidGameDataPath(getConfiguredGamePath(profile.id)));
+	return configuredProfiles.length === 1 ? configuredProfiles[0]!.id : undefined;
 }
 
 function getRulesSourceStatus(languageId: string, cacheDir: string, bundledRulesPath: string): RulesSourceStatus {
@@ -252,14 +438,15 @@ async function selectGameFolderFlow(languageHint?: string): Promise<boolean> {
 }
 
 function buildInstallHealth(options: InstallHealthOptions) {
-	const profile = getProfileByLanguageId(options.languageId);
+	const profile = getKnownProfileByLanguageId(options.languageId);
+	const profileDisplayName = profile?.displayName ?? displayGameName(options.languageId);
 	const configuredGamePath = getConfiguredGamePath(options.languageId);
 	const rules = getRulesSourceStatus(options.languageId, options.cacheDir, options.bundledRulesPath);
 	const source = rulesSourceLabel(rules.source);
 	const workspacePath = firstWorkspacePath();
 	const checks = [
 		{
-			name: localize('Language server', '语言服务器'),
+			name: localize('Language server', '语言服务'),
 			ok: fs.existsSync(options.serverExe) && options.clientStarted,
 			detail: fs.existsSync(options.serverExe)
 				? localize('Server binary found and client started.', '已找到服务端程序，语言客户端已启动。')
@@ -280,15 +467,30 @@ function buildInstallHealth(options: InstallHealthOptions) {
 				: undefined,
 		},
 		{
-			name: localize('Vanilla game folder', '游戏目录'),
-			ok: options.isVanillaFolder || isValidGameDataPath(configuredGamePath),
-			detail: options.isVanillaFolder
-				? localize('Current workspace looks like a vanilla game folder.', '当前工作区看起来是游戏目录。')
-				: configuredGamePath
-					? localize(`Configured path: ${configuredGamePath}`, `已配置路径：${configuredGamePath}`)
-					: localize(`${profile.displayName} vanilla folder is not configured.`, `尚未配置 ${profile.displayName} 游戏目录。`),
-			action: options.isVanillaFolder ? undefined : localize('Use Select Game Folder to configure it.', '使用“选择游戏目录”进行配置。'),
+			name: localize('Rules repository', '规则仓库'),
+			ok: !!options.rulesRemoteUrl || rules.source !== 'Missing',
+			detail: options.rulesRemoteUrl
+				? localize(`Remote rules: ${options.rulesRemoteUrl}`, `远程规则：${options.rulesRemoteUrl}`)
+				: localize('No remote rules repository is configured for the detected game type.', '当前识别的游戏类型没有配置远程规则仓库。'),
+			action: options.rulesRemoteUrl ? undefined : localize('Select the target game folder or use manual/workspace rules.', '请选择目标游戏目录，或使用手动/工作区规则。'),
 		},
+		profile
+			? {
+				name: localize('Vanilla game folder', '游戏目录'),
+				ok: options.isVanillaFolder || isValidGameDataPath(configuredGamePath),
+				detail: options.isVanillaFolder
+					? localize('Current workspace looks like a vanilla game folder.', '当前工作区看起来是游戏目录。')
+					: configuredGamePath
+						? localize(`Configured path: ${configuredGamePath}`, `已配置路径：${configuredGamePath}`)
+						: localize(`${profile.displayName} vanilla folder is not configured.`, `尚未配置 ${profile.displayName} 游戏目录。`),
+				action: options.isVanillaFolder ? undefined : localize('Use Select Game Folder to configure it.', '使用“选择游戏目录”进行配置。'),
+			}
+			: {
+				name: localize('Game type', '游戏类型'),
+				ok: false,
+				detail: localize('Workspace game type was not detected.', '未识别工作区游戏类型。'),
+				action: localize('Open a game-specific file or use Select Game Folder to choose the target game.', '请打开具体游戏的脚本文件，或使用“选择游戏目录”指定目标游戏。'),
+			},
 		{
 			name: localize('Workspace', '工作区'),
 			ok: !!workspacePath,
@@ -296,7 +498,7 @@ function buildInstallHealth(options: InstallHealthOptions) {
 			action: workspacePath ? undefined : localize('Open the mod folder with File > Open Folder.', '请通过“文件 > 打开文件夹”打开 Mod 目录。'),
 		},
 	];
-	return { profile, rules, checks };
+	return { profileDisplayName, rules, checks };
 }
 
 function escapeHtml(value: string): string {
@@ -315,9 +517,9 @@ function renderSetupHtml(options: InstallHealthOptions): string {
 	const needsSetupText = localize('Needs setup', '需要配置');
 	const rows = health.checks.map(check => `
 		<tr>
-			<td class="${check.ok ? 'ok' : 'warn'}">${check.ok ? okText : needsSetupText}</td>
-			<td>${escapeHtml(check.name)}</td>
-			<td>${escapeHtml(check.detail)}${check.action ? `<div class="hint">${escapeHtml(check.action)}</div>` : ''}</td>
+			<td class="status ${check.ok ? 'ok' : 'warn'}">${check.ok ? okText : needsSetupText}</td>
+			<td class="check-name">${escapeHtml(check.name)}</td>
+			<td class="check-detail">${escapeHtml(check.detail)}${check.action ? `<div class="hint">${escapeHtml(check.action)}</div>` : ''}</td>
 		</tr>
 	`).join('');
 	const rulesPath = health.rules.path ? `<p class="muted">${escapeHtml(health.rules.path)}</p>` : '';
@@ -337,9 +539,13 @@ function renderSetupHtml(options: InstallHealthOptions): string {
 			.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 22px; }
 			button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 0; padding: 7px 12px; border-radius: 3px; cursor: pointer; }
 			button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-			table { width: 100%; border-collapse: collapse; border: 1px solid var(--vscode-panel-border); }
+			.health-table { overflow-x: auto; }
+			table { width: 100%; min-width: 620px; border-collapse: collapse; border: 1px solid var(--vscode-panel-border); table-layout: fixed; }
 			td { border-top: 1px solid var(--vscode-panel-border); padding: 10px 12px; vertical-align: top; }
 			tr:first-child td { border-top: 0; }
+			.status { width: 64px; }
+			.check-name { width: 150px; white-space: nowrap; }
+			.check-detail { overflow-wrap: anywhere; word-break: break-word; }
 			.ok { color: var(--vscode-testing-iconPassed); font-weight: 600; white-space: nowrap; }
 			.warn { color: var(--vscode-testing-iconQueued); font-weight: 600; white-space: nowrap; }
 			.muted, .hint { color: var(--vscode-descriptionForeground); }
@@ -350,7 +556,7 @@ function renderSetupHtml(options: InstallHealthOptions): string {
 	<body>
 		<main>
 			<h1>${escapeHtml(title)}</h1>
-			<p class="muted">${escapeHtml(localize(`${health.profile.displayName} workspace health and first-run configuration.`, `${health.profile.displayName} 工作区健康状态与首次运行配置。`))}</p>
+			<p class="muted">${escapeHtml(localize(`${health.profileDisplayName} workspace health and first-run configuration.`, `${health.profileDisplayName} 工作区健康状态与首次运行配置。`))}</p>
 			<div class="summary">
 				<p><strong>${escapeHtml(localize('Rules source:', '规则来源：'))}</strong> ${escapeHtml(source)} (${escapeHtml(localize(`${health.rules.fileCount} files`, `${health.rules.fileCount} 个文件`))})</p>
 				${rulesPath}
@@ -362,7 +568,7 @@ function renderSetupHtml(options: InstallHealthOptions): string {
 				<button class="secondary" data-command="refresh">${escapeHtml(localize('Refresh', '刷新'))}</button>
 			</div>
 			<h2>${escapeHtml(localize('Installation Health', '安装健康检查'))}</h2>
-			<table>${rows}</table>
+			<div class="health-table"><table>${rows}</table></div>
 		</main>
 		<script>
 			const vscode = acquireVsCodeApi();
@@ -410,8 +616,9 @@ async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promi
 	const gamePromptKey = `cwtools.gamePathPrompted.${options.languageId}`;
 	const hasGamePath = options.isVanillaFolder || isValidGameDataPath(getConfiguredGamePath(options.languageId));
 	if (!hasGamePath && !options.context.globalState.get<boolean>(gamePromptKey)) {
+		const profile = getKnownProfileByLanguageId(options.languageId);
+		if (!profile) return;
 		await options.context.globalState.update(gamePromptKey, true);
-		const profile = getProfileByLanguageId(options.languageId);
 		const choice = await window.showInformationMessage(
 			localize(
 				`${profile.displayName} vanilla folder is not configured. Configure it now so CWTools can build the vanilla cache.`,
@@ -1169,7 +1376,7 @@ export async function activate(context: ExtensionContext) {
 				}
 			},
 			initializationOptions: {
-				language: language === 'eu5' ? 'paradox' : language,
+				language: language,
 				uiLanguage: vs.env.language,
 				isVanillaFolder: isVanillaFolder,
 				rulesCache: cacheDir,
@@ -1330,6 +1537,7 @@ export async function activate(context: ExtensionContext) {
 			languageId: language,
 			cacheDir,
 			bundledRulesPath,
+			rulesRemoteUrl: repoPath,
 			serverExe,
 			isVanillaFolder,
 			clientStarted,
@@ -1353,10 +1561,11 @@ export async function activate(context: ExtensionContext) {
 		};
 		context.subscriptions.push(rulesStatusBar);
 		context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
+			const profile = getKnownProfileByLanguageId(language);
 			if (
 				e.affectsConfiguration('cwtools.rules_version') ||
 				e.affectsConfiguration('cwtools.rules_folder') ||
-				e.affectsConfiguration(getProfileByLanguageId(language).cacheSettingKey)
+				(profile ? e.affectsConfiguration(profile.cacheSettingKey) : false)
 			) {
 				updateRulesStatusBar();
 			}
@@ -1536,7 +1745,6 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	let languageId: string;
-	const knownLanguageIds = getAllLanguageIds();
 	const getLanguageIdFallback = async function () {
 		const markerFiles = await workspace.findFiles("**/*.txt", null, 1);
 		if (markerFiles.length == 1) {
@@ -1547,14 +1755,14 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	let guessedLanguageId: string | undefined | null = window.activeTextEditor?.document?.languageId;
-	if (guessedLanguageId === undefined || !knownLanguageIds.includes(guessedLanguageId)) {
+	if (!isKnownGameLanguageId(guessedLanguageId)) {
 		guessedLanguageId = await getLanguageIdFallback();
 	}
 
-	if (guessedLanguageId && knownLanguageIds.includes(guessedLanguageId)) {
+	if (isKnownGameLanguageId(guessedLanguageId)) {
 		languageId = guessedLanguageId;
 	} else {
-		languageId = "paradox";
+		languageId = inferLanguageIdFromWorkspace() ?? "paradox";
 	}
 	async function findExeInFiles(gameExeName: string, binariesPrefix = false) {
 		if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
@@ -1593,7 +1801,7 @@ export async function activate(context: ExtensionContext) {
 		 
 		const { id } = games[i]!;
 		 
-		if (results[i]!.length > 0 && (languageId === null || languageId === id)) {
+		if (results[i]!.length > 0 && (!isKnownGameLanguageId(languageId) || languageId === id)) {
 			isVanillaFolder = true;
 			languageId = id;
 		}
@@ -1606,6 +1814,9 @@ export async function activate(context: ExtensionContext) {
 		path.basename(workspace.workspaceFolders[0]!.uri.fsPath) === "game"
 	) {
 		isVanillaFolder = true;
+		if (!isKnownGameLanguageId(languageId)) {
+			languageId = inferLanguageIdFromWorkspace() ?? languageId;
+		}
 	}
 
 	// ── Auto-detect localization language when user hasn't explicitly configured it ──

@@ -668,6 +668,23 @@ type Server(client: ILanguageClient) =
         || value.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)
         || value.EndsWith(".cwt", StringComparison.OrdinalIgnoreCase)
 
+    let isCodeLensEventType (typeName: string) =
+        if String.IsNullOrWhiteSpace typeName then false
+        else
+            let normalized = typeName.Split('.').[0].ToLowerInvariant()
+            normalized = "event"
+            || normalized.EndsWith("_event", StringComparison.Ordinal)
+
+    let codeLensIdentityFieldPriority typeName field =
+        match isCodeLensEventType typeName, field with
+        | true, "id" -> 0
+        | true, "key" -> 1
+        | true, "name" -> 2
+        | false, "name" -> 0
+        | false, "id" -> 1
+        | false, "key" -> 2
+        | _ -> 3
+
     let tryDefinitionKeyAtLine (sourceText: string option) lineIndex =
         sourceText
         |> Option.bind (fun text ->
@@ -687,7 +704,7 @@ type Server(client: ILanguageClient) =
     let tryDefinitionKeyAtRange (sourceText: string option) (tdi: TypeDefInfo) =
         tryDefinitionKeyAtLine sourceText (int tdi.range.StartLine - 1)
 
-    let tryDefinitionNameFieldAtRange (sourceText: string option) (tdi: TypeDefInfo) =
+    let tryDefinitionIdentityFieldAtRange (sourceText: string option) typeName (tdi: TypeDefInfo) =
         sourceText
         |> Option.bind (fun text ->
             let lines = text.Split('\n')
@@ -698,13 +715,6 @@ type Server(client: ILanguageClient) =
                     let rangeEnd = max startLine (int tdi.range.EndLine - 1)
                     min (lines.Length - 1) (min rangeEnd (startLine + 80))
 
-                let priority field =
-                    match field with
-                    | "name" -> 0
-                    | "id" -> 1
-                    | "key" -> 2
-                    | _ -> 3
-
                 [ startLine .. endLine ]
                 |> List.choose (fun lineIndex ->
                     let line = lines.[lineIndex].TrimEnd('\r')
@@ -712,7 +722,8 @@ type Server(client: ILanguageClient) =
                     if m.Success then
                         let field = m.Groups.[1].Value.ToLowerInvariant()
                         let value = m.Groups.[2].Value.Trim('"')
-                        if String.IsNullOrWhiteSpace value then None else Some(priority field, lineIndex, value)
+                        if String.IsNullOrWhiteSpace value then None
+                        else Some(codeLensIdentityFieldPriority typeName field, lineIndex, value)
                     else
                         None)
                 |> List.sortBy (fun (rank, lineIndex, _) -> rank, lineIndex)
@@ -729,9 +740,12 @@ type Server(client: ILanguageClient) =
             || id = resolvedTypeName
             || (definitionKey |> Option.exists ((=) id))
 
+        let identityField = tryDefinitionIdentityFieldAtRange sourceText resolvedTypeName tdi
         let resolvedId =
-            if idLooksBroad then
-                match tryDefinitionNameFieldAtRange sourceText tdi with
+            if isCodeLensEventType resolvedTypeName then
+                defaultArg identityField id
+            elif idLooksBroad then
+                match identityField with
                 | Some fieldValue -> fieldValue
                 | None ->
                     match definitionKey with

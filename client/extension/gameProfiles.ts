@@ -407,6 +407,13 @@ export function getProfileByLanguageId(languageId: string): GameProfile {
 }
 
 /**
+ * Returns the profile for a given language ID, or undefined for generic/custom modes.
+ */
+export function getKnownProfileByLanguageId(languageId?: string | null): GameProfile | undefined {
+	return languageId ? PROFILES.get(languageId) : undefined;
+}
+
+/**
  * Returns the profile matching a document's language ID.
  * Accepts any object with a languageId property.
  * Falls back to Stellaris if no matching profile is found.
@@ -466,7 +473,7 @@ export function getAllLanguageIds(): string[] {
  * This replaces the scattered switch statements in extension.ts.
  */
 export function getRulesRemoteUrl(languageId: string): string {
-	return getProfileByLanguageId(languageId).rulesRemoteUrl;
+	return getKnownProfileByLanguageId(languageId)?.rulesRemoteUrl ?? '';
 }
 
 /**

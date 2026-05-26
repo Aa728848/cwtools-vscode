@@ -64,7 +64,7 @@ const MODE_ITERATION_LIMITS: Record<AgentMode, { min: number; base: number; cap:
     script_reviewer: { min: 8, base: 15, cap: 22 },
     loc_translator: { min: 10, base: 20, cap: 30 },
     loc_writer: { min: 10, base: 20, cap: 30 },
-    orchestrator: { min: 8, base: 18, cap: 28 },
+    orchestrator: { min: 32, base: 48, cap: 64 },
 };
 
 export function resolveMaxToolIterations(options: IterationLimitOptions): number {

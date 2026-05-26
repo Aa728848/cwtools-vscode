@@ -52,6 +52,101 @@ let private codeLensNameFieldPattern =
         @"(?:^|[\s{])\b(name|id|key)\b\s*=\s*(""?[A-Za-z0-9_.$:@-]+""?)",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private isLocalisationDefinitionPath (filePath: string) =
+    let normalized = filePath.Replace('\\', '/').ToLowerInvariant()
+    normalized.EndsWith(".yml")
+    || normalized.Contains("/localisation/")
+    || normalized.Contains("/localisation_synced/")
+    || normalized.Contains("/localization/")
+
+let private normalizeDefinitionSymbol (symbol: string) =
+    symbol.Trim().Trim('"')
+
+let private tryDefinitionSymbolAt (sourceText: string) (line: int) (character: int) =
+    if String.IsNullOrEmpty sourceText then None
+    else
+        let lines = sourceText.Split('\n')
+        if line < 0 || line >= lines.Length then None
+        else
+            let lineText = lines.[line].TrimEnd('\r')
+            if String.IsNullOrEmpty lineText then None
+            else
+                let isSymbolChar c =
+                    Char.IsLetterOrDigit c
+                    || c = '_'
+                    || c = '.'
+                    || c = ':'
+                    || c = '@'
+                    || c = '-'
+                    || c = '/'
+
+                let initial = min (max 0 character) (lineText.Length - 1)
+                let cursor =
+                    if isSymbolChar lineText.[initial] then initial
+                    elif initial > 0 && isSymbolChar lineText.[initial - 1] then initial - 1
+                    else initial
+
+                if not (isSymbolChar lineText.[cursor]) then None
+                else
+                    let mutable startIndex = cursor
+                    while startIndex > 0 && isSymbolChar lineText.[startIndex - 1] do
+                        startIndex <- startIndex - 1
+
+                    let mutable endIndex = cursor
+                    while endIndex + 1 < lineText.Length && isSymbolChar lineText.[endIndex + 1] do
+                        endIndex <- endIndex + 1
+
+                    let symbol = lineText.Substring(startIndex, endIndex - startIndex + 1) |> normalizeDefinitionSymbol
+                    if String.IsNullOrWhiteSpace symbol then None else Some symbol
+
+let private tryCodeDefinitionBySymbol (gameDispatcher: IGameDispatcher) (game: IGame) (symbol: string) =
+    let needle = normalizeDefinitionSymbol symbol
+    let sameSymbol value =
+        String.Equals(normalizeDefinitionSymbol value, needle, StringComparison.OrdinalIgnoreCase)
+    let isCodeRange (r: range) =
+        not (isLocalisationDefinitionPath r.FileName)
+
+    if String.IsNullOrWhiteSpace needle then None
+    else
+        let fromTypes =
+            game.Types()
+            |> Map.toSeq
+            |> Seq.tryPick (fun (_, infos) ->
+                infos
+                |> Array.tryPick (fun tdi ->
+                    if isCodeRange tdi.range && sameSymbol tdi.id then Some tdi.range else None))
+
+        let fromEntities () =
+            let visitor =
+                { new IGameVisitor<_> with
+                    member _.Visit game =
+                        game.AllEntities()
+                        |> Seq.tryPick (fun struct (entity, _) ->
+                            if isLocalisationDefinitionPath entity.filepath then None
+                            else
+                                entity.entity.Children
+                                |> Seq.tryPick (fun child ->
+                                    if sameSymbol child.Key then Some child.Position else None)) }
+
+            gameDispatcher.Dispatch visitor |> Option.flatten
+
+        fromTypes |> Option.orElseWith fromEntities
+
+let private preferCodeDefinitionOverLocalisation
+    (gameDispatcher: IGameDispatcher)
+    (game: IGame)
+    (sourceText: string)
+    (line: int)
+    (character: int)
+    (candidate: range option)
+    =
+    match candidate with
+    | Some target when isLocalisationDefinitionPath target.FileName ->
+        tryDefinitionSymbolAt sourceText line character
+        |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game)
+        |> Option.orElse candidate
+    | _ -> candidate
+
 [<assembly: AssemblyDescription("CWTools language server for PDXScript")>]
 do ()
 
@@ -932,6 +1027,14 @@ type Server(client: ILanguageClient) =
 
     /// When true, the next delayedAnalyze must run full RefreshCaches
     let mutable needsTypeRefresh = false
+    /// Last edit that dirtied the global type/reference indexes.
+    let mutable lastTypeRefreshRequestAt = DateTime.MinValue
+    /// Last completed full RefreshCaches cycle.
+    let mutable lastTypeRefreshCompletedAt = DateTime.MinValue
+    /// Avoid rebuilding multi-GB global indexes while the user is still typing.
+    let typeRefreshQuietPeriod = TimeSpan.FromSeconds(5.0)
+    /// Bound full cache rebuild cadence during normal editing sessions.
+    let typeRefreshCooldown = TimeSpan.FromSeconds(20.0)
     /// How many consecutive deep-analyze cycles have skipped RefreshCaches
     let mutable refreshSkipCount = 0
     /// Maximum consecutive skips before forcing a full refresh
@@ -1060,13 +1163,15 @@ type Server(client: ILanguageClient) =
             forgetFileCaches name
 
             if name.EndsWith(".yml") then
-                delayedLocUpdate <- true
-                clearLocalisationCaches ()
+                if not shallowAnalyze then
+                    delayedLocUpdate <- true
+                    clearLocalisationCaches ()
                 markFileStale name "localisation"
 
             // Mark type refresh needed if edited file is in a type-defining directory
-            if isTypeDefiningPath name then
+            if isTypeDefiningPath name && not shallowAnalyze then
                 needsTypeRefresh <- true
+                lastTypeRefreshRequestAt <- DateTime.UtcNow
                 clearTypeCaches ()
                 markFileStale name "types"
 
@@ -1181,51 +1286,76 @@ type Server(client: ILanguageClient) =
     let mutable delayTime = TimeSpan(0, 0, 5)
 
 
-    let delayedAnalyze () =
+    let delayedAnalyze (forceGlobalRefresh: bool) =
         match gameObj with
         | Some game ->
             let timestamp = Stopwatch.GetTimestamp()
             let allocBefore = GC.GetTotalAllocatedBytes(false)
-            // Conditionally skip RefreshCaches when no type-defining files changed
-            let doRefresh = needsTypeRefresh || refreshSkipCount >= maxRefreshSkipCount
+            let now = DateTime.UtcNow
+            let quietEnough =
+                lastTypeRefreshRequestAt = DateTime.MinValue
+                || now - lastTypeRefreshRequestAt >= typeRefreshQuietPeriod
+            let cooldownElapsed =
+                lastTypeRefreshCompletedAt = DateTime.MinValue
+                || now - lastTypeRefreshCompletedAt >= typeRefreshCooldown
+            let skipLimitReached = refreshSkipCount >= maxRefreshSkipCount
+            // Conditionally skip RefreshCaches while edits are still arriving.
+            let doRefresh =
+                needsTypeRefresh
+                && (forceGlobalRefresh || (quietEnough && cooldownElapsed) || skipLimitReached)
+            let mutable didGlobalWork = false
             gameStateLock.EnterWriteLock()
             try
                 if doRefresh then
                     game.RefreshCaches()
                     let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
-                    logInfo $"[MemDiag:RefreshCaches] +{(allocAfterRefresh - allocBefore) / 1048576L}MB (forced={not needsTypeRefresh})"
+                    logInfo $"[MemDiag:RefreshCaches] +{(allocAfterRefresh - allocBefore) / 1048576L}MB (force={forceGlobalRefresh}, skipLimit={skipLimitReached})"
                     perfRefreshCachesCount <- perfRefreshCachesCount + 1
+                    didGlobalWork <- true
                     // Force blocking Gen2 GC after RefreshCaches: old RuleValidationService/InfoService
                     // instances are dead, reclaim their large memoization dictionaries immediately.
                     GC.Collect(2, GCCollectionMode.Default, true, true)
                     GC.WaitForPendingFinalizers()
                     needsTypeRefresh <- false
+                    lastTypeRefreshCompletedAt <- DateTime.UtcNow
                     refreshSkipCount <- 0
-                else
+                elif needsTypeRefresh then
                     refreshSkipCount <- refreshSkipCount + 1
-                    logInfo $"[MemDiag:RefreshCaches] SKIPPED (skip#{refreshSkipCount})"
+                    logInfo $"[MemDiag:RefreshCaches] SKIPPED pending type refresh (skip#{refreshSkipCount}, quiet={quietEnough}, cooldown={cooldownElapsed})"
+                else
+                    refreshSkipCount <- 0
+                    logInfo "[MemDiag:RefreshCaches] SKIPPED (no pending type refresh)"
 
                 let allocBeforeLoc = GC.GetTotalAllocatedBytes(false)
+                let mutable didLocRefresh = false
                 if delayedLocUpdate then
                     logDiag "delayedLocUpdate true"
                     game.RefreshLocalisationCaches()
                     cachedLocMap <- None  // invalidate cached loc entries
                     delayedLocUpdate <- false
+                    didLocRefresh <- true
+                    didGlobalWork <- true
 
                     // Use Dictionary: Clear and refill
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
-                else
+                elif doRefresh then
                     logDiag "delayedLocUpdate false"
 
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
-                evictIfNeeded locCache
+                    didLocRefresh <- true
+                else
+                    logDiag "LocErrors skipped: no localisation or type refresh"
+                if didLocRefresh then evictIfNeeded locCache
                 let allocAfterLoc = GC.GetTotalAllocatedBytes(false)
-                logInfo $"[MemDiag:LocErrors] +{(allocAfterLoc - allocBeforeLoc) / 1048576L}MB"
-                perfRefreshLocCount <- perfRefreshLocCount + 1
+                if didLocRefresh then
+                    logInfo $"[MemDiag:LocErrors] +{(allocAfterLoc - allocBeforeLoc) / 1048576L}MB"
+                    perfRefreshLocCount <- perfRefreshLocCount + 1
+                else
+                    logInfo "[MemDiag:LocErrors] SKIPPED"
                 if allocAfterLoc - allocBeforeLoc > gcThresholdBytes then
                     GC.Collect(2, GCCollectionMode.Optimized, false, false)
 
@@ -1234,20 +1364,24 @@ type Server(client: ILanguageClient) =
                 // we now keep stale entries: SemanticTokensFull will return cached data
                 // when the entity is not yet rebuilt, then VSCode re-requests once the
                 // AST is ready. We clear codeLens because it's cheaper to recompute.
-                clearAllDerivedCaches ()
+                if doRefresh then
+                    clearAllDerivedCaches ()
+                elif didLocRefresh then
+                    inlayHintCache.Clear()
 
                 // ── Update the diagnostic status of all files to Fresh ──────────────────────────────
                 //After delayedAnalyze completes the global refresh, clear the pending mark
-                let freshEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
-                let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                for kvp in fileDiagnosticStates do
-                    if kvp.Value.freshness <> Fresh then
-                        fileDiagnosticStates.[kvp.Key] <-
-                            { kvp.Value with
-                                epoch = freshEpoch
-                                updatedAtUnixMs = nowMs
-                                freshness = Fresh
-                                pendingGlobalKinds = [] }
+                if didGlobalWork then
+                    let freshEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
+                    let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    for kvp in fileDiagnosticStates do
+                        if kvp.Value.freshness <> Fresh then
+                            fileDiagnosticStates.[kvp.Key] <-
+                                { kvp.Value with
+                                    epoch = freshEpoch
+                                    updatedAtUnixMs = nowMs
+                                    freshness = Fresh
+                                    pendingGlobalKinds = [] }
             finally
                 gameStateLock.ExitWriteLock()
 
@@ -1256,41 +1390,42 @@ type Server(client: ILanguageClient) =
             delayTime <-
                 TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 1, 500).Ticks, 2L * time.Ticks)))
             
-            // Regularly clean the cache of non-existing files to prevent memory leaks
-            // Use game.AllFiles() to get all files known to the workspace instead of docs.OpenFiles()
-            // This will only clear the cache of files that really don't exist, rather than simply clearing unopened files
-            try
-                let existingFiles = 
-                    game.AllFiles() 
-                    |> List.choose (fun r ->
-                        let filePath =
-                            match r with
-                            | CWTools.Games.EntityResource(f, _) -> Some f
-                            | CWTools.Games.FileWithContentResource(f, _) -> Some f
-                            | CWTools.Games.FileResource(f, _) -> Some f
-                        filePath |> Option.map (fun f -> try FileInfo(f).FullName with _ -> f))
-                    |> Set.ofList
-                game.CleanupCache existingFiles
-                let existingNormalised =
-                    existingFiles
-                    |> Seq.map normaliseCachePath
-                    |> Set.ofSeq
-                for staleKey in fileDiagnosticStates.Keys |> Seq.filter (fun f -> not (existingNormalised.Contains(normaliseCachePath f))) |> Seq.toArray do
-                    fileDiagnosticStates.TryRemove(staleKey) |> ignore
-            with e ->
-                logDiag $"CleanupCache failed: {e.Message}"
+            // Regularly clean the cache of non-existing files to prevent memory leaks.
+            // This scans all known files, so only do it after real global work.
+            if didGlobalWork then
+                try
+                    let existingFiles = 
+                        game.AllFiles() 
+                        |> List.choose (fun r ->
+                            let filePath =
+                                match r with
+                                | CWTools.Games.EntityResource(f, _) -> Some f
+                                | CWTools.Games.FileWithContentResource(f, _) -> Some f
+                                | CWTools.Games.FileResource(f, _) -> Some f
+                            filePath |> Option.map (fun f -> try FileInfo(f).FullName with _ -> f))
+                        |> Set.ofList
+                    game.CleanupCache existingFiles
+                    let existingNormalised =
+                        existingFiles
+                        |> Seq.map normaliseCachePath
+                        |> Set.ofSeq
+                    for staleKey in fileDiagnosticStates.Keys |> Seq.filter (fun f -> not (existingNormalised.Contains(normaliseCachePath f))) |> Seq.toArray do
+                        fileDiagnosticStates.TryRemove(staleKey) |> ignore
+                with e ->
+                    logDiag $"CleanupCache failed: {e.Message}"
             
             // L6/L3 Fix: Use non-blocking Gen2 GC only after a full refresh to
             // reclaim large rule data; avoid frequent mid-stream GC in hot path.
-            maybeCollectGarbage ()
+            if didGlobalWork then maybeCollectGarbage ()
 
-            // Memory diagnostics: track growth sources after each full refresh
+            // Memory diagnostics: track growth sources after each analyze pass.
             let heapBytes = GC.GetTotalMemory(false)
             let allocTotal = GC.GetTotalAllocatedBytes(false)
             let sm = CWTools.Utilities.StringResource.stringManager
             logInfo $"[MemDiag] heap={heapBytes / 1048576L}MB alloc={allocTotal / 1048576L}MB cycle=+{(allocTotal - allocBefore) / 1048576L}MB strings={sm.StringCount} ints={sm.IntCount}"
             maybePerfReport "delayedAnalyze"
-        | None -> ()
+            didGlobalWork
+        | None -> false
 
 
     let lintAgent =
@@ -1305,16 +1440,19 @@ type Server(client: ILanguageClient) =
                     try
                         try
                             let shallowAnalyse = DateTime.Now < nextTime
-                            logDiag $"lint force: %b{force}, shallow: %b{shallowAnalyse}"
-                            do! lint uri (shallowAnalyse && (not force)) false
+                            let useShallowAnalyze = shallowAnalyse && (not force)
+                            logDiag $"lint force: %b{force}, shallow: %b{useShallowAnalyze}"
+                            do! lint uri useShallowAnalyze false
 
-                            if not shallowAnalyse then
-                                delayedAnalyze ()
+                            if not useShallowAnalyze then
+                                let didGlobalWork = delayedAnalyze force
                                 logDiag "lint after delayed"
-                                // Somehow get updated localisation errors after loccache is updated
-                                do! lint uri true false
+                                // Somehow get updated localisation errors after loccache is updated.
+                                // Re-lint only when global caches actually changed.
+                                if didGlobalWork then
+                                    do! lint uri true false
                                 nextTime <- DateTime.Now.Add(delayTime)
-                                needsDeepAnalyse <- false
+                                needsDeepAnalyse <- needsTypeRefresh || delayedLocUpdate
                             else
                                 needsDeepAnalyse <- true
                         with e ->
@@ -1378,15 +1516,16 @@ type Server(client: ILanguageClient) =
                             let newstate = state |> Map.remove key
                             analyze next force
                             return! loop true newstate
-                    | None, false ->
+                    | None, false -> 
                         logDiag "Idle timeout: triggering background delayedAnalyze"
-                        delayedAnalyze ()
-                        needsDeepAnalyse <- false
+                        let didGlobalWork = delayedAnalyze false
+                        needsDeepAnalyse <- needsTypeRefresh || delayedLocUpdate
                         nextAnalyseTime <- DateTime.Now.Add(delayTime)
 
-                        for doc in docs.OpenFiles() do
-                            let uri = Uri(doc.FullName)
-                            do! lint uri true false
+                        if didGlobalWork then
+                            for doc in docs.OpenFiles() do
+                                let uri = Uri(doc.FullName)
+                                do! lint uri true false
 
                         return! loop false state
                     | None, true ->
@@ -2256,7 +2395,7 @@ type Server(client: ILanguageClient) =
                     UpdateRequest(
                         { uri = p.textDocument.uri
                           version = p.textDocument.version },
-                        true  // Force deep lint to ensure errors and warnings are based on the latest file content
+                        false  // Let the lint agent use shallow passes while typing; save/focus still forces deep lint.
                     )
                 )
             }
@@ -2457,12 +2596,21 @@ type Server(client: ILanguageClient) =
                         let position = PosHelper.fromZ p.position.line p.position.character
                         logInfo $"goto fn %A{p.textDocument.uri}"
                         let path = getPathFromDoc p.textDocument.uri
+                        let fileContent =
+                            docs.GetText(FileInfo(path))
+                            |> Option.defaultValue (try File.ReadAllText path with _ -> "")
 
                         let gototype =
                             game.GoToType
                                 position
                                 path
-                                (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
+                                fileContent
+                            |> preferCodeDefinitionOverLocalisation
+                                gameDispatcher
+                                game
+                                fileContent
+                                p.position.line
+                                p.position.character
 
                         match gototype with
                         | Some goto ->
@@ -3586,7 +3734,15 @@ type Server(client: ILanguageClient) =
                                 match gameObj with
                                 | Some g ->
                                     // Try jump-to-definition first
-                                    match g.GoToType position filePath fileContent with
+                                    match
+                                        g.GoToType position filePath fileContent
+                                        |> preferCodeDefinitionOverLocalisation
+                                            gameDispatcher
+                                            g
+                                            fileContent
+                                            line
+                                            col
+                                    with
                                     | Some rng ->
                                         JsonValue.Record
                                             [| "kind", JsonValue.String "definition"

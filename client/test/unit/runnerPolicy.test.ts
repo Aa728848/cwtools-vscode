@@ -70,6 +70,11 @@ describe('runnerPolicy', () => {
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000 })).to.equal(40);
     });
 
+    it('gives orchestrator parent runs enough room for exploration and dispatch', () => {
+        expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 128000 })).to.equal(48);
+        expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 200000 })).to.equal(60);
+    });
+
     it('honors override and bypass sandbox', () => {
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, override: 17 })).to.equal(17);
         expect(resolveMaxToolIterations({ mode: 'build', baseContextLimit: 128000, bypassSandbox: true })).to.equal(10000);

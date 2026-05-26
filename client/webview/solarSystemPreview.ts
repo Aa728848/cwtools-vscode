@@ -202,6 +202,8 @@ let showLabels = true;
 let showOrbits = true;
 let editMode = false;
 let scaleMode: 'readable' | 'true' = 'readable';
+const BODY_DISPLAY_SIZE_SCALE = 0.6;
+const STAR_DISPLAY_SIZE_MULTIPLIER = 1.00;
 
 // Data
 interface CelestialClass {
@@ -252,6 +254,10 @@ function getBodyTitle(body: CelestialBody): string {
 function isDirectChild(parent: CelestialBody | null, child: CelestialBody): boolean {
     if (!parent) return false;
     return parent.moons.includes(child) || parent.subPlanets.includes(child);
+}
+
+function isStellarBody(body: CelestialBody): boolean {
+    return body.bodyType === 'star' || body.planetClass.includes('_star') || body.planetClass === 'star';
 }
 
 function findParentBody(bodies: CelestialBody[], child: CelestialBody): CelestialBody | null {
@@ -681,7 +687,7 @@ function drawBody(
     ctx.save();
 
     // Glow effect for stars
-    if (body.bodyType === 'star' || body.planetClass.includes('_star') || body.planetClass === 'star') {
+    if (isStellarBody(body)) {
         let glowColor = 'rgba(255,255,255,0.3)';
         
         // If it's the central star, use the system class glow
@@ -889,8 +895,9 @@ function drawBody(
 
 function getDisplaySize(body: CelestialBody): number {
     const size = Math.max(1, body.resolvedSize);
-    // Same script size should render to the same radius regardless of body type.
-    return size * 0.6;
+    const typeScale = isStellarBody(body) ? STAR_DISPLAY_SIZE_MULTIPLIER : 1;
+    // Planets and moons share one size scale; stellar bodies get extra visual weight.
+    return size * BODY_DISPLAY_SIZE_SCALE * typeScale;
 }
 
 // ─── Color Utilities ────────────────────────────────────────────────────────

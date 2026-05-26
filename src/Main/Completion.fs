@@ -307,7 +307,7 @@ let optimiseCompletion (completionList: CompletionItem seq) =
     // Optimization: Use Array instead of Seq to avoid multiple traversals
     let arr = completionList |> Seq.toArray
 
-    logInfo $"[CompletionCache] items={arr.Length} cacheEntries={completionCache.Count}"
+    logDiag $"completion cache items={arr.Length} cacheEntries={completionCache.Count}"
 
     if arr.Length > 1000 then
         Array.sortInPlaceBy (fun (c: CompletionItem) -> c.sortText) arr

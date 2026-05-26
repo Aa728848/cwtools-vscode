@@ -1391,6 +1391,8 @@ export async function activate(context: ExtensionContext) {
 		const client = new LanguageClient('cwtools', 'Paradox Language Server', serverOptions, clientOptions);
 		defaultClient = client;
 		client.registerProposedFeatures();
+		const monitorLogChannel = window.createOutputChannel('MemDiag');
+		context.subscriptions.push(monitorLogChannel);
 		interface loadingBarParams { enable: boolean; value: string; percentage?: number }
 		const loadingBarNotification = new NotificationType<loadingBarParams>('loadingBar');
 		interface debugStatusBarParams { enable: boolean; value: string }
@@ -1405,6 +1407,8 @@ export async function activate(context: ExtensionContext) {
 		let status: Disposable | undefined;
 		interface UpdateFileList { fileList: FileListItem[] }
 		const updateFileList = new NotificationType<UpdateFileList>('updateFileList');
+		interface MonitorLogParams { category?: string; message: string; timestamp?: string }
+		const monitorLogNotification = new NotificationType<MonitorLogParams>('monitorLog');
 
 		async function didChangeActiveTextEditor(editor: vs.TextEditor | undefined): Promise<void> {
 			if (editor) {
@@ -1529,6 +1533,11 @@ export async function activate(context: ExtensionContext) {
 			else if (!param.enable) {
 				debugStatusBar.hide();
 			}
+		})
+		client.onNotification(monitorLogNotification, (param: MonitorLogParams) => {
+			const timestamp = param.timestamp ?? new Date().toLocaleTimeString('en-US', { hour12: false });
+			const category = param.category ? `[${param.category}] ` : '';
+			monitorLogChannel.appendLine(`[${timestamp}] ${category}${param.message}`);
 		})
 
 		let clientStarted = false;

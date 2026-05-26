@@ -59,6 +59,53 @@ let private isLocalisationDefinitionPath (filePath: string) =
     || normalized.Contains("/localisation_synced/")
     || normalized.Contains("/localization/")
 
+let private isNavigableDefinitionRange (r: range) =
+    not (String.IsNullOrWhiteSpace r.FileName)
+
+let private tryFindDescriptorRoot (filePath: string) =
+    let rec loop (dir: DirectoryInfo) =
+        if isNull dir then None
+        elif File.Exists(Path.Combine(dir.FullName, "descriptor.mod")) then Some dir.FullName
+        else loop dir.Parent
+
+    try
+        let start =
+            let attr = File.GetAttributes(filePath)
+            if attr.HasFlag(FileAttributes.Directory) then DirectoryInfo(filePath)
+            else FileInfo(filePath).Directory
+        if isNull start then None else loop start
+    with _ -> None
+
+let private tryFindContentRoot (filePath: string) =
+    let contentDirs =
+        set
+            [ "common"; "events"; "interface"; "gfx"; "localisation"; "localisation_synced"
+              "localization"; "map"; "history"; "prescripted_countries"; "sound"; "music" ]
+
+    let rec loop (dir: DirectoryInfo) =
+        if isNull dir then None
+        elif contentDirs.Contains(dir.Name.ToLowerInvariant()) && not (isNull dir.Parent) then
+            Some dir.Parent.FullName
+        else loop dir.Parent
+
+    try
+        let start =
+            let attr = File.GetAttributes(filePath)
+            if attr.HasFlag(FileAttributes.Directory) then DirectoryInfo(filePath)
+            else FileInfo(filePath).Directory
+        if isNull start then None else loop start
+    with _ -> None
+
+let private tryFindProjectRoot filePath =
+    tryFindDescriptorRoot filePath
+    |> Option.orElseWith (fun () -> tryFindContentRoot filePath)
+
+let private isAllowedDefinitionTarget (sourcePath: string) (targetPath: string) =
+    match tryFindProjectRoot sourcePath, tryFindProjectRoot targetPath with
+    | Some sourceRoot, Some targetRoot ->
+        String.Equals(sourceRoot, targetRoot, StringComparison.OrdinalIgnoreCase)
+    | _ -> true
+
 let private normalizeDefinitionSymbol (symbol: string) =
     symbol.Trim().Trim('"')
 
@@ -99,53 +146,89 @@ let private tryDefinitionSymbolAt (sourceText: string) (line: int) (character: i
                     let symbol = lineText.Substring(startIndex, endIndex - startIndex + 1) |> normalizeDefinitionSymbol
                     if String.IsNullOrWhiteSpace symbol then None else Some symbol
 
-let private tryCodeDefinitionBySymbol (gameDispatcher: IGameDispatcher) (game: IGame) (symbol: string) =
+let private tryCodeDefinitionBySymbol
+    (gameDispatcher: IGameDispatcher)
+    (game: IGame)
+    (sourcePath: string)
+    (symbol: string)
+    =
     let needle = normalizeDefinitionSymbol symbol
     let sameSymbol value =
         String.Equals(normalizeDefinitionSymbol value, needle, StringComparison.OrdinalIgnoreCase)
     let isCodeRange (r: range) =
-        not (isLocalisationDefinitionPath r.FileName)
+        isNavigableDefinitionRange r
+        && not (isLocalisationDefinitionPath r.FileName)
+        && isAllowedDefinitionTarget sourcePath r.FileName
+
+    let isGfxDefinitionNodeKey key =
+        match key with
+        | "spriteType"
+        | "corneredTileSpriteType"
+        | "frameAnimatedSpriteType"
+        | "textSpriteType"
+        | "maskedShieldTexture"
+        | "progressBarType"
+        | "tileSpriteType" -> true
+        | _ -> false
 
     if String.IsNullOrWhiteSpace needle then None
     else
+        let typeMap = game.Types()
         let fromTypes =
-            game.Types()
+            typeMap
             |> Map.toSeq
             |> Seq.tryPick (fun (_, infos) ->
                 infos
                 |> Array.tryPick (fun tdi ->
                     if isCodeRange tdi.range && sameSymbol tdi.id then Some tdi.range else None))
 
-        let fromEntities () =
+        let fromGfxSpriteNames () =
             let visitor =
                 { new IGameVisitor<_> with
                     member _.Visit game =
+                        let rec findSpriteName (node: CWTools.Process.Node) =
+                            let current =
+                                if isGfxDefinitionNodeKey node.Key && sameSymbol (node.TagText "name") then
+                                    Some node.Position
+                                else None
+
+                            current
+                            |> Option.orElseWith (fun () ->
+                                node.Children
+                                |> Seq.tryPick findSpriteName)
+
                         game.AllEntities()
                         |> Seq.tryPick (fun struct (entity, _) ->
-                            if isLocalisationDefinitionPath entity.filepath then None
-                            else
-                                entity.entity.Children
-                                |> Seq.tryPick (fun child ->
-                                    if sameSymbol child.Key then Some child.Position else None)) }
+                            let targetPath = entity.filepath
+                            if isLocalisationDefinitionPath targetPath
+                               || not (isAllowedDefinitionTarget sourcePath targetPath)
+                               || not (targetPath.EndsWith(".gfx", StringComparison.OrdinalIgnoreCase)
+                                       || targetPath.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)) then
+                                None
+                            else findSpriteName entity.entity) }
 
             gameDispatcher.Dispatch visitor |> Option.flatten
 
-        fromTypes |> Option.orElseWith fromEntities
+        fromTypes |> Option.orElseWith fromGfxSpriteNames
 
 let private preferCodeDefinitionOverLocalisation
     (gameDispatcher: IGameDispatcher)
     (game: IGame)
+    (sourcePath: string)
     (sourceText: string)
     (line: int)
     (character: int)
     (candidate: range option)
     =
     match candidate with
+    | Some target when not (isNavigableDefinitionRange target) ->
+        tryDefinitionSymbolAt sourceText line character
+        |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game sourcePath)
     | Some target when isLocalisationDefinitionPath target.FileName ->
         tryDefinitionSymbolAt sourceText line character
-        |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game)
+        |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game sourcePath)
         |> Option.orElse candidate
-    | _ -> candidate
+    | _ -> candidate |> Option.filter isNavigableDefinitionRange
 
 [<assembly: AssemblyDescription("CWTools language server for PDXScript")>]
 do ()
@@ -155,6 +238,34 @@ do ()
 // client.LogMessage { ``type`` = MessageType.Info; message = "info"}
 // client.LogMessage { ``type`` = MessageType.Log; message = "log"}
 let mutable diagnosticLogging = false
+
+type MonitorLogKind =
+    | Memory
+    | Cache
+    | Performance
+    | Lint
+    | Refresh
+    | Localisation
+    | Completion
+    | Hover
+    | Lifecycle
+
+let private monitorLogKindName =
+    function
+    | Memory -> "Memory"
+    | Cache -> "Cache"
+    | Performance -> "Performance"
+    | Lint -> "Lint"
+    | Refresh -> "Refresh"
+    | Localisation -> "Localisation"
+    | Completion -> "Completion"
+    | Hover -> "Hover"
+    | Lifecycle -> "Lifecycle"
+
+let mutable private monitorLogSink: string -> string -> unit = fun _ _ -> ()
+
+let private monitorLog kind message =
+    monitorLogSink (monitorLogKindName kind) message
 
 let setupLogger (client: ILanguageClient) =
     let logInfo =
@@ -182,10 +293,23 @@ let setupLogger (client: ILanguageClient) =
                     { ``type`` = MessageType.Log
                       message = sprintf "[Diag - %s] %s" (System.DateTime.Now.ToString("HH:mm:ss")) m })
 
+    let logMonitor =
+        (fun category message ->
+            try
+                client.CustomNotification(
+                    "monitorLog",
+                    JsonValue.Record
+                        [| "category", JsonValue.String category
+                           "message", JsonValue.String message
+                           "timestamp", JsonValue.String(System.DateTime.Now.ToString("HH:mm:ss")) |]
+                )
+            with _ -> ())
+
     CWTools.Utilities.Utils.logInfo <- logInfo
     CWTools.Utilities.Utils.logWarning <- logWarning
     CWTools.Utilities.Utils.logError <- logError
     CWTools.Utilities.Utils.logDiag <- logDiag
+    monitorLogSink <- logMonitor
 
 type LintRequestMsg =
     | UpdateRequest of VersionedTextDocumentIdentifier * bool
@@ -306,6 +430,12 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                 let srcLine = lines.[line]
                 if col >= 0 && col + len <= srcLine.Length then
                     tokens.Add(struct (line, col, len, tokenType, 0))
+        let tryIndexOfFrom (srcLine: string) (value: string) (startIndex: int) =
+            let safeStart = max 0 startIndex
+            if safeStart <= srcLine.Length then
+                srcLine.IndexOf(value, safeStart)
+            else
+                -1
         let rec visitNode (n: CWTools.Process.Node) =
             n.Leaves |> Seq.iter (fun l ->
                 if l.Position.FileName = filePath then
@@ -317,7 +447,7 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                         let srcLine = lines.[line]
                         let actualCol =
                             if col >= 0 && col + key.Length <= srcLine.Length && srcLine.Substring(col, key.Length) = key then col
-                            else let idx = srcLine.IndexOf(key, max 0 col)
+                            else let idx = tryIndexOfFrom srcLine key col
                                  if idx >= 0 then idx
                                  else let idx2 = srcLine.IndexOf(key)
                                       if idx2 >= 0 then idx2 else -1
@@ -350,7 +480,7 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                                     valStartHint
                                 else
                                     let searchFrom = max 0 (col + key.Length)
-                                    let idx = srcLine.IndexOf(searchVal, searchFrom)
+                                    let idx = tryIndexOfFrom srcLine searchVal searchFrom
                                     if idx >= 0 then idx else -1
                             if actualValCol >= 0 then
                                 verifyAndAdd valLine actualValCol searchVal.Length valType
@@ -378,7 +508,7 @@ let computeScriptTokens (game: IGame<_>) (filePath: string) (fileText: string) =
                         let srcLine = lines.[nLine]
                         let actualCol =
                             if nCol >= 0 && nCol + nKey.Length <= srcLine.Length && srcLine.Substring(nCol, nKey.Length) = nKey then nCol
-                            else let idx = srcLine.IndexOf(nKey, max 0 nCol)
+                            else let idx = tryIndexOfFrom srcLine nKey nCol
                                  if idx >= 0 then idx
                                  else let idx2 = srcLine.IndexOf(nKey)
                                       if idx2 >= 0 then idx2 else -1
@@ -478,16 +608,42 @@ type Server(client: ILanguageClient) =
     let mutable perfLastReportTime = DateTime.UtcNow
     let perfReportIntervalSeconds = 30.0
     let mutable getPerfCacheSnapshot: unit -> string = fun () -> ""
+    let mutable getPerfDiagnosticSnapshot: unit -> string = fun () -> ""
+
+    let getPerfMemorySnapshot () =
+        use proc = Process.GetCurrentProcess()
+        let gcInfo = GC.GetGCMemoryInfo()
+        let heapMB = GC.GetTotalMemory(false) / 1048576L
+        let allocMB = GC.GetTotalAllocatedBytes(false) / 1048576L
+        let workingSetMB = proc.WorkingSet64 / 1048576L
+        let privateMB = proc.PrivateMemorySize64 / 1048576L
+        let fragmentedMB = gcInfo.FragmentedBytes / 1048576L
+        $"mem[heap={heapMB}MB alloc={allocMB}MB working={workingSetMB}MB private={privateMB}MB fragmented={fragmentedMB}MB gc0={GC.CollectionCount(0)} gc1={GC.CollectionCount(1)} gc2={GC.CollectionCount(2)}]"
+
+    let getDiagnosticSnapshot () =
+        let mutable freshFiles = 0
+        let mutable pendingFiles = 0
+        let mutable staleFiles = 0
+        let mutable errors = 0
+        let mutable warnings = 0
+        for state in fileDiagnosticStates.Values do
+            match state.freshness with
+            | Fresh -> freshFiles <- freshFiles + 1
+            | Pending -> pendingFiles <- pendingFiles + 1
+            | Stale -> staleFiles <- staleFiles + 1
+            errors <- errors + state.errorCount
+            warnings <- warnings + state.warningCount
+        $" diag[files={fileDiagnosticStates.Count} fresh={freshFiles} pending={pendingFiles} stale={staleFiles} errors={errors} warnings={warnings}]"
+
+    do getPerfDiagnosticSnapshot <- getDiagnosticSnapshot
 
     /// Check whether the performance summary log needs to be output after each operation
     let maybePerfReport (operationName: string) =
         let now = DateTime.UtcNow
         let totalOps = perfLintCount + perfRefreshCachesCount + perfRefreshLocCount + perfCompletionCount
         if (now - perfLastReportTime).TotalSeconds >= perfReportIntervalSeconds || totalOps % 100 = 0 then
-            let heapMB = GC.GetTotalMemory(false) / 1048576L
-            let allocMB = GC.GetTotalAllocatedBytes(false) / 1048576L
             let sm = CWTools.Utilities.StringResource.stringManager
-            logInfo $"[PerfCounters] last={operationName} lint={perfLintCount} refresh={perfRefreshCachesCount} refreshLoc={perfRefreshLocCount} completion={perfCompletionCount} heap={heapMB}MB alloc={allocMB}MB strings={sm.StringCount} ints={sm.IntCount} diagFiles={fileDiagnosticStates.Count}{getPerfCacheSnapshot()}"
+            monitorLog Performance $"PerfCounters last={operationName} lint={perfLintCount} refresh={perfRefreshCachesCount} refreshLoc={perfRefreshLocCount} completion={perfCompletionCount} strings={sm.StringCount} ints={sm.IntCount} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
             perfLastReportTime <- now
 
     let gameDispatcher =
@@ -583,6 +739,7 @@ type Server(client: ILanguageClient) =
     /// Cached References().Localisation result — invalidated on RefreshLocalisationCaches.
     /// Avoids repeated materialization of ALL loc entries on every InlayHint/Hover request.
     let mutable cachedLocMap: (string * Entry) list option = None
+    let mutable cachedLocMapCount = 0
 
     let getOrBuildLocMap (game: IGame<_>) =
         match cachedLocMap with
@@ -590,6 +747,7 @@ type Server(client: ILanguageClient) =
         | None ->
             let m = game.References().Localisation
             cachedLocMap <- Some m
+            cachedLocMapCount <- m.Length
             m
 
     /// SemanticTokens cache: filePath -> (contentHash, encodedDataArray, resultId)
@@ -642,11 +800,6 @@ type Server(client: ILanguageClient) =
                 |> Seq.sortBy (fun kvp -> fst kvp.Value)
                 |> Seq.truncate overflow
                 |> Seq.iter (fun kvp -> completionListCache.TryRemove(kvp.Key) |> ignore)
-
-    do
-        getPerfCacheSnapshot <-
-            fun () ->
-                $" caches[semantic={semanticTokensCache.Count} codeLens={codeLensCache.Count} inlay={inlayHintCache.Count} loc={locCache.Count} completionTTL={completionListCache.Count}]"
 
     /// Cached type-index: filePath -> (typeName, id, TypeDefInfo) list.
     /// Built lazily from game.Types(), cleared on delayedAnalyze alongside codeLensCache.
@@ -703,6 +856,7 @@ type Server(client: ILanguageClient) =
     let clearLocalisationCaches () =
         locCache.Clear()
         cachedLocMap <- None
+        cachedLocMapCount <- 0
 
     /// Clear all derived caches (called after full refresh)
     let clearAllDerivedCaches () =
@@ -719,6 +873,15 @@ type Server(client: ILanguageClient) =
     /// Write-time tracking for LRU eviction.  Updated on every cache write so
     /// evictIfNeeded can remove the least-recently-written entries first.
     let cacheWriteTimes = System.Collections.Concurrent.ConcurrentDictionary<string, int64>()
+
+    do
+        getPerfCacheSnapshot <-
+            fun () ->
+                let groupedTypeFiles =
+                    cachedGroupedTypes
+                    |> Option.map (fun grouped -> grouped.Count)
+                    |> Option.defaultValue 0
+                $" caches[semantic={semanticTokensCache.Count} codeLens={codeLensCache.Count} inlay={inlayHintCache.Count} locFiles={locCache.Count} locKeys={cachedLocMapCount} completionTTL={completionListCache.Count} typeRefs={typeReferenceResultCache.Count} groupedTypeFiles={groupedTypeFiles} cacheWriteKeys={cacheWriteTimes.Count}]"
 
     let clearCacheWriteTimesForFile (filePath: string) =
         let fullPath = try FileInfo(filePath).FullName with _ -> filePath
@@ -1225,7 +1388,7 @@ type Server(client: ILanguageClient) =
                         |> List.map (fun e ->
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     let allocAfterUpdate = GC.GetTotalAllocatedBytes(false)
-                    logInfo $"[MemDiag:UpdateFile] shallow={shallowAnalyze} +{(allocAfterUpdate - allocBeforeUpdate) / 1048576L}MB"
+                    monitorLog Lint $"UpdateFile file={name} shallow={shallowAnalyze} allocDeltaMB={(allocAfterUpdate - allocBeforeUpdate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     
                     if name.EndsWith(".yml") then
                         // We still need to call game.UpdateFile so the VFS gets the new text,
@@ -1309,7 +1472,7 @@ type Server(client: ILanguageClient) =
                 if doRefresh then
                     game.RefreshCaches()
                     let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
-                    logInfo $"[MemDiag:RefreshCaches] +{(allocAfterRefresh - allocBefore) / 1048576L}MB (force={forceGlobalRefresh}, skipLimit={skipLimitReached})"
+                    monitorLog Refresh $"RefreshCaches allocDeltaMB={(allocAfterRefresh - allocBefore) / 1048576L} force={forceGlobalRefresh} skipLimit={skipLimitReached} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     perfRefreshCachesCount <- perfRefreshCachesCount + 1
                     didGlobalWork <- true
                     // Force blocking Gen2 GC after RefreshCaches: old RuleValidationService/InfoService
@@ -1321,10 +1484,10 @@ type Server(client: ILanguageClient) =
                     refreshSkipCount <- 0
                 elif needsTypeRefresh then
                     refreshSkipCount <- refreshSkipCount + 1
-                    logInfo $"[MemDiag:RefreshCaches] SKIPPED pending type refresh (skip#{refreshSkipCount}, quiet={quietEnough}, cooldown={cooldownElapsed})"
+                    monitorLog Refresh $"RefreshCaches skipped pending=true skip={refreshSkipCount} quiet={quietEnough} cooldown={cooldownElapsed} force={forceGlobalRefresh}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                 else
                     refreshSkipCount <- 0
-                    logInfo "[MemDiag:RefreshCaches] SKIPPED (no pending type refresh)"
+                    monitorLog Refresh $"RefreshCaches skipped pending=false{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
 
                 let allocBeforeLoc = GC.GetTotalAllocatedBytes(false)
                 let mutable didLocRefresh = false
@@ -1332,6 +1495,7 @@ type Server(client: ILanguageClient) =
                     logDiag "delayedLocUpdate true"
                     game.RefreshLocalisationCaches()
                     cachedLocMap <- None  // invalidate cached loc entries
+                    cachedLocMapCount <- 0
                     delayedLocUpdate <- false
                     didLocRefresh <- true
                     didGlobalWork <- true
@@ -1352,10 +1516,11 @@ type Server(client: ILanguageClient) =
                 if didLocRefresh then evictIfNeeded locCache
                 let allocAfterLoc = GC.GetTotalAllocatedBytes(false)
                 if didLocRefresh then
-                    logInfo $"[MemDiag:LocErrors] +{(allocAfterLoc - allocBeforeLoc) / 1048576L}MB"
+                    let locErrorCount = locCache.Values |> Seq.sumBy List.length
+                    monitorLog Localisation $"LocErrors allocDeltaMB={(allocAfterLoc - allocBeforeLoc) / 1048576L} locFiles={locCache.Count} locErrors={locErrorCount} cachedLocKeys={cachedLocMapCount}"
                     perfRefreshLocCount <- perfRefreshLocCount + 1
                 else
-                    logInfo "[MemDiag:LocErrors] SKIPPED"
+                    monitorLog Localisation $"LocErrors skipped delayedLocUpdate={delayedLocUpdate} doRefresh={doRefresh} locFiles={locCache.Count} cachedLocKeys={cachedLocMapCount}"
                 if allocAfterLoc - allocBeforeLoc > gcThresholdBytes then
                     GC.Collect(2, GCCollectionMode.Optimized, false, false)
 
@@ -1419,10 +1584,9 @@ type Server(client: ILanguageClient) =
             if didGlobalWork then maybeCollectGarbage ()
 
             // Memory diagnostics: track growth sources after each analyze pass.
-            let heapBytes = GC.GetTotalMemory(false)
             let allocTotal = GC.GetTotalAllocatedBytes(false)
             let sm = CWTools.Utilities.StringResource.stringManager
-            logInfo $"[MemDiag] heap={heapBytes / 1048576L}MB alloc={allocTotal / 1048576L}MB cycle=+{(allocTotal - allocBefore) / 1048576L}MB strings={sm.StringCount} ints={sm.IntCount}"
+            monitorLog Memory $"AnalyzePass cycleAllocMB={(allocTotal - allocBefore) / 1048576L} strings={sm.StringCount} ints={sm.IntCount} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
             maybePerfReport "delayedAnalyze"
             didGlobalWork
         | None -> false
@@ -1827,6 +1991,8 @@ type Server(client: ILanguageClient) =
                     gameFieldClearers |> List.iter (fun f -> f())
                     fileDiagnosticStates.Clear()
                     locCache.Clear()
+                    cachedLocMap <- None
+                    cachedLocMapCount <- 0
                     semanticTokensCache.Clear()
                     clearAllDerivedCaches ()
                     cacheWriteTimes.Clear()
@@ -1935,6 +2101,8 @@ type Server(client: ILanguageClient) =
 
                 let locRaw = game.LocalisationErrors(true, true)
                 locCache.Clear()
+                cachedLocMap <- None
+                cachedLocMapCount <- 0
                 for fileName, errors in locRaw |> List.groupBy _.range.FileName do
                     locCache.[fileName] <- errors
 
@@ -2452,6 +2620,7 @@ type Server(client: ILanguageClient) =
         member this.Completion(p: CompletionParams) =
             async {
                 let sw = Stopwatch.StartNew()
+                let allocBefore = GC.GetTotalAllocatedBytes(false)
                 let filePath = getPathFromDoc p.textDocument.uri
                 let fileText = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
                 let hash = contentHash fileText
@@ -2459,7 +2628,9 @@ type Server(client: ILanguageClient) =
                 let now = DateTime.UtcNow
                 match completionListCache.TryGetValue(cacheKey) with
                 | true, (createdAt, cached) when (now - createdAt).TotalMilliseconds <= completionListTtlMs ->
-                    logInfo $"[CompletionCache] ttl-hit {filePath}:{p.position.line}:{p.position.character}"
+                    sw.Stop()
+                    let allocAfter = GC.GetTotalAllocatedBytes(false)
+                    monitorLog Completion $"Completion ttl-hit file={filePath} line={p.position.line} char={p.position.character} elapsed={sw.ElapsedMilliseconds}ms allocDeltaMB={(allocAfter - allocBefore) / 1048576L}{getPerfCacheSnapshot()}"
                     perfCompletionCount <- perfCompletionCount + 1
                     maybePerfReport "completion-cache-hit"
                     return cached
@@ -2468,8 +2639,9 @@ type Server(client: ILanguageClient) =
                     completionListCache.[cacheKey] <- (now, result)
                     evictCompletionListCacheIfNeeded ()
                     sw.Stop()
+                    let allocAfter = GC.GetTotalAllocatedBytes(false)
                     let count = result |> Option.map (fun r -> r.items.Length) |> Option.defaultValue 0
-                    logInfo $"[Perf:Completion] file={filePath} line={p.position.line} char={p.position.character} items={count} elapsed={sw.ElapsedMilliseconds}ms"
+                    monitorLog Completion $"Completion file={filePath} line={p.position.line} char={p.position.character} items={count} elapsed={sw.ElapsedMilliseconds}ms allocDeltaMB={(allocAfter - allocBefore) / 1048576L}{getPerfCacheSnapshot()}"
                     perfCompletionCount <- perfCompletionCount + 1
                     maybePerfReport "completion"
                     return result
@@ -2478,6 +2650,9 @@ type Server(client: ILanguageClient) =
 
         member this.Hover(p: TextDocumentPositionParams) =
             async {
+                let sw = Stopwatch.StartNew()
+                let allocBefore = GC.GetTotalAllocatedBytes(false)
+                let filePath = getPathFromDoc p.textDocument.uri
                 // Build or reuse cached locMap for hover
                 let locMapForHover =
                     match cachedLocMap with
@@ -2497,6 +2672,11 @@ type Server(client: ILanguageClient) =
                         p.textDocument.uri
                         p.position
                         locMapForHover
+                sw.Stop()
+                let allocAfter = GC.GetTotalAllocatedBytes(false)
+                let allocDelta = allocAfter - allocBefore
+                if sw.ElapsedMilliseconds >= 25L || allocDelta >= 8L * 1024L * 1024L then
+                    monitorLog Hover $"Hover file={filePath} line={p.position.line} char={p.position.character} elapsed={sw.ElapsedMilliseconds}ms allocDeltaMB={allocDelta / 1048576L} cachedLocKeys={cachedLocMapCount}{getPerfCacheSnapshot()}"
                 return Some hover
             }
             |> catchError None
@@ -2608,6 +2788,7 @@ type Server(client: ILanguageClient) =
                             |> preferCodeDefinitionOverLocalisation
                                 gameDispatcher
                                 game
+                                path
                                 fileContent
                                 p.position.line
                                 p.position.character
@@ -3739,6 +3920,7 @@ type Server(client: ILanguageClient) =
                                         |> preferCodeDefinitionOverLocalisation
                                             gameDispatcher
                                             g
+                                            filePath
                                             fileContent
                                             line
                                             col

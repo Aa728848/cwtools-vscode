@@ -37,6 +37,7 @@ import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsm
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { repairToolArgs } from './tools/argRepair';
 import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace, TOOL_RESULT_BUDGET_BASE } from './contextBudget';
+import type { CompactMessagesOptions } from './contextBudget';
 import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
 import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from './workspacePaths';
@@ -51,7 +52,7 @@ import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
-import { prepareMessagesForResume, loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
+import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
 import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT } from './runner/compaction';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
@@ -1171,7 +1172,16 @@ export class AgentRunner {
         const runRecord = await this.activeRunRecordPromise!;
         this.readTracker.reset();
         let iteration = 0;
-        const supportsPrefixCache = (options?.providerId ?? '').startsWith('deepseek') || (options?.providerId ?? '').startsWith('openai');
+        const activeProviderId = options?.providerId ?? this.aiService.getConfig().provider;
+        const activeModel = (options?.model ?? this.aiService.getConfig().model ?? '').toLowerCase();
+        const preserveMimoReasoningContent = activeProviderId.startsWith('mimo') || activeModel.startsWith('mimo-v2');
+        const supportsPrefixCache = activeProviderId.startsWith('deepseek')
+            || activeProviderId.startsWith('openai')
+            || preserveMimoReasoningContent;
+        const compactionOptions: CompactMessagesOptions = {
+            preserveTailBytes: supportsPrefixCache,
+            preserveReasoningContentForToolCalls: preserveMimoReasoningContent,
+        };
 
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
@@ -1344,7 +1354,7 @@ export class AgentRunner {
                         { kind: 'mid_loop', beforeTokens: loopTokens, threshold: midLoopThreshold },
                         { status: 'running' }
                     );
-                    this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: supportsPrefixCache });
+                    this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
                     const afterTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
                     await runLedger.appendEvent(
                         runRecord.runId,
@@ -2212,7 +2222,7 @@ export class AgentRunner {
                     { kind: 'emergency', beforeTokens: emergencyTokens, contextLimit },
                     { status: 'running' }
                 );
-                this.compactMessagesInPlace(messages, toolResultBudget, { preserveTailBytes: supportsPrefixCache });
+                this.compactMessagesInPlace(messages, toolResultBudget, compactionOptions);
                 const afterEmergencyTokens = messages.reduce((s, m) => s + estimateTokenCount(contentToString(m.content)), 0);
                 await runLedger.appendEvent(
                     runRecord.runId,
@@ -2383,7 +2393,7 @@ export class AgentRunner {
         return _budgetToolResult(result, maxChars);
     }
 
-    private compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number, options?: { preserveTailBytes?: boolean }): void {
+    private compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number, options?: CompactMessagesOptions): void {
         _compactMessagesInPlace(messages, toolResultBudget, options);
     }
     /** 

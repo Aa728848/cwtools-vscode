@@ -21,6 +21,11 @@ export function getToolResultBudget(maxContextTokens?: number): number {
 /** Default budget per tool result (characters). */
 export const TOOL_RESULT_BUDGET_BASE = 12000;
 
+export interface CompactMessagesOptions {
+    preserveTailBytes?: boolean;
+    preserveReasoningContentForToolCalls?: boolean;
+}
+
 /**
  * Intelligently budget a tool result to fit within maxChars.
  * Uses strategies that preserve information density:
@@ -240,7 +245,7 @@ function buildArrayResult(
  * 3. For very old tool results (beyond the last 12 messages),
  *    aggressively compress to just file/success/error metadata.
  */
-export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number, options?: { preserveTailBytes?: boolean }): void {
+export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget: number, options?: CompactMessagesOptions): void {
     if (messages.length <= 8) return;
 
     const keepHead = 1;
@@ -250,6 +255,9 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
     for (let i = keepHead; i < messages.length - keepTail; i++) {
         const m = messages[i]!;
         const content = contentToString(m.content);
+        const preserveReasoningContent = options?.preserveReasoningContentForToolCalls === true
+            && m.role === 'assistant'
+            && !!m.tool_calls?.length;
         if (content.length <= 500) continue;
 
         if (m.role === 'tool' || (m.role === 'user' && content.startsWith('[Tool Result'))) {
@@ -284,6 +292,7 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
                 }
             }
         } else if (m.role === 'assistant' && i < aggressiveThreshold) {
+            if (preserveReasoningContent) continue;
             // Aggressively compress old assistant reasoning
             const newM: ChatMessage = { ...m };
             if (content.length > 2000) {
@@ -303,7 +312,7 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
         //
         // DeepSeek cache-optimization: the keep-tail zone (i >= messages.length - keepTail)
         // is already excluded by the loop upper bound, so its reasoning_content is never touched.
-        if (m.role === 'assistant' && m.reasoning_content !== undefined) {
+        if (m.role === 'assistant' && m.reasoning_content !== undefined && !preserveReasoningContent) {
             const stripped: ChatMessage = { ...m };
             delete stripped.reasoning_content;
             messages[i] = stripped;

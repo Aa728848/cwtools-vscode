@@ -24,6 +24,7 @@ import {
     BUILTIN_PROVIDERS,
     getModelOutputTokens,
     getDisableThinkingParams,
+    getEnableThinkingParams,
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
@@ -305,6 +306,11 @@ export class AIService {
                         return m;
                     });
                 }
+            }
+        } else {
+            const thinkingParams = getEnableThinkingParams(model, providerId);
+            if (thinkingParams?.extraBody) {
+                extraBody = { ...(extraBody ?? {}), ...thinkingParams.extraBody } as Record<string, any>;
             }
         }
 

@@ -8,6 +8,7 @@ import {
     getEffectiveEndpoint,
     getEffectiveModel,
     getDisableThinkingParams,
+    getEnableThinkingParams,
     toClaudeRequest,
     suggestOllamaConfig,
     BUILTIN_PROVIDERS,
@@ -276,6 +277,30 @@ describe('getDisableThinkingParams', () => {
 });
 
 // ─── toClaudeRequest ─────────────────────────────────────────────────────────
+
+describe('getEnableThinkingParams', () => {
+    it('returns MiMo thinking params for MiMo provider', () => {
+        const result = getEnableThinkingParams('mimo-v2.5-pro', 'mimo');
+        expect(result).to.not.equal(undefined);
+        expect(result!.extraBody).to.deep.equal({ thinking: { type: 'enabled' } });
+    });
+
+    it('returns MiMo thinking params for token-plan provider', () => {
+        const result = getEnableThinkingParams('mimo-v2-flash', 'mimo-token-plan');
+        expect(result).to.not.equal(undefined);
+        expect(result!.extraBody).to.deep.equal({ thinking: { type: 'enabled' } });
+    });
+
+    it('infers MiMo thinking params from model name', () => {
+        const result = getEnableThinkingParams('mimo-v2-pro', 'custom');
+        expect(result).to.not.equal(undefined);
+        expect(result!.extraBody).to.deep.equal({ thinking: { type: 'enabled' } });
+    });
+
+    it('returns undefined for non-MiMo models', () => {
+        expect(getEnableThinkingParams('qwen3.6-plus', 'qwen')).to.equal(undefined);
+    });
+});
 
 describe('toClaudeRequest', () => {
     it('extracts system message into system field', () => {

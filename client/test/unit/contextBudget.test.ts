@@ -198,6 +198,33 @@ describe('compactMessagesInPlace', () => {
         }
     });
 
+    it('preserves reasoning_content on old assistant tool-call messages when requested', () => {
+        const messages: ChatMessage[] = [];
+        messages.push({ role: 'system', content: 'sys' });
+        for (let i = 0; i < 12; i++) {
+            messages.push({
+                role: 'assistant',
+                content: `reply ${i} ${'padding'.repeat(100)}`,
+                reasoning_content: `thinking about tool call ${i}`,
+                tool_calls: [{
+                    id: `call_${i}`,
+                    type: 'function',
+                    function: { name: 'read_file', arguments: '{"path":"test.txt"}' },
+                }],
+            });
+            messages.push({ role: 'tool', content: 'tool result', tool_call_id: `call_${i}` });
+            messages.push({ role: 'user', content: `user ${i}` });
+        }
+
+        compactMessagesInPlace(messages, 5000, { preserveReasoningContentForToolCalls: true });
+
+        for (let i = 1; i < messages.length - 6; i++) {
+            if (messages[i]!.role === 'assistant' && messages[i]!.tool_calls?.length) {
+                expect(messages[i]!.reasoning_content, `message ${i}`).to.match(/^thinking about tool call/);
+            }
+        }
+    });
+
     it('aggressively compacts very old tool results to metadata', () => {
         const messages: ChatMessage[] = [];
         messages.push({ role: 'system', content: 'sys' });

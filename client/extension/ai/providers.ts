@@ -216,6 +216,10 @@ export interface DisableThinkingResult {
     injectPrompt?: boolean;
 }
 
+export interface EnableThinkingResult {
+    extraBody?: Record<string, unknown>;
+}
+
 /**
  * Data-driven table: model-name prefix → disable-thinking parameters.
  * Evaluated top-to-bottom; first match wins.
@@ -257,6 +261,23 @@ export function getDisableThinkingParams(model: string): DisableThinkingResult |
     const lower = model.toLowerCase();
     for (const entry of DISABLE_THINKING_PARAMS) {
         if (entry.match(lower)) return entry.result;
+    }
+    return undefined;
+}
+
+/**
+ * Look up provider-specific parameters for explicitly enabling thinking.
+ */
+export function getEnableThinkingParams(model: string, providerId?: string): EnableThinkingResult | undefined {
+    const lowerModel = model.toLowerCase();
+    const lowerProvider = providerId?.toLowerCase() ?? '';
+    if (
+        lowerProvider === 'mimo' ||
+        lowerProvider === 'mimo-token-plan' ||
+        lowerProvider.includes('mimo') ||
+        lowerModel.startsWith('mimo-v2')
+    ) {
+        return { extraBody: { thinking: { type: 'enabled' } } };
     }
     return undefined;
 }

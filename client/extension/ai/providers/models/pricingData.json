@@ -31,8 +31,10 @@
   "gemini-3.1-pro-preview": [14.40, 86.40],
   "gemini-3-flash-preview": [3.60, 21.60],
   "gemini-3.1-flash-lite-preview": [1.80, 10.80],
-  "mimo-v2.5-pro": [7.00, 21.00],
-  "mimo-v2.5": [2.80, 14.00],
+  "mimo-v2.5-pro": [3.00, 6.00],
+  "mimo-v2.5": [1.00, 2.00],
+  "kimi-k2.6": [6.00, 24.00],
+  "kimi-k2.5": [3.60, 18.00],
   "mimo-v2-pro": [7.00, 21.00],
   "mimo-v2-omni": [2.80, 14.00],
   "mimo-v2-flash": [0.70, 2.10]

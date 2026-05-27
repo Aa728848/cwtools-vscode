@@ -66,6 +66,8 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'mimo-v2-pro': false,
     'mimo-v2.5': false,
     'mimo-v2-flash': false,
+    'kimi-k2.6': true,
+    'kimi-k2.5': true
 };
 
 /**
@@ -222,6 +224,8 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'GLM-Z1': 128000,
     'GLM-4': 128000,
     'glm': 128000,
+    'kimi-k2.6': 262144,
+    'kimi-k2.5': 262144,
     'Kimi-K2': 128000,
     'moonshot': 128000,
     'kimi': 128000,
@@ -292,6 +296,9 @@ export function getModelOutputTokens(model: string, providerId?: string): number
     }
     if (providerId === 'mimo' || providerId === 'mimo-token-plan' || providerId?.includes('mimo') || lower.includes('mimo')) {
         return 65536;
+    }
+    if (providerId === 'kimi' || lower.includes('kimi') || lower.includes('moonshot')) {
+        return 16384;
     }
 
     if (lower.includes('deepseek') && lower.includes('v4')) {

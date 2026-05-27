@@ -235,7 +235,9 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'deepseek-ai/DeepSeek-V4-Pro',
         models: [
             'deepseek-ai/DeepSeek-V4-Pro',
-            'deepseek-ai/DeepSeek-V4-Flash'
+            'deepseek-ai/DeepSeek-V4-Flash',
+            'Pro/zai-org/GLM-5.1',
+            'Pro/moonshotai/Kimi-K2.6'
         ],
         supportsToolUse: true,
         requiresApiKey: true,
@@ -379,6 +381,25 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         requiresApiKey: true,
         supportsStreaming: true,
         maxContextTokens: 200000,
+        isOpenAICompatible: true,
+        toolCallStyle: 'openai',
+        supportsFIM: false,
+        supportsVision: true,
+    },
+    kimi: {
+        id: 'kimi',
+        registerUrl: 'https://platform.moonshot.cn/',
+        name: 'Kimi (月之暗面)',
+        endpoint: 'https://api.moonshot.ai/v1',
+        defaultModel: 'kimi-k2.6',
+        models: [
+            'kimi-k2.6',
+            'kimi-k2.5'
+        ],
+        supportsToolUse: true,
+        requiresApiKey: true,
+        supportsStreaming: true,
+        maxContextTokens: 262144,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         supportsFIM: false,

@@ -12,6 +12,8 @@ export interface IterationLimitOptions {
     baseContextLimit: number;
     bypassSandbox?: boolean;
     override?: number;
+    /** When true, apply MODE_ITERATION_LIMITS caps. Top-level agents run uncapped. */
+    isSubAgent?: boolean;
 }
 
 export const SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS = 16_384;
@@ -54,17 +56,17 @@ export function filterToolDefinitionsForMode(
 }
 
 const MODE_ITERATION_LIMITS: Record<AgentMode, { min: number; base: number; cap: number }> = {
-    build: { min: 20, base: 40, cap: 55 },
-    plan: { min: 10, base: 18, cap: 25 },
+    build: { min: 20, base: 40, cap: 60 },
+    plan: { min: 10, base: 18, cap: 28 },
     explore: { min: 8, base: 16, cap: 24 },
-    general: { min: 8, base: 18, cap: 25 },
+    general: { min: 8, base: 18, cap: 26 },
     utility: { min: 15, base: 30, cap: 45 },
-    review: { min: 8, base: 15, cap: 22 },
-    gui_expert: { min: 18, base: 30, cap: 45 },
-    script_reviewer: { min: 8, base: 15, cap: 22 },
+    review: { min: 15, base: 30, cap: 45 },
+    gui_expert: { min: 15, base: 30, cap: 45 },
+    script_reviewer: { min: 8, base: 15, cap: 23 },
     loc_translator: { min: 10, base: 20, cap: 30 },
     loc_writer: { min: 10, base: 20, cap: 30 },
-    orchestrator: { min: 32, base: 48, cap: 64 },
+    orchestrator: { min: 32, base: 48, cap: 80 },
 };
 
 export function resolveMaxToolIterations(options: IterationLimitOptions): number {
@@ -72,6 +74,10 @@ export function resolveMaxToolIterations(options: IterationLimitOptions): number
     if (options.override !== undefined && Number.isFinite(options.override)) {
         return Math.max(1, Math.min(1000, Math.floor(options.override)));
     }
+
+    // Top-level (non-sub) agents run without iteration caps.
+    // Only sub-agents are bounded by MODE_ITERATION_LIMITS to keep orchestrator costs predictable.
+    if (!options.isSubAgent) return 10000;
 
     const limits = MODE_ITERATION_LIMITS[options.mode] ?? MODE_ITERATION_LIMITS.build;
     const scale = Math.max(0.8, Math.min(1.25, options.baseContextLimit / 128000));

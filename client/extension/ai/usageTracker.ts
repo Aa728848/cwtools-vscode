@@ -1,6 +1,7 @@
 import * as vs from 'vscode';
 import { TokenUsage } from './types';
 import { ErrorReporter } from './errorReporter';
+import { getModelPricing, getCacheDiscountFactor } from './providers/models/pricing';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -14,6 +15,12 @@ export interface UsageRecord {
     costCny: number;
     /** Input tokens that hit prefix cache (0 if not applicable) */
     cachedTokens?: number;
+    /** Net input tokens excluding cache hits */
+    netInputTokens?: number;
+    /** Net total tokens excluding cache hits */
+    netTotalTokens?: number;
+    /** Pre-computed cost saved by cache hits (from agentRunner) */
+    cacheSavedCostCny?: number;
     /** Tool calls made in this request (Batch 4.2) */
     toolCalls?: Record<string, number>;
     /** Response latency in ms (Batch 4.2) */
@@ -44,6 +51,8 @@ export interface ModelDistribution {
 
 export interface UsageStats {
     totalTokens: number;
+    /** Net total tokens excluding cache hits */
+    totalNetTokens?: number;
     totalCostCny: number;
     totalCalls: number;
     byProvider: Record<string, ProviderStats>;
@@ -57,6 +66,8 @@ export interface UsageStats {
     cacheStats: {
         totalCachedTokens: number;
         totalInputTokens: number;
+        /** Input tokens from models that support cache statistics */
+        cacheCapableInputTokens: number;
         cacheHitRate: number;       // 0-100 percentage
         estimatedSavingsCny: number; // cost saved by cache hits
     };
@@ -107,6 +118,9 @@ export class UsageTracker {
             totalTokens: usage.total,
             costCny: usage.estimatedCostCny ?? 0,
             cachedTokens: usage.cachedTokens ?? 0,
+            netInputTokens: usage.netInput ?? (usage.input - (usage.cachedTokens ?? 0)),
+            netTotalTokens: usage.netTotal ?? (usage.input - (usage.cachedTokens ?? 0) + usage.output),
+            cacheSavedCostCny: usage.cacheSavedCostCny,
             toolCalls: options?.toolCalls,
             durationMs: options?.durationMs,
             topicId: options?.topicId,
@@ -126,6 +140,7 @@ export class UsageTracker {
 
         // Aggregates
         let totalTokens = 0;
+        let totalNetTokens = 0;
         let totalCostCny = 0;
         const byProvider: Record<string, ProviderStats> = {};
         const dailyMap = new Map<string, { tokens: number; costCny: number; callCount: number }>();
@@ -133,15 +148,16 @@ export class UsageTracker {
 
         for (const r of records) {
             totalTokens += r.totalTokens;
+            totalNetTokens += r.netTotalTokens ?? r.totalTokens;
             totalCostCny += r.costCny;
 
             // By provider
             if (!byProvider[r.provider]) {
                 byProvider[r.provider] = { tokens: 0, costCny: 0 };
             }
-             
-            byProvider[r.provider]!.tokens += r.totalTokens;
-             
+
+            byProvider[r.provider]!.tokens += r.netTotalTokens ?? r.totalTokens;
+
             byProvider[r.provider]!.costCny += r.costCny;
 
             // By day
@@ -150,14 +166,14 @@ export class UsageTracker {
                 if (r.timestamp) day = new Date(r.timestamp).toISOString().slice(0, 10);
             } catch { /* ignore invalid dates */ }
             const d = dailyMap.get(day) ?? { tokens: 0, costCny: 0, callCount: 0 };
-            d.tokens += r.totalTokens;
+            d.tokens += r.netTotalTokens ?? r.totalTokens;
             d.costCny += r.costCny;
             d.callCount += 1;
             dailyMap.set(day, d);
 
             // By model
             const m = modelMap.get(r.model) ?? { tokens: 0, costCny: 0, callCount: 0 };
-            m.tokens += r.totalTokens;
+            m.tokens += r.netTotalTokens ?? r.totalTokens;
             m.costCny += r.costCny;
             m.callCount += 1;
             modelMap.set(r.model, m);
@@ -169,7 +185,7 @@ export class UsageTracker {
             .sort((a, b) => b.date.localeCompare(a.date));
 
         // Model distribution sorted by tokens descending
-        const totalForPct = totalTokens || 1;
+        const totalForPct = totalNetTokens || 1;
         const modelDistribution: ModelDistribution[] = Array.from(modelMap.entries())
             .map(([model, v]) => ({
                 model,
@@ -206,22 +222,44 @@ export class UsageTracker {
         // Cache hit statistics
         let totalCachedTokens = 0;
         let totalInputTokens = 0;
+        let totalNetInputTokens = 0;
+        let cacheCapableInputTokens = 0; // Only count input from cache-capable models
         for (const r of records) {
             totalCachedTokens += r.cachedTokens ?? 0;
             totalInputTokens += r.inputTokens;
+            totalNetInputTokens += r.netInputTokens ?? r.inputTokens;
+            // Only count input tokens from models that support cache statistics
+            if (r.cachedTokens && r.cachedTokens > 0) {
+                cacheCapableInputTokens += r.inputTokens;
+            }
         }
-        const cacheHitRate = totalInputTokens > 0
-            ? Math.round((totalCachedTokens / totalInputTokens) * 10000) / 100
+        // Calculate cache hit rate based only on cache-capable models
+        const cacheHitRate = cacheCapableInputTokens > 0
+            ? Math.round((totalCachedTokens / cacheCapableInputTokens) * 10000) / 100
             : 0;
-        // Estimated savings: cached tokens billed at 0.1× vs full price → savings = 0.9× cached cost
-        // Use average input cost per token across all records as approximation
-        const avgInputCostPerToken = totalInputTokens > 0
-            ? (totalCostCny / (totalInputTokens + records.reduce((s, r) => s + r.outputTokens, 0) || 1))
-            : 0;
-        const estimatedSavingsCny = Math.round(totalCachedTokens * avgInputCostPerToken * 0.9 * 1000000) / 1000000;
+        // Estimated savings: cached tokens billed at discounted rate vs full price
+        // Use actual cost data per record for more accurate savings calculation
+        let estimatedSavingsCny = 0;
+        for (const r of records) {
+            if (r.cachedTokens && r.cachedTokens > 0) {
+                // Prefer pre-computed savings from agentRunner (uses accurate response.model)
+                if (r.cacheSavedCostCny !== undefined && r.cacheSavedCostCny > 0) {
+                    estimatedSavingsCny += r.cacheSavedCostCny;
+                } else {
+                    // Fallback: re-compute from pricing table (may fail if model name doesn't match)
+                    const model = r.model;
+                    const pricing = getModelPricing(model);
+                    const cacheDiscount = getCacheDiscountFactor(model);
+                    // Savings = cached tokens * full price * (1 - discount factor)
+                    estimatedSavingsCny += (r.cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
+                }
+            }
+        }
+        estimatedSavingsCny = Math.round(estimatedSavingsCny * 1000000) / 1000000;
 
         return {
-            totalTokens,
+            totalTokens: totalTokens,  // Total including cache hits
+            totalNetTokens,             // Net total excluding cache hits
             totalCostCny,
             totalCalls: records.length,
             byProvider,
@@ -232,6 +270,7 @@ export class UsageTracker {
             cacheStats: {
                 totalCachedTokens,
                 totalInputTokens,
+                cacheCapableInputTokens,
                 cacheHitRate,
                 estimatedSavingsCny,
             },
@@ -253,7 +292,7 @@ export class UsageTracker {
                 if (r.timestamp) day = new Date(r.timestamp).toISOString().slice(0, 10);
             } catch { /* ignore invalid dates */ }
             const d = dailyMap.get(day) ?? { tokens: 0, costCny: 0, callCount: 0 };
-            d.tokens += r.totalTokens;
+            d.tokens += r.netTotalTokens ?? r.totalTokens;
             d.costCny += r.costCny;
             d.callCount += 1;
             dailyMap.set(day, d);
@@ -273,9 +312,10 @@ export class UsageTracker {
         let total = 0;
 
         for (const r of data.records) {
-            total += r.totalTokens;
+            const netTokens = r.netTotalTokens ?? r.totalTokens;
+            total += netTokens;
             const m = modelMap.get(r.model) ?? { tokens: 0, costCny: 0, callCount: 0 };
-            m.tokens += r.totalTokens;
+            m.tokens += netTokens;
             m.costCny += r.costCny;
             m.callCount += 1;
             modelMap.set(r.model, m);

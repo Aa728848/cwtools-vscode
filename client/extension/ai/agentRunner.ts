@@ -1283,6 +1283,7 @@ export class AgentRunner {
             baseContextLimit,
             bypassSandbox,
             override: options?.maxIterations,
+            isSubAgent: options?.useSlimPrompt === true,
         });
         if (runMetrics) runMetrics.maxIterations = maxToolIterations;
 
@@ -1599,7 +1600,8 @@ export class AgentRunner {
                  // Cache-aware cost calculation: cached tokens billed at discounted rate
                 const cachedTokens = response.usage?.cached_tokens ?? 
                                      (response.usage as any)?.prompt_tokens_details?.cached_tokens ?? 
-                                     (response.usage as any)?.prompt_cache_hit_tokens ?? 0;
+                                     (response.usage as any)?.prompt_cache_hit_tokens ??
+                                     (response.usage as any)?.cached_content_token_count ?? 0;
                 const uncachedInputTokens = promptTokens - cachedTokens;
                 const cacheDiscount = getCacheDiscountFactor(response.model ?? options?.model ?? '');
                 const cachedCost = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount;
@@ -1611,7 +1613,12 @@ export class AgentRunner {
                 tokenAccumulator.total += totalTokens;
                 tokenAccumulator.estimatedCostCny += cachedCost + uncachedCost + outputCost;
                 tokenAccumulator.cachedTokens = (tokenAccumulator.cachedTokens ?? 0) + cachedTokens;
+                tokenAccumulator.netInput = (tokenAccumulator.netInput ?? 0) + uncachedInputTokens;
+                tokenAccumulator.netTotal = (tokenAccumulator.netTotal ?? 0) + uncachedInputTokens + completionTokens;
                 tokenAccumulator.contextWindowTokens = promptTokens;
+                // Accumulate cache savings: difference between full-price and discounted cost for cached tokens
+                const thisSaved = (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
+                tokenAccumulator.cacheSavedCostCny = (tokenAccumulator.cacheSavedCostCny ?? 0) + thisSaved;
 
                 // Emit cache hit rate, cache creation, and saved costs for real-time auditing in the UI
                 const cacheCreationTokens = response.usage?.cache_creation_tokens ?? 0;

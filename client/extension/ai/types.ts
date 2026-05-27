@@ -1075,6 +1075,12 @@ export interface TokenUsage {
     contextWindowTokens?: number;
     /** Input tokens that hit provider prefix cache (DeepSeek, Claude, etc.) */
     cachedTokens?: number;
+    /** Net input tokens excluding cache hits (input - cachedTokens) */
+    netInput?: number;
+    /** Net total tokens excluding cache hits (netInput + output) */
+    netTotal?: number;
+    /** Estimated cost saved by cache hits in CNY, pre-computed during API call */
+    cacheSavedCostCny?: number;
 }
 
 export interface AgentRunMetrics {

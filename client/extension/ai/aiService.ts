@@ -888,7 +888,7 @@ export class AIService {
                 const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
                 // Capture model name and usage from any chunk
                 if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
-                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const cached = u.prompt_cache_hit_tokens ?? u.cached_tokens ?? u.cache_read_input_tokens ?? 0; const cacheCreation = u.cache_creation_input_tokens ?? 0; usageBuf = { prompt_tokens: u.prompt_tokens ?? u.input_tokens ?? 0, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? ((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
+                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const cached = u.prompt_cache_hit_tokens ?? u.cached_tokens ?? u.cache_read_input_tokens ?? u.prompt_tokens_details?.cached_tokens ?? u.cached_content_token_count ?? 0; const promptTk = u.prompt_tokens ?? u.input_tokens ?? 0; const cacheCreation = u.cache_creation_input_tokens ?? u.prompt_cache_miss_tokens ?? (cached > 0 && promptTk > cached ? promptTk - cached : 0); usageBuf = { prompt_tokens: promptTk, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? (promptTk + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
                 if (!choices || choices.length === 0) continue;
                 const delta = choices[0]!.delta as Record<string, unknown> | undefined;  
                 if (!delta) { finishReason = (choices[0]!.finish_reason as string) ?? finishReason; continue; }  
@@ -959,6 +959,7 @@ export class AIService {
                 completion_tokens: usageBuf.completion_tokens,
                 total_tokens: usageBuf.total_tokens,
                 cached_tokens: usageBuf.cached_tokens,
+                cache_creation_tokens: usageBuf.cache_creation_tokens,
             } : undefined,
         } as ChatCompletionResponse;
     }

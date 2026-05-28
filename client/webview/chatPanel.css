@@ -1,4 +1,4 @@
-:root {
+﻿:root {
     --bg: var(--vscode-editor-background, #1e1e1e);
     --fg: var(--vscode-editor-foreground, #cccccc);
     --border: var(--vscode-panel-border, #333);
@@ -309,6 +309,23 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .tool-group[open] > summary::before { transform: rotate(90deg); }
 .tg-icon { opacity: 0.6; }
 .tool-group-body { padding: 4px 0; border-top: 1px solid var(--border); }
+/* Category-coloured grouped tool groups */
+.tool-group.tg-cat-read { border-left: 3px solid rgba(100,166,255,0.6); }
+.tool-group.tg-cat-read > summary { background: rgba(100,166,255,0.04); }
+.tool-group.tg-cat-write { border-left: 3px solid rgba(76,175,80,0.6); }
+.tool-group.tg-cat-write > summary { background: rgba(76,175,80,0.04); }
+.tool-group.tg-cat-query { border-left: 3px solid rgba(185,149,255,0.6); }
+.tool-group.tg-cat-query > summary { background: rgba(185,149,255,0.04); }
+.tool-group.tg-cat-validate { border-left: 3px solid rgba(255,152,0,0.6); }
+.tool-group.tg-cat-validate > summary { background: rgba(255,152,0,0.04); }
+.tool-group.tg-cat-execute { border-left: 3px solid rgba(244,67,54,0.6); }
+.tool-group.tg-cat-execute > summary { background: rgba(244,67,54,0.04); }
+.tool-group.tg-cat-orchestrate { border-left: 3px solid rgba(232,168,56,0.6); }
+.tool-group.tg-cat-orchestrate > summary { background: rgba(232,168,56,0.04); }
+.tool-group.tg-cat-other { border-left: 3px solid rgba(255,255,255,0.2); }
+.tg-label { flex: 1; min-width: 0; font-weight: 600; font-size: 11.5px; }
+.tg-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); color: var(--fg); font-size: 10px; font-family: var(--vscode-editor-font-family, monospace); flex-shrink: 0; }
+.tool-timeline-grouped { display: flex; flex-direction: column; gap: 4px; }
 /* Tool pair row */
 .tool-pair { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; padding: 3px 10px; gap: 4px 7px; min-width: 0; font-size: 10.5px; }
 .tool-pair:not(:last-child) { border-bottom: 1px solid rgba(255,255,255,0.04); }

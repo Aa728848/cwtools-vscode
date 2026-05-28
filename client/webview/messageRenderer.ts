@@ -10,6 +10,7 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 import { Icons, svgIconNoMargin } from './svgIcons';
+import { groupToolCalls, categoryClass, type ToolGroup } from './chat/toolPhrases';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -290,6 +291,31 @@ function renderParamPreview(toolName: string, args: Record<string, unknown>, max
     return html;
 }
 
+// ── Tool group rendering ─────────────────────────────────────────────────────
+
+/**
+ * Build HTML for a collapsed tool group (≥3 calls).
+ * Each group is a `<details>` element with a summary label and child tool pairs.
+ */
+export function buildToolGroupHtml(
+    group: ToolGroup,
+    globalToolIdx: { value: number },
+    opts?: ToolPairOptions,
+): string {
+    const catCls = categoryClass(group.category);
+    let html = `<details class="tool-group ${catCls}"><summary>${group.icon} <span class="tg-label">${escapeHtml(group.summaryLabel)}</span><span class="tg-count">${group.pairs.length}</span></summary>`;
+    html += '<div class="tool-group-body">';
+    for (const pair of group.pairs) {
+        globalToolIdx.value++;
+        html += buildToolPairHtml(pair.call, pair.result, {
+            ...opts,
+            stepIndex: pair.call.stepIndex || globalToolIdx.value,
+        });
+    }
+    html += '</div></details>';
+    return html;
+}
+
 // ── Main HTML builders ───────────────────────────────────────────────────────
 
 /**
@@ -510,23 +536,42 @@ export function buildAssistantMessageHtml(
 
     function flushTools() {
         if (toolCallBuf.length === 0) return;
-        html += '<div class="tool-timeline">';
-        const resultsCopy = [...toolResultBuf];
-        for (const call of toolCallBuf) {
-            globalToolIdx++;
-            const resultIdx = resultsCopy.findIndex(r => r.toolName === call.toolName);
-            let result: RendererStep | undefined;
-            if (resultIdx >= 0) {
-                result = resultsCopy.splice(resultIdx, 1)[0];
+
+        const pairOpts: ToolPairOptions = {
+            showDuration: true,
+            showParams: true,
+            showDiff: true,
+        };
+
+        // Try grouped rendering (≥3 tool calls)
+        const groups = groupToolCalls(toolCallBuf, toolResultBuf);
+        if (groups) {
+            html += '<div class="tool-timeline tool-timeline-grouped">';
+            const idxRef = { value: globalToolIdx };
+            for (const group of groups) {
+                html += buildToolGroupHtml(group, idxRef, pairOpts);
             }
-            html += buildToolPairHtml(call, result, {
-                stepIndex: call.stepIndex || globalToolIdx,
-                showDuration: true,
-                showParams: true,
-                showDiff: true,
-            });
+            globalToolIdx = idxRef.value;
+            html += '</div>';
+        } else {
+            // Fewer than threshold — render individually
+            html += '<div class="tool-timeline">';
+            const resultsCopy = [...toolResultBuf];
+            for (const call of toolCallBuf) {
+                globalToolIdx++;
+                const resultIdx = resultsCopy.findIndex(r => r.toolName === call.toolName);
+                let result: RendererStep | undefined;
+                if (resultIdx >= 0) {
+                    result = resultsCopy.splice(resultIdx, 1)[0];
+                }
+                html += buildToolPairHtml(call, result, {
+                    ...pairOpts,
+                    stepIndex: call.stepIndex || globalToolIdx,
+                });
+            }
+            html += '</div>';
         }
-        html += '</div>';
+
         toolCallBuf = [];
         toolResultBuf = [];
     }

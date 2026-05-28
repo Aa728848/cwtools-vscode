@@ -1451,7 +1451,9 @@ export type WebViewMessage =
     | { type: 'clearUsageStats' }
     | { type: 'requestMentionSearch'; query: string }
     | { type: 'requestManagerSnapshot' }
-    | { type: 'requestCompactedMemory' };
+    | { type: 'requestCompactedMemory' }
+    | { type: 'requestScratchFiles' }
+    | { type: 'openScratchFile'; file: string };
 
 export type HostMessage =
     | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
@@ -1537,7 +1539,8 @@ export type HostMessage =
         liveStepCount: number;
         artifacts: AgentArtifact[];
     } | { type: 'compactedMemoryResult'; content: string }
-    | { type: 'runArtifactsCleanupResult'; deletedCount: number; keptCount: number; reclaimedBytes: number };
+    | { type: 'runArtifactsCleanupResult'; deletedCount: number; keptCount: number; reclaimedBytes: number }
+    | { type: 'scratchFiles'; files: Array<{ name: string; relPath: string; size: number }> };
 
 /** Provider metadata sent to the settings WebView */
 export interface ProviderMeta {

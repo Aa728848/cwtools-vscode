@@ -73,7 +73,7 @@ export class ContextReferenceManager {
         const editor = vs.window.activeTextEditor;
         const builtins = this.builtinReferences(editor, qLower);
 
-        if (!q) return builtins;
+        if (!q) return [...builtins, ...this.recentWorkspaceFiles(8)];
 
         const results: MentionSearchResult[] = [...builtins];
         if (qLower.startsWith('blackboard:')) {
@@ -235,6 +235,33 @@ export class ContextReferenceManager {
             item.label.toLowerCase().includes(queryLower) ||
             item.desc.toLowerCase().includes(queryLower)
         );
+    }
+
+    /**
+     * Return the N most recently accessed workspace documents as mention results.
+     * Uses the already-open textDocument list (no fs scan needed).
+     */
+    private recentWorkspaceFiles(limit: number): MentionSearchResult[] {
+        const docs = vs.workspace.textDocuments
+            .filter(d =>
+                d.uri.scheme === 'file'
+                && !d.isUntitled
+                && !isAgentTempPath(d.uri.fsPath)
+                && !d.uri.fsPath.includes('node_modules')
+            );
+        // Sort by most recently changed (dirty first, then by fsPath length as heuristic)
+        docs.sort((a, b) => {
+            if (a.isDirty !== b.isDirty) return a.isDirty ? -1 : 1;
+            return a.uri.fsPath.length - b.uri.fsPath.length;
+        });
+        return docs.slice(0, limit).map(d => ({
+            type: 'file' as const,
+            uri: d.uri.fsPath,
+            label: path.basename(d.uri.fsPath),
+            desc: vs.workspace.asRelativePath(d.uri),
+            tokenEstimate: Math.ceil(d.getText().length / 4),
+            cacheStatus: d.isDirty ? 'live' as const : 'disk' as const,
+        }));
     }
 
     private async searchWorkspaceFiles(query: string, maxResults: number): Promise<MentionSearchResult[]> {

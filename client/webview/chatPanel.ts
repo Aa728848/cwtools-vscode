@@ -1,4 +1,4 @@
-import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
+﻿import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 import { routeLiveStep, buildToolPairHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import {
     escapeHtml as _fmtEscapeHtml,
@@ -399,6 +399,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
         detachSideWorkspaceContent();
         clearSideWorkspaceShell();
+        hideSwTabs();
     }
 
     function clearTopicWorkspaceState(): void {
@@ -551,6 +552,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     subtitle: '计划、批注和文件变更会显示在这里',
                     build: createWorkspaceHomeView,
                 });
+                showSwTabs('changes');
                 return;
             }
             if (activeResponsiveWorkspace && sideWorkspaceContent !== activeResponsiveWorkspace.content) {
@@ -591,6 +593,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             subtitle: '计划、批注和文件变更会显示在这里',
             build: createWorkspaceHomeView,
         });
+        showSwTabs('changes');
     }
 
     function fileBaseNameLocal(file: string): string {
@@ -834,6 +837,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             wide: true,
             build: () => createSideDiffView(snapshot, { title, focus }),
         });
+        showSwTabs('changes');
     }
 
     function openDiffInSideWorkspace(
@@ -959,6 +963,117 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         savedInputRange = null;
         autoResizeInput();
     }
+
+    // ── Side-Workspace Tab system ─────────────────────────────────────────────
+    let _activeSwTab: string = 'changes';
+    let _scratchFiles: Array<{ name: string; relPath: string; size: number }> = [];
+
+    const swTabs = document.getElementById('swTabs');
+    const swBadgeChanges = document.getElementById('swBadgeChanges');
+    const swBadgeFiles = document.getElementById('swBadgeFiles');
+    const swBadgeArtifacts = document.getElementById('swBadgeArtifacts');
+
+    function showSwTabs(activeTab: string): void {
+        if (!swTabs) return;
+        _activeSwTab = activeTab;
+        swTabs.style.display = 'flex';
+        swTabs.querySelectorAll('.sw-tab').forEach(btn => {
+            const tab = (btn as HTMLElement).dataset.swTab || '';
+            btn.classList.toggle('active', tab === activeTab);
+        });
+        updateSwBadges();
+    }
+
+    function hideSwTabs(): void {
+        if (swTabs) swTabs.style.display = 'none';
+    }
+
+    function updateSwBadges(): void {
+        const diffCount = sideDiffEntries.reduce((s, e) => s + e.files.length, 0);
+        if (swBadgeChanges) swBadgeChanges.textContent = diffCount > 0 ? String(diffCount) : '';
+        if (swBadgeFiles) swBadgeFiles.textContent = _scratchFiles.length > 0 ? String(_scratchFiles.length) : '';
+        if (swBadgeArtifacts) swBadgeArtifacts.textContent = artifacts.length > 0 ? String(artifacts.length) : '';
+    }
+
+    function switchSwTab(tab: string): void {
+        _activeSwTab = tab;
+        swTabs?.querySelectorAll('.sw-tab').forEach(btn => {
+            btn.classList.toggle('active', (btn as HTMLElement).dataset.swTab === tab);
+        });
+        if (!sideWorkspaceBody) return;
+        switch (tab) {
+            case 'changes':
+                if (sideDiffEntries.length > 0) {
+                    showSideDiffWorkspace();
+                } else {
+                    sideWorkspaceBody.innerHTML = '<div class="sw-empty-state">暂无文件变更</div>';
+                }
+                break;
+            case 'files':
+                vscode.postMessage({ type: 'requestScratchFiles' });
+                renderScratchFileTree();
+                break;
+            case 'artifacts':
+                renderSwArtifactList();
+                break;
+        }
+    }
+
+    function renderScratchFileTree(): void {
+        if (!sideWorkspaceBody) return;
+        if (_scratchFiles.length === 0) {
+            sideWorkspaceBody.innerHTML = '<div class="sw-empty-state">暂无 Scratch 文件<br><span style="font-size:10px;opacity:0.6">Agent 创建的临时脚本和文件会显示在这里</span></div>';
+            return;
+        }
+        const html = _scratchFiles.map(f => {
+            const ext = f.name.split('.').pop() || '';
+            const iconMap: Record<string, string> = { py: '🐍', ts: '📘', js: '📗', ps1: '⚡', sh: '⚡', bat: '⚡', md: '📄', txt: '📄', json: '📋' };
+            const icon = iconMap[ext] || '📄';
+            const sizeLabel = f.size < 1024 ? `${f.size}B` : `${(f.size / 1024).toFixed(1)}KB`;
+            return `<div class="scratch-file-item" data-file="${escapeHtml(f.relPath)}" title="${escapeHtml(f.relPath)}">` +
+                `<span class="scratch-file-icon">${icon}</span>` +
+                `<span class="scratch-file-name">${escapeHtml(f.name)}</span>` +
+                `<span class="scratch-file-size">${sizeLabel}</span>` +
+            `</div>`;
+        }).join('');
+        sideWorkspaceBody.innerHTML = `<div class="scratch-file-tree">${html}</div>`;
+        sideWorkspaceBody.querySelectorAll('.scratch-file-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const filePath = (el as HTMLElement).dataset.file;
+                if (filePath) vscode.postMessage({ type: 'openScratchFile', file: filePath });
+            });
+        });
+    }
+
+    function renderSwArtifactList(): void {
+        if (!sideWorkspaceBody) return;
+        if (artifacts.length === 0) {
+            sideWorkspaceBody.innerHTML = '<div class="sw-empty-state">暂无 Artifacts<br><span style="font-size:10px;opacity:0.6">计划、验证和文件变更产物会显示在这里</span></div>';
+            return;
+        }
+        const html = artifacts.map(a => {
+            return `<div class="sw-artifact-card" data-artifact-id="${escapeHtml(a.id)}" title="${escapeHtml(a.summary || '')}">` +
+                `<span class="sw-artifact-kind">${escapeHtml(a.kind)}</span>` +
+                `<span class="sw-artifact-title">${escapeHtml(a.title)}</span>` +
+                `<span class="sw-artifact-status">${escapeHtml(a.status || '')}</span>` +
+            `</div>`;
+        }).join('');
+        sideWorkspaceBody.innerHTML = `<div class="sw-artifact-list">${html}</div>`;
+        sideWorkspaceBody.querySelectorAll('.sw-artifact-card').forEach(el => {
+            el.addEventListener('click', () => {
+                const id = (el as HTMLElement).dataset.artifactId;
+                if (id) vscode.postMessage({ type: 'openArtifact', artifactId: id });
+            });
+        });
+    }
+
+    // Tab click handler
+    swTabs?.querySelectorAll('.sw-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = (btn as HTMLElement).dataset.swTab || '';
+            if (tab) switchSwTab(tab);
+        });
+    });
 
     function cloneInputPayload(payload: UserMessageInputPayload): UserMessageInputPayload {
         return {
@@ -4393,6 +4508,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'artifactList':
                 artifacts = sortArtifactsByNewest(msg.artifacts || []);
                 renderArtifactPanel();
+                updateSwBadges();
+                break;
+            case 'scratchFiles':
+                _scratchFiles = (msg as any).files || [];
+                updateSwBadges();
+                if (_activeSwTab === 'files') renderScratchFileTree();
                 break;
 
             case 'topicTitleGenerated': {

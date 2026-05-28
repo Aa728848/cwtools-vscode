@@ -299,5 +299,45 @@ export async function routeWebviewMessage(
             });
             break;
         }
+        case 'requestScratchFiles': {
+            try {
+                const { getProjectWorkspaceRoot, getTopicStorageDir } = await import('../workspacePaths');
+                const fsModule = await import('fs');
+                const pathModule = await import('path');
+                const root = getProjectWorkspaceRoot();
+                const topicId = provider.topicManager.currentTopic?.id || 'default';
+                const topicDir = getTopicStorageDir(topicId, root);
+                const scratchDir = topicDir ? pathModule.join(topicDir, 'scratch') : null;
+                const files: Array<{ name: string; relPath: string; size: number }> = [];
+                if (scratchDir && fsModule.existsSync(scratchDir)) {
+                    const entries = fsModule.readdirSync(scratchDir, { withFileTypes: true });
+                    for (const entry of entries) {
+                        if (!entry.isFile()) continue;
+                        const fullPath = pathModule.join(scratchDir, entry.name);
+                        try {
+                            const stat = fsModule.statSync(fullPath);
+                            files.push({ name: entry.name, relPath: fullPath, size: stat.size });
+                        } catch { /* ignore */ }
+                    }
+                }
+                provider.postMessage({ type: 'scratchFiles', files } as any);
+            } catch (e) {
+                ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to list scratch files', e);
+                provider.postMessage({ type: 'scratchFiles', files: [] } as any);
+            }
+            break;
+        }
+        case 'openScratchFile': {
+            const filePath = (msg as any).file;
+            if (filePath && typeof filePath === 'string') {
+                try {
+                    const doc = await vs.workspace.openTextDocument(vs.Uri.file(filePath));
+                    await vs.window.showTextDocument(doc, { preview: true });
+                } catch (e) {
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to open scratch file', e);
+                }
+            }
+            break;
+        }
     }
 }

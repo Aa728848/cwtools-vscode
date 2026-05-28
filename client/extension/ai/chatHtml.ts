@@ -118,6 +118,11 @@ ${stylesheetLinks}
         </div>
         <button class="icon-btn side-workspace-close" id="sideWorkspaceClose" title="关闭" aria-label="关闭右侧工作区">${svgIconNoMargin('x')}</button>
     </div>
+    <div class="sw-tabs" id="swTabs" style="display:none">
+        <button class="sw-tab active" data-sw-tab="changes">${svgIconNoMargin('pencil')}<span>变更</span><span class="sw-tab-badge" id="swBadgeChanges"></span></button>
+        <button class="sw-tab" data-sw-tab="files">${svgIconNoMargin('folder')}<span>文件</span><span class="sw-tab-badge" id="swBadgeFiles"></span></button>
+        <button class="sw-tab" data-sw-tab="artifacts">${svgIconNoMargin('layers')}<span>Artifacts</span><span class="sw-tab-badge" id="swBadgeArtifacts"></span></button>
+    </div>
     <div class="side-workspace-body" id="sideWorkspaceBody"></div>
 </aside>
 

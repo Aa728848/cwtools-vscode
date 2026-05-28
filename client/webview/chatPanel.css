@@ -326,6 +326,30 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .tg-label { flex: 1; min-width: 0; font-weight: 600; font-size: 11.5px; }
 .tg-count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); color: var(--fg); font-size: 10px; font-family: var(--vscode-editor-font-family, monospace); flex-shrink: 0; }
 .tool-timeline-grouped { display: flex; flex-direction: column; gap: 4px; }
+
+/* ── Side Workspace Tab bar ── */
+.sw-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); padding: 0 8px; flex-shrink: 0; }
+.sw-tab { display: flex; align-items: center; gap: 5px; padding: 7px 12px 6px; border: none; background: none; color: var(--fg); font-size: 11px; opacity: 0.55; cursor: pointer; border-bottom: 2px solid transparent; transition: opacity 0.15s, border-color 0.15s; white-space: nowrap; }
+.sw-tab:hover { opacity: 0.85; }
+.sw-tab.active { opacity: 1; border-bottom-color: var(--vscode-focusBorder, #007acc); font-weight: 600; }
+.sw-tab svg { width: 13px; height: 13px; flex-shrink: 0; }
+.sw-tab-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.08); color: var(--fg); font-size: 9px; font-family: var(--vscode-editor-font-family, monospace); margin-left: 2px; }
+.sw-tab-badge:empty { display: none; }
+/* ── Scratch file tree ── */
+.scratch-file-tree { display: flex; flex-direction: column; gap: 1px; padding: 6px 4px; }
+.scratch-file-item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 11.5px; color: var(--fg); transition: background 0.12s; }
+.scratch-file-item:hover { background: rgba(255,255,255,0.06); }
+.scratch-file-icon { flex-shrink: 0; width: 14px; height: 14px; opacity: 0.65; }
+.scratch-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scratch-file-size { flex-shrink: 0; font-size: 10px; opacity: 0.4; font-family: var(--vscode-editor-font-family, monospace); }
+.sw-empty-state { padding: 20px 16px; text-align: center; opacity: 0.4; font-size: 11.5px; line-height: 1.6; }
+/* ── Side Workspace Artifact mini-cards ── */
+.sw-artifact-list { display: flex; flex-direction: column; gap: 4px; padding: 6px 4px; }
+.sw-artifact-card { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 5px; cursor: pointer; font-size: 11.5px; color: var(--fg); border: 1px solid var(--border); transition: background 0.12s, border-color 0.12s; }
+.sw-artifact-card:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.15); }
+.sw-artifact-kind { flex-shrink: 0; font-size: 10px; padding: 1px 6px; border-radius: 3px; background: rgba(255,255,255,0.06); text-transform: uppercase; letter-spacing: 0.04em; }
+.sw-artifact-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.sw-artifact-status { flex-shrink: 0; font-size: 10px; opacity: 0.5; }
 /* Tool pair row */
 .tool-pair { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; padding: 3px 10px; gap: 4px 7px; min-width: 0; font-size: 10.5px; }
 .tool-pair:not(:last-child) { border-bottom: 1px solid rgba(255,255,255,0.04); }

@@ -1,5 +1,6 @@
 ﻿import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
-import { routeLiveStep, buildToolPairHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
+import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
+import { groupToolCalls } from './chat/toolPhrases';
 import {
     escapeHtml as _fmtEscapeHtml,
     formatNum as _fmtFormatNum,
@@ -2898,23 +2899,38 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             tools.className = 'process-section process-tools';
             tools.open = hasFailedTool;
             tools.innerHTML = `<summary>${svgIconNoMargin('gear')} 工具详情 <span>${toolCalls.length} 次调用${hasFailedTool ? ' · 有失败' : ''}</span></summary>`;
-            const timelineDiv = document.createElement('div');
-            timelineDiv.className = 'tool-timeline process-tool-timeline';
-            const resultsCopy = [...toolResults];
-            toolCalls.forEach((call: any, idx: number) => {
-                const resultIdx = resultsCopy.findIndex((r: any) => r.toolName === call.toolName);
-                let result: RendererStep | undefined;
-                if (resultIdx >= 0) result = resultsCopy.splice(resultIdx, 1)[0];
-                const wrapper = document.createElement('div');
-                wrapper.innerHTML = buildToolPairHtml(call, result, {
-                    stepIndex: call.stepIndex || idx + 1,
-                    showDuration: true,
-                    showParams: true,
-                    showDiff: true,
+
+            const pairOpts = { showDuration: true, showParams: true, showDiff: true };
+
+            // Use grouped rendering when ≥3 tool calls (Stage B integration)
+            const groups = groupToolCalls(toolCalls, toolResults);
+            if (groups) {
+                const timelineDiv = document.createElement('div');
+                timelineDiv.className = 'tool-timeline process-tool-timeline tool-timeline-grouped';
+                const idxRef = { value: 0 };
+                for (const group of groups) {
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = buildToolGroupHtml(group, idxRef, pairOpts);
+                    if (wrapper.firstElementChild) timelineDiv.appendChild(wrapper.firstElementChild);
+                }
+                tools.appendChild(timelineDiv);
+            } else {
+                const timelineDiv = document.createElement('div');
+                timelineDiv.className = 'tool-timeline process-tool-timeline';
+                const resultsCopy = [...toolResults];
+                toolCalls.forEach((call: any, idx: number) => {
+                    const resultIdx = resultsCopy.findIndex((r: any) => r.toolName === call.toolName);
+                    let result: RendererStep | undefined;
+                    if (resultIdx >= 0) result = resultsCopy.splice(resultIdx, 1)[0];
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = buildToolPairHtml(call, result, {
+                        ...pairOpts,
+                        stepIndex: call.stepIndex || idx + 1,
+                    });
+                    if (wrapper.firstElementChild) timelineDiv.appendChild(wrapper.firstElementChild);
                 });
-                if (wrapper.firstElementChild) timelineDiv.appendChild(wrapper.firstElementChild);
-            });
-            tools.appendChild(timelineDiv);
+                tools.appendChild(timelineDiv);
+            }
             stack.appendChild(tools);
         }
 

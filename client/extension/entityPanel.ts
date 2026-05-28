@@ -302,8 +302,23 @@ export class EntityPanel {
             await vscode.workspace.applyEdit(edit);
             await doc.save();
         } else {
-            // Locator is not script-defined (mesh/bone locator) — cannot persist position changes
-            console.warn(`[EntityPanel] Locator "${msg.locatorName}" is not script-defined, skipping position update`);
+            // Locator is not script-defined (mesh/bone locator) — insert a new
+            // locator override block into the entity so the change persists.
+            if (entityBlockEnd >= 0) {
+                const p = msg.position;
+                const r = msg.rotation;
+                const insertText = `\tlocator = { name = "${msg.locatorName}" position = { ${p[0].toFixed(6)} ${p[1].toFixed(6)} ${p[2].toFixed(6)} } rotation = { ${r[0].toFixed(2)} ${r[1].toFixed(2)} ${r[2].toFixed(2)} } }\n`;
+                const edit = new vscode.WorkspaceEdit();
+                edit.insert(doc.uri, new vscode.Position(entityBlockEnd, 0), insertText);
+                this._skipNextReload = true;
+                await vscode.workspace.applyEdit(edit);
+                await doc.save();
+                // Invalidate graph cache so subsequent edits see the new line
+                this._entityGraph = null;
+                console.log(`[EntityPanel] Inserted locator override for mesh locator "${msg.locatorName}"`);
+            } else {
+                console.warn(`[EntityPanel] Cannot insert locator "${msg.locatorName}": entity block not found`);
+            }
         }
     }
 

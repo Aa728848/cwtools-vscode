@@ -27,7 +27,7 @@ export default [
         },
         plugins: [
             typescript({
-                tsconfig: "tsconfig.webview.json",
+                tsconfig: ".config/tsconfig.webview.json",
                 clean: false,
                 tsconfigOverride: {
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
@@ -46,7 +46,7 @@ export default [
         },
         plugins: [
             typescript({
-                tsconfig: "tsconfig.webview-solar.json",
+                tsconfig: ".config/tsconfig.webview-solar.json",
                 clean: false,
                 tsconfigOverride: {
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
@@ -66,7 +66,7 @@ export default [
         },
         plugins: [
             typescript({
-                tsconfig: "tsconfig.webview-chat.json",
+                tsconfig: ".config/tsconfig.webview-chat.json",
                 clean: false,
                 tsconfigOverride: {
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
@@ -86,7 +86,7 @@ export default [
         },
         plugins: [
             typescript({
-                tsconfig: "tsconfig.webview-chat.json",
+                tsconfig: ".config/tsconfig.webview-chat.json",
                 clean: false,
                 tsconfigOverride: {
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
@@ -108,7 +108,7 @@ export default [
             resolve({ browser: true }),
             commonjs(),
             typescript({
-                tsconfig: "tsconfig.webview-event.json",
+                tsconfig: ".config/tsconfig.webview-event.json",
                 clean: false,
                 tsconfigOverride: {
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
@@ -130,7 +130,7 @@ export default [
             resolve({ browser: true }),
             commonjs(),
             typescript({
-                tsconfig: "tsconfig.webview-tech.json",
+                tsconfig: ".config/tsconfig.webview-tech.json",
                 clean: false,
                 tsconfigOverride: {
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
@@ -152,7 +152,7 @@ export default [
             resolve({ browser: true }),
             commonjs(),
             typescript({
-                tsconfig: "tsconfig.webview-entity.json",
+                tsconfig: ".config/tsconfig.webview-entity.json",
                 clean: false,
                 tsconfigOverride: {
                     exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]

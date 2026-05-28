@@ -56,7 +56,7 @@ git submodule update --init --recursive
 
 `npm run compile` 会执行：
 
-1. `tsc -p ./tsconfig.extension.json`
+1. `tsc -p ./.config/tsconfig.extension.json`
 2. `rollup -c`
 
 Rollup 当前打包 7 个 Webview 入口：
@@ -78,20 +78,6 @@ npm run rules:stellaris:check
 npm run rules:stellaris:update
 ```
 
-根目录也提供便捷构建脚本：
-
-```bash
-# Windows
-.\build.cmd
-
-# Linux / macOS
-./build.sh
-
-# Nushell
-nu build.nu
-```
-
-这些脚本会恢复 dotnet tools、初始化子模块，并调用 `dotnet run --project build -- -t ...`。
 
 ## 运行和调试
 

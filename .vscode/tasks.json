@@ -33,78 +33,9 @@
             }
         },
         {
-            "command": "${workspaceRoot}/build.sh",
-            "windows": {
-                "command": "${workspaceRoot}/build.cmd"
-            },
-            "label": "BuildLocal",
-            "args": [
-                "QuickBuildLocal"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        },
-        {
-            "command": "${workspaceRoot}/build.sh",
-            "windows": {
-                "command": "${workspaceRoot}/build.cmd"
-            },
-            "label": "BuildLocalDebug",
-            "args": [
-                "QuickBuildLocalDebug"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        },
-        {
-            "command": "${workspaceRoot}/build.sh",
-            "windows": {
-                "command": "${workspaceRoot}/build.cmd"
-            },
-            "label": "Build",
-            "args": [
-                "QuickBuild"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        },
-        {
-            "command": "${workspaceRoot}/build.sh",
-            "windows": {
-                "command": "${workspaceRoot}/build.cmd"
-            },
-            "label": "BuildDebug",
-            "args": [
-                "QuickBuildDebug"
-            ],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        },
-        {
             "label": "PaketUpdate",
             "command": "dotnet",
             "args": ["paket", "update", "-g", "git", "--no-install"]
-        },
-        {
-            "label": "UpdateBuild",
-            "dependsOn" :[ "PaketUpdate" ,"Build" ],
-            "dependsOrder": "sequence"
-        },
-        {
-            "label": "UpdateBuildDebug",
-            "dependsOn": [
-                "PaketUpdate",
-                "BuildDebug"
-            ],
-            "dependsOrder": "sequence"
         }
     ]
-}
+}

@@ -1,0 +1,38 @@
+{
+    "compilerOptions": {
+        "module": "ES2020",
+        "target": "ES2021",
+        "noImplicitAny": true,
+        "noImplicitThis": true
+    },
+    "extends": "../tsconfig.json",
+    "include": [
+        "../client/webview/agentManager.ts",
+        "../client/webview/chatPanel.ts",
+        "../client/webview/artifactPanelModel.ts",
+        "../client/webview/messageRenderer.ts",
+        "../client/webview/svgIcons.ts",
+        "../client/webview/chat/artifacts.ts",
+        "../client/webview/chat/artifactDrawer.ts",
+        "../client/webview/chat/formatters.ts",
+        "../client/webview/chat/i18n.ts",
+        "../client/webview/chat/annotations.ts",
+        "../client/webview/chat/contextMentions.ts",
+        "../client/webview/chat/liveSteps.ts",
+        "../client/webview/chat/markdown.ts",
+        "../client/webview/chat/modes.ts",
+        "../client/webview/chat/settingsOverview.ts",
+        "../client/webview/chat/slashCommands.ts",
+        "../client/webview/chat/topicViews.ts",
+        "../client/webview/chat/topics.ts",
+        "../client/webview/chat/workflowSelector.ts",
+        "../client/webview/chat/workflows.ts",
+        "../client/webview/vscode.d.ts"
+    ],
+    "exclude": [
+        "../client/extension/**",
+        "../client/test/**",
+        "../client/webview/guiPreview.ts",
+        "../client/webview/solarSystemPreview.ts"
+    ]
+}

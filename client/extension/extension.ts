@@ -96,7 +96,12 @@ function displayGameName(languageId: string): string {
 }
 
 function countRuleFiles(folder?: string): number {
-	if (!folder || !fs.existsSync(folder)) return 0;
+	if (!folder) return 0;
+	// ZIP archive: file exists and has .zip extension
+	if (folder.endsWith('.zip')) {
+		return fs.existsSync(folder) ? 100 : 0; // Estimate; exact count is not needed for health display
+	}
+	if (!fs.existsSync(folder)) return 0;
 	let count = 0;
 	const visit = (dir: string) => {
 		let entries: fs.Dirent[];
@@ -124,13 +129,18 @@ function firstWorkspacePath(): string | undefined {
 }
 
 function resolveBundledRulesPath(context: ExtensionContext, languageId: string): string {
+	// Packaged ZIP archive (preferred in production)
+	const packagedZip = context.asAbsolutePath(path.join('rules', `${languageId}-rules.zip`));
+	if (fs.existsSync(packagedZip)) return packagedZip;
+	// Legacy: packaged folder
 	const packagedPath = context.asAbsolutePath(path.join('rules', languageId, 'config'));
 	if (fs.existsSync(packagedPath)) return packagedPath;
+	// Dev mode: submodule folder
 	if (languageId === 'stellaris') {
 		const devPath = context.asAbsolutePath(path.join('submodules', 'cwtools-stellaris-config', 'config'));
 		if (fs.existsSync(devPath)) return devPath;
 	}
-	return packagedPath;
+	return packagedZip;
 }
 
 function getConfiguredGamePath(languageId: string): string | undefined {

@@ -109,6 +109,26 @@ let private getRuleFilesFromFolder folder =
     else
         []
 
+let private getRuleFilesFromZip (zipPath: string) : (string * string) list =
+    if not (File.Exists zipPath) then
+        []
+    else
+        try
+            use archive = System.IO.Compression.ZipFile.OpenRead(zipPath)
+            archive.Entries
+            |> Seq.filter (fun entry ->
+                let ext = Path.GetExtension(entry.FullName)
+                (ext = ".cwt" || ext = ".log") && entry.Length > 0L)
+            |> Seq.map (fun entry ->
+                use stream = entry.Open()
+                use reader = new System.IO.StreamReader(stream)
+                let content = reader.ReadToEnd()
+                entry.FullName, content)
+            |> List.ofSeq
+        with e ->
+            logInfo $"Failed to read bundled rules ZIP %s{zipPath}: %A{e}"
+            []
+
 let private readConfigFiles configFiles =
     configFiles |> List.map (fun f -> f, File.ReadAllText(f))
 
@@ -124,9 +144,11 @@ let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder
         | Some path, false -> getRuleFilesFromFolder path
         | _ -> []
 
-    let bundledConfigFiles =
+    let bundledConfigFiles : (string * string) list =
         match bundledRulesFolder, useManualRules with
-        | Some path, false -> getRuleFilesFromFolder path
+        | Some (path: string), false when path.EndsWith(".zip", System.StringComparison.OrdinalIgnoreCase) ->
+            getRuleFilesFromZip path
+        | Some path, false -> readConfigFiles (getRuleFilesFromFolder path)
         | _ -> []
 
     let workspaceConfigFiles =
@@ -135,12 +157,12 @@ let getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder
         | _ -> []
 
     let configFiles =
-        if manualConfigFiles.Length > 0 then manualConfigFiles
-        elif cachedConfigFiles.Length > 0 then cachedConfigFiles
+        if manualConfigFiles.Length > 0 then readConfigFiles manualConfigFiles
+        elif cachedConfigFiles.Length > 0 then readConfigFiles cachedConfigFiles
         elif bundledConfigFiles.Length > 0 then bundledConfigFiles
-        else workspaceConfigFiles
+        else readConfigFiles workspaceConfigFiles
 
-    readConfigFiles configFiles
+    configFiles
 
 let getFolderList (filename: string, filetext: string) =
     if Path.GetFileName filename = "folders.cwt" then

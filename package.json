@@ -2,7 +2,7 @@
   "name": "cwtools-vscode",
   "version": "2.2.3",
   "scripts": {
-    "compile": "tsc -p ./tsconfig.extension.json && rollup -c",
+    "compile": "tsc -p ./.config/tsconfig.extension.json && rollup -c",
     "pack": "powershell -ExecutionPolicy Bypass -File ./package.ps1",
     "pack:install": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -Install",
     "pack:quick": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -SkipServer -Install",

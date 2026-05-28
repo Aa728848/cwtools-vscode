@@ -430,13 +430,8 @@ dotnet build src/LSP/
 dotnet build src/Main/
 ```
 
-便捷脚本：
+> 注意：`build/Program.fs` 中的 Fake 构建系统为上游遗留代码。当前推荐使用 `npm run compile` 和 `package.ps1`。
 
-- `build.cmd`
-- `build.sh`
-- `build.nu`
-
-这些脚本会恢复 dotnet tools、初始化子模块，并调用 `dotnet run --project build -- -t ...`。
 
 ## 打包
 
@@ -447,6 +442,8 @@ npx @vscode/vsce package
 ```
 
 打包前需要准备 TypeScript/Webview 输出和三平台服务端输出。推荐在根目录下运行 `package.ps1` 脚本（或使用快捷指令 `npm run pack:install` / `npm run pack:quick`），可一键自动化执行所有环境的编译、静态资源复制、包体打包及本地强制升级安装。
+
+打包时会将 `submodules/cwtools-stellaris-config/config/` 压缩为 `release/rules/stellaris-rules.zip` 作为 fallback 规则（正常情况下通过 GitHub 拉取规则，仅在网络不可用时启用此 fallback）。F# 服务端使用 `System.IO.Compression.ZipFile` 直接从内存读取 ZIP 内容，无需解压到磁盘。
 
 ## 关键设计约束
 
@@ -597,7 +594,17 @@ cwtools-vscode/
     rules-sync/
   release/
     bin/
+    rules/
+      stellaris-rules.zip       Fallback 规则压缩包
     syntaxes/                 TextMate 语法（paradox, stellaris, pdxshader）
+  .config/
+    tsconfig.extension.json
+    tsconfig.webview.json
+    tsconfig.webview-chat.json
+    tsconfig.webview-entity.json
+    tsconfig.webview-event.json
+    tsconfig.webview-solar.json
+    tsconfig.webview-tech.json
   rollup.config.mjs
   eslint.config.mjs
   global.json

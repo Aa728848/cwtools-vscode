@@ -3,8 +3,6 @@
     <File Path="paket.dependencies" />
   </Folder>
   <Folder Name="/Solution Items/">
-    <File Path="build.cmd" />
-    <File Path="build.sh" />
     <File Path="Directory.Packages.props" />
   </Folder>
   <Folder Name="/src/">

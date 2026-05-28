@@ -47,7 +47,7 @@ if ($Version) {
         $JsonContent.version = $Version
         $JsonText = $JsonContent | ConvertTo-Json -Depth 100
         [System.IO.File]::WriteAllText($PackageJsonPath, $JsonText)
-        Write-Host "[✓] Successfully updated release/package.json: $OldVersion -> $Version" -ForegroundColor Green
+        Write-Host "[OK] Successfully updated release/package.json: $OldVersion -> $Version" -ForegroundColor Green
         Write-Host "[!] Remember to log the updates in release/CHANGELOG.md!" -ForegroundColor Yellow
     } else {
         Write-Error "Could not find release/package.json"
@@ -66,7 +66,7 @@ if (-not $SkipServer) {
         Write-Error "Failed to publish win-x64 server!"
         exit $LASTEXITCODE
     }
-    Write-Host "[✓] win-x64 server published successfully." -ForegroundColor Green
+    Write-Host "[OK] win-x64 server published successfully." -ForegroundColor Green
 
     # linux-x64
     Write-Host ">>> Publishing linux-x64..." -ForegroundColor Cyan
@@ -75,7 +75,7 @@ if (-not $SkipServer) {
         Write-Error "Failed to publish linux-x64 server!"
         exit $LASTEXITCODE
     }
-    Write-Host "[✓] linux-x64 server published successfully." -ForegroundColor Green
+    Write-Host "[OK] linux-x64 server published successfully." -ForegroundColor Green
 
     # osx-x64
     Write-Host ">>> Publishing osx-x64..." -ForegroundColor Cyan
@@ -84,7 +84,7 @@ if (-not $SkipServer) {
         Write-Error "Failed to publish osx-x64 server!"
         exit $LASTEXITCODE
     }
-    Write-Host "[✓] osx-x64 server published successfully." -ForegroundColor Green
+    Write-Host "[OK] osx-x64 server published successfully." -ForegroundColor Green
 } else {
     Write-Host "[1/5] (SKIPPED) Skip F# server compilation." -ForegroundColor Gray
 }
@@ -92,12 +92,12 @@ if (-not $SkipServer) {
 # 3. Compile Client TypeScript
 if (-not $SkipClient) {
     Write-Host "[2/5] Compiling client TypeScript extension host..." -ForegroundColor Yellow
-    npx tsc -p tsconfig.extension.json
+    npx tsc -p .config/tsconfig.extension.json
     if ($LASTEXITCODE -ne 0) {
         Write-Error "TypeScript compilation failed!"
         exit $LASTEXITCODE
     }
-    Write-Host "[✓] Client TypeScript compiled successfully." -ForegroundColor Green
+    Write-Host "[OK] Client TypeScript compiled successfully." -ForegroundColor Green
 } else {
     Write-Host "[2/5] (SKIPPED) Skip client TypeScript compilation." -ForegroundColor Gray
 }
@@ -110,7 +110,7 @@ if (-not $SkipClient) {
         Write-Error "Rollup bundling failed!"
         exit $LASTEXITCODE
     }
-    Write-Host "[✓] Webview bundling completed successfully." -ForegroundColor Green
+    Write-Host "[OK] Webview bundling completed successfully." -ForegroundColor Green
 
     Write-Host "[4/5] Copying static webview assets and bundled rules..." -ForegroundColor Yellow
     $DestCssDir = Join-Path $PSScriptRoot "release/bin/client/webview"
@@ -120,18 +120,22 @@ if (-not $SkipClient) {
     Copy-Item "client/webview/solarSystemPreview.css" "$DestCssDir/" -Force
     Copy-Item "client/webview/chatPanel.css" "$DestCssDir/" -Force
     $RulesSourceDir = Join-Path $PSScriptRoot "submodules/cwtools-stellaris-config/config"
-    $RulesDestDir = Join-Path $PSScriptRoot "release/rules/stellaris/config"
+    $RulesDestZip = Join-Path $PSScriptRoot "release/rules/stellaris-rules.zip"
     if (-not (Test-Path $RulesSourceDir)) {
         Write-Error "Bundled Stellaris rules source not found: $RulesSourceDir"
         exit 1
     }
-    if (Test-Path $RulesDestDir) {
-        Remove-Item -LiteralPath $RulesDestDir -Recurse -Force
+    $RulesDestDir = Split-Path $RulesDestZip -Parent
+    if (-not (Test-Path $RulesDestDir)) {
+        New-Item -ItemType Directory -Path $RulesDestDir -Force | Out-Null
     }
-    New-Item -ItemType Directory -Path $RulesDestDir -Force | Out-Null
-    Copy-Item -Path (Join-Path $RulesSourceDir "*") -Destination $RulesDestDir -Recurse -Force
-    Write-Host "[OK] Bundled Stellaris rules copied successfully." -ForegroundColor Green
-    Write-Host "[✓] Static CSS assets copied successfully." -ForegroundColor Green
+    # Remove legacy folder and old ZIP
+    $LegacyDir = Join-Path $PSScriptRoot "release/rules/stellaris"
+    if (Test-Path $LegacyDir) { Remove-Item -LiteralPath $LegacyDir -Recurse -Force }
+    if (Test-Path $RulesDestZip) { Remove-Item -LiteralPath $RulesDestZip -Force }
+    Compress-Archive -Path (Join-Path $RulesSourceDir "*") -DestinationPath $RulesDestZip -CompressionLevel Optimal
+    Write-Host "[OK] Bundled Stellaris rules compressed to ZIP successfully." -ForegroundColor Green
+    Write-Host "[OK] Static CSS assets copied successfully." -ForegroundColor Green
 } else {
     Write-Host "[3/5 & 4/5] (SKIPPED) Skip Webview compilation and asset copying." -ForegroundColor Gray
 }
@@ -169,8 +173,8 @@ if ($Install) {
         code --install-extension $VsixFile.FullName --force
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
-            Write-Host "🚀 Extension installed and upgraded successfully!" -ForegroundColor Green
-            Write-Host "👉 Tip: Execute [Developer: Reload Window] in VSCode to apply updates!" -ForegroundColor Green
+            Write-Host "[OK] Extension installed and upgraded successfully!" -ForegroundColor Green
+            Write-Host "[OK] Tip: Execute [Developer: Reload Window] in VSCode to apply updates!" -ForegroundColor Green
             Write-Host ""
         } else {
             Write-Warning "Installation command returned a non-zero code. Make sure 'code' CLI is in your PATH."
@@ -182,4 +186,4 @@ if ($Install) {
 
 $EndTime = Get-Date
 $Duration = $EndTime - $StartTime
-Write-Host "🕒 Build finished. Total duration: $($Duration.Minutes)m $($Duration.Seconds)s." -ForegroundColor Cyan
+Write-Host "[OK] Build finished. Total duration: $($Duration.Minutes)m $($Duration.Seconds)s." -ForegroundColor Cyan

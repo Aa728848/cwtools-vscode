@@ -50,8 +50,8 @@ export function computeLineDiff(
     newContent: string,
     maxLines: number = MAX_DIFF_LINES
 ): FileDiffResult {
-    const oldLines = oldContent.split('\n');
-    const newLines = newContent.split('\n');
+    const oldLines = oldContent.replace(/\r\n/g, '\n').split('\n');
+    const newLines = newContent.replace(/\r\n/g, '\n').split('\n');
 
     // For very large files, fall back to a simpler approach
     const totalLines = oldLines.length + newLines.length;

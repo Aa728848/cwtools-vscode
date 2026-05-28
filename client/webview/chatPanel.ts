@@ -1,4 +1,4 @@
-﻿import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
+import { Icons, svgIcon, svgIconNoMargin, svgIconColored } from './svgIcons';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import { groupToolCalls } from './chat/toolPhrases';
 import {
@@ -216,6 +216,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsInSideWorkspace = false;
     let sideDiffEntrySeq = 0;
     const sideDiffEntries: SideDiffEntry[] = [];
+    /** Files modified by Agent that the user has not yet viewed in the diff panel. */
+    const unseenDiffFiles = new Set<string>();
     const originalParents = new Map<HTMLElement, { parent: Node; nextSibling: ChildNode | null }>();
     let activeResponsiveWorkspace: ResponsiveWorkspacePanel | null = null;
     let responsiveWorkspacePinnedClosed = false;
@@ -722,6 +724,30 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
     }
 
+    /** SVG file-type icon based on extension. Returns a 14x14 inline SVG string with colored stroke. */
+    function fileTypeIconSvg(filename: string): string {
+        const ext = (filename.split('.').pop() || '').toLowerCase();
+        const colors: Record<string, string> = {
+            ts: '#3178c6', tsx: '#3178c6', js: '#f7df1e', jsx: '#f7df1e',
+            json: '#a8b1c2', css: '#264de4', scss: '#cf649a', less: '#1d365d',
+            py: '#3776ab', rs: '#dea584', go: '#00add8',
+            md: '#519aba', txt: '#888', yml: '#cb171e', yaml: '#cb171e',
+            fs: '#b845fc', fsx: '#b845fc', fsi: '#b845fc',
+            cwt: '#e68a00', log: '#888',
+            html: '#e44d26', xml: '#e44d26', svg: '#ffb13b',
+            sh: '#89e051', ps1: '#2b5b84', bat: '#c1f12e',
+            lua: '#000080', gfx: '#e68a00', gui: '#e68a00', asset: '#e68a00',
+        };
+        const c = colors[ext] || 'currentColor';
+        const codeExts = new Set(['ts', 'tsx', 'js', 'jsx', 'py', 'rs', 'go', 'fs', 'fsx', 'fsi', 'lua', 'sh', 'ps1', 'bat', 'css', 'scss', 'less', 'html', 'xml']);
+        if (codeExts.has(ext)) return svgIconColored('code', c);
+        const dataExts = new Set(['json', 'yml', 'yaml', 'cwt', 'gfx', 'gui', 'asset', 'txt', 'log']);
+        if (dataExts.has(ext)) return svgIconColored('fileText', c);
+        if (ext === 'md') return svgIconColored('file', c);
+        if (ext === 'svg' || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'dds', 'tga'].includes(ext)) return svgIconColored('image', c);
+        return Icons.file;
+    }
+
     function createSideDiffView(entries: SideDiffEntry[], options: { title: string; focus?: SideDiffFocus }): HTMLElement {
         const view = document.createElement('div');
         view.className = 'side-diff-view';
@@ -765,6 +791,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const item = document.createElement('section');
                 item.className = 'side-diff-file open';
                 item.dataset.sideDiffFile = file.file;
+                const fileBaseName = fileBaseNameLocal(file.file);
+                const fileIcon = fileTypeIconSvg(fileBaseName);
+                const isUnseen = unseenDiffFiles.has(file.file);
+                const unseenDot = isUnseen ? '<span class="side-diff-unseen-dot"></span>' : '';
                 const stats = file.additions != null ? `<span class="ds-add">+${file.additions || 0}</span><span class="ds-del">-${file.deletions || 0}</span>` : escapeHtml(file.diffPreview || '');
                 const preview = file.diffPreview ? `<span class="side-diff-file-preview">${escapeHtml(file.diffPreview)}</span>` : '';
                 const fileHeader = document.createElement('button');
@@ -773,8 +803,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 fileHeader.innerHTML = `
                     <div class="side-diff-file-main">
                         <span class="side-diff-file-title">
+                            ${unseenDot}
                             <span class="side-diff-chevron">&gt;</span>
-                            <span class="side-diff-file-name" title="${escapeHtml(file.file)}">${escapeHtml(fileBaseNameLocal(file.file))}</span>
+                            <span class="side-diff-file-icon">${fileIcon}</span>
+                            <span class="side-diff-file-name" title="${escapeHtml(file.file)}">${escapeHtml(fileBaseName)}</span>
                         </span>
                         <span class="side-diff-file-path">${escapeHtml(file.file)}</span>
                         ${preview}
@@ -783,6 +815,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 fileHeader.addEventListener('click', event => {
                     event.stopPropagation();
                     item.classList.toggle('open');
+                    // Clear unseen on click
+                    if (unseenDiffFiles.delete(file.file)) {
+                        const dot = fileHeader.querySelector('.side-diff-unseen-dot');
+                        if (dot) dot.remove();
+                        updateSwBadges();
+                    }
                 });
                 item.appendChild(fileHeader);
                 const code = document.createElement('div');
@@ -846,6 +884,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         title = '文件变更',
         options: { pending?: { messageId: string; isNewFile: boolean }; append?: boolean; sourceKey?: string; focusFile?: string } = {},
     ): void {
+        // Mark incoming files as unseen
+        for (const f of files) unseenDiffFiles.add(f.file);
         const sourceKey = options.sourceKey || getSideDiffSourceKey(title, files, options.pending);
         const entry = createSideDiffEntry(files, title, options.pending, sourceKey);
         const activeEntry = upsertSideDiffEntry(entry);
@@ -994,6 +1034,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (swBadgeChanges) swBadgeChanges.textContent = diffCount > 0 ? String(diffCount) : '';
         if (swBadgeFiles) swBadgeFiles.textContent = _scratchFiles.length > 0 ? String(_scratchFiles.length) : '';
         if (swBadgeArtifacts) swBadgeArtifacts.textContent = artifacts.length > 0 ? String(artifacts.length) : '';
+        // Unseen indicator on the changes tab
+        const changesTab = swTabs?.querySelector('[data-sw-tab="changes"]');
+        if (changesTab) {
+            changesTab.classList.toggle('sw-tab-unseen', unseenDiffFiles.size > 0 && _activeSwTab !== 'changes');
+        }
     }
 
     function switchSwTab(tab: string): void {
@@ -2836,7 +2881,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function buildProcessPanel(sortedSteps: any[]) {
         const thinkingSteps = sortedSteps.filter((s: any) => s.type === 'thinking' || s.type === 'thinking_content');
         const textDeltas = sortedSteps.filter((s: any) => s.type === 'text_delta');
-        const specialSteps = sortedSteps.filter((s: any) => !['thinking', 'thinking_content', 'tool_call', 'tool_result', 'text_delta'].includes(s.type));
+        const cacheStatsSteps = sortedSteps.filter((s: any) => s.type === 'cache_stats');
+        const specialSteps = sortedSteps.filter((s: any) => !['thinking', 'thinking_content', 'tool_call', 'tool_result', 'text_delta', 'cache_stats'].includes(s.type));
         const toolCalls = sortedSteps.filter((s: any) => s.type === 'tool_call');
         const toolResults = sortedSteps.filter((s: any) => s.type === 'tool_result');
         const hasFailedTool = toolResults.some((s: any) => {
@@ -2846,16 +2892,55 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const hasUsefulContent = thinkingSteps.length > 0 || toolCalls.length > 0 || specialSteps.length > 0 || textDeltas.length > 0;
         if (!hasUsefulContent) return null;
 
-        const panel = document.createElement('details');
+        // ── Custom collapsible panel (replaces native <details>) ──
+        const panel = document.createElement('div');
         panel.className = 'agent-process-panel';
-        panel.open = hasFailedTool;
-        const summary = document.createElement('summary');
-        summary.innerHTML = `
+        let isExpanded = hasFailedTool;
+        let userToggled = false;
+
+        function setExpanded(expanded: boolean) {
+            isExpanded = expanded;
+            panel.classList.toggle('process-expanded', expanded);
+            if (expanded) {
+                // First set to scrollHeight to animate open, then unlock to none after transition
+                body.style.maxHeight = body.scrollHeight + 'px';
+                body.style.opacity = '1';
+                const unlock = () => {
+                    if (isExpanded) body.style.maxHeight = 'none';
+                    body.removeEventListener('transitionend', unlock);
+                };
+                body.addEventListener('transitionend', unlock);
+            } else {
+                // Collapse: lock to current scrollHeight first, then animate to 0
+                body.style.maxHeight = body.scrollHeight + 'px';
+                // Force reflow before setting to 0
+                void body.offsetHeight;
+                body.style.maxHeight = '0';
+                body.style.opacity = '0';
+            }
+            collapseBtn.style.display = expanded ? '' : 'none';
+        }
+
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'process-panel-header';
+        header.innerHTML = `
+            <span class="process-panel-chevron"></span>
             ${svgIconNoMargin('layers')}
             <span class="process-title">探索过程</span>
             <span class="process-meta">${thinkingSteps.length} 思考 · ${toolCalls.length} 工具 · ${textDeltas.length} 文本</span>
+            <span class="process-countdown"></span>
         `;
-        panel.appendChild(summary);
+        header.addEventListener('click', () => {
+            userToggled = true;
+            setExpanded(!isExpanded);
+        });
+        panel.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'process-panel-body';
+        body.style.maxHeight = isExpanded ? 'none' : '0';
+        body.style.opacity = isExpanded ? '1' : '0';
 
         const stack = document.createElement('div');
         stack.className = 'process-stack';
@@ -2934,6 +3019,24 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             stack.appendChild(tools);
         }
 
+        // ── Aggregated cache stats summary ──
+        if (cacheStatsSteps.length > 0) {
+            let totalHit = 0, totalCreated = 0, totalSaved = 0;
+            for (const cs of cacheStatsSteps) {
+                const stats = (cs as any).cacheStats;
+                if (stats) {
+                    totalHit += stats.cachedTokens || 0;
+                    totalCreated += stats.cacheCreationTokens || 0;
+                    totalSaved += stats.savedCostCny || 0;
+                }
+            }
+            const hitRate = totalHit > 0 ? ((totalHit / (totalHit + totalCreated)) * 100).toFixed(1) : '0.0';
+            const cacheSummary = document.createElement('div');
+            cacheSummary.className = 'process-cache-summary';
+            cacheSummary.innerHTML = `${svgIconNoMargin('check')} Prefix Cache 汇总 (${cacheStatsSteps.length} 次)：命中 ${totalHit.toLocaleString()} tokens (${hitRate}%)，创建 ${totalCreated.toLocaleString()} tokens，节省约 ¥${totalSaved.toFixed(4)}`;
+            stack.appendChild(cacheSummary);
+        }
+
         if (specialSteps.length > 0) {
             const special = document.createElement('div');
             special.className = 'process-specials';
@@ -2947,7 +3050,43 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             stack.appendChild(special);
         }
 
-        panel.appendChild(stack);
+        // ── Collapse button at bottom of body ──
+        const collapseBtn = document.createElement('button');
+        collapseBtn.type = 'button';
+        collapseBtn.className = 'process-collapse-btn';
+        collapseBtn.innerHTML = svgIconNoMargin('x') + ' 收起';
+        collapseBtn.style.display = isExpanded ? '' : 'none';
+        collapseBtn.addEventListener('click', () => {
+            userToggled = true;
+            setExpanded(false);
+        });
+
+        body.appendChild(stack);
+        body.appendChild(collapseBtn);
+        panel.appendChild(body);
+
+        if (isExpanded) panel.classList.add('process-expanded');
+
+        // ── Auto-collapse with 3s countdown (skipped if user toggled or has failures) ──
+        if (!hasFailedTool && !userToggled) {
+            // Start expanded so user can see progress
+            setExpanded(true);
+            const countdownEl = header.querySelector('.process-countdown') as HTMLElement | null;
+            let countdown = 3;
+            const tick = () => {
+                if (userToggled) return;
+                if (countdownEl) countdownEl.textContent = `（${countdown}）`;
+                if (countdown <= 0) {
+                    if (countdownEl) countdownEl.textContent = '';
+                    setExpanded(false);
+                    return;
+                }
+                countdown--;
+                setTimeout(tick, 1000);
+            };
+            setTimeout(tick, 500);
+        }
+
         return panel;
     }
 
@@ -3131,7 +3270,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     interface AgentStreamState {
         livePhase: string | null;
         liveSummary: HTMLElement | null;
-        liveProcessPanel: HTMLDetailsElement | null;
+        liveProcessPanel: HTMLDivElement | null;
         liveProcessBody: HTMLElement | null;
         liveTextProcessBody: HTMLElement | null;
         liveThinkBlock: HTMLElement | null;
@@ -3314,14 +3453,35 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function ensureLiveProcessPanel(state: AgentStreamState) {
         if (!state.container) return null;
         if (!state.liveProcessPanel) {
-            state.liveProcessPanel = document.createElement('details');
-            state.liveProcessPanel.className = 'agent-process-panel live-process-panel';
-            state.liveProcessPanel.open = true;
-            const summary = document.createElement('summary');
-            summary.innerHTML = buildLiveProcessSummaryHtml('layers', chatI18n.live.realtimeProcess, '');
-            state.liveProcessPanel.appendChild(summary);
+            state.liveProcessPanel = document.createElement('div');
+            state.liveProcessPanel.className = 'agent-process-panel live-process-panel process-expanded';
+            const header = document.createElement('button');
+            header.type = 'button';
+            header.className = 'process-panel-header';
+            header.innerHTML = `<span class="process-panel-chevron"></span>` + buildLiveProcessSummaryHtml('layers', chatI18n.live.realtimeProcess, '');
+            header.addEventListener('click', () => {
+                const isOpen = state.liveProcessPanel!.classList.toggle('process-expanded');
+                const body = state.liveProcessBody;
+                if (body) {
+                    if (isOpen) {
+                        body.style.maxHeight = 'none';
+                        body.style.opacity = '1';
+                    } else {
+                        body.style.maxHeight = body.scrollHeight + 'px';
+                        void body.offsetHeight;
+                        body.style.maxHeight = '0';
+                        body.style.opacity = '0';
+                    }
+                }
+            });
+            state.liveProcessPanel.appendChild(header);
             state.liveProcessBody = document.createElement('div');
-            state.liveProcessBody.className = 'process-stack live-process-stack';
+            state.liveProcessBody.className = 'process-panel-body';
+            state.liveProcessBody.style.maxHeight = 'none';
+            state.liveProcessBody.style.opacity = '1';
+            const stack = document.createElement('div');
+            stack.className = 'process-stack live-process-stack';
+            state.liveProcessBody.appendChild(stack);
             state.liveProcessPanel.appendChild(state.liveProcessBody);
             if (state.liveSummary && state.liveSummary.nextSibling) {
                 state.container.insertBefore(state.liveProcessPanel, state.liveSummary.nextSibling);
@@ -3329,9 +3489,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 state.container.appendChild(state.liveProcessPanel);
             }
         }
-        const meta = state.liveProcessPanel.querySelector(':scope > summary .process-meta');
+        const meta = state.liveProcessPanel.querySelector('.process-panel-header .process-meta');
         if (meta) meta.textContent = buildLiveProcessMeta(state.liveSteps, chatI18n);
-        return state.liveProcessBody;
+        // Return the inner stack, not the body wrapper
+        return state.liveProcessBody?.querySelector('.process-stack') as HTMLElement | null ?? state.liveProcessBody;
     }
 
     function ensureLiveSummary(state: AgentStreamState, step?: any, coalesced = false) {

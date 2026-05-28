@@ -10,7 +10,7 @@
 
 // ── Imports ──────────────────────────────────────────────────────────────────
 import { Icons, svgIconNoMargin } from './svgIcons';
-import { groupToolCalls, categoryClass, type ToolGroup } from './chat/toolPhrases';
+import { groupToolCalls, categoryClass, getToolDynamicPhrase, type ToolGroup } from './chat/toolPhrases';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -356,12 +356,14 @@ export function buildToolPairHtml(
     }
 
     // ── Standard tool call ──
+    const dynPhrase = getToolDynamicPhrase(toolName, args);
+    const displayLabel = resultStep ? dynPhrase.label : dynPhrase.loadingLabel;
     const summary = summarizeToolArgs(toolName, args, paramLen);
 
     let callHtml = '';
     if (opts?.stepIndex != null) callHtml += `<span class="tp-idx">${opts.stepIndex}.</span>`;
     callHtml += `<span class="tp-icon">${icon}</span>`;
-    callHtml += `<span class="tp-name">${escapeHtml(toolName)}</span>`;
+    callHtml += `<span class="tp-name">${escapeHtml(displayLabel)}</span>`;
     if (summary) callHtml += ` <span class="tp-file">${escapeHtml(summary)}</span>`;
 
     // Duration

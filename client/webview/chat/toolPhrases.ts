@@ -75,6 +75,144 @@ export function getToolPhrase(toolName: string): ToolPhraseMeta {
     return TOOL_PHRASES[toolName] ?? { category: 'other', icon: '⚙', phrase: toolName };
 }
 
+// ── Dynamic phrase (parameter-aware, dual-state) ─────────────────────────────
+
+/**
+ * A context-aware phrase pair for rendering tool calls.
+ * `label` is shown after completion; `loadingLabel` during streaming.
+ */
+export interface ToolDynamicPhrase {
+    /** 完成态短语: "读取 bar.ts 第 10-60 行" */
+    label: string;
+    /** 进行时态短语: "正在读取 bar.ts..." */
+    loadingLabel: string;
+}
+
+/** Extract basename from a file path. */
+function basename(path: string): string {
+    return (path || '').replace(/\\/g, '/').split('/').pop() || path;
+}
+
+/** Truncate text to a max length. */
+function truncateStr(text: string, max: number): string {
+    return text.length > max ? text.slice(0, max) + '…' : text;
+}
+
+/** Build a dual-state phrase pair from a label. */
+function dualPhrase(label: string): ToolDynamicPhrase {
+    return { label, loadingLabel: `正在${label}...` };
+}
+
+/**
+ * Generate a context-aware dynamic phrase from tool name and arguments.
+ * Falls back to the static phrase registry if no args are available.
+ */
+export function getToolDynamicPhrase(
+    toolName: string,
+    toolArgs?: Record<string, unknown>,
+): ToolDynamicPhrase {
+    const args = toolArgs || {};
+    const meta = getToolPhrase(toolName);
+
+    switch (toolName) {
+        case 'read_file': {
+            const fp = args.AbsolutePath ?? args.file_path ?? args.filePath;
+            if (typeof fp === 'string') {
+                const name = basename(fp);
+                const start = typeof args.StartLine === 'number' ? args.StartLine : undefined;
+                const end = typeof args.EndLine === 'number' ? args.EndLine : undefined;
+                if (start != null && end != null) return dualPhrase(`读取 ${name} 第 ${start}-${end} 行`);
+                if (start != null) return dualPhrase(`读取 ${name} 从第 ${start} 行`);
+                return dualPhrase(`读取 ${name}`);
+            }
+            return dualPhrase(meta.phrase);
+        }
+        case 'edit_file':
+        case 'multiedit': {
+            const fp = args.TargetFile ?? args.file_path ?? args.filePath;
+            const name = typeof fp === 'string' ? basename(fp) : '文件';
+            return dualPhrase(`编辑 ${name}`);
+        }
+        case 'write_file':
+        case 'create_file': {
+            const fp = args.TargetFile ?? args.file_path ?? args.filePath;
+            const name = typeof fp === 'string' ? basename(fp) : '文件';
+            return dualPhrase(`写入 ${name}`);
+        }
+        case 'delete_file': {
+            const fp = args.TargetFile ?? args.file_path ?? args.filePath;
+            const name = typeof fp === 'string' ? basename(fp) : '文件';
+            return dualPhrase(`删除 ${name}`);
+        }
+        case 'run_command': {
+            const cmd = args.CommandLine ?? args.command;
+            if (typeof cmd === 'string') return dualPhrase(`执行 ${truncateStr(cmd, 80)}`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'list_directory': {
+            const dp = args.DirectoryPath ?? args.path;
+            if (typeof dp === 'string') return dualPhrase(`列出 ${basename(dp)}/`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'glob_files':
+        case 'search_mod_files': {
+            const pattern = args.Pattern ?? args.pattern ?? args.query;
+            if (typeof pattern === 'string') return dualPhrase(`搜索文件 ${truncateStr(pattern, 60)}`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'codesearch': {
+            const query = args.Query ?? args.query ?? args.pattern;
+            if (typeof query === 'string') return dualPhrase(`代码搜索 ${truncateStr(query, 60)}`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'search_web': {
+            const query = args.query ?? args.Query;
+            if (typeof query === 'string') return dualPhrase(`搜索 "${truncateStr(query, 60)}"`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'web_fetch': {
+            const url = args.url ?? args.Url;
+            if (typeof url === 'string') return dualPhrase(`抓取 ${truncateStr(url, 60)}`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'get_diagnostics':
+        case 'validate_code': {
+            const fp = args.file ?? args.filePath ?? args.AbsolutePath;
+            if (typeof fp === 'string') return dualPhrase(`诊断 ${basename(fp)}`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'query_workspace_index': {
+            const query = args.query ?? args.Query ?? args.keyword;
+            if (typeof query === 'string') return dualPhrase(`查索引 "${truncateStr(query, 50)}"`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'dispatch_agents': {
+            const desc = args.description ?? args.prompt;
+            if (typeof desc === 'string') return dualPhrase(`分派 ${truncateStr(desc, 60)}`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'get_pdx_block': {
+            const fp = args.file ?? args.filePath;
+            const key = args.key ?? args.blockKey;
+            if (typeof fp === 'string' && typeof key === 'string') return dualPhrase(`提取 ${basename(fp)} → ${truncateStr(key, 40)}`);
+            if (typeof fp === 'string') return dualPhrase(`提取 ${basename(fp)} 脚本块`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'write_localisation': {
+            const key = args.key ?? args.locKey;
+            if (typeof key === 'string') return dualPhrase(`写入本地化 ${truncateStr(key, 50)}`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'apply_patch': {
+            const fp = args.TargetFile ?? args.file_path;
+            if (typeof fp === 'string') return dualPhrase(`补丁 ${basename(fp)}`);
+            return dualPhrase(meta.phrase);
+        }
+        default:
+            return dualPhrase(meta.phrase);
+    }
+}
+
 // ── Grouping ─────────────────────────────────────────────────────────────────
 
 export interface ToolCallPair {

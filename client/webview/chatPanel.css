@@ -1,4 +1,4 @@
-﻿:root {
+:root {
     --bg: var(--vscode-editor-background, #1e1e1e);
     --fg: var(--vscode-editor-foreground, #cccccc);
     --border: var(--vscode-panel-border, #333);
@@ -1018,7 +1018,7 @@ body.chat-empty .slash-popup { top: var(--composer-popup-top); bottom: auto; max
 .side-diff-file-header:hover { background: rgba(255,255,255,0.035); }
 .side-diff-file.focused > .side-diff-file-header { box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .side-diff-file-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.side-diff-file-title { min-width: 0; display: inline-flex; align-items: baseline; gap: 7px; }
+.side-diff-file-title { min-width: 0; display: inline-flex; align-items: center; gap: 5px; }
 .side-diff-file-name { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-diff-file-path { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; opacity: 0.48; overflow-wrap: anywhere; word-break: break-word; }
 .side-diff-file-preview { font-size: 10.5px; opacity: 0.56; }
@@ -1031,18 +1031,28 @@ body.chat-empty .slash-popup { top: var(--composer-popup-top); bottom: auto; max
 .side-diff-chevron { flex-shrink: 0; display: inline-block; opacity: 0.5; transform: rotate(0deg); transition: transform 0.14s ease, opacity 0.14s ease; font-family: var(--vscode-editor-font-family, monospace); }
 .side-diff-entry.open > .side-diff-entry-header .side-diff-chevron,
 .side-diff-file.open > .side-diff-file-header .side-diff-chevron { transform: rotate(90deg); opacity: 0.8; }
+.side-diff-file-icon { flex-shrink: 0; display: inline-flex; align-items: center; opacity: 0.75; }
+/* Unseen dot (new/modified file indicator) */
+.side-diff-unseen-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-focusBorder, #0078d4); box-shadow: 0 0 4px rgba(0,120,212,0.4); }
+@keyframes sw-unseen-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.sw-tab-unseen { position: relative; }
+.sw-tab-unseen::after { content: ''; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-focusBorder, #0078d4); animation: sw-unseen-pulse 1.5s ease-in-out infinite; }
 /* ── Tool Timeline (linear step list, replaces collapsed tool-group for finalized messages) ── */
 .tool-timeline { margin: 4px 0; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
 .tool-timeline > .tool-pair { padding: 4px 10px; }
 .tool-timeline > .tool-pair:not(:last-child) { border-bottom: 1px solid rgba(255,255,255,0.04); }
 
-/* Antigravity-style concentrated process panel */
+/* Antigravity-style concentrated process panel (custom collapsible) */
 .agent-process-panel { margin: 6px 0; border: 1px solid var(--thinking-border); border-radius: 8px; overflow: hidden; background: var(--thinking-bg); }
-.agent-process-panel > summary { cursor: pointer; list-style: none; user-select: none; display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 12px; color: cornflowerblue; font-size: 11.5px; opacity: 1; }
-.agent-process-panel > summary::-webkit-details-marker { display: none; }
-.agent-process-panel > summary::before { content: '▸'; font-size: 9px; opacity: 0.58; transition: transform 0.15s; }
-.agent-process-panel[open] > summary::before { transform: rotate(90deg); }
-.agent-process-panel > summary:hover { background: rgba(100,149,237,0.04); }
+.process-panel-header { width: 100%; border: 0; background: transparent; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 12px; color: cornflowerblue; font-size: 11.5px; font-family: inherit; }
+.process-panel-header:hover { background: rgba(100,149,237,0.04); }
+.process-panel-chevron { flex-shrink: 0; display: inline-block; width: 8px; font-size: 9px; opacity: 0.58; transition: transform 0.2s ease; }
+.process-panel-chevron::before { content: '▸'; }
+.process-expanded > .process-panel-header .process-panel-chevron { transform: rotate(90deg); }
+.process-panel-body { overflow: hidden; transition: max-height 700ms ease-in-out, opacity 300ms ease; }
+.process-countdown { flex-shrink: 0; font-size: 10px; opacity: 0.5; font-family: var(--vscode-editor-font-family, monospace); }
+.process-collapse-btn { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; border: 0; border-top: 1px solid var(--thinking-border); background: rgba(100,149,237,0.03); color: cornflowerblue; font-size: 10.5px; font-family: inherit; padding: 5px; cursor: pointer; opacity: 0.6; transition: opacity 0.15s; }
+.process-collapse-btn:hover { opacity: 1; background: rgba(100,149,237,0.06); }
 .process-stack { border-top: 1px solid var(--thinking-border); padding: 6px; display: flex; flex-direction: column; gap: 6px; background: rgba(0,0,0,0.08); }
 .process-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-weight: inherit; color: inherit; }
 .process-meta { min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; margin-left: auto; opacity: 0.46; font-family: var(--vscode-editor-font-family, monospace); font-size: 9.5px; white-space: nowrap; }
@@ -1056,6 +1066,7 @@ body.chat-empty .slash-popup { top: var(--composer-popup-top); bottom: auto; max
 .process-tool-timeline { margin: 0; border-color: rgba(255,255,255,0.08); border-radius: 7px; background: rgba(255,255,255,0.018); }
 .process-tool-timeline > .tool-pair { padding: 6px 9px; }
 .process-specials { display: flex; flex-direction: column; gap: 4px; padding: 2px 3px; }
+.process-cache-summary { display: flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid rgba(100,149,237,0.12); border-radius: 7px; background: rgba(100,149,237,0.035); font-size: 10.5px; color: cornflowerblue; opacity: 0.82; }
 .live-process-panel { border-color: rgba(100,149,237,0.2); background: rgba(100,149,237,0.035); }
 
 /* Collapsible tool group */
@@ -1566,3 +1577,26 @@ body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
     font-weight: bold;
     color: var(--vscode-charts-green, #388a34);
 }
+
+/* ── Stage H: Micro-interactions ── */
+@keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.tool-pair { animation: fadeSlideIn 150ms ease-out both; }
+.tool-group { animation: fadeSlideIn 150ms ease-out both; }
+
+/* Chevron rotation for inner details (process-section) */
+.process-section > summary::before { transition: transform 0.2s ease; }
+.process-section[open] > summary::before { transform: rotate(90deg); }
+
+/* Hover feedback */
+.tool-pair:hover { background: rgba(255,255,255,0.02); }
+.side-diff-file-header:hover .side-diff-file-name { opacity: 0.85; }
+
+/* Plan card entrance animation */
+@keyframes slideInFromBottom {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.annotatable-plan { animation: slideInFromBottom 200ms ease-out both; }

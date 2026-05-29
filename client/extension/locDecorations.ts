@@ -74,12 +74,12 @@ function fromIndexedEntry(entry: LocEntry): LocLookupEntry {
     };
 }
 
-async function findLocEntry(
+function findLocEntry(
     key: string,
     preferredDocument: vs.TextDocument,
     indexService?: IndexService,
-): Promise<LocLookupEntry | undefined> {
-    // Fast path: check open document caches first (no async needed)
+): LocLookupEntry | undefined {
+    // Fast path: check open document caches first (hash map O(1) lookup)
     const preferred = openDocumentLocCache.get(preferredDocument.uri.toString())?.get(key);
     if (preferred) return preferred;
 
@@ -88,8 +88,8 @@ async function findLocEntry(
         if (entry) return entry;
     }
 
-    // Async path: wait for loc index to be ready before querying
-    const indexedEntry = (await indexService?.queryLocalisationAsync({ key, limit: 1 }))?.[0];
+    // Non-blocking: query whatever has been indexed so far.
+    const indexedEntry = indexService?.queryLocalisation({ key, limit: 1 })[0];
     return indexedEntry ? fromIndexedEntry(indexedEntry) : undefined;
 }
 
@@ -171,7 +171,7 @@ class LocRefHoverProvider implements vs.HoverProvider {
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const entry = await findLocEntry(refName, document, this.indexService);
+        const entry = findLocEntry(refName, document, this.indexService);
         if (!entry) return null;
 
         // Strip color codes for display
@@ -199,7 +199,7 @@ class LocRefDefinitionProvider implements vs.DefinitionProvider {
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const entry = await findLocEntry(refName, document, this.indexService);
+        const entry = findLocEntry(refName, document, this.indexService);
         if (!entry) return null;
 
         return new vs.Location(entry.uri, new vs.Position(entry.line, 0));
@@ -250,7 +250,7 @@ class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
         // Skip identifiers with common non-loc prefixes (GFX_, event., trigger names, etc.)
         if (!isQuoted && /^(GFX_|gfx\/|event\.|@)/.test(word)) return null;
 
-        const entry = await findLocEntry(word, document, this.indexService);
+        const entry = findLocEntry(word, document, this.indexService);
         if (!entry) return null;
 
         return new vs.Location(entry.uri, new vs.Position(entry.line, 0));

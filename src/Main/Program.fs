@@ -231,18 +231,13 @@ let private preferCodeDefinitionOverLocalisation
         tryDefinitionSymbolAt sourceText line character
         |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game sourcePath)
     | Some target when isLocalisationDefinitionPath target.FileName ->
-        tryDefinitionSymbolAt sourceText line character
-        |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game sourcePath)
-        |> Option.orElse candidate
+        // GoToType already resolved to a loc file — return it directly.
+        candidate
     | _ -> candidate |> Option.filter isNavigableDefinitionRange
 
 [<assembly: AssemblyDescription("CWTools language server for PDXScript")>]
 do ()
 
-// client.LogMessage { ``type`` = MessageType.Error; message = "error"}
-// client.LogMessage { ``type`` = MessageType.Warning; message = "warning"}
-// client.LogMessage { ``type`` = MessageType.Info; message = "info"}
-// client.LogMessage { ``type`` = MessageType.Log; message = "log"}
 let mutable diagnosticLogging = false
 
 type MonitorLogKind =
@@ -3349,10 +3344,6 @@ type Server(client: ILanguageClient) =
 
         member this.SemanticTokensFull(p: SemanticTokensParams) =
             // Token type indices (must match legend in capabilities):
-            // 0=namespace, 1=type, 2=function, 3=variable, 4=parameter,
-            // 5=property, 6=enumMember, 7=keyword, 8=number, 9=string,
-            // 10=comment, 11=operator, 12=macro, 13=decorator
-            // Effect keys -> 2(function), Trigger keys -> 1(type)
             async {
                 let semanticTokensFunction (game: IGame<_>) =
                     // ── Content-hash cache: skip full AST traversal if file unchanged ──

@@ -206,6 +206,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         actions: HTMLElement | null;
     } | null = null;
     let savedInputRange: Range | null = null;
+    /** Currently active contenteditable element (main input or inline editor) */
+    let activeComposerEl: HTMLElement = input;
     let artifacts: ArtifactRecord[] = [];
     let artifactFilter: ArtifactFilter = 'all';
     let workflows: WorkflowView[] = [];
@@ -910,7 +912,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function getInputText(): string {
-        return Array.from(input.childNodes).map(textFromComposerNode).join('').replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
+        return Array.from(activeComposerEl.childNodes).map(textFromComposerNode).join('').replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
     }
 
     function isInputEmpty(): boolean {
@@ -927,8 +929,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function isRangeInsideInput(range: Range): boolean {
-        return (range.startContainer === input || input.contains(range.startContainer))
-            && (range.endContainer === input || input.contains(range.endContainer));
+        const el = activeComposerEl;
+        return (range.startContainer === el || el.contains(range.startContainer))
+            && (range.endContainer === el || el.contains(range.endContainer));
     }
 
     function saveInputSelection() {
@@ -939,7 +942,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function setInputRange(range: Range) {
-        input.focus();
+        activeComposerEl.focus();
         const selection = window.getSelection();
         selection?.removeAllRanges();
         selection?.addRange(range);
@@ -948,7 +951,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function getInputEndRange(): Range {
         const range = document.createRange();
-        range.selectNodeContents(input);
+        range.selectNodeContents(activeComposerEl);
         range.collapse(false);
         return range;
     }
@@ -1173,12 +1176,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             editingMessageIndex = null;
             return;
         }
+        activeComposerEl = input;
         session.container.remove();
         session.bubble.style.display = '';
         if (session.actions) session.actions.style.display = '';
         messageIndexMap.get(session.messageIndex)?.classList.remove('editing');
         inlineEditSession = null;
         editingMessageIndex = null;
+        closeAtPopup();
+        slashPopup?.classList.remove('show');
         if (focusBubble) session.bubble.focus();
     }
 
@@ -1313,9 +1319,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 images: draftImages.length > 0 ? [...draftImages] : undefined,
             });
             editingMessageIndex = null;
+            activeComposerEl = input;
+            closeAtPopup();
+            slashPopup?.classList.remove('show');
         };
 
         textEditor.addEventListener('keydown', e => {
+            // @ mention popup keyboard handling in inline editor
+            if (_atPopupVisible && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === 'Tab' || e.key === 'Escape')) {
+                if (e.key === 'ArrowDown') { e.preventDefault(); setMentionSelectedIndex(_mentionSelectedIndex + 1); return; }
+                if (e.key === 'ArrowUp') { e.preventDefault(); setMentionSelectedIndex(_mentionSelectedIndex - 1); return; }
+                if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); if (acceptSelectedMention()) return; }
+                if (e.key === 'Escape') { e.preventDefault(); closeAtPopup(); return; }
+            }
             if (e.key === 'Enter' && !e.shiftKey && !(e as KeyboardEvent).isComposing) {
                 e.preventDefault();
                 submit();
@@ -1323,6 +1339,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 e.preventDefault();
                 cancelInlineEdit(true);
             }
+        });
+        textEditor.addEventListener('input', () => {
+            const v = getInputText();
+            if (v.startsWith('/') && v.length > 0) showSlashPopup(v);
+            else slashPopup?.classList.remove('show');
+            const mentionFilter = getMentionFilterBeforeCaret();
+            if (mentionFilter !== null) showAtPopup(mentionFilter);
+            else closeAtPopup();
         });
         submitBtn.addEventListener('click', submit);
         cancelBtn.addEventListener('click', () => cancelInlineEdit(true));
@@ -1336,6 +1360,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         message.classList.add('editing');
         bubble.insertAdjacentElement('afterend', editorCard);
         inlineEditSession = { messageIndex: messageIdx, container: editorCard, bubble, actions: actions || null };
+        activeComposerEl = textEditor;
         textEditor.focus();
         const range = document.createRange();
         range.selectNodeContents(textEditor);
@@ -2116,8 +2141,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             closeAtPopup();
         }
     });
-    document.addEventListener('click', e => { if (slashPopup && !slashPopup.contains(e.target as Node) && e.target !== input) slashPopup.classList.remove('show'); });
-    document.addEventListener('click', e => { const t = e.target as HTMLElement; if (t && !t.closest('#atPopup') && t !== input) closeAtPopup(); });
+    document.addEventListener('click', e => { if (slashPopup && !slashPopup.contains(e.target as Node) && e.target !== input && e.target !== activeComposerEl) slashPopup.classList.remove('show'); });
+    document.addEventListener('click', e => { const t = e.target as HTMLElement; if (t && !t.closest('#atPopup') && t !== input && t !== activeComposerEl) closeAtPopup(); });
     input.addEventListener('keydown', e => {
         if (e.key === 'Escape' && slashPopup && slashPopup.classList.contains('show')) {
             e.stopPropagation();

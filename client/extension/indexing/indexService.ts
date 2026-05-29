@@ -86,6 +86,7 @@ export class IndexService implements vscode.Disposable {
 	private _fileWatcher: vscode.FileSystemWatcher | undefined;
 	private _symbolFileWatcher: vscode.FileSystemWatcher | undefined;
 	private _pendingUpdateUris: Map<string, vscode.Uri> = new Map();
+	private _locBuildPromise: Promise<void> | undefined;
 	private _debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	private static readonly DEBOUNCE_MS = 300;
 	private static readonly WORKSPACE_SYMBOL_FILE_LIMIT = 4000;
@@ -152,11 +153,14 @@ export class IndexService implements vscode.Disposable {
 
 			// Keep activation lightweight. Localisation powers editor hovers/definitions,
 			// while the heavier workspace/vanilla symbol index is built lazily by AI tools.
-			await this.refresh('initial');
+			this._locBuildPromise = this.refresh('initial');
+			await this._locBuildPromise;
+			this._locBuildPromise = undefined;
 			this._status = 'ready';
 
 			ErrorReporter.debug('IndexService', `Index ready: ${this._locIndex.size} localisation keys`);
 		} catch (e) {
+			this._locBuildPromise = undefined;
 			this._status = 'error';
 			ErrorReporter.warn('IndexService', 'Failed to start indexing', e);
 		}
@@ -232,8 +236,21 @@ export class IndexService implements vscode.Disposable {
 
 	/**
 	 * Query localisation keys.
+	 * Returns results from whatever has been indexed so far (non-blocking).
 	 */
 	queryLocalisation(query: LocQuery): LocEntry[] {
+		return queryLocIndex(this._locIndex, query);
+	}
+
+	/**
+	 * Query localisation keys, waiting for the index to be ready first.
+	 * Use this from definition providers to avoid returning empty results
+	 * while the initial index build is still in progress.
+	 */
+	async queryLocalisationAsync(query: LocQuery): Promise<LocEntry[]> {
+		if (this._locBuildPromise) {
+			await this._locBuildPromise;
+		}
 		return queryLocIndex(this._locIndex, query);
 	}
 
@@ -257,6 +274,7 @@ export class IndexService implements vscode.Disposable {
 
 	private async _indexLocalisationFiles(): Promise<void> {
 		this._locIndex.clear();
+		const t0 = Date.now();
 
 		const files = await vscode.workspace.findFiles(
 			`**/${this._locDirectoryGlob}/**/*.yml`,
@@ -264,13 +282,28 @@ export class IndexService implements vscode.Disposable {
 			5000
 		);
 
-		for (const uri of files) {
-			try {
-				await this._indexSingleLocFile(uri);
-			} catch {
-				// Skip files that can't be parsed
+		// Process files in batches with concurrency and event-loop yields
+		// to avoid starving other extension host tasks during startup.
+		for (let i = 0; i < files.length; i += IndexService.INDEX_BATCH_SIZE) {
+			const batch = files.slice(i, i + IndexService.INDEX_BATCH_SIZE);
+			await Promise.all(batch.map(async (uri) => {
+				try {
+					await this._indexSingleLocFile(uri);
+				} catch {
+					// Skip files that can't be parsed
+				}
+			}));
+			// Yield to the event loop between batches so CodeLens,
+			// semantic tokens, and completions are not starved.
+			if (i + IndexService.INDEX_BATCH_SIZE < files.length) {
+				await IndexService._yieldToEventLoop();
 			}
 		}
+
+		ErrorReporter.debug(
+			'IndexService',
+			`Loc index built: ${this._locIndex.size} keys from ${files.length} files in ${Date.now() - t0}ms`
+		);
 	}
 
 	private async _indexWorkspaceSymbolFiles(): Promise<void> {

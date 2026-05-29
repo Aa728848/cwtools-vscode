@@ -209,7 +209,13 @@ let private tryCodeDefinitionBySymbol
 
             gameDispatcher.Dispatch visitor |> Option.flatten
 
-        fromTypes |> Option.orElseWith fromGfxSpriteNames
+        // Only attempt the expensive AllEntities() scan for GFX-prefixed symbols.
+        // Non-GFX identifiers (loc keys, effects, triggers, etc.) will never match
+        // a spriteType node, so the full entity walk is wasted work.
+        if needle.StartsWith("GFX_", StringComparison.OrdinalIgnoreCase) then
+            fromTypes |> Option.orElseWith fromGfxSpriteNames
+        else
+            fromTypes
 
 let private preferCodeDefinitionOverLocalisation
     (gameDispatcher: IGameDispatcher)
@@ -2747,6 +2753,7 @@ type Server(client: ILanguageClient) =
                                             { label = "$" + pname + "$"
                                               documentation = Some(sprintf "Parameter: %s" pname) })
 
+
                                     let scopes =
                                         String.Join(", ", effect.Scopes |> List.map (fun s -> s.ToString()))
 
@@ -2770,11 +2777,12 @@ type Server(client: ILanguageClient) =
 
         member this.GotoDefinition(p: TextDocumentPositionParams) =
             async {
-                return
+                let sw = Stopwatch.StartNew()
+                let allocBefore = GC.GetTotalAllocatedBytes(false)
+                let result =
                     match gameObj with
                     | Some game ->
                         let position = PosHelper.fromZ p.position.line p.position.character
-                        logInfo $"goto fn %A{p.textDocument.uri}"
                         let path = getPathFromDoc p.textDocument.uri
                         let fileContent =
                             docs.GetText(FileInfo(path))
@@ -2795,12 +2803,15 @@ type Server(client: ILanguageClient) =
 
                         match gototype with
                         | Some goto ->
-                            logInfo $"goto %s{goto.FileName}"
-
                             [ { uri = Uri(goto.FileName)
                                 range = (convRangeToLSPRange goto) } ]
                         | None -> []
                     | None -> []
+                sw.Stop()
+                let allocAfter = GC.GetTotalAllocatedBytes(false)
+                if sw.ElapsedMilliseconds >= 50L then
+                    monitorLog Performance $"GotoDefinition file={getPathFromDoc p.textDocument.uri} line={p.position.line} char={p.position.character} elapsed={sw.ElapsedMilliseconds}ms allocDeltaMB={(allocAfter - allocBefore) / 1048576L}{getPerfCacheSnapshot()}"
+                return result
             }
             |> catchError []
 

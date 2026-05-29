@@ -283,37 +283,44 @@ function parseGfxFile(uri: vs.Uri, text: string): GfxEntry[] {
 
 /** Build the full GFX index from all .gfx files in the workspace + vanilla */
 async function buildGfxIndex(): Promise<Map<string, GfxEntry>> {
-    const map = new Map<string, GfxEntry>();
+    return vs.window.withProgress(
+        { location: vs.ProgressLocation.Window, title: 'Building GFX sprite index...' },
+        async (progress) => {
+            const map = new Map<string, GfxEntry>();
 
-    // Scan workspace .gfx files via VS Code API
-    const uris = await vs.workspace.findFiles('**/*.gfx');
-    const batchSize = 30;
-    for (let i = 0; i < uris.length; i += batchSize) {
-        const batch = uris.slice(i, i + batchSize);
-        await Promise.all(batch.map(async (uri) => {
-            try {
-                const data = await vs.workspace.fs.readFile(uri);
-                const text = new TextDecoder('utf-8').decode(data);
-                for (const entry of parseGfxFile(uri, text)) {
-                    map.set(entry.name, entry);
+            // Scan workspace .gfx files via VS Code API
+            const uris = await vs.workspace.findFiles('**/*.gfx');
+            const batchSize = 30;
+            for (let i = 0; i < uris.length; i += batchSize) {
+                const batch = uris.slice(i, i + batchSize);
+                await Promise.all(batch.map(async (uri) => {
+                    try {
+                        const data = await vs.workspace.fs.readFile(uri);
+                        const text = new TextDecoder('utf-8').decode(data);
+                        for (const entry of parseGfxFile(uri, text)) {
+                            map.set(entry.name, entry);
+                        }
+                    } catch { /* skip */ }
+                }));
+                progress.report({ message: `${Math.min(i + batchSize, uris.length)}/${uris.length} files` });
+            }
+
+            // Also scan vanilla game directory for .gfx files (interface/ and gfx/ folders)
+            const gamePath = getGamePath();
+            if (gamePath) {
+                progress.report({ message: 'Scanning vanilla directory...' });
+                const vanillaDirs = [
+                    path.join(gamePath, 'interface'),
+                    path.join(gamePath, 'gfx'),
+                ];
+                for (const dir of vanillaDirs) {
+                    await scanDirForGfx(dir, map, 500);
                 }
-            } catch { /* skip */ }
-        }));
-    }
+            }
 
-    // Also scan vanilla game directory for .gfx files (interface/ and gfx/ folders)
-    const gamePath = getGamePath();
-    if (gamePath) {
-        const vanillaDirs = [
-            path.join(gamePath, 'interface'),
-            path.join(gamePath, 'gfx'),
-        ];
-        for (const dir of vanillaDirs) {
-            await scanDirForGfx(dir, map, 500);
-        }
-    }
-
-    return map;
+            return map;
+        },
+    );
 }
 
 /** Recursively scan a directory for .gfx files and add entries to the index */
@@ -840,4 +847,11 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
         }
     });
     context.subscriptions.push(textWatcher);
+
+    // Background pre-warm GFX and Room indexes to eliminate cold-start delay
+    // on the first Ctrl+Click. Delayed 5s to avoid competing with startup tasks.
+    setTimeout(() => {
+        void getGfxIndex();
+        void getRoomEntries();
+    }, 5000);
 }

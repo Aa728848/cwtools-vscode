@@ -74,11 +74,12 @@ function fromIndexedEntry(entry: LocEntry): LocLookupEntry {
     };
 }
 
-function findLocEntry(
+async function findLocEntry(
     key: string,
     preferredDocument: vs.TextDocument,
     indexService?: IndexService,
-): LocLookupEntry | undefined {
+): Promise<LocLookupEntry | undefined> {
+    // Fast path: check open document caches first (no async needed)
     const preferred = openDocumentLocCache.get(preferredDocument.uri.toString())?.get(key);
     if (preferred) return preferred;
 
@@ -87,7 +88,8 @@ function findLocEntry(
         if (entry) return entry;
     }
 
-    const indexedEntry = indexService?.queryLocalisation({ key, limit: 1 })[0];
+    // Async path: wait for loc index to be ready before querying
+    const indexedEntry = (await indexService?.queryLocalisationAsync({ key, limit: 1 }))?.[0];
     return indexedEntry ? fromIndexedEntry(indexedEntry) : undefined;
 }
 
@@ -169,7 +171,7 @@ class LocRefHoverProvider implements vs.HoverProvider {
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const entry = findLocEntry(refName, document, this.indexService);
+        const entry = await findLocEntry(refName, document, this.indexService);
         if (!entry) return null;
 
         // Strip color codes for display
@@ -197,32 +199,58 @@ class LocRefDefinitionProvider implements vs.DefinitionProvider {
         const word = document.getText(range);
         const refName = word.replace(/^\$|\$$/g, '');
 
-        const entry = findLocEntry(refName, document, this.indexService);
+        const entry = await findLocEntry(refName, document, this.indexService);
         if (!entry) return null;
 
         return new vs.Location(entry.uri, new vs.Position(entry.line, 0));
     }
 }
 
+/**
+ * Patterns that precede a loc-key reference in PDXScript assignments.
+ * Only unquoted identifiers following these patterns are treated as potential loc keys.
+ */
+const LOC_KEY_CONTEXT_RE = /\b(?:title|desc|name|tooltip|text|custom_tooltip|fail_text|success_text|option_name|trigger_tooltip|description|localization|loc|key)\s*=\s*$/;
+
+/** Common PDXScript keywords and prefixes that are never localisation keys. */
+const NON_LOC_KEYWORDS_RE = /^(yes|no|none|root|prev|from|this|event_target|owner|capital_scope|controller|solar_system|planet|pop|species|leader|country|fleet|ship|army|sector|federation|galactic_community|is_|has_|any_|every_|random_|count_|set_|add_|remove_|change_|check_|limit|modifier|potential|allow|effect|trigger|weight|factor|mult|if|else|else_if|switch|while|NOT|AND|OR|NOR|NAND)$/i;
+
 /** 
 * Jump to the definition of localization key in the script file 
-* Support title = "xxx" / name = xxx / desc = xxx and other reference formats 
+* Support title = "xxx" / name = xxx / desc = xxx and other reference formats.
+* 
+* Performance: Unquoted identifiers are only matched when preceded by a known
+* loc-key assignment context (title =, desc =, etc.) to avoid flooding the
+* IndexService with lookups for every PDXScript keyword on every Ctrl+Click.
 */
 class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
     constructor(private readonly indexService: IndexService) {}
 
     async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
-        //Try to match quoted and unquoted string values
-        const range =
-            document.getWordRangeAtPosition(position, /"([A-Za-z_][A-Za-z0-9_.:-]+)"/) ||
-            document.getWordRangeAtPosition(position, /\b([A-Za-z_][A-Za-z0-9_.:-]+)\b/);
-        if (!range) return null;
+        // 1. Prefer quoted strings — these are almost always loc key references
+        let range = document.getWordRangeAtPosition(position, /"([A-Za-z_][A-Za-z0-9_.:-]+)"/);
+        let isQuoted = !!range;
+
+        // 2. Fall back to unquoted identifiers only if preceded by a loc-key context
+        if (!range) {
+            range = document.getWordRangeAtPosition(position, /\b([A-Za-z_][A-Za-z0-9_.:-]+)\b/);
+            if (!range) return null;
+
+            // Check that the text before this word matches a loc assignment pattern
+            const lineText = document.lineAt(position.line).text;
+            const textBefore = lineText.substring(0, range.start.character);
+            if (!LOC_KEY_CONTEXT_RE.test(textBefore)) return null;
+        }
 
         const word = document.getText(range).replace(/^"|"$/g, '');
-        // Skip obvious non-localized key cases (pure numbers, yes/no, common keywords, etc.)
-        if (/^\d+$/.test(word) || /^(yes|no|none|root|prev|from|this|event_target|owner|capital_scope)$/i.test(word)) return null;
 
-        const entry = findLocEntry(word, document, this.indexService);
+        // Skip obvious non-localisation tokens
+        if (/^\d+$/.test(word) || word.length < 2) return null;
+        if (NON_LOC_KEYWORDS_RE.test(word)) return null;
+        // Skip identifiers with common non-loc prefixes (GFX_, event., trigger names, etc.)
+        if (!isQuoted && /^(GFX_|gfx\/|event\.|@)/.test(word)) return null;
+
+        const entry = await findLocEntry(word, document, this.indexService);
         if (!entry) return null;
 
         return new vs.Location(entry.uri, new vs.Position(entry.line, 0));

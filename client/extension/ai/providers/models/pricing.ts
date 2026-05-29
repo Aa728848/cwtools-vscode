@@ -13,6 +13,7 @@ export function getModelPricing(model: string): [number, number] {
     if (entry) return [entry[0]!, entry[1]!];
     // Case-insensitive matching for model names like "DeepSeek-V4-Pro" vs "deepseek-v4-pro"
     const lower = model.toLowerCase();
+    if (lower.includes('free') || lower.includes('pickle')) return [0, 0];
     for (const key of Object.keys(MODEL_PRICING)) {
         if (lower.startsWith(key.toLowerCase())) { const v = MODEL_PRICING[key]!; return [v[0]!, v[1]!]; }
     }

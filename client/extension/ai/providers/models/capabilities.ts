@@ -20,6 +20,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-4o': true,
     'gpt-4-vision': true,
     'gpt-5': true,
+    'claude-opus-4-8': true,
     'claude-opus-4-7': true,
     'claude-opus-4-6': true,
     'claude-sonnet-4-6': true,
@@ -67,7 +68,9 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'mimo-v2.5': false,
     'mimo-v2-flash': false,
     'kimi-k2.6': true,
-    'kimi-k2.5': true
+    'kimi-k2.5': true,
+    'qwen3.7': true,
+    'Qwen3.7': true
 };
 
 /**
@@ -125,6 +128,7 @@ export const ALWAYS_THINKING_PREFIXES: string[] = [
     'gemini-2.5-pro', 'gemini-3.1-pro',
     'QwQ', 'qwq',
     'Thinking', 'thinking',
+    'phi-4-reasoning',
 ];
 
 /**
@@ -245,6 +249,18 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'Step-3': 128000,
     'Step-2': 128000,
     'gemini': 1048576,
+    'claude-opus-4-8': 1000000,
+    'gemini-3.5-flash': 1048576,
+    'gemini-3.1-pro': 2097152,
+    'gemini-3.1-flash-lite': 1048576,
+    'grok-build-8.1': 131072,
+    'qwen3.6-plus-free': 1000000,
+    'qwen3.7-max-free': 1000000,
+    'nemotron-3-super-free': 131072,
+    'phi-4-reasoning': 16384,
+    'qwen3.7-max': 1000000,
+    'Qwen3.7-Max': 1000000,
+    'glm-5.1-highspeed': 200000,
 };
 
 /**

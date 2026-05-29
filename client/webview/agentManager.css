@@ -240,10 +240,13 @@ body.agent-manager-shell .slash-popup {
     position: fixed;
     left: calc(var(--manager-active-left-width) + 16px);
     right: calc(var(--manager-active-right-width) + 16px);
-    width: auto;
-    max-width: none;
+    width: min(calc(100vw - var(--manager-active-left-width) - var(--manager-active-right-width) - 32px), 980px);
+    max-width: 980px;
+    margin-left: auto;
+    margin-right: auto;
     bottom: 110px;
     top: auto;
+    max-height: min(420px, calc(100vh - 180px));
 }
 
 body.agent-manager-shell .artifact-scrim {

@@ -322,9 +322,9 @@ ${stylesheetLinks}
                         Agent 可以通过加载 <code>npx skills</code> 社区技能包来扩展能力（例如 MiniMax CLI）。<br>
                         技能将仅安装在当前插件的本地存储中。
                     </div>
-                    <div style="display: flex; gap: 8px; margin-top: 8px;">
-                        <input class="settings-input" id="skillSourceInput" type="text" placeholder="例如: MiniMax-AI/cli" autocomplete="off" />
-                        <button class="settings-test-btn" id="installSkillBtn" style="width: auto; padding: 0 12px;">安装/导入</button>
+                    <div style="display: flex; gap: 8px; margin-top: 8px; align-items: center;">
+                        <input class="settings-input" id="skillSourceInput" type="text" placeholder="例如: MiniMax-AI/cli" autocomplete="off" style="flex: 1; min-width: 0;" />
+                        <button class="settings-test-btn" id="installSkillBtn" style="width: auto; padding: 6px 16px; flex: none; white-space: nowrap; height: 32px; display: flex; align-items: center; justify-content: center;">安装</button>
                     </div>
                     <div id="installedSkillsList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
                 </div>

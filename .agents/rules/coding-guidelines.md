@@ -40,3 +40,6 @@ trigger: always_on
 - **编译检查**：完成 TypeScript 层面的修改后，建议指引用户或自行通过后台终端运行 `npm run compile`，验证 Extension 和 Rollup (Webview 捆绑器) 阶段的构建是否通过。
 - **单元测试**：针对 Agent 核心逻辑、Diff 引擎或工具调度器修改后，应引导执行 `npm run test:unit`。
 - **发布工作流**：如果涉及全局版本更新或构建分发，调用相关的 `/package` 工作流（`.agents/workflows/package.md`）。
+
+## 7. 编辑规范
+- **编辑检查**：进行文件编辑前，注意是否有未提交的改动，如有，请注意编辑不要损坏文件，损坏了恢复需要把未提交的改动一起恢复。

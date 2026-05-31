@@ -24,6 +24,9 @@ let serializeEU5 = serializeToCache CWTools.Serializer.serializeEU5 "eu5.cwb"
 
 let deserialize path =
     try
-        deserialize path
-    with _ ->
+        let resources, files = deserialize path
+        CWTools.Utilities.Utils.logInfo (sprintf "Cache loaded from %s: %d resources, %d files" path (List.length resources) (List.length files))
+        resources, files
+    with e ->
+        CWTools.Utilities.Utils.logError (sprintf "Failed to deserialize cache %s: %s" path (e.ToString()))
         [], []

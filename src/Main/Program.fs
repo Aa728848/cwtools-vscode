@@ -314,6 +314,9 @@ let setupLogger (client: ILanguageClient) =
 
 type LintRequestMsg =
     | UpdateRequest of VersionedTextDocumentIdentifier * bool
+    /// DidOpen/DidFocus: deep lint without marking needsTypeRefresh.
+    /// Opening a file does not change its content, so the type index stays valid.
+    | OpenRequest of VersionedTextDocumentIdentifier
     | WorkComplete of DateTime
 
 /// Shared token computation — walks AST, classifies tokens, encodes to delta int[].
@@ -1067,7 +1070,7 @@ type Server(client: ILanguageClient) =
     /// Allocation-based GC threshold — triggers non-blocking Gen2 collection
     /// after ~50 MB of new allocations instead of a simple locCache.Count check.
     let mutable lastGCAllocBytes = GC.GetTotalAllocatedBytes(false)
-    let gcThresholdBytes = 50L * 1024L * 1024L
+    let gcThresholdBytes = 200L * 1024L * 1024L
 
     let maybeCollectGarbage () =
         let currentBytes = GC.GetTotalAllocatedBytes(false)
@@ -1320,20 +1323,22 @@ type Server(client: ILanguageClient) =
                 pos, 1, None)
         issues |> Seq.toList
 
-    let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) : Async<unit> =
+    /// isEditAction: true for DidChange/DidSave (content changed), false for DidOpen/DidFocus (content unchanged).
+    let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) (isEditAction: bool) : Async<unit> =
         async {
             let name = getPathFromDoc doc
             // Invalidate codelens cache for THIS file only
             forgetFileCaches name
 
             if name.EndsWith(".yml") then
-                if not shallowAnalyze then
+                if isEditAction && not shallowAnalyze then
                     delayedLocUpdate <- true
                     clearLocalisationCaches ()
-                markFileStale name "localisation"
+                if isEditAction then markFileStale name "localisation"
 
-            // Mark type refresh needed if edited file is in a type-defining directory
-            if isTypeDefiningPath name && not shallowAnalyze then
+            // Mark type refresh needed ONLY if the file was EDITED (not just opened).
+            // Opening a file does not change its content, so the type/enum index is still valid.
+            if isEditAction && isTypeDefiningPath name && not shallowAnalyze then
                 needsTypeRefresh <- true
                 lastTypeRefreshRequestAt <- DateTime.UtcNow
                 clearTypeCaches ()
@@ -1463,10 +1468,17 @@ type Server(client: ILanguageClient) =
                 lastTypeRefreshCompletedAt = DateTime.MinValue
                 || now - lastTypeRefreshCompletedAt >= typeRefreshCooldown
             let skipLimitReached = refreshSkipCount >= maxRefreshSkipCount
+            // Even force=true refreshes respect a minimum 2s cooldown to prevent
+            // storm-like rebuilds when saving multiple files in rapid succession.
+            let forceCooldownOk =
+                lastTypeRefreshCompletedAt = DateTime.MinValue
+                || now - lastTypeRefreshCompletedAt >= TimeSpan.FromSeconds(2.0)
             // Conditionally skip RefreshCaches while edits are still arriving.
             let doRefresh =
                 needsTypeRefresh
-                && (forceGlobalRefresh || (quietEnough && cooldownElapsed) || skipLimitReached)
+                && (skipLimitReached
+                    || (forceGlobalRefresh && forceCooldownOk)
+                    || (quietEnough && cooldownElapsed))
             let mutable didGlobalWork = false
             gameStateLock.EnterWriteLock()
             try
@@ -1598,7 +1610,7 @@ type Server(client: ILanguageClient) =
             let mutable nextAnalyseTime = DateTime.Now
             let mutable needsDeepAnalyse = false
 
-            let analyzeTask uri force =
+            let analyzeTask uri force isEditAction =
                 async {
                     let mutable nextTime = nextAnalyseTime
 
@@ -1607,7 +1619,7 @@ type Server(client: ILanguageClient) =
                             let shallowAnalyse = DateTime.Now < nextTime
                             let useShallowAnalyze = shallowAnalyse && (not force)
                             logDiag $"lint force: %b{force}, shallow: %b{useShallowAnalyze}"
-                            do! lint uri useShallowAnalyze false
+                            do! lint uri useShallowAnalyze false isEditAction
 
                             if not useShallowAnalyze then
                                 let didGlobalWork = delayedAnalyze force
@@ -1615,7 +1627,7 @@ type Server(client: ILanguageClient) =
                                 // Somehow get updated localisation errors after loccache is updated.
                                 // Re-lint only when global caches actually changed.
                                 if didGlobalWork then
-                                    do! lint uri true false
+                                    do! lint uri true false false  // re-lint after cache refresh is never an "edit"
                                 nextTime <- DateTime.Now.Add(delayTime)
                                 needsDeepAnalyse <- needsTypeRefresh || delayedLocUpdate
                             else
@@ -1626,11 +1638,11 @@ type Server(client: ILanguageClient) =
                         agent.Post(WorkComplete(nextTime))
                 } |> Async.StartAsTask
 
-            let analyze (file: VersionedTextDocumentIdentifier) force =
+            let analyze (file: VersionedTextDocumentIdentifier) force isEditAction =
                 //eprintfn "Analyze %s" (file.uri.ToString())
-                analyzeTask file.uri force |> ignore
+                analyzeTask file.uri force isEditAction |> ignore
 
-            let rec loop (inprogress: bool) (state: Map<string, VersionedTextDocumentIdentifier * bool>) =
+            let rec loop (inprogress: bool) (state: Map<string, VersionedTextDocumentIdentifier * bool * bool>) =
                 async {
                     let waitTimeMs =
                         if not inprogress && state.IsEmpty && needsDeepAnalyse then
@@ -1649,19 +1661,28 @@ type Server(client: ILanguageClient) =
 
                     match msgOpt, inprogress with
                     | Some (UpdateRequest(ur, force)), false ->
-                        analyze ur force
+                        analyze ur force true  // UpdateRequest is always an edit action
                         return! loop true state
                     | Some (UpdateRequest(ur, force)), true ->
                         if Map.containsKey ur.uri.LocalPath state then
                             if
                                 (Map.find ur.uri.LocalPath state)
-                                |> (fun ({ VersionedTextDocumentIdentifier.version = v }, _) -> v < ur.version)
+                                |> (fun ({ VersionedTextDocumentIdentifier.version = v }, _, _) -> v < ur.version)
                             then
-                                return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, force))
+                                return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, force, true))
                             else
                                 return! loop inprogress state
                         else
-                            return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, force))
+                            return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, force, true))
+                    // DidOpen / DidFocus: deep lint without marking needsTypeRefresh
+                    | Some (OpenRequest ur), false ->
+                        analyze ur false false  // not an edit action
+                        return! loop true state
+                    | Some (OpenRequest ur), true ->
+                        if not (Map.containsKey ur.uri.LocalPath state) then
+                            return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, false, false))
+                        else
+                            return! loop inprogress state  // edit request already queued, skip open
                     | Some (WorkComplete time), _ ->
                         nextAnalyseTime <- time
 
@@ -1677,9 +1698,9 @@ type Server(client: ILanguageClient) =
                                     |> Seq.map fst
                                     |> Seq.head
 
-                            let next, force = state.[key]
+                            let next, force, isEdit = state.[key]
                             let newstate = state |> Map.remove key
-                            analyze next force
+                            analyze next force isEdit
                             return! loop true newstate
                     | None, false -> 
                         logDiag "Idle timeout: triggering background delayedAnalyze"
@@ -1690,7 +1711,7 @@ type Server(client: ILanguageClient) =
                         if didGlobalWork then
                             for doc in docs.OpenFiles() do
                                 let uri = Uri(doc.FullName)
-                                do! lint uri true false
+                                do! lint uri true false false  // idle re-lint is never an edit
 
                         return! loop false state
                     | None, true ->
@@ -1712,6 +1733,10 @@ type Server(client: ILanguageClient) =
                     | Some (UpdateRequest(ur, force)) ->
                         // New edit arrived reset the debounce timer
                         return! loop (pending |> Map.add ur.uri.LocalPath (ur, force))
+                    | Some (OpenRequest ur) ->
+                        // Open requests bypass debounce — forward immediately
+                        lintAgent.Post(OpenRequest ur)
+                        return! loop pending
                     | Some (WorkComplete _) ->
                         // Ignore WorkComplete messages in debounce agent
                         return! loop pending
@@ -2492,10 +2517,9 @@ type Server(client: ILanguageClient) =
                 docs.Open p
 
                 lintAgent.Post(
-                    UpdateRequest(
+                    OpenRequest(
                         { uri = p.textDocument.uri
-                          version = p.textDocument.version },
-                        true
+                          version = p.textDocument.version }
                     )
                 )
 
@@ -2542,7 +2566,7 @@ type Server(client: ILanguageClient) =
             async {
                 let path = getPathFromDoc p.uri
                 lastFocusedFile <- Some path
-                lintAgent.Post(UpdateRequest({ uri = p.uri; version = 0 }, true))
+                lintAgent.Post(OpenRequest({ uri = p.uri; version = 0 }))
             }
 
         member this.DidChangeTextDocument(p: DidChangeTextDocumentParams) =

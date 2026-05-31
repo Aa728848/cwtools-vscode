@@ -218,7 +218,7 @@ let getCachedFiles (game: GameLanguage) cachePath isVanillaFolder =
         | CK3, Some cp, _ -> deserialize (cp + "/../ck3.cwb")
         | _ -> ([], [])
 
-    logInfo $"Parse cache time: %i{timer.ElapsedMilliseconds}"
+    logInfo $"Parse cache time: %i{timer.ElapsedMilliseconds}ms, cached resources: %d{List.length cached}, cached files: %d{List.length cachedFiles}"
     timer.Restart()
     cached, cachedFiles
 

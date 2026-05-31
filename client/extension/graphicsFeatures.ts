@@ -220,6 +220,10 @@ interface GfxEntry {
     texturefile?: string;
 }
 
+interface GfxScanCounter {
+    count: number;
+}
+
 /** Maps GFX name (e.g. "GFX_ship_part_background") → definition location */
 let gfxIndex: Map<string, GfxEntry> | null = null;
 let gfxIndexDirty = true;
@@ -313,8 +317,9 @@ async function buildGfxIndex(): Promise<Map<string, GfxEntry>> {
                     path.join(gamePath, 'interface'),
                     path.join(gamePath, 'gfx'),
                 ];
+                const vanillaFilesScanned: GfxScanCounter = { count: 0 };
                 for (const dir of vanillaDirs) {
-                    await scanDirForGfx(dir, map, 500);
+                    await scanDirForGfx(dir, map, vanillaFilesScanned, 2000);
                 }
             }
 
@@ -324,16 +329,22 @@ async function buildGfxIndex(): Promise<Map<string, GfxEntry>> {
 }
 
 /** Recursively scan a directory for .gfx files and add entries to the index */
-async function scanDirForGfx(dir: string, map: Map<string, GfxEntry>, maxFiles: number): Promise<void> {
-    if (map.size >= maxFiles) return;
+async function scanDirForGfx(
+    dir: string,
+    map: Map<string, GfxEntry>,
+    scannedFiles: GfxScanCounter,
+    maxFiles: number,
+): Promise<void> {
+    if (scannedFiles.count >= maxFiles) return;
     try {
         const entries = await fs.promises.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
-            if (map.size >= maxFiles) return;
+            if (scannedFiles.count >= maxFiles) return;
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
-                await scanDirForGfx(full, map, maxFiles);
+                await scanDirForGfx(full, map, scannedFiles, maxFiles);
             } else if (entry.name.endsWith('.gfx')) {
+                scannedFiles.count++;
                 try {
                     const content = await fs.promises.readFile(full, 'utf-8');
                     const uri = vs.Uri.file(full);
@@ -348,6 +359,11 @@ async function scanDirForGfx(dir: string, map: Map<string, GfxEntry>, maxFiles: 
         }
     } catch { /* skip inaccessible dir */ }
 }
+
+export const __test = {
+    parseGfxFile,
+    scanDirForGfx,
+};
 
 /** Get the GFX index, with promise-based deduplication to prevent concurrent rebuilds */
 async function getGfxIndex(): Promise<Map<string, GfxEntry>> {
@@ -847,6 +863,15 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
         }
     });
     context.subscriptions.push(textWatcher);
+
+    const configWatcher = vs.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration('cwtools.cache.stellaris')) {
+            gfxIndexDirty = true;
+            roomCacheDirty = true;
+            imageCache.clear();
+        }
+    });
+    context.subscriptions.push(configWatcher);
 
     // Background pre-warm GFX and Room indexes to eliminate cold-start delay
     // on the first Ctrl+Click. Delayed 5s to avoid competing with startup tasks.

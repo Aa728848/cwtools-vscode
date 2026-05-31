@@ -1,6 +1,13 @@
 import { expect } from 'chai';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
-const vscodeStub = {};
+const vscodeStub = {
+    Uri: {
+        file: (fsPath: string) => ({ fsPath }),
+    },
+};
 
 function loadGraphicsFeatures() {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };
@@ -47,5 +54,40 @@ describe('graphicsFeatures image path links', () => {
         expect(isImagePathLinkText('gfx/interface/icons/test.dds')).to.equal(true);
         expect(isImagePathLinkText('"gfx/interface/icons/test.tga"')).to.equal(true);
         expect(isImagePathLinkText('interface/example.gfx')).to.equal(false);
+    });
+});
+
+describe('graphicsFeatures GFX sprite scan', () => {
+    it('continues scanning vanilla files when the workspace sprite index is already large', async () => {
+        const graphicsFeatures = loadGraphicsFeatures();
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-gfx-'));
+
+        try {
+            const interfaceDir = path.join(tmp, 'interface');
+            fs.mkdirSync(interfaceDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(interfaceDir, 'vanilla.gfx'),
+                [
+                    'spriteTypes = {',
+                    '  spriteType = {',
+                    '    name = "GFX_vanilla_preview"',
+                    '    texturefile = "gfx/interface/icons/vanilla.dds"',
+                    '  }',
+                    '}',
+                ].join('\n'),
+                'utf8',
+            );
+
+            const map = new Map<string, any>();
+            for (let i = 0; i < 600; i++) {
+                map.set(`GFX_workspace_${i}`, { name: `GFX_workspace_${i}`, uri: { fsPath: 'workspace.gfx' }, line: 0 });
+            }
+
+            await graphicsFeatures.__test.scanDirForGfx(tmp, map, { count: 0 }, 10);
+
+            expect(map.get('GFX_vanilla_preview')?.texturefile).to.equal('gfx/interface/icons/vanilla.dds');
+        } finally {
+            fs.rmSync(tmp, { recursive: true, force: true });
+        }
     });
 });

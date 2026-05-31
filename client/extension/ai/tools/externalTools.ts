@@ -48,6 +48,7 @@ interface CommandFileState {
     mtimeMs: number;
     previousContent?: string | null;
     contentCaptured: boolean;
+    hadBom?: boolean;
 }
 
 // ─── Context type ────────────────────────────────────────────────────────────
@@ -346,11 +347,14 @@ export class ExternalToolHandler {
 
                 let previousContent: string | null | undefined;
                 let contentCaptured = false;
+                let hadBom = false;
                 if (captureContent
                     && stat.size <= COMMAND_SNAPSHOT_MAX_FILE_BYTES
                     && capturedBytes + stat.size <= COMMAND_SNAPSHOT_MAX_TOTAL_BYTES) {
                     try {
-                        const content = await fs.promises.readFile(fullPath, 'utf-8');
+                        const rawBuffer = await fs.promises.readFile(fullPath);
+                        hadBom = rawBuffer.length >= 3 && rawBuffer[0] === 0xEF && rawBuffer[1] === 0xBB && rawBuffer[2] === 0xBF;
+                        const content = rawBuffer.toString('utf-8');
                         if (!content.includes('\u0000')) {
                             previousContent = content;
                             contentCaptured = true;
@@ -367,6 +371,7 @@ export class ExternalToolHandler {
                     mtimeMs: stat.mtimeMs,
                     previousContent,
                     contentCaptured,
+                    hadBom,
                 });
             }
         };
@@ -394,13 +399,33 @@ export class ExternalToolHandler {
         if (!record) return 0;
 
         const after = await this.collectCommandFileState(false);
+
+        // ─── 自动纠正变动文件的编码格式 (主动防御机制) ───
+        for (const [key, afterState] of after) {
+            const beforeState = before.get(key);
+            if (beforeState) {
+                // 如果是已存在的文件，且大小或时间变了（说明被修改过）
+                if (beforeState.size !== afterState.size || Math.abs(beforeState.mtimeMs - afterState.mtimeMs) >= 1) {
+                    await this.ensureCorrectEncodingAfterCommand(afterState.filePath, beforeState.hadBom ?? false, false);
+                }
+            } else {
+                // 如果是新创建的文件
+                if (!this.shouldIgnoreCommandChange(afterState.filePath, true)) {
+                    await this.ensureCorrectEncodingAfterCommand(afterState.filePath, null, true);
+                }
+            }
+        }
+
+        // 刷新 after 状态，因为前面执行的自动编码修复可能会改变 after 文件的大小和修改时间
+        const refreshedAfter = await this.collectCommandFileState(false);
+
         let recorded = 0;
 
         for (const [key, beforeState] of before) {
             if (this.shouldIgnoreCommandChange(beforeState.filePath)) {
                 continue;
             }
-            const afterState = after.get(key);
+            const afterState = refreshedAfter.get(key);
             if (!afterState) {
                 if (beforeState.contentCaptured && beforeState.previousContent !== undefined) {
                     record(beforeState.filePath, beforeState.previousContent);
@@ -432,7 +457,7 @@ export class ExternalToolHandler {
             recorded++;
         }
 
-        for (const [key, afterState] of after) {
+        for (const [key, afterState] of refreshedAfter) {
             if (before.has(key)) continue;
             if (this.shouldIgnoreCommandChange(afterState.filePath, true)) continue;
             if (afterState.size > COMMAND_SNAPSHOT_MAX_FILE_BYTES) continue;
@@ -441,6 +466,81 @@ export class ExternalToolHandler {
         }
 
         return recorded;
+    }
+
+    private async ensureCorrectEncodingAfterCommand(
+        filePath: string,
+        hadBomBefore: boolean | null,
+        isNewFile: boolean
+    ): Promise<void> {
+        try {
+            if (!fs.existsSync(filePath)) return;
+            const stat = await fs.promises.stat(filePath);
+            if (!stat.isFile() || stat.size > 10_000_000) return; // 忽略大型或非文本文件
+
+            const buffer = await fs.promises.readFile(filePath);
+            
+            // 1. 检测当前的编码格式 (检测 UTF-16LE, UTF-16BE, UTF-8 BOM)
+            const isUtf16le = buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE;
+            const isUtf16be = buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF;
+            const hasUtf8Bom = buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF;
+
+            let textContent = '';
+            let decoded = false;
+
+            // 如果被 PowerShell 错误地写成了 UTF-16LE，先用对应的编码解码为文本
+            if (isUtf16le) {
+                textContent = buffer.toString('utf16le');
+                decoded = true;
+            } else if (isUtf16be) {
+                textContent = buffer.toString('utf16le'); // fallback
+                decoded = true;
+            }
+
+            // 2. 决定预期的 BOM 状态
+            let shouldHaveBom = false;
+            if (isNewFile) {
+                const ext = path.extname(filePath).toLowerCase();
+                const normalPath = filePath.replace(/\\/g, '/').toLowerCase();
+                // 凡是 Paradox 本地化 YML 文件或处于 localisation 目录下的，都必须使用 UTF-8 with BOM
+                if (ext === '.yml' || normalPath.includes('/localisation/') || normalPath.includes('/localization/')) {
+                    shouldHaveBom = true;
+                } else {
+                    shouldHaveBom = false;
+                }
+            } else {
+                shouldHaveBom = hadBomBefore === true;
+            }
+
+            // 3. 执行校正并重新写回
+            if (decoded) {
+                let outputBuffer: Buffer;
+                if (shouldHaveBom) {
+                    outputBuffer = Buffer.concat([
+                        Buffer.from([0xEF, 0xBB, 0xBF]),
+                        Buffer.from(textContent, 'utf8')
+                    ]);
+                } else {
+                    outputBuffer = Buffer.from(textContent, 'utf8');
+                }
+                await fs.promises.writeFile(filePath, outputBuffer);
+            } else {
+                if (shouldHaveBom && !hasUtf8Bom) {
+                    // 预期带 BOM，但没有：补全 BOM
+                    const outputBuffer = Buffer.concat([
+                        Buffer.from([0xEF, 0xBB, 0xBF]),
+                        buffer
+                    ]);
+                    await fs.promises.writeFile(filePath, outputBuffer);
+                } else if (!shouldHaveBom && hasUtf8Bom) {
+                    // 预期不带 BOM，但带有：剥离 BOM
+                    const outputBuffer = buffer.subarray(3);
+                    await fs.promises.writeFile(filePath, outputBuffer);
+                }
+            }
+        } catch (e) {
+            console.error(`[EncodingCheck] 修复文件编码格式失败: ${filePath}`, e);
+        }
     }
 
     private async requestPermissionWithAbort(

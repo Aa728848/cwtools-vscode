@@ -182,6 +182,23 @@ export class FileToolHandler {
         }
     }
 
+    private shouldBypassReadTrackerCheck(filePath: string): boolean {
+        const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+        // 1. 所有在 .cwtools-ai 文件夹下的写入操作
+        if (normalized.includes('/.cwtools-ai/') || normalized.startsWith('.cwtools-ai/') || normalized.includes('.cwtools-ai')) {
+            return true;
+        }
+        // 2. 所有常见的 command 脚本或脚本辅助文件后缀
+        const ext = path.extname(filePath).toLowerCase();
+        const COMMAND_TEMP_SCRIPT_EXTENSIONS = new Set([
+            '.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh',
+        ]);
+        if (COMMAND_TEMP_SCRIPT_EXTENSIONS.has(ext)) {
+            return true;
+        }
+        return false;
+    }
+
     private async resolveAndAuthorizeWrite(filePath: string, toolName: string, context?: import('../types').AgentToolContext): Promise<string> {
         const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), false, context);
         if (!isSecuritySandboxDisabled()) {
@@ -203,7 +220,7 @@ export class FileToolHandler {
         }
         // 🌟 ReadTracker 写门禁安全拦截 (D1)
         const readTracker = (context?.agentRunner as any)?.readTracker;
-        if (readTracker) {
+        if (readTracker && !this.shouldBypassReadTrackerCheck(resolution.resolved)) {
             const check = readTracker.canWrite(resolution.resolved);
             if (!check.ok) {
                 throw new Error(`ReadTracker Blocked: ${check.reason}. You must read the file context first using read_file or get_file_context. If you have already read it, the file might have been modified externally; please perform a fresh read_file to synchronize, and then retry your edit.`);

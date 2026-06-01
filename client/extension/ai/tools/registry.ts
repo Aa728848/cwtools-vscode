@@ -14,8 +14,7 @@ export type AgentToolName =
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
     | 'query_scripted_triggers' | 'query_enums' | 'get_entity_info'
     | 'query_static_modifiers' | 'query_variables' | 'set_memory'
-    | 'get_memory' | 'search_memory' | 'save_memory' | 'mmx_generate_image'
-    | 'mmx_generate_video' | 'mmx_generate_music' | 'mmx_generate_speech'
+    | 'get_memory' | 'search_memory' | 'save_memory'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results';
@@ -73,7 +72,7 @@ const EDIT: AgentToolName[] = [
 const MEMORY: AgentToolName[] = ['todo_write', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
 const NETWORK: AgentToolName[] = ['web_fetch', 'search_web', 'codesearch'];
 const UTILITY: AgentToolName[] = ['run_command', 'git_ops', 'analyze_diagnostic_error'];
-const MEDIA: AgentToolName[] = ['mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech', 'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
+const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
 

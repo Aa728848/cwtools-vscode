@@ -313,32 +313,17 @@ The CWTools LSP does NOT instantly reflect newly written localisation keys. "Mis
 ## Media Asset Pipeline (Icons, Textures, Sound Effects, Music)
 When creating new game entities (technologies, traditions, edicts, events, etc.), some may require custom visual or audio assets.
 
-### When to Consider Media Generation
-- **Icons/Sprites**: New technologies, traditions, edicts, civics, ascension perks, archaeological sites, relics — anything that displays a unique icon in the UI
-- **Sound Effects**: Events with \`sound = \` or UI elements with custom audio
-- **Music/BGM**: Custom soundtrack additions
-
-### Decision Flow (MANDATORY before generating any media asset)
+### Decision Flow (MANDATORY before deploying any media asset)
 1. **Check for existing assets FIRST** (two-stage search):
    - **Sprite candidates**: \`find_sprite_candidates(query="your_keyword", searchContext="both")\` — finds verified project and vanilla \`spriteType\` definitions, including the texture path for semantic checking.
    - **Sound candidates**: \`find_sound_candidates(query="your_keyword", searchContext="both")\` — finds verified project and vanilla sound/music assets from \`.asset\` files.
    - If you need raw file evidence, cross-check with \`search_mod_files(query="your_keyword", directory="interface", searchContext="vanilla", fileExtension=".gfx")\`.
    - Prefer reusing existing assets whenever a suitable match is found.
-2. **If no existing asset matches AND the task benefits from a custom one**: You MUST explicitly ask the user whether they want you to generate a new asset. **Never silently generate images or audio without user consent.** Example: *"This technology needs an icon. Would you like me to generate a custom icon, or should I use an existing vanilla sprite (e.g. \`GFX_tech_mine_exotic_gas\`)?"*
-3. **If the user agrees to generation**: Call the appropriate tool. If it returns an error indicating the required CLI tool is not installed (mmx, ImageMagick, ffmpeg), **do NOT retry or work around it**. Instead:
-   - Inform the user which tool is missing and how to install it
-   - Leave a \`# TODO: [MEDIA ASSET REQUIRED] icon/sound not generated — install [tool_name] and re-run\` comment in the code
-   - Use a placeholder vanilla asset reference (e.g. \`icon = "GFX_ship_part_empty_slot"\`) so the code remains valid
-4. **If the user declines or tools are unavailable**: Use the closest matching vanilla asset and note the substitution in the walkthrough.
+2. **If no existing asset matches AND a new custom asset is required**:
+   - For **images/textures**: Convert custom local image using \`convert_image_to_dds(sourcePath, outputDir)\` and deploy it using \`deploy_mod_asset\`.
+   - For **audio/sound effects**: Convert custom local audio using \`convert_audio(targetFormat="ogg")\` and deploy it using \`deploy_mod_asset\`.
+3. **If tools are unavailable or no custom asset is provided**: Use the closest matching vanilla asset.
 
-### Full Generation Pipeline (when all tools are available)
-\`\`\`
-Step 1: mmx_generate_image(prompt, aspect_ratio)  → .cwtools-ai/<current-topic-id>/media/xxx.png
-Step 2: convert_image_to_dds(source, compression="dxt5")  → .cwtools-ai/<current-topic-id>/media/xxx.dds
-Step 3: deploy_mod_asset(source, target="gfx/interface/icons/my_icon.dds")
-Step 4: register the spriteType with guarded \`replace_lines\` when you know the insertion range, or \`multi_replace_file_content\` only after copying the exact current anchor text
-\`\`\`
-For audio: \`mmx_generate_music\`/\`mmx_generate_speech\` → \`convert_audio(targetFormat="ogg")\` → \`deploy_mod_asset(target="sound/...")\`
 ${gameKnowledge}`;
 }
 

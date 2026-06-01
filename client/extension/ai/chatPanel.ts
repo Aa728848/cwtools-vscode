@@ -2405,7 +2405,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         const mediaSteps = result.steps.filter(s =>
-            ['mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech', 'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'].includes(String(s.toolName))
+            ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'].includes(String(s.toolName))
         );
         if (mediaSteps.length > 0) {
             const files = mediaSteps.flatMap(s => {

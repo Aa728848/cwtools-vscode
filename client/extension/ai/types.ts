@@ -790,11 +790,6 @@ export type AgentToolName =
     | 'get_ignored_diagnostics'
     | 'get_pdx_block'
     | 'edit_pdx_block'
-    // ── MiniMax CLI Media tools ──
-    | 'mmx_generate_image'
-    | 'mmx_generate_video'
-    | 'mmx_generate_music'
-    | 'mmx_generate_speech'
     // ── Media Asset Conversion tools ──
     | 'convert_image_to_dds'
     | 'convert_audio'

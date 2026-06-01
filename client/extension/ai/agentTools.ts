@@ -87,11 +87,6 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     // Shell - requires user permission approval (infinite wait), command execution has independent internal timeoutMs protection,
     // Set outer timeout to 0 = disabled, AbortSignal is responsible for global interrupt instead
     run_command: 0,
-    // MiniMax CLI Media — also requires permission approval and has an independent spawn timeout internally.
-    mmx_generate_image: 0,
-    mmx_generate_video: 0,
-    mmx_generate_music: 0,
-    mmx_generate_speech: 0,
     // Media Asset Conversion
     convert_image_to_dds: 60_000,
     convert_audio: 60_000,
@@ -516,15 +511,15 @@ export class AgentToolExecutor {
             case 'get_ignored_diagnostics':
                 result = await this.externalHandler.getIgnoredDiagnostics(); break;
 
-            // ── MiniMax CLI Media tools ────────────────────────────────
-            case 'mmx_generate_image':
-                result = await this.externalHandler.mmxGenerateImage(args as any, context); break;
-            case 'mmx_generate_video':
-                result = await this.externalHandler.mmxGenerateVideo(args as any, context); break;
-            case 'mmx_generate_music':
-                result = await this.externalHandler.mmxGenerateMusic(args as any, context); break;
-            case 'mmx_generate_speech':
-                result = await this.externalHandler.mmxGenerateSpeech(args as any, context); break;
+
+
+
+
+
+
+
+
+
 
             // ── Media Asset Conversion tools ──────────────────────────
             case 'convert_image_to_dds':

@@ -14,7 +14,6 @@ const toolDefinitions = [
     'dispatch_agents',
     'query_blackboard',
     'mcp_call',
-    'mmx_generate_image',
     'run_command',
     'write_file',
     'apply_patch',
@@ -34,7 +33,7 @@ describe('runnerPolicy', () => {
         expect(names).to.include('replace_lines');
         expect(names).to.not.include('dispatch_agents');
         expect(names).to.not.include('mcp_call');
-        expect(names).to.not.include('mmx_generate_image');
+
     });
 
     it('keeps orchestration tools only in orchestrator mode', () => {

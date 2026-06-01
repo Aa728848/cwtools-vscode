@@ -42,7 +42,6 @@ export function buildSubAgentSandbox(
     const defaultExcludes = new Set<string>([
         'web_fetch', 'search_web', 'codesearch',
         'run_command', 'git_ops',
-        'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
         'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
     ]);
 
@@ -111,9 +110,7 @@ export function enforceSubAgentSafety(
     // W7 fix: 针对 excluded 敏感特权工具直接物理阻断
     const excludedTools = new Set<string>([
         'web_fetch', 'search_web', 'codesearch',
-        'run_command',
-        'git_ops',
-        'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
+        'run_command', 'git_ops',
         'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
     ]);
 

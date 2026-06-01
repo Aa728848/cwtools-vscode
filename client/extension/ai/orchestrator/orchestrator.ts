@@ -262,7 +262,7 @@ export class Orchestrator {
                                 excludeTools: [ // Maintain consistent security constraints with normal subagents
                                     'web_fetch', 'search_web', 'codesearch',
                                     'run_command', 'git_ops',
-                                    'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech',
+
                                     'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
                                 ],
                             }
@@ -360,9 +360,8 @@ export class Orchestrator {
             // 3. If the subtask requires network information, it should be searched by Orchestrator and injected through contextFiles before dispatching.
             excludeTools: [
                 'web_fetch', 'search_web', 'codesearch', 
-                'run_command',
-                'git_ops',
-                'mmx_generate_image', 'mmx_generate_video', 'mmx_generate_music', 'mmx_generate_speech', 
+                'run_command', 'git_ops',
+
                 'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
             ],
         };

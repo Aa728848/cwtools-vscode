@@ -252,6 +252,19 @@ function hasRelativePath(rootPath: string, relativePath: string): boolean {
 	return fs.existsSync(path.join(rootPath, ...relativePath.split('/')));
 }
 
+function hasWorkspaceModDescriptor(rootPath: string): boolean {
+	try {
+		for (const entry of fs.readdirSync(rootPath, { withFileTypes: true })) {
+			if (entry.isFile() && (entry.name.toLowerCase().endsWith('.mod') || entry.name === 'metadata.json')) {
+				return true;
+			}
+		}
+	} catch {
+		// Ignore unreadable workspaces
+	}
+	return false;
+}
+
 function readWorkspaceGameDescriptor(rootPath: string): string {
 	const chunks: string[] = [];
 	const candidates = [
@@ -311,9 +324,22 @@ function scoreWorkspaceForGame(rootPath: string, descriptorText: string, profile
 	return score;
 }
 
+function isCwtRuleWorkspace(rootPath: string): boolean {
+	try {
+		if (fs.existsSync(path.join(rootPath, 'descriptor.mod'))) {
+			return false;
+		}
+		// countRuleFiles counts the number of .cwt files recursively
+		return countRuleFiles(rootPath) > 5;
+	} catch {
+		return false;
+	}
+}
+
 function inferLanguageIdFromWorkspace(): string | undefined {
 	const rootPath = firstWorkspacePath();
 	if (!rootPath) return undefined;
+	if (isCwtRuleWorkspace(rootPath)) return undefined;
 	const descriptorText = readWorkspaceGameDescriptor(rootPath);
 	const scores = getAllProfiles()
 		.map(profile => ({ id: profile.id, score: scoreWorkspaceForGame(rootPath, descriptorText, profile) }))
@@ -437,6 +463,25 @@ async function selectGameFolderFlow(languageHint?: string): Promise<boolean> {
 
 	const finalProfile = getProfileByLanguageId(languageId);
 	await workspace.getConfiguration('cwtools').update(getCacheSettingKey(languageId), selectedPath, true);
+
+	// ── Automatically set workspace-level file associations to enable language themes/validation ──
+	if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+		const filesConfig = workspace.getConfiguration('files');
+		const associations = filesConfig.get<Record<string, string>>('associations') || {};
+		const updatedAssociations = { ...associations };
+		const extensionsToAssociate = ['*.txt', '*.gui', '*.gfx', '*.asset'];
+		let updated = false;
+		for (const ext of extensionsToAssociate) {
+			if (updatedAssociations[ext] !== languageId) {
+				updatedAssociations[ext] = languageId;
+				updated = true;
+			}
+		}
+		if (updated) {
+			await filesConfig.update('associations', updatedAssociations, false);
+		}
+	}
+
 	await reloadExtension(
 		localize(
 			`${finalProfile.displayName} folder saved. Reload CWTools to build the vanilla cache now?`,
@@ -454,6 +499,7 @@ function buildInstallHealth(options: InstallHealthOptions) {
 	const rules = getRulesSourceStatus(options.languageId, options.cacheDir, options.bundledRulesPath);
 	const source = rulesSourceLabel(rules.source);
 	const workspacePath = firstWorkspacePath();
+	const hasMod = workspacePath ? hasWorkspaceModDescriptor(workspacePath) : false;
 	const checks = [
 		{
 			name: localize('Language server', '语言服务'),
@@ -498,8 +544,12 @@ function buildInstallHealth(options: InstallHealthOptions) {
 			: {
 				name: localize('Game type', '游戏类型'),
 				ok: false,
-				detail: localize('Workspace game type was not detected.', '未识别工作区游戏类型。'),
-				action: localize('Open a game-specific file or use Select Game Folder to choose the target game.', '请打开具体游戏的脚本文件，或使用“选择游戏目录”指定目标游戏。'),
+				detail: hasMod
+					? localize('Detected a Mod descriptor (.mod) in workspace, but the target game could not be determined automatically.', '在工作区中检测到了 Mod 描述文件 (.mod)，但无法自动确定目标游戏类型。')
+					: localize('Workspace game type was not detected.', '未识别工作区游戏类型。'),
+				action: hasMod
+					? localize('Click Select Game Folder below to choose the target game.', '请点击下方的“选择游戏目录”来显式指定此 Mod 对应的游戏。')
+					: localize('Open a game-specific file or use Select Game Folder to choose the target game.', '请打开具体游戏的脚本文件，或使用“选择游戏目录”指定目标游戏。'),
 			},
 		{
 			name: localize('Workspace', '工作区'),
@@ -1774,6 +1824,10 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	let guessedLanguageId: string | undefined | null = window.activeTextEditor?.document?.languageId;
+	// CWT files are rule files, opening them shouldn't act as a trigger to activate a specific game context
+	if (window.activeTextEditor?.document?.uri.fsPath.toLowerCase().endsWith('.cwt')) {
+		guessedLanguageId = null;
+	}
 	if (!isKnownGameLanguageId(guessedLanguageId)) {
 		guessedLanguageId = await getLanguageIdFallback();
 	}
@@ -1840,6 +1894,48 @@ export async function activate(context: ExtensionContext) {
 
 	// ── Auto-detect localization language when user hasn't explicitly configured it ──
 	await autoDetectLocLanguage();
+
+	// ── Mod folder target game selection guidance and auto-association ──
+	if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
+		const rootPath = workspace.workspaceFolders[0]!.uri.fsPath;
+		if (hasWorkspaceModDescriptor(rootPath)) {
+			if (languageId === "paradox") {
+				const gamePromptKey = "cwtools.gamePathPrompted.paradox";
+				if (!context.globalState.get<boolean>(gamePromptKey)) {
+					void context.globalState.update(gamePromptKey, true);
+					void window.showInformationMessage(
+						localize(
+							'Detected a Mod descriptor in workspace, but the target game type is undetermined. Select your target game platform now?',
+							'检测到当前工作区包含 Mod 描述文件，但尚未确定目标游戏类型。是否现在指定你的目标游戏平台？'
+						),
+						localize('Select Game', '选择游戏'),
+						localize('Later', '稍后')
+					).then(async (choice) => {
+						if (choice === localize('Select Game', '选择游戏')) {
+							await selectGameFolderFlow();
+						}
+					});
+				}
+			} else if (isKnownGameLanguageId(languageId)) {
+				// If the game type was successfully determined (either via scoring or fallback),
+				// automatically sync workspace-level file associations so that editor themes/syntax highlights instantly work.
+				const filesConfig = workspace.getConfiguration('files');
+				const associations = filesConfig.get<Record<string, string>>('associations') || {};
+				const extensionsToAssociate = ['*.txt', '*.gui', '*.gfx', '*.asset'];
+				let needsUpdate = false;
+				const updatedAssociations = { ...associations };
+				for (const ext of extensionsToAssociate) {
+					if (updatedAssociations[ext] !== languageId) {
+						updatedAssociations[ext] = languageId;
+						needsUpdate = true;
+					}
+				}
+				if (needsUpdate) {
+					void filesConfig.update('associations', updatedAssociations, false);
+				}
+			}
+		}
+	}
 
 	await init(languageId, isVanillaFolder);
 }

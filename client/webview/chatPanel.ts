@@ -132,6 +132,55 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 (function () {
     const chatI18n = getChatI18n(document.documentElement.lang || navigator.language);
     const renderMarkdown = createMarkdownRenderer(chatI18n.markdown);
+    const uiText = chatI18n.locale === 'zh-cn'
+        ? {
+            workspace: '工作区',
+            workspaceEmptyTitle: '暂无工作区内容',
+            workspaceEmptyText: '当前没有文件变更、计划或批注需要展示。等本轮产生可跟踪内容后，这里会自动显示详情。',
+            workspaceSubtitle: '计划、批注和文件变更会显示在这里',
+            fileChanges: '文件变更',
+            changeOverview: '变更概览',
+            thisChange: '本次变更',
+            changeRecord: '变更记录',
+            changesCount: '次变更',
+            filesCount: '个文件',
+            previewLines: '行预览',
+            noInlineDiff: '没有可内联显示的差异。',
+            noFileChanges: '暂无文件变更',
+            scratchEmpty: '暂无 Scratch 文件',
+            scratchHint: 'Agent 创建的临时脚本和文件会显示在这里',
+            artifactsEmpty: '暂无产物',
+            artifactsHint: '计划、验证和文件变更产物会显示在这里',
+            changesTab: '变更',
+            filesTab: '文件',
+            artifactsTab: '产物',
+            accept: '接受',
+            reject: '拒绝',
+        }
+        : {
+            workspace: 'Workspace',
+            workspaceEmptyTitle: 'No workspace content yet',
+            workspaceEmptyText: 'There are no file changes, plans, or annotations to show yet. Trackable content will appear here automatically.',
+            workspaceSubtitle: 'Plans, annotations, and file changes appear here',
+            fileChanges: 'File Changes',
+            changeOverview: 'Change Overview',
+            thisChange: 'This Change',
+            changeRecord: 'Change Record',
+            changesCount: 'changes',
+            filesCount: 'files',
+            previewLines: 'preview lines',
+            noInlineDiff: 'No inline diff is available.',
+            noFileChanges: 'No file changes yet',
+            scratchEmpty: 'No scratch files yet',
+            scratchHint: 'Temporary scripts and files created by the agent will appear here',
+            artifactsEmpty: 'No artifacts yet',
+            artifactsHint: 'Plans, validation, and file-change artifacts will appear here',
+            changesTab: 'Changes',
+            filesTab: 'Files',
+            artifactsTab: 'Artifacts',
+            accept: 'Accept',
+            reject: 'Reject',
+        };
     const vscode = acquireVsCodeApi();
     (window as any).__cwtoolsVscode = vscode;
     const chatArea = document.getElementById('chatArea') as HTMLDivElement;
@@ -214,6 +263,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let activeWorkflowId: string | null = null;
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
+    let quickWriteMode: 'confirm' | 'auto' = 'confirm';
     let sideWorkspaceContent: HTMLElement | null = null;
     let settingsInSideWorkspace = false;
     let sideDiffEntrySeq = 0;
@@ -340,8 +390,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const view = document.createElement('div');
         view.className = 'workspace-empty';
         view.innerHTML = `
-            <div class="workspace-empty-title">${svgIconNoMargin('folder')} 暂无工作区内容</div>
-            <div class="workspace-empty-text">当前没有文件变更、计划或批注需要展示。等本轮产生可跟踪内容后，这里会自动显示详情。</div>
+            <div class="workspace-empty-title">${svgIconNoMargin('folder')} ${escapeHtml(uiText.workspaceEmptyTitle)}</div>
+            <div class="workspace-empty-text">${escapeHtml(uiText.workspaceEmptyText)}</div>
         `;
         return view;
     }
@@ -373,7 +423,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         document.body.classList.remove('side-workspace-open');
         document.body.classList.remove('side-workspace-wide');
         sideWorkspace?.setAttribute('aria-hidden', 'true');
-        if (sideWorkspaceTitle) sideWorkspaceTitle.textContent = '工作区';
+        if (sideWorkspaceTitle) sideWorkspaceTitle.textContent = uiText.workspace;
         if (sideWorkspaceSubtitle) sideWorkspaceSubtitle.textContent = '';
         if (sideWorkspaceBody) sideWorkspaceBody.innerHTML = '';
         updateWorkspaceToggleState();
@@ -429,10 +479,33 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function openSideWorkspace(options: { title: string; subtitle?: string; content?: HTMLElement; build?: () => HTMLElement; wide?: boolean }): HTMLElement | null {
         if (!sideWorkspace || !sideWorkspaceBody) return null;
-        if (document.body.classList.contains('artifact-drawer-open')) setArtifactDrawerOpen(false);
         let content = options.content || null;
         if (!content && options.build) content = options.build();
         if (!content) return null;
+        if (isManagerShell() && content !== topicsPanel) {
+            if (sideWorkspaceContent && sideWorkspaceContent !== content) {
+                detachSideWorkspaceContent();
+            }
+            if (sideWorkspaceContent !== content) {
+                rememberOriginalParent(content);
+                sideWorkspaceContent = content;
+            }
+            const kind = content === settingsPage ? 'settings' : 'workspace';
+            const detail = {
+                kind,
+                title: options.title,
+                subtitle: options.subtitle || '',
+                content,
+                wide: !!options.wide,
+            };
+            (window as any).__cwtoolsPendingManagerWorkspaceContent = detail;
+            window.dispatchEvent(new CustomEvent('agent-manager-workspace-content', { detail }));
+            document.body.classList.remove('side-workspace-open', 'side-workspace-wide');
+            sideWorkspace.setAttribute('aria-hidden', 'true');
+            updateWorkspaceToggleState();
+            return content;
+        }
+        if (document.body.classList.contains('artifact-drawer-open')) setArtifactDrawerOpen(false);
         if (sideWorkspaceContent && sideWorkspaceContent !== content) {
             detachSideWorkspaceContent();
         }
@@ -469,7 +542,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         activeResponsiveWorkspace = panel;
         responsiveWorkspacePinnedClosed = false;
 
-        if (shouldUseSideWorkspace()) {
+        if (isManagerShell() || shouldUseSideWorkspace()) {
             openSideWorkspace({
                 title: panel.title,
                 subtitle: panel.subtitle,
@@ -501,7 +574,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function syncResponsiveWorkspaceLayout(): void {
-        const isWide = shouldUseSideWorkspace();
+        const isWide = isManagerShell() || shouldUseSideWorkspace();
         if (isWide !== wasWideWorkspace) {
             responsiveWorkspacePinnedClosed = false;
             wasWideWorkspace = isWide;
@@ -534,7 +607,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function openWorkspaceFromButton(): void {
-        if (!shouldUseSideWorkspace()) return;
+        if (!isManagerShell() && !shouldUseSideWorkspace()) return;
         if (document.body.classList.contains('side-workspace-open')) {
             const isNonWorkspacePanel = sideWorkspaceContent === settingsPage || sideWorkspaceContent === topicsPanel;
             if (isNonWorkspacePanel) {
@@ -553,8 +626,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     return;
                 }
                 openSideWorkspace({
-                    title: '工作区',
-                    subtitle: '计划、批注和文件变更会显示在这里',
+                    title: uiText.workspace,
+                    subtitle: uiText.workspaceSubtitle,
                     build: createWorkspaceHomeView,
                 });
                 showSwTabs('changes');
@@ -594,8 +667,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             return;
         }
         openSideWorkspace({
-            title: '工作区',
-            subtitle: '计划、批注和文件变更会显示在这里',
+            title: uiText.workspace,
+            subtitle: uiText.workspaceSubtitle,
             build: createWorkspaceHomeView,
         });
         showSwTabs('changes');
@@ -607,7 +680,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function renderDiffTable(lines: SideDiffLine[] | undefined): string {
         if (!lines || lines.length === 0) {
-            return '<div class="side-diff-empty">没有可内联显示的差异。</div>';
+            return `<div class="side-diff-empty">${escapeHtml(uiText.noInlineDiff)}</div>`;
         }
         let html = '<table class="ds-diff-table"><tbody>';
         for (const line of lines) {
@@ -715,7 +788,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function refreshSideDiffWorkspaceAfterRemoval(): void {
         if (!sideWorkspaceContent?.classList.contains('side-diff-view')) return;
         if (sideDiffEntries.length > 0) {
-            showSideDiffWorkspace('文件变更');
+            showSideDiffWorkspace(uiText.fileChanges);
         } else {
             closeSideWorkspace();
         }
@@ -755,10 +828,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         view.className = 'side-diff-view';
         const allFiles = entries.flatMap(entry => entry.files);
         const totals = getSideDiffTotals(allFiles);
-        const toolbarTitle = options.title === '文件变更' ? '变更概览' : options.title;
+        const toolbarTitle = options.title === uiText.fileChanges || options.title === '文件变更' ? uiText.changeOverview : options.title;
         view.innerHTML = `<div class="side-diff-toolbar">
             <div class="side-diff-title">${svgIconNoMargin('edit')}<span>${escapeHtml(toolbarTitle)}</span></div>
-            <div class="side-diff-stats"><span class="ds-add">+${totals.additions}</span><span class="ds-del">-${totals.deletions}</span><span>${entries.length} 次变更</span><span>${allFiles.length} 个文件</span></div>
+            <div class="side-diff-stats"><span class="ds-add">+${totals.additions}</span><span class="ds-del">-${totals.deletions}</span><span>${entries.length} ${uiText.changesCount}</span><span>${allFiles.length} ${uiText.filesCount}</span></div>
         </div>`;
 
         const fileList = document.createElement('div');
@@ -771,7 +844,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             entryEl.className = 'side-diff-entry open';
             entryEl.dataset.sideDiffEntryId = entry.id;
             const entryTotals = getSideDiffTotals(entry.files);
-            const entryTitle = entry.title === options.title ? (entries.length === 1 ? '本次变更' : '变更记录') : entry.title;
+            const entryTitle = entry.title === options.title ? (entries.length === 1 ? uiText.thisChange : uiText.changeRecord) : entry.title;
             const entryHeader = document.createElement('button');
             entryHeader.type = 'button';
             entryHeader.className = 'side-diff-entry-header';
@@ -781,7 +854,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     <span class="side-diff-entry-title">${escapeHtml(entryTitle)}</span>
                     <span class="side-diff-entry-time">${formatSideDiffTime(entry.timestamp)}</span>
                 </div>
-                <div class="side-diff-entry-stats"><span class="ds-add">+${entryTotals.additions}</span><span class="ds-del">-${entryTotals.deletions}</span><span>${entry.files.length} 个文件</span><span>${entryTotals.lineCount} 行预览</span></div>`;
+                <div class="side-diff-entry-stats"><span class="ds-add">+${entryTotals.additions}</span><span class="ds-del">-${entryTotals.deletions}</span><span>${entry.files.length} ${uiText.filesCount}</span><span>${entryTotals.lineCount} ${uiText.previewLines}</span></div>`;
             entryHeader.addEventListener('click', () => {
                 entryEl.classList.toggle('open');
             });
@@ -845,8 +918,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (entry.pending) {
                 const actions = document.createElement('div');
                 actions.className = 'side-diff-actions';
-                actions.innerHTML = `<button class="diff-reject-btn" type="button">${svgIcon('x')}拒绝</button>
-                    <button class="diff-accept-btn" type="button">${svgIcon('check')}接受</button>`;
+                actions.innerHTML = `<button class="diff-reject-btn" type="button">${svgIcon('x')}${escapeHtml(uiText.reject)}</button>
+                    <button class="diff-accept-btn" type="button">${svgIcon('check')}${escapeHtml(uiText.accept)}</button>`;
                 actions.querySelector('.diff-accept-btn')?.addEventListener('click', () => {
                     vscode.postMessage({ type: 'confirmWriteFile', messageId: entry.pending!.messageId });
                     removeSideDiffEntry(entry.id);
@@ -869,12 +942,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return view;
     }
 
-    function showSideDiffWorkspace(title = '文件变更', entries = sideDiffEntries, focus?: SideDiffFocus): void {
+    function showSideDiffWorkspace(title = uiText.fileChanges, entries = sideDiffEntries, focus?: SideDiffFocus): void {
         const fileCount = entries.reduce((sum, entry) => sum + entry.files.length, 0);
         const snapshot = entries.map(cloneSideDiffEntry);
         openSideWorkspace({
             title,
-            subtitle: entries.length === 1 && fileCount === 1 ? `${entries[0]?.title || title} · ${entries[0]?.files[0]?.file || ''}` : `${entries.length} 次变更 · ${fileCount} 个文件`,
+            subtitle: entries.length === 1 && fileCount === 1 ? `${entries[0]?.title || title} · ${entries[0]?.files[0]?.file || ''}` : `${entries.length} ${uiText.changesCount} · ${fileCount} ${uiText.filesCount}`,
             wide: true,
             build: () => createSideDiffView(snapshot, { title, focus }),
         });
@@ -883,7 +956,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function openDiffInSideWorkspace(
         files: SideDiffFile[],
-        title = '文件变更',
+        title = uiText.fileChanges,
         options: { pending?: { messageId: string; isNewFile: boolean }; append?: boolean; sourceKey?: string; focusFile?: string } = {},
     ): void {
         // Mark incoming files as unseen
@@ -891,7 +964,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const sourceKey = options.sourceKey || getSideDiffSourceKey(title, files, options.pending);
         const entry = createSideDiffEntry(files, title, options.pending, sourceKey);
         const activeEntry = upsertSideDiffEntry(entry);
-        showSideDiffWorkspace('文件变更', sideDiffEntries, {
+        showSideDiffWorkspace(uiText.fileChanges, sideDiffEntries, {
             entryId: activeEntry.id,
             file: options.focusFile,
         });
@@ -1016,6 +1089,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const swBadgeChanges = document.getElementById('swBadgeChanges');
     const swBadgeFiles = document.getElementById('swBadgeFiles');
     const swBadgeArtifacts = document.getElementById('swBadgeArtifacts');
+    swTabs?.querySelector('[data-sw-tab="changes"] span:not(.sw-tab-badge)')?.replaceChildren(uiText.changesTab);
+    swTabs?.querySelector('[data-sw-tab="files"] span:not(.sw-tab-badge)')?.replaceChildren(uiText.filesTab);
+    swTabs?.querySelector('[data-sw-tab="artifacts"] span:not(.sw-tab-badge)')?.replaceChildren(uiText.artifactsTab);
 
     function showSwTabs(activeTab: string): void {
         if (!swTabs) return;
@@ -1055,7 +1131,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (sideDiffEntries.length > 0) {
                     showSideDiffWorkspace();
                 } else {
-                    sideWorkspaceBody.innerHTML = '<div class="sw-empty-state">暂无文件变更</div>';
+                    sideWorkspaceBody.innerHTML = `<div class="sw-empty-state">${escapeHtml(uiText.noFileChanges)}</div>`;
                 }
                 break;
             case 'files':
@@ -1071,7 +1147,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function renderScratchFileTree(): void {
         if (!sideWorkspaceBody) return;
         if (_scratchFiles.length === 0) {
-            sideWorkspaceBody.innerHTML = '<div class="sw-empty-state">暂无 Scratch 文件<br><span style="font-size:10px;opacity:0.6">Agent 创建的临时脚本和文件会显示在这里</span></div>';
+            sideWorkspaceBody.innerHTML = `<div class="sw-empty-state">${escapeHtml(uiText.scratchEmpty)}<br><span style="font-size:10px;opacity:0.6">${escapeHtml(uiText.scratchHint)}</span></div>`;
             return;
         }
         const html = _scratchFiles.map(f => {
@@ -1097,7 +1173,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function renderSwArtifactList(): void {
         if (!sideWorkspaceBody) return;
         if (artifacts.length === 0) {
-            sideWorkspaceBody.innerHTML = '<div class="sw-empty-state">暂无 Artifacts<br><span style="font-size:10px;opacity:0.6">计划、验证和文件变更产物会显示在这里</span></div>';
+            sideWorkspaceBody.innerHTML = `<div class="sw-empty-state">${escapeHtml(uiText.artifactsEmpty)}<br><span style="font-size:10px;opacity:0.6">${escapeHtml(uiText.artifactsHint)}</span></div>`;
             return;
         }
         const html = artifacts.map(a => {
@@ -1856,6 +1932,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
     }
 
+    function updateQuickWriteModeSelector(mode: 'confirm' | 'auto' | string | undefined): void {
+        quickWriteMode = mode === 'auto' ? 'auto' : 'confirm';
+        const select = document.getElementById('quickWriteModeSelect') as HTMLSelectElement | null;
+        if (!select) return;
+        select.value = quickWriteMode;
+        select.title = chatI18n.locale === 'zh-cn'
+            ? (quickWriteMode === 'auto' ? '写入模式：自动写入' : '写入模式：确认写入')
+            : (quickWriteMode === 'auto' ? 'Write mode: Auto' : 'Write mode: Confirm');
+    }
+
     const quickModelSel = document.getElementById('quickModelSelect');
     if (quickModelSel) {
         quickModelSel.addEventListener('change', () => {
@@ -1863,6 +1949,26 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             renderQuickModelMenu();
             vscode.postMessage({ type: 'quickChangeModel', model: quickModelCurrent });
         });
+    }
+
+    const quickWriteModeSel = document.getElementById('quickWriteModeSelect') as HTMLSelectElement | null;
+    if (quickWriteModeSel) {
+        quickWriteModeSel.addEventListener('change', () => {
+            updateQuickWriteModeSelector(quickWriteModeSel.value);
+            const agentWriteMode = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
+            if (agentWriteMode) agentWriteMode.value = quickWriteMode;
+            refreshSettingsOverview();
+            vscode.postMessage({ type: 'quickChangeWriteMode', mode: quickWriteMode });
+        });
+    }
+
+    if (chatI18n.locale !== 'zh-cn' && quickWriteModeSel) {
+        const confirmOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="confirm"]');
+        const autoOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="auto"]');
+        if (confirmOption) confirmOption.textContent = 'Confirm';
+        if (autoOption) autoOption.textContent = 'Auto';
+        quickWriteModeSel.title = 'Write mode';
+        quickWriteModeSel.setAttribute('aria-label', 'Write mode');
     }
 
     const composerAddBtn = document.getElementById('composerAddBtn');
@@ -1944,7 +2050,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 return;
             }
             topicsPanel.classList.add('show');
-            openSideWorkspace({ title: '历史话题', subtitle: '搜索、切换和管理对话', content: topicsPanel });
+            openSideWorkspace({
+                title: chatI18n.locale === 'zh-cn' ? '历史话题' : 'Topic History',
+                subtitle: chatI18n.locale === 'zh-cn' ? '搜索、切换和管理对话' : 'Search, switch, and manage conversations',
+                content: topicsPanel,
+            });
             return;
         }
         closeSideWorkspace();
@@ -1955,7 +2065,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     bindBtn('btnNewTopicPanel', () => { vscode.postMessage({ type: 'newTopic' }); topicsPanel.classList.remove('show'); if (sideWorkspaceContent === topicsPanel) closeSideWorkspace(); });
     updateManagerTopicsToggleState();
     bindBtn('btnSettings', () => {
-        setArtifactDrawerOpen(false);
+        if (!isManagerShell()) {
+            setArtifactDrawerOpen(false);
+        } else {
+            document.body.classList.add('artifact-drawer-open');
+        }
         vscode.postMessage({ type: 'openSettings' });
         topicsPanel.classList.remove('show');
     });
@@ -1990,7 +2104,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     if (settingsPage) {
         settingsPage.addEventListener('input', () => { if (settingsPage.classList.contains('active')) refreshSettingsOverview(); });
-        settingsPage.addEventListener('change', () => { if (settingsPage.classList.contains('active')) refreshSettingsOverview(); });
+        settingsPage.addEventListener('change', event => {
+            if ((event.target as HTMLElement | null)?.id === 'agentWriteMode') {
+                updateQuickWriteModeSelector((event.target as HTMLSelectElement).value);
+            }
+            if (settingsPage.classList.contains('active')) refreshSettingsOverview();
+        });
     }
 
     // ── Topic search (debounced 300ms) ─────────────────────────────────────────
@@ -2216,7 +2335,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }));
         if (files.length === 0) return true;
 
-        openDiffInSideWorkspace(files, '文件变更', { sourceKey: artifactId, focusFile: file });
+        openDiffInSideWorkspace(files, uiText.fileChanges, { sourceKey: artifactId, focusFile: file });
         return true;
     }
 
@@ -4849,6 +4968,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
                 updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
+                updateQuickWriteModeSelector(msg.current?.agentFileWriteMode || 'confirm');
                 if (msg.showPanel && isCurrentSurface(msg.targetSurface)) showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
                 break;
 
@@ -5275,17 +5395,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     deletions: f.deletions,
                     diffLines: f.diffLines,
                 }));
-                const summarySourceKey = msg.summaryId || getSideDiffSourceKey('文件变更', summaryFiles);
+                const summarySourceKey = msg.summaryId || getSideDiffSourceKey(uiText.fileChanges, summaryFiles);
                 const card = document.createElement('div');
                 card.className = 'diff-summary-card';
 
                 // Header with total stats
                 let totalAdd = 0, totalDel = 0;
                 for (const f of msg.files) { totalAdd += f.additions || 0; totalDel += f.deletions || 0; }
+                const collapseSummaryLabel = chatI18n.locale === 'zh-cn' ? '收起文件变更摘要' : 'Collapse file-change summary';
+                const expandSummaryLabel = chatI18n.locale === 'zh-cn' ? '展开文件变更摘要' : 'Expand file-change summary';
                 const headerHtml = `<div class="ds-header">
-                    <button class="ds-collapse-btn" type="button" aria-label="收起文件变更摘要" aria-expanded="true">▾</button>
-                    <span class="ds-title">${svgIconNoMargin('edit')} 文件变更摘要</span>
-                    <span class="ds-stats"><span class="ds-add">+${totalAdd}</span> <span class="ds-del">-${totalDel}</span> · ${msg.files.length} 个文件</span>
+                    <button class="ds-collapse-btn" type="button" aria-label="${escapeHtml(collapseSummaryLabel)}" aria-expanded="true">▾</button>
+                    <span class="ds-title">${svgIconNoMargin('edit')} ${escapeHtml(uiText.fileChanges)}</span>
+                    <span class="ds-stats"><span class="ds-add">+${totalAdd}</span> <span class="ds-del">-${totalDel}</span> · ${msg.files.length} ${uiText.filesCount}</span>
                 </div>`;
                 card.innerHTML = headerHtml;
 
@@ -5337,7 +5459,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         fileHeader.style.cursor = 'pointer';
                         fileHeader.addEventListener('click', () => {
                             if (shouldUseSideWorkspace()) {
-                                openDiffInSideWorkspace(summaryFiles, '文件变更', { sourceKey: summarySourceKey, focusFile: f.file });
+                                openDiffInSideWorkspace(summaryFiles, uiText.fileChanges, { sourceKey: summarySourceKey, focusFile: f.file });
                                 return;
                             }
                             const isOpen = diffBody.style.display !== 'none';
@@ -5358,13 +5480,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         const collapsed = card.classList.toggle('collapsed');
                         collapseBtn.textContent = collapsed ? '▸' : '▾';
                         collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-                        collapseBtn.setAttribute('aria-label', collapsed ? '展开文件变更摘要' : '收起文件变更摘要');
+                        collapseBtn.setAttribute('aria-label', collapsed ? expandSummaryLabel : collapseSummaryLabel);
                     });
                 }
                 chatArea.appendChild(card);
                 scrollBottom();
                 if (shouldUseSideWorkspace()) {
-                    openDiffInSideWorkspace(summaryFiles, '文件变更', { sourceKey: summarySourceKey });
+                    openDiffInSideWorkspace(summaryFiles, uiText.fileChanges, { sourceKey: summarySourceKey });
                 }
                 break;
             }
@@ -5580,6 +5702,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         settingsProviders = providers;
         settingsOllamaModels = ollamaModels || [];
         updateQuickModelSelector(providers, current, ollamaModels);
+        updateQuickWriteModeSelector(current.agentFileWriteMode || 'confirm');
         const sel = document.getElementById('settingsProvider') as HTMLSelectElement;
         sel.innerHTML = providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement;
@@ -5596,6 +5719,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         (document.getElementById('inlineEndpoint') as HTMLInputElement).value = current.inlineCompletion?.endpoint || '';
         (document.getElementById('inlineDebounce') as HTMLInputElement).value = current.inlineCompletion?.debounceMs || 500;
         (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'confirm';
+        updateQuickWriteModeSelector(current.agentFileWriteMode || 'confirm');
         // Brave Search API key — show masked placeholder if already set
         const braveKeyEl = document.getElementById('braveSearchApiKey') as HTMLInputElement | null;
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
@@ -5723,7 +5847,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (shouldUseSideWorkspace()) {
             settingsInSideWorkspace = true;
             responsiveWorkspacePinnedClosed = !!activeResponsiveWorkspace;
-            openSideWorkspace({ title: 'AI 设置', subtitle: '模型、上下文、API 和工具', content: settingsPage });
+            openSideWorkspace({
+                title: chatI18n.locale === 'zh-cn' ? 'AI 设置' : 'AI Settings',
+                subtitle: chatI18n.locale === 'zh-cn' ? '模型、上下文、API 和工具' : 'Models, context, API, and tools',
+                content: settingsPage,
+            });
         } else {
             settingsInSideWorkspace = false;
             closeSideWorkspace({ preserveResponsivePin: true });

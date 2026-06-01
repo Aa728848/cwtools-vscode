@@ -56,6 +56,26 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
 
     const submitBtn = header.querySelector('.ap-submit-btn') as HTMLButtonElement;
     const approveBtn = header.querySelector('.ap-approve-btn') as HTMLButtonElement;
+    const headerHint = header.querySelector('.ap-header-hint') as HTMLElement | null;
+    const toggleCompact = (): void => {
+        wrap.classList.toggle('ap-compact');
+        header.setAttribute('aria-expanded', wrap.classList.contains('ap-compact') ? 'false' : 'true');
+    };
+
+    header.addEventListener('click', event => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('button, textarea, input, select, a')) return;
+        if (wrap.classList.contains('ap-approved')) {
+            toggleCompact();
+        }
+    });
+    header.addEventListener('keydown', event => {
+        const keyEvent = event as KeyboardEvent;
+        if (!wrap.classList.contains('ap-approved')) return;
+        if (keyEvent.key !== 'Enter' && keyEvent.key !== ' ') return;
+        keyEvent.preventDefault();
+        toggleCompact();
+    });
 
     const updateSubmitBtn = (): void => {
         submitBtn.innerHTML = submitLabel(options.labels.submit, annotations.length);
@@ -74,6 +94,14 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
         approveBtn.innerHTML = svgIcon('check') + escapeHtml(options.labels.approved);
         approveBtn.disabled = true;
         submitBtn.disabled = true;
+        if (document.body.classList.contains('agent-manager-shell')) {
+            wrap.classList.add('ap-approved', 'ap-compact');
+            header.tabIndex = 0;
+            header.setAttribute('role', 'button');
+            header.setAttribute('aria-expanded', 'false');
+            if (headerHint) headerHint.textContent = options.labels.approved;
+            return;
+        }
         options.dismissCard(wrap, 400);
     });
 

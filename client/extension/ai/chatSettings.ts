@@ -120,6 +120,12 @@ export class ChatSettingsManager {
         await this.buildAndSendSettingsData();
     }
 
+    async quickChangeWriteMode(mode: 'confirm' | 'auto'): Promise<void> {
+        const nextMode = mode === 'auto' ? 'auto' : 'confirm';
+        await vs.workspace.getConfiguration('cwtools.ai').update('agentFileWriteMode', nextMode, vs.ConfigurationTarget.Global);
+        await this.buildAndSendSettingsData();
+    }
+
     async saveSettings(settings: PanelSettings, targetSurface?: 'chat' | 'manager'): Promise<void> {
         const cfg = vs.workspace.getConfiguration('cwtools.ai');
         const { BUILTIN_PROVIDERS } = await import('./providers');

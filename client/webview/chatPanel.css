@@ -505,9 +505,9 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .composer-input :not(.reference-chip):not(.reference-chip *) { background: transparent !important; color: inherit !important; font: inherit !important; text-decoration: inherit !important; }
 .input-controls { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px 10px; gap: 8px; }
 .composer-toolbar { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-.composer-add-btn, .composer-model-trigger, .composer-chip { height: 32px; border: 1px solid transparent; background: rgba(255,255,255,0.065); color: var(--fg); font-family: inherit; font-size: 12px; cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s; }
+.composer-add-btn, .composer-model-trigger, .composer-chip, .composer-write-mode-select { height: 32px; border: 1px solid transparent; background: rgba(255,255,255,0.065); color: var(--fg); font-family: inherit; font-size: 12px; cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s; }
 .composer-add-btn { width: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; opacity: 0.82; }
-.composer-add-btn:hover, .composer-add-btn.active, .composer-model-trigger:hover, .composer-model-trigger.active, .composer-chip:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.15); opacity: 1; }
+.composer-add-btn:hover, .composer-add-btn.active, .composer-model-trigger:hover, .composer-model-trigger.active, .composer-chip:hover, .composer-write-mode-select:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.15); opacity: 1; }
 .composer-model-trigger { max-width: min(46vw, 220px); border-radius: 10px; padding: 0 10px 0 12px; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; }
 .composer-model-trigger span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .composer-chevron { font-size: 10px; opacity: 0.68; line-height: 1; }
@@ -517,6 +517,13 @@ body.review-mode .token-usage-fill { background: #f48771 !important; }
 .composer-chip span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .composer-chip-icon { display: inline-flex; align-items: center; line-height: 0; opacity: 0.62; flex-shrink: 0; }
 .workflow-chip { max-width: 220px; }
+.composer-write-mode-select {
+    flex: 0 0 auto;
+    max-width: 108px;
+    border-radius: 9px;
+    padding: 0 8px;
+    outline: none;
+}
 .hidden-composer-select, .hidden-composer-action { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .composer-menu, .model-menu { position: absolute; left: max(22px, calc(50% - var(--chat-column-half-width) + 10px)); bottom: calc(100% - 4px); z-index: 230; display: none; min-width: 152px; max-width: calc(100vw - 44px); padding: 6px; background: rgba(27,27,30,0.98); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.36); }
 body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6px); bottom: auto; }

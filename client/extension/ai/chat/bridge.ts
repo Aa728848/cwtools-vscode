@@ -141,6 +141,9 @@ export async function routeWebviewMessage(
         case 'quickChangeModel':
             await provider.settingsManager.quickChangeModel(msg.model);
             break;
+        case 'quickChangeWriteMode':
+            await provider.settingsManager.quickChangeWriteMode(msg.mode);
+            break;
         case 'slashCommand':
             await provider.handleSlashCommand(msg.command);
             break;

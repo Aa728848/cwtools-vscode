@@ -33,8 +33,10 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, opti
     const csp = webview.cspSource;
     const title = options?.title ?? 'Eddy CWTool Code';
     const bodyClass = options?.bodyClass ?? 'chat-empty';
+    const locale = vs.env.language.toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
+    const htmlLang = locale === 'zh-cn' ? 'zh-CN' : 'en';
     return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${htmlLang}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -42,7 +44,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, opti
 <title>${title}</title>
 ${stylesheetLinks}
 </head>
-<body class="${bodyClass}">
+<body class="${bodyClass}" data-locale="${locale}">
 <div class="header" role="banner">
     <div class="header-title">
         <svg class="header-brand-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
@@ -180,6 +182,10 @@ ${stylesheetLinks}
                 <select class="hidden-composer-select" id="quickModelSelect" title="当前模型" aria-hidden="true" tabindex="-1"></select>
                 <button class="hidden-composer-action" id="imgPickBtn" title="上传图片" aria-hidden="true" tabindex="-1"></button>
             </div>
+            <select class="composer-write-mode-select" id="quickWriteModeSelect" title="写入模式" aria-label="写入模式">
+                <option value="confirm">确认写入</option>
+                <option value="auto">自动写入</option>
+            </select>
             <button class="send-btn" id="sendBtn" title="发送 (Enter)" aria-label="发送消息">↑</button>
         </div>
     </div>

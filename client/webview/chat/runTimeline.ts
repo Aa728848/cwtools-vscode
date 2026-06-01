@@ -154,11 +154,12 @@ export function groupByAgentLane(events: TimelineEvent[]): Map<string, {
 /**
  * Renders timeline HTML for embedding in the Agent Manager webview.
  */
-export function renderTimelineHTML(groups: TimelineGroup[], collapsible = false): string {
+export function renderTimelineHTML(groups: TimelineGroup[], collapsible = false, collapsedGroups?: ReadonlySet<string>): string {
     let html = '<div class="run-timeline">';
     for (const group of groups) {
         const collapseAttr = collapsible ? ' tabindex="0" role="button"' : '';
-        html += `<div class="timeline-group${collapsible ? ' collapsed' : ''}" data-group="${group.id}">`;
+        const collapsed = collapsible && (collapsedGroups ? collapsedGroups.has(group.id) : true);
+        html += `<div class="timeline-group${collapsed ? ' collapsed' : ''}" data-group="${group.id}">`;
         html += `<h3 class="timeline-group-header"${collapseAttr}>${group.icon} ${group.label} <span class="count">(${group.events.length})</span></h3>`;
         html += '<ul class="timeline-events">';
         for (const evt of group.events) {

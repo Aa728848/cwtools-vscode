@@ -1417,6 +1417,7 @@ export type WebViewMessage =
     | { type: 'confirmWriteFile'; messageId: string }
     | { type: 'cancelWriteFile'; messageId: string }
     | { type: 'quickChangeModel'; model: string }
+    | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' }
     | { type: 'slashCommand'; command: string }
     | { type: 'permissionResponse'; permissionId: string; allowed: boolean; alwaysAllow?: boolean }
     /** Submit inline annotations collected in the webview back to AI for revision */

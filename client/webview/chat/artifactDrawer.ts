@@ -68,7 +68,7 @@ export function renderArtifactDrawer(
         row.className = `artifact-row artifact-${artifact.kind} artifact-${artifact.status || 'done'}`;
         row.innerHTML = renderArtifactRowHtml(artifact, i18n);
         if (artifact.kind === 'diff' || artifact.action === 'openDiff') {
-            row.addEventListener('click', () => toggleDiffArtifactDetails(row, artifact, callbacks));
+            row.addEventListener('click', () => toggleDiffArtifactDetails(row, artifact, callbacks, i18n));
         } else if (artifact.filePath) {
             row.addEventListener('click', () => callbacks.openPlanFile(artifact.filePath!));
         } else {
@@ -117,6 +117,7 @@ export function toggleDiffArtifactDetails(
     row: HTMLElement,
     artifact: ArtifactRecord,
     callbacks: Pick<ArtifactDrawerCallbacks, 'openArtifact'>,
+    i18n: ChatI18nText,
 ): void {
     const next = row.nextElementSibling as HTMLElement | null;
     if (next?.classList.contains('artifact-file-list')) {
@@ -132,15 +133,15 @@ export function toggleDiffArtifactDetails(
     const details = document.createElement('div');
     details.className = 'artifact-file-list';
     if (files.length === 0) {
-        details.innerHTML = '<div class="artifact-file-empty">No file changes recorded.</div>';
+        details.innerHTML = `<div class="artifact-file-empty">${i18n.locale === 'zh-cn' ? '暂无记录的文件变更。' : 'No file changes recorded.'}</div>`;
     } else {
         const header = document.createElement('div');
         header.className = 'artifact-file-list-header';
-        header.innerHTML = `<span>${files.length} file${files.length === 1 ? '' : 's'}</span>`;
+        header.innerHTML = `<span>${i18n.locale === 'zh-cn' ? `${files.length} 个文件` : `${files.length} file${files.length === 1 ? '' : 's'}`}</span>`;
         const openAll = document.createElement('button');
         openAll.type = 'button';
         openAll.className = 'artifact-open-all';
-        openAll.textContent = 'Open all';
+        openAll.textContent = i18n.locale === 'zh-cn' ? '全部打开' : 'Open all';
         openAll.addEventListener('click', event => {
             event.stopPropagation();
             callbacks.openArtifact(artifact.id);

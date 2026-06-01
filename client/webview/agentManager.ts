@@ -30,7 +30,7 @@ type ManagerEnhancementState = {
     cleanupResult?: { deletedCount: number; keptCount: number; reclaimedBytes: number };
     copiedEventAt?: number;
     workspaceContent?: HTMLElement | null;
-    workspaceEntries?: Array<{ content: HTMLElement; title?: string; subtitle?: string; kind?: string; wide?: boolean }>;
+    workspaceEntries?: Array<{ content: HTMLElement; title?: string; subtitle?: string; kind?: string; sourceKey?: string; wide?: boolean }>;
     workspaceTitle?: string;
     workspaceSubtitle?: string;
     settingsContent?: HTMLElement | null;
@@ -41,6 +41,7 @@ type ManagerEnhancementState = {
     cacheStats?: {
         totalCachedTokens: number;
         totalInputTokens: number;
+        totalCacheCreationTokens?: number;
         totalSavedCostCny: number;
         aggregateHitRate: number;
         byAgent: Array<{ agentId: string; cachedTokens: number; inputTokens: number; hitRate: number; callCount: number }>;
@@ -85,9 +86,15 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     let activeTab: ManagerTab = 'runs';
     let settingsRequestPending = false;
     let topicTitleEditing = false;
+    let lastKnownTopicId: string | null = null;
+    let lastOverviewSignature = '';
+    let lastWorkspaceRenderSignature = '';
+    let workspaceRenderRevision = 0;
     const collapsedTimelineGroups = new Set<string>();
     const collapsedWorkspaceFiles = new Set<string>();
+    const cacheStatsByRunId = new Map<string, NonNullable<ManagerEnhancementState['cacheStats']>>();
     const vscode = (window as any).__cwtoolsVscode;
+    document.body.dataset.managerActiveTab = activeTab;
 
     // 从 HTML body 的 data-locale 属性读取 locale（由 agentManagerHtml.ts 注入）
     const locale = normalizeChatLocale((document.body as HTMLElement).dataset.locale);
@@ -269,6 +276,92 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         return [...byPath.values()];
     }
 
+    function normalizeCacheStats(raw: any): NonNullable<ManagerEnhancementState['cacheStats']> {
+        const totalCachedTokens = Number(raw?.totalCachedTokens ?? raw?.cachedTokens ?? 0);
+        const totalInputTokens = Number(raw?.totalInputTokens ?? raw?.inputTokens ?? raw?.totalTokens ?? 0);
+        const totalCacheCreationTokens = Number(raw?.totalCacheCreationTokens ?? raw?.cacheCreationTokens ?? 0);
+        const totalSavedCostCny = Number(raw?.totalSavedCostCny ?? raw?.savedCostCny ?? 0);
+        return {
+            totalCachedTokens,
+            totalInputTokens,
+            totalCacheCreationTokens,
+            totalSavedCostCny,
+            aggregateHitRate: totalInputTokens > 0 ? totalCachedTokens / totalInputTokens : Number(raw?.aggregateHitRate ?? raw?.hitRate ?? 0),
+            byAgent: Array.isArray(raw?.byAgent) ? raw.byAgent : [],
+        };
+    }
+
+    function aggregateCacheStats(): NonNullable<ManagerEnhancementState['cacheStats']> | undefined {
+        let totalCachedTokens = 0;
+        let totalInputTokens = 0;
+        let totalCacheCreationTokens = 0;
+        let totalSavedCostCny = 0;
+        const byAgent = new Map<string, { agentId: string; cachedTokens: number; inputTokens: number; callCount: number }>();
+        for (const stats of cacheStatsByRunId.values()) {
+            totalCachedTokens += Number(stats.totalCachedTokens || 0);
+            totalInputTokens += Number(stats.totalInputTokens || 0);
+            totalCacheCreationTokens += Number(stats.totalCacheCreationTokens || 0);
+            totalSavedCostCny += Number(stats.totalSavedCostCny || 0);
+            for (const agent of stats.byAgent || []) {
+                const agentId = String(agent.agentId || 'root');
+                const existing = byAgent.get(agentId) || { agentId, cachedTokens: 0, inputTokens: 0, callCount: 0 };
+                existing.cachedTokens += Number(agent.cachedTokens || 0);
+                existing.inputTokens += Number(agent.inputTokens || 0);
+                existing.callCount += Number(agent.callCount || 0);
+                byAgent.set(agentId, existing);
+            }
+        }
+        if (totalCachedTokens <= 0 && totalInputTokens <= 0 && totalCacheCreationTokens <= 0 && totalSavedCostCny <= 0) {
+            return undefined;
+        }
+        return {
+            totalCachedTokens,
+            totalInputTokens,
+            totalCacheCreationTokens,
+            totalSavedCostCny,
+            aggregateHitRate: totalInputTokens > 0 ? totalCachedTokens / totalInputTokens : 0,
+            byAgent: Array.from(byAgent.values()).map(agent => ({
+                ...agent,
+                hitRate: agent.inputTokens > 0 ? agent.cachedTokens / agent.inputTokens : 0,
+            })),
+        };
+    }
+
+    function setRunCacheStats(runId: string | undefined, raw: any): void {
+        if (!runId || !raw) return;
+        cacheStatsByRunId.set(runId, normalizeCacheStats(raw));
+        state.cacheStats = aggregateCacheStats();
+    }
+
+    function resetTopicScopedWorkbenchState(options: { preserveCache?: boolean } = {}): void {
+        const previousCacheStats = options.preserveCache ? state.cacheStats : undefined;
+        state.run = null;
+        state.runEvents = [];
+        state.selectedRunEventId = undefined;
+        state.cacheStats = previousCacheStats;
+        state.compactedMemoryContent = undefined;
+        state.cleanupResult = undefined;
+        state.workspaceContent = null;
+        state.workspaceEntries = [];
+        if (!options.preserveCache) cacheStatsByRunId.clear();
+        collapsedTimelineGroups.clear();
+        collapsedWorkspaceFiles.clear();
+        workspaceRenderRevision++;
+        lastWorkspaceRenderSignature = '';
+    }
+
+    function syncTopicScopedState(nextTopicId: string | null | undefined): void {
+        const normalizedTopicId = nextTopicId || null;
+        if (!normalizedTopicId) return;
+        if (!lastKnownTopicId) {
+            lastKnownTopicId = normalizedTopicId;
+            return;
+        }
+        if (lastKnownTopicId === normalizedTopicId) return;
+        lastKnownTopicId = normalizedTopicId;
+        resetTopicScopedWorkbenchState();
+    }
+
     function formatFileStats(file: WorkspaceFileRecord): string {
         const parts: string[] = [];
         if (file.status) parts.push(file.status);
@@ -284,7 +377,12 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
     function renderWorkspaceDiffLines(file: WorkspaceFileRecord): string {
         const lines = Array.isArray(file.diffLines) ? file.diffLines : [];
-        if (!lines.length) return '';
+        if (!lines.length) {
+            return `<div class="manager-workspace-diff-preview manager-workspace-diff-empty">
+                <div>${escapeHtml(file.file)}</div>
+                <span>${escapeHtml(formatFileStats(file))}</span>
+            </div>`;
+        }
         const rows = lines.slice(0, 160).map(line => {
             const type = line.type === 'add' ? 'add' : line.type === 'remove' ? 'remove' : 'ctx';
             const prefix = type === 'add' ? '+' : type === 'remove' ? '-' : ' ';
@@ -298,6 +396,47 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             </tr>`;
         }).join('');
         return `<div class="manager-workspace-diff-preview"><table><tbody>${rows}</tbody></table></div>`;
+    }
+
+    function currentWorkspaceEntries(): Array<{ content: HTMLElement; title?: string; subtitle?: string; kind?: string; sourceKey?: string; wide?: boolean }> {
+        return state.workspaceEntries || (state.workspaceContent ? [{ content: state.workspaceContent, title: state.workspaceTitle, subtitle: state.workspaceSubtitle }] : []);
+    }
+
+    function workspaceRenderSignature(files: WorkspaceFileRecord[], entries = currentWorkspaceEntries()): string {
+        return JSON.stringify({
+            revision: workspaceRenderRevision,
+            entries: entries.map(entry => ({
+                key: entry.sourceKey || entry.kind || entry.title || '',
+                title: entry.title || '',
+                subtitle: entry.subtitle || '',
+                compact: entry.content.classList.contains('ap-compact'),
+            })),
+            files: files.map(file => ({
+                file: file.file,
+                status: file.status || '',
+                additions: file.additions ?? null,
+                deletions: file.deletions ?? null,
+                preview: file.diffPreview || '',
+                lineCount: Array.isArray(file.diffLines) ? file.diffLines.length : 0,
+                collapsed: collapsedWorkspaceFiles.has(file.file),
+            })),
+        });
+    }
+
+    function updateWorkspaceFileToggle(fileKey: string, row: HTMLElement): void {
+        const files = collectWorkspaceFiles(state.run);
+        const file = files.find(item => item.file === fileKey);
+        const nextCollapsed = !collapsedWorkspaceFiles.has(fileKey);
+        if (nextCollapsed) collapsedWorkspaceFiles.add(fileKey);
+        else collapsedWorkspaceFiles.delete(fileKey);
+        row.classList.toggle('is-collapsed', nextCollapsed);
+        const button = row.querySelector<HTMLButtonElement>('.manager-file-change-toggle');
+        button?.setAttribute('aria-expanded', nextCollapsed ? 'false' : 'true');
+        row.querySelector<HTMLElement>('.manager-workspace-diff-preview')?.remove();
+        if (!nextCollapsed && file) {
+            row.insertAdjacentHTML('beforeend', renderWorkspaceDiffLines(file));
+        }
+        lastWorkspaceRenderSignature = workspaceRenderSignature(files);
     }
 
     function renderUsageStatsCard(): string {
@@ -408,8 +547,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         button?.click();
     }
 
-    function ensureSettingsContent(): void {
-        if (state.settingsContent) return;
+    function ensureSettingsContent(force = false): void {
+        if (settingsRequestPending) return;
+        if (!force && state.settingsContent) return;
         settingsRequestPending = true;
         vscode?.postMessage?.({ type: 'openSettings' });
     }
@@ -472,7 +612,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 return true;
             }
             document.body.classList.add('artifact-drawer-open');
-            setActiveTab('settings');
+            setActiveTab('settings', { forceSettingsRefresh: true });
             return true;
         }
         if (action === 'rename-topic') {
@@ -487,7 +627,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (!button) return;
         const nextTab = button.dataset.managerTab as ManagerTab | undefined;
         if (!nextTab) return;
-        setActiveTab(nextTab);
+        setActiveTab(nextTab, { forceSettingsRefresh: nextTab === 'settings' });
     });
 
     overview.addEventListener('click', event => {
@@ -554,13 +694,17 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             return;
         }
 
-        const workspaceFileToggle = target?.closest<HTMLButtonElement>('[data-workspace-file-toggle]');
+        if (target?.closest('.annotatable-plan .ap-header')) {
+            lastWorkspaceRenderSignature = workspaceRenderSignature(collectWorkspaceFiles(state.run));
+            return;
+        }
+
+        const workspaceFileToggle = target?.closest<HTMLElement>('[data-workspace-file-toggle]');
         if (workspaceFileToggle) {
             const fileKey = workspaceFileToggle.dataset.workspaceFileToggle;
             if (fileKey) {
-                if (collapsedWorkspaceFiles.has(fileKey)) collapsedWorkspaceFiles.delete(fileKey);
-                else collapsedWorkspaceFiles.add(fileKey);
-                renderInspector();
+                const row = workspaceFileToggle.closest<HTMLElement>('.manager-file-change-row');
+                if (row) updateWorkspaceFileToggle(fileKey, row);
             }
             return;
         }
@@ -712,6 +856,21 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             cachePercent = Math.round(cacheStats.aggregateHitRate * 100);
         }
         cachePercent = Math.max(0, Math.min(100, cachePercent));
+        const drawerOpen = document.body.classList.contains('artifact-drawer-open');
+        const overviewSignature = JSON.stringify({
+            drawerOpen,
+            topicTitleEditing,
+            topicTitle,
+            workflow: state.workflowId || state.mode,
+            statusText,
+            statusClass,
+            tokens: compactNumber(metrics.totalTokens),
+            cachePercent,
+            cost: costLabel(metrics.costCny),
+            changedCount,
+        });
+        if (overviewSignature === lastOverviewSignature) return;
+        lastOverviewSignature = overviewSignature;
         overview.innerHTML = `
             <div class="manager-command-left">
                 <button type="button" class="manager-command-icon manager-overview-topic-toggle" data-manager-action="toggle-topics" title="${ui.actions.showTopics}" aria-label="${ui.actions.showTopics}">${svgIconNoMargin('collapseAll')}</button>
@@ -743,7 +902,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 <button type="button" class="manager-command-metric manager-command-change" data-manager-jump="workspace">
                     <strong>${changedCount}</strong> ${ui.metrics.filesChanged}
                 </button>
-                <button type="button" class="manager-command-settings manager-command-workbench" data-manager-action="workbench" title="${document.body.classList.contains('artifact-drawer-open') ? ui.actions.closeWorkbench : ui.actions.workbench}" aria-label="${document.body.classList.contains('artifact-drawer-open') ? ui.actions.closeWorkbench : ui.actions.workbench}">
+                <button type="button" class="manager-command-settings manager-command-workbench" data-manager-action="workbench" title="${drawerOpen ? ui.actions.closeWorkbench : ui.actions.workbench}" aria-label="${drawerOpen ? ui.actions.closeWorkbench : ui.actions.workbench}">
                     ${svgIconNoMargin('layers')}
                     <span>${ui.actions.workbench}</span>
                 </button>
@@ -755,8 +914,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         `;
     }
 
-    function setActiveTab(nextTab: ManagerTab): void {
+    function setActiveTab(nextTab: ManagerTab, options: { forceSettingsRefresh?: boolean; suppressSettingsRequest?: boolean } = {}): void {
         activeTab = nextTab;
+        document.body.dataset.managerActiveTab = activeTab;
         artifactDrawerEl.setAttribute('data-active-tab', activeTab);
         tabs.querySelectorAll<HTMLElement>('[data-manager-tab]').forEach(button => {
             button.classList.toggle('active', button.dataset.managerTab === activeTab);
@@ -777,8 +937,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (activeTab === 'runs') {
             vscode?.postMessage?.({ type: 'requestUsageStats' });
         }
-        if (activeTab === 'settings') {
-            ensureSettingsContent();
+        if (activeTab === 'settings' && !options.suppressSettingsRequest) {
+            ensureSettingsContent(!!options.forceSettingsRefresh);
         }
 
         if (activeTab === 'artifacts') {
@@ -834,9 +994,14 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (activeTab === 'workspace') {
             const run = state.run;
             const workspaceFiles = collectWorkspaceFiles(run);
-            const workspaceEntries = state.workspaceEntries || (state.workspaceContent ? [{ content: state.workspaceContent, title: state.workspaceTitle, subtitle: state.workspaceSubtitle }] : []);
+            const workspaceEntries = currentWorkspaceEntries();
+            const signature = workspaceRenderSignature(workspaceFiles, workspaceEntries);
+            if (signature === lastWorkspaceRenderSignature && artifactListEl.querySelector('.manager-workspace-page')) {
+                return;
+            }
+            lastWorkspaceRenderSignature = signature;
             const changedFilesHtml = workspaceFiles.length ? workspaceFiles.map(file => `
-                <article class="manager-file-change-row ${collapsedWorkspaceFiles.has(file.file) ? 'is-collapsed' : ''}">
+                <article class="manager-file-change-row ${collapsedWorkspaceFiles.has(file.file) ? 'is-collapsed' : ''}" data-workspace-file-toggle="${escapeHtml(file.file)}">
                     <button type="button" class="manager-file-change-toggle" data-workspace-file-toggle="${escapeHtml(file.file)}" aria-expanded="${collapsedWorkspaceFiles.has(file.file) ? 'false' : 'true'}">
                         <span title="${escapeHtml(file.file)}">${svgIconNoMargin('file')}${escapeHtml(fileBasename(file.file))}<small>${escapeHtml(file.file)}</small></span>
                         <em>${escapeHtml(formatFileStats(file))}</em>
@@ -882,20 +1047,28 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         }
 
         if (activeTab === 'settings') {
-            artifactListEl.innerHTML = `
-                <div class="manager-settings-page">
-                    <section class="manager-side-card manager-workspace-hero">
-                        <div class="manager-card-title">${escapeHtml(state.settingsTitle || ui.settings.title)}</div>
-                        <p>${escapeHtml(state.settingsSubtitle || ui.settings.subtitle)}</p>
-                    </section>
-                    <div id="managerSettingsHost" class="manager-settings-host">
-                        <div class="manager-side-empty">${ui.settings.loading}</div>
+            if (!artifactListEl.querySelector('.manager-settings-page')) {
+                artifactListEl.innerHTML = `
+                    <div class="manager-settings-page">
+                        <section class="manager-side-card manager-workspace-hero">
+                            <div class="manager-card-title"></div>
+                            <p></p>
+                        </section>
+                        <div id="managerSettingsHost" class="manager-settings-host">
+                            <div class="manager-side-empty">${ui.settings.loading}</div>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            }
+            const titleEl = artifactListEl.querySelector<HTMLElement>('.manager-settings-page .manager-card-title');
+            const subtitleEl = artifactListEl.querySelector<HTMLElement>('.manager-settings-page .manager-workspace-hero p');
+            if (titleEl) titleEl.textContent = state.settingsTitle || ui.settings.title;
+            if (subtitleEl) subtitleEl.textContent = state.settingsSubtitle || ui.settings.subtitle;
             const host = artifactListEl.querySelector<HTMLElement>('#managerSettingsHost');
-            if (host && state.settingsContent) {
+            if (host && state.settingsContent && state.settingsContent.parentElement !== host) {
                 host.replaceChildren(state.settingsContent);
+            } else if (host && !state.settingsContent && !host.firstElementChild) {
+                host.innerHTML = `<div class="manager-side-empty">${ui.settings.loading}</div>`;
             }
             return;
         }
@@ -1151,21 +1324,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     }
 
     function updateFromSnapshot(snapshot: ManagerSnapshotMessage): void {
-        const previousTopicId = state.stats.currentTopicId;
         state.topics = snapshot.topics || [];
         state.stats = snapshot.stats || state.stats;
-        if (previousTopicId !== state.stats.currentTopicId) {
-            state.run = null;
-            state.runEvents = [];
-            state.selectedRunEventId = undefined;
-            state.cacheStats = undefined;
-            state.compactedMemoryContent = undefined;
-            state.cleanupResult = undefined;
-            state.workspaceContent = null;
-            state.workspaceEntries = [];
-            collapsedTimelineGroups.clear();
-            collapsedWorkspaceFiles.clear();
-        }
+        syncTopicScopedState(state.stats.currentTopicId);
         state.artifacts = snapshot.artifacts || [];
         state.mode = snapshot.mode || state.mode;
         state.workflowId = snapshot.workflowId || null;
@@ -1179,7 +1340,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     }
 
     function applyEmbeddedWorkbenchContent(detail: any): void {
-        const kind = detail?.kind === 'settings' ? 'settings' : 'workspace';
+        const kind = detail?.kind === 'settings' ? 'settings' : String(detail?.kind || 'workspace');
         const content = detail?.content instanceof HTMLElement ? detail.content : null;
         if (kind === 'settings') {
             settingsRequestPending = false;
@@ -1187,28 +1348,50 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             state.settingsTitle = detail?.title || ui.settings.title;
             state.settingsSubtitle = detail?.subtitle || ui.settings.subtitle;
             document.body.classList.add('artifact-drawer-open');
-            setActiveTab('settings');
+            if (activeTab === 'settings') {
+                renderInspector();
+            } else {
+                setActiveTab('settings', { suppressSettingsRequest: true });
+            }
             return;
         }
         if (content) {
             const entries = state.workspaceEntries ? [...state.workspaceEntries] : [];
-            const existingIndex = entries.findIndex(entry => entry.content === content);
+            const sourceKey = String(detail?.sourceKey || kind || 'workspace');
+            const existingIndex = entries.findIndex(entry => entry.sourceKey === sourceKey || entry.content === content);
             const nextEntry = {
                 content,
                 title: detail?.title || ui.workspace.title,
                 subtitle: detail?.subtitle || '',
                 kind,
+                sourceKey,
                 wide: !!detail?.wide,
             };
+            const previousEntry = existingIndex >= 0 ? entries[existingIndex] : undefined;
+            const changedEntry = !previousEntry
+                || previousEntry.content !== nextEntry.content
+                || previousEntry.title !== nextEntry.title
+                || previousEntry.subtitle !== nextEntry.subtitle
+                || previousEntry.kind !== nextEntry.kind
+                || previousEntry.sourceKey !== nextEntry.sourceKey;
             if (existingIndex >= 0) entries[existingIndex] = nextEntry;
             else entries.push(nextEntry);
+            if (changedEntry) {
+                workspaceRenderRevision++;
+                lastWorkspaceRenderSignature = '';
+            }
             state.workspaceEntries = entries;
             state.workspaceContent = content;
             state.workspaceTitle = nextEntry.title;
             state.workspaceSubtitle = nextEntry.subtitle;
         }
         document.body.classList.add('artifact-drawer-open');
-        setActiveTab('workspace');
+        if (activeTab === 'settings') {
+            renderOverview();
+            renderInspector();
+        } else {
+            setActiveTab('workspace');
+        }
     }
 
     function applyHostMessage(msg: any): void {
@@ -1219,7 +1402,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             case 'runSnapshot':
                 state.run = msg.snapshot;
                 state.runEvents = Array.isArray(msg.events) ? msg.events : [];
-                state.cacheStats = msg.cacheStats || state.cacheStats;
+                setRunCacheStats(msg.snapshot?.runId, msg.cacheStats);
                 renderOverview();
                 renderInspector();
                 break;
@@ -1241,21 +1424,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 break;
             case 'topicList':
                 {
-                    const previousTopicId = state.stats.currentTopicId;
                     state.topics = msg.topics || [];
                     state.stats = msg.stats || state.stats;
-                    if (previousTopicId !== state.stats.currentTopicId) {
-                        state.run = null;
-                        state.runEvents = [];
-                        state.selectedRunEventId = undefined;
-                        state.cacheStats = undefined;
-                        state.compactedMemoryContent = undefined;
-                        state.cleanupResult = undefined;
-                        state.workspaceContent = null;
-                        state.workspaceEntries = [];
-                        collapsedTimelineGroups.clear();
-                        collapsedWorkspaceFiles.clear();
-                    }
+                    syncTopicScopedState(state.stats.currentTopicId);
                     renderOverview();
                     renderInspector();
                 }
@@ -1272,14 +1443,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             case 'clearChat':
                 if (msg.targetSurface && msg.targetSurface !== 'manager') break;
                 state.messageCount = 0;
-                state.run = null;
-                state.runEvents = [];
-                state.selectedRunEventId = undefined;
-                state.cacheStats = undefined;
-                state.workspaceContent = null;
-                state.workspaceEntries = [];
-                collapsedTimelineGroups.clear();
-                collapsedWorkspaceFiles.clear();
+                resetTopicScopedWorkbenchState({ preserveCache: true });
                 renderOverview();
                 renderInspector();
                 break;
@@ -1329,29 +1493,11 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 break;
             case 'agentStep':
                 state.liveStepCount += 1;
-                state.isGenerating = true;
-                if (msg.step?.type === 'cache_stats' && msg.step.cacheStats) {
-                    const current = state.cacheStats || {
-                        totalCachedTokens: 0,
-                        totalInputTokens: 0,
-                        totalSavedCostCny: 0,
-                        aggregateHitRate: 0,
-                        byAgent: [],
-                    };
-                    const cachedTokens = Number(msg.step.cacheStats.cachedTokens || 0);
-                    const inputTokens = Number(msg.step.cacheStats.totalTokens || 0);
-                    const savedCost = Number(msg.step.cacheStats.savedCostCny || 0);
-                    const totalCachedTokens = current.totalCachedTokens + cachedTokens;
-                    const totalInputTokens = current.totalInputTokens + inputTokens;
-                    state.cacheStats = {
-                        ...current,
-                        totalCachedTokens,
-                        totalInputTokens,
-                        totalSavedCostCny: current.totalSavedCostCny + savedCost,
-                        aggregateHitRate: totalInputTokens > 0 ? totalCachedTokens / totalInputTokens : 0,
-                    };
+                {
+                    const wasGenerating = state.isGenerating;
+                    state.isGenerating = true;
+                    if (!wasGenerating) renderOverview();
                 }
-                renderOverview();
                 break;
             case 'generationComplete':
                 state.messageCount += 1;

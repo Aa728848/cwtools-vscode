@@ -44,7 +44,7 @@ import { applyModeUi } from './chat/modes';
 import { buildSlashCommands, filterSlashCommands, renderSlashCommandItems } from './chat/slashCommands';
 import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
-import { createAnnotationCard } from './chat/annotations';
+import { createAnnotationCard, type AnnotationCardOptions } from './chat/annotations';
 import {
     CONTEXT_TYPE_META,
     generateContextId,
@@ -95,6 +95,9 @@ interface ResponsiveWorkspacePanel {
     subtitle?: string;
     content: HTMLElement;
     wide?: boolean;
+    sourceKey?: string;
+    signature?: string;
+    annotationOptions?: AnnotationCardOptions;
 }
 
 function cloneSideDiffLines(lines?: SideDiffLine[]): SideDiffLine[] | undefined {
@@ -266,8 +269,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let quickWriteMode: 'confirm' | 'auto' = 'confirm';
     let sideWorkspaceContent: HTMLElement | null = null;
     let settingsInSideWorkspace = false;
+    let lastSettingsPageSignature = '';
     let sideDiffEntrySeq = 0;
     const sideDiffEntries: SideDiffEntry[] = [];
+    const responsiveWorkspacePanelCache = new Map<string, ResponsiveWorkspacePanel>();
     /** Files modified by Agent that the user has not yet viewed in the diff panel. */
     const unseenDiffFiles = new Set<string>();
     const originalParents = new Map<HTMLElement, { parent: Node; nextSibling: ChildNode | null }>();
@@ -460,6 +465,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function clearTopicWorkspaceState(): void {
         const responsiveContent = activeResponsiveWorkspace?.content || null;
         sideDiffEntries.length = 0;
+        responsiveWorkspacePanelCache.clear();
         responsiveWorkspacePinnedClosed = false;
 
         if (sideWorkspaceContent && sideWorkspaceContent !== settingsPage && sideWorkspaceContent !== topicsPanel) {
@@ -477,7 +483,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         updateWorkspaceToggleState();
     }
 
-    function openSideWorkspace(options: { title: string; subtitle?: string; content?: HTMLElement; build?: () => HTMLElement; wide?: boolean }): HTMLElement | null {
+    function openSideWorkspace(options: { title: string; subtitle?: string; content?: HTMLElement; build?: () => HTMLElement; wide?: boolean; kind?: string; sourceKey?: string }): HTMLElement | null {
         if (!sideWorkspace || !sideWorkspaceBody) return null;
         let content = options.content || null;
         if (!content && options.build) content = options.build();
@@ -490,9 +496,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 rememberOriginalParent(content);
                 sideWorkspaceContent = content;
             }
-            const kind = content === settingsPage ? 'settings' : 'workspace';
+            const kind = content === settingsPage ? 'settings' : (options.kind || 'workspace');
             const detail = {
                 kind,
+                sourceKey: options.sourceKey || kind,
                 title: options.title,
                 subtitle: options.subtitle || '',
                 content,
@@ -548,6 +555,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 subtitle: panel.subtitle,
                 content: panel.content,
                 wide: panel.wide,
+                kind: panel.kind,
+                sourceKey: panel.sourceKey || panel.kind,
             });
         } else {
             if (sideWorkspaceContent === panel.content) {
@@ -560,6 +569,58 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
         setChatEmptyState();
         updateWorkspaceToggleState();
+    }
+
+    function showAnnotationWorkspacePanel(panel: ResponsiveWorkspacePanel): void {
+        const sourceKey = panel.sourceKey || panel.kind;
+        const cached = responsiveWorkspacePanelCache.get(sourceKey);
+        if (cached && cached.signature === panel.signature) {
+            showResponsiveWorkspacePanel(cached);
+            return;
+        }
+        if (cached) {
+            const wasCompact = cached.content.classList.contains('ap-compact');
+            const wasApproved = cached.content.classList.contains('ap-approved');
+            const approvedButtonHtml = cached.content.querySelector<HTMLElement>('.ap-approve-btn')?.innerHTML || '';
+            const approvedHintText = cached.content.querySelector<HTMLElement>('.ap-header-hint')?.textContent || '';
+            const updater = (cached.content as HTMLElement & { __cwtoolsUpdateAnnotationCard?: (nextPanel: any) => void }).__cwtoolsUpdateAnnotationCard;
+            if (typeof updater === 'function' && panel.annotationOptions) {
+                updater(panel.annotationOptions);
+            } else {
+                cached.content.className = panel.content.className;
+                cached.content.replaceChildren(...Array.from(panel.content.childNodes));
+            }
+            cached.content.classList.toggle('ap-compact', wasCompact);
+            cached.content.classList.toggle('ap-approved', wasApproved);
+            const header = cached.content.querySelector<HTMLElement>('.ap-header');
+            if (header && isManagerShell()) {
+                header.tabIndex = 0;
+                header.setAttribute('role', 'button');
+                header.setAttribute('aria-expanded', cached.content.classList.contains('ap-compact') ? 'false' : 'true');
+            }
+            if (wasApproved) {
+                const approveBtn = cached.content.querySelector<HTMLButtonElement>('.ap-approve-btn');
+                const submitBtn = cached.content.querySelector<HTMLButtonElement>('.ap-submit-btn');
+                const headerHint = cached.content.querySelector<HTMLElement>('.ap-header-hint');
+                if (approveBtn) {
+                    if (approvedButtonHtml) approveBtn.innerHTML = approvedButtonHtml;
+                    approveBtn.disabled = true;
+                }
+                if (submitBtn) submitBtn.disabled = true;
+                if (headerHint && approvedHintText) headerHint.textContent = approvedHintText;
+            }
+            const nextPanel = {
+                ...panel,
+                content: cached.content,
+                sourceKey,
+            };
+            responsiveWorkspacePanelCache.set(sourceKey, nextPanel);
+            showResponsiveWorkspacePanel(nextPanel);
+            return;
+        }
+        const nextPanel = { ...panel, sourceKey };
+        responsiveWorkspacePanelCache.set(sourceKey, nextPanel);
+        showResponsiveWorkspacePanel(nextPanel);
     }
 
     function scheduleResponsiveWorkspaceLayoutSync(): void {
@@ -588,6 +649,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     subtitle: panel.subtitle,
                     content: panel.content,
                     wide: panel.wide,
+                    kind: panel.kind,
+                    sourceKey: panel.sourceKey || panel.kind,
                 });
             } else if (!isWide) {
                 if (sideWorkspaceContent === panel.content) {
@@ -618,6 +681,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                         subtitle: activeResponsiveWorkspace.subtitle,
                         content: activeResponsiveWorkspace.content,
                         wide: activeResponsiveWorkspace.wide,
+                        kind: activeResponsiveWorkspace.kind,
+                        sourceKey: activeResponsiveWorkspace.sourceKey || activeResponsiveWorkspace.kind,
                     });
                     return;
                 }
@@ -640,6 +705,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     subtitle: activeResponsiveWorkspace.subtitle,
                     content: activeResponsiveWorkspace.content,
                     wide: activeResponsiveWorkspace.wide,
+                    kind: activeResponsiveWorkspace.kind,
+                    sourceKey: activeResponsiveWorkspace.sourceKey || activeResponsiveWorkspace.kind,
                 });
                 return;
             }
@@ -659,6 +726,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 subtitle: activeResponsiveWorkspace.subtitle,
                 content: activeResponsiveWorkspace.content,
                 wide: activeResponsiveWorkspace.wide,
+                kind: activeResponsiveWorkspace.kind,
+                sourceKey: activeResponsiveWorkspace.sourceKey || activeResponsiveWorkspace.kind,
             });
             return;
         }
@@ -949,6 +1018,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             title,
             subtitle: entries.length === 1 && fileCount === 1 ? `${entries[0]?.title || title} · ${entries[0]?.files[0]?.file || ''}` : `${entries.length} ${uiText.changesCount} · ${fileCount} ${uiText.filesCount}`,
             wide: true,
+            kind: 'fileChanges',
+            sourceKey: 'fileChanges',
             build: () => createSideDiffView(snapshot, { title, focus }),
         });
         showSwTabs('changes');
@@ -1783,22 +1854,30 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function closeComposerMenus() {
         const composerMenu = document.getElementById('composerMenu');
         const modelMenu = document.getElementById('modelMenu');
+        const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
+        const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         composerMenu?.classList.remove('show');
         composerMenu?.setAttribute('aria-hidden', 'true');
         modelMenu?.classList.remove('show');
         modelMenu?.setAttribute('aria-hidden', 'true');
+        writeModeMenu?.classList.remove('show');
+        writeModeMenu?.setAttribute('aria-hidden', 'true');
         composerAddBtn?.classList.remove('active');
         quickModelTrigger?.classList.remove('active');
         quickModelTrigger?.setAttribute('aria-expanded', 'false');
+        quickWriteModeTrigger?.classList.remove('active');
+        quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
     }
 
     function setComposerMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
         const modelMenu = document.getElementById('modelMenu');
+        const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
+        const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         composerMenu?.classList.toggle('show', open);
         composerMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
         composerAddBtn?.classList.toggle('active', open);
@@ -1806,16 +1885,22 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (open) {
             modelMenu?.classList.remove('show');
             modelMenu?.setAttribute('aria-hidden', 'true');
+            writeModeMenu?.classList.remove('show');
+            writeModeMenu?.setAttribute('aria-hidden', 'true');
             quickModelTrigger?.classList.remove('active');
             quickModelTrigger?.setAttribute('aria-expanded', 'false');
+            quickWriteModeTrigger?.classList.remove('active');
+            quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
         }
     }
 
     function setModelMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
         const modelMenu = document.getElementById('modelMenu');
+        const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
+        const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         modelMenu?.classList.toggle('show', open);
         modelMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
         quickModelTrigger?.classList.toggle('active', open);
@@ -1824,7 +1909,34 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (open) {
             composerMenu?.classList.remove('show');
             composerMenu?.setAttribute('aria-hidden', 'true');
+            writeModeMenu?.classList.remove('show');
+            writeModeMenu?.setAttribute('aria-hidden', 'true');
             composerAddBtn?.classList.remove('active');
+            quickWriteModeTrigger?.classList.remove('active');
+            quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
+        }
+    }
+
+    function setWriteModeMenuOpen(open: boolean) {
+        const composerMenu = document.getElementById('composerMenu');
+        const modelMenu = document.getElementById('modelMenu');
+        const writeModeMenu = document.getElementById('writeModeMenu');
+        const composerAddBtn = document.getElementById('composerAddBtn');
+        const quickModelTrigger = document.getElementById('quickModelTrigger');
+        const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
+        writeModeMenu?.classList.toggle('show', open);
+        writeModeMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
+        quickWriteModeTrigger?.classList.toggle('active', open);
+        quickWriteModeTrigger?.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) positionComposerMenus();
+        if (open) {
+            composerMenu?.classList.remove('show');
+            composerMenu?.setAttribute('aria-hidden', 'true');
+            modelMenu?.classList.remove('show');
+            modelMenu?.setAttribute('aria-hidden', 'true');
+            composerAddBtn?.classList.remove('active');
+            quickModelTrigger?.classList.remove('active');
+            quickModelTrigger?.setAttribute('aria-expanded', 'false');
         }
     }
 
@@ -1833,8 +1945,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const wrapperRect = inputWrapper.getBoundingClientRect();
         const composerMenu = document.getElementById('composerMenu') as HTMLElement | null;
         const modelMenu = document.getElementById('modelMenu') as HTMLElement | null;
+        const writeModeMenu = document.getElementById('writeModeMenu') as HTMLElement | null;
         const composerAddBtn = document.getElementById('composerAddBtn') as HTMLElement | null;
         const quickModelTrigger = document.getElementById('quickModelTrigger') as HTMLElement | null;
+        const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger') as HTMLElement | null;
 
         const positionMenu = (menu: HTMLElement | null, anchor: HTMLElement | null) => {
             if (!menu || !anchor) return;
@@ -1847,6 +1961,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
         positionMenu(composerMenu, composerAddBtn);
         positionMenu(modelMenu, quickModelTrigger);
+        positionMenu(writeModeMenu, quickWriteModeTrigger);
     }
 
     function renderComposerChips() {
@@ -1935,11 +2050,46 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function updateQuickWriteModeSelector(mode: 'confirm' | 'auto' | string | undefined): void {
         quickWriteMode = mode === 'auto' ? 'auto' : 'confirm';
         const select = document.getElementById('quickWriteModeSelect') as HTMLSelectElement | null;
-        if (!select) return;
-        select.value = quickWriteMode;
-        select.title = chatI18n.locale === 'zh-cn'
-            ? (quickWriteMode === 'auto' ? '写入模式：自动写入' : '写入模式：确认写入')
-            : (quickWriteMode === 'auto' ? 'Write mode: Auto' : 'Write mode: Confirm');
+        if (select) select.value = quickWriteMode;
+        const label = document.getElementById('quickWriteModeLabel');
+        const trigger = document.getElementById('quickWriteModeTrigger');
+        const display = getQuickWriteModeLabel(quickWriteMode);
+        if (label) label.textContent = display;
+        if (trigger) {
+            trigger.title = chatI18n.locale === 'zh-cn'
+                ? `写入模式：${display}`
+                : `Write mode: ${display}`;
+        }
+        renderQuickWriteModeMenu();
+    }
+
+    function getQuickWriteModeLabel(mode: 'confirm' | 'auto'): string {
+        if (chatI18n.locale === 'zh-cn') return mode === 'auto' ? '自动写入' : '确认写入';
+        return mode === 'auto' ? 'Auto write' : 'Confirm write';
+    }
+
+    function renderQuickWriteModeMenu(): void {
+        const list = document.getElementById('writeModeMenuList');
+        const title = document.getElementById('writeModeMenuTitle');
+        if (title) title.textContent = chatI18n.locale === 'zh-cn' ? '写入模式' : 'Write mode';
+        if (!list) return;
+        list.innerHTML = '';
+        (['confirm', 'auto'] as const).forEach(mode => {
+            const btn = document.createElement('button');
+            btn.className = 'model-menu-item';
+            btn.type = 'button';
+            btn.textContent = getQuickWriteModeLabel(mode);
+            btn.classList.toggle('active', mode === quickWriteMode);
+            btn.addEventListener('click', () => {
+                updateQuickWriteModeSelector(mode);
+                const agentWriteMode = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
+                if (agentWriteMode) agentWriteMode.value = quickWriteMode;
+                refreshSettingsOverview();
+                setWriteModeMenuOpen(false);
+                vscode.postMessage({ type: 'quickChangeWriteMode', mode: quickWriteMode });
+            });
+            list.appendChild(btn);
+        });
     }
 
     const quickModelSel = document.getElementById('quickModelSelect');
@@ -1961,6 +2111,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             vscode.postMessage({ type: 'quickChangeWriteMode', mode: quickWriteMode });
         });
     }
+
+    const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
+    quickWriteModeTrigger?.addEventListener('click', e => {
+        e.stopPropagation();
+        const writeModeMenu = document.getElementById('writeModeMenu');
+        setWriteModeMenuOpen(!writeModeMenu?.classList.contains('show'));
+    });
+    renderQuickWriteModeMenu();
 
     if (chatI18n.locale !== 'zh-cn' && quickWriteModeSel) {
         const confirmOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="confirm"]');
@@ -2007,7 +2165,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
     document.addEventListener('click', e => {
         const target = e.target as Element | null;
-        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger')) {
+        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
             closeComposerMenus();
         }
     });
@@ -4969,7 +5127,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
                 updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
                 updateQuickWriteModeSelector(msg.current?.agentFileWriteMode || 'confirm');
-                if (msg.showPanel && isCurrentSurface(msg.targetSurface)) showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
+                {
+                    const managerSettingsVisible = isManagerShell()
+                        && document.body.dataset.managerActiveTab === 'settings'
+                        && document.body.classList.contains('artifact-drawer-open');
+                    if ((msg.showPanel || managerSettingsVisible) && isCurrentSurface(msg.targetSurface)) {
+                        showSettingsPage(msg.providers, msg.current, msg.ollamaModels);
+                    }
+                }
                 break;
 
             case 'ollamaModels': {
@@ -5231,10 +5396,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'renderPlan': {
-                document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
                 const isOrchestratorPlan = msg.mode === 'orchestrator';
                 const labels = isOrchestratorPlan ? chatI18n.annotations.orchestratorPlan : chatI18n.annotations.plan;
-                const wrap = createAnnotationCard({
+                const sourceKey = isOrchestratorPlan ? 'plan:orchestrator' : 'plan';
+                const signature = JSON.stringify(msg.sections || []);
+                if (!isManagerShell()) {
+                    document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
+                }
+                const cardOptions: AnnotationCardOptions = {
                     className: `plan-card-wrap ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`,
                     icon: isOrchestratorPlan ? 'bot' : 'edit',
                     approveIcon: isOrchestratorPlan ? 'zap' : 'check',
@@ -5245,13 +5414,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     dismissCard: (element, delay = 0, done, removeFromDom) => dismissCard(element, delay, done, removeFromDom),
                     approveMessageType: 'submitPlanAnnotations',
                     reviseMessageType: 'revisePlanWithAnnotations',
-                });
-                showResponsiveWorkspacePanel({
+                };
+                const wrap = createAnnotationCard(cardOptions);
+                showAnnotationWorkspacePanel({
                     kind: 'plan',
                     title: labels.title,
                     subtitle: labels.hint,
                     content: wrap,
                     wide: true,
+                    sourceKey,
+                    signature,
+                    annotationOptions: cardOptions,
                 });
                 scheduleResponsiveWorkspaceLayoutSync();
                 break;
@@ -5300,8 +5473,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'renderWalkthrough': {
-                document.querySelectorAll('.annotatable-plan.walkthrough-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
-                const wrap = createAnnotationCard({
+                const signature = JSON.stringify(msg.sections || []);
+                if (!isManagerShell()) {
+                    document.querySelectorAll('.annotatable-plan.walkthrough-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
+                }
+                const cardOptions: AnnotationCardOptions = {
                     className: 'walkthrough-card-wrap',
                     icon: 'flag',
                     sections: msg.sections || [],
@@ -5312,21 +5488,28 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     approveMessageType: 'approveWalkthrough',
                     reviseMessageType: 'reviseWalkthroughWithAnnotations',
                     disableApproveOnSubmit: true,
-                });
-                showResponsiveWorkspacePanel({
+                };
+                const wrap = createAnnotationCard(cardOptions);
+                showAnnotationWorkspacePanel({
                     kind: 'walkthrough',
                     title: chatI18n.annotations.walkthrough.title,
                     subtitle: chatI18n.annotations.walkthrough.hint,
                     content: wrap,
                     wide: true,
+                    sourceKey: 'walkthrough',
+                    signature,
+                    annotationOptions: cardOptions,
                 });
                 scheduleResponsiveWorkspaceLayoutSync();
                 break;
             }
 
             case 'renderBlueprint': {
-                document.querySelectorAll('.annotatable-plan.blueprint-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
-                const wrap = createAnnotationCard({
+                const signature = JSON.stringify(msg.sections || []);
+                if (!isManagerShell()) {
+                    document.querySelectorAll('.annotatable-plan.blueprint-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
+                }
+                const cardOptions: AnnotationCardOptions = {
                     className: 'blueprint-card-wrap',
                     icon: 'layers',
                     sections: msg.sections || [],
@@ -5336,13 +5519,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     dismissCard: (element, delay = 0, done, removeFromDom) => dismissCard(element, delay, done, removeFromDom),
                     approveMessageType: 'submitPlanAnnotations',
                     reviseMessageType: 'revisePlanWithAnnotations',
-                });
-                showResponsiveWorkspacePanel({
+                };
+                const wrap = createAnnotationCard(cardOptions);
+                showAnnotationWorkspacePanel({
                     kind: 'blueprint',
                     title: chatI18n.annotations.blueprint.title,
                     subtitle: chatI18n.annotations.blueprint.hint,
                     content: wrap,
                     wide: true,
+                    sourceKey: 'blueprint',
+                    signature,
+                    annotationOptions: cardOptions,
                 });
                 scheduleResponsiveWorkspaceLayoutSync();
                 break;
@@ -5703,6 +5890,29 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         settingsOllamaModels = ollamaModels || [];
         updateQuickModelSelector(providers, current, ollamaModels);
         updateQuickWriteModeSelector(current.agentFileWriteMode || 'confirm');
+        const settingsPageSignature = JSON.stringify({
+            providers: (providers || []).map((p: any) => ({
+                id: p.id,
+                name: p.name,
+                models: p.models,
+                hasKey: p.hasKey,
+                defaultModel: p.defaultModel,
+                defaultEndpoint: p.defaultEndpoint,
+                maxContextTokens: p.maxContextTokens,
+            })),
+            current,
+            ollamaModels: (ollamaModels || []).map((m: any) => ({ name: m.name, size: m.size, parameterSize: m.parameterSize })),
+        });
+        if (isManagerShell() && settingsPage.classList.contains('active') && settingsPageSignature === lastSettingsPageSignature) {
+            settingsInSideWorkspace = true;
+            openSideWorkspace({
+                title: chatI18n.locale === 'zh-cn' ? 'AI 设置' : 'AI Settings',
+                subtitle: chatI18n.locale === 'zh-cn' ? '模型、上下文、API 和工具' : 'Models, context, API, and tools',
+                content: settingsPage,
+            });
+            return;
+        }
+        lastSettingsPageSignature = settingsPageSignature;
         const sel = document.getElementById('settingsProvider') as HTMLSelectElement;
         sel.innerHTML = providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement;

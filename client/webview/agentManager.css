@@ -1725,39 +1725,46 @@ body.agent-manager-shell .manager-run-summary .artifact-item-summary {
     margin: 0;
 }
 
-body.agent-manager-shell .manager-workspace-external-host > .annotatable-plan {
+body.agent-manager-shell .manager-workspace-external-host .annotatable-plan {
     margin: 0;
+    animation: none !important;
+    flex: 0 0 auto;
+    min-height: 0;
 }
 
-body.agent-manager-shell .manager-workspace-external-host > .annotatable-plan.ap-approved {
+body.agent-manager-shell .manager-workspace-external-host .annotatable-plan {
     cursor: pointer;
 }
 
-body.agent-manager-shell .manager-workspace-external-host > .annotatable-plan.ap-approved .ap-header {
+body.agent-manager-shell .manager-workspace-external-host .annotatable-plan.ap-compact .ap-header {
     border-bottom-color: transparent;
 }
 
-body.agent-manager-shell .manager-workspace-external-host > .annotatable-plan.ap-approved .ap-header::after {
+body.agent-manager-shell .manager-workspace-external-host .annotatable-plan .ap-header::after {
     content: "展开";
     margin-left: auto;
     color: var(--manager-muted);
     font-size: 11px;
 }
 
-body.agent-manager-shell:not([data-locale="zh-cn"]) .manager-workspace-external-host > .annotatable-plan.ap-approved .ap-header::after {
+body.agent-manager-shell:not([data-locale="zh-cn"]) .manager-workspace-external-host .annotatable-plan .ap-header::after {
     content: "Expand";
 }
 
-body.agent-manager-shell .manager-workspace-external-host > .annotatable-plan.ap-approved:not(.ap-compact) .ap-header::after {
+body.agent-manager-shell .manager-workspace-external-host .annotatable-plan:not(.ap-compact) .ap-header::after {
     content: "收起";
 }
 
-body.agent-manager-shell:not([data-locale="zh-cn"]) .manager-workspace-external-host > .annotatable-plan.ap-approved:not(.ap-compact) .ap-header::after {
+body.agent-manager-shell:not([data-locale="zh-cn"]) .manager-workspace-external-host .annotatable-plan:not(.ap-compact) .ap-header::after {
     content: "Collapse";
 }
 
-body.agent-manager-shell .manager-workspace-external-host > .annotatable-plan.ap-compact .ap-sections {
-    display: none;
+body.agent-manager-shell .manager-workspace-external-host .annotatable-plan .ap-header::after {
+    flex-shrink: 0;
+}
+
+body.agent-manager-shell .manager-workspace-external-host .annotatable-plan.ap-compact .ap-sections {
+    display: none !important;
 }
 
 .manager-workspace-external-host .side-diff-toolbar {
@@ -1873,6 +1880,7 @@ body.agent-manager-shell .manager-workspace-external-host > .annotatable-plan.ap
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
     gap: 8px;
+    cursor: pointer;
 }
 
 .manager-file-change-toggle {
@@ -2110,6 +2118,21 @@ body.agent-manager-shell .manager-workspace-external-host > .annotatable-plan.ap
     padding-top: 8px;
     border-top: 1px dashed var(--vscode-border);
     font-size: 11px;
+}
+
+.manager-workspace-diff-empty {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    color: var(--manager-muted);
+}
+
+.manager-workspace-diff-empty div {
+    color: var(--manager-fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .run-written-files ul {

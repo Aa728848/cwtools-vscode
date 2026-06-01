@@ -57,21 +57,27 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
     const submitBtn = header.querySelector('.ap-submit-btn') as HTMLButtonElement;
     const approveBtn = header.querySelector('.ap-approve-btn') as HTMLButtonElement;
     const headerHint = header.querySelector('.ap-header-hint') as HTMLElement | null;
+    const isManagerCard = (): boolean => document.body.classList.contains('agent-manager-shell');
     const toggleCompact = (): void => {
         wrap.classList.toggle('ap-compact');
         header.setAttribute('aria-expanded', wrap.classList.contains('ap-compact') ? 'false' : 'true');
     };
+    if (isManagerCard()) {
+        header.tabIndex = 0;
+        header.setAttribute('role', 'button');
+        header.setAttribute('aria-expanded', 'true');
+    }
 
     header.addEventListener('click', event => {
         const target = event.target as HTMLElement | null;
         if (target?.closest('button, textarea, input, select, a')) return;
-        if (wrap.classList.contains('ap-approved')) {
+        if (isManagerCard() || wrap.classList.contains('ap-approved')) {
             toggleCompact();
         }
     });
     header.addEventListener('keydown', event => {
         const keyEvent = event as KeyboardEvent;
-        if (!wrap.classList.contains('ap-approved')) return;
+        if (!isManagerCard() && !wrap.classList.contains('ap-approved')) return;
         if (keyEvent.key !== 'Enter' && keyEvent.key !== ' ') return;
         keyEvent.preventDefault();
         toggleCompact();
@@ -119,17 +125,28 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
 
     const sectionsWrap = document.createElement('div');
     sectionsWrap.className = 'ap-sections';
-    options.sections.forEach((section, index) => {
-        sectionsWrap.appendChild(createAnnotationRow({
+    const renderSections = (sections: string[], labels: AnnotationLabels, renderMarkdownFn: (text: string) => string): void => {
+        sectionsWrap.replaceChildren(...sections.map((section, index) => createAnnotationRow({
             section,
             index,
             annotations,
-            labels: options.labels,
-            renderMarkdown: options.renderMarkdown,
+            labels,
+            renderMarkdown: renderMarkdownFn,
             updateSubmitBtn,
-        }));
-    });
+        })));
+    };
+    renderSections(options.sections, options.labels, options.renderMarkdown);
     wrap.appendChild(sectionsWrap);
+    (wrap as HTMLElement & { __cwtoolsUpdateAnnotationCard?: (nextOptions: AnnotationCardOptions) => void }).__cwtoolsUpdateAnnotationCard = (nextOptions: AnnotationCardOptions) => {
+        const titleEl = header.querySelector<HTMLElement>('.ap-header-title');
+        if (titleEl) titleEl.innerHTML = `${svgIcon(nextOptions.icon as any)}${escapeHtml(nextOptions.labels.title)}`;
+        if (headerHint && !wrap.classList.contains('ap-approved')) {
+            headerHint.textContent = nextOptions.labels.hint;
+        }
+        wrap.className = `annotatable-plan ${nextOptions.className}`;
+        renderSections(nextOptions.sections, nextOptions.labels, nextOptions.renderMarkdown);
+        updateSubmitBtn();
+    };
     return wrap;
 }
 

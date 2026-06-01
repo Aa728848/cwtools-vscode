@@ -153,6 +153,10 @@ ${stylesheetLinks}
         <div class="model-menu-title">Model</div>
         <div id="modelMenuList" class="model-menu-list"></div>
     </div>
+    <div id="writeModeMenu" class="model-menu write-mode-menu" aria-hidden="true">
+        <div class="model-menu-title" id="writeModeMenuTitle">写入模式</div>
+        <div id="writeModeMenuList" class="model-menu-list"></div>
+    </div>
     <div class="input-container">
         <div class="file-badge-area" id="fileBadgeArea"></div>
         <div class="image-preview-area" id="imagePreviewArea"></div>
@@ -182,10 +186,14 @@ ${stylesheetLinks}
                 <select class="hidden-composer-select" id="quickModelSelect" title="当前模型" aria-hidden="true" tabindex="-1"></select>
                 <button class="hidden-composer-action" id="imgPickBtn" title="上传图片" aria-hidden="true" tabindex="-1"></button>
             </div>
-            <select class="composer-write-mode-select" id="quickWriteModeSelect" title="写入模式" aria-label="写入模式">
+            <select class="hidden-composer-select" id="quickWriteModeSelect" title="写入模式" aria-hidden="true" tabindex="-1">
                 <option value="confirm">确认写入</option>
                 <option value="auto">自动写入</option>
             </select>
+            <button class="composer-model-trigger composer-write-mode-trigger" id="quickWriteModeTrigger" title="写入模式" aria-haspopup="listbox" aria-expanded="false">
+                <span id="quickWriteModeLabel">确认写入</span>
+                <span class="composer-chevron" aria-hidden="true">v</span>
+            </button>
             <button class="send-btn" id="sendBtn" title="发送 (Enter)" aria-label="发送消息">↑</button>
         </div>
     </div>

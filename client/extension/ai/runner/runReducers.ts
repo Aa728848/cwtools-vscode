@@ -303,10 +303,34 @@ export function reduceCacheStats(events: AgentRunEvent[]): CacheStatsSnapshot {
     let totalInput = 0;
     let totalCreation = 0;
     let totalSaved = 0;
+    const records: Array<{ ev: AgentRunEvent; payload: Record<string, any>; agentId: string; key: string; score: number }> = [];
     for (const ev of events) {
         if (ev.type !== 'cache_stats') continue;
         const p = (ev.payload as Record<string, any>) ?? {};
-        const agentId = ev.agentId ?? '__root__';
+        const cached = p.cachedTokens ?? p.totalCachedTokens ?? 0;
+        const input = p.inputTokens ?? p.totalTokens ?? 0;
+        const creation = p.cacheCreationTokens ?? 0;
+        const output = p.outputTokens ?? p.completionTokens ?? 0;
+        const saved = p.savedCostCny ?? 0;
+        const agentId = ev.agentId ?? p.agentId ?? '__root__';
+        const key = `${p.providerId ?? ''}|${p.model ?? ''}|${input}|${cached}|${creation}|${output}`;
+        const score = (agentId === '__root__' ? 0 : 2) + (saved ? 1 : 0);
+        const duplicateIndex = records.findIndex(record =>
+            record.key === key
+            && Math.abs((record.ev.sequence ?? 0) - (ev.sequence ?? 0)) <= 4
+            && Math.abs((record.ev.timestamp ?? 0) - (ev.timestamp ?? 0)) <= 10_000
+        );
+        if (duplicateIndex >= 0) {
+            if (score > records[duplicateIndex]!.score) {
+                records[duplicateIndex] = { ev, payload: p, agentId, key, score };
+            }
+            continue;
+        }
+        records.push({ ev, payload: p, agentId, key, score });
+    }
+    for (const record of records) {
+        const p = record.payload;
+        const agentId = record.agentId;
         const bucket = buckets.get(agentId) ?? {
             agentId,
             cachedTokens: 0,

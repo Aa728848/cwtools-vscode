@@ -1630,6 +1630,7 @@ export class AgentRunner {
                         type: 'cache_stats',
                         content: `Prefix Cache: Hit ${cachedTokens} tokens (${(hitRate * 100).toFixed(1)}% hit), Created ${cacheCreationTokens} tokens. Saved approx. ¥${savedCostCny.toFixed(4)}.`,
                         timestamp: Date.now(),
+                        agentId: options?.sandbox?.agentId,
                         cacheStats: {
                             cachedTokens,
                             totalTokens: promptTokens,
@@ -1638,6 +1639,17 @@ export class AgentRunner {
                             cacheCreationTokens
                         }
                     });
+                    runLedger.appendEvent(runRecord.runId, 'cache_stats', {
+                        providerId: options?.providerId ?? activeProviderConfig.provider,
+                        model: response.model ?? options?.model ?? '',
+                        inputTokens: promptTokens,
+                        totalTokens: promptTokens,
+                        cachedTokens,
+                        cacheCreationTokens,
+                        outputTokens: completionTokens,
+                        hitRate,
+                        savedCostCny
+                    }, { agentId: options?.sandbox?.agentId }).catch(() => {});
                 }
             }
 

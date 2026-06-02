@@ -96,8 +96,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     mode: {
                         type: 'string',
-                        enum: ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'asset'],
-                        description: 'Optional mode card to return, e.g. build, plan, loc_writer, asset, orchestrator.',
+                        enum: ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script', 'asset'],
+                        description: 'Optional mode card to return, e.g. build, plan, loc_writer, asset, orchestrator, script.',
                     },
                 },
                 required: [],
@@ -996,7 +996,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     description: { type: 'string', description: 'Short one-sentence summary shown in the workflow picker and slash command list.' },
                     mode: {
                         type: 'string',
-                        enum: ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator'],
+                        enum: ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script'],
                         description: 'Agent mode this workflow should run in. Default build.',
                     },
                     promptSupplement: {
@@ -1054,14 +1054,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: '🎯 [Orchestrator-only] Decompose the current task into multiple sub-tasks and dispatch them to specialist agents for parallel execution. Available only in Orchestrator mode. Sub-agents include Explorer (read-only exploration), Builder (code generation), LocWriter (localisation), Reviewer (code review), etc. Agents exchange data via the shared Blackboard and execution order is guaranteed by a DAG.',
+            description: '🎯 [Orchestrator/Script Mode] Decompose the current task into multiple sub-tasks and dispatch them to specialist agents for parallel execution. Script Mode may dispatch up to 8 concise tasks per wave; classic Orchestrator mode remains limited to 4. Sub-agents include Explorer (read-only exploration), Builder (code generation), LocWriter (localisation), Reviewer (code review), etc. Agents exchange data via the shared Blackboard and execution order is guaranteed by a DAG.',
             parameters: {
                 type: 'object',
                 properties: {
                     tasks: {
                         type: 'array',
-                        maxItems: 4,
-                        description: 'List of sub-tasks. Ordered by dependencies. ⚠️ CRITICAL: Maximum 4 tasks allowed per dispatch to prevent API timeouts! If you have more work, dispatch them in sequential batches across multiple turns.',
+                        maxItems: 8,
+                        description: 'List of sub-tasks. Ordered by dependencies. Classic Orchestrator mode allows at most 4 tasks per dispatch; Script Mode allows at most 8 concise tasks per dispatch for read-heavy fanout and batched verification. If you have more work, dispatch it in waves.',
                         items: {
                             type: 'object',
                             properties: {
@@ -1119,7 +1119,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'merge_results',
-            description: '🔗 [Orchestrator-only] Merge execution results from multiple sub-agents into a final deliverable. Call after all sub-agents complete to consolidate code generation, localisation, and review report outputs. Available only in Orchestrator mode.',
+            description: '🔗 [Orchestrator/Script Mode] Merge execution results from multiple sub-agents into a final deliverable. Call after all sub-agents complete to consolidate code generation, localisation, and review report outputs. Available in Orchestrator and Script Mode.',
             parameters: {
                 type: 'object',
                 properties: {

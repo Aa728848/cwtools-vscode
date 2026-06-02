@@ -458,7 +458,7 @@ function splitCsv(value: string | undefined): string[] {
 
 function parseMode(value: string | undefined): AgentMode {
 	const mode = (value || 'build').trim() as AgentMode;
-	const valid: AgentMode[] = ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator'];
+	const valid: AgentMode[] = ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script'];
 	return valid.includes(mode) ? mode : 'build';
 }
 

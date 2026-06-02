@@ -100,6 +100,18 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('dispatch the Explorer batch first');
     });
 
+    it('describes script mode as a dynamic PDXScript workflow coordinator', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSystemPromptForMode('script');
+
+        expect(prompt).to.include('Script Mode');
+        expect(prompt).to.include('dynamic workflow coordinator');
+        expect(prompt).to.include('dispatch_agents');
+        expect(prompt).to.include('up to 8');
+        expect(prompt).to.include('plannedFiles');
+    });
+
     it('keeps slim localisation writers on write_localisation and concise completion', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());

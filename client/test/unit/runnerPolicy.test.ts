@@ -36,11 +36,17 @@ describe('runnerPolicy', () => {
 
     });
 
-    it('keeps orchestration tools only in orchestrator mode', () => {
+    it('keeps orchestration tools in coordinator modes', () => {
         const filtered = filterToolDefinitionsForMode(toolDefinitions, 'orchestrator');
         const names = filtered.map(t => t.function.name);
         expect(names).to.include('dispatch_agents');
         expect(names).to.include('query_blackboard');
+
+        const scriptFiltered = filterToolDefinitionsForMode(toolDefinitions, 'script');
+        const scriptNames = scriptFiltered.map(t => t.function.name);
+        expect(scriptNames).to.include('dispatch_agents');
+        expect(scriptNames).to.include('query_blackboard');
+        expect(scriptNames).to.not.include('write_file');
     });
 
     it('hides command tools from slim sub-agent toolsets', () => {
@@ -74,6 +80,12 @@ describe('runnerPolicy', () => {
         expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 128000 })).to.equal(10000);
         expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 128000, isSubAgent: true })).to.equal(48);
         expect(resolveMaxToolIterations({ mode: 'orchestrator', baseContextLimit: 200000, isSubAgent: true })).to.equal(60);
+    });
+
+    it('leaves script parent runs uncapped and gives script sub-agents a larger workflow budget', () => {
+        expect(resolveMaxToolIterations({ mode: 'script', baseContextLimit: 128000 })).to.equal(10000);
+        expect(resolveMaxToolIterations({ mode: 'script', baseContextLimit: 128000, isSubAgent: true })).to.equal(64);
+        expect(resolveMaxToolIterations({ mode: 'script', baseContextLimit: 200000, isSubAgent: true })).to.equal(80);
     });
 
     it('honors override and bypass sandbox', () => {

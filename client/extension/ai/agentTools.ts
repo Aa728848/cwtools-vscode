@@ -1206,14 +1206,18 @@ export class AgentToolExecutor {
             providerOverride?: string;
         }> | undefined;
 
+        const runnerOptsForLimits = context?.runnerOptions ?? this.parentRunnerOptions;
+        const isScriptMode = runnerOptsForLimits?.mode === 'script';
+        const maxTasksPerDispatch = isScriptMode ? 8 : 4;
+
         if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
             return { success: false, error: '请提供 tasks 数组，每个 task 需包含 id、agentType、prompt 字段' };
         }
 
-        if (tasks.length > 4) {
+        if (tasks.length > maxTasksPerDispatch) {
             return {
                 success: false,
-                error: `并发上限保护: 您尝试一次性分派 ${tasks.length} 个任务，超过了最大允许的 4 个上限。过长的任务列表会导致大模型生成超时或被截断。请将任务拆分为多批次分步执行。`
+                error: `并发上限保护: 您尝试一次性分派 ${tasks.length} 个任务，超过了当前模式最大允许的 ${maxTasksPerDispatch} 个上限。过长的任务列表会导致大模型生成超时或被截断。请将任务拆分为多批次分步执行。`
             };
         }
 
@@ -1257,13 +1261,15 @@ export class AgentToolExecutor {
             }
 
             // Instantiate Orchestrator
-            const orchestrator = new Orchestrator(this.parentAgentRunner);
+            const orchestrator = new Orchestrator(this.parentAgentRunner, {
+                maxConcurrency: isScriptMode ? Math.min(8, Math.max(1, tasks.length)) : undefined,
+            });
             const parentRunPromise = context?.agentRunner?.getActiveRunRecordPromise?.()
                 ?? this.parentAgentRunner.getActiveRunRecordPromise?.();
             const parentRun = await parentRunPromise?.catch(() => undefined);
 
             // Build execution options (read first from AgentToolContext, fallback to old instance fields)
-            const runnerOpts = context?.runnerOptions ?? this.parentRunnerOptions;
+            const runnerOpts = runnerOptsForLimits;
             const globalSignal = runnerOpts?.abortSignal;
             const onGlobalAbort = () => localAbort.abort(globalSignal?.reason);
             if (globalSignal) {

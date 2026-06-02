@@ -878,6 +878,7 @@ export class AgentRunner {
             utility: AGENT.MODE_UTILITY,
             review: AGENT.MODE_REVIEW,
             orchestrator: AGENT.MODE_ORCHESTRATOR,
+            script: AGENT.MODE_SCRIPT,
         };
         emitStep({
             type: 'thinking',
@@ -904,7 +905,7 @@ export class AgentRunner {
             const code = this.extractCode(finalMessage);
 
             // Plan / Explore / General / Review / Orchestrator mode — or no code generated — just an explanation
-            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator') {
+            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator' || mode === 'script') {
                 updateRunStatus('completed');
                 await clearResumeStateIfComplete();
                 return {

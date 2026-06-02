@@ -491,6 +491,7 @@ describe('agent sprite candidate tool contract', () => {
         }
 
         const taskProperties = (definition.function.parameters.properties as any).tasks.items.properties;
+        expect((definition.function.parameters.properties as any).tasks.maxItems).to.equal(8);
         expect(taskProperties.plannedFiles.description).to.include('Provide this for Builder tasks');
     });
 

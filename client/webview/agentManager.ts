@@ -106,7 +106,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             topicsTitle: 'Agent 话题',
             tabs: { runs: '运行', artifacts: '产物', tasks: '任务', workspace: '工作区', settings: '设置' },
             actions: { workbench: '工作台', closeWorkbench: '关闭工作台', settings: '设置', showTopics: '显示话题', toggleTopics: '折叠话题栏', newTopic: '新话题', archived: '已归档', exportTopic: '导出', searchTopics: '搜索话题...', renameTopic: '重命名话题' },
-            workflow: { build: '构建工作流', plan: '计划工作流', review: '审查工作流', explore: '探索工作流', orchestrator: '多 Agent 工作流' },
+            workflow: { build: '构建工作流', plan: '计划工作流', review: '审查工作流', explore: '探索工作流', orchestrator: '多 Agent 工作流', script: '脚本模式工作流' },
             status: { paused: '已暂停', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消', idle: '空闲' },
             metrics: { tokens: 'Token', cache: '缓存', filesChanged: '个文件变更', cost: '费用', in: '输入', out: '输出', cached: '缓存', calls: '调用', totalUsage: '总计消耗', estimatedCost: '预估成本', cacheHit: '缓存命中', providers: '按供应商', models: '模型分布' },
             run: {
@@ -151,7 +151,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             topicsTitle: 'Agent Topics',
             tabs: { runs: 'Runs', artifacts: 'Artifacts', tasks: 'Tasks', workspace: 'Workspace', settings: 'Settings' },
             actions: { workbench: 'Workbench', closeWorkbench: 'Close Workbench', settings: 'Settings', showTopics: 'Show topics', toggleTopics: 'Toggle topics', newTopic: 'New topic', archived: 'Archived', exportTopic: 'Export', searchTopics: 'Search topics...', renameTopic: 'Rename topic' },
-            workflow: { build: 'Build Workflow', plan: 'Plan Workflow', review: 'Review Workflow', explore: 'Explore Workflow', orchestrator: 'Multi-Agent Workflow' },
+            workflow: { build: 'Build Workflow', plan: 'Plan Workflow', review: 'Review Workflow', explore: 'Explore Workflow', orchestrator: 'Multi-Agent Workflow', script: 'Script Mode Workflow' },
             status: { paused: 'Paused', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', idle: 'Idle' },
             metrics: { tokens: 'Tokens', cache: 'Cache', filesChanged: 'files changed', cost: 'Cost', in: 'in', out: 'out', cached: 'cached', calls: 'calls', totalUsage: 'Total Usage', estimatedCost: 'Estimated Cost', cacheHit: 'Cache Hit', providers: 'By Provider', models: 'Models' },
             run: {
@@ -791,6 +791,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     function workflowLabel(mode: string, workflowId: string | null): string {
         if (workflowId) return workflowId;
         if (mode === 'orchestrator') return ui.workflow.orchestrator;
+        if (mode === 'script') return ui.workflow.script;
         if (mode === 'plan') return ui.workflow.plan;
         if (mode === 'review') return ui.workflow.review;
         if (mode === 'explore') return ui.workflow.explore;

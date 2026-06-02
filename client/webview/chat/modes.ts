@@ -8,6 +8,7 @@ export const MODE_BODY_CLASSES = [
     'utility-mode',
     'review-mode',
     'orchestrator-mode',
+    'script-mode',
 ] as const;
 
 export function normalizeMode(mode: string): string {

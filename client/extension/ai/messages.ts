@@ -20,6 +20,7 @@ export const AGENT = {
     MODE_UTILITY: '处理泛用工程任务中（Utility 模式）...',
     MODE_REVIEW: '代码审查中（Review 模式）...',
     MODE_ORCHESTRATOR: '多 Agent 协调中（Orchestrator 模式）...',
+    MODE_SCRIPT: '脚本模式运行中（动态流水线并行）...',
     MODE_FALLBACK: '分析中...',
 
     CANCELLED: '已取消生成',

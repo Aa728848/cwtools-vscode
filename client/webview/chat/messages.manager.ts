@@ -10,7 +10,7 @@ export type ManagerWebviewMessage =
     | { type: 'setShowArchived'; show: boolean }
     | { type: 'pinTopic'; topicId: string; pinned?: boolean }
     | { type: 'setTopicWorkspace'; topicId: string; workspaceId?: string | null; workspaceLabel?: string | null }
-    | { type: 'switchMode'; mode: 'build' | 'plan' | 'explore' | 'utility' | 'review' | 'orchestrator' }
+    | { type: 'switchMode'; mode: 'build' | 'plan' | 'explore' | 'utility' | 'review' | 'orchestrator' | 'script' }
     | { type: 'cancelGeneration' };
 
 export interface ManagerSnapshotMessage {

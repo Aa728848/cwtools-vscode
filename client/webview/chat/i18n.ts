@@ -167,6 +167,7 @@ const EN: ChatI18nText = {
         loc_translator: { label: 'Translation Mode - localisation file translation', bodyClass: 'build-mode' },
         loc_writer: { label: 'Writing Mode - localisation content creation', bodyClass: 'build-mode' },
         orchestrator: { label: 'Multi-Agent Execution - DAG dispatch and parallel collaboration', bodyClass: 'orchestrator-mode' },
+        script: { label: 'Script Mode - dynamic PDXScript workflow pipeline', bodyClass: 'script-mode' },
     },
     slashDescriptions: {
         '/init': 'Scan the project and generate Agent profile + CWTOOLS.md',
@@ -182,6 +183,7 @@ const EN: ChatI18nText = {
         '/mode:utility': 'Switch to Utility mode',
         '/mode:review': 'Switch to Review mode',
         '/mode:orchestrator': 'Switch to multi-agent Orchestrator mode',
+        '/mode:script': 'Switch to Script Mode',
     },
     artifact: {
         emptyTitle: 'No Artifacts',
@@ -381,6 +383,7 @@ const ZH_CN: ChatI18nText = {
         loc_translator: { label: '翻译模式 - 本地化文件翻译', bodyClass: 'build-mode' },
         loc_writer: { label: '写作模式 - 本地化内容创作', bodyClass: 'build-mode' },
         orchestrator: { label: '多 Agent 执行 - DAG 分派与并行协作', bodyClass: 'orchestrator-mode' },
+        script: { label: '脚本模式 - 动态流水线并行处理 PDXScript', bodyClass: 'script-mode' },
     },
     slashDescriptions: {
         '/init': '扫描项目，生成 Agent 画像和 CWTOOLS.md',
@@ -396,6 +399,7 @@ const ZH_CN: ChatI18nText = {
         '/mode:utility': '切换到泛用模式',
         '/mode:review': '切换到审查模式',
         '/mode:orchestrator': '切换到多 Agent 执行模式',
+        '/mode:script': '切换到脚本模式',
     },
     artifact: {
         emptyTitle: '暂无 Artifacts',

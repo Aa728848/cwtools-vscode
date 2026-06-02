@@ -20,6 +20,7 @@ const BASE_SLASH_COMMANDS = [
     '/mode:utility',
     '/mode:review',
     '/mode:orchestrator',
+    '/mode:script',
 ];
 
 export function buildSlashCommands(

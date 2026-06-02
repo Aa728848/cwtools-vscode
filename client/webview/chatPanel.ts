@@ -1798,7 +1798,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (!isGenerating) sendMessage();
         } else if (e.key === 'Tab') {
             e.preventDefault();
-            const modes = ['build', 'plan', 'explore', 'utility', 'review', 'orchestrator'];
+            const modes = ['build', 'plan', 'explore', 'utility', 'review', 'orchestrator', 'script'];
             const idx = modes.indexOf(currentMode);
             const cycleDir = e.shiftKey ? -1 : 1;
             const nextMode = modes[(idx + cycleDir + modes.length) % modes.length]!;
@@ -1840,15 +1840,42 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function getModeChipLabel(mode: string): string {
-        const labels: Record<string, string> = {
-            build: 'Build',
-            plan: 'Plan',
-            explore: 'Explore',
-            utility: 'Utility',
-            review: 'Review',
-            orchestrator: 'Orchestrator',
-        };
+        const labels: Record<string, string> = chatI18n.locale === 'zh-cn'
+            ? {
+                build: '构建模式',
+                plan: '计划模式',
+                explore: '探索模式',
+                utility: '工具模式',
+                review: '审查模式',
+                orchestrator: '协作模式',
+                script: '脚本模式',
+            }
+            : {
+                build: 'Build',
+                plan: 'Plan',
+                explore: 'Explore',
+                utility: 'Utility',
+                review: 'Review',
+                orchestrator: 'Orchestrator',
+                script: 'Script',
+            };
         return labels[mode === 'general' ? 'utility' : mode] || mode;
+    }
+
+    function applyComposerModeLabels(): void {
+        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-mode]').forEach(item => {
+            const mode = item.dataset.mode;
+            if (!mode) return;
+            const label = getModeChipLabel(mode);
+            const text = item.querySelector('span');
+            if (text) text.textContent = label;
+            item.title = label;
+        });
+
+        const modeSelector = document.getElementById('modeSel') as HTMLSelectElement | null;
+        modeSelector?.querySelectorAll<HTMLOptionElement>('option').forEach(option => {
+            option.textContent = getModeChipLabel(option.value);
+        });
     }
 
     function closeComposerMenus() {
@@ -2128,6 +2155,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         quickWriteModeSel.title = 'Write mode';
         quickWriteModeSel.setAttribute('aria-label', 'Write mode');
     }
+
+    applyComposerModeLabels();
 
     const composerAddBtn = document.getElementById('composerAddBtn');
     const quickModelTrigger = document.getElementById('quickModelTrigger');
@@ -2510,7 +2539,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     pushUnique({
                         id: `restored:plan:${step.content}`,
                         kind: 'plan',
-                        title: step.mode === 'orchestrator' ? 'Orchestrator Plan' : 'Implementation Plan',
+                        title: step.mode === 'orchestrator' ? 'Orchestrator Plan' : step.mode === 'script' ? '脚本模式计划' : 'Implementation Plan',
                         summary: 'Restored from chat history.',
                         filePath: step.content,
                         relPath: step.content,
@@ -5373,16 +5402,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'planFileSaved': {
                 // Compact card — just "open file" button; annotation is handled by renderPlan below
-                const isOrchestratorPlan = msg.mode === 'orchestrator';
+                const isOrchestratorPlan = msg.mode === 'orchestrator' || msg.mode === 'script';
+                const isScriptPlan = msg.mode === 'script';
                 const card = document.createElement('div');
                 card.className = `plan-file-card ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`;
                 prepareSingleFileArtifactCard(card, 'plan', msg.filePath, msg.relPath);
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin(isOrchestratorPlan ? 'bot' : 'clipboard')}</div>
                     <div class="plan-file-info">
-                        <div class="plan-file-title">${isOrchestratorPlan ? '多 Agent 执行计划已导出' : '计划已导出'}</div>
+                        <div class="plan-file-title">${isScriptPlan ? '脚本模式流水线计划已导出' : isOrchestratorPlan ? '多 Agent 执行计划已导出' : '计划已导出'}</div>
                         <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
-                        <div class="plan-file-hint">${isOrchestratorPlan ? '确认后将进入 dispatch_agents 并行执行。' : '确认后将切换到构建执行。'}</div>
+                        <div class="plan-file-hint">${isScriptPlan ? '确认后将按动态流水线进入 dispatch_agents 并行执行。' : isOrchestratorPlan ? '确认后将进入 dispatch_agents 并行执行。' : '确认后将切换到构建执行。'}</div>
                     </div>
                     <div class="plan-file-actions">
                         <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} 打开文件</button>
@@ -5396,9 +5426,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'renderPlan': {
-                const isOrchestratorPlan = msg.mode === 'orchestrator';
+                const isOrchestratorPlan = msg.mode === 'orchestrator' || msg.mode === 'script';
                 const labels = isOrchestratorPlan ? chatI18n.annotations.orchestratorPlan : chatI18n.annotations.plan;
-                const sourceKey = isOrchestratorPlan ? 'plan:orchestrator' : 'plan';
+                const sourceKey = msg.mode === 'script' ? 'plan:script' : isOrchestratorPlan ? 'plan:orchestrator' : 'plan';
                 const signature = JSON.stringify(msg.sections || []);
                 if (!isManagerShell()) {
                     document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));

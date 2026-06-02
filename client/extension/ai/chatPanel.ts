@@ -506,7 +506,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private ensureDispatchAgentFeedbackVisible(result: GenerationResult): GenerationResult {
-        if (this.currentMode !== 'orchestrator') return result;
+        if (this.currentMode !== 'orchestrator' && this.currentMode !== 'script') return result;
         if (!result.steps.some(s => s.toolName === 'dispatch_agents')) return result;
 
         const existing = (result.explanation || '').trim();
@@ -536,7 +536,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const lines = [
             '## 多 Agent 执行计划',
             '',
-            '当前 orchestrator 已提交的 DAG 子任务如下：',
+            '当前协调模式已提交的 DAG 子任务如下：',
             '',
         ];
 
@@ -804,7 +804,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const result = this.ensureDispatchAgentFeedbackVisible(rawResult);
 
             // ── Orchestrator 自动生成 Walkthrough 自愈机制 ──
-            if (this.currentMode === 'orchestrator' && result.steps.some(s => s.toolName === 'dispatch_agents')) {
+            if ((this.currentMode === 'orchestrator' || this.currentMode === 'script') && result.steps.some(s => s.toolName === 'dispatch_agents')) {
                 await this.ensureOrchestratorWalkthrough(result);
             }
 
@@ -844,7 +844,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 await this.renderWalkthroughUI(wtPath, topicId, uiSteps);
             }
 
-            if ((this.currentMode === 'plan' || (this.currentMode === 'orchestrator' && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
+            if ((this.currentMode === 'plan' || ((this.currentMode === 'orchestrator' || this.currentMode === 'script') && !usedDispatchAgents)) && result.explanation && !isJustAskingQuestions) {
                 // Chat shows only tool-call steps (no full plan text)
                 this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({
@@ -868,7 +868,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.topicManager.saveTopics();
 
             const bpPath = this.findGeneratedTopicFile(topicId, 'design_blueprint.md');
-            if (bpPath && this.currentMode !== 'orchestrator') {
+            if (bpPath && this.currentMode !== 'orchestrator' && this.currentMode !== 'script') {
                 void this.renderBlueprintUI(bpPath, topicId, uiSteps);
             }
 
@@ -1495,8 +1495,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.upsertArtifact({
                 id: this.artifactId('plan', path.basename(filePath)),
                 kind: 'plan',
-                title: this.currentMode === 'orchestrator' ? 'Orchestrator Plan' : 'Implementation Plan',
-                summary: this.currentMode === 'orchestrator'
+                title: this.currentMode === 'orchestrator' ? 'Orchestrator Plan' : this.currentMode === 'script' ? 'Script Mode Pipeline Plan' : 'Implementation Plan',
+                summary: (this.currentMode === 'orchestrator' || this.currentMode === 'script')
                     ? 'DAG dispatch plan awaiting approval.'
                     : 'Single-agent implementation plan awaiting approval.',
                 filePath,
@@ -2010,7 +2010,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const mode = cmd.split(':')[1] as AgentMode;
             if (mode === 'general') {
                 this.switchMode('utility');
-            } else if (['build', 'plan', 'explore', 'utility', 'review', 'orchestrator'].includes(mode)) {
+            } else if (['build', 'plan', 'explore', 'utility', 'review', 'orchestrator', 'script'].includes(mode)) {
                 this.switchMode(mode);
             }
         } else if (cmd === 'workflow:none' || cmd === '/workflow:none' || cmd === 'workflow:off' || cmd === '/workflow:off') {

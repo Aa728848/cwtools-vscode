@@ -372,6 +372,12 @@ describe('ConflictDetector', () => {
 // -- dispatch_agents wiring ---------------------------------------------------
 
 describe('dispatch_agents tool wiring', () => {
+    const makeTasks = (count: number) => Array.from({ length: count }, (_, index) => ({
+        id: `task_${index + 1}`,
+        agentType: 'explore',
+        prompt: `inspect area ${index + 1}`,
+    }));
+
     it('passes planned write targets from task args into TaskGraph nodes', async () => {
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
@@ -414,6 +420,75 @@ describe('dispatch_agents tool wiring', () => {
             const node = capturedGraph?.nodes.get('build_events');
             expect(node?.plannedFiles).to.deep.equal(['events/shared.txt']);
             expect(node?.plannedEntities).to.deep.equal(['event:foo.1']);
+        } finally {
+            (Orchestrator.prototype as any).execute = originalExecute;
+        }
+    });
+
+    it('keeps classic orchestrator dispatches capped at four tasks', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+
+        const result = await executor.execute('dispatch_agents', {
+            userPrompt: 'too many classic tasks',
+            tasks: makeTasks(5),
+        }, {
+            runnerOptions: { mode: 'orchestrator', abortSignal: new AbortController().signal },
+            onStep: () => undefined,
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('最大允许的 4 个上限');
+    });
+
+    it('allows script mode to dispatch up to eight tasks but rejects nine', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+        executor.parentAgentRunner = { run: async () => undefined } as any;
+
+        let capturedGraph: import('../../extension/ai/orchestrator/types').TaskGraph | undefined;
+        const originalExecute = Orchestrator.prototype.execute;
+        (Orchestrator.prototype as any).execute = async (graph: import('../../extension/ai/orchestrator/types').TaskGraph) => {
+            capturedGraph = graph;
+            return {
+                success: true,
+                summary: 'ok',
+                agentResults: new Map(),
+                totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                failedNodes: [],
+                cancelledNodes: [],
+            };
+        };
+
+        try {
+            const allowed = await executor.execute('dispatch_agents', {
+                userPrompt: 'script wave',
+                tasks: makeTasks(8),
+            }, {
+                runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+                onStep: () => undefined,
+            } as any) as any;
+
+            expect(allowed.success).to.equal(true);
+            expect(capturedGraph?.nodes.size).to.equal(8);
+
+            const rejected = await executor.execute('dispatch_agents', {
+                userPrompt: 'script wave too large',
+                tasks: makeTasks(9),
+            }, {
+                runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+                onStep: () => undefined,
+            } as any) as any;
+
+            expect(rejected.success).to.equal(false);
+            expect(rejected.error).to.include('最大允许的 8 个上限');
         } finally {
             (Orchestrator.prototype as any).execute = originalExecute;
         }

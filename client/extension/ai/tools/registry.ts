@@ -113,6 +113,7 @@ const LOC_MODES = new Set([
     'analyze_diagnostic_error', 'save_workflow'
 ]);
 const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const SCRIPT_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;
@@ -122,6 +123,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     if (REVIEW_MODES.has(name)) { allowed.add('review'); allowed.add('script_reviewer'); }
     if (LOC_MODES.has(name)) { allowed.add('loc_translator'); allowed.add('loc_writer'); }
     if (ORCHESTRATOR_MODES.has(name)) allowed.add('orchestrator');
+    if (SCRIPT_MODES.has(name)) allowed.add('script');
     if (BUILD_MODES.has(name)) { allowed.add('build'); allowed.add('gui_expert'); }
     
     // For general and utility mode, we do inverse exclusions:

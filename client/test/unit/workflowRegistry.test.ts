@@ -178,6 +178,28 @@ describe('AI Workflow Registry', () => {
         }
     });
 
+    it('saves script-mode project workflows and parses them back', () => {
+        const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-script-workflow-'));
+        try {
+            const result = saveProjectWorkflow({
+                id: 'Script Pipeline',
+                title: 'Script Pipeline',
+                description: 'Dynamic PDXScript coordination workflow.',
+                mode: 'script',
+                promptSupplement: 'Dispatch read waves before narrow Builder write waves.',
+                allowedTools: ['read_file', 'dispatch_agents', 'query_blackboard', 'merge_results'],
+                requiredContext: ['workspace!'],
+            }, tempRoot);
+
+            expect(result.success).to.be.true;
+            expect(result.workflow!.mode).to.equal('script');
+            expect(result.workflow!.toolPolicy.tools).to.include('dispatch_agents');
+            expect(result.workflow!.toolPolicy.tools).to.include('merge_results');
+        } finally {
+            fs.rmSync(tempRoot, { recursive: true, force: true });
+        }
+    });
+
     it('all workflows have valid structure', () => {
         for (const wf of getAllWorkflows()) {
             expect(wf.id, `${wf.id}.id`).to.be.a('string').and.not.be.empty;

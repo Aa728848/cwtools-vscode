@@ -15,8 +15,9 @@
  * - loc_translator: Specialized for translating YML localisation files between languages.
  * - loc_writer: Specialized for writing new YML localisation entries from scratch.
  * - orchestrator: Multi-Agent coordinator mode — decomposes tasks and dispatches sub-agents.
+ * - script: Script Mode — dynamic PDXScript workflow coordination with higher read parallelism.
  */
-export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator';
+export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
 
 // ─── MCP Settings ────────────────────────────────────────────────────────────
 

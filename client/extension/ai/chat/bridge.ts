@@ -178,7 +178,7 @@ export async function routeWebviewMessage(
                 contextStr = '\n\n用户批注:\n' + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
             }
 
-            if (provider.session.currentMode === 'orchestrator') {
+            if (provider.session.currentMode === 'orchestrator' || provider.session.currentMode === 'script') {
                 const prompt = '同意执行。请根据最新生成的计划，使用 `dispatch_agents` 工具将该计划分解并分配给适当的子 Agent 执行。' + contextStr;
                 await provider.handleUserMessage(prompt, undefined, undefined, true, true);
             } else {

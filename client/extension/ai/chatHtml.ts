@@ -143,6 +143,7 @@ ${stylesheetLinks}
             <button class="composer-menu-item" data-mode="utility">${svgIconNoMargin('zap')}<span>Utility</span></button>
             <button class="composer-menu-item" data-mode="review">${svgIconNoMargin('shield')}<span>Review</span></button>
             <button class="composer-menu-item" data-mode="orchestrator">${svgIconNoMargin('gitBranch')}<span>Orchestrator</span></button>
+            <button class="composer-menu-item" data-mode="script">${svgIconNoMargin('code')}<span>Script</span></button>
         </div>
         <div class="composer-menu-divider"></div>
         <button class="composer-menu-item" data-composer-action="media">${svgIconNoMargin('upload')}<span>Media</span></button>
@@ -182,6 +183,7 @@ ${stylesheetLinks}
                     <option value="utility">泛用模式</option>
                     <option value="review">审查模式</option>
                     <option value="orchestrator">协作模式</option>
+                    <option value="script">脚本模式</option>
                 </select>
                 <select class="hidden-composer-select" id="quickModelSelect" title="当前模型" aria-hidden="true" tabindex="-1"></select>
                 <button class="hidden-composer-action" id="imgPickBtn" title="上传图片" aria-hidden="true" tabindex="-1"></button>

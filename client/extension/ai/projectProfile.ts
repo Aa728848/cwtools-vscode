@@ -370,11 +370,18 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
             '- Put shared IDs, namespaces, and decisions on the blackboard.',
             '- Keep sub-agents on structured read/edit tools; command/git work stays with the main agent.',
         ].join('\n'),
+        script: [
+            'Script mode project card:',
+            '- Use dynamic workflow waves: preflight, read fanout, classify, write batches, verify, summarize.',
+            '- Start with project profile, workspace index, diagnostics, scope/rule queries, and asset candidates.',
+            '- Dispatch up to 8 concise read-heavy tasks, but keep write waves narrow and always set plannedFiles.',
+            '- Use reviewer/diagnostics verification after every write wave before summarizing.',
+        ].join('\n'),
     };
 }
 
 function renderModeCards(profile: ProjectProfile): string {
-    const order: Array<AgentMode | 'asset'> = ['build', 'plan', 'explore', 'review', 'loc_writer', 'asset', 'orchestrator'];
+    const order: Array<AgentMode | 'asset'> = ['build', 'plan', 'explore', 'review', 'loc_writer', 'asset', 'orchestrator', 'script'];
     return order
         .map(mode => {
             const card = getPromptCardForMode(profile, mode);

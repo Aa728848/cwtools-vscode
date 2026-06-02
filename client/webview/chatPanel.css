@@ -1180,6 +1180,11 @@ body.orchestrator-mode .input-container { border-color: #e8a838; box-shadow: 0 0
 body.orchestrator-mode .input-container:focus-within { border-color: #e8a838; box-shadow: 0 0 0 1px #e8a838, 0 0 8px rgba(232,168,56,0.2); }
 body.orchestrator-mode .send-btn { background: #e8a838; }
 body.orchestrator-mode .token-usage-fill { background: #e8a838 !important; }
+body.script-mode .mode-indicator { display: block; color: #2aa198; }
+body.script-mode .input-container { border-color: #2aa198; box-shadow: 0 0 0 1px rgba(42,161,152,0.3); }
+body.script-mode .input-container:focus-within { border-color: #2aa198; box-shadow: 0 0 0 1px #2aa198, 0 0 8px rgba(42,161,152,0.2); }
+body.script-mode .send-btn { background: #2aa198; }
+body.script-mode .token-usage-fill { background: #2aa198 !important; }
 
 /* Agent Lane 面板 */
 .orchestrator-lane-panel {

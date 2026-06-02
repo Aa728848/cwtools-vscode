@@ -61,7 +61,8 @@ import {
     buildScriptReviewerSystemPrompt,
     buildLocTranslatorSystemPrompt,
     buildLocWriterSystemPrompt,
-    buildOrchestratorSystemPrompt
+    buildOrchestratorSystemPrompt,
+    buildScriptModeSystemPrompt
 } from './prompt/sections/modePrompts';
 import { buildSkillIndexPrompt } from './skills';
 
@@ -635,6 +636,7 @@ ${trimmed}
             case 'loc_translator': return buildLocTranslatorSystemPrompt(gameKnowledge, gameName);
             case 'loc_writer': return buildLocWriterSystemPrompt(gameKnowledge, gameName, isSlim);
             case 'orchestrator': return buildOrchestratorSystemPrompt(gameKnowledge, gameName);
+            case 'script': return buildScriptModeSystemPrompt(gameKnowledge, gameName);
             default: return buildBuildSystemPrompt(gameKnowledge, gameName, isSlim);
         }
     }

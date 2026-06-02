@@ -15,7 +15,7 @@ import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
-import { getAiStorageRootCandidates } from './workspacePaths';
+import { getExistingTopicFilePath } from './workspacePaths';
 import {
     buildProfileSummary,
     getProjectProfilePath,
@@ -77,7 +77,7 @@ You are using Claude. Batch independent tool calls in a single response. Use ext
 /** Gemini: prefer direct answers, avoid over-tooling */
 const GEMINI_SUPPLEMENT = `
 <system-reminder>
-You are using Gemini. Prefer direct answers for simple questions. Only call tools when you genuinely need external information.
+You are using Gemini. Prefer direct answers for simple questions. Only call tools when you genuinely need external information. For PDXScript constructs, CWT/LSP verification counts as genuinely needed external information.
 </system-reminder>`;
 
 /** GPT/OpenAI: parallel tool calls preferred */
@@ -111,7 +111,7 @@ export class PromptBuilder {
 
     /**
      * Detect the active game languageId from the currently open editor.
-     * Falls back to 'stellaris' if nothing is detected.
+     * Falls back to generic Paradox rules if nothing is detected.
      */
     private detectGameLanguageId(): string {
         const editor = vs.window.activeTextEditor;
@@ -120,8 +120,8 @@ export class PromptBuilder {
             const knownLangs = ['stellaris', 'hoi4', 'eu4', 'ck2', 'ck3', 'vic2', 'vic3', 'imperator', 'eu5', 'paradox'];
             if (knownLangs.includes(langId)) return langId;
         }
-        // Fallback: check workspace files for language hints
-        return 'stellaris';
+        // Fallback: avoid leaking Stellaris-specific rules into other PDX games.
+        return 'paradox';
     }
 
     /**
@@ -220,7 +220,7 @@ export class PromptBuilder {
 
         // Inject approved design blueprint in Build mode
         if (mode === 'build') {
-            const blueprintPrompt = this.getDesignBlueprintPrompt();
+            const blueprintPrompt = this.getDesignBlueprintPrompt(topicId);
             if (blueprintPrompt) finalPrompt += blueprintPrompt + '\n';
         }
 
@@ -296,6 +296,11 @@ export class PromptBuilder {
                 }
             }
             dynamicParts.push(`<runtime-state>\n${lines.join('\n')}\n</runtime-state>`);
+        }
+
+        if (runtime?.mode === 'build') {
+            const blueprintPrompt = this.getDesignBlueprintPrompt(topicId);
+            if (blueprintPrompt) dynamicParts.push(blueprintPrompt);
         }
 
         // 1. Compacted Summary (来自历史会话看板的压缩)
@@ -376,7 +381,7 @@ export class PromptBuilder {
      * Build a slim system prompt for sub-agents — includes only mod info + namespaces
      * from CWTOOLS.md to avoid bloating narrow-scope sub-agent contexts.
      */
-    buildSlimSystemPromptForMode(mode: AgentMode, providerId?: string, languageId?: string): string {
+    buildSlimSystemPromptForMode(mode: AgentMode, providerId?: string, languageId?: string, topicId?: string): string {
         const gameId = languageId ?? this.detectGameLanguageId();
         const gameKnowledge = getGameKnowledge(gameId);
         const gameName = getGameDisplayName(gameId);
@@ -387,7 +392,7 @@ export class PromptBuilder {
         let finalPrompt = '';
         if (slimRules) finalPrompt += slimRules + '\n';
         if (mode === 'build') {
-            const blueprintPrompt = this.getDesignBlueprintPrompt();
+            const blueprintPrompt = this.getDesignBlueprintPrompt(topicId);
             if (blueprintPrompt) finalPrompt += blueprintPrompt + '\n';
         }
         finalPrompt += basePrompt;
@@ -499,7 +504,7 @@ export class PromptBuilder {
         const custom = customRules?.trim()
             ? `\n\n## Custom Rules (from CWTOOLS.md)\n${this.truncateProjectRuleSection(customRules.trim(), 1800)}`
             : '';
-        return `<project-premise>\n# PROJECT PROFILE (from .cwtools-ai/project/profile.json)\nUse this compact profile for routing. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}${custom}\n</project-premise>\n`;
+        return `<project-premise>\n# PROJECT PROFILE (from .cwtools-ai/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}${custom}\n</project-premise>\n`;
     }
 
     /**
@@ -518,7 +523,7 @@ export class PromptBuilder {
             const fullBuildRules = vs.workspace.getConfiguration('cwtools.ai.performance')
                 .get<boolean>('fullProjectRulesInBuild') === true;
             if (fullBuildRules) {
-                return `<project-premise>\n# MANDATORY PROJECT RULES & CONTEXT (From CWTOOLS.md)\nYou MUST strictly read and follow these rules before attempting any task. These project-specific rules supersede all general instructions:\n\n${parsed.raw}\n</project-premise>\n`;
+                return `<project-premise>\n# PROJECT RULES & CONTEXT (From CWTOOLS.md)\nRead these project-specific rules before attempting the task. Follow them when consistent with the current user request, current files, and CWT/LSP evidence; they never override tool safety, current diagnostics, or verified game rules:\n\n${parsed.raw}\n</project-premise>\n`;
             }
 
             const buildSections: string[] = [];
@@ -528,7 +533,7 @@ export class PromptBuilder {
             if (parsed.agentGuidelines) buildSections.push(`## Agent Guidelines\n${this.truncateProjectRuleSection(parsed.agentGuidelines, 2600)}`);
             if (parsed.customRules) buildSections.push(`## Custom Rules\n${this.truncateProjectRuleSection(parsed.customRules, 2200)}`);
             if (buildSections.length === 0) return '';
-            return `<project-premise>\n# PROJECT RULES SUMMARY (From CWTOOLS.md)\nFollow these project-specific rules. If the task depends on omitted details or the user explicitly asks for full project policy, read CWTOOLS.md before editing.\n\n${buildSections.join('\n\n')}\n</project-premise>\n`;
+            return `<project-premise>\n# PROJECT RULES SUMMARY (From CWTOOLS.md)\nFollow these project-specific rules when they are consistent with the current user request, current files, and CWT/LSP evidence. If the task depends on omitted details or the user explicitly asks for full project policy, read CWTOOLS.md before editing.\n\n${buildSections.join('\n\n')}\n</project-premise>\n`;
         }
 
         const sections: string[] = [];
@@ -551,7 +556,7 @@ export class PromptBuilder {
         if (parsed.customRules) sections.push(`## Custom Rules\n${parsed.customRules}`);
 
         if (sections.length === 0) return '';
-        return `<project-premise>\n# PROJECT CONTEXT (From CWTOOLS.md)\n${sections.join('\n\n')}\n</project-premise>\n`;
+        return `<project-premise>\n# PROJECT CONTEXT (From CWTOOLS.md)\nTreat this as project convention context and cross-check it against current files and CWT/LSP evidence.\n\n${sections.join('\n\n')}\n</project-premise>\n`;
     }
 
     /**
@@ -580,42 +585,30 @@ export class PromptBuilder {
     }
 
     /**
-     * Read .cwtools-ai/design_blueprint.md and return it as a system directive for Build mode.
+     * Read the current topic's design_blueprint.md and return it as a directive for Build mode.
      * The blueprint is produced by Plan Mode's write_design_blueprint tool and guides code generation.
      */
-    private getDesignBlueprintPrompt(): string {
+    private getDesignBlueprintPrompt(topicId?: string): string {
         try {
-            if (!this.workspaceRoot) return '';
-            // Scan topic directories for the most recently modified blueprint
-            let bestPath = '';
-            let bestMtime = 0;
-            for (const aiDir of getAiStorageRootCandidates(this.workspaceRoot)) {
-                if (!fs.existsSync(aiDir)) continue;
-                const entries = fs.readdirSync(aiDir, { withFileTypes: true });
-                for (const entry of entries) {
-                    if (!entry.isDirectory() || !entry.name.startsWith('topic_')) continue;
-                    const bp = path.join(aiDir, entry.name, 'design_blueprint.md');
-                    if (fs.existsSync(bp)) {
-                        const stat = fs.statSync(bp);
-                        if (stat.mtimeMs > bestMtime) {
-                            bestMtime = stat.mtimeMs;
-                            bestPath = bp;
-                        }
-                    }
-                }
-            }
-            if (!bestPath) return '';
-            const content = fs.readFileSync(bestPath, 'utf-8').trim();
+            if (!this.workspaceRoot || !topicId) return '';
+            const blueprintPath = getExistingTopicFilePath(topicId, 'design_blueprint.md', this.workspaceRoot);
+            if (!blueprintPath || !fs.existsSync(blueprintPath)) return '';
+            const content = fs.readFileSync(blueprintPath, 'utf-8').trim();
             if (!content) return '';
-            // Cap the blueprint injection at 4000 chars to avoid context bloat
-            const trimmed = content.length > 4000 ? content.substring(0, 4000) + '\n\n... [blueprint truncated] ...' : content;
+            const relativePath = path.relative(this.workspaceRoot, blueprintPath).replace(/\\/g, '/');
+            // Keep both the head and tail so dependency order, cleanup, and risk sections survive truncation.
+            const maxChars = 12_000;
+            const trimmed = content.length > maxChars
+                ? `${content.substring(0, 8_000)}\n\n... [blueprint middle truncated; read ${relativePath} for the full current-topic blueprint] ...\n\n${content.substring(content.length - 3_000)}`
+                : content;
             return `<design-blueprint>
-## Approved Design Blueprint (MANDATORY — Follow This Architecture)
-The following architecture blueprint was approved during the Plan phase. You MUST:
+## Current Topic Design Blueprint (MANDATORY - Follow This Architecture)
+This blueprint belongs to topic \`${topicId}\` and is stored at \`${relativePath}\`. You MUST:
 1. Create files in the exact dependency order listed
 2. Use the exact entity IDs, event IDs, and scope contexts specified
-3. Verify scope transitions at every subsystem boundary (especially site → project → reward)
-4. Reference this blueprint when making ANY architectural decision
+3. Verify scope transitions at every subsystem boundary (especially site -> project -> reward)
+4. Preserve the selected common/ subsystem plan, reward plan, trigger plan, and cleanup plan
+5. Reference this blueprint when making ANY architectural decision
 
 ${trimmed}
 </design-blueprint>`;

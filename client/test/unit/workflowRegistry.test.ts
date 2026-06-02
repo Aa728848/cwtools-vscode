@@ -83,6 +83,14 @@ describe('AI Workflow Registry', () => {
         expect(wf.toolPolicy.tools).to.include('write_design_blueprint');
     });
 
+    it('event-chain-design includes common review and reward planning gates', () => {
+        const wf = getWorkflow('event-chain-design')!;
+        expect(wf.phases.map(p => p.id)).to.include.members(['common-review', 'rewards']);
+        expect(wf.verification.map(v => v.id)).to.include.members(['common-review-written', 'reward-plan-written', 'blueprint-written']);
+        expect(wf.promptSupplement).to.include('common/');
+        expect(wf.promptSupplement).to.include('concrete common entity families');
+    });
+
     // ── Rules Sync Review Workflow ──────────────────────────────────────
 
     it('rules-sync-review runs in review mode', () => {

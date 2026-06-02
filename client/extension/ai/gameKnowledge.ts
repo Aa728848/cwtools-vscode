@@ -54,13 +54,13 @@ You can chain scopes using dot notation (e.g. \`owner.capital.owner\`) or nested
 - A leader can absolutely transition to \`owner\`, \`planet\`, \`fleet\`, or \`army\`.
 - A pop can transition to \`planet\`, \`owner\`, \`faction\`.
 - \`from\` / \`root\` / \`prev\` are used for context-relative references.
-Assume logical scope transitions are VALID unless the LSP explicitly throws an error via \`get_diagnostics\`. Do NOT proactively declare them "illegal" in your plans or reviews based on your own assumptions.
+Treat common logical scope links as plausible hardcoded native links, then verify before final blueprint/build with \`query_scope\`, \`query_rules(category="scope_change")\`, completions, diagnostics, or a verified project/vanilla archetype. Do NOT reject them solely because an explicit scope_change rule is missing; do NOT finalize them solely from memory.
 
 ## Vanilla Game Cache — Query Strategy
 The CWTools language server has already indexed the entire vanilla game.
-**ALWAYS query LSP tools** — do NOT rely on memory, do NOT read vanilla game files directly.
-LLM knowledge of PDXscript triggers, effects, and modifiers is frequently hallucinated;
-the LSP server is the ONLY authoritative source for these constructs.
+Use the shared evidence hierarchy for vanilla knowledge: CWT/LSP schema and typed indexes first, current project examples second, bounded vanilla archetype evidence third, web last.
+LLM knowledge of PDXscript triggers, effects, modifiers, and common entity families is frequently hallucinated;
+CWT/LSP evidence is authoritative for syntax, types, scopes, enum values, and diagnostics.
 
 | Goal | Tool | Example |
 |------|------|---------|
@@ -71,7 +71,7 @@ the LSP server is the ONLY authoritative source for these constructs.
 | Find effect/trigger signature | \`query_rules("effect", "add_modifier")\` | Returns syntax |
 | Find what uses a vanilla ID | \`query_references("tech_lasers_1")\` | All references |
 
-**Rules**: always use the \`filter\` parameter with \`query_types\`; never call \`read_file\` on vanilla files.
+**Rules**: always use the \`filter\` parameter with \`query_types\`. For archetype design, bounded vanilla reads are allowed only after an indexed/exact lookup identifies a concrete example; prefer \`get_entity_info\`, \`document_symbols\`, and \`get_pdx_block\` before any raw \`read_file\`.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools bypass file-system text search and query the CWTools AST directly.
@@ -200,6 +200,22 @@ When designing complex features spanning multiple game subsystems, think in term
 **engine entities, not text-only event chains**. The following layers are available for
 cross-system coupling and should be considered during blueprint planning:
 
+### Stellaris common/ Design Space Review
+Before planning a complex event chain, inventory \`common/\` and build a capability map. Do not treat
+"richness" as adding random subsystems; treat it as choosing the right engine entities for entry,
+progression, player agency, rewards, AI behavior, and cleanup.
+
+Recommended directory families to consider (verify availability with \`list_directory("common")\`, \`query_types\`, and CWT rules for the user's install/config):
+- **Entry hooks and flow control**: \`common/on_actions\`, \`common/event_chains\`, \`common/scripted_effects\`, \`common/scripted_triggers\`, \`common/script_values\`, \`common/game_rules\`.
+- **Exploration and progression anchors**: \`common/anomalies\` (\`anomaly_category\`), \`common/archaeological_site_types\` (\`archaeological_site_type\`), \`common/special_projects\`, \`common/situations\`, \`common/astral_rifts\`, \`common/astral_actions\`, \`common/first_contact\`, \`common/intel_categories\`, \`common/intel_levels\`, \`common/storm_types\`.
+- **Map and spatial presence**: \`common/solar_system_initializers\`, \`common/star_classes\`, \`common/planet_classes\`, \`common/deposits\`, \`common/deposit_categories\`, \`common/megastructures\`, \`common/bypass\`, \`common/ambient_objects\`, \`common/dust_clouds\`, \`common/terraform_links\`.
+- **Rewards and economy**: \`common/relics\`, \`common/artifact_actions\`, \`common/technology\`, \`common/buildings\`, \`common/districts\`, \`common/pop_jobs\`, \`common/pop_categories\`, \`common/resources\`, \`common/static_modifiers\`, modifier category enums, \`common/decisions\`, \`common/edicts\`, \`common/policies\`, \`common/traits\`, \`common/ascension_perks\`, \`common/traditions\`.
+- **Political, diplomatic, and AI context**: \`common/personalities\`, \`common/country_types\`, \`common/federation_laws\` / \`common/federation_perks\` / \`common/federation_types\`, \`common/galactic_focuses\`, \`common/resolution_categories\`, \`common/resolutions\`, \`common/espionage_operation_categories\`, \`common/espionage_assets\`, \`common/espionage_operation_types\`, \`common/agreement_terms\`, \`common/agreement_term_values\`, \`common/agreement_presets\`, \`common/agreement_resources\`, \`common/pop_faction_types\`, \`common/ethics\`, \`common/governments\`, \`common/governments/civics\`, \`common/governments/authorities\`, \`common/governments/councilors\`.
+
+For each serious candidate, record whether it is selected, what concrete entity type it contributes,
+which scope it operates in, and why it is better than a pure event-only implementation. Also record
+why rejected common directories are not used, so the design stays broad without becoming fragmented.
+
 ### Layer 1 — Spatial & Map (physical presence on the star map)
 - \`solar_system_initializers\`: Generate dedicated physical star systems
 - \`ambient_objects\` / \`dust_clouds\`: Environmental entities within systems
@@ -259,13 +275,13 @@ PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the 
 
 ## HOI4 Scope System
 HOI4 scopes: Country, State, Character, Division, MilitaryIndustrialOrganization, Operative
-You can chain scopes using dot notation or nested blocks. Assume logical native links are valid.
+You can chain scopes using dot notation or nested blocks. Treat logical native links as hypotheses to verify with CWT/LSP evidence before final code.
 - \`ROOT\`, \`FROM\`, \`PREV\` — context-relative references
 - \`owner\` → State to Country
 - \`capital\` → Country to State
 - \`controller\` → State to Country
 - \`tag\` → Country identifier
-Assume logical scope transitions are VALID unless the LSP explicitly throws an error via \`get_diagnostics\`.
+Treat logical scope transitions as plausible until verified; do not reject or approve them solely from model memory.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
@@ -315,12 +331,12 @@ PDXScript is strictly typed. You MUST EXACTLY follow the syntax returned by the 
 
 ## EU4 Scope System
 EU4 scopes: Country, Province, TradeNode, Advisor, Monarch, Heir, Consort, RebelFaction
-You can chain scopes using dot notation or nested blocks. Assume logical transitions are valid natively.
+You can chain scopes using dot notation or nested blocks. Treat logical transitions as native-link hypotheses to verify with CWT/LSP evidence before final code.
 - \`ROOT\`, \`FROM\`, \`PREV\` — context-relative references
 - \`owner\` → Province to Country
 - \`capital_scope\` → Country to Province
 - \`controller\` → Province to Country
-Assume logical scope transitions are VALID unless the LSP explicitly throws an error via \`get_diagnostics\`.
+Treat logical scope transitions as plausible until verified; do not reject or approve them solely from model memory.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
@@ -403,7 +419,7 @@ CK3 scopes: Character, Title, Province, County, Duchy, Kingdom, Empire, Culture,
 - \`capital_province\` → Title to Province
 - \`holder\` → Title to Character
 - \`faith\`, \`culture\` → Character to Faith/Culture
-Assume logical scope transitions are VALID unless the LSP explicitly throws an error via \`get_diagnostics\`.
+Treat logical scope transitions as plausible until verified; do not reject or approve them solely from model memory.
 
 ## Deep API Tools — Anti-Hallucination Arsenal
 These tools query the CWTools AST directly — use them INSTEAD of \`search_mod_files\` for symbol lookups.
@@ -571,7 +587,8 @@ Do NOT rely on memory — always verify with the LSP server.
 
 /**
  * Returns the game-specific knowledge block based on the languageId.
- * Defaults to Stellaris (the most comprehensive block) if languageId is unknown.
+ * Defaults to the generic Paradox block if languageId is unknown to avoid leaking
+ * Stellaris-specific rules into other PDXScript games.
  */
 export function getGameKnowledge(languageId: string): string {
     switch (languageId) {
@@ -585,7 +602,7 @@ export function getGameKnowledge(languageId: string): string {
         case 'imperator': return IMPERATOR_KNOWLEDGE;
         case 'eu5': return EU5_KNOWLEDGE;
         case 'paradox': return PARADOX_KNOWLEDGE;
-        default: return STELLARIS_KNOWLEDGE;
+        default: return PARADOX_KNOWLEDGE;
     }
 }
 

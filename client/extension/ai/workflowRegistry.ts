@@ -251,7 +251,7 @@ Use the write_localisation tool for all YML writes. Follow encoding conventions 
 registerWorkflow({
 	id: 'event-chain-design',
 	title: 'Event Chain Design',
-	description: 'Design and plan a new event chain with proper scope chains and dependencies.',
+	description: 'Design and plan a new event chain with common/ subsystem review, scope chains, rewards, and dependencies.',
 	mode: 'plan',
 	requiredContext: [
 		{
@@ -289,24 +289,44 @@ registerWorkflow({
 			description: 'Find and study a vanilla event chain of similar complexity.',
 		},
 		{
+			id: 'common-review',
+			title: 'Common Capability Review',
+			description: 'Inventory common/ directories and decide which engine subsystems should anchor progression, agency, rewards, and cleanup.',
+		},
+		{
 			id: 'topology',
 			title: 'Pipeline Topology',
 			description: 'Map the entry point, intermediate nodes, and outcomes.',
 		},
 		{
+			id: 'rewards',
+			title: 'Reward Implementation',
+			description: 'Map outcomes to concrete common entity families such as relics, technologies, modifiers, decisions, or economy definitions.',
+		},
+		{
 			id: 'blueprint',
 			title: 'Blueprint',
-			description: 'Write the design blueprint with scope chains and ID allocation.',
+			description: 'Write the design blueprint with common review, subsystem plan, scope chains, ID allocation, rewards, and cleanup.',
 		},
 	],
 	verification: [
+		{
+			id: 'common-review-written',
+			description: 'The blueprint records common/ directories considered, selected, and rejected with rationale.',
+			required: true,
+		},
+		{
+			id: 'reward-plan-written',
+			description: 'The blueprint maps rewards and outcomes to concrete common entity families.',
+			required: true,
+		},
 		{
 			id: 'blueprint-written',
 			description: 'A design_blueprint.md has been created in the topic directory.',
 			required: true,
 		},
 	],
-	promptSupplement: `You are running in the **Event Chain Design Workflow**. Follow the Deep Archetype Study (Rule 0c) and Blueprint Architecture (Step 3) protocols strictly.`,
+	promptSupplement: `You are running in the **Event Chain Design Workflow**. Follow the Deep Archetype Study (Rule 0c), Common Directory Capability Review, and Blueprint Architecture (Step 3) protocols strictly. The final blueprint must show which current-game common/ directories were considered, which are selected, why unused candidates are rejected, and how rewards/outcomes are implemented through concrete common entity families.`,
 });
 
 // ── Rules Sync Review Workflow ───────────────────────────────────────────────

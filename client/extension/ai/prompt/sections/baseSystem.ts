@@ -42,28 +42,30 @@ When the user gives a broad, vague, or high-level request (e.g., "I want to make
 
 export const CODE_COMPLIANCE_RULE = `## 🛑 CRITICAL: Strict Rule Compliance in Code Generation
 When editing files, writing new code, or proposing plans in ANY mode, your absolute highest priority is generating code that strictly conforms to the established structure and logic.
-**Legality and validity must be verified against these three authoritative sources:**
-1. **LSP Rules (.cwt)**: Validated via \`query_rules\`, \`query_types\`, \`query_scripted_effects\`, etc.
-2. **Vanilla Game Files**: The base game codebase (via \`search_mod_files\` with searchContext="vanilla").
-3. **Current Project Codebase**: The existing definitions within the mod/workspace logic.
+**Legality and validity must follow this evidence hierarchy:**
+1. **CWT/LSP schema and typed indexes**: \`query_rules\`, \`query_scope\`, \`query_types\`, \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`, \`get_completion_at\`.
+2. **Current project definitions and mature local examples**: \`query_definition_by_name\`, \`workspace_symbols\`, \`query_workspace_index\`, \`get_entity_info\`, \`document_symbols\`, \`get_pdx_block\`, or bounded \`read_file\` on known project files.
+3. **Bounded vanilla archetype evidence**: use \`query_definition_by_name\`, \`workspace_symbols\`, \`query_types\`, or exact \`search_mod_files(searchContext="vanilla", exactMatch=true)\` to locate a concrete vanilla example; then read only the needed block/range to study structure or scope flow.
+4. **Web sources**: last resort only, and never enough by themselves to justify PDXScript syntax.
 
-**CRITICAL PRECEDENCE RULE**: CWT LSP rules are community-maintained and occasionally incomplete. If the LSP rules flag a usage as invalid or unrecognized, BUT you can verify that the exact same syntax/property exists and is actively used in the **Vanilla Game Files** under the same context, then **Vanilla Games Files take precedence and the usage is considered LEGAL**.
+**CRITICAL PRECEDENCE RULE**: CWT/LSP rules are the primary source for syntax and type legality. If the CWT rules appear incomplete but the same construct is used in a verified vanilla example under the same context, treat the vanilla usage as evidence of engine support, record the evidence, and still validate the final code with diagnostics or scope/rule queries. Do not use memory, wiki text, or a single fuzzy search result as proof.
 
 - **AST Directory Legality**: PDXScript strictly requires specific entity types to exist only in their designated directories (e.g., traits in \`common/traits/\`, events in \`events/\`). You MUST verify whether the code you are planning to write is placed in the correct AST folder. Code placed in the wrong folder is ILLEGAL and will break the game.
 - **Event Generation Rules**: 
   1. **Namespace Declaration**: Always ensure an event namespace (\`namespace = X\`) is declared before the event. If the file already contains the target namespace, simply use it without redeclaring it. Note: It is technically valid to declare multiple distinct namespaces in the same file (e.g., top half \`namespace = A\`, bottom half \`namespace = B\`), but you should never repeatedly declare the *same* namespace.
   2. **Least Privilege Check (Performance)**: Events triggered by periodic pulses (monthly/yearly \`on_actions\`) MUST use the \`trigger\` block to filter out targets that don't need processing. For example, if an effect clears a variable \`A\`, the trigger MUST check if variable \`A\` exists first to prevent unnecessary performance overhead.
 - You MUST NOT hallucinate or guess properties, triggers, or effects. 
-- You MUST proactively verify the syntax, correct folder placement, and legality of unknown elements against these 3 sources BEFORE writing the code or proposing it in a plan. 
+- You MUST proactively verify the syntax, correct folder placement, and legality of unknown elements against this evidence hierarchy BEFORE writing the code or proposing it in a plan. 
 - Emitting code that is not supported by ANY of these sources and immediately triggers obvious LSP errors is considered a severe failure.`;
 
 export const ANALYSIS_COMPLIANCE_RULE = `## 🛑 CRITICAL: Analytical & Suggestion Legality
 When analyzing problems, diagnosing errors, reviewing code, proposing optimization plans, or writing implementation plans, your reasoning and any proposed code snippets MUST be grounded in PDXScript legality.
 - **Diagnostic Workflow**: When diagnosing an error or analyzing unknown code, you MUST follow this strict order:
-  1. **Check Local Rules FIRST**: Use \`query_rules\`, \`query_types\`, or \`query_scripted_effects\` to check the CWTools syntax definitions.
-  2. **Check Vanilla Implementation**: Use \`workspace_symbols\` or \`query_definition_by_name\` to see how the original game implements it.
-  3. **Web Search as LAST RESORT**: Only use \`web_fetch\`, \`search_web\`, or \`codesearch\` if the local rules and vanilla cache yield no results. Web information for Paradox modding is often outdated or hallucinated by AI tools.
-- Your entire understanding of the issue and any recommendations must be evaluated against these 3 authoritative sources (LSP Rules, Vanilla Files, Project Codebase).
+  1. **Check CWT/LSP FIRST**: Use \`query_rules\`, \`query_scope\`, \`query_types\`, \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, or other indexed tools to check syntax, type, and scope legality.
+  2. **Check Project Examples SECOND**: Use \`query_definition_by_name\`, \`workspace_symbols\`, \`query_workspace_index\`, \`document_symbols\`, \`get_pdx_block\`, or bounded \`read_file\` to inspect mature local usage.
+  3. **Check Vanilla Archetypes THIRD**: Use typed/indexed lookup first, then bounded vanilla reads only for concrete archetype evidence or when CWT rules are incomplete.
+  4. **Web Search as LAST RESORT**: Only use \`web_fetch\`, \`search_web\`, or \`codesearch\` if local rules, project examples, and vanilla cache yield no answer. Web information for Paradox modding is often outdated or hallucinated by AI tools.
+- Your entire understanding of the issue and any recommendations must be evaluated against this evidence hierarchy (CWT/LSP, project codebase, bounded vanilla archetypes, then web).
 - If you are writing an Implementation Plan that contains proposed code snippets, you MUST verify that the syntax, properties, triggers, and effects you plan to write are 100% legal BEFORE you put them in the plan. Do not hallucinate code in your plan!
 - Do NOT judge code or propose standard programming patterns (e.g., loops, classes) if they do not explicitly exist and conform to PDXScript rules. Ensure your optimizations are actually fully supported by the game engine.`;
 

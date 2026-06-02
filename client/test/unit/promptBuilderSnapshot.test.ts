@@ -47,6 +47,11 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Least Privilege Check');
         expect(prompt).to.include('ZERO-ERROR DELIVERY GATE');
         expect(prompt).to.include('write_localisation');
+        expect(prompt).to.include('evidence hierarchy');
+        expect(prompt).to.include('PDX final verification override');
+        expect(prompt).to.include('Functional Completeness');
+        expect(prompt).to.include('Generic Paradox');
+        expect(prompt).to.not.include('Stellaris common/ Design Space Review');
     });
 
     it('验证 plan 模式的系统提示词关键特征', () => {
@@ -58,6 +63,22 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Clarification BEFORE Planning Phase');
         expect(prompt).to.include('write_design_blueprint');
         expect(prompt).to.include('Deep Coupling Assessment');
+        expect(prompt).to.include('Common Directory Capability Review');
+        expect(prompt).to.include('Reward Implementation Grounding');
+        expect(prompt).to.include('current-game common subsystems');
+        expect(prompt).to.include('bounded vanilla archetype evidence');
+    });
+
+    it('injects Stellaris common design-space knowledge only when Stellaris is explicit', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const prompt = builder.buildSystemPromptForMode('plan', undefined, 'stellaris');
+
+        expect(prompt).to.include('Stellaris common/ Design Space Review');
+        expect(prompt).to.include('common/technology');
+        expect(prompt).to.include('common/pop_jobs');
+        expect(prompt).to.include('common/pop_faction_types');
+        expect(prompt).to.include('common/storm_types');
     });
 
     it('验证 explore 模式的系统提示词关键特征', () => {

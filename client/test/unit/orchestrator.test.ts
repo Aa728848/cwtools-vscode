@@ -686,9 +686,14 @@ describe('Orchestrator runtime safety', () => {
 
 describe('QualityGate', () => {
     let QualityGate: typeof import('../../extension/ai/orchestrator/qualityGate').QualityGate;
+    let isPdxDiagnosticFile: typeof import('../../extension/ai/orchestrator/qualityGate').isPdxDiagnosticFile;
+    let PDX_DIAGNOSTIC_EXTENSIONS: typeof import('../../extension/ai/orchestrator/qualityGate').PDX_DIAGNOSTIC_EXTENSIONS;
 
     before(() => {
-        QualityGate = require('../../extension/ai/orchestrator/qualityGate').QualityGate;
+        const qualityGate = require('../../extension/ai/orchestrator/qualityGate') as typeof import('../../extension/ai/orchestrator/qualityGate');
+        QualityGate = qualityGate.QualityGate;
+        isPdxDiagnosticFile = qualityGate.isPdxDiagnosticFile;
+        PDX_DIAGNOSTIC_EXTENSIONS = qualityGate.PDX_DIAGNOSTIC_EXTENSIONS;
     });
 
     it('buildReviewPrompt: 生成包含文件列表的审查提示', () => {
@@ -704,6 +709,32 @@ describe('QualityGate', () => {
         const prompt = qg.buildReviewPrompt(mockResult);
         expect(prompt).to.include('events/test.txt');
         expect(prompt).to.include('common/tech.txt');
+    });
+
+    it('checks all PDX ecosystem diagnostic file types', () => {
+        expect([...PDX_DIAGNOSTIC_EXTENSIONS]).to.deep.equal(['.txt', '.gui', '.yml', '.gfx', '.asset']);
+        expect(isPdxDiagnosticFile('events/test.txt')).to.equal(true);
+        expect(isPdxDiagnosticFile('interface/test.gui')).to.equal(true);
+        expect(isPdxDiagnosticFile('localisation/test_l_english.yml')).to.equal(true);
+        expect(isPdxDiagnosticFile('interface/sprites.gfx')).to.equal(true);
+        expect(isPdxDiagnosticFile('sound/test.asset')).to.equal(true);
+        expect(isPdxDiagnosticFile('notes.md')).to.equal(false);
+    });
+
+    it('buildCombinedReviewPrompt names PDX diagnostic targets beyond txt and gui', () => {
+        const qg = new QualityGate();
+        const prompt = qg.buildCombinedReviewPrompt([
+            'events/test.txt',
+            'interface/test.gui',
+            'localisation/test_l_english.yml',
+            'interface/sprites.gfx',
+            'sound/test.asset',
+        ]);
+
+        expect(prompt).to.include('.txt, .gui, .yml, .gfx, .asset');
+        expect(prompt).to.include('localisation/test_l_english.yml');
+        expect(prompt).to.include('interface/sprites.gfx');
+        expect(prompt).to.include('sound/test.asset');
     });
 
     it('parseReviewResult: 识别通过结果', () => {

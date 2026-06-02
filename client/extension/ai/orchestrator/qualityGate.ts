@@ -23,6 +23,13 @@ const DEFAULT_CONFIG: QualityGateConfig = {
     autoFix: true,
 };
 
+export const PDX_DIAGNOSTIC_EXTENSIONS = ['.txt', '.gui'] as const;
+
+export function isPdxDiagnosticFile(file: string): boolean {
+    const normalized = file.toLowerCase();
+    return PDX_DIAGNOSTIC_EXTENSIONS.some(ext => normalized.endsWith(ext));
+}
+
 export const SPRITE_REPAIR_PROTOCOL = [
     '## Sprite Resource Diagnostic Protocol',
     '',
@@ -80,9 +87,11 @@ export class QualityGate {
             ? `\n## Pre-fetched LSP Diagnostics (ALREADY RETRIEVED — DO NOT call get_diagnostics again):\n${preFetchedDiagnostics}\n` 
             : '';
 
+        const diagnosticTargets = writtenFiles.filter(isPdxDiagnosticFile);
+        const diagnosticTargetText = PDX_DIAGNOSTIC_EXTENSIONS.join(', ');
         const step1 = preFetchedDiagnostics
             ? '1. Review the pre-fetched diagnostics above.'
-            : '1. Diagnostics were not pre-fetched. You may call `get_diagnostics` if needed.';
+            : `1. Diagnostics were not pre-fetched. You may call \`get_diagnostics\` if needed, especially for PDX ecosystem files (${diagnosticTargetText}).`;
 
         const hasSpriteDiagnostics = /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(preFetchedDiagnostics ?? '');
         const hasSoundDiagnostics = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(preFetchedDiagnostics ?? '');
@@ -102,7 +111,8 @@ export class QualityGate {
             '2. Check for logic conflict issues (e.g., an event has `option` but uses `hide_window = yes`, which is a contradiction). Such conflicts MUST be reported and fixed.',
             '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys, and sprite/asset references).',
             '4. Verify the correctness of the scope chain.',
-            '5. Check file structure integrity (Refer to Rule 3b).',
+            '5. Check file structure integrity and functional completeness (Refer to Rule 3b).',
+            diagnosticTargets.length > 0 ? `6. PDX diagnostic target files include: ${diagnosticTargets.join(', ')}` : '6. No PDX diagnostic target files were written.',
             '',
             'Output Format (You MUST output EXACTLY this JSON format in a markdown code block):',
             '```json',
@@ -140,7 +150,7 @@ export class QualityGate {
         try {
             const diagResults: string[] = [];
             for (const file of writtenFiles) {
-                if (!file.endsWith('.txt') && !file.endsWith('.gui')) continue;
+                if (!isPdxDiagnosticFile(file)) continue;
                 const res = await agentRunner.toolExecutor.execute('get_diagnostics', { file, severity: 'error' });
                 if (res && typeof res === 'object') {
                     const count = (res as any).totalDiagnosticCount || 0;

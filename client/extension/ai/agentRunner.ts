@@ -795,7 +795,7 @@ export class AgentRunner {
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
         // to ensure byte-level stability across API calls for cache hits.
         let systemPrompt = options?.useSlimPrompt
-            ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt)
+            ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt, undefined, topicId)
             : supportsPrefixCache
                 ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined)
                 : this.promptBuilder.buildSystemPromptForMode(mode, providerForPrompt, undefined, topicId, runId, pinnedData);

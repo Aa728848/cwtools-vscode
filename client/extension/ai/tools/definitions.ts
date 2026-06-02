@@ -26,7 +26,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_types',
-            description: '⚠️ MANDATORY before using any game ID. Query defined instances of a Stellaris type from mod + vanilla cache. PDXscript IDs are routinely hallucinated — always verify through this tool. Set filter to narrow results.',
+            description: '⚠️ MANDATORY before using any game ID. Query defined instances of a current-game PDXScript type from mod + vanilla cache. PDXscript IDs are routinely hallucinated — always verify through this tool. Set filter to narrow results.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -297,7 +297,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'grep',
-            description: 'Searches for files matching the specified text/regular expression within the workspace/path. Returns matching lines and line numbers. Zero results are NOT proof an ID/key is missing; use verify_pdx_identifier or an AST lookup before declaring absence. To search for vanilla game files, use `search_mod_files(searchContext="vanilla")`.',
+            description: 'Searches for files matching the specified text/regular expression within the workspace/path. Returns matching lines and line numbers. Zero results are NOT proof an ID/key is missing; use verify_pdx_identifier or an AST lookup before declaring absence. To search the vanilla cache for bounded archetype evidence, use `search_mod_files(searchContext="vanilla", exactMatch=true)`.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -549,7 +549,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'web_fetch',
-            description: 'Fetch the text content of a public URL (e.g. Stellaris wiki pages, GitHub raw files). Converts HTML to plain text. Use for looking up game mechanics, modding documentation, or locating vanilla definitions online. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
+            description: 'Fetch the text content of a public URL (e.g. Paradox wiki pages, GitHub raw files). Converts HTML to plain text. Use for looking up game mechanics, modding documentation, or locating vanilla definitions online. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -581,11 +581,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_web',
-            description: 'Search the web for information about Stellaris modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (cwtools.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
+            description: 'Search the web for information about Paradox modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (cwtools.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Search query. Be specific. Example: "Stellaris relic activation trigger conditions"' },
+                    query: { type: 'string', description: 'Search query. Be specific. Example: "Stellaris relic activation trigger conditions" or "HOI4 national focus completion reward syntax"' },
                     maxResults: { type: 'number', description: 'Max results to return (default 5, max 10)' },
                 },
                 required: ['query'],
@@ -600,7 +600,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    query: { type: 'string', description: 'Code search query. Be specific about the pattern, API, or function name. Example: "Stellaris on_action on_fleet_combat implementation"' },
+                    query: { type: 'string', description: 'Code search query. Be specific about the pattern, API, or function name. Example: "PDXScript on_action event implementation"' },
                     maxResults: { type: 'number', description: 'Max results to return (default 5, max 10)' },
                 },
                 required: ['query'],
@@ -908,7 +908,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_localisation',
-            description: '🌐 MANDATORY for all .yml localisation file operations. Safely write localisation entries to Stellaris .yml files. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use multi_replace_file_content, apply_patch, or write_file for .yml localisation files — ALWAYS use this tool instead.',
+            description: '🌐 MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use multi_replace_file_content, apply_patch, or write_file for .yml localisation files — ALWAYS use this tool instead.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -938,7 +938,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_design_blueprint',
-            description: 'Write a structured design blueprint for a game entity pipeline to the Agent Workspace. You MUST use this tool in Plan Mode BEFORE writing any implementation plan when the task involves: (1) event chains (2+ connected events), (2) archaeological sites, special projects, relics, situations, or anomalies, (3) any task producing 2+ game entity files that reference each other. The blueprint documents entity topology, scope chains, ID allocations, branching logic, media asset requirements, and file dependency order. It is saved as design_blueprint.md and displayed to the user for approval before Build phase begins. NOTE: When researching entities for this blueprint, you MUST combine and cross-reference Vanilla AST folders, the CWT code rule base, and mature instance templates from the project.',
+            description: 'Write a structured design blueprint for a game entity pipeline to the Agent Workspace. You MUST use this tool in Plan Mode BEFORE writing any implementation plan when the task involves: (1) event chains (2+ connected events), (2) archaeological sites, special projects, relics, situations, or anomalies, (3) any task producing 2+ game entity files that reference each other. For these tasks, commonDirectoryReview, subsystemPlan, triggerPlan, rewardPlan, cleanupPlan, evidence, and dependencyOrder are hard requirements. The blueprint documents entity topology, common/ capability review, scope chains, reward implementation, lifecycle cleanup, ID allocations, branching logic, media asset requirements, and file dependency order. It is saved as design_blueprint.md and displayed to the user for approval before Build phase begins. NOTE: Research must follow the evidence hierarchy: CWT/LSP and typed indexes first, current project examples second, bounded vanilla archetype evidence third.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -959,6 +959,110 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                             required: ['id', 'type', 'file'],
                         },
                     },
+                    commonDirectoryReview: {
+                        type: 'array',
+                        description: 'Capability review of current-game common/ directories considered for this design. Include selected and rejected directories so the plan shows a broad game-system search, not just event text.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                directory: { type: 'string', description: 'common/ directory or entity family, e.g. common/situations, common/relics, common/technology, common/solar_system_initializers' },
+                                role: { type: 'string', description: 'Design role considered, e.g. entry trigger, progression anchor, reward, economy sink, map presence, cleanup support' },
+                                candidateTypes: { type: 'array', items: { type: 'string' }, description: 'Concrete CWT types or entity kinds found in this directory' },
+                                selected: { type: 'boolean', description: 'Whether this directory is used in the final blueprint' },
+                                rationale: { type: 'string', description: 'Why it is used or intentionally rejected for this user requirement' },
+                                findings: { type: 'string', description: 'Archetype or rule insight discovered from project/vanilla/CWT research' },
+                            },
+                            required: ['directory', 'role', 'selected', 'rationale', 'findings'],
+                        },
+                    },
+                    subsystemPlan: {
+                        type: 'array',
+                        description: 'Selected engine subsystem layers for the design, grounded in common/ directory capabilities and user requirements.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                layer: { type: 'string', description: 'Subsystem layer, e.g. spatial, progression, agency, economy, reward, hooks, support' },
+                                directories: { type: 'array', items: { type: 'string' }, description: 'common/ directories used by this layer' },
+                                entities: { type: 'array', items: { type: 'string' }, description: 'Entity IDs or planned entities implementing this layer' },
+                                rationale: { type: 'string', description: 'Why this layer belongs in the design and how it serves the feature' },
+                                requirementSource: { type: 'string', description: 'User requirement or inferred design need that justifies the layer' },
+                            },
+                            required: ['layer', 'directories', 'rationale'],
+                        },
+                    },
+                    triggerPlan: {
+                        type: 'array',
+                        description: 'Per-node trigger and pacing plan, including indirect triggers such as on_actions, MTTH, days delays, situation ticks, or direct event calls.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                nodeId: { type: 'string', description: 'Entity or node ID this trigger plan applies to' },
+                                mechanism: { type: 'string', description: 'Trigger mechanism, e.g. on_action, MTTH, days, direct_event, situation_tick, special_project_on_success' },
+                                scopeBridge: { type: 'string', description: 'Scope transition used by the trigger, e.g. owner={ country_event }, event_target:site_planet' },
+                                timing: { type: 'string', description: 'Timing or pacing detail, e.g. 30 days, yearly pulse, project completion' },
+                                rationale: { type: 'string', description: 'Why this trigger mechanism is appropriate' },
+                            },
+                            required: ['nodeId', 'mechanism', 'rationale'],
+                        },
+                    },
+                    branchingPlan: {
+                        type: 'array',
+                        description: 'Player choice branches, convergence points, and logical consequences.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                branchId: { type: 'string', description: 'Stable branch identifier' },
+                                fromEntity: { type: 'string', description: 'Entity or event where the branch starts' },
+                                choices: { type: 'array', items: { type: 'string' }, description: 'Player or simulation choices in this branch' },
+                                convergence: { type: 'string', description: 'Entity or condition where branch paths converge, if any' },
+                                consequences: { type: 'string', description: 'Mechanical and narrative consequences of the branch' },
+                            },
+                            required: ['branchId', 'fromEntity', 'choices', 'consequences'],
+                        },
+                    },
+                    rewardPlan: {
+                        type: 'array',
+                        description: 'Reward and outcome implementation plan using concrete common/ entity families, not just prose.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                rewardId: { type: 'string', description: 'Reward or outcome identifier' },
+                                directory: { type: 'string', description: 'Target common/ directory for this reward, e.g. common/relics, common/technology, common/static_modifiers' },
+                                entityType: { type: 'string', description: 'CWT type or entity kind implementing the reward' },
+                                playerValue: { type: 'string', description: 'What the player gains or risks' },
+                                implementation: { type: 'string', description: 'How the reward is granted, unlocked, activated, or cleaned up' },
+                                balanceNotes: { type: 'string', description: 'Balance constraints, cooldowns, costs, AI weights, or limits' },
+                            },
+                            required: ['rewardId', 'directory', 'entityType', 'playerValue', 'implementation'],
+                        },
+                    },
+                    cleanupPlan: {
+                        type: 'array',
+                        description: 'Lifecycle closure plan for flags, modifiers, spawned systems, situations, projects, event targets, and temporary state.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                target: { type: 'string', description: 'Flag, modifier, event target, entity, or spawned object to clean up' },
+                                lifecycle: { type: 'string', description: 'When this target is created and how long it should persist' },
+                                cleanup: { type: 'string', description: 'Exact cleanup or closure mechanism' },
+                                owner: { type: 'string', description: 'Scope or subsystem responsible for cleanup' },
+                            },
+                            required: ['target', 'lifecycle', 'cleanup'],
+                        },
+                    },
+                    evidence: {
+                        type: 'array',
+                        description: 'Research evidence used for the blueprint. Include project examples, vanilla archetypes, CWT rule queries, and common/ directory inventory findings.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                sourceType: { type: 'string', description: 'Evidence kind, e.g. project, vanilla, cwt, common_inventory, user_requirement' },
+                                source: { type: 'string', description: 'File path, symbol ID, query name, or user requirement reference' },
+                                insight: { type: 'string', description: 'Relevant design fact learned from this source' },
+                            },
+                            required: ['sourceType', 'source', 'insight'],
+                        },
+                    },
                     eventIdAllocation: {
                         type: 'object',
                         description: 'Pre-allocated event ID ranges for the entire pipeline',
@@ -977,9 +1081,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                         items: { type: 'string' },
                         description: 'File creation order (dependencies first). Files listed earlier must be written before later ones.',
                     },
+                    riskRegister: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Known implementation risks, scope uncertainties, performance concerns, or user decisions that remain sensitive.',
+                    },
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },
-                required: ['title', 'entities', 'dependencyOrder'],
+                required: ['title', 'entities', 'commonDirectoryReview', 'subsystemPlan', 'triggerPlan', 'rewardPlan', 'cleanupPlan', 'evidence', 'dependencyOrder'],
             },
         },
     },

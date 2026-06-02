@@ -26,7 +26,7 @@ import type {
 import { TaskGraphEngine } from './taskGraphEngine';
 import { Blackboard } from './blackboard';
 import { ParallelExecutor, type SubAgentExecutor } from './parallelExecutor';
-import { QualityGate } from './qualityGate';
+import { QualityGate, PDX_DIAGNOSTIC_EXTENSIONS, isPdxDiagnosticFile } from './qualityGate';
 import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG } from '../messages';
@@ -161,10 +161,11 @@ export class Orchestrator {
                     timestamp: Date.now(),
                 });
 
-                const txtFiles = allWrittenFiles
-                    .filter(f => f.endsWith('.txt') || f.endsWith('.gui'))
+                const diagnosticFiles = allWrittenFiles
+                    .filter(isPdxDiagnosticFile)
                     .map(f => `   - ${f}`)
                     .join('\n');
+                const diagnosticExtensionList = PDX_DIAGNOSTIC_EXTENSIONS.join(', ');
 
                 const sweepPrompt = [
                     '## Localization Sweep Phase (Diagnostic-Driven ONLY)',
@@ -175,8 +176,8 @@ export class Orchestrator {
                     '- Your ONLY data source is the diagnostic error list from `get_diagnostics`.',
                     '',
                     '### Workflow:',
-                    '1. Call `get_diagnostics` on EACH of these files (only .txt and .gui files):',
-                    txtFiles,
+                    `1. Call \`get_diagnostics\` on EACH of these PDX ecosystem files (${diagnosticExtensionList}):`,
+                    diagnosticFiles || '   - (No PDX diagnostic target files)',
                     '2. From the diagnostics output, extract ONLY errors/warnings containing "Missing localisation" or "missing loc key".',
                     '3. For each missing key found in step 2, call `write_localisation` to create it with appropriate text.',
                     '4. If `get_diagnostics` returns zero localisation-related errors, output "No missing localisation keys found." and STOP immediately.',

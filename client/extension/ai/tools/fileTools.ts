@@ -1606,6 +1606,75 @@ return { files: [], total: 0 };
 
     async writeDesignBlueprint(args: import('../types').WriteDesignBlueprintArgs, context?: import('../types').AgentToolContext): Promise<import('../types').WriteDesignBlueprintResult> {
         try {
+            const failBlueprint = (message: string): import('../types').WriteDesignBlueprintResult => ({
+                success: false,
+                message,
+                filePath: '',
+            });
+            const hasItems = (value: unknown): value is unknown[] => Array.isArray(value) && value.length > 0;
+            const requiredSections: Array<[string, unknown]> = [
+                ['entities', args.entities],
+                ['commonDirectoryReview', args.commonDirectoryReview],
+                ['subsystemPlan', args.subsystemPlan],
+                ['triggerPlan', args.triggerPlan],
+                ['rewardPlan', args.rewardPlan],
+                ['cleanupPlan', args.cleanupPlan],
+                ['evidence', args.evidence],
+                ['dependencyOrder', args.dependencyOrder],
+            ];
+            const missingSections = requiredSections
+                .filter(([, value]) => !hasItems(value))
+                .map(([name]) => name);
+            if (missingSections.length > 0) {
+                return failBlueprint(`Design blueprint refused: missing required planning section(s): ${missingSections.join(', ')}. For complex PDXScript pipelines, include common/ capability review, subsystem plan, trigger plan, reward plan, cleanup plan, evidence, and dependency order.`);
+            }
+
+            const commonReview = args.commonDirectoryReview!;
+            const hasSelectedCommon = commonReview.some(item => item.selected === true);
+            const hasRejectedCommon = commonReview.some(item => item.selected === false);
+            if (!hasSelectedCommon || !hasRejectedCommon) {
+                return failBlueprint('Design blueprint refused: commonDirectoryReview must include at least one selected and one rejected common/ candidate so the plan shows a real design-space comparison.');
+            }
+            const commonWithoutFindings = commonReview
+                .filter(item => !String(item.findings ?? '').trim())
+                .map(item => item.directory);
+            if (commonWithoutFindings.length > 0) {
+                return failBlueprint(`Design blueprint refused: commonDirectoryReview entries need concrete CWT/project/vanilla findings. Missing findings for: ${commonWithoutFindings.join(', ')}.`);
+            }
+
+            const entitiesMissingScope = args.entities
+                .filter(entity => !String(entity.scopeContext ?? '').trim())
+                .map(entity => entity.id);
+            if (entitiesMissingScope.length > 0) {
+                return failBlueprint(`Design blueprint refused: every entity needs a scopeContext, even if it is "definition/no runtime scope". Missing scopeContext for: ${entitiesMissingScope.join(', ')}.`);
+            }
+
+            const rewardWithoutImplementation = args.rewardPlan!
+                .filter(reward => !String(reward.directory ?? '').trim() || !String(reward.entityType ?? '').trim() || !String(reward.implementation ?? '').trim())
+                .map(reward => reward.rewardId);
+            if (rewardWithoutImplementation.length > 0) {
+                return failBlueprint(`Design blueprint refused: every reward must name a concrete directory/entity type and implementation path. Incomplete reward(s): ${rewardWithoutImplementation.join(', ')}.`);
+            }
+
+            const cleanupWithoutMechanism = args.cleanupPlan!
+                .filter(item => !String(item.cleanup ?? '').trim())
+                .map(item => item.target);
+            if (cleanupWithoutMechanism.length > 0) {
+                return failBlueprint(`Design blueprint refused: cleanupPlan entries need exact cleanup or closure mechanisms. Missing cleanup for: ${cleanupWithoutMechanism.join(', ')}.`);
+            }
+
+            const evidence = args.evidence!;
+            const evidenceText = evidence
+                .map(item => `${item.sourceType} ${item.source} ${item.insight}`)
+                .join('\n')
+                .toLowerCase();
+            if (!/(cwt|lsp|query_rules|query_scope|query_types|scope|rule)/.test(evidenceText)) {
+                return failBlueprint('Design blueprint refused: evidence must include at least one CWT/LSP or typed-rule verification source.');
+            }
+            if (!/(common_inventory|common\/|list_directory\("common"\)|list_directory\('common'\)|common directory)/.test(evidenceText)) {
+                return failBlueprint('Design blueprint refused: evidence must include the common/ inventory or common directory findings used to choose subsystems.');
+            }
+
             // Save to topic-scoped folder (same as Implementation_Plan.md)
             const topicId = context?.runnerOptions?.topicId || 'default';
             const blueprintDir = getTopicStorageDir(topicId, this.ctx.workspaceRoot);
@@ -1620,6 +1689,44 @@ return { files: [], total: 0 };
             lines.push(`> Generated: ${new Date().toISOString()}`);
             lines.push('');
 
+            lines.push('## Blueprint Completeness Gate');
+            lines.push('');
+            lines.push('- [x] Common directory review includes selected and rejected candidates');
+            lines.push('- [x] Entity topology includes scopeContext for every entity');
+            lines.push('- [x] Trigger, reward, cleanup, and dependency plans are present');
+            lines.push('- [x] Evidence includes CWT/LSP verification and common/ inventory findings');
+            lines.push('');
+
+            const cell = (value: unknown): string => {
+                if (value === undefined || value === null || value === '') return '-';
+                return String(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+            };
+            const listCell = (values?: string[]): string => values && values.length > 0 ? values.map(cell).join(', ') : '-';
+
+            // Common directory capability review
+            if (args.commonDirectoryReview && args.commonDirectoryReview.length > 0) {
+                lines.push('## Common Directory Capability Review');
+                lines.push('');
+                lines.push('| Directory | Role Considered | Candidate Types | Used | Rationale | Findings |');
+                lines.push('|-----------|-----------------|-----------------|------|-----------|----------|');
+                for (const item of args.commonDirectoryReview) {
+                    lines.push(`| \`${cell(item.directory)}\` | ${cell(item.role)} | ${listCell(item.candidateTypes)} | ${item.selected ? 'yes' : 'no'} | ${cell(item.rationale)} | ${cell(item.findings)} |`);
+                }
+                lines.push('');
+            }
+
+            // Engine subsystem plan
+            if (args.subsystemPlan && args.subsystemPlan.length > 0) {
+                lines.push('## Engine Subsystem Plan');
+                lines.push('');
+                lines.push('| Layer | Common Directories | Entities | Requirement Source | Rationale |');
+                lines.push('|-------|--------------------|----------|--------------------|-----------|');
+                for (const item of args.subsystemPlan) {
+                    lines.push(`| ${cell(item.layer)} | ${listCell(item.directories)} | ${listCell(item.entities)} | ${cell(item.requirementSource)} | ${cell(item.rationale)} |`);
+                }
+                lines.push('');
+            }
+
             // Entity Topology Map
             lines.push('## Entity Topology (Cascading Trigger Pipeline)');
             lines.push('');
@@ -1627,10 +1734,10 @@ return { files: [], total: 0 };
             lines.push('|---|-----------|------|------|-------------|-------|---------------|');
             for (let i = 0; i < args.entities.length; i++) {
                 const e = args.entities[i]!;
-                const fires = e.fires?.join(', ') || '\u2014';
-                const triggeredBy = e.triggeredBy || '\u2014';
-                const scope = e.scopeContext || '\u2014';
-                lines.push(`| ${i + 1} | \`${e.id}\` | ${e.type} | \`${e.file}\` | ${triggeredBy} | ${fires} | ${scope} |`);
+                const fires = listCell(e.fires);
+                const triggeredBy = cell(e.triggeredBy);
+                const scope = cell(e.scopeContext);
+                lines.push(`| ${i + 1} | \`${cell(e.id)}\` | ${cell(e.type)} | \`${cell(e.file)}\` | ${triggeredBy} | ${fires} | ${scope} |`);
             }
             lines.push('');
 
@@ -1650,6 +1757,42 @@ return { files: [], total: 0 };
             }
             lines.push('```');
             lines.push('');
+
+            // Trigger and pacing plan
+            if (args.triggerPlan && args.triggerPlan.length > 0) {
+                lines.push('## Trigger and Pacing Plan');
+                lines.push('');
+                lines.push('| Node | Mechanism | Scope Bridge | Timing | Rationale |');
+                lines.push('|------|-----------|--------------|--------|-----------|');
+                for (const item of args.triggerPlan) {
+                    lines.push(`| \`${cell(item.nodeId)}\` | ${cell(item.mechanism)} | ${cell(item.scopeBridge)} | ${cell(item.timing)} | ${cell(item.rationale)} |`);
+                }
+                lines.push('');
+            }
+
+            // Branching and convergence plan
+            if (args.branchingPlan && args.branchingPlan.length > 0) {
+                lines.push('## Branching and Convergence Plan');
+                lines.push('');
+                lines.push('| Branch | Starts From | Choices | Converges At | Consequences |');
+                lines.push('|--------|-------------|---------|--------------|--------------|');
+                for (const item of args.branchingPlan) {
+                    lines.push(`| \`${cell(item.branchId)}\` | \`${cell(item.fromEntity)}\` | ${listCell(item.choices)} | ${cell(item.convergence)} | ${cell(item.consequences)} |`);
+                }
+                lines.push('');
+            }
+
+            // Reward and outcome plan
+            if (args.rewardPlan && args.rewardPlan.length > 0) {
+                lines.push('## Reward and Outcome Plan');
+                lines.push('');
+                lines.push('| Reward | Directory | Entity Type | Player Value | Implementation | Balance Notes |');
+                lines.push('|--------|-----------|-------------|--------------|----------------|---------------|');
+                for (const item of args.rewardPlan) {
+                    lines.push(`| \`${cell(item.rewardId)}\` | \`${cell(item.directory)}\` | ${cell(item.entityType)} | ${cell(item.playerValue)} | ${cell(item.implementation)} | ${cell(item.balanceNotes)} |`);
+                }
+                lines.push('');
+            }
 
             // Event ID Allocation
             if (args.eventIdAllocation) {
@@ -1677,6 +1820,40 @@ return { files: [], total: 0 };
                 lines.push(`${i + 1}. \`${args.dependencyOrder[i]}\``);
             }
             lines.push('');
+
+            // Cleanup and lifecycle closure plan
+            if (args.cleanupPlan && args.cleanupPlan.length > 0) {
+                lines.push('## Cleanup and Closure Plan');
+                lines.push('');
+                lines.push('| Target | Lifecycle | Cleanup Mechanism | Owner |');
+                lines.push('|--------|-----------|-------------------|-------|');
+                for (const item of args.cleanupPlan) {
+                    lines.push(`| \`${cell(item.target)}\` | ${cell(item.lifecycle)} | ${cell(item.cleanup)} | ${cell(item.owner)} |`);
+                }
+                lines.push('');
+            }
+
+            // Evidence used to build the design
+            if (args.evidence && args.evidence.length > 0) {
+                lines.push('## Evidence Studied');
+                lines.push('');
+                lines.push('| Source Type | Source | Design Insight |');
+                lines.push('|-------------|--------|----------------|');
+                for (const item of args.evidence) {
+                    lines.push(`| ${cell(item.sourceType)} | \`${cell(item.source)}\` | ${cell(item.insight)} |`);
+                }
+                lines.push('');
+            }
+
+            // Risk register
+            if (args.riskRegister && args.riskRegister.length > 0) {
+                lines.push('## Risk Register');
+                lines.push('');
+                for (const risk of args.riskRegister) {
+                    lines.push(`- ${cell(risk)}`);
+                }
+                lines.push('');
+            }
 
             // Notes
             if (args.notes) {

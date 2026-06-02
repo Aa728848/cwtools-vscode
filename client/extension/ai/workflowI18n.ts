@@ -123,22 +123,32 @@ const WORKFLOW_TEXT: Record<string, Record<WorkflowLocale, LocalizedWorkflowText
     'event-chain-design': {
         en: {
             title: 'Event Chain Design',
-            description: 'Design and plan a new event chain with proper scope chains and dependencies.',
+            description: 'Design and plan a new event chain with common/ subsystem review, scope chains, rewards, and dependencies.',
             phases: {
                 archetype: {
                     title: 'Archetype Study',
                     description: 'Find and study a vanilla event chain of similar complexity.',
                 },
+                'common-review': {
+                    title: 'Common Capability Review',
+                    description: 'Inventory common/ directories and choose engine subsystems for progression, agency, rewards, and cleanup.',
+                },
                 topology: {
                     title: 'Pipeline Topology',
                     description: 'Map the entry point, intermediate nodes, and outcomes.',
                 },
+                rewards: {
+                    title: 'Reward Implementation',
+                    description: 'Map outcomes to concrete common entity families such as relics, technologies, modifiers, or decisions.',
+                },
                 blueprint: {
                     title: 'Blueprint',
-                    description: 'Write the design blueprint with scope chains and ID allocation.',
+                    description: 'Write the design blueprint with common review, subsystem plan, scope chains, rewards, and cleanup.',
                 },
             },
             verification: {
+                'common-review-written': 'The blueprint records common/ directories considered, selected, and rejected with rationale.',
+                'reward-plan-written': 'The blueprint maps rewards and outcomes to concrete common entity families.',
                 'blueprint-written': 'A design_blueprint.md has been created in the topic directory.',
             },
         },

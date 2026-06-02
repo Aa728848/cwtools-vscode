@@ -967,15 +967,78 @@ export interface BlueprintEntity {
     scopeContext?: string;
 }
 
+export interface BlueprintCommonDirectoryReview {
+    directory: string;
+    role: string;
+    candidateTypes?: string[];
+    selected?: boolean;
+    rationale: string;
+    findings?: string;
+}
+
+export interface BlueprintSubsystemPlan {
+    layer: string;
+    directories: string[];
+    entities?: string[];
+    rationale: string;
+    requirementSource?: string;
+}
+
+export interface BlueprintTriggerPlan {
+    nodeId: string;
+    mechanism: string;
+    scopeBridge?: string;
+    timing?: string;
+    rationale: string;
+}
+
+export interface BlueprintBranchPlan {
+    branchId: string;
+    fromEntity: string;
+    choices: string[];
+    convergence?: string;
+    consequences: string;
+}
+
+export interface BlueprintRewardPlan {
+    rewardId: string;
+    directory: string;
+    entityType: string;
+    playerValue: string;
+    implementation: string;
+    balanceNotes?: string;
+}
+
+export interface BlueprintCleanupPlan {
+    target: string;
+    lifecycle: string;
+    cleanup: string;
+    owner?: string;
+}
+
+export interface BlueprintEvidenceRef {
+    sourceType: string;
+    source: string;
+    insight: string;
+}
+
 export interface WriteDesignBlueprintArgs {
     title: string;
     entities: BlueprintEntity[];
+    commonDirectoryReview?: BlueprintCommonDirectoryReview[];
+    subsystemPlan?: BlueprintSubsystemPlan[];
+    triggerPlan?: BlueprintTriggerPlan[];
+    branchingPlan?: BlueprintBranchPlan[];
+    rewardPlan?: BlueprintRewardPlan[];
+    cleanupPlan?: BlueprintCleanupPlan[];
+    evidence?: BlueprintEvidenceRef[];
     eventIdAllocation?: {
         namespace: string;
         ranges: string;
     };
     localisationKeys?: string[];
     dependencyOrder: string[];
+    riskRegister?: string[];
     notes?: string;
 }
 

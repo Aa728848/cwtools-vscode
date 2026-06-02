@@ -125,6 +125,29 @@ describe('PromptBuilder context budgeting', () => {
         }
     });
 
+    it('injects only the current topic design blueprint into build prompts', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const workspaceRoot = makeWorkspace();
+        try {
+            const topicA = path.join(workspaceRoot, '.cwtools-ai', 'topic-a');
+            const topicB = path.join(workspaceRoot, '.cwtools-ai', 'topic-b');
+            fs.mkdirSync(topicA, { recursive: true });
+            fs.mkdirSync(topicB, { recursive: true });
+            fs.writeFileSync(path.join(topicA, 'design_blueprint.md'), '# Design Blueprint: Topic A\n\nA_ONLY_ENTITY\n', 'utf8');
+            fs.writeFileSync(path.join(topicB, 'design_blueprint.md'), '# Design Blueprint: Topic B\n\nB_ONLY_ENTITY\n', 'utf8');
+
+            const builder = new PromptBuilder(workspaceRoot);
+            const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-a');
+
+            expect(prompt).to.include('Current Topic Design Blueprint');
+            expect(prompt).to.include('topic-a');
+            expect(prompt).to.include('A_ONLY_ENTITY');
+            expect(prompt).to.not.include('B_ONLY_ENTITY');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
     it('tells agents to reuse one temporary helper script per task', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());

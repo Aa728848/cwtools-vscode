@@ -331,6 +331,7 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
         plan: [
             'Plan mode project card:',
             `- Study existing patterns in: ${keyDirs}.`,
+            '- Inventory common/ directories before designing complex event chains; record selected and rejected subsystem candidates in the blueprint.',
             '- Use vanilla archetypes before inventing event chains or scope flows.',
             `- Existing namespaces: ${namespaces}. Allocate IDs deliberately and record them in the blueprint.`,
             '- Prefer write_design_blueprint for implementation-ready plans.',

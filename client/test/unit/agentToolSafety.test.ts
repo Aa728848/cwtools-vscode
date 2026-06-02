@@ -364,6 +364,116 @@ describe('agent tool file path safety', () => {
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('multi_replace_file_content')).to.equal(false);
     });
 
+    it('requires rich blueprint sections in write_design_blueprint schema', () => {
+        const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'write_design_blueprint');
+        const required = tool?.function.parameters.required ?? [];
+
+        expect(required).to.include.members([
+            'title',
+            'entities',
+            'commonDirectoryReview',
+            'subsystemPlan',
+            'triggerPlan',
+            'rewardPlan',
+            'cleanupPlan',
+            'evidence',
+            'dependencyOrder',
+        ]);
+    });
+
+    it('rejects incomplete design blueprints before writing', async () => {
+        const handler = createFileHandler();
+        const result = await handler.writeDesignBlueprint({
+            title: 'Incomplete Chain',
+            entities: [{ id: 'test.1', type: 'country_event', file: 'events/test.txt' }],
+            dependencyOrder: ['events/test.txt'],
+        } as any, makeContext('topic-blueprint'));
+
+        expect(result.success).to.equal(false);
+        expect(result.message).to.include('missing required planning section');
+        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.md'))).to.equal(false);
+    });
+
+    it('writes complete design blueprints with a completeness gate', async () => {
+        const handler = createFileHandler();
+        const result = await handler.writeDesignBlueprint({
+            title: 'Native Hook Event Chain',
+            entities: [{
+                id: 'test.1',
+                type: 'country_event',
+                file: 'events/test.txt',
+                triggeredBy: 'common/on_actions yearly pulse',
+                fires: ['test_reward via owner country scope'],
+                scopeContext: 'this=country root=country',
+            }],
+            commonDirectoryReview: [
+                {
+                    directory: 'common/on_actions',
+                    role: 'entry hook',
+                    candidateTypes: ['on_action'],
+                    selected: true,
+                    rationale: 'Native yearly hook matches the requested entry point.',
+                    findings: 'CWT/LSP on_action evidence confirms country pulse hook support.',
+                },
+                {
+                    directory: 'common/situations',
+                    role: 'progression anchor',
+                    candidateTypes: ['situation'],
+                    selected: false,
+                    rationale: 'The request does not need long-running UI progression.',
+                    findings: 'list_directory("common") found situations, but archetype role is too heavy for this flow.',
+                },
+            ],
+            subsystemPlan: [{
+                layer: 'hooks',
+                directories: ['common/on_actions'],
+                entities: ['test_on_action'],
+                rationale: 'Use the engine hook as the cascade entry.',
+                requirementSource: 'user requested an event chain with native trigger.',
+            }],
+            triggerPlan: [{
+                nodeId: 'test.1',
+                mechanism: 'on_action',
+                scopeBridge: 'country_event in country scope',
+                timing: 'yearly pulse',
+                rationale: 'Native timing avoids a pure text-only chain.',
+            }],
+            rewardPlan: [{
+                rewardId: 'test_reward',
+                directory: 'common/relics',
+                entityType: 'relic',
+                playerValue: 'Permanent reward with active effect.',
+                implementation: 'Final event grants the relic with add_relic.',
+                balanceNotes: 'Activation cooldown and cost are planned.',
+            }],
+            cleanupPlan: [{
+                target: 'test_chain_active flag',
+                lifecycle: 'Set when the first event fires.',
+                cleanup: 'Removed in the resolution event.',
+                owner: 'country',
+            }],
+            evidence: [
+                {
+                    sourceType: 'cwt',
+                    source: 'query_rules(effect=country_event)',
+                    insight: 'CWT/LSP scope evidence supports the event call.',
+                },
+                {
+                    sourceType: 'common_inventory',
+                    source: 'list_directory("common")',
+                    insight: 'common/on_actions and common/situations were compared.',
+                },
+            ],
+            dependencyOrder: ['common/on_actions/test.txt', 'events/test.txt'],
+        }, makeContext('topic-blueprint'));
+
+        expect(result.success).to.equal(true);
+        const content = fs.readFileSync(path.join(workspaceRoot, '.cwtools-ai', 'topic-blueprint', 'design_blueprint.md'), 'utf8');
+        expect(content).to.include('## Blueprint Completeness Gate');
+        expect(content).to.include('Common Directory Capability Review');
+        expect(content).to.include('Reward and Outcome Plan');
+    });
+
     it('lets orchestrator sub-agents write localisation without waiting for pending-write confirmation', async () => {
         const pendingWrite = sinon.stub().resolves(false);
         const handler = new FileToolHandler({

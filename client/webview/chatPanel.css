@@ -810,6 +810,8 @@ body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6
 .ap-sections { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; resize: vertical; min-height: 0; }
 .annotatable-plan.ap-compact {
     flex: 0 0 auto;
+    height: auto !important;
+    max-height: none;
     min-height: 0;
 }
 .annotatable-plan.ap-compact .ap-header {

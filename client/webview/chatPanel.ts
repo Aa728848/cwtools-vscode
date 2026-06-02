@@ -4579,6 +4579,38 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             : card === 'walkthrough'
                 ? 'walkthrough-card-wrap'
                 : 'blueprint-card-wrap';
+        if (isManagerShell()) {
+            const labels = card === 'walkthrough'
+                ? chatI18n.annotations.walkthrough
+                : card === 'blueprint'
+                    ? chatI18n.annotations.blueprint
+                    : chatI18n.annotations.plan;
+            document.querySelectorAll(`.annotatable-plan.${className}`).forEach(el => {
+                const cardEl = el as HTMLElement;
+                const resolvedLabels = cardEl.classList.contains('orchestrator-plan-card') ? chatI18n.annotations.orchestratorPlan : labels;
+                cardEl.dataset.resolved = 'true';
+                cardEl.classList.add('ap-approved', 'ap-compact');
+                cardEl.style.display = '';
+                cardEl.style.opacity = '1';
+                cardEl.style.transform = '';
+                const header = cardEl.querySelector<HTMLElement>('.ap-header');
+                if (header) {
+                    header.tabIndex = 0;
+                    header.setAttribute('role', 'button');
+                    header.setAttribute('aria-expanded', 'false');
+                }
+                const hint = cardEl.querySelector<HTMLElement>('.ap-header-hint');
+                if (hint) hint.textContent = resolvedLabels.approved;
+                const approveBtn = cardEl.querySelector<HTMLButtonElement>('.ap-approve-btn');
+                if (approveBtn) {
+                    approveBtn.innerHTML = svgIcon('check') + escapeHtml(resolvedLabels.approved);
+                    approveBtn.disabled = true;
+                }
+                const submitBtn = cardEl.querySelector<HTMLButtonElement>('.ap-submit-btn');
+                if (submitBtn) submitBtn.disabled = true;
+            });
+            return;
+        }
         document.querySelectorAll(`.annotatable-plan.${className}`).forEach(el => {
             dismissResolvedCard(el as HTMLElement);
         });

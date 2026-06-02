@@ -1729,6 +1729,8 @@ body.agent-manager-shell .manager-workspace-external-host .annotatable-plan {
     margin: 0;
     animation: none !important;
     flex: 0 0 auto;
+    height: auto !important;
+    max-height: none;
     min-height: 0;
 }
 

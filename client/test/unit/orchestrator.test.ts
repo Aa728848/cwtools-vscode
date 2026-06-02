@@ -711,17 +711,17 @@ describe('QualityGate', () => {
         expect(prompt).to.include('common/tech.txt');
     });
 
-    it('checks all PDX ecosystem diagnostic file types', () => {
-        expect([...PDX_DIAGNOSTIC_EXTENSIONS]).to.deep.equal(['.txt', '.gui', '.yml', '.gfx', '.asset']);
+    it('checks only LSP-precise diagnostic file types', () => {
+        expect([...PDX_DIAGNOSTIC_EXTENSIONS]).to.deep.equal(['.txt', '.gui']);
         expect(isPdxDiagnosticFile('events/test.txt')).to.equal(true);
         expect(isPdxDiagnosticFile('interface/test.gui')).to.equal(true);
-        expect(isPdxDiagnosticFile('localisation/test_l_english.yml')).to.equal(true);
-        expect(isPdxDiagnosticFile('interface/sprites.gfx')).to.equal(true);
-        expect(isPdxDiagnosticFile('sound/test.asset')).to.equal(true);
+        expect(isPdxDiagnosticFile('localisation/test_l_english.yml')).to.equal(false);
+        expect(isPdxDiagnosticFile('interface/sprites.gfx')).to.equal(false);
+        expect(isPdxDiagnosticFile('sound/test.asset')).to.equal(false);
         expect(isPdxDiagnosticFile('notes.md')).to.equal(false);
     });
 
-    it('buildCombinedReviewPrompt names PDX diagnostic targets beyond txt and gui', () => {
+    it('buildCombinedReviewPrompt names only LSP diagnostic targets', () => {
         const qg = new QualityGate();
         const prompt = qg.buildCombinedReviewPrompt([
             'events/test.txt',
@@ -731,10 +731,9 @@ describe('QualityGate', () => {
             'sound/test.asset',
         ]);
 
-        expect(prompt).to.include('.txt, .gui, .yml, .gfx, .asset');
-        expect(prompt).to.include('localisation/test_l_english.yml');
-        expect(prompt).to.include('interface/sprites.gfx');
-        expect(prompt).to.include('sound/test.asset');
+        expect(prompt).to.include('.txt, .gui');
+        expect(prompt).to.include('LSP diagnostic target files include: events/test.txt, interface/test.gui');
+        expect(prompt).to.not.include('LSP diagnostic target files include: events/test.txt, interface/test.gui, localisation/test_l_english.yml');
     });
 
     it('parseReviewResult: 识别通过结果', () => {

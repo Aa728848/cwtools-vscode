@@ -91,7 +91,7 @@ export class QualityGate {
         const diagnosticTargetText = PDX_DIAGNOSTIC_EXTENSIONS.join(', ');
         const step1 = preFetchedDiagnostics
             ? '1. Review the pre-fetched diagnostics above.'
-            : `1. Diagnostics were not pre-fetched. You may call \`get_diagnostics\` if needed, especially for PDX ecosystem files (${diagnosticTargetText}).`;
+            : `1. Diagnostics were not pre-fetched. You may call \`get_diagnostics\` if needed, especially for LSP diagnostic target files (${diagnosticTargetText}).`;
 
         const hasSpriteDiagnostics = /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(preFetchedDiagnostics ?? '');
         const hasSoundDiagnostics = /show_sound|Expected value of type sound|type sound|sound\s*=|music|\.asset/i.test(preFetchedDiagnostics ?? '');
@@ -112,7 +112,7 @@ export class QualityGate {
             '3. Check cross-file reference consistency (Event IDs, Modifier names, Localization keys, and sprite/asset references).',
             '4. Verify the correctness of the scope chain.',
             '5. Check file structure integrity and functional completeness (Refer to Rule 3b).',
-            diagnosticTargets.length > 0 ? `6. PDX diagnostic target files include: ${diagnosticTargets.join(', ')}` : '6. No PDX diagnostic target files were written.',
+            diagnosticTargets.length > 0 ? `6. LSP diagnostic target files include: ${diagnosticTargets.join(', ')}` : '6. No LSP diagnostic target files were written.',
             '',
             'Output Format (You MUST output EXACTLY this JSON format in a markdown code block):',
             '```json',

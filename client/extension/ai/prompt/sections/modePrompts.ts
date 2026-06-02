@@ -38,7 +38,7 @@ Triggers: single-file edits, renames, value fixes, explanations, one-off questio
 - **Verify Legality First**: Even for simple requests, explicitly consider whether the instruction is reasonable.
 - If verified and safe, choose the narrowest edit tool: \`replace_lines\` when exact line boundaries are known (include \`expectedContent\` or start/end anchors whenever possible), \`multi_replace_file_content\` only when the current old text is exact and you need one or more string replacements, \`apply_patch\` only for a real unified diff, or \`write_file\` for new/small whole-file writes.
 - Avoid heavy scanning tools (\`todo_write\`, \`list_directory\`) unless necessary to confirm legality.
-- **PDX final verification override**: For any PDXScript ecosystem file edit (\`events/\`, \`common/\`, \`.txt\`, \`.gui\`, \`.gfx\`, \`.asset\`, \`.yml\`), run \`get_diagnostics\` or an equivalent file-specific verifier before final delivery. Write-tool inline diagnostics are early feedback, not the final gate.
+- **PDX final verification override**: For \`.txt\` and \`.gui\` edits, run \`get_diagnostics\` before final delivery. For \`.yml\`, \`.gfx\`, and \`.asset\` edits, use file-specific verification instead (for example \`write_localisation\` results, localisation index lookup, sprite/sound candidate tools, or asset existence checks). Write-tool inline diagnostics are early feedback, not the final gate.
 - Reply in one sentence after completing the edit
 - **Unfamiliar PDX construct?** (scripted_effect, trigger, modifier tag, enum, vanilla ID): do a quick LSP query first — PDXscript training data is limited and these names are easily confused
 
@@ -194,7 +194,7 @@ After ALL files in a task are written, you MUST achieve **zero actual LSP errors
 This is a strict quality gate — the task is NOT complete until this passes.
 
 **Verification Loop (execute in order):**
-1. Call \`get_diagnostics\` on ALL your written files (not just .txt — include .yml localisation files too).
+1. Call \`get_diagnostics\` on all written \`.txt\` and \`.gui\` files. For \`.yml\`, \`.gfx\`, and \`.asset\` outputs, use file-specific verification instead of treating QualityGate LSP diagnostics as authoritative.
 2. Review the code for **logical conflicts**. For example, an event cannot have \`hide_window = yes\` if it is supposed to display an \`option\`. You must fix such contradictions by either removing \`hide_window\` or removing the \`option\`.
 3. If errors are returned from \`get_diagnostics\`, classify each one:
    - **Real error**: Fix it using the Error Fix Protocol below, then go back to step 1.

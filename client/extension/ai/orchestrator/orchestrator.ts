@@ -176,7 +176,7 @@ export class Orchestrator {
                     '- Your ONLY data source is the diagnostic error list from `get_diagnostics`.',
                     '',
                     '### Workflow:',
-                    `1. Call \`get_diagnostics\` on EACH of these PDX ecosystem files (${diagnosticExtensionList}):`,
+                    `1. Call \`get_diagnostics\` on EACH of these LSP diagnostic target files (${diagnosticExtensionList}):`,
                     diagnosticFiles || '   - (No PDX diagnostic target files)',
                     '2. From the diagnostics output, extract ONLY errors/warnings containing "Missing localisation" or "missing loc key".',
                     '3. For each missing key found in step 2, call `write_localisation` to create it with appropriate text.',

@@ -2578,14 +2578,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private async ensureOrchestratorWalkthrough(result: GenerationResult): Promise<void> {
-        const dispatchStep = result.steps.find(s => s.type === 'tool_result' && s.toolName === 'dispatch_agents');
-        const toolResult = dispatchStep?.toolResult as Record<string, any> | undefined;
-        if (toolResult && Array.isArray(toolResult.agents)) {
+        const dispatchResults = result.steps
+            .filter(s => s.type === 'tool_result' && s.toolName === 'dispatch_agents')
+            .map(s => s.toolResult as Record<string, any> | undefined)
+            .filter((toolResult): toolResult is Record<string, any> => !!toolResult && Array.isArray(toolResult.agents));
+        if (dispatchResults.length > 0) {
             const topicId = this.topicManager.currentTopic?.id || 'default';
             const candidates = getTopicFileCandidates(topicId, 'walkthrough.md', getProjectWorkspaceRoot());
             const wtPath = candidates[0];
             if (wtPath) {
-                const mdContent = this.buildOrchestratorWalkthroughMarkdown(toolResult.agents, result);
+                const mdContent = this.buildOrchestratorWalkthroughMarkdown(dispatchResults, result);
                 try {
                     await fs.promises.mkdir(path.dirname(wtPath), { recursive: true });
                     await fs.promises.writeFile(wtPath, mdContent, 'utf-8');
@@ -2598,55 +2600,178 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    private buildOrchestratorWalkthroughMarkdown(agents: any[], result: GenerationResult): string {
-        const title = "Multi-Agent Coordination Walkthrough (多 Agent 协作演练报告)";
-        const topicTitle = this.topicManager.currentTopic?.title || "PDXScript 任务协作";
-        
+    private buildOrchestratorWalkthroughMarkdown(dispatchResults: Array<Record<string, any>>, result: GenerationResult): string {
+        const title = "Multi-Agent Coordination Walkthrough (多 Agent 协作全局报告)";
+        const topicTitle = this.topicManager.currentTopic?.title || "PDXScript 多 Agent 协作任务";
+        const topicId = this.topicManager.currentTopic?.id || 'default';
+        const workspaceRoot = getProjectWorkspaceRoot();
+        const taskLookup = new Map(this.extractDispatchTasks(result).map(task => [task.id, task]));
+        const failedNodes = new Set<string>();
+        const cancelledNodes = new Set<string>();
+        const changedFiles = new Map<string, { file: string; agentIds: Set<string> }>();
+        const batchSections: string[] = [];
+        const agentSections: string[] = [];
+        const manifestRows: string[] = [];
+        let totalAgents = 0;
+        let totalFilesCount = 0;
+        let totalTokens = 0;
+        let totalCost = 0;
+
+        const markdownText = (value: unknown, maxLength: number): string => {
+            const text = String(value ?? '')
+                .replace(/\r\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            if (!text) return '';
+            if (text.length <= maxLength) return text;
+            return `${text.slice(0, maxLength).trimEnd()}\n\n... [truncated, full length: ${text.length}]`;
+        };
+        const tableCell = (value: unknown, maxLength = 140): string => {
+            const text = this.shortPlainText(value, maxLength).replace(/\|/g, '\\|');
+            return text || '-';
+        };
+        const listValue = (value: unknown, maxLength = 120): string => {
+            if (!Array.isArray(value) || value.length === 0) return '无';
+            const items = value
+                .map(item => this.shortPlainText(item, maxLength))
+                .filter(Boolean);
+            return items.length > 0 ? items.map(item => `\`${item}\``).join(', ') : '无';
+        };
+        const fileLink = (file: string): string => {
+            const absPath = path.isAbsolute(file) ? file : path.join(workspaceRoot, file);
+            const relPath = path.relative(workspaceRoot, absPath) || file;
+            return `[\`${path.basename(absPath)}\`](file:///${absPath.replace(/\\/g, '/')}) - \`${relPath}\``;
+        };
+        const recordFile = (agentId: string, file: string): void => {
+            const absPath = path.isAbsolute(file) ? file : path.join(workspaceRoot, file);
+            const key = absPath.toLowerCase();
+            if (!changedFiles.has(key)) changedFiles.set(key, { file: absPath, agentIds: new Set<string>() });
+            changedFiles.get(key)?.agentIds.add(agentId);
+        };
+
+        dispatchResults.forEach((batch, batchIndex) => {
+            const agents = Array.isArray(batch.agents) ? batch.agents : [];
+            totalAgents += agents.length;
+            totalTokens += Number(batch.totalTokens || 0);
+            totalCost += Number(batch.estimatedCostCny || 0);
+
+            for (const id of Array.isArray(batch.failedNodes) ? batch.failedNodes : []) {
+                failedNodes.add(String(id));
+            }
+            for (const id of Array.isArray(batch.cancelledNodes) ? batch.cancelledNodes : []) {
+                cancelledNodes.add(String(id));
+            }
+
+            if (batch.summary) {
+                batchSections.push([
+                    `### Batch ${batchIndex + 1}`,
+                    '',
+                    markdownText(batch.summary, 1200),
+                ].join('\n'));
+            }
+
+            agents.forEach((agent: any, agentIndex: number) => {
+                const id = this.shortPlainText(agent.id, 100) || `agent_${batchIndex + 1}_${agentIndex + 1}`;
+                const task = taskLookup.get(id);
+                const role = agent.agentType || task?.agentType || 'agent';
+                const files: string[] = Array.isArray(agent.filesWritten)
+                    ? agent.filesWritten.filter((file: unknown): file is string => typeof file === 'string' && !!file)
+                    : [];
+                const status = agent.success
+                    ? '✅ 成功'
+                    : agent.needsClarification
+                        ? '⚠️ 待决'
+                        : agent.error
+                            ? '❌ 失败'
+                            : '未知';
+                const resultSummary = agent.success
+                    ? (agent.outputSummary || agent.summary || '子 Agent 已完成分配任务，但未返回详细摘要。')
+                    : agent.needsClarification
+                        ? (agent.clarification || agent.error || '子 Agent 请求父 Agent 决策。')
+                        : (agent.error || '子 Agent 未返回成功结果。');
+
+                totalFilesCount += files.length;
+                for (const file of files) {
+                    recordFile(id, file);
+                }
+
+                manifestRows.push(`| ${batchIndex + 1} | \`${tableCell(id, 100)}\` | \`${tableCell(role, 60)}\` | ${status} | ${files.length} | ${Number(agent.tokenUsed || 0)} | ${tableCell(resultSummary, 180)} |`);
+
+                const agentLines = [
+                    `### Agent ${id} (${role})`,
+                    '',
+                    `- **Batch**: ${batchIndex + 1}`,
+                    `- **状态**: ${status}`,
+                    `- **职责/任务**: ${markdownText(agent.prompt || task?.prompt, 1200) || '未记录任务说明。'}`,
+                    `- **依赖**: ${listValue(agent.dependencies || task?.dependencies)}`,
+                    `- **上下文文件**: ${listValue(task?.contextFiles)}`,
+                    `- **计划文件**: ${listValue(agent.plannedFiles)}`,
+                    `- **计划对象**: ${listValue(agent.plannedEntities)}`,
+                    `- **步骤数**: ${Number(agent.stepCount || 0)}`,
+                    `- **Token 消耗**: ${Number(agent.tokenUsed || 0)}`,
+                    '',
+                    '#### 子 Agent 工作总结',
+                    markdownText(resultSummary, 2400) || '未记录详细输出。',
+                ];
+
+                if (files.length > 0) {
+                    agentLines.push('', '#### 文件产出');
+                    agentLines.push(...files.map(file => `- ${fileLink(file)}`));
+                }
+
+                agentSections.push(agentLines.join('\n'));
+            });
+        });
+
+        const tokenTotal = result.tokenUsage?.total || totalTokens || 0;
+        const costTotal = result.tokenUsage?.estimatedCostCny ?? totalCost ?? 0;
+        const changedFileLines = Array.from(changedFiles.values()).map(({ file, agentIds }) => {
+            const displayPath = agentIds.size > 0
+                ? Array.from(agentIds).join(', ')
+                : 'unknown';
+            return `- ${fileLink(file)}，来源 Agent: ${displayPath}`;
+        });
+
         const lines = [
             `# ${title}`,
-            `\n> [!NOTE]\n> 本次任务采用多 Agent 协调模式执行，主控 Orchestrator 成功调度并分派了多个专职子 Agent 协同完成开发与校验。`,
-            `\n## 🎯 任务背景 (Topic Background)\n- **当前主题**: ${topicTitle}`,
-            `\n## 📊 协作节点执行列表 (Agent Execution Manifest)`,
-            `| 子任务 ID | 角色类型 | 执行状态 | 变更文件数 | Token 消耗 | 结果说明 |`,
-            `| :--- | :--- | :--- | :--- | :--- | :--- |`
+            '',
+            '> [!NOTE]',
+            '> 本报告由父级主 Agent 在所有 dispatch_agents 批次完成后统一生成，用于汇总每个子 Agent 的职责、执行过程、产出摘要和文件变更，避免只保留最后一个子 Agent 的结果。',
+            '',
+            '## 任务背景 (Topic Background)',
+            `- **当前主题**: ${topicTitle}`,
+            `- **调度批次**: ${dispatchResults.length}`,
+            `- **子 Agent 数量**: ${totalAgents}`,
+            `- **总 Token**: ${tokenTotal}`,
+            `- **估算成本**: ¥${costTotal.toFixed(4)}`,
+            '',
+            '## 主 Agent 全局总结 (Parent Agent Global Summary)',
+            markdownText(result.explanation, 1800) || '父级主 Agent 已完成多 Agent 协调，并基于调度结果生成全局 Walkthrough。',
+            '',
+            '## 协作节点执行列表 (Agent Execution Manifest)',
+            '| Batch | 子任务 ID | 角色类型 | 执行状态 | 变更文件数 | Token 消耗 | 结果说明 |',
+            '| :--- | :--- | :--- | :--- | ---: | ---: | :--- |',
+            ...(manifestRows.length > 0 ? manifestRows : ['| - | - | - | - | 0 | 0 | 未记录子 Agent 结果 |']),
+            '',
+            '## 调度批次总结 (Dispatch Batch Summaries)',
+            batchSections.length > 0 ? batchSections.join('\n\n') : '未记录批次级摘要。',
+            '',
+            '## 每个子 Agent 的工作总结 (Per-Agent Work Summaries)',
+            agentSections.length > 0 ? agentSections.join('\n\n') : '未记录子 Agent 工作总结。',
+            '',
+            '## 文件变更总览 (File Changes Summary)',
+            `本次多 Agent 协作共记录 **${totalFilesCount}** 个文件写入事件，涉及 **${changedFiles.size}** 个唯一文件。`,
+            '',
+            changedFileLines.length > 0 ? changedFileLines.join('\n') : '未记录子 Agent 文件变更。',
+            '',
+            '## 验证与质量把关 (Verification & Quality Gate)',
+            `- **失败节点**: ${failedNodes.size > 0 ? Array.from(failedNodes).map(id => `\`${id}\``).join(', ') : '无'}`,
+            `- **取消节点**: ${cancelledNodes.size > 0 ? Array.from(cancelledNodes).map(id => `\`${id}\``).join(', ') : '无'}`,
+            '- **主 Agent 职责**: 以全局视角审查所有子 Agent 结果，确认各部分产出能够组成完整任务交付，而不是只采用最后完成节点的总结。',
+            '',
+            '---',
+            `*报告由 Eddy CWTool AI 协调器在多 Agent 协作结束后生成并存档于 \`.cwtools-ai/${topicId}/walkthrough.md\`。*`,
         ];
-
-        let totalFilesCount = 0;
-        const fileChangeDetails: string[] = [];
-
-        for (const agent of agents) {
-            const statusIcon = agent.success ? "✅ 成功" : agent.error ? "❌ 失败" : "⚠️ 待澄清";
-            const filesCount = Array.isArray(agent.filesWritten) ? agent.filesWritten.length : 0;
-            totalFilesCount += filesCount;
-
-            const safeError = agent.error ? String(agent.error).replace(/\n/g, ' ') : '';
-            const summaryText = agent.success 
-                ? "节点工作已完美交付并通过质量校验" 
-                : agent.needsClarification 
-                    ? `上报待决: ${agent.clarification?.slice(0, 100)}`
-                    : `执行异常: ${safeError.slice(0, 100)}`;
-
-            lines.push(`| \`${agent.id}\` | \`${agent.agentType || 'builder'}\` | ${statusIcon} | ${filesCount} | ${agent.tokenUsed || 0} | ${summaryText} |`);
-
-            if (filesCount > 0) {
-                fileChangeDetails.push(`### 📂 节点 \`${agent.id}\` 修改文件清单`);
-                for (const file of agent.filesWritten) {
-                    const absPath = path.isAbsolute(file) ? file : path.join(getProjectWorkspaceRoot(), file);
-                    fileChangeDetails.push(`- **[\`${path.basename(absPath)}\`](file:///${absPath.replace(/\\/g, '/')})** — \`${path.relative(getProjectWorkspaceRoot(), absPath)}\``);
-                }
-                fileChangeDetails.push('');
-            }
-        }
-
-        lines.push(`\n## 📂 文件变更总览 (File Changes Summary)\n本次多 Agent 协作共修改/创建了 **${totalFilesCount}** 个文件。`);
-        lines.push('');
-        lines.push(...fileChangeDetails);
-
-        lines.push(`\n## 🔍 验证与质量把关 (Verification & Quality Gate)`);
-        lines.push(`- **质量校验**: 所有子 Agent 执行结束后，代码已自动通过 CWTools LSP 语法与作用域链零报错诊断交付门禁（Zero-Error Delivery Gate）。`);
-        lines.push(`- **执行代金总耗**: ${result.tokenUsage?.total || 0} Token (折合人民币约 ${(result.tokenUsage?.estimatedCostCny || 0).toFixed(4)} 元)。`);
-        
-        lines.push(`\n\n--- \n*报告由 Eddy CWTool AI 协调器在多 Agent 协作结束后智能自动生成并存档于 \`.cwtools-ai/${this.topicManager.currentTopic?.id || 'default'}/walkthrough.md\`。*`);
 
         return lines.join('\n');
     }

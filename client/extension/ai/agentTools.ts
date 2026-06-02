@@ -108,6 +108,16 @@ const TOOL_TIMEOUTS: Record<string, number> = {
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 
+function compactAgentOutputForReport(output: unknown, maxLength = 1600): string | undefined {
+    const text = String(output ?? '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    if (!text) return undefined;
+    if (text.length <= maxLength) return text;
+    return text.slice(0, maxLength).trimEnd() + `\n\n... [truncated, full length: ${text.length}]`;
+}
+
 /**
  * Executes Agent tools by communicating with the CWTools Language Server
  * and directly reading workspace files.
@@ -1347,13 +1357,19 @@ export class AgentToolExecutor {
                 '__orchestrator__',
             );
 
-            // Build lightweight return results (only status and file list, not complete output)
-            // Reduce the size of the main Agent context and alleviate the thinking lag in the summary stage.
+            // Keep the parent Agent context compact while preserving enough detail for the final global walkthrough.
             const agentSummaries: Array<{
                 id: string;
+                agentType?: string;
+                prompt?: string;
+                dependencies?: string[];
+                plannedFiles?: string[];
+                plannedEntities?: string[];
                 success: boolean;
                 filesWritten: string[];
                 tokenUsed: number;
+                stepCount?: number;
+                outputSummary?: string;
                 error?: string;
                 needsClarification?: boolean;
                 clarification?: string;
@@ -1389,11 +1405,19 @@ export class AgentToolExecutor {
                         ).catch(() => {});
                     }
                 }
+                const taskMeta = tasks.find(task => task.id === id);
                 agentSummaries.push({
                     id,
+                    agentType: taskMeta?.agentType,
+                    prompt: taskMeta?.prompt,
+                    dependencies: taskMeta?.dependencies ?? [],
+                    plannedFiles: taskMeta?.plannedFiles ?? [],
+                    plannedEntities: taskMeta?.plannedEntities ?? [],
                     success: agentResult.success,
                     filesWritten: agentResult.writtenFiles,
                     tokenUsed: agentResult.tokenUsage.total,
+                    stepCount: agentResult.stepCount,
+                    outputSummary: compactAgentOutputForReport(agentResult.output),
                     error: agentResult.error ? agentResult.error.slice(0, 1000) : undefined,
                     needsClarification: agentResult.needsClarification,
                     clarification: agentResult.clarification ? agentResult.clarification.slice(0, 2000) : undefined,

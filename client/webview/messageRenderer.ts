@@ -77,7 +77,7 @@ export interface ToolPairOptions {
 // ── Tool icon map (text-only, no SVG — SVG injected by WebView consumer) ─────
 
 const TOOL_ICON_LABELS: Record<string, string> = {
-    read_file: '📂', write_file: '💾', edit_file: '✏️', multiedit: '✏️',
+    read_file: '📂', write_file: '💾', edit_file: '✏️', multiedit: '✏️', save_workflow: '💾',
     list_directory: '📁', search_mod_files: '🔍', validate_code: '✅',
     get_file_context: '📄', get_diagnostics: '🩺', get_completion_at: '💡',
     document_symbols: '🔖', workspace_symbols: '🔖', query_scope: '🔭',

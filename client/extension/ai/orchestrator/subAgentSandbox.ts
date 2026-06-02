@@ -2,6 +2,8 @@ import * as path from 'path';
 import { getAgentProfile } from './agentRegistry';
 import type { TaskNode } from './types';
 import type { AgentMode } from '../types';
+import { isPlanModeCardArtifactFile } from '../planModeGuard';
+import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 
 /**
  * Orchestrator 子 Agent 物理沙盒隔离规范 (Sub-Agent Sandbox)
@@ -41,13 +43,13 @@ export function buildSubAgentSandbox(
     // 默认黑名单拦截高危/交互型特权工具
     const defaultExcludes = new Set<string>([
         'web_fetch', 'search_web', 'codesearch',
-        'run_command', 'git_ops',
+        'run_command', 'git_ops', 'save_workflow',
         'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
     ]);
 
     // 如果是只读或者 plan 规划角色，额外禁止所有物理写入工具
     if (profile.toolBudget === 'read_only' || profile.toolBudget === 'plan') {
-        const writeTools = ['write_file', 'replace_file_content', 'multi_replace_file_content', 'write_localisation', 'replace_lines'];
+        const writeTools = ['write_file', 'replace_file_content', 'multi_replace_file_content', 'write_localisation', 'replace_lines', 'apply_patch', 'write_design_blueprint'];
         writeTools.forEach(t => defaultExcludes.add(t));
     }
 
@@ -101,6 +103,50 @@ export function buildSubAgentSandbox(
 /**
  * 在 Host 层拦截子 Agent 的工具与路径调用，执行沙盒安全强校验
  */
+function targetMatchesWriteScope(targetFile: string, writeScope: string[], workspaceRoot: string): boolean {
+    const absTarget = path.isAbsolute(targetFile) ? targetFile : path.resolve(workspaceRoot, targetFile);
+    const relTarget = path.relative(workspaceRoot, absTarget).replace(/\\/g, '/').toLowerCase();
+
+    for (const scope of writeScope) {
+        const absScope = path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope);
+        const relScope = path.relative(workspaceRoot, absScope).replace(/\\/g, '/').toLowerCase();
+
+        if (
+            scope.startsWith('.') &&
+            scope.toLowerCase() !== TOPIC_ARTIFACT_SCOPE &&
+            relTarget.endsWith(scope.toLowerCase())
+        ) {
+            return true;
+        }
+        if (
+            scope.toLowerCase() === TOPIC_ARTIFACT_SCOPE &&
+            (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`))
+        ) {
+            return true;
+        }
+        if (scope.toLowerCase() === 'localisation' && relTarget.includes('localisation')) {
+            return true;
+        }
+        if (relTarget.includes(relScope) || relTarget === relScope) {
+            return true;
+        }
+        if (!scope.startsWith('.') && scope.toLowerCase() !== 'localisation') {
+            const ext = path.extname(relScope);
+            if (ext) {
+                const relScopeDir = path.dirname(relScope).replace(/\\/g, '/');
+                if (relScopeDir && relScopeDir !== '.' && relScopeDir !== '/' && relScopeDir !== '') {
+                    const requiredPrefix = relScopeDir.endsWith('/') ? relScopeDir : relScopeDir + '/';
+                    if (relTarget.startsWith(requiredPrefix) || relTarget === relScopeDir) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 export function enforceSubAgentSafety(
     sandbox: SubAgentSandbox,
     toolName: string,
@@ -110,7 +156,7 @@ export function enforceSubAgentSafety(
     // W7 fix: 针对 excluded 敏感特权工具直接物理阻断
     const excludedTools = new Set<string>([
         'web_fetch', 'search_web', 'codesearch',
-        'run_command', 'git_ops',
+        'run_command', 'git_ops', 'save_workflow',
         'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
     ]);
 
@@ -129,12 +175,23 @@ export function enforceSubAgentSafety(
 
     // ─── 1. 判断是否属于文件写入类工具 ───
     const writeTools = new Set<string>([
-        'write_file', 'replace_file_content', 'multi_replace_file_content', 'write_localisation', 'replace_lines'
+        'write_file', 'replace_file_content', 'multi_replace_file_content', 'write_localisation', 'replace_lines', 'apply_patch', 'write_design_blueprint'
     ]);
 
     if (writeTools.has(toolName)) {
+        const targetFiles = getAgentToolTargetFiles(toolName, args || {}, workspaceRoot);
+        const isPlanCardArtifactWrite = sandbox.mode === 'plan'
+            && targetFiles.length > 0
+            && targetFiles.every(target => isPlanModeCardArtifactFile(target, workspaceRoot));
+
+        if (toolName === 'write_design_blueprint' && sandbox.mode === 'plan') {
+            return { allowed: true };
+        }
         // 如果子 Agent 本身就是只读角色（如 explorer, reviewer），直接断开拦截
         if (sandbox.writeScope && sandbox.writeScope.length === 0) {
+            if (isPlanCardArtifactWrite) {
+                return { allowed: true };
+            }
             return {
                 allowed: false,
                 reason: `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用物理写入工具 '${toolName}'`
@@ -143,7 +200,9 @@ export function enforceSubAgentSafety(
 
         // 提取写入文件的具体路径参数
         let targetFile: string = '';
-        if (args && typeof args === 'object') {
+        if (targetFiles.length > 0) {
+            targetFile = targetFiles[0]!;
+        } else if (args && typeof args === 'object') {
             targetFile = args.TargetFile || args.filePath || args.targetRelativePath || args.file || '';
         }
 
@@ -154,6 +213,16 @@ export function enforceSubAgentSafety(
         // 将目标物理路径规格化为统一的工作区正斜杠相对路径
         const absTarget = path.isAbsolute(targetFile) ? targetFile : path.resolve(workspaceRoot, targetFile);
         const relTarget = path.relative(workspaceRoot, absTarget).replace(/\\/g, '/').toLowerCase();
+
+        if (sandbox.writeScope && sandbox.writeScope.length > 0 && targetFiles.length > 1) {
+            const invalidTarget = targetFiles.find(target => !targetMatchesWriteScope(target, sandbox.writeScope!, workspaceRoot));
+            if (invalidTarget) {
+                return {
+                    allowed: false,
+                    reason: `子 Agent 沙盒物理拦截：多文件写入目标 '${invalidTarget}' 不在许可的作用域范围 [${sandbox.writeScope.join(', ')}] 内，拒绝操作。`
+                };
+            }
+        }
 
         // 如果存在具体的限制范围，验证写入是否越权越界
         if (sandbox.writeScope && sandbox.writeScope.length > 0) {

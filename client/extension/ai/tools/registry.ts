@@ -4,7 +4,7 @@ import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
     | 'query_scope' | 'query_types' | 'query_rules' | 'remove_ignored_diagnostic'
-    | 'query_localisation_index' | 'query_workspace_index' | 'query_project_profile' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
+    | 'query_localisation_index' | 'query_workspace_index' | 'query_project_profile' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file'
@@ -16,7 +16,7 @@ export type AgentToolName =
     | 'query_static_modifiers' | 'query_variables' | 'set_memory'
     | 'get_memory' | 'search_memory' | 'save_memory'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
-    | 'write_localisation' | 'write_design_blueprint' | 'git_ops' | 'dispatch_agents'
+    | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results';
 
 export type ToolEffect =
@@ -59,7 +59,7 @@ export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_localisation_index', 'query_workspace_index', 'query_references',
-    'query_project_profile', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'query_project_profile', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -67,7 +67,7 @@ const BASE_READ: AgentToolName[] = [
 ];
 const EDIT: AgentToolName[] = [
     'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
-    'edit_pdx_block', 'write_localisation', 'write_design_blueprint', 'remove_ignored_diagnostic'
+    'edit_pdx_block', 'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
 const NETWORK: AgentToolName[] = ['web_fetch', 'search_web', 'codesearch'];
@@ -77,7 +77,7 @@ const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
-const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_fetch', 'search_web', 'codesearch', 'run_command', 'git_ops', ...MEDIA]);
+const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_fetch', 'search_web', 'codesearch', 'run_command', 'git_ops', 'save_workflow', ...MEDIA]);
 
 // Mutating tools: 改变工作区 / 记忆 / 黑板状态的工具。doom-loop 检测见到 mutating 成功
 // 后会清空对应文件的 pairFrequency 窗口,避免把 verify-after-write 误判为重复。
@@ -101,18 +101,18 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, 'todo_write', 'write_design_blueprint', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops']);
-const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops']);
+const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, 'todo_write', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops', 'save_workflow']);
+const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY]);
 const LOC_MODES = new Set([
     'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
     'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
-    'analyze_diagnostic_error'
+    'analyze_diagnostic_error', 'save_workflow'
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error']);
+const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, 'set_memory', 'get_memory', 'search_memory', 'todo_write', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;

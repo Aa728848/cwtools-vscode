@@ -744,6 +744,7 @@ export type AgentToolName =
     | 'query_localisation_index'
     | 'query_workspace_index'
     | 'query_project_profile'
+    | 'run_skill'
     | 'query_rules'
     | 'query_references'
     // validate_code — REMOVED: replaced by get_diagnostics + multi_replace_file_content inline diagnostics
@@ -798,6 +799,7 @@ export type AgentToolName =
     | 'write_localisation'
     // ── Design tools ──
     | 'write_design_blueprint'
+    | 'save_workflow'
     // ── Git tools ──
     | 'git_ops'
     // ── MCP tools ──

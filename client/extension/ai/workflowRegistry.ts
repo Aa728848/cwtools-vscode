@@ -11,7 +11,11 @@
  *   - Provide query helpers for runner integration
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type { AgentMode, AgentToolName } from './types';
+import { getProjectWorkspaceRoot } from './workspacePaths';
+import { TOOL_REGISTRY } from './tools/registry';
 
 // ─── Workflow contracts ──────────────────────────────────────────────────────
 
@@ -78,6 +82,28 @@ export interface AiWorkflow {
 	verification: WorkflowVerificationStep[];
 	/** Optional: system prompt supplement injected before the mode prompt. */
 	promptSupplement?: string;
+}
+
+export interface WorkflowSaveInput {
+	id?: string;
+	title: string;
+	description: string;
+	mode?: AgentMode;
+	promptSupplement: string;
+	allowedTools?: AgentToolName[];
+	blockedTools?: AgentToolName[];
+	requiredContext?: Array<WorkflowContextRequirement['kind'] | `${WorkflowContextRequirement['kind']}!`>;
+	verificationTool?: AgentToolName;
+	overwrite?: boolean;
+}
+
+export interface SaveProjectWorkflowResult {
+	success: boolean;
+	id: string;
+	message: string;
+	filePath?: string;
+	workflow?: AiWorkflow;
+	alreadyExists?: boolean;
 }
 
 // ─── Workflow registry ───────────────────────────────────────────────────────
@@ -399,25 +425,289 @@ registerWorkflow({
 
 // ─── Query helpers ───────────────────────────────────────────────────────────
 
+// Project workflow files:
+// .cwtools-ai/workflows/<id>.md or .agents/workflows/<id>.md
+// Frontmatter keys: id, title, description, mode, allowed-tools, blocked-tools,
+// required-context, verification-tool.
+function parseWorkflowFrontmatter(content: string): { meta: Record<string, string>; body: string } {
+	const normalized = content.replace(/^\uFEFF/, '');
+	if (!normalized.startsWith('---')) return { meta: {}, body: normalized.trim() };
+	const lines = normalized.split(/\r?\n/);
+	const meta: Record<string, string> = {};
+	let end = -1;
+	for (let i = 1; i < lines.length; i++) {
+		const line = lines[i] ?? '';
+		if (line.trim() === '---') {
+			end = i;
+			break;
+		}
+		const match = line.match(/^([A-Za-z0-9_.-]+)\s*:\s*(.*)$/);
+		if (match) {
+			meta[match[1]!.toLowerCase()] = match[2]!.trim().replace(/^["']|["']$/g, '');
+		}
+	}
+	return end >= 0
+		? { meta, body: lines.slice(end + 1).join('\n').trim() }
+		: { meta: {}, body: normalized.trim() };
+}
+
+function splitCsv(value: string | undefined): string[] {
+	if (!value) return [];
+	return value.split(/[,\n]/).map(v => v.trim()).filter(Boolean);
+}
+
+function parseMode(value: string | undefined): AgentMode {
+	const mode = (value || 'build').trim() as AgentMode;
+	const valid: AgentMode[] = ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator'];
+	return valid.includes(mode) ? mode : 'build';
+}
+
+function parseToolList(value: string | undefined): AgentToolName[] {
+	const tools: AgentToolName[] = [];
+	for (const raw of splitCsv(value)) {
+		const name = raw as AgentToolName;
+		if (TOOL_REGISTRY.has(name as any)) tools.push(name);
+	}
+	return tools;
+}
+
+function uniqueTools(values: AgentToolName[] | undefined): AgentToolName[] {
+	const out: AgentToolName[] = [];
+	const seen = new Set<string>();
+	for (const value of values || []) {
+		const name = String(value || '').trim() as AgentToolName;
+		if (!name || seen.has(name)) continue;
+		if (!TOOL_REGISTRY.has(name as any)) continue;
+		seen.add(name);
+		out.push(name);
+	}
+	return out;
+}
+
+function parseRequiredContext(value: string | undefined): WorkflowContextRequirement[] {
+	const entries = splitCsv(value);
+	if (entries.length === 0) {
+		return [{ kind: 'workspace', required: false, description: 'Workspace context is optional.' }];
+	}
+	return entries.map(raw => {
+		const required = raw.endsWith('!');
+		const clean = raw.replace(/!$/, '').trim() as WorkflowContextRequirement['kind'];
+		const valid = ['activeFile', 'diagnostics', 'selection', 'workspace'].includes(clean) ? clean : 'workspace';
+		return {
+			kind: valid,
+			required,
+			description: `${valid} context${required ? ' is required' : ' is useful'} for this workflow.`,
+		};
+	});
+}
+
+function parseProjectWorkflow(filePath: string): AiWorkflow | undefined {
+	try {
+		const raw = fs.readFileSync(filePath, 'utf8');
+		const { meta, body } = parseWorkflowFrontmatter(raw);
+		const id = (meta.id || path.basename(filePath, path.extname(filePath))).trim();
+		if (!id) return undefined;
+
+		const allowedTools = parseToolList(meta['allowed-tools'] || meta.allowedtools || meta.tools);
+		const blockedTools = parseToolList(meta['blocked-tools'] || meta.blockedtools);
+		const hasAllowlist = allowedTools.length > 0 || (meta['tool-policy'] || meta.toolpolicy || '').toLowerCase() === 'allowlist';
+		const toolPolicy: WorkflowToolPolicy = hasAllowlist
+			? { strategy: 'allowlist', tools: allowedTools }
+			: { strategy: 'blocklist', tools: blockedTools };
+
+		const verificationTool = (meta['verification-tool'] || meta.verificationtool) as AgentToolName | undefined;
+		const verification: WorkflowVerificationStep[] = verificationTool && TOOL_REGISTRY.has(verificationTool as any)
+			? [{
+				id: 'verify',
+				description: `Run ${verificationTool} for workflow verification.`,
+				verificationTool,
+				required: true,
+			}]
+			: [];
+
+		return {
+			id,
+			title: meta.title || id,
+			description: meta.description || 'Project-defined workflow.',
+			mode: parseMode(meta.mode),
+			requiredContext: parseRequiredContext(meta['required-context'] || meta.requiredcontext),
+			toolPolicy,
+			phases: [{
+				id: 'run',
+				title: 'Run Workflow',
+				description: meta.phase || 'Follow the project-defined workflow instructions.',
+			}],
+			verification,
+			promptSupplement: body || undefined,
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function loadProjectWorkflows(): Map<string, AiWorkflow> {
+	const out = new Map<string, AiWorkflow>();
+	const workspaceRoot = getProjectWorkspaceRoot();
+	if (!workspaceRoot) return out;
+
+	const dirs = [
+		path.join(workspaceRoot, '.cwtools-ai', 'workflows'),
+		path.join(workspaceRoot, '.agents', 'workflows'),
+	];
+	for (const dir of dirs) {
+		if (!fs.existsSync(dir)) continue;
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue;
+			const workflow = parseProjectWorkflow(path.join(dir, entry.name));
+			if (workflow) out.set(workflow.id, workflow);
+		}
+	}
+	return out;
+}
+
+function sanitizeWorkflowId(value: string | undefined, fallbackTitle: string): string {
+	const source = (value || fallbackTitle || '').trim().toLowerCase();
+	const sanitized = source
+		.replace(/[^a-z0-9_.-]+/g, '-')
+		.replace(/^[.-]+|[.-]+$/g, '')
+		.slice(0, 80);
+	return sanitized || `workflow-${Date.now()}`;
+}
+
+function frontmatterValue(value: string): string {
+	return value.replace(/\r?\n/g, ' ').replace(/"/g, '\\"').trim();
+}
+
+function formatFrontmatterCsv(values: string[]): string | undefined {
+	const clean = values.map(v => v.trim()).filter(Boolean);
+	return clean.length > 0 ? clean.join(', ') : undefined;
+}
+
+function normalizeRequiredContextForSave(values: WorkflowSaveInput['requiredContext']): string[] {
+	const entries = values && values.length > 0 ? values : ['workspace!'];
+	const validKinds = new Set(['activeFile', 'diagnostics', 'selection', 'workspace']);
+	const out: string[] = [];
+	for (const raw of entries) {
+		const text = String(raw || '').trim();
+		const required = text.endsWith('!');
+		const kind = text.replace(/!$/, '');
+		if (!validKinds.has(kind)) continue;
+		out.push(`${kind}${required ? '!' : ''}`);
+	}
+	return out.length > 0 ? out : ['workspace!'];
+}
+
+export function saveProjectWorkflow(
+	input: WorkflowSaveInput,
+	workspaceRoot = getProjectWorkspaceRoot(),
+	onBeforeWrite?: (filePath: string, previousContent: string | null) => void
+): SaveProjectWorkflowResult {
+	if (!workspaceRoot) {
+		return { success: false, id: '', message: 'No workspace is open; cannot save a project workflow.' };
+	}
+
+	const title = String(input.title || '').trim();
+	const description = String(input.description || '').trim();
+	const promptSupplement = String(input.promptSupplement || '').trim();
+	if (!title) {
+		return { success: false, id: '', message: 'Workflow title is required.' };
+	}
+	if (!description) {
+		return { success: false, id: '', message: 'Workflow description is required.' };
+	}
+	if (!promptSupplement) {
+		return { success: false, id: '', message: 'Workflow instructions are required.' };
+	}
+
+	const id = sanitizeWorkflowId(input.id, title);
+	const workflowDir = path.join(workspaceRoot, '.cwtools-ai', 'workflows');
+	const filePath = path.join(workflowDir, `${id}.md`);
+	if (fs.existsSync(filePath) && !input.overwrite) {
+		return {
+			success: false,
+			id,
+			filePath,
+			alreadyExists: true,
+			message: `Workflow '${id}' already exists. Set overwrite=true to replace it.`,
+		};
+	}
+
+	const mode = parseMode(input.mode);
+	const allowedTools = uniqueTools(input.allowedTools);
+	const blockedTools = uniqueTools(input.blockedTools);
+	const requiredContext = normalizeRequiredContextForSave(input.requiredContext);
+	const verificationTool = input.verificationTool && TOOL_REGISTRY.has(input.verificationTool as any)
+		? input.verificationTool
+		: undefined;
+
+	const frontmatter: string[] = [
+		'---',
+		`id: ${id}`,
+		`title: "${frontmatterValue(title)}"`,
+		`description: "${frontmatterValue(description)}"`,
+		`mode: ${mode}`,
+		`required-context: ${requiredContext.join(', ')}`,
+	];
+	const allowed = formatFrontmatterCsv(allowedTools);
+	const blocked = formatFrontmatterCsv(blockedTools);
+	if (allowed) {
+		frontmatter.push(`allowed-tools: ${allowed}`);
+	} else if (blocked) {
+		frontmatter.push(`blocked-tools: ${blocked}`);
+	}
+	if (verificationTool) {
+		frontmatter.push(`verification-tool: ${verificationTool}`);
+	}
+	frontmatter.push('---', '', promptSupplement, '');
+
+	fs.mkdirSync(workflowDir, { recursive: true });
+	const previousContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : null;
+	onBeforeWrite?.(filePath, previousContent);
+	fs.writeFileSync(filePath, frontmatter.join('\n'), 'utf8');
+
+	const workflow = parseProjectWorkflow(filePath);
+	return {
+		success: true,
+		id,
+		filePath,
+		workflow,
+		message: `Saved workflow '${id}' to ${filePath}. It is now available as /workflow:${id}.`,
+	};
+}
+
+function getMergedWorkflowMap(): Map<string, AiWorkflow> {
+	const merged = new Map(WORKFLOWS);
+	for (const [id, workflow] of loadProjectWorkflows()) {
+		merged.set(id, workflow);
+	}
+	return merged;
+}
+
 /**
  * Returns the workflow for a given ID, or undefined if not found.
  */
 export function getWorkflow(id: string): AiWorkflow | undefined {
-	return WORKFLOWS.get(id);
+	return getMergedWorkflowMap().get(id);
 }
 
 /**
  * Returns all registered workflows.
  */
 export function getAllWorkflows(): AiWorkflow[] {
-	return Array.from(WORKFLOWS.values());
+	return Array.from(getMergedWorkflowMap().values());
 }
 
 /**
  * Returns all workflow IDs.
  */
 export function getAllWorkflowIds(): string[] {
-	return Array.from(WORKFLOWS.keys());
+	return Array.from(getMergedWorkflowMap().keys());
 }
 
 /**

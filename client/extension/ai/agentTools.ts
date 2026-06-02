@@ -31,6 +31,9 @@ import { validateToolAccess } from './tools/permissions';
 import { runLedger } from './runner/runLedger';
 import { TOOL_REGISTRY } from './tools/registry';
 import { queryProjectProfile } from './projectProfile';
+import { loadSkill } from './skills';
+import { validatePlanModeToolUse } from './planModeGuard';
+import { saveProjectWorkflow } from './workflowRegistry';
 
 // ─── Tool Executor ───────────────────────────────────────────────────────────
 
@@ -94,8 +97,10 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     deploy_mod_asset: 0,
     // Git
     git_ops: 30_000,
+    save_workflow: 30_000,
     // Todo — pure memory operation, very short timeout is enough
     todo_write: 5_000,
+    run_skill: 30_000,
     // Orchestrator - sub-Agent scheduling takes a long time and is managed by the coordinator's own life cycle and external AbortSignal
     // Relax the timeout to 1 hour to prevent unexpected timeouts and zombie retries due to slow response of large language models
     dispatch_agents: 3600_000,
@@ -117,6 +122,8 @@ export class AgentToolExecutor {
     public onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
     /** Callback when a file is automatically written (auto mode). */
     public onAutoWritten?: (file: string, isNewFile: boolean) => void;
+    /** Callback when a project workflow is saved. */
+    public onWorkflowSaved?: () => void;
     /**
      * Callback fired BEFORE any file is written or created.
      * Used by the retract system to snapshot file state for later restoration.
@@ -150,14 +157,20 @@ export class AgentToolExecutor {
 
     private readonly clientGetter: () => LanguageClient;
     public readonly workspaceRoot: string;
+    public readonly globalStoragePath?: string;
+    public readonly extensionPath?: string;
     public readonly indexService?: IndexService;
 
     constructor(
         clientOrGetter: LanguageClient | (() => LanguageClient),
         workspaceRoot: string,
-        indexService?: IndexService
+        indexService?: IndexService,
+        globalStoragePath?: string,
+        extensionPath?: string
     ) {
         this.workspaceRoot = workspaceRoot;
+        this.globalStoragePath = globalStoragePath;
+        this.extensionPath = extensionPath;
         this.indexService = indexService;
         this.clientGetter = typeof clientOrGetter === 'function'
             ? clientOrGetter
@@ -280,6 +293,17 @@ export class AgentToolExecutor {
         // T4.1 — replay short-circuit. When a ReplaySession is attached, serve recorded
         // results from the original run's ledger instead of executing live. Misses
         // fall through to live execution (caller can still validate divergence).
+        if (mode === 'plan') {
+            const guard = validatePlanModeToolUse(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
+            if (!guard.allowed) {
+                return {
+                    success: false,
+                    error: guard.reason,
+                    planModeBlocked: true,
+                };
+            }
+        }
+
         const replaySession = (context?.runnerOptions as any)?.replaySession;
         if (replaySession) {
             const { maybeServeFromReplay } = require('./runner/runReplay') as typeof import('./runner/runReplay');
@@ -423,6 +447,8 @@ export class AgentToolExecutor {
                 result = await this.queryWorkspaceIndex(args as any); break;
             case 'query_project_profile':
                 result = queryProjectProfile(this.workspaceRoot, args as any); break;
+            case 'run_skill':
+                result = this.runSkill(args); break;
             case 'query_rules':
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_references':
@@ -491,6 +517,8 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.writeLocalisation(args as any, context); break;
             case 'write_design_blueprint':
                 result = await this.fileHandler.writeDesignBlueprint(args as any, context); break;
+            case 'save_workflow':
+                result = this.saveWorkflow(args); break;
             case 'git_ops':
                 result = await this.fileHandler.gitOps(args as any); break; // git ops uses workspace wide state mostly
 
@@ -570,6 +598,49 @@ export class AgentToolExecutor {
                 } else {
                     throw new Error(`Unknown tool: ${toolName}`);
                 }
+        }
+        return result;
+    }
+
+    private runSkill(args: Record<string, unknown>): unknown {
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        if (!name) {
+            return {
+                success: false,
+                error: 'run_skill requires a non-empty name.',
+            };
+        }
+
+        const loaded = loadSkill(name, {
+            workspaceRoot: this.workspaceRoot,
+            globalStoragePath: this.globalStoragePath,
+            extensionPath: this.extensionPath,
+        });
+        if (!loaded.success) return loaded;
+
+        const argumentSummary = args.arguments === undefined
+            ? ''
+            : `\n\n<skill-arguments>\n${JSON.stringify(args.arguments, null, 2)}\n</skill-arguments>`;
+        return {
+            success: true,
+            name: loaded.skill.name,
+            source: loaded.skill.source,
+            runAs: loaded.skill.runAs,
+            allowedTools: loaded.skill.allowedTools,
+            truncated: loaded.truncated,
+            content: `<skill name="${loaded.skill.name}">\n${loaded.content}\n</skill>${argumentSummary}`,
+            guidance: 'Follow this SKILL.md for the current task. If runAs says subagent, use dispatch_agents only when orchestration is already appropriate and available.',
+        };
+    }
+
+    private saveWorkflow(args: Record<string, unknown>): unknown {
+        const result = saveProjectWorkflow(
+            args as any,
+            this.workspaceRoot,
+            (filePath, previousContent) => this.onBeforeFileWrite?.(filePath, previousContent)
+        );
+        if (result.success) {
+            this.onWorkflowSaved?.();
         }
         return result;
     }

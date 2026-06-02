@@ -59,6 +59,7 @@ import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, too
 import { buildToolInvocation } from './runner/toolInvocation';
 import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash, DoomLoopState } from './runner/doomLoopDetector';
 import { ReadTracker } from './runner/readTracker';
+import { validatePlanModeToolUse } from './planModeGuard';
 
 export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
 export { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } from './runner/toolScheduler';
@@ -248,11 +249,11 @@ const _PLAN_MODE_TOOLS: AgentToolName[] = [
     'get_entity_info', 'query_definition', 'query_definition_by_name',
     'query_static_modifiers', 'query_variables',
     // Structured design blueprint output
-    'write_design_blueprint',
+    'write_design_blueprint', 'save_workflow',
     // Memory tools for persisting architectural state
     'set_memory', 'get_memory', 'search_memory',
     // Git operations for investigation
-    'git_ops',
+    'git_ops', 'save_workflow',
 ];
 
 /** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
@@ -266,7 +267,7 @@ const _EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'query_definition', 'query_definition_by_name', 'codesearch',
     // Git operations for investigation
-    'git_ops',
+    'git_ops', 'save_workflow',
 ];
 
 /** General mode: legacy read-only Q&A mode. */
@@ -296,7 +297,7 @@ const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
     'query_localisation_index', 'query_workspace_index',
     // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
-    'write_localisation', 'git_ops',
+    'write_localisation', 'git_ops', 'save_workflow',
 ];
 
 /** Loc Writer mode: create new localisation entries from scratch */
@@ -307,7 +308,7 @@ const _LOC_WRITER_TOOLS: AgentToolName[] = [
     'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
-    'write_localisation', 'git_ops',
+    'write_localisation', 'git_ops', 'save_workflow',
 ];
 
 /** Orchestrator mode: read-only tools + coordinator-specific tools (dispatch_agents, query_blackboard, merge_results) */
@@ -325,7 +326,7 @@ const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     // Coordinator-specific
     'dispatch_agents', 'query_blackboard', 'merge_results',
     // Git
-    'git_ops',
+    'git_ops', 'save_workflow',
 ];
 
 
@@ -801,13 +802,22 @@ export class AgentRunner {
 
         // Inject workflow prompt supplement if running within a workflow
         const activeWorkflowForPrompt = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
-        if (activeWorkflowForPrompt?.promptSupplement) {
+        if (!supportsPrefixCache && activeWorkflowForPrompt?.promptSupplement) {
             systemPrompt = activeWorkflowForPrompt.promptSupplement + '\n\n' + systemPrompt;
         }
 
         // Build the dynamic prompt block containing pinned data / summaries
         const dynamicBlock = supportsPrefixCache
-            ? this.promptBuilder.buildDynamicPromptBlock(pinnedData, topicId, runId)
+            ? this.promptBuilder.buildDynamicPromptBlock(pinnedData, topicId, runId, {
+                mode,
+                workflow: activeWorkflowForPrompt
+                    ? {
+                        id: activeWorkflowForPrompt.id,
+                        title: activeWorkflowForPrompt.title,
+                        promptSupplement: activeWorkflowForPrompt.promptSupplement,
+                    }
+                    : undefined,
+            })
             : [];
 
         // Build the message array
@@ -1243,9 +1253,10 @@ export class AgentRunner {
         const activeWorkflow = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
         if (activeWorkflow) {
             const policy = activeWorkflow.toolPolicy;
+            const workflowReadOnlySupportTools = new Set<string>(['run_skill']);
             if (policy.strategy === 'allowlist') {
                 const allowed = new Set<string>(policy.tools);
-                availableTools = availableTools.filter(t => allowed.has(t.function.name));
+                availableTools = availableTools.filter(t => allowed.has(t.function.name) || workflowReadOnlySupportTools.has(t.function.name));
             } else {
                 // blocklist
                 const blocked = new Set<string>(policy.tools);
@@ -1996,6 +2007,30 @@ export class AgentRunner {
                     }
                     toolResults[i] = { ok: false, error: errMsg };
                     continue;
+                }
+
+                if (mode === 'plan') {
+                    const guard = validatePlanModeToolUse(toolName, toolArgs, this.toolExecutor.workspaceRoot, options?.topicId, ci.targetPaths);
+                    if (!guard.allowed) {
+                        emitStep({
+                            type: 'validation',
+                            content: guard.reason ?? 'Plan mode blocked this tool call.',
+                            timestamp: Date.now(),
+                            invocationId: ci.invocationId,
+                        });
+                        toolResults[i] = {
+                            success: false,
+                            error: guard.reason ?? 'Plan mode blocked this tool call.',
+                            planModeBlocked: true,
+                        };
+                        await runLedger.appendEvent(
+                            runRecord.runId,
+                            'tool_call_end',
+                            { success: false, error: toolResults[i].error, planModeBlocked: true },
+                            { invocationId: ci.invocationId }
+                        );
+                        continue;
+                    }
                 }
 
                 if (READ_ONLY_TOOLS.has(toolName)) {

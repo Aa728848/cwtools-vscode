@@ -12,6 +12,7 @@ const BASE_SLASH_COMMANDS = [
     '/fork',
     '/archive',
     '/workflow:list',
+    '/workflow:save',
     '/workflow:off',
     '/mode:build',
     '/mode:plan',

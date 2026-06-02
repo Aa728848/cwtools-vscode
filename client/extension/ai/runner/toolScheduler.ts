@@ -37,6 +37,13 @@ export function getAgentToolTargetFiles(
             }
         }
     };
+    const workflowId = (value: unknown, fallback: unknown): string | undefined => {
+        const source = String(value || fallback || '').trim().toLowerCase();
+        return source
+            .replace(/[^a-z0-9_.-]+/g, '-')
+            .replace(/^[.-]+|[.-]+$/g, '')
+            .slice(0, 80);
+    };
 
     switch (toolName) {
         case 'write_file':
@@ -51,6 +58,17 @@ export function getAgentToolTargetFiles(
         case 'write_localisation':
             add(args.filePath);
             break;
+        case 'apply_patch': {
+            const patch = typeof args.patch === 'string' ? args.patch : '';
+            for (const line of patch.split(/\r?\n/)) {
+                const match = line.match(/^\+\+\+\s+(?:b\/)?(.+)$/);
+                if (!match) continue;
+                const raw = match[1]!.trim();
+                if (!raw || raw === '/dev/null') continue;
+                add(raw.replace(/^"|"$/g, ''));
+            }
+            break;
+        }
         case 'deploy_mod_asset':
             if (workspaceRoot && typeof args.targetRelativePath === 'string') {
                 paths.push(path.resolve(workspaceRoot, args.targetRelativePath));
@@ -61,6 +79,12 @@ export function getAgentToolTargetFiles(
         case 'write_design_blueprint':
             if (workspaceRoot) {
                 paths.push(path.join(getTopicStorageDir(topicId || 'default', workspaceRoot), 'design_blueprint.md'));
+            }
+            break;
+        case 'save_workflow':
+            if (workspaceRoot) {
+                const id = workflowId(args.id, args.title);
+                if (id) paths.push(path.join(workspaceRoot, '.cwtools-ai', 'workflows', `${id}.md`));
             }
             break;
     }

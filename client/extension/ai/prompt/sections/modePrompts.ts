@@ -336,7 +336,7 @@ export function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: strin
 ${rules}
 
 <system-reminder>
-Plan mode is active. You MUST NOT generate or apply code, or use any write tools (\`write_file\`, \`multi_replace_file_content\`). The ONLY write tool available is \`write_design_blueprint\` for structured architecture output. This supersedes all other instructions.
+Plan mode is active. You MUST NOT generate or apply code, or mutate project files. The only allowed writes are: (1) \`write_design_blueprint\` for structured architecture output, and (2) creating or revising topic-scoped card artifacts inside the Agent Workspace Dir, including \`Implementation_Plan.md\`, \`design_blueprint.md\`, \`walkthrough.md\`, \`task.md\`, annotation metadata files, and temporary card/diff preview files. This supersedes all other instructions.
 </system-reminder>
 ${isSlim ? `
 <sub-agent-reminder>

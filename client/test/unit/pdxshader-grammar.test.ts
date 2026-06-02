@@ -38,7 +38,9 @@ describe('PDX Shader Grammar & Language Configuration', () => {
             expect(hlslPattern.begin).to.equal('\\[\\[');
             expect(hlslPattern.end).to.equal('\\]\\]');
             expect(hlslPattern.contentName).to.equal('source.hlsl');
-            expect(hlslPattern.patterns).to.deep.equal([{ include: 'source.hlsl' }]);
+            expect(hlslPattern.patterns).to.be.an('array');
+            expect(hlslPattern.patterns).to.deep.include({ include: 'source.hlsl' });
+            expect(hlslPattern.patterns.map((p: any) => p.name)).to.include('support.variable.readwrite.hlsl.pdx');
         });
 
         it('includes named-declarations before keywords for correct precedence', () => {
@@ -67,8 +69,13 @@ describe('PDX Shader Grammar & Language Configuration', () => {
 
         // --- Comments ---
         it('matches DSL comments correctly', () => {
-            const doubleSlashRegex = getRegex('comments', 0);
-            const numberSignRegex = getRegex('comments', 2);
+            const commentPatterns = grammar.repository['comments'].patterns;
+            const doubleSlashPattern = commentPatterns.find((p: any) => p.name === 'comment.line.double-slash.pdx-shader');
+            const numberSignPattern = commentPatterns.find((p: any) => p.name === 'comment.line.number-sign.pdx-shader');
+            expect(doubleSlashPattern, 'double-slash comment pattern').to.exist;
+            expect(numberSignPattern, 'number-sign comment pattern').to.exist;
+            const doubleSlashRegex = new RegExp(doubleSlashPattern.match);
+            const numberSignRegex = new RegExp(numberSignPattern.match);
 
             expect(doubleSlashRegex.test('// This is a line comment')).to.be.true;
             expect(doubleSlashRegex.test('  // Indented line comment')).to.be.true;
@@ -300,7 +307,7 @@ describe('PDX Shader Grammar & Language Configuration', () => {
         it('has escape character support inside strings', () => {
             const stringPatterns = grammar.repository['strings'].patterns[0].patterns;
             expect(stringPatterns).to.be.an('array');
-            expect(stringPatterns[0].name).to.equal('constant.character.escape.pdx-shader');
+            expect(stringPatterns.some((p: any) => p.name === 'constant.character.escape.pdx-shader')).to.be.true;
         });
     });
 

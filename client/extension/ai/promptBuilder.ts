@@ -36,6 +36,15 @@ interface ParsedProjectRules {
     namespaces?: string[];
 }
 
+interface RuntimePromptState {
+    mode?: AgentMode;
+    workflow?: {
+        id: string;
+        title: string;
+        promptSupplement?: string;
+    };
+}
+
 import {
     SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL,
     SOUND_DIAGNOSTIC_REPAIR_PROTOCOL
@@ -54,6 +63,7 @@ import {
     buildLocWriterSystemPrompt,
     buildOrchestratorSystemPrompt
 } from './prompt/sections/modePrompts';
+import { buildSkillIndexPrompt } from './skills';
 
 // ─── Model-specific instruction supplements ───────────────────────────────────
 
@@ -266,9 +276,26 @@ export class PromptBuilder {
             decisions?: string[];
         },
         topicId?: string,
-        runId?: string
+        runId?: string,
+        runtime?: RuntimePromptState
     ): ChatMessage[] {
         const dynamicParts: string[] = [];
+        if (runtime?.mode || runtime?.workflow) {
+            const lines: string[] = [];
+            if (runtime.mode) {
+                lines.push(`mode: ${runtime.mode}`);
+                if (runtime.mode === 'plan') {
+                    lines.push('plan-write-policy: Only write_design_blueprint and topic-scoped Agent Workspace card artifacts (Implementation_Plan.md, design_blueprint.md, walkthrough.md, task.md, annotation files, and tmp/artifact previews) may be written. Project file mutations are blocked at runtime.');
+                }
+            }
+            if (runtime.workflow) {
+                lines.push(`workflow: ${runtime.workflow.id} (${runtime.workflow.title})`);
+                if (runtime.workflow.promptSupplement) {
+                    lines.push(`workflow-instructions:\n${runtime.workflow.promptSupplement}`);
+                }
+            }
+            dynamicParts.push(`<runtime-state>\n${lines.join('\n')}\n</runtime-state>`);
+        }
 
         // 1. Compacted Summary (来自历史会话看板的压缩)
         if (topicId && runId) {
@@ -621,49 +648,16 @@ ${trimmed}
     }
 
     /**
-     * Scans plugin-local storage for installed Agent Skills
-     * and compiles them into a prompt instruction so the Agent knows how to use them.
+     * Scans installed Agent Skills and exposes only a compact index.
+     * Full SKILL.md bodies are loaded on demand through run_skill.
      */
     private getAgentSkillsPrompt(): string {
         try {
-            const skills: string[] = [];
-            
-            // 1. Read built-in extension skills
-            if (this.extensionPath) {
-                const internalSkillsDir = path.join(this.extensionPath, 'resources', 'skills');
-                if (fs.existsSync(internalSkillsDir)) {
-                    const dirs = fs.readdirSync(internalSkillsDir, { withFileTypes: true });
-                    for (const dirent of dirs) {
-                        if (dirent.isDirectory()) {
-                            const skillMd = path.join(internalSkillsDir, dirent.name, 'SKILL.md');
-                            if (fs.existsSync(skillMd)) {
-                                const content = fs.readFileSync(skillMd, 'utf8').trim();
-                                if (content) skills.push(`### Skill: ${dirent.name}\n${content}`);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 2. Read user-installed skills
-            if (this.globalStoragePath) {
-                const skillsDir = path.join(this.globalStoragePath, '.agents', 'skills');
-                if (fs.existsSync(skillsDir)) {
-                    const dirs = fs.readdirSync(skillsDir, { withFileTypes: true });
-                    for (const dirent of dirs) {
-                        if (dirent.isDirectory()) {
-                            const skillMd = path.join(skillsDir, dirent.name, 'SKILL.md');
-                            if (fs.existsSync(skillMd)) {
-                                const content = fs.readFileSync(skillMd, 'utf8').trim();
-                                if (content) skills.push(`### Skill: ${dirent.name}\n${content}`);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (skills.length === 0) return '';
-            return `\n## Installed Agent Skills\nYou have access to the following capabilities via installed CLI skills. Use the \`run_command\` tool to invoke them.\n\n${skills.join('\n\n')}`;
+            return buildSkillIndexPrompt({
+                workspaceRoot: this.workspaceRoot,
+                globalStoragePath: this.globalStoragePath,
+                extensionPath: this.extensionPath,
+            });
         } catch (e) {
             ErrorReporter.debug(SOURCE.PROMPT_BUILDER, 'Error reading agent skills', e);
             return '';

@@ -42,6 +42,7 @@ const TOOL_PHRASES: Record<string, ToolPhraseMeta> = {
     apply_patch:               { category: 'write',       icon: '✏️', phrase: '应用补丁' },
     delete_file:               { category: 'write',       icon: '✏️', phrase: '删除文件' },
     write_localisation:        { category: 'write',       icon: '✏️', phrase: '写入本地化' },
+    save_workflow:             { category: 'write',       icon: '✏️', phrase: '保存工作流' },
     todo_write:                { category: 'write',       icon: '✏️', phrase: '更新待办' },
 
     // Query
@@ -201,6 +202,11 @@ export function getToolDynamicPhrase(
         case 'write_localisation': {
             const key = args.key ?? args.locKey;
             if (typeof key === 'string') return dualPhrase(`写入本地化 ${truncateStr(key, 50)}`);
+            return dualPhrase(meta.phrase);
+        }
+        case 'save_workflow': {
+            const title = args.title ?? args.id;
+            if (typeof title === 'string') return dualPhrase(`保存工作流 ${truncateStr(title, 50)}`);
             return dualPhrase(meta.phrase);
         }
         case 'apply_patch': {

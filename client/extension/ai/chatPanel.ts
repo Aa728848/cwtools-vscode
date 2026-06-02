@@ -183,6 +183,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg));
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
         this.contextReferences = new ContextReferenceManager(() => this.agentRunner.toolExecutor.blackboard);
+        this.agentRunner.toolExecutor.onWorkflowSaved = () => this.sendWorkflowState();
         runLedger.onChange((runId) => this.queueRunSnapshot(runId));
     }
 
@@ -2016,6 +2017,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.switchWorkflow(null);
         } else if (cmd === 'workflow:list' || cmd === '/workflow:list') {
             this.sendWorkflowState();
+        } else if (cmd === 'workflow:save' || cmd === '/workflow:save' || cmd.startsWith('workflow:save:') || cmd.startsWith('/workflow:save:')) {
+            await this.saveWorkflowFromSlash(command);
         } else if (cmd.startsWith('workflow:') || cmd.startsWith('/workflow:')) {
             this.switchWorkflow(cmd.split(':')[1]);
         } else if (cmd === 'fork' || cmd === '/fork') {
@@ -2036,6 +2039,26 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * Mirrors OpenCode's /init command which generates CLAUDE.md.
      * The file is written to the workspace root and loaded into every future session.
      */
+    private async saveWorkflowFromSlash(command: string): Promise<void> {
+        const visibleCommand = command.trim();
+        const normalized = visibleCommand.replace(/^\//, '');
+        const parts = normalized.split(':');
+        const requestedId = parts.length > 2
+            ? parts.slice(2).join(':').trim().replace(/[^a-zA-Z0-9_.-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '').slice(0, 80)
+            : '';
+        const idInstruction = requestedId
+            ? `Use workflow id "${requestedId}" unless it is unsafe; if you need to sanitize it, preserve its meaning.`
+            : 'Choose a short kebab-case id.';
+        const prompt = [
+            `The user invoked ${visibleCommand} to save the reusable process from this conversation as a project workflow.`,
+            idInstruction,
+            'Extract only the repeatable workflow: objective, phases, constraints, useful tools, required context, and verification.',
+            'Then call save_workflow with title, description, mode, promptSupplement, and any narrow allowedTools/blockedTools that make the workflow safer.',
+            'After saving, briefly tell the user the workflow id and slash command to run it.',
+        ].join('\n');
+        await this.handleUserMessage(prompt, undefined, undefined, true, false, false, visibleCommand);
+    }
+
     private async generateInitFile(): Promise<void> {
         const result = await generateInitFile(
             (msg) => this.postMessage(msg),

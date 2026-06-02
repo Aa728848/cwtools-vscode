@@ -96,9 +96,9 @@ describe('GameProfile Registry', () => {
         expect(url).to.include('hoi4-config');
     });
 
-    it('getRulesRemoteUrl falls back for unknown language', () => {
+    it('getRulesRemoteUrl returns empty for unknown language', () => {
         const url = getRulesRemoteUrl('unknown');
-        expect(url).to.include('stellaris-config');
+        expect(url).to.equal('');
     });
 
     // ── Cache setting key ──────────────────────────────────────────────

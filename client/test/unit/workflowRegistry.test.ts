@@ -1,10 +1,14 @@
 import { expect } from 'chai';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
     getWorkflow,
     getAllWorkflows,
     getAllWorkflowIds,
     getWorkflowAllowedTools,
     checkWorkflowContext,
+    saveProjectWorkflow,
 } from '../../extension/ai/workflowRegistry';
 
 describe('AI Workflow Registry', () => {
@@ -137,6 +141,42 @@ describe('AI Workflow Registry', () => {
     });
 
     // ── All workflows have prompt supplements where expected ───────────
+
+    it('saves project workflow markdown and parses it back', () => {
+        const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-workflow-'));
+        try {
+            let snapshottedPath = '';
+            let snapshottedContent: string | null | undefined = undefined;
+            const result = saveProjectWorkflow({
+                id: 'Saved Demo',
+                title: 'Saved Demo',
+                description: 'Reusable saved workflow.',
+                mode: 'plan',
+                promptSupplement: 'Follow the saved process and verify the result.',
+                allowedTools: ['read_file', 'save_workflow', 'unknown_tool' as any],
+                requiredContext: ['workspace!'],
+                verificationTool: 'get_diagnostics',
+            }, tempRoot, (filePath, previousContent) => {
+                snapshottedPath = filePath;
+                snapshottedContent = previousContent;
+            });
+
+            expect(result.success).to.be.true;
+            expect(result.id).to.equal('saved-demo');
+            expect(result.filePath).to.equal(path.join(tempRoot, '.cwtools-ai', 'workflows', 'saved-demo.md'));
+            expect(fs.existsSync(result.filePath!)).to.be.true;
+            expect(snapshottedPath).to.equal(result.filePath);
+            expect(snapshottedContent).to.equal(null);
+            expect(result.workflow!.mode).to.equal('plan');
+            expect(result.workflow!.toolPolicy.strategy).to.equal('allowlist');
+            expect(result.workflow!.toolPolicy.tools).to.include('read_file');
+            expect(result.workflow!.toolPolicy.tools).to.include('save_workflow');
+            expect(result.workflow!.toolPolicy.tools).to.not.include('unknown_tool' as any);
+            expect(result.workflow!.verification[0]!.verificationTool).to.equal('get_diagnostics');
+        } finally {
+            fs.rmSync(tempRoot, { recursive: true, force: true });
+        }
+    });
 
     it('all workflows have valid structure', () => {
         for (const wf of getAllWorkflows()) {

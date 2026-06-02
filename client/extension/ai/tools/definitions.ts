@@ -107,6 +107,25 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'run_skill',
+            description: 'Load the full instructions for an installed Agent Skill by exact name. Use this when the skill index says a skill is relevant; the system prompt only contains the compact index, not the skill body.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    name: { type: 'string', description: 'Exact skill name from the Installed Agent Skills index.' },
+                    arguments: {
+                        type: 'object',
+                        description: 'Optional task-specific arguments or notes for applying the skill.',
+                        additionalProperties: true,
+                    },
+                },
+                required: ['name'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'query_rules',
             description: 'Query syntax rules for triggers, effects, scope changes, or modifiers. Returns valid syntax, parameters, and scopes. Fuzzy-matches if exact name not found.',
             parameters: {
@@ -961,6 +980,54 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },
                 required: ['title', 'entities', 'dependencyOrder'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'save_workflow',
+            description: 'Save a reusable project workflow from the current conversation or task process. Use only when the user asks to save the process/workflow or when preserving a clearly reusable workflow is the task. Writes .cwtools-ai/workflows/<id>.md and makes it available through /workflow:<id>.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    id: { type: 'string', description: 'Optional stable workflow id, lowercase/kebab-case preferred. If omitted, it is derived from the title.' },
+                    title: { type: 'string', description: 'User-facing workflow title.' },
+                    description: { type: 'string', description: 'Short one-sentence summary shown in the workflow picker and slash command list.' },
+                    mode: {
+                        type: 'string',
+                        enum: ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator'],
+                        description: 'Agent mode this workflow should run in. Default build.',
+                    },
+                    promptSupplement: {
+                        type: 'string',
+                        description: 'The reusable workflow instructions. Include objective, phases/checklist, important constraints, expected tools, and verification steps. Do not include private one-off conversation details unless they are needed for reuse.',
+                    },
+                    allowedTools: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Optional tool allowlist. Use this for narrow workflows; leave empty to use the mode default tools.',
+                    },
+                    blockedTools: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Optional tools to block when no allowlist is provided.',
+                    },
+                    requiredContext: {
+                        type: 'array',
+                        items: { type: 'string', enum: ['activeFile', 'activeFile!', 'diagnostics', 'diagnostics!', 'selection', 'selection!', 'workspace', 'workspace!'] },
+                        description: 'Context needed before starting. Add ! for required context. Default: workspace!.',
+                    },
+                    verificationTool: {
+                        type: 'string',
+                        description: 'Optional single verification tool, e.g. get_diagnostics.',
+                    },
+                    overwrite: {
+                        type: 'boolean',
+                        description: 'If true, replace an existing workflow with the same id. Default false.',
+                    },
+                },
+                required: ['title', 'description', 'promptSupplement'],
             },
         },
     },

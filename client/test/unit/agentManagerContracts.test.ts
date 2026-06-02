@@ -45,9 +45,11 @@ describe('agent manager cross-surface contracts', () => {
         expect(manager).to.include("import './chatPanel'");
         expect(manager).to.include("import type { ManagerSnapshotMessage");
         expect(manager).to.include("case 'orchestratorProgress'");
-        expect(manager).to.include('data-manager-tab="agents"');
+        expect(manager).to.include('data-manager-tab="runs"');
         expect(manager).to.include('data-manager-tab="artifacts"');
         expect(manager).to.include('data-manager-tab="tasks"');
+        expect(manager).to.include('data-manager-tab="workspace"');
+        expect(manager).to.include('data-manager-tab="settings"');
         expect(manager).to.not.include('function renderMessages');
         expect(topicViews).to.include("grouping?: 'date' | 'workspace'");
         expect(topicViews).to.include('groupTopicsByWorkspace');
@@ -74,7 +76,7 @@ describe('agent manager cross-surface contracts', () => {
         expect(settingsHost).to.include("targetSurface?: 'chat' | 'manager'");
         expect(webview).to.include('isCurrentSurface(msg.targetSurface)');
         expect(webview).to.include('if (shouldUseSideWorkspace())');
-        expect(webview).to.include("openSideWorkspace({ title: 'AI 设置'");
+        expect(webview).to.include("title: chatI18n.locale === 'zh-cn' ? 'AI 设置' : 'AI Settings'");
         expect(webview).to.include("document.getElementById('exaApiKey')");
         expect(webview).to.include('exaApiKey: ((document.getElementById');
     });
@@ -96,7 +98,7 @@ describe('agent manager cross-surface contracts', () => {
         expect(managerCss).to.include('width: min(calc(100vw - var(--manager-active-left-width) - var(--manager-active-right-width) - 32px), 980px);');
         expect(managerCss).to.not.include('body.agent-manager-shell .floating-card-area {\n    position: absolute;\n    left: calc(var(--manager-active-left-width) + 16px);\n    right: calc(var(--manager-active-right-width) + 16px);\n    bottom: 98px;\n    width: auto;\n    max-width: none;');
         expect(managerCss).to.include('body.agent-manager-shell.manager-topics-collapsed');
-        expect(managerCss).to.include('body.agent-manager-shell .manager-overview {\n    display: none;');
+        expect(managerCss).to.include('body.agent-manager-shell .manager-overview {\n    position: relative;');
         expect(managerCss).to.include('body.agent-manager-shell .header-actions #btnTopics {\n    display: inline-flex;');
         expect(managerCss).to.include('body.agent-manager-shell .header-actions #btnAgentManager {\n    display: none;');
         expect(webview).to.include('function positionComposerMenus(): void');
@@ -194,7 +196,8 @@ describe('agent manager cross-surface contracts', () => {
         expect(webview).to.include("approveMessageType: 'approveWalkthrough'");
         expect(webview).to.include('scheduleResponsiveWorkspaceLayoutSync()');
         expect(webview).to.include('if (!isCurrentSurface(msg.targetSurface)) break;');
-        expect(webview).to.include('if (shouldUseSideWorkspace()) {\n            openSideWorkspace({');
+        expect(webview).to.include('if (shouldUseSideWorkspace()) {');
+        expect(webview).to.include('openSideWorkspace({');
         expect(webview).to.not.include('if (!panel.content.parentNode) {\n            chatArea.appendChild(panel.content);\n        }\n\n        if (shouldUseSideWorkspace())');
     });
 });

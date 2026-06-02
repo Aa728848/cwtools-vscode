@@ -200,10 +200,10 @@ describe('routeLiveStep', () => {
 // ─── buildToolPairHtml ───────────────────────────────────────────────────────
 
 describe('buildToolPairHtml', () => {
-    it('renders tool name and file basename', () => {
+    it('renders tool label and file basename', () => {
         const call = { type: 'tool_call' as const, toolName: 'read_file', toolArgs: { filePath: '/a/b/c.txt' }, content: '', timestamp: 1000 };
         const html = buildToolPairHtml(call);
-        expect(html).to.include('read_file');
+        expect(html).to.include('tool-pair');
         expect(html).to.include('c.txt');
     });
 
@@ -309,7 +309,7 @@ describe('buildToolPairHtml', () => {
     it('handles missing toolResult gracefully (pending state)', () => {
         const call = { type: 'tool_call' as const, toolName: 'read_file', toolArgs: { filePath: '/a/b.txt' }, content: '', timestamp: 1 };
         const html = buildToolPairHtml(call);
-        expect(html).to.include('read_file');
+        expect(html).to.include('b.txt');
         expect(html).to.not.include('undefined');
     });
 
@@ -431,9 +431,9 @@ describe('buildAssistantMessageHtml', () => {
         // Verify chronological order: thinking → text → tool-timeline → thinking → tool-timeline → text
         const thinkIdx1 = html.indexOf('iter1 reasoning');
         const textIdx1 = html.indexOf('Let me explore...');
-        const toolIdx1 = html.indexOf('read_file');
+        const toolIdx1 = html.indexOf('a.txt');
         const thinkIdx2 = html.indexOf('iter2 reasoning');
-        const toolIdx2 = html.indexOf('edit_file');
+        const toolIdx2 = html.indexOf('b.txt');
         const textIdx2 = html.indexOf('Done!');
 
         // All should be present

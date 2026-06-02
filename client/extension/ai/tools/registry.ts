@@ -8,7 +8,7 @@ export type AgentToolName =
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file'
-    | 'replace_lines' | 'list_directory' | 'get_diagnostics' | 'analyze_diagnostic_error'
+    | 'replace_lines' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
     | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command'
     | 'search_web' | 'codesearch' | 'apply_patch' | 'multi_replace_file_content'
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
@@ -61,7 +61,7 @@ const BASE_READ: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_localisation_index', 'query_workspace_index', 'query_references',
     'query_project_profile', 'run_skill', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory', 'glob_files',
-    'lsp_operation', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
+    'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics'
 ];
@@ -93,6 +93,7 @@ const MUTATING_TOOLS_SET = new Set<string>([
 // Storm-exempt tools: 廉价状态检查 / 协作信号,允许在同一轮反复调用,不计入 doom-loop 窗口。
 const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'get_diagnostics',
+    'get_lsp_status',
     'get_ignored_diagnostics',
     'query_scope',
     'document_symbols',
@@ -108,7 +109,7 @@ const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UT
 const LOC_MODES = new Set([
     'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
-    'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
+    'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
     'analyze_diagnostic_error', 'save_workflow'
 ]);
@@ -138,7 +139,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     if (BASE_READ.includes(name)) {
         effect = 'workspace_read';
         riskLevel = 0;
-        if (['document_symbols', 'workspace_symbols', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition'].includes(name)) {
+        if (['document_symbols', 'workspace_symbols', 'get_lsp_status', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition'].includes(name)) {
             concurrencyClass = 'lsp-limited';
         } else {
             concurrencyClass = 'parallel';

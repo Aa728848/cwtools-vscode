@@ -115,6 +115,7 @@ type Diagnostic =
       code: string option
       source: string option
       message: string
+      data: JsonValue option
       relatedInformation: DiagnosticRelatedInformation list }
 
 type Command =

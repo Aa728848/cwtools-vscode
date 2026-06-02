@@ -16,6 +16,7 @@ import type { ValidationError } from '../types';
 import { getCachedFile, setCachedFile } from '../fileCache';
 import { getToolResultBudget } from '../contextBudget';
 import { fuzzyReplace } from './replacerSuite';
+import { diagnosticMetadata } from './diagnosticMetadata';
 import { getTopicStorageDir } from '../workspacePaths';
 import {
     isSecuritySandboxDisabled,
@@ -1266,17 +1267,23 @@ return { files: [], total: 0 };
 
 // ─── getLspDiagnosticsForFile ─────────────────────────────────────────── 
 
-/** Extract diagnostics from Problems panel and format */
+    /** Extract diagnostics from Problems panel and format */
     private static mapDiagnostics(uri: vs.Uri): ValidationError[] {
-        return vs.languages.getDiagnostics(uri).map(d => ({
-            code: String(d.code ?? ''),
-            severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
-                : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                    : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
-            message: d.message,
-            line: d.range.start.line,
-            column: d.range.start.character,
-        } as ValidationError));
+        return vs.languages.getDiagnostics(uri).map(d => {
+            const metadata = diagnosticMetadata(d);
+            return {
+                code: String(d.code ?? ''),
+                severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                    : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+                message: d.message,
+                line: d.range.start.line,
+                column: d.range.start.character,
+                category: metadata.category,
+                repairHint: metadata.repairHint,
+                data: metadata.data,
+            } as ValidationError;
+        });
     }
 
 

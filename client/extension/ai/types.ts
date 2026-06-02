@@ -407,6 +407,9 @@ export interface ValidationError {
     message: string;
     line: number;
     column: number;
+    category?: DiagnosticAnalysisCategory;
+    repairHint?: string;
+    data?: unknown;
 }
 
 
@@ -545,7 +548,17 @@ export interface GetCompletionAtArgs {
     file: string;
     line: number;
     column: number;
-    fileContent: string;
+    limit?: number;
+}
+
+export interface GetLspStatusArgs {
+    timeoutMs?: number;
+}
+
+export interface GetDiagnosticsArgs {
+    file?: string;
+    severity?: 'error' | 'warning' | 'info' | 'hint' | 'all';
+    limit?: number;
 }
 
 export interface DocumentSymbolsArgs {
@@ -637,10 +650,17 @@ export interface GetCompletionAtResult {
         label: string;
         kind: string;
         description?: string;
+        insertText?: string;
+        filterText?: string;
+        sortText?: string;
+        documentation?: string;
+        isSnippet?: boolean;
     }>;
     /** Total completions available from the LSP before slicing */
     totalAvailable?: number;
     _note?: string;
+    _warning?: string;
+    _nextSteps?: string[];
 }
 
 // ─── Blackboard Memory Tool Types ──────────────────────────────────────────────
@@ -693,6 +713,8 @@ export type ToolArgs =
     | FindSpriteCandidatesArgs
     | FindSoundCandidatesArgs
     | GetCompletionAtArgs
+    | GetLspStatusArgs
+    | GetDiagnosticsArgs
     | DocumentSymbolsArgs
     | WorkspaceSymbolsArgs
     | VerifyPdxIdentifierArgs
@@ -723,6 +745,8 @@ export type ToolResult =
     | FindSpriteCandidatesResult
     | FindSoundCandidatesResult
     | GetCompletionAtResult
+    | GetLspStatusResult
+    | GetDiagnosticsResult
     | DocumentSymbolsResult
     | WorkspaceSymbolsResult
     | VerifyPdxIdentifierResult
@@ -749,6 +773,7 @@ export type AgentToolName =
     | 'query_rules'
     | 'query_references'
     // validate_code — REMOVED: replaced by get_diagnostics + multi_replace_file_content inline diagnostics
+    | 'get_lsp_status'
     | 'get_diagnostics'
     | 'get_file_context'
     | 'search_mod_files'
@@ -1056,6 +1081,9 @@ export type DiagnosticAnalysisCategory =
     | 'scope_mismatch'
     | 'unknown_trigger_effect'
     | 'brace_or_syntax_error'
+    | 'invalid_value_type'
+    | 'missing_definition'
+    | 'duplicate_definition'
     | 'read_tracker_stale'
     | 'tool_argument_error'
     | 'lsp_no_feedback'
@@ -1096,6 +1124,40 @@ export interface DiagnosticEntry {
     line: number;
     column: number;
     code?: string;
+    category?: DiagnosticAnalysisCategory;
+    repairHint?: string;
+    data?: unknown;
+}
+
+export interface ValidationStatusSnapshot {
+    ok?: boolean;
+    epoch?: number;
+    freshness?: 'fresh' | 'pending' | 'stale';
+    totalFiles?: number;
+    pendingFiles?: number;
+    pendingGlobalKinds?: string[];
+    inProgress?: boolean;
+    queueDepth?: number;
+    debounceQueueDepth?: number;
+    needsTypeRefresh?: boolean;
+    delayedLocalisationUpdate?: boolean;
+    refreshSkipCount?: number;
+    nextAnalyzeDelayMs?: number;
+    lastTypeRefreshRequestedAtUnixMs?: number;
+    lastTypeRefreshCompletedAtUnixMs?: number;
+    openDocuments?: number;
+    runtime?: Record<string, unknown>;
+    loading?: Record<string, unknown>;
+    completion?: Record<string, unknown>;
+    diagnosticSummary?: Record<string, unknown>;
+    memory?: Record<string, unknown>;
+    caches?: Record<string, unknown>;
+}
+
+export interface GetLspStatusResult extends ValidationStatusSnapshot {
+    status?: 'available' | 'unavailable' | 'timeout' | 'error';
+    responded?: boolean;
+    message?: string;
 }
 
 export interface GetDiagnosticsResult {
@@ -1106,6 +1168,10 @@ export interface GetDiagnosticsResult {
     totalFiles: number;
     /** Total number of matching diagnostics before truncation */
     totalDiagnosticCount: number;
+    /** Number of diagnostics suppressed by the user's ignoredDiagnostics whitelist after file/severity filtering. */
+    ignoredDiagnosticCount?: number;
+    /** Whitelist keys that suppressed diagnostics in this result. */
+    ignoredDiagnosticKeys?: string[];
     truncated: boolean;
     /** Global diagnostic freshness: fresh=all verification completed, pending=global verification in progress, stale=not verified */
     freshness?: 'fresh' | 'pending' | 'stale';
@@ -1113,6 +1179,8 @@ export interface GetDiagnosticsResult {
     pendingGlobalKinds?: string[];
     /** Global diagnostic epoch counter */
     lastEpoch?: number;
+    /** Full server-side validation/runtime snapshot from cwtools.ai.getValidationStatus. */
+    validationStatus?: ValidationStatusSnapshot;
     /** Health of the LSP validation-status feedback path used for freshness/epoch metadata. */
     diagnosticService?: {
         status: 'available' | 'unavailable' | 'timeout' | 'error';

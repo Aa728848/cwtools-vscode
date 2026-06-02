@@ -949,7 +949,7 @@ export class ExternalToolHandler {
 
         // Preflight shell command segment risk analysis
         const preflight = preflightCommand(args.command);
-        let currentEscalationReason = escalationReason || (preflight.requiresEscalation ? preflight.blockedReason : '');
+        const currentEscalationReason = escalationReason || (preflight.requiresEscalation ? preflight.blockedReason : '');
         
         // Destructive check
         if (!preflight.safe && !args.requestEscalation && !bypassSandbox) {

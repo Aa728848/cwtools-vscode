@@ -578,6 +578,54 @@ type FileDiagnosticState =
       diagnostics: Diagnostic list
       warningCount: int }
 
+type ValidationRuntimeState =
+    { inProgress: bool
+      queueDepth: int
+      debounceQueueDepth: int
+      lastStartedAtUnixMs: int64
+      lastCompletedAtUnixMs: int64
+      lastCycleElapsedMs: int64
+      lastCycleFile: string
+      lastCycleShallow: bool
+      lastCycleEditAction: bool
+      lastAnalyzeElapsedMs: int64
+      lastAnalyzeCompletedAtUnixMs: int64
+      lastAnalyzeDidGlobalWork: bool
+      lastRefreshStatus: string
+      lastError: string option }
+
+type LoadingRuntimeState =
+    { inProgress: bool
+      phase: string
+      lastStartedAtUnixMs: int64
+      lastCompletedAtUnixMs: int64
+      lastElapsedMs: int64
+      lastWorkspaceRoot: string
+      lastGame: string
+      lastFileCount: int
+      lastParserErrorCount: int
+      lastValidationErrorCount: int
+      lastLocalisationErrorCount: int
+      lastRulesStatus: string
+      lastCacheStatus: string
+      lastPrecacheFileCount: int
+      lastError: string option }
+
+type CompletionRuntimeState =
+    { totalRequests: int
+      cacheHits: int
+      cacheMisses: int
+      lastStartedAtUnixMs: int64
+      lastCompletedAtUnixMs: int64
+      lastElapsedMs: int64
+      lastFile: string
+      lastLine: int
+      lastCharacter: int
+      lastItemCount: int
+      lastCacheHit: bool
+      lastIsIncomplete: bool
+      lastError: string option }
+
 type Server(client: ILanguageClient) =
     do setupLogger client
     let docs = DocumentStore()
@@ -603,6 +651,84 @@ type Server(client: ILanguageClient) =
     let fileDiagnosticStates =
         System.Collections.Concurrent.ConcurrentDictionary<string, FileDiagnosticState>()
 
+    let runtimeStateLock = obj()
+    let mutable validationRuntimeState =
+        { inProgress = false
+          queueDepth = 0
+          debounceQueueDepth = 0
+          lastStartedAtUnixMs = 0L
+          lastCompletedAtUnixMs = 0L
+          lastCycleElapsedMs = 0L
+          lastCycleFile = ""
+          lastCycleShallow = false
+          lastCycleEditAction = false
+          lastAnalyzeElapsedMs = 0L
+          lastAnalyzeCompletedAtUnixMs = 0L
+          lastAnalyzeDidGlobalWork = false
+          lastRefreshStatus = "not_started"
+          lastError = None }
+
+    let loadingStateLock = obj()
+    let mutable loadingRuntimeState =
+        { inProgress = false
+          phase = "not_started"
+          lastStartedAtUnixMs = 0L
+          lastCompletedAtUnixMs = 0L
+          lastElapsedMs = 0L
+          lastWorkspaceRoot = ""
+          lastGame = activeGame.ToString()
+          lastFileCount = 0
+          lastParserErrorCount = 0
+          lastValidationErrorCount = 0
+          lastLocalisationErrorCount = 0
+          lastRulesStatus = "not_started"
+          lastCacheStatus = "not_started"
+          lastPrecacheFileCount = 0
+          lastError = None }
+
+    let completionRuntimeLock = obj()
+    let mutable completionRuntimeState =
+        { totalRequests = 0
+          cacheHits = 0
+          cacheMisses = 0
+          lastStartedAtUnixMs = 0L
+          lastCompletedAtUnixMs = 0L
+          lastElapsedMs = 0L
+          lastFile = ""
+          lastLine = 0
+          lastCharacter = 0
+          lastItemCount = 0
+          lastCacheHit = false
+          lastIsIncomplete = false
+          lastError = None }
+
+    let nowUnixMs () = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+
+    let dateTimeToUnixMs (value: DateTime) =
+        if value = DateTime.MinValue then 0L
+        else DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)).ToUnixTimeMilliseconds()
+
+    let updateValidationRuntime update =
+        lock runtimeStateLock (fun () ->
+            validationRuntimeState <- update validationRuntimeState)
+
+    let validationRuntimeSnapshot () =
+        lock runtimeStateLock (fun () -> validationRuntimeState)
+
+    let updateLoadingRuntime update =
+        lock loadingStateLock (fun () ->
+            loadingRuntimeState <- update loadingRuntimeState)
+
+    let loadingRuntimeSnapshot () =
+        lock loadingStateLock (fun () -> loadingRuntimeState)
+
+    let updateCompletionRuntime update =
+        lock completionRuntimeLock (fun () ->
+            completionRuntimeState <- update completionRuntimeState)
+
+    let completionRuntimeSnapshot () =
+        lock completionRuntimeLock (fun () -> completionRuntimeState)
+
     //──PerfCounters performance observation──────────────────────────────────────────────
     //Lightweight indicator aggregation, periodically output to log, used for long session performance analysis
     let mutable perfLintCount = 0
@@ -624,6 +750,19 @@ type Server(client: ILanguageClient) =
         let fragmentedMB = gcInfo.FragmentedBytes / 1048576L
         $"mem[heap={heapMB}MB alloc={allocMB}MB working={workingSetMB}MB private={privateMB}MB fragmented={fragmentedMB}MB gc0={GC.CollectionCount(0)} gc1={GC.CollectionCount(1)} gc2={GC.CollectionCount(2)}]"
 
+    let getMemorySnapshotJson () =
+        use proc = Process.GetCurrentProcess()
+        let gcInfo = GC.GetGCMemoryInfo()
+        JsonValue.Record
+            [| "heapMB", JsonValue.Number(decimal (GC.GetTotalMemory(false) / 1048576L))
+               "allocatedMB", JsonValue.Number(decimal (GC.GetTotalAllocatedBytes(false) / 1048576L))
+               "workingSetMB", JsonValue.Number(decimal (proc.WorkingSet64 / 1048576L))
+               "privateMB", JsonValue.Number(decimal (proc.PrivateMemorySize64 / 1048576L))
+               "fragmentedMB", JsonValue.Number(decimal (gcInfo.FragmentedBytes / 1048576L))
+               "gc0", JsonValue.Number(decimal (GC.CollectionCount(0)))
+               "gc1", JsonValue.Number(decimal (GC.CollectionCount(1)))
+               "gc2", JsonValue.Number(decimal (GC.CollectionCount(2))) |]
+
     let getDiagnosticSnapshot () =
         let mutable freshFiles = 0
         let mutable pendingFiles = 0
@@ -638,6 +777,70 @@ type Server(client: ILanguageClient) =
             errors <- errors + state.errorCount
             warnings <- warnings + state.warningCount
         $" diag[files={fileDiagnosticStates.Count} fresh={freshFiles} pending={pendingFiles} stale={staleFiles} errors={errors} warnings={warnings}]"
+
+    let getDiagnosticSummaryJson () =
+        let mutable freshFiles = 0
+        let mutable pendingFiles = 0
+        let mutable staleFiles = 0
+        let mutable errors = 0
+        let mutable warnings = 0
+        for state in fileDiagnosticStates.Values do
+            match state.freshness with
+            | Fresh -> freshFiles <- freshFiles + 1
+            | Pending -> pendingFiles <- pendingFiles + 1
+            | Stale -> staleFiles <- staleFiles + 1
+            errors <- errors + state.errorCount
+            warnings <- warnings + state.warningCount
+        JsonValue.Record
+            [| "files", JsonValue.Number(decimal fileDiagnosticStates.Count)
+               "freshFiles", JsonValue.Number(decimal freshFiles)
+               "pendingFiles", JsonValue.Number(decimal pendingFiles)
+               "staleFiles", JsonValue.Number(decimal staleFiles)
+               "errors", JsonValue.Number(decimal errors)
+               "warnings", JsonValue.Number(decimal warnings) |]
+
+    let getRuntimeSnapshotJson () =
+        let state = validationRuntimeSnapshot ()
+        JsonValue.Record
+            [| "inProgress", JsonValue.Boolean state.inProgress
+               "queueDepth", JsonValue.Number(decimal state.queueDepth)
+               "debounceQueueDepth", JsonValue.Number(decimal state.debounceQueueDepth)
+               "lastStartedAtUnixMs", JsonValue.Number(decimal state.lastStartedAtUnixMs)
+               "lastCompletedAtUnixMs", JsonValue.Number(decimal state.lastCompletedAtUnixMs)
+               "lastCycleElapsedMs", JsonValue.Number(decimal state.lastCycleElapsedMs)
+               "lastCycleFile", JsonValue.String state.lastCycleFile
+               "lastCycleShallow", JsonValue.Boolean state.lastCycleShallow
+               "lastCycleEditAction", JsonValue.Boolean state.lastCycleEditAction
+               "lastAnalyzeElapsedMs", JsonValue.Number(decimal state.lastAnalyzeElapsedMs)
+               "lastAnalyzeCompletedAtUnixMs", JsonValue.Number(decimal state.lastAnalyzeCompletedAtUnixMs)
+               "lastAnalyzeDidGlobalWork", JsonValue.Boolean state.lastAnalyzeDidGlobalWork
+               "lastRefreshStatus", JsonValue.String state.lastRefreshStatus
+               "lastError",
+                    (match state.lastError with
+                     | Some error -> JsonValue.String error
+                     | None -> JsonValue.Null) |]
+
+    let getLoadingSnapshotJson () =
+        let state = loadingRuntimeSnapshot ()
+        JsonValue.Record
+            [| "inProgress", JsonValue.Boolean state.inProgress
+               "phase", JsonValue.String state.phase
+               "lastStartedAtUnixMs", JsonValue.Number(decimal state.lastStartedAtUnixMs)
+               "lastCompletedAtUnixMs", JsonValue.Number(decimal state.lastCompletedAtUnixMs)
+               "lastElapsedMs", JsonValue.Number(decimal state.lastElapsedMs)
+               "lastWorkspaceRoot", JsonValue.String state.lastWorkspaceRoot
+               "lastGame", JsonValue.String state.lastGame
+               "lastFileCount", JsonValue.Number(decimal state.lastFileCount)
+               "lastParserErrorCount", JsonValue.Number(decimal state.lastParserErrorCount)
+               "lastValidationErrorCount", JsonValue.Number(decimal state.lastValidationErrorCount)
+               "lastLocalisationErrorCount", JsonValue.Number(decimal state.lastLocalisationErrorCount)
+               "lastRulesStatus", JsonValue.String state.lastRulesStatus
+               "lastCacheStatus", JsonValue.String state.lastCacheStatus
+               "lastPrecacheFileCount", JsonValue.Number(decimal state.lastPrecacheFileCount)
+               "lastError",
+                    (match state.lastError with
+                     | Some error -> JsonValue.String error
+                     | None -> JsonValue.Null) |]
 
     do getPerfDiagnosticSnapshot <- getDiagnosticSnapshot
 
@@ -887,6 +1090,49 @@ type Server(client: ILanguageClient) =
                     |> Option.defaultValue 0
                 $" caches[semantic={semanticTokensCache.Count} codeLens={codeLensCache.Count} inlay={inlayHintCache.Count} locFiles={locCache.Count} locKeys={cachedLocMapCount} completionTTL={completionListCache.Count} typeRefs={typeReferenceResultCache.Count} groupedTypeFiles={groupedTypeFiles} cacheWriteKeys={cacheWriteTimes.Count}]"
 
+    let getCacheSnapshotJson () =
+        let groupedTypeFiles =
+            cachedGroupedTypes
+            |> Option.map (fun grouped -> grouped.Count)
+            |> Option.defaultValue 0
+        JsonValue.Record
+            [| "semanticTokens", JsonValue.Number(decimal semanticTokensCache.Count)
+               "codeLens", JsonValue.Number(decimal codeLensCache.Count)
+               "inlayHints", JsonValue.Number(decimal inlayHintCache.Count)
+               "locFiles", JsonValue.Number(decimal locCache.Count)
+               "locKeys", JsonValue.Number(decimal cachedLocMapCount)
+               "completionTtl", JsonValue.Number(decimal completionListCache.Count)
+               "typeReferences", JsonValue.Number(decimal typeReferenceResultCache.Count)
+               "groupedTypeFiles", JsonValue.Number(decimal groupedTypeFiles)
+               "cacheWriteKeys", JsonValue.Number(decimal cacheWriteTimes.Count) |]
+
+    let getCompletionSnapshotJson () =
+        let state = completionRuntimeSnapshot ()
+        let hitRate =
+            if state.totalRequests <= 0 then 0.0
+            else (double state.cacheHits) / (double state.totalRequests)
+        JsonValue.Record
+            [| "totalRequests", JsonValue.Number(decimal state.totalRequests)
+               "cacheHits", JsonValue.Number(decimal state.cacheHits)
+               "cacheMisses", JsonValue.Number(decimal state.cacheMisses)
+               "cacheHitRate", JsonValue.Number(decimal hitRate)
+               "lastStartedAtUnixMs", JsonValue.Number(decimal state.lastStartedAtUnixMs)
+               "lastCompletedAtUnixMs", JsonValue.Number(decimal state.lastCompletedAtUnixMs)
+               "lastElapsedMs", JsonValue.Number(decimal state.lastElapsedMs)
+               "lastFile", JsonValue.String state.lastFile
+               "lastLine", JsonValue.Number(decimal state.lastLine)
+               "lastCharacter", JsonValue.Number(decimal state.lastCharacter)
+               "lastItemCount", JsonValue.Number(decimal state.lastItemCount)
+               "lastCacheHit", JsonValue.Boolean state.lastCacheHit
+               "lastIsIncomplete", JsonValue.Boolean state.lastIsIncomplete
+               "ttlCacheEntries", JsonValue.Number(decimal completionListCache.Count)
+               "ttlMs", JsonValue.Number(decimal completionListTtlMs)
+               "ttlMaxEntries", JsonValue.Number(decimal completionListCacheMaxEntries)
+               "lastError",
+                    (match state.lastError with
+                     | Some error -> JsonValue.String error
+                     | None -> JsonValue.Null) |]
+
     let clearCacheWriteTimesForFile (filePath: string) =
         let fullPath = try FileInfo(filePath).FullName with _ -> filePath
         for key in [ filePath; fullPath ] do
@@ -1120,6 +1366,77 @@ type Server(client: ILanguageClient) =
         | Severity.Hint -> DiagnosticSeverity.Hint
         | _ -> DiagnosticSeverity.Information
 
+    let diagnosticCategoryAndHint (code: string) (message: string) =
+        let lower = message.ToLowerInvariant()
+        let has (needle: string) = lower.Contains(needle)
+        if code.StartsWith("CW001", StringComparison.OrdinalIgnoreCase)
+           || has "syntax"
+           || has "parse"
+           || has "unexpected"
+           || has "brace"
+           || has "missing '}'"
+           || has "unmatched" then
+            "brace_or_syntax_error",
+            "Inspect the nearest block boundaries and fix the smallest malformed syntax region before changing semantic content."
+        elif has "localisation"
+             || has "localization"
+             || has "localised"
+             || has "localized" then
+            "missing_localisation",
+            "Verify the key in localisation indexes and project text before creating or updating localisation."
+        elif has "scope" then
+            "scope_mismatch",
+            "Query the current scope and the relevant rule before changing triggers, effects, or scope transitions."
+        elif has "sprite"
+             || has "gfx_"
+             || has "spritetype"
+             || has "picture" then
+            "unknown_sprite",
+            "Resolve the sprite through project and vanilla .gfx/.asset candidates before editing the reference."
+        elif has "sound"
+             || has "music"
+             || has ".asset" then
+            "unknown_sound",
+            "Resolve the sound or music asset through project and vanilla candidates before editing the reference."
+        elif has "duplicate"
+             || has "already defined"
+             || has "redeclared" then
+            "duplicate_definition",
+            "Find the existing definition before deleting, renaming, or moving the duplicate entry."
+        elif has "expected value of type"
+             || has "invalid value"
+             || has "not a valid value"
+             || has "wrong type" then
+            "invalid_value_type",
+            "Query the field rule and nearby scope before replacing the value with a type-correct candidate."
+        elif has "trigger"
+             || has "effect" then
+            "unknown_trigger_effect",
+            "Check CWT rules, scripted triggers/effects, and definitions before renaming or creating identifiers."
+        elif has "unknown"
+             || has "not found"
+             || has "could not find"
+             || has "does not exist"
+             || has "unresolved" then
+            "missing_definition",
+            "Verify the referenced definition across workspace and vanilla indexes before creating a replacement."
+        else
+            "unknown",
+            "Gather nearby file context, rule data, and current diagnostics before applying another edit."
+
+    let diagnosticData (code: string) (message: string) =
+        let category, repairHint = diagnosticCategoryAndHint code message
+        JsonValue.Record
+            [| "category", JsonValue.String category
+               "repairHint", JsonValue.String repairHint |]
+
+    let diagnosticUri (f: string) =
+        (match Uri.TryCreate(f, UriKind.Absolute) with
+         | TrySuccess value -> value
+         | TryFailure ->
+             logWarning f
+             Uri "/")
+
     let parserErrorToDiagnostics e =
         let code, sev, file, error, (position: range), length, related = e
 
@@ -1131,13 +1448,6 @@ type Server(client: ILanguageClient) =
         let startLine = (int position.StartLine) - 1
         let startLine = max startLine 0
 
-        let createUri (f: string) =
-            (match Uri.TryCreate(f, UriKind.Absolute) with
-             | TrySuccess value -> value
-             | TryFailure ->
-                 logWarning f
-                 Uri "/")
-
         let result =
             { range =
                 { start = { line = startLine; character = startC }
@@ -1146,12 +1456,13 @@ type Server(client: ILanguageClient) =
               code = Some code
               source = Some code
               message = error
+              data = Some(diagnosticData code error)
               relatedInformation =
                 related
                 |> Option.map (
                     List.map (fun rel ->
                         { DiagnosticRelatedInformation.location =
-                            { uri = createUri rel.location.FileName
+                            { uri = diagnosticUri rel.location.FileName
                               range = convRangeToLSPRange rel.location }
                           message = rel.message })
                 )
@@ -1159,13 +1470,49 @@ type Server(client: ILanguageClient) =
 
         (file, result)
 
-    let sendDiagnostics s =
-        let diagnosticFilter (f: string, d) =
-            match (f, d) with
-            | _, { Diagnostic.code = Some code } when Array.contains code ignoreCodes -> false
-            | f, _ when Array.contains (Path.GetFileName f) ignoreFiles -> false
-            | _, _ -> true
+    let diagnosticFilter (f: string, d) =
+        match (f, d) with
+        | _, { Diagnostic.code = Some code } when Array.contains code ignoreCodes -> false
+        | f, _ when Array.contains (Path.GetFileName f) ignoreFiles -> false
+        | _, _ -> true
 
+    let diagnosticCounts (diagnostics: Diagnostic list) =
+        let errCount =
+            diagnostics
+            |> List.filter (fun d -> d.severity = Some(sevToDiagSev Severity.Error))
+            |> List.length
+        let warnCount =
+            diagnostics
+            |> List.filter (fun d -> d.severity = Some(sevToDiagSev Severity.Warning))
+            |> List.length
+        errCount, warnCount
+
+    let setFileDiagnosticStateWithEpoch filePath epoch freshness pendingKinds diagnostics =
+        let errCount, warnCount = diagnosticCounts diagnostics
+        let state =
+            { version = docs.GetVersionByPath(filePath)
+              epoch = epoch
+              updatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+              freshness = freshness
+              pendingGlobalKinds = pendingKinds
+              errorCount = errCount
+              diagnostics = diagnostics
+              warningCount = warnCount }
+        fileDiagnosticStates.[filePath] <- state
+
+    let nextDiagnosticEpoch () =
+        System.Threading.Interlocked.Increment(diagnosticEpoch)
+
+    let setFileDiagnosticState filePath freshness pendingKinds diagnostics =
+        setFileDiagnosticStateWithEpoch filePath (nextDiagnosticEpoch ()) freshness pendingKinds diagnostics
+
+    let diagnosticsForFile filePath diagnostics =
+        let normalisedPath = normaliseCachePath filePath
+        diagnostics
+        |> List.choose (fun (f, d) ->
+            if normaliseCachePath f = normalisedPath then Some d else None)
+
+    let sendDiagnostics s =
         s
         |> List.groupBy fst
         |> List.map (
@@ -1173,11 +1520,7 @@ type Server(client: ILanguageClient) =
             >> (fun (f, rs) ->
                 try
                     { uri =
-                        (match Uri.TryCreate(f, UriKind.Absolute) with
-                         | TrySuccess value -> value
-                         | TryFailure ->
-                             logWarning f
-                             Uri "/")
+                        diagnosticUri f
                       diagnostics = List.map snd rs }
                 with e ->
                     failwith $"%A{e} %A{rs}")
@@ -1208,22 +1551,12 @@ type Server(client: ILanguageClient) =
     let maxRefreshSkipCount = 10
 
     let markFileStale filePath reason =
-        let currentEpoch = diagnosticEpoch.Value
         let pendingKinds =
             match reason with
             | "localisation" -> [ "localisation" ]
             | "types" -> [ "types" ]
             | _ -> []
-        let state =
-            { version = docs.GetVersionByPath(filePath)
-              epoch = currentEpoch
-              updatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-              freshness = Stale
-              pendingGlobalKinds = pendingKinds
-              errorCount = 0
-              diagnostics = []
-              warningCount = 0 }
-        fileDiagnosticStates.[filePath] <- state
+        setFileDiagnosticState filePath Stale pendingKinds []
 
     //──Lightweight bracket scanner ───────────────────────────────────────────────────
     // Provide precise bracket error location when parser fails
@@ -1408,11 +1741,12 @@ type Server(client: ILanguageClient) =
                 match errors with
                 | [] -> []
                 | x -> x |> List.map parserErrorToDiagnostics
+            let visibleDiagnosticsList = diagnosticsList |> List.filter diagnosticFilter
 
             // Publish to VS Code Problems panel
             // IMPORTANT: You must ensure that the currently edited file always receives diagnostic updates,
             // Even though there is no entry for this file in diagnosticsList (bugs all fixed)
-            match diagnosticsList with
+            match visibleDiagnosticsList with
             | [] -> client.PublishDiagnostics { uri = doc; diagnostics = [] }
             | x ->
                 x |> sendDiagnostics
@@ -1428,26 +1762,13 @@ type Server(client: ILanguageClient) =
                   if needsTypeRefresh then yield "types" ]
             let freshness =
                 if pendingKinds.IsEmpty then Fresh else Pending
-            let allDiags = diagnosticsList |> List.map snd
-            let errCount =
-                allDiags
-                |> List.filter (fun d -> d.severity = Some(sevToDiagSev Severity.Error))
-                |> List.length
-            let warnCount =
-                allDiags
-                |> List.filter (fun d -> d.severity = Some(sevToDiagSev Severity.Warning))
-                |> List.length
-            let docVersion = docs.GetVersionByPath(name)
-            let state =
-                { version = docVersion
-                  epoch = newEpoch
-                  updatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                  freshness = freshness
-                  pendingGlobalKinds = pendingKinds
-                  errorCount = errCount
-                  diagnostics = allDiags
-                  warningCount = warnCount }
-            fileDiagnosticStates.[name] <- state
+            setFileDiagnosticStateWithEpoch name newEpoch freshness pendingKinds (diagnosticsForFile name visibleDiagnosticsList)
+
+            visibleDiagnosticsList
+            |> List.groupBy fst
+            |> List.iter (fun (filePath, entries) ->
+                if normaliseCachePath filePath <> normaliseCachePath name then
+                    setFileDiagnosticStateWithEpoch filePath newEpoch freshness pendingKinds (entries |> List.map snd))
             perfLintCount <- perfLintCount + 1
             maybePerfReport "lint"
         }
@@ -1460,6 +1781,7 @@ type Server(client: ILanguageClient) =
         | Some game ->
             let timestamp = Stopwatch.GetTimestamp()
             let allocBefore = GC.GetTotalAllocatedBytes(false)
+            let mutable refreshStatus = "not_needed"
             let now = DateTime.UtcNow
             let quietEnough =
                 lastTypeRefreshRequestAt = DateTime.MinValue
@@ -1485,6 +1807,7 @@ type Server(client: ILanguageClient) =
                 if doRefresh then
                     game.RefreshCaches()
                     let allocAfterRefresh = GC.GetTotalAllocatedBytes(false)
+                    refreshStatus <- if forceGlobalRefresh then "refresh_caches_forced" else "refresh_caches"
                     monitorLog Refresh $"RefreshCaches allocDeltaMB={(allocAfterRefresh - allocBefore) / 1048576L} force={forceGlobalRefresh} skipLimit={skipLimitReached} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     perfRefreshCachesCount <- perfRefreshCachesCount + 1
                     didGlobalWork <- true
@@ -1497,9 +1820,11 @@ type Server(client: ILanguageClient) =
                     refreshSkipCount <- 0
                 elif needsTypeRefresh then
                     refreshSkipCount <- refreshSkipCount + 1
+                    refreshStatus <- $"deferred:skip={refreshSkipCount};quiet={quietEnough};cooldown={cooldownElapsed};force={forceGlobalRefresh}"
                     monitorLog Refresh $"RefreshCaches skipped pending=true skip={refreshSkipCount} quiet={quietEnough} cooldown={cooldownElapsed} force={forceGlobalRefresh}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                 else
                     refreshSkipCount <- 0
+                    refreshStatus <- "not_needed"
                     monitorLog Refresh $"RefreshCaches skipped pending=false{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
 
                 let allocBeforeLoc = GC.GetTotalAllocatedBytes(false)
@@ -1564,6 +1889,12 @@ type Server(client: ILanguageClient) =
                 gameStateLock.ExitWriteLock()
 
             let time = Stopwatch.GetElapsedTime(timestamp)
+            updateValidationRuntime (fun state ->
+                { state with
+                    lastAnalyzeElapsedMs = int64 (time.TotalMilliseconds)
+                    lastAnalyzeCompletedAtUnixMs = nowUnixMs ()
+                    lastAnalyzeDidGlobalWork = didGlobalWork
+                    lastRefreshStatus = refreshStatus })
 
             delayTime <-
                 TimeSpan(Math.Min(TimeSpan(0, 0, 30).Ticks, Math.Max(TimeSpan(0, 0, 1, 500).Ticks, 2L * time.Ticks)))
@@ -1602,7 +1933,14 @@ type Server(client: ILanguageClient) =
             monitorLog Memory $"AnalyzePass cycleAllocMB={(allocTotal - allocBefore) / 1048576L} strings={sm.StringCount} ints={sm.IntCount} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
             maybePerfReport "delayedAnalyze"
             didGlobalWork
-        | None -> false
+        | None ->
+            updateValidationRuntime (fun state ->
+                { state with
+                    lastAnalyzeElapsedMs = 0L
+                    lastAnalyzeCompletedAtUnixMs = nowUnixMs ()
+                    lastAnalyzeDidGlobalWork = false
+                    lastRefreshStatus = "no_game" })
+            false
 
 
     let lintAgent =
@@ -1610,14 +1948,24 @@ type Server(client: ILanguageClient) =
             let mutable nextAnalyseTime = DateTime.Now
             let mutable needsDeepAnalyse = false
 
-            let analyzeTask uri force isEditAction =
+            let analyzeTask (uri: Uri) (force: bool) (isEditAction: bool) =
                 async {
                     let mutable nextTime = nextAnalyseTime
+                    let cycleSw = Stopwatch.StartNew()
+                    let mutable errorMessage: string option = None
 
                     try
                         try
                             let shallowAnalyse = DateTime.Now < nextTime
                             let useShallowAnalyze = shallowAnalyse && (not force)
+                            updateValidationRuntime (fun state ->
+                                { state with
+                                    inProgress = true
+                                    lastStartedAtUnixMs = nowUnixMs ()
+                                    lastCycleFile = uri.LocalPath
+                                    lastCycleShallow = useShallowAnalyze
+                                    lastCycleEditAction = isEditAction
+                                    lastError = None })
                             logDiag $"lint force: %b{force}, shallow: %b{useShallowAnalyze}"
                             do! lint uri useShallowAnalyze false isEditAction
 
@@ -1633,8 +1981,16 @@ type Server(client: ILanguageClient) =
                             else
                                 needsDeepAnalyse <- true
                         with e ->
+                            errorMessage <- Some e.Message
                             logError $"uri %A{uri.LocalPath} \n exception %A{e}"
                     finally
+                        cycleSw.Stop()
+                        updateValidationRuntime (fun state ->
+                            { state with
+                                inProgress = false
+                                lastCompletedAtUnixMs = nowUnixMs ()
+                                lastCycleElapsedMs = int64 (cycleSw.Elapsed.TotalMilliseconds)
+                                lastError = errorMessage })
                         agent.Post(WorkComplete(nextTime))
                 } |> Async.StartAsTask
 
@@ -1644,6 +2000,7 @@ type Server(client: ILanguageClient) =
 
             let rec loop (inprogress: bool) (state: Map<string, VersionedTextDocumentIdentifier * bool * bool>) =
                 async {
+                    updateValidationRuntime (fun runtime -> { runtime with queueDepth = state.Count })
                     let waitTimeMs =
                         if not inprogress && state.IsEmpty && needsDeepAnalyse then
                             // If the user is completely idle, cap the wait time to 2.5 seconds.
@@ -1727,6 +2084,7 @@ type Server(client: ILanguageClient) =
         MailboxProcessor.Start(fun agent ->
             let rec loop (pending: Map<string, VersionedTextDocumentIdentifier * bool>) =
                 async {
+                    updateValidationRuntime (fun runtime -> { runtime with debounceQueueDepth = pending.Count })
                     // Wait up to 1500ms for a new message; if none, fire the pending lint
                     let! msgOpt = agent.TryReceive(1500)
                     match msgOpt with
@@ -1752,9 +2110,30 @@ type Server(client: ILanguageClient) =
             loop Map.empty)
 
     let setupRulesCaches () =
+        let sw = Stopwatch.StartNew()
+        let finishRules status error =
+            sw.Stop()
+            updateLoadingRuntime (fun state ->
+                { state with
+                    inProgress = false
+                    phase = "rules"
+                    lastCompletedAtUnixMs = nowUnixMs ()
+                    lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
+                    lastRulesStatus = status
+                    lastError = error })
+        updateLoadingRuntime (fun state ->
+            { state with
+                inProgress = true
+                phase = "rules"
+                lastStartedAtUnixMs = nowUnixMs ()
+                lastGame = activeGame.ToString()
+                lastRulesStatus = "checking"
+                lastError = None })
         match cachePath, remoteRepoPath, useManualRules with
         | Some cp, Some rp, false ->
             let stable = rulesChannel <> "latest"
+            let mutable rulesStatus = "updating"
+            let mutable rulesError: string option = None
 
             client.CustomNotification(
                 "loadingBar",
@@ -1763,15 +2142,26 @@ type Server(client: ILanguageClient) =
                        "enable", JsonValue.Boolean(true) |]
             )
 
-            match initOrUpdateRules rp cp stable true with
-            | true, Some date ->
+            let rulesResult =
+                try Some (initOrUpdateRules rp cp stable true)
+                with e ->
+                    rulesStatus <- "error"
+                    rulesError <- Some e.Message
+                    logError $"Failed to update CWTools rules: {e.Message}"
+                    None
+
+            match rulesResult with
+            | Some (true, Some date) ->
+                rulesStatus <- "updated"
                 let text = String.Format(LangResources.rulesUpdated, activeGame, date)
                 logInfo text
-            | false, Some _ ->
+            | Some (false, Some _) ->
+                rulesStatus <- "up_to_date"
                 logInfo "CWTools rules are already up-to-date."
-            | false, None ->
+            | Some (false, None) ->
                 let fallbackConfigs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath
                 if fallbackConfigs.Length > 0 then
+                    rulesStatus <- "fallback"
                     let warningMsg =
                         uiText
                             (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached, bundled, or workspace rules instead. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
@@ -1782,22 +2172,27 @@ type Server(client: ILanguageClient) =
                           message = warningMsg }
                     )
                 else
+                    rulesStatus <- "missing"
                     let errorMsg =
                         uiText
                             (sprintf "Failed to update or load CWTools rules for %A. No cached or bundled fallback rules were found at %s. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
                             (sprintf "无法更新或加载 %A 的 CWTools 规则。未在 %s 找到缓存或内置备用规则。请重新安装 VSIX 或重新运行打包脚本，然后运行“CWTools: 运行安装健康检查”。" activeGame cp)
+                    rulesError <- Some errorMsg
                     logError errorMsg
                     client.ShowMessage(
                         { ``type`` = MessageType.Error
                           message = errorMsg }
                     )
-            | _ -> ()
+            | Some _ -> rulesStatus <- "unknown"
+            | None -> ()
+
+            finishRules rulesStatus rulesError
 
             client.CustomNotification(
                 "loadingBar",
                 JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
             )
-        | _ -> ()
+        | _ -> finishRules "skipped" None
 
     /// Bump this when the serialized vanilla cache format or serializer inputs
     /// become incompatible with caches produced by older extension builds.
@@ -1846,8 +2241,19 @@ type Server(client: ILanguageClient) =
         File.WriteAllText(metadataPath, metadata.ToString(), Encoding.UTF8)
 
     let checkOrSetGameCache (forceCreate: bool) =
+        let sw = Stopwatch.StartNew()
+        let mutable cacheStatus = "skipped"
+        let mutable cacheError: string option = None
+        updateLoadingRuntime (fun state ->
+            { state with
+                inProgress = true
+                phase = "vanilla_cache"
+                lastStartedAtUnixMs = nowUnixMs ()
+                lastGame = activeGame.ToString()
+                lastCacheStatus = "checking"
+                lastError = None })
         match (cachePath, isVanillaFolder, activeGame) with
-        | _, _, Custom -> ()
+        | _, _, Custom -> cacheStatus <- "skipped_custom_game"
         | Some cp, false, _ ->
             // L7 Fix: use Directory.GetParent() instead of string `+ "/../"` which
             // fails on UNC paths (\\server\share\...) and some symlinked directories.
@@ -1916,10 +2322,12 @@ type Server(client: ILanguageClient) =
                         logInfo (sprintf "Failed to check cache outdated status: %A" e)
 
                 if doesCacheExist && not forceCreate && not isOutdated then
+                    cacheStatus <- "up_to_date"
                     logInfo (sprintf "Cache exists and is up-to-date at %s" cacheFilePath)
                 else
                     match vanillaPathOpt with
                     | Some vp ->
+                        cacheStatus <- "generating"
                         client.CustomNotification(
                             "loadingBar",
                             JsonValue.Record
@@ -1930,24 +2338,58 @@ type Server(client: ILanguageClient) =
                         try
                             serializeFn vp gameCachePath
                             writeVanillaCacheMetadata cacheFilePath activeGame vp
+                            cacheStatus <- "generated"
                             let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
                             client.CustomNotification("forceReload", JsonValue.String(text))
                         with e ->
+                            cacheStatus <- "error"
                             let errorMsg = sprintf "Failed to generate vanilla cache for %A. Check permissions for %s. Error: %s" activeGame gameCachePath e.Message
+                            cacheError <- Some errorMsg
                             logError errorMsg
                             client.ShowMessage(
                                 { ``type`` = MessageType.Error // Error
                                   message = errorMsg }
                             )
                     | None ->
+                        cacheStatus <- "prompted_vanilla_path"
                         client.CustomNotification("promptVanillaPath", JsonValue.String(promptName))
-        | _ -> logInfo "No cache path"
+        | _ ->
+            cacheStatus <- "no_cache_path"
+            logInfo "No cache path"
+        sw.Stop()
+        updateLoadingRuntime (fun state ->
+            { state with
+                inProgress = false
+                phase = "vanilla_cache"
+                lastCompletedAtUnixMs = nowUnixMs ()
+                lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
+                lastCacheStatus = cacheStatus
+                lastError = cacheError })
 
     /// Precache CodeLens for all files. InlayHints stay lazy because walking
     /// every entity after load can starve editor requests during file switches.
     let precacheAllFiles () =
+        let sw = Stopwatch.StartNew()
+        let mutable precacheFileCount = 0
+        let mutable precacheError: string option = None
+        updateLoadingRuntime (fun state ->
+            { state with
+                inProgress = true
+                phase = "precache"
+                lastStartedAtUnixMs = nowUnixMs ()
+                lastGame = activeGame.ToString()
+                lastError = None })
         match gameObj with
-        | None -> ()
+        | None ->
+            sw.Stop()
+            updateLoadingRuntime (fun state ->
+                { state with
+                    inProgress = false
+                    phase = "precache"
+                    lastCompletedAtUnixMs = nowUnixMs ()
+                    lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
+                    lastPrecacheFileCount = 0
+                    lastError = None })
         | Some game ->
             client.CustomNotification(
                 "loadingBar",
@@ -1958,6 +2400,7 @@ type Server(client: ILanguageClient) =
 
                 // Build CodeLens cache from type index (no file reads, instant)
                 let groupedTypes = getOrBuildGroupedTypes game
+                precacheFileCount <- groupedTypes.Count
                 for (filePath, items) in groupedTypes |> Map.toSeq do
                     let lenses =
                         items
@@ -1968,14 +2411,38 @@ type Server(client: ILanguageClient) =
                 // so CodeLens clicks do not pay an all-project scan later.
                 game.TypeReferenceIndex() |> ignore
 
-            with e -> eprintfn $"Precache failed: %A{e}"
+            with e ->
+                precacheError <- Some e.Message
+                eprintfn $"Precache failed: %A{e}"
             client.CustomNotification(
                 "loadingBar",
                 JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
             )
             maybeCollectGarbage ()
+            sw.Stop()
+            updateLoadingRuntime (fun state ->
+                { state with
+                    inProgress = false
+                    phase = "precache"
+                    lastCompletedAtUnixMs = nowUnixMs ()
+                    lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
+                    lastPrecacheFileCount = precacheFileCount
+                    lastError = precacheError })
 
     let processWorkspace (uri: option<Uri>) =
+        let sw = Stopwatch.StartNew()
+        let mutable loadedFileCount = 0
+        let mutable parserErrorCount = 0
+        let mutable validationErrorCount = 0
+        let mutable localisationErrorCount = 0
+        let mutable loadError: string option = None
+        updateLoadingRuntime (fun state ->
+            { state with
+                inProgress = true
+                phase = "loading_project"
+                lastStartedAtUnixMs = nowUnixMs ()
+                lastGame = activeGame.ToString()
+                lastError = None })
         client.CustomNotification(
             "loadingBar",
             JsonValue.Record
@@ -1986,6 +2453,13 @@ type Server(client: ILanguageClient) =
         match uri with
         | Some u ->
             let path = getPathFromDoc u
+            updateLoadingRuntime (fun state ->
+                { state with
+                    inProgress = true
+                    phase = "loading_project"
+                    lastWorkspaceRoot = path
+                    lastGame = activeGame.ToString()
+                    lastError = None })
 
             try
                 let serverSettings =
@@ -2013,8 +2487,12 @@ type Server(client: ILanguageClient) =
                             oldGame.CleanupCache existingFiles
                         with e -> logDiag $"CleanupCache error on reload: {e.Message}"
                     | None -> ()
+                    for kvp in fileDiagnosticStates |> Seq.toArray do
+                        if kvp.Value.diagnostics.Length > 0 then
+                            client.PublishDiagnostics { uri = diagnosticUri kvp.Key; diagnostics = [] }
                     // Clear all old type-specific references
                     gameFieldClearers |> List.iter (fun f -> f())
+                    gameObj <- None
                     fileDiagnosticStates.Clear()
                     locCache.Clear()
                     cachedLocMap <- None
@@ -2087,8 +2565,7 @@ type Server(client: ILanguageClient) =
                 let parserErrors =
                     game.ParserErrors()
                     |> List.map (fun (n, e, p) -> "CW001", Severity.Error, n, e, (getRange p p), 0, None)
-
-                parserErrors |> List.map parserErrorToDiagnostics |> sendDiagnostics
+                parserErrorCount <- parserErrors.Length
 
                 let mapResourceToFilePath =
                     function
@@ -2096,7 +2573,7 @@ type Server(client: ILanguageClient) =
                     | FileResource(f, r) -> r.scope, f, r.logicalpath
                     | FileWithContentResource(f, r) -> r.scope, f, r.logicalpath
 
-                let fileList =
+                let fileEntries =
                     game.AllFiles()
                     |> List.choose (fun resource ->
                         let scope, fileUri, logicalPath = mapResourceToFilePath resource
@@ -2104,12 +2581,21 @@ type Server(client: ILanguageClient) =
                         match Uri.TryCreate(fileUri, UriKind.Absolute) with
                         | TrySuccess url -> Some(scope, url, logicalPath)
                         | TryFailure -> None)
+
+                let loadedFilePaths =
+                    fileEntries
+                    |> List.map (fun (_, uri, _) -> getPathFromDoc uri)
+                    |> List.distinctBy normaliseCachePath
+
+                let fileList =
+                    fileEntries
                     |> List.map (fun (s, uri, l) ->
                         JsonValue.Record
                             [| "scope", JsonValue.String s
                                "uri", uri.AbsoluteUri |> JsonValue.String
                                "logicalpath", JsonValue.String l |])
                     |> Array.ofList
+                loadedFileCount <- fileList.Length
 
                 client.CustomNotification("updateFileList", JsonValue.Record [| "fileList", JsonValue.Array fileList |])
 
@@ -2124,8 +2610,10 @@ type Server(client: ILanguageClient) =
                     game.ValidationErrors()
                     |> List.map (fun e ->
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                validationErrorCount <- valErrors.Length
 
                 let locRaw = game.LocalisationErrors(true, true)
+                localisationErrorCount <- locRaw.Length
                 locCache.Clear()
                 cachedLocMap <- None
                 cachedLocMapCount <- 0
@@ -2137,14 +2625,63 @@ type Server(client: ILanguageClient) =
                     |> List.map (fun e ->
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
-                valErrors @ locErrors |> List.map parserErrorToDiagnostics |> sendDiagnostics
+                let visibleInitialDiagnostics =
+                    parserErrors @ valErrors @ locErrors
+                    |> List.map parserErrorToDiagnostics
+                    |> List.filter diagnosticFilter
+
+                visibleInitialDiagnostics |> sendDiagnostics
+
+                let diagnosticsByFile =
+                    visibleInitialDiagnostics
+                    |> List.groupBy (fun (filePath, _) -> normaliseCachePath filePath)
+                    |> Map.ofList
+
+                let loadedNormalised = loadedFilePaths |> List.map normaliseCachePath |> Set.ofList
+                let loadEpoch = nextDiagnosticEpoch ()
+
+                for filePath in loadedFilePaths do
+                    let diagnostics =
+                        diagnosticsByFile
+                        |> Map.tryFind (normaliseCachePath filePath)
+                        |> Option.map (List.map snd)
+                        |> Option.defaultValue []
+                    setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] diagnostics
+
+                diagnosticsByFile
+                |> Map.toSeq
+                |> Seq.iter (fun (_, entries) ->
+                    match entries with
+                    | (filePath, _) :: _ when not (loadedNormalised.Contains(normaliseCachePath filePath)) ->
+                        setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] (entries |> List.map snd)
+                    | _ -> ())
 
                 // L6 Fix: non-blocking optimised GC avoids a 100ms freeze on load
                 maybeCollectGarbage ()
             with e ->
+                loadError <- Some e.Message
                 eprintfn $"%A{e}"
 
         | None -> ()
+
+        sw.Stop()
+        let finalPhase =
+            match loadError, uri, gameObj with
+            | Some _, _, _ -> "load_project_error"
+            | None, None, _ -> "no_workspace"
+            | None, Some _, Some _ -> "ready"
+            | None, Some _, None -> "not_loaded"
+        updateLoadingRuntime (fun state ->
+            { state with
+                inProgress = false
+                phase = finalPhase
+                lastCompletedAtUnixMs = nowUnixMs ()
+                lastElapsedMs = int64 (sw.Elapsed.TotalMilliseconds)
+                lastFileCount = loadedFileCount
+                lastParserErrorCount = parserErrorCount
+                lastValidationErrorCount = validationErrorCount
+                lastLocalisationErrorCount = localisationErrorCount
+                lastError = loadError })
 
         client.CustomNotification(
             "loadingBar",
@@ -2152,8 +2689,8 @@ type Server(client: ILanguageClient) =
         )
 
         // Notify AI agent that the server is fully ready (game data loaded and validated)
-        match gameObj with
-        | Some _ ->
+        match loadError, gameObj with
+        | None, Some _ ->
             client.CustomNotification(
                 "cwtools/serverReady",
                 JsonValue.Record
@@ -2161,7 +2698,7 @@ type Server(client: ILanguageClient) =
                        "vanillaLoaded", JsonValue.Boolean(not isVanillaFolder)
                        "timestamp", JsonValue.Number(decimal (System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())) |]
             )
-        | None -> ()
+        | _ -> ()
 
     let createRange startLine startCol endLine endCol =
         { start =
@@ -2349,6 +2886,10 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.getEntityInfo"
                                           "cwtools.ai.queryStaticModifiers"
                                           "cwtools.ai.queryVariables"
+                                          "cwtools.ai.getDiagnosticsFresh"
+                                          "cwtools.ai.waitDiagnosticsFresh"
+                                          "cwtools.ai.getValidationStatus"
+                                          "cwtools.ai.parseFragment"
                                           "cwtools.exportTypes"
                                           "getFileTypes" ] }
                             inlayHintProvider = true
@@ -2647,6 +3188,13 @@ type Server(client: ILanguageClient) =
                 let sw = Stopwatch.StartNew()
                 let allocBefore = GC.GetTotalAllocatedBytes(false)
                 let filePath = getPathFromDoc p.textDocument.uri
+                updateCompletionRuntime (fun state ->
+                    { state with
+                        lastStartedAtUnixMs = nowUnixMs ()
+                        lastFile = filePath
+                        lastLine = p.position.line
+                        lastCharacter = p.position.character
+                        lastError = None })
                 let fileText = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
                 let hash = contentHash fileText
                 let cacheKey = completionListCacheKey filePath hash p.position.line p.position.character debugMode clientSupportsInsertReplaceEdit
@@ -2655,6 +3203,18 @@ type Server(client: ILanguageClient) =
                 | true, (createdAt, cached) when (now - createdAt).TotalMilliseconds <= completionListTtlMs ->
                     sw.Stop()
                     let allocAfter = GC.GetTotalAllocatedBytes(false)
+                    let count = cached |> Option.map (fun r -> r.items.Length) |> Option.defaultValue 0
+                    let isIncomplete = cached |> Option.map (fun r -> r.isIncomplete) |> Option.defaultValue false
+                    updateCompletionRuntime (fun state ->
+                        { state with
+                            totalRequests = state.totalRequests + 1
+                            cacheHits = state.cacheHits + 1
+                            lastCompletedAtUnixMs = nowUnixMs ()
+                            lastElapsedMs = int64 sw.ElapsedMilliseconds
+                            lastItemCount = count
+                            lastCacheHit = true
+                            lastIsIncomplete = isIncomplete
+                            lastError = None })
                     monitorLog Completion $"Completion ttl-hit file={filePath} line={p.position.line} char={p.position.character} elapsed={sw.ElapsedMilliseconds}ms allocDeltaMB={(allocAfter - allocBefore) / 1048576L}{getPerfCacheSnapshot()}"
                     perfCompletionCount <- perfCompletionCount + 1
                     maybePerfReport "completion-cache-hit"
@@ -2666,6 +3226,17 @@ type Server(client: ILanguageClient) =
                     sw.Stop()
                     let allocAfter = GC.GetTotalAllocatedBytes(false)
                     let count = result |> Option.map (fun r -> r.items.Length) |> Option.defaultValue 0
+                    let isIncomplete = result |> Option.map (fun r -> r.isIncomplete) |> Option.defaultValue false
+                    updateCompletionRuntime (fun state ->
+                        { state with
+                            totalRequests = state.totalRequests + 1
+                            cacheMisses = state.cacheMisses + 1
+                            lastCompletedAtUnixMs = nowUnixMs ()
+                            lastElapsedMs = int64 sw.ElapsedMilliseconds
+                            lastItemCount = count
+                            lastCacheHit = false
+                            lastIsIncomplete = isIncomplete
+                            lastError = None })
                     monitorLog Completion $"Completion file={filePath} line={p.position.line} char={p.position.character} items={count} elapsed={sw.ElapsedMilliseconds}ms allocDeltaMB={(allocAfter - allocBefore) / 1048576L}{getPerfCacheSnapshot()}"
                     perfCompletionCount <- perfCompletionCount + 1
                     maybePerfReport "completion"
@@ -4385,10 +4956,21 @@ type Server(client: ILanguageClient) =
                                     let diagnosticsJson =
                                         state.diagnostics
                                         |> List.map (fun d ->
+                                            let codeText = d.code |> Option.defaultValue ""
+                                            let dataJson =
+                                                d.data
+                                                |> Option.defaultWith (fun () -> diagnosticData codeText d.message)
+                                            let dataString field fallback =
+                                                match dataJson.TryGetProperty(field) with
+                                                | Some(JsonValue.String value) -> value
+                                                | _ -> fallback
                                             JsonValue.Record
-                                                [| "code", JsonValue.String (d.code |> Option.defaultValue "")
+                                                [| "code", JsonValue.String codeText
                                                    "message", JsonValue.String d.message
                                                    "severity", JsonValue.String (match d.severity with Some DiagnosticSeverity.Error -> "error" | Some DiagnosticSeverity.Warning -> "warning" | Some DiagnosticSeverity.Information -> "info" | Some DiagnosticSeverity.Hint -> "hint" | _ -> "info")
+                                                   "category", JsonValue.String (dataString "category" "unknown")
+                                                   "repairHint", JsonValue.String (dataString "repairHint" "")
+                                                   "data", dataJson
                                                    "line", JsonValue.Number(decimal d.range.start.line)
                                                    "column", JsonValue.Number(decimal d.range.start.character) |])
                                         |> Array.ofList
@@ -4434,6 +5016,7 @@ type Server(client: ILanguageClient) =
                                 if pendingFiles = 0 then "fresh"
                                 elif pendingFiles < totalFiles then "pending"
                                 else "stale"
+                            let runtime = validationRuntimeSnapshot ()
                             let result =
                                 JsonValue.Record
                                     [| "ok",                 JsonValue.Boolean true
@@ -4441,7 +5024,23 @@ type Server(client: ILanguageClient) =
                                        "freshness",         JsonValue.String freshness
                                        "totalFiles",        JsonValue.Number(decimal totalFiles)
                                        "pendingFiles",      JsonValue.Number(decimal pendingFiles)
-                                       "pendingGlobalKinds",JsonValue.Array(allPendingKinds |> Array.map JsonValue.String) |]
+                                       "pendingGlobalKinds",JsonValue.Array(allPendingKinds |> Array.map JsonValue.String)
+                                       "inProgress",        JsonValue.Boolean runtime.inProgress
+                                       "queueDepth",        JsonValue.Number(decimal runtime.queueDepth)
+                                       "debounceQueueDepth",JsonValue.Number(decimal runtime.debounceQueueDepth)
+                                       "needsTypeRefresh",  JsonValue.Boolean needsTypeRefresh
+                                       "delayedLocalisationUpdate", JsonValue.Boolean delayedLocUpdate
+                                       "refreshSkipCount",  JsonValue.Number(decimal refreshSkipCount)
+                                       "nextAnalyzeDelayMs",JsonValue.Number(decimal (int delayTime.TotalMilliseconds))
+                                       "lastTypeRefreshRequestedAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastTypeRefreshRequestAt))
+                                       "lastTypeRefreshCompletedAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastTypeRefreshCompletedAt))
+                                       "openDocuments",     JsonValue.Number(decimal (docs.OpenFiles() |> List.length))
+                                       "runtime",           getRuntimeSnapshotJson ()
+                                       "loading",           getLoadingSnapshotJson ()
+                                       "completion",        getCompletionSnapshotJson ()
+                                       "diagnosticSummary", getDiagnosticSummaryJson ()
+                                       "memory",            getMemorySnapshotJson ()
+                                       "caches",            getCacheSnapshotJson () |]
                             Some result
 
                         // ── cwtools.ai.parseFragment ─────────────────────────────────────────

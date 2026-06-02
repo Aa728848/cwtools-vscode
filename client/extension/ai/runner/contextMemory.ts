@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { ChatMessage, TokenUsage, contentToString } from '../types';
+import { ChatMessage, contentToString } from '../types';
 import { AIService } from '../aiService';
 import { getProjectWorkspaceRoot } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
@@ -122,7 +122,7 @@ ${recentChatPreview}
         
         try {
             parsed = parseAndCleanJson(rawText);
-        } catch (parseError) {
+        } catch {
             ErrorReporter.warn(SOURCE.AGENT_RUNNER, `压缩生成的 JSON 存在语法残缺，尝试自愈解析中...`);
             parsed = attemptJsonSelfRepair(rawText);
         }

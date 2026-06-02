@@ -229,7 +229,7 @@ class ScriptLocDefinitionProvider implements vs.DefinitionProvider {
     async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
         // 1. Prefer quoted strings — these are almost always loc key references
         let range = document.getWordRangeAtPosition(position, /"([A-Za-z_][A-Za-z0-9_.:-]+)"/);
-        let isQuoted = !!range;
+        const isQuoted = !!range;
 
         // 2. Fall back to unquoted identifiers only if preceded by a loc-key context
         if (!range) {

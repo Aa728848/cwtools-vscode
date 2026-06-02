@@ -965,30 +965,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         }
     }
 
-    function renderInspectorSlider(): void {
-        const sliderBody = document.getElementById('runInspectorSliderBody');
-        if (!sliderBody) return;
-
-        const events = Array.isArray(state.runEvents) ? state.runEvents : [];
-        const selectedEvent = events.find((evt: any) => evt.eventId === state.selectedRunEventId);
-        const run = state.run;
-        const context = run?.context || {};
-        const contextMeter = context.estimatedPromptTokens && context.contextLimit ? {
-            estimatedPromptTokens: context.estimatedPromptTokens,
-            contextLimit: context.contextLimit,
-            percentage: Math.round((context.estimatedPromptTokens / context.contextLimit) * 100),
-        } : undefined;
-
-        const copyLabel = state.copiedEventAt && Date.now() - state.copiedEventAt < 2500 ? m.runs.copiedEvent : m.runs.copyEventJson;
-        sliderBody.innerHTML = `
-            <div class="run-action-row run-inspector-actions">
-                <button type="button" class="run-action-btn" data-run-action="copy-event" ${selectedEvent ? '' : 'disabled'}>${copyLabel}</button>
-            </div>
-            ${renderInspectorHTML({ selectedEventId: state.selectedRunEventId, selectedEvent, contextMeter }, i18n)}
-        `;
-        updateInspectorSliderVisibility();
-    }
-
     function renderInspector(): void {
         if (activeTab === 'artifacts') return;
 

@@ -222,12 +222,10 @@ export class UsageTracker {
         // Cache hit statistics
         let totalCachedTokens = 0;
         let totalInputTokens = 0;
-        let totalNetInputTokens = 0;
         let cacheCapableInputTokens = 0; // Only count input from cache-capable models
         for (const r of records) {
             totalCachedTokens += r.cachedTokens ?? 0;
             totalInputTokens += r.inputTokens;
-            totalNetInputTokens += r.netInputTokens ?? r.inputTokens;
             // Only count input tokens from models that support cache statistics
             if (r.cachedTokens && r.cachedTokens > 0) {
                 cacheCapableInputTokens += r.inputTokens;

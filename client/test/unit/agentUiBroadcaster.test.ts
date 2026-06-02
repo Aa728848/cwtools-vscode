@@ -1,6 +1,5 @@
 import { expect } from 'chai';
 import type { HostMessage } from '../../extension/ai/types';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { AgentUiBroadcaster } = require('../../extension/ai/agentUiBroadcaster');
 
 describe('AgentUiBroadcaster', () => {

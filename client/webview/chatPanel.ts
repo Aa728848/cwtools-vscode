@@ -250,7 +250,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let pendingFiles: string[] = [];
     /** Pending structured references to attach to the next sent message */
     let activeContexts: ActiveContext[] = [];
-    let editingMessageIndex: number | null = null;
     let inlineEditSession: {
         messageIndex: number;
         container: HTMLElement;
@@ -1320,7 +1319,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function cancelInlineEdit(focusBubble = false) {
         const session = inlineEditSession;
         if (!session) {
-            editingMessageIndex = null;
             return;
         }
         activeComposerEl = input;
@@ -1329,7 +1327,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (session.actions) session.actions.style.display = '';
         messageIndexMap.get(session.messageIndex)?.classList.remove('editing');
         inlineEditSession = null;
-        editingMessageIndex = null;
         closeAtPopup();
         slashPopup?.classList.remove('show');
         if (focusBubble) session.bubble.focus();
@@ -1465,7 +1462,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 contexts: draftContexts.length > 0 ? draftContexts.map(ctx => ({ ...ctx })) : undefined,
                 images: draftImages.length > 0 ? [...draftImages] : undefined,
             });
-            editingMessageIndex = null;
             activeComposerEl = input;
             closeAtPopup();
             slashPopup?.classList.remove('show');
@@ -1501,7 +1497,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         renderContexts();
         renderImages();
 
-        editingMessageIndex = messageIdx;
         bubble.style.display = 'none';
         if (actions) actions.style.display = 'none';
         message.classList.add('editing');
@@ -1641,11 +1636,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             input.focus();
         });
         return chip;
-    }
-
-    function renderContextTray() {
-        syncContextsFromComposer();
-        updateComposerStackHeight();
     }
 
     // ── Placeholder rotation ───────────────────────────────────────────────────
@@ -4683,15 +4673,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             preflightHtml +
             `</div></div>` +
             actionsHtml;
-        if (false) div.innerHTML =
-            `<div class="permission-card-header">` +
-            `<span class="permission-card-icon">${svgIconNoMargin('key')}</span>` +
-            `<div class="permission-card-body">` +
-            `<div class="permission-card-title">${escapeHtml(description)}</div>` +
-            (command ? `<div class="permission-card-cmd">${escapeHtml(command)}</div>` : '') +
-            `</div></div>` +
-            actionsHtml;
-            
         (div.querySelector('.permission-allow-btn') as HTMLButtonElement).addEventListener('click', function () {
             this.disabled = true; 
             const denyBtn = div.querySelector('.permission-deny-btn') as HTMLButtonElement;

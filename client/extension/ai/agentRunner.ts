@@ -242,7 +242,7 @@ const _PLAN_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'todo_write',
-    'read_file', 'list_directory', 'get_diagnostics', 'web_fetch', 'search_web',
+    'read_file', 'list_directory', 'get_lsp_status', 'get_diagnostics', 'web_fetch', 'search_web',
     'glob_files', 'codesearch',
     // Deep API tools for archetype study in Plan mode
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -261,7 +261,7 @@ const _EXPLORE_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
-    'get_diagnostics', 'web_fetch', 'search_web', 'glob_files',
+    'get_lsp_status', 'get_diagnostics', 'web_fetch', 'search_web', 'glob_files',
     // CWTools Deep API tools (read-only, advertised in Explore mode prompt)
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
@@ -281,7 +281,7 @@ const _REVIEW_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
-    'get_diagnostics', 'query_definition', 'query_definition_by_name',
+    'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'web_fetch', 'search_web', 'glob_files', 'codesearch',
@@ -293,7 +293,7 @@ const _REVIEW_MODE_TOOLS: AgentToolName[] = [
 const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
-    'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
+    'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
     'query_localisation_index', 'query_workspace_index',
     // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
@@ -304,7 +304,7 @@ const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
 const _LOC_WRITER_TOOLS: AgentToolName[] = [
     'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
-    'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_diagnostics',
+    'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
@@ -317,7 +317,7 @@ const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
     'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
-    'get_diagnostics', 'web_fetch', 'search_web', 'glob_files', 'codesearch',
+    'get_lsp_status', 'get_diagnostics', 'web_fetch', 'search_web', 'glob_files', 'codesearch',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables',
     'query_definition', 'query_definition_by_name',
@@ -2502,6 +2502,7 @@ export class AgentRunner {
             pendingGlobalKinds: string[];
             lastEpoch?: number;
             diagnosticService?: GetDiagnosticsResult['diagnosticService'];
+            validationStatus?: GetDiagnosticsResult['validationStatus'];
         }> => {
             const rawResult = await this.toolExecutor.execute('get_diagnostics', {
                 file: targetFile,
@@ -2517,6 +2518,9 @@ export class AgentRunner {
                         message: String(d.message ?? ''),
                         line: Number(d.line ?? 0),
                         column: Number(d.column ?? 0),
+                        category: d.category,
+                        repairHint: d.repairHint,
+                        data: d.data,
                     });
                 }
             }
@@ -2537,6 +2541,7 @@ export class AgentRunner {
                 pendingGlobalKinds,
                 lastEpoch,
                 diagnosticService: rawResult?.diagnosticService,
+                validationStatus: rawResult?.validationStatus,
             };
         };
 
@@ -2566,7 +2571,7 @@ export class AgentRunner {
                     const previousEpoch = diagnosticRead.lastEpoch;
                     emitStep({
                         type: 'validation',
-                        content: `Validation diagnostics are ${diagnosticRead.freshness}; waiting ${delayMs}ms for CWTools LSP to settle.`,
+                        content: `Validation diagnostics are ${diagnosticRead.freshness}; waiting ${delayMs}ms for CWTools LSP to settle.${this.formatValidationStatusBrief(diagnosticRead.validationStatus)}`,
                         timestamp: Date.now(),
                     });
                     await this.delay(delayMs);
@@ -2590,6 +2595,7 @@ export class AgentRunner {
                         freshness,
                         pendingGlobalKinds,
                         diagnosticRead.diagnosticService,
+                        diagnosticRead.validationStatus,
                         sawDiagnosticEpochProgress,
                     );
                     const fallbackErrorCount = fallbackErrors.filter(e => e.severity === 'error').length;
@@ -2608,6 +2614,7 @@ export class AgentRunner {
                             pendingGlobalKinds,
                             diagnosticService: diagnosticRead.diagnosticService?.status,
                             diagnosticEpochProgress: sawDiagnosticEpochProgress,
+                            validationRuntime: this.compactValidationStatus(diagnosticRead.validationStatus),
                         });
                         return {
                             code: currentCode,
@@ -2770,6 +2777,7 @@ export class AgentRunner {
         freshness: 'pending' | 'stale',
         pendingGlobalKinds: string[],
         diagnosticService: GetDiagnosticsResult['diagnosticService'],
+        validationStatus: GetDiagnosticsResult['validationStatus'],
         sawDiagnosticEpochProgress: boolean,
     ): ValidationError[] {
         const text = this.readValidationFallbackText(targetFile, currentCode);
@@ -2787,13 +2795,80 @@ export class AgentRunner {
         const epochSuffix = sawDiagnosticEpochProgress
             ? ' Diagnostic epoch advanced while waiting.'
             : ' Diagnostic epoch did not advance while waiting.';
+        const runtimeSuffix = this.formatValidationStatusBrief(validationStatus);
         return [{
             code: 'VALIDATION_DEGRADED_LSP_NO_FEEDBACK',
             severity: 'warning',
-            message: `CWTools LSP did not provide fresh diagnostics (${freshness}).${pendingSuffix}${serviceSuffix}${epochSuffix} Local syntax fallback found no brace/string errors, but semantic CWTools validation was not confirmed.`,
+            message: `CWTools LSP did not provide fresh diagnostics (${freshness}).${pendingSuffix}${serviceSuffix}${epochSuffix}${runtimeSuffix} Local syntax fallback found no brace/string errors, but semantic CWTools validation was not confirmed.`,
             line: 0,
             column: 0,
         }];
+    }
+
+    private compactValidationStatus(status?: GetDiagnosticsResult['validationStatus']): Record<string, unknown> | undefined {
+        if (!status) return undefined;
+        const runtime = status.runtime && typeof status.runtime === 'object'
+            ? status.runtime as Record<string, unknown>
+            : {};
+        const loading = status.loading && typeof status.loading === 'object'
+            ? status.loading as Record<string, unknown>
+            : {};
+        const completion = status.completion && typeof status.completion === 'object'
+            ? status.completion as Record<string, unknown>
+            : {};
+        return {
+            inProgress: status.inProgress,
+            queueDepth: status.queueDepth,
+            debounceQueueDepth: status.debounceQueueDepth,
+            needsTypeRefresh: status.needsTypeRefresh,
+            delayedLocalisationUpdate: status.delayedLocalisationUpdate,
+            refreshSkipCount: status.refreshSkipCount,
+            nextAnalyzeDelayMs: status.nextAnalyzeDelayMs,
+            lastRefreshStatus: typeof runtime.lastRefreshStatus === 'string' ? runtime.lastRefreshStatus : undefined,
+            lastCycleElapsedMs: typeof runtime.lastCycleElapsedMs === 'number' ? runtime.lastCycleElapsedMs : undefined,
+            lastAnalyzeElapsedMs: typeof runtime.lastAnalyzeElapsedMs === 'number' ? runtime.lastAnalyzeElapsedMs : undefined,
+            loadingInProgress: typeof loading.inProgress === 'boolean' ? loading.inProgress : undefined,
+            loadingPhase: typeof loading.phase === 'string' ? loading.phase : undefined,
+            loadingElapsedMs: typeof loading.lastElapsedMs === 'number' ? loading.lastElapsedMs : undefined,
+            loadedFileCount: typeof loading.lastFileCount === 'number' ? loading.lastFileCount : undefined,
+            completionLastElapsedMs: typeof completion.lastElapsedMs === 'number' ? completion.lastElapsedMs : undefined,
+            completionLastItemCount: typeof completion.lastItemCount === 'number' ? completion.lastItemCount : undefined,
+            completionLastCacheHit: typeof completion.lastCacheHit === 'boolean' ? completion.lastCacheHit : undefined,
+            completionLastIsIncomplete: typeof completion.lastIsIncomplete === 'boolean' ? completion.lastIsIncomplete : undefined,
+            completionCacheHitRate: typeof completion.cacheHitRate === 'number' ? completion.cacheHitRate : undefined,
+            completionTtlCacheEntries: typeof completion.ttlCacheEntries === 'number' ? completion.ttlCacheEntries : undefined,
+        };
+    }
+
+    private formatValidationStatusBrief(status?: GetDiagnosticsResult['validationStatus']): string {
+        const compact = this.compactValidationStatus(status);
+        if (!compact) return '';
+        const parts: string[] = [];
+        if (typeof compact.inProgress === 'boolean') parts.push(`inProgress=${compact.inProgress}`);
+        if (typeof compact.queueDepth === 'number') parts.push(`queue=${compact.queueDepth}`);
+        if (typeof compact.debounceQueueDepth === 'number') parts.push(`debounce=${compact.debounceQueueDepth}`);
+        if (typeof compact.needsTypeRefresh === 'boolean' && compact.needsTypeRefresh) parts.push('needsTypeRefresh=true');
+        if (typeof compact.delayedLocalisationUpdate === 'boolean' && compact.delayedLocalisationUpdate) parts.push('delayedLoc=true');
+        if (typeof compact.nextAnalyzeDelayMs === 'number') parts.push(`nextDelayMs=${compact.nextAnalyzeDelayMs}`);
+        if (typeof compact.lastRefreshStatus === 'string') parts.push(`lastRefresh=${compact.lastRefreshStatus}`);
+        if (compact.loadingInProgress === true || typeof compact.loadingPhase === 'string') {
+            const loadingBits = [
+                typeof compact.loadingPhase === 'string' ? compact.loadingPhase : undefined,
+                compact.loadingInProgress === true ? 'in-progress' : undefined,
+                typeof compact.loadedFileCount === 'number' ? `files=${compact.loadedFileCount}` : undefined,
+            ].filter(Boolean).join('/');
+            if (loadingBits) parts.push(`loading=${loadingBits}`);
+        }
+        if (typeof compact.completionLastElapsedMs === 'number' && compact.completionLastElapsedMs > 0) {
+            const completionBits = [
+                `${compact.completionLastElapsedMs}ms`,
+                typeof compact.completionLastItemCount === 'number' ? `${compact.completionLastItemCount} items` : undefined,
+                compact.completionLastCacheHit === true ? 'ttl-hit' : undefined,
+                compact.completionLastIsIncomplete === true ? 'incomplete' : undefined,
+            ].filter(Boolean).join('/');
+            if (completionBits) parts.push(`completion=${completionBits}`);
+        }
+        return parts.length ? ` Runtime: ${parts.join(', ')}.` : '';
     }
 
     private readValidationFallbackText(targetFile: string, currentCode: string): string {

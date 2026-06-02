@@ -33,6 +33,9 @@ let private macroParamPattern =
         @"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private valueArgTokenBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; '\n'; '\r'|]
+let private completionPrefixBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; ':'; '|'; '('; ')'; '['; ']'; '"'; '\''; '\n'; '\r'|]
+
 /// Extract a single line from text without allocating a full string[] via Split.
 let private getLineAt (text: string) (lineIdx: int) =
     if lineIdx < 0 then ""
@@ -50,6 +53,86 @@ let private getLineAt (text: string) (lineIdx: int) =
                 e
             text.Substring(idx, lineEnd - idx)
 
+let private getTextBeforeCursor (filetext: string) (position: pos) =
+    let targetLine = getLineAt filetext (position.Line - 1)
+    let safeColumn = Math.Max(0, Math.Min(position.Column, targetLine.Length))
+    targetLine.Substring(0, safeColumn)
+
+let private tryGetValueArgEntity (textBeforeCursor: string) =
+    try
+        let lastPipeIdx = textBeforeCursor.LastIndexOf('|')
+        if lastPipeIdx <= 0 then None
+        else
+            let afterPipe = textBeforeCursor.Substring(lastPipeIdx + 1)
+            if afterPipe |> Seq.exists Char.IsWhiteSpace then None
+            else
+                let tokenStart = textBeforeCursor.LastIndexOfAny(valueArgTokenBoundaries)
+                let potentialToken =
+                    if tokenStart < lastPipeIdx then
+                        textBeforeCursor.Substring(tokenStart + 1, lastPipeIdx - tokenStart - 1)
+                    else ""
+
+                if not (potentialToken.StartsWith("value:", StringComparison.OrdinalIgnoreCase)) then
+                    None
+                else
+                    let cleanToken = potentialToken.Substring(6)
+                    let parts = cleanToken.Split('|')
+                    let entityName = if parts.Length > 0 then parts.[0] else ""
+                    if entityName = "" then None else Some entityName
+    with _ -> None
+
+let private tryFindScriptValueLikeType (game: IGame) (entityName: string) =
+    let types = game.Types()
+    let tryFind typeName =
+        types
+        |> Map.tryFind typeName
+        |> Option.bind (fun arr -> arr |> Array.tryFind (fun t -> t.id = entityName))
+
+    tryFind "script_value"
+    |> Option.orElseWith (fun () -> tryFind "scripted_effect")
+
+let private tryReadTypeFileText (docs: DocumentStore) (filePath: string) =
+    if String.IsNullOrEmpty(filePath) then None
+    else
+        try
+            match docs.GetText(FileInfo(filePath)) with
+            | Some text when text <> "" -> Some text
+            | _ ->
+                if File.Exists(filePath) then
+                    let text = File.ReadAllText(filePath)
+                    if text = "" then None else Some text
+                else
+                    None
+        with _ -> None
+
+let private tryGetScriptValueMacroParams (game: IGame) (docs: DocumentStore) (filetext: string) (position: pos) =
+    let textBeforeCursor = getTextBeforeCursor filetext position
+
+    tryGetValueArgEntity textBeforeCursor
+    |> Option.bind (fun entityName ->
+        tryFindScriptValueLikeType game entityName
+        |> Option.bind (fun t ->
+            tryReadTypeFileText docs t.range.FileName
+            |> Option.bind (fun sourceText ->
+                let values =
+                    [ for m in macroParamPattern.Matches(sourceText) -> m.Groups.[1].Value ]
+                    |> List.distinct
+                    |> List.filter (fun x -> x <> "")
+
+                if values.IsEmpty then None else Some values)))
+
+let private completionPrefixFromTextBeforeCursor (textBeforeCursor: string) =
+    let boundary = textBeforeCursor.LastIndexOfAny(completionPrefixBoundaries)
+    let token =
+        if boundary >= 0 then textBeforeCursor.Substring(boundary + 1)
+        else textBeforeCursor
+    let dotIdx = token.LastIndexOf('.')
+    let prefix =
+        if dotIdx >= 0 then token.Substring(dotIdx + 1)
+        else token
+
+    if String.IsNullOrWhiteSpace prefix then None else Some prefix
+
 let completionCache = System.Collections.Concurrent.ConcurrentDictionary<int, CompletionItem>()
 let private rangeCacheLock = obj()
 let mutable private rangeCache: (string * int * int * Range * Range) option = None
@@ -61,8 +144,22 @@ let addToCache completionItem =
     completionCache.[key] <- completionItem
     key
 
+let private completionTextHash (text: string) =
+    let mutable hash = 2166136261u
+    for i in 0 .. text.Length - 1 do
+        hash <- (hash ^^^ (uint32 text.[i])) * 16777619u
+    int hash
 
-let mutable private completionPartialCache: (CompletionParams * CompletionItem seq) option =
+
+type private CompletionPartialCacheKey =
+    { uri: Uri
+      line: int
+      character: int
+      textHash: int }
+
+let private completionPartialCacheLock = obj()
+
+let mutable private completionPartialCache: (CompletionPartialCacheKey * CompletionItem list) option =
     None
 
 let completionResolveItem (gameObj: IGame option) (item: CompletionItem) =
@@ -333,18 +430,31 @@ let optimiseCompletion (completionList: CompletionItem seq) =
         }
     else arr :> seq<_>
 
-let checkPartialCompletionCache (p: CompletionParams) genItems =
-    match p.context, completionPartialCache, p.textDocument, p.position with
-    | Some { triggerKind = CompletionTriggerKind.TriggerForIncompleteCompletions }, Some(c, res), td, pos when
-        c.position.line = pos.line && c.textDocument.uri = td.uri
-        ->
-        res
-    | _ ->
-        let items = genItems ()
-        completionPartialCache <- Some(p, items)
-        items
+let checkPartialCompletionCache (p: CompletionParams) (filetext: string) genItems =
+    let key =
+        { uri = p.textDocument.uri
+          line = p.position.line
+          character = p.position.character
+          textHash = completionTextHash filetext }
 
-let completionCallLSP (game: IGame) (p: CompletionParams) _ debugMode supportsInsertReplaceEdit filetext position =
+    let isIncompleteRetry =
+        match p.context with
+        | Some { triggerKind = CompletionTriggerKind.TriggerForIncompleteCompletions } -> true
+        | _ -> false
+
+    if isIncompleteRetry then
+        match lock completionPartialCacheLock (fun () -> completionPartialCache) with
+        | Some(cachedKey, cachedItems) when cachedKey = key -> cachedItems :> seq<_>
+        | _ ->
+            let items = genItems () |> Seq.toList
+            lock completionPartialCacheLock (fun () -> completionPartialCache <- Some(key, items))
+            items :> seq<_>
+    else
+        let items = genItems () |> Seq.toList
+        lock completionPartialCacheLock (fun () -> completionPartialCache <- Some(key, items))
+        items :> seq<_>
+
+let completionCallLSP (game: IGame) (p: CompletionParams) debugMode supportsInsertReplaceEdit (filetext: string) (position: pos) =
 
     let path =
         let u = p.textDocument.uri
@@ -535,72 +645,17 @@ let completion
         let filetext =
             (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
 
-        let items =
-            checkPartialCompletionCache p (fun () ->
-                completionCallLSP game p docs debugMode supportsInsertReplaceEdit filetext position)
-            |> Seq.toArray :> seq<_>
-
-        logInfo $"completion items time %i{stopwatch.ElapsedMilliseconds}ms"
-        let targetLine = getLineAt filetext (position.Line - 1)
-        let textBeforeCursor = targetLine.Remove(position.Column)
         logInfo $"{p} {position}"
 
+        let textBeforeCursor = getTextBeforeCursor filetext position
+
+        let getRawItems () =
+            checkPartialCompletionCache p filetext (fun () ->
+                completionCallLSP game p debugMode supportsInsertReplaceEdit filetext position)
+
         try
-            let lastPipeIdx = textBeforeCursor.LastIndexOf('|')
-            let potentialToken = 
-                try
-                    if lastPipeIdx > 0 && not (textBeforeCursor.Substring(lastPipeIdx).Contains(" ")) then
-                        let tokenStart = textBeforeCursor.LastIndexOfAny([|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; '\n'; '\r'|])
-                        if tokenStart < lastPipeIdx then
-                            textBeforeCursor.Substring(tokenStart + 1, lastPipeIdx - tokenStart - 1)
-                        else ""
-                    else ""
-                with _ -> ""
-            
-            // Only activate for value:xxx| pattern (script_value parameter input)
-            let isInScriptValueArg = potentialToken.StartsWith("value:", StringComparison.OrdinalIgnoreCase)
-
-            // When in script_value parameter context, compute params FIRST and short-circuit
-            if isInScriptValueArg then
-                let macroParams = 
-                    try
-                        let cleanToken = if potentialToken.StartsWith("value:") then potentialToken.Substring(6) else potentialToken
-                        let parts = cleanToken.Split('|')
-                        let entityName = if parts.Length > 0 then parts.[0] else ""
-                        
-                        if entityName <> "" then
-                            let typeDefOpt = 
-                                match game.Types() |> Map.tryFind "script_value" with
-                                | Some arr -> 
-                                    arr |> Array.tryFind (fun t -> t.id = entityName)
-                                | None -> None
-                                |> Option.orElseWith (fun () -> 
-                                    match game.Types() |> Map.tryFind "scripted_effect" with
-                                    | Some arr -> arr |> Array.tryFind (fun t -> t.id = entityName)
-                                    | None -> None)
-                            
-                            match typeDefOpt with
-                            | Some t ->
-                                let filePath = t.range.FileName
-                                if not (String.IsNullOrEmpty(filePath)) then
-                                    let fileText = 
-                                        try
-                                            match docs.GetText(FileInfo(filePath)) with
-                                            | Some text -> text
-                                            | None -> if File.Exists(filePath) then File.ReadAllText(filePath) else ""
-                                        with _ -> ""
-                                    
-                                    if fileText <> "" then
-                                        let pattern = macroParamPattern
-                                        [ for m in pattern.Matches(fileText) -> m.Groups.[1].Value ]
-                                        |> List.distinct
-                                        |> List.filter (fun x -> x <> "")
-                                    else []
-                                else []
-                            | None -> []
-                        else []
-                    with _ -> []
-
+            match tryGetScriptValueMacroParams game docs filetext position with
+            | Some macroParams ->
                 // Compute textEdit range for parameter insertion (right after last |)
                 let paramTextEdit (text: string) =
                     if supportsInsertReplaceEdit then
@@ -622,38 +677,34 @@ let completion
                             textEdit = paramTextEdit p
                         })
 
-                if paramItems.Length > 0 then
-                    // Short-circuit: return only parameter items, skip expensive generic completion
-                    Some { isIncomplete = false; items = paramItems }
-                else
-                    // No params found, fall through to generic completion
-                    let itemsList = items |> Seq.toList
-                    let finalItems = itemsList |> List.map (fun i -> { i with filterText = Some i.label })
-                    Some { isIncomplete = true; items = finalItems }
-            else
+                logInfo $"completion script-value params time %i{stopwatch.ElapsedMilliseconds}ms"
+                Some { isIncomplete = false; items = paramItems }
+            | None ->
                 // Normal (non-script_value) completion path
-                let prefixSoFar =
-                    match textBeforeCursor.Split([||]) |> Array.tryLast with
-                    | Some lastWord when not (String.IsNullOrWhiteSpace lastWord) -> lastWord.Split('.') |> Array.last |> Some
-                    | _ -> None
+                let items = getRawItems () |> Seq.toArray
+                logInfo $"completion items time %i{stopwatch.ElapsedMilliseconds}ms"
+
+                let prefixSoFar = completionPrefixFromTextBeforeCursor textBeforeCursor
 
                 // Single-pass: materialize once, then dedup + filter + count in one pass
-                let itemsArr = items |> Seq.toArray
-                let itemCount = itemsArr.Length
+                let itemCount = items.Length
                 let partialReturn = itemCount > 2000
 
                 // Single-pass dedup + filter using HashSet
                 let seen = HashSet<struct (string * MarkupContent option)>()
                 let dedupedItems = ResizeArray<CompletionItem>(min itemCount 2048)
-                for i in 0 .. itemsArr.Length - 1 do
-                    let item = itemsArr.[i]
+                for i in 0 .. items.Length - 1 do
+                    let item = items.[i]
                     if not (item.label.StartsWith("$", StringComparison.OrdinalIgnoreCase)) then
                         let matchesPrefix =
                             match prefixSoFar, partialReturn with
                             | None, _ -> true
                             | _, false -> true
                             | Some prefix, true ->
-                                item.label.Contains(prefix, StringComparison.OrdinalIgnoreCase)
+                                let filterText = item.filterText |> Option.defaultValue item.label
+                                item.label.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                                || filterText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                                || item.label.Contains(prefix, StringComparison.OrdinalIgnoreCase)
                         if matchesPrefix then
                             let key = struct (item.label, item.documentation)
                             if seen.Add(key) then
@@ -680,7 +731,9 @@ let completion
         with e ->
             logError $"Completion fallback: {e.Message}"
             // Fallback: return raw items without any processing
-            let fallbackItems = items |> Seq.toList
+            let fallbackItems =
+                try getRawItems () |> Seq.toList
+                with _ -> []
             Some { isIncomplete = false; items = fallbackItems }
     // |false ->
     //     let extraKeywords = ["yes"; "no";]

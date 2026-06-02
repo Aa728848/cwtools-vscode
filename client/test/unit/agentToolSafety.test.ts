@@ -3,12 +3,27 @@ import sinon from 'sinon';
 import * as fs from 'fs';
 import * as path from 'path';
 
+let diagnosticPairs: Array<[any, any[]]> = [];
+let ignoredDiagnostics: string[] = [];
+
 const vscodeStub = {
     workspace: {
         workspaceFolders: [],
         getConfiguration: () => ({
-            get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue,
+            get: <T>(key: string, defaultValue?: T): T | undefined => {
+                if (key === 'ignoredDiagnostics') return ignoredDiagnostics as T;
+                return defaultValue;
+            },
         }),
+    },
+    languages: {
+        getDiagnostics: () => diagnosticPairs,
+    },
+    DiagnosticSeverity: {
+        Error: 0,
+        Warning: 1,
+        Information: 2,
+        Hint: 3,
     },
     commands: {
         executeCommand: async () => undefined,
@@ -89,6 +104,8 @@ describe('agent tool file path safety', () => {
     });
 
     afterEach(() => {
+        diagnosticPairs = [];
+        ignoredDiagnostics = [];
         cleanupWorkspace(workspaceRoot);
     });
 
@@ -544,6 +561,8 @@ describe('agent sprite candidate tool contract', () => {
     });
 
     afterEach(() => {
+        diagnosticPairs = [];
+        ignoredDiagnostics = [];
         cleanupWorkspace(workspaceRoot);
     });
 
@@ -684,6 +703,51 @@ describe('agent sprite candidate tool contract', () => {
 
         expect(result.status).to.equal('unavailable');
         expect(result.entries).to.deep.equal([]);
+    });
+
+    it('counts get_diagnostics totals across the full filtered set while excluding ignored diagnostics', async () => {
+        const fileA = path.join(workspaceRoot, 'events', 'a.txt');
+        const fileB = path.join(workspaceRoot, 'events', 'b.txt');
+        fs.mkdirSync(path.dirname(fileA), { recursive: true });
+        fs.writeFileSync(fileA, 'country_event = {}', 'utf8');
+        fs.writeFileSync(fileB, 'country_event = {}', 'utf8');
+
+        ignoredDiagnostics = ['IGNORED_KEY'];
+        diagnosticPairs = [
+            [{ fsPath: fileA }, [
+                {
+                    severity: vscodeStub.DiagnosticSeverity.Error,
+                    message: 'First visible error',
+                    range: { start: { line: 1, character: 2 } },
+                    code: 'CW001',
+                },
+                {
+                    severity: vscodeStub.DiagnosticSeverity.Warning,
+                    message: 'Suppressed IGNORED_KEY warning',
+                    range: { start: { line: 2, character: 0 } },
+                    code: 'CW002',
+                },
+            ]],
+            [{ fsPath: fileB }, [
+                {
+                    severity: vscodeStub.DiagnosticSeverity.Error,
+                    message: 'Second visible error',
+                    range: { start: { line: 3, character: 4 } },
+                    code: 'CW003',
+                },
+            ]],
+        ];
+
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const result = await executor.execute('get_diagnostics', { limit: 1 }) as any;
+
+        expect(result.summary).to.deep.include({ errors: 2, warnings: 0 });
+        expect(result.totalDiagnosticCount).to.equal(2);
+        expect(result.totalFiles).to.equal(2);
+        expect(result.truncated).to.equal(true);
+        expect(result.diagnostics).to.have.lengthOf(1);
+        expect(result.ignoredDiagnosticCount).to.equal(1);
+        expect(result.ignoredDiagnosticKeys).to.deep.equal(['IGNORED_KEY']);
     });
 
     it('queries the /init project profile without scanning the workspace', async () => {

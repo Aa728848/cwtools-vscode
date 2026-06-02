@@ -43,7 +43,7 @@ When the user gives a broad, vague, or high-level request (e.g., "I want to make
 export const CODE_COMPLIANCE_RULE = `## 🛑 CRITICAL: Strict Rule Compliance in Code Generation
 When editing files, writing new code, or proposing plans in ANY mode, your absolute highest priority is generating code that strictly conforms to the established structure and logic.
 **Legality and validity must follow this evidence hierarchy:**
-1. **CWT/LSP schema and typed indexes**: \`query_rules\`, \`query_scope\`, \`query_types\`, \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`, \`get_completion_at\`.
+1. **CWT/LSP schema and typed indexes**: \`get_lsp_status\`, \`query_rules\`, \`query_scope\`, \`query_types\`, \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_enums\`, \`query_static_modifiers\`, \`query_variables\`, \`get_completion_at\`.
 2. **Current project definitions and mature local examples**: \`query_definition_by_name\`, \`workspace_symbols\`, \`query_workspace_index\`, \`get_entity_info\`, \`document_symbols\`, \`get_pdx_block\`, or bounded \`read_file\` on known project files.
 3. **Bounded vanilla archetype evidence**: use \`query_definition_by_name\`, \`workspace_symbols\`, \`query_types\`, or exact \`search_mod_files(searchContext="vanilla", exactMatch=true)\` to locate a concrete vanilla example; then read only the needed block/range to study structure or scope flow.
 4. **Web sources**: last resort only, and never enough by themselves to justify PDXScript syntax.

@@ -138,7 +138,7 @@ registerWorkflow({
 		tools: [
 			// Read & analyze
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'get_diagnostics', 'verify_pdx_identifier',
+			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Query rules
 			'query_scope', 'query_types', 'query_rules', 'query_references',
 			'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -209,7 +209,7 @@ registerWorkflow({
 			// Read & analyze
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
-			'get_diagnostics', 'verify_pdx_identifier',
+			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Query
 			'query_types', 'query_definition_by_name',
 			// Write (localisation only)
@@ -266,7 +266,7 @@ registerWorkflow({
 			// Read-only analysis
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
-			'get_diagnostics', 'verify_pdx_identifier',
+			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Deep API
 			'query_scope', 'query_types', 'query_rules', 'query_references',
 			'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
@@ -348,7 +348,7 @@ registerWorkflow({
 		tools: [
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
-			'get_diagnostics', 'verify_pdx_identifier',
+			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			'query_scope', 'query_types', 'query_rules', 'query_references',
 			'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
 			'query_definition', 'query_definition_by_name',
@@ -402,7 +402,7 @@ registerWorkflow({
 		tools: [
 			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
 			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'list_directory', 'glob_files',
-			'get_diagnostics', 'verify_pdx_identifier',
+			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			'find_sprite_candidates', 'find_sound_candidates',
 			'query_rules',
 			'write_file', 'multi_replace_file_content', 'replace_lines',

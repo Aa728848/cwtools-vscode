@@ -332,6 +332,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'get_lsp_status',
+            description: 'Get a lightweight CWTools LSP health and performance snapshot without listing diagnostics. Use this before or after heavy validation/completion work to inspect loading phase, validation queue depth, diagnostic freshness, memory/cache state, and recent completion latency/cache hits.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    timeoutMs: { type: 'number', description: 'Optional status request timeout in milliseconds (default 5000, max 30000).' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'document_symbols',
             description: 'Get all symbols defined in a file as a hierarchical tree with line ranges. Use this FIRST to understand file structure without reading content. Combine with get_pdx_block/edit_pdx_block for zero-read workflows.',
             parameters: {

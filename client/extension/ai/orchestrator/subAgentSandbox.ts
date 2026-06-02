@@ -27,7 +27,7 @@ const TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
  */
 export function buildSubAgentSandbox(
     taskNode: TaskNode,
-    workspaceRoot: string
+    _workspaceRoot: string
 ): SubAgentSandbox {
     const profile = getAgentProfile(taskNode.agentType);
     const role = taskNode.agentType;

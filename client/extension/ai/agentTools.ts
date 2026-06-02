@@ -29,7 +29,6 @@ import { MemoryToolHandler } from './tools/memoryTools';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolAccess } from './tools/permissions';
 import { runLedger } from './runner/runLedger';
-import { TOOL_REGISTRY } from './tools/registry';
 import { queryProjectProfile } from './projectProfile';
 import { loadSkill } from './skills';
 import { validatePlanModeToolUse } from './planModeGuard';
@@ -55,6 +54,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_rules: 45_000,
     query_references: 45_000,
     // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
+    get_lsp_status: 10_000,
     get_diagnostics: 45_000,
     get_file_context: 45_000,
     search_mod_files: 45_000,
@@ -464,6 +464,8 @@ export class AgentToolExecutor {
             case 'query_references':
                 result = await this.lspHandler.queryReferences(args as any); break;
             // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
+            case 'get_lsp_status':
+                result = await this.lspHandler.getLspStatus(args as any); break;
             case 'get_diagnostics':
                 result = await this.lspHandler.getDiagnostics(args as any); break;
             case 'get_file_context':
@@ -795,6 +797,9 @@ export class AgentToolExecutor {
             || obj.logicalPath !== undefined
             || obj.file !== undefined
             || obj.filePath !== undefined
+            || obj.category !== undefined
+            || obj.repairHint !== undefined
+            || obj.data !== undefined
         );
         if (looksLikeDiagnostic) {
             out.push({
@@ -805,6 +810,9 @@ export class AgentToolExecutor {
                 line: this.asNumber(obj.line),
                 column: this.asNumber(obj.column),
                 code: this.asString(obj.code) || undefined,
+                category: this.normalizeDiagnosticCategory(obj.category),
+                repairHint: this.asString(obj.repairHint) || undefined,
+                data: obj.data,
             });
         }
 
@@ -846,6 +854,9 @@ export class AgentToolExecutor {
         diagnostics: DiagnosticEntry[],
         freshness?: AnalyzeDiagnosticErrorResult['freshness'],
     ): DiagnosticAnalysisCategory {
+        const structured = diagnostics.find(d => d.category && d.category !== 'unknown')?.category;
+        if (structured) return structured;
+
         const lower = text.toLowerCase();
         if (/validation_degraded_lsp_no_feedback|diagnostics?_unavailable|lsp.*no feedback|did not provide fresh diagnostics|diagnostic service:\s*(timeout|error|unavailable)/.test(lower)) return 'lsp_no_feedback';
         if (/readtracker|was not read|modified externally|fresh read|get_file_context/.test(lower)) return 'read_tracker_stale';
@@ -855,7 +866,10 @@ export class AgentToolExecutor {
         if (/show_sound|expected value of type sound|type sound|sound\s*=|music|\.asset/.test(lower)) return 'unknown_sound';
         if (/missing localisation|missing localization|localisation key|localization key|not localised|not localized/.test(lower)) return 'missing_localisation';
         if (/invalid scope|scope mismatch|expected scope|not valid in this scope|current scope|root scope/.test(lower)) return 'scope_mismatch';
+        if (/duplicate|already defined|redeclared/.test(lower)) return 'duplicate_definition';
+        if (/expected value of type|invalid value|not a valid value|wrong type/.test(lower)) return 'invalid_value_type';
         if (/unknown (trigger|effect)|invalid (trigger|effect)|not a valid (trigger|effect)|trigger_docs|effects\.cwt/.test(lower)) return 'unknown_trigger_effect';
+        if (/unknown|not found|could not find|does not exist|unresolved/.test(lower)) return 'missing_definition';
         if ((freshness === 'pending' || freshness === 'stale') && diagnostics.length === 0) return 'stale_lsp_cache';
         return 'unknown';
     }
@@ -895,6 +909,8 @@ export class AgentToolExecutor {
             || category === 'unknown_sprite'
             || category === 'unknown_sound'
             || category === 'missing_localisation'
+            || category === 'invalid_value_type'
+            || category === 'missing_definition'
             || category === 'stale_lsp_cache'
             || category === 'unknown';
     }
@@ -912,6 +928,12 @@ export class AgentToolExecutor {
         }
         if (category === 'missing_localisation') {
             return `Before creating localisation, verify key(s) [${refs}] with query_localisation_index and search_mod_files(searchContext="both"); only use write_localisation if absent.`;
+        }
+        if (category === 'invalid_value_type') {
+            return `Before replacing value(s) [${refs}], query the field rule/scope and verify type-correct candidates through local indexes.`;
+        }
+        if (category === 'missing_definition') {
+            return `Before creating definition(s) [${refs}], verify workspace and vanilla definitions with query_definition_by_name, workspace_symbols, and search_mod_files(searchContext="both").`;
         }
         return `Before editing or creating definitions again, verify reference(s) [${refs}] through query_rules/query_definition_by_name/workspace_symbols, then search_mod_files(searchContext="both") or verify_pdx_identifier(includeVanilla=true) if still unresolved.`;
     }
@@ -970,6 +992,24 @@ export class AgentToolExecutor {
                     recommendedTools: ['query_scope', 'query_rules', 'get_file_context', 'document_symbols'],
                     avoidTools: ['guessing scope transitions'],
                     nextInstruction: 'Use CWTools scope/rule queries to verify the legal scope chain before changing triggers or effects.',
+                };
+            case 'invalid_value_type':
+                return {
+                    recommendedTools: ['query_rules', 'query_scope', 'get_file_context', 'verify_pdx_identifier', ...referenceTools],
+                    avoidTools: ['guessing enum/type values', 'copying unrelated vanilla values without scope/rule evidence'],
+                    nextInstruction: 'Read the exact field rule and current scope, then replace only the invalid value with a verified type-correct candidate.',
+                };
+            case 'missing_definition':
+                return {
+                    recommendedTools: ['query_definition_by_name', 'workspace_symbols', 'search_mod_files', 'verify_pdx_identifier', ...referenceTools],
+                    avoidTools: ['creating duplicate definitions before checking vanilla/project sources'],
+                    nextInstruction: 'Verify whether the referenced ID exists in workspace or vanilla before creating or renaming anything.',
+                };
+            case 'duplicate_definition':
+                return {
+                    recommendedTools: ['query_definition_by_name', 'workspace_symbols', 'document_symbols', 'get_file_context'],
+                    avoidTools: ['deleting definitions without checking references', 'renaming both copies blindly'],
+                    nextInstruction: 'Locate both definitions and references, then remove or rename only the unintended duplicate.',
                 };
             case 'unknown_trigger_effect':
                 return {
@@ -1047,6 +1087,29 @@ export class AgentToolExecutor {
         const severity = String(value ?? 'error').toLowerCase();
         if (severity === 'warning' || severity === 'info' || severity === 'hint') return severity;
         return 'error';
+    }
+
+    private normalizeDiagnosticCategory(value: unknown): DiagnosticEntry['category'] {
+        const category = String(value ?? '').toLowerCase();
+        if ([
+            'stale_lsp_cache',
+            'missing_localisation',
+            'unknown_sprite',
+            'unknown_sound',
+            'scope_mismatch',
+            'unknown_trigger_effect',
+            'brace_or_syntax_error',
+            'invalid_value_type',
+            'missing_definition',
+            'duplicate_definition',
+            'read_tracker_stale',
+            'tool_argument_error',
+            'lsp_no_feedback',
+            'unknown',
+        ].includes(category)) {
+            return category as DiagnosticEntry['category'];
+        }
+        return undefined;
     }
 
     // ─── MCP Connection Pool ─────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { getTopicStorageDir } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
-import { AgentRunRecord, AgentRunStatus } from '../types';
+import { AgentRunRecord } from '../types';
 
 const RUN_LEDGER_FIELD_MAX_CHARS = 6000;
 const RUN_STATE_MAX_LOAD_BYTES = 4_000_000;
@@ -237,7 +237,7 @@ export class RunLedger {
         this.emitter.emit('change', runId);
     }
 
-    private shouldSkipPersistedEvent(type: AgentRunEventType, payload: any): boolean {
+    private shouldSkipPersistedEvent(type: AgentRunEventType, _payload: any): boolean {
         if (type === 'model_call_delta' || type === 'tool_output_delta') return true;
         return type === 'step_appended';
     }

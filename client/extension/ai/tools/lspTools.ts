@@ -22,6 +22,7 @@ import type {
     RuleInfo,
 } from '../types';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
+import { diagnosticMetadata } from './diagnosticMetadata';
 
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
@@ -179,20 +180,23 @@ export class LspToolHandler {
         timeoutMs = LspToolHandler.LSP_TIMEOUT_MS,
     ): Promise<T> {
         await this.acquireLspSlot();
-        let timer: ReturnType<typeof setTimeout>;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const cancellation = new vs.CancellationTokenSource();
         try {
             const promise = this.client.sendRequest('workspace/executeCommand', {
                 command,
                 arguments: args,
-            });
+            }, cancellation.token);
             const timeout = new Promise<never>((_, reject) => {
-                timer = setTimeout(() => reject(new Error(
-                    `LSP request "${command}" timed out after ${timeoutMs / 1000}s`
-                )), timeoutMs);
+                timer = setTimeout(() => {
+                    cancellation.cancel();
+                    reject(new Error(`LSP request "${command}" timed out after ${timeoutMs / 1000}s`));
+                }, timeoutMs);
             });
             return await Promise.race([promise, timeout]) as T;
         } finally {
-            clearTimeout(timer!);
+            if (timer) clearTimeout(timer);
+            cancellation.dispose();
             this.releaseLspSlot();
         }
     }
@@ -856,12 +860,50 @@ export class LspToolHandler {
 
     // ─── getDiagnostics ──────────────────────────────────────────────────────
 
+    async getLspStatus(args: { timeoutMs?: number } = {}): Promise<import('../types').GetLspStatusResult> {
+        const requestedTimeout = typeof args.timeoutMs === 'number' && Number.isFinite(args.timeoutMs)
+            ? args.timeoutMs
+            : 5000;
+        const timeoutMs = Math.max(500, Math.min(requestedTimeout, 30000));
+        try {
+            const statusResult = await this.lspRequest<Record<string, unknown> | null>(
+                'cwtools.ai.getValidationStatus',
+                [],
+                timeoutMs,
+            );
+            if (statusResult && typeof statusResult === 'object') {
+                return {
+                    ...(statusResult as import('../types').ValidationStatusSnapshot),
+                    status: 'available',
+                    responded: true,
+                };
+            }
+            return {
+                ok: false,
+                status: 'unavailable',
+                responded: false,
+                message: 'CWTools validation status command returned no object result.',
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return {
+                ok: false,
+                status: /timed out|timeout/i.test(message) ? 'timeout' : 'error',
+                responded: false,
+                message,
+            };
+        }
+    }
+
     async getDiagnostics(args: {
         file?: string;
         severity?: 'error' | 'warning' | 'info' | 'hint' | 'all';
         limit?: number;
     }): Promise<import('../types').GetDiagnosticsResult> {
-        const limit = Math.min(args.limit ?? 500, 2000);
+        const requestedLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
+            ? args.limit
+            : 500;
+        const limit = Math.max(0, Math.min(Math.floor(requestedLimit), 2000));
         const severityFilter = args.severity && args.severity !== 'all' ? args.severity : null;
 
         const allPairs = vs.languages.getDiagnostics();
@@ -870,6 +912,23 @@ export class LspToolHandler {
 
         const entries: import('../types').DiagnosticEntry[] = [];
         const filesWithDiags = new Set<string>();
+        const summary = { errors: 0, warnings: 0, info: 0, hints: 0 };
+        let totalDiagCount = 0;
+        let ignoredDiagnosticCount = 0;
+
+        const diagnosticSeverity = (d: vs.Diagnostic): 'error' | 'warning' | 'info' | 'hint' =>
+            d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                    : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
+
+        const ignoredKeyForDiagnostic = (d: vs.Diagnostic): string | undefined => {
+            for (const key of ignored) {
+                if (d.message.includes(`'${key}'`) || d.message.includes(`"${key}"`) || d.message.includes(key)) {
+                    return key;
+                }
+            }
+            return undefined;
+        };
 
         for (const [uri, diags] of allPairs) {
             if (diags.length === 0) continue;
@@ -884,67 +943,44 @@ export class LspToolHandler {
 
             if (isAgentTempPath(fsPath)) continue;
 
-            filesWithDiags.add(fsPath);
-
             for (const d of diags) {
-                if (entries.length >= limit) break;
-
-                const sev = d.severity === vs.DiagnosticSeverity.Error ? 'error'
-                    : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
+                const sev = diagnosticSeverity(d);
 
                 if (severityFilter && sev !== severityFilter) continue;
 
-                let shouldIgnore = false;
-                for (const key of ignored) {
-                    if (d.message.includes(`'${key}'`) || d.message.includes(`"${key}"`) || d.message.includes(key)) {
-                        shouldIgnore = true;
-                        activelyIgnoredKeys.add(key);
-                        break;
-                    }
+                const ignoredKey = ignoredKeyForDiagnostic(d);
+                if (ignoredKey) {
+                    ignoredDiagnosticCount++;
+                    activelyIgnoredKeys.add(ignoredKey);
+                    continue;
                 }
-                if (shouldIgnore) continue;
 
-                entries.push({
-                    file: fsPath,
-                    logicalPath: path.relative(this.ctx.workspaceRoot, fsPath).replace(/\\/g, '/'),
-                    severity: sev,
-                    message: d.message,
-                    line: d.range.start.line,
-                    column: d.range.start.character,
-                    code: d.code !== undefined ? String(d.code) : undefined,
-                });
-            }
-            if (entries.length >= limit) break;
-        }
+                totalDiagCount++;
+                filesWithDiags.add(fsPath);
+                if (sev === 'error') summary.errors++;
+                else if (sev === 'warning') summary.warnings++;
+                else if (sev === 'info') summary.info++;
+                else summary.hints++;
 
-        const summary = {
-            errors: entries.filter(e => e.severity === 'error').length,
-            warnings: entries.filter(e => e.severity === 'warning').length,
-            info: entries.filter(e => e.severity === 'info').length,
-            hints: entries.filter(e => e.severity === 'hint').length,
-        };
-
-        let totalDiagCount = 0;
-        for (const [uri, diags] of allPairs) {
-            if (isAgentTempPath(uri.fsPath)) continue;
-            if (args.file) {
-                const fileNorm = args.file.replace(/\\/g, '/').toLowerCase();
-                if (!uri.fsPath.replace(/\\/g, '/').toLowerCase().includes(fileNorm)) continue;
-            }
-            if (severityFilter) {
-                for (const d of diags) {
-                    const sev = d.severity === vs.DiagnosticSeverity.Error ? 'error'
-                        : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                            : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
-                    if (sev === severityFilter) totalDiagCount++;
+                if (entries.length < limit) {
+                    const metadata = diagnosticMetadata(d);
+                    entries.push({
+                        file: fsPath,
+                        logicalPath: path.relative(this.ctx.workspaceRoot, fsPath).replace(/\\/g, '/'),
+                        severity: sev,
+                        message: d.message,
+                        line: d.range.start.line,
+                        column: d.range.start.character,
+                        code: d.code !== undefined ? String(d.code) : undefined,
+                        category: metadata.category,
+                        repairHint: metadata.repairHint,
+                        data: metadata.data,
+                    });
                 }
-            } else {
-                totalDiagCount += diags.length;
             }
         }
 
-        if (activelyIgnoredKeys.size > 0) {
+        if (activelyIgnoredKeys.size > 0 && entries.length < limit) {
             entries.push({
                 file: 'system',
                 logicalPath: 'system',
@@ -962,6 +998,7 @@ export class LspToolHandler {
         let freshness: 'fresh' | 'pending' | 'stale' = 'pending';
         let pendingGlobalKinds: string[] = [];
         let lastEpoch = 0;
+        let validationStatus: import('../types').GetDiagnosticsResult['validationStatus'] = undefined;
         let diagnosticService: import('../types').GetDiagnosticsResult['diagnosticService'] = {
             status: 'unavailable',
             responded: false,
@@ -980,6 +1017,7 @@ export class LspToolHandler {
                     responded: true,
                 };
                 if (statusResult && typeof statusResult === 'object') {
+                    validationStatus = statusResult as import('../types').ValidationStatusSnapshot;
                     freshness = (statusResult.freshness as any) || 'pending';
                     pendingGlobalKinds = Array.isArray(statusResult.pendingGlobalKinds)
                         ? statusResult.pendingGlobalKinds as string[] : [];
@@ -1001,9 +1039,12 @@ export class LspToolHandler {
             totalFiles: filesWithDiags.size,
             totalDiagnosticCount: totalDiagCount,
             truncated: totalDiagCount > limit,
+            ignoredDiagnosticCount,
+            ignoredDiagnosticKeys: Array.from(activelyIgnoredKeys),
             freshness,
             pendingGlobalKinds,
             lastEpoch,
+            validationStatus,
             diagnosticService,
         };
     }
@@ -1909,19 +1950,56 @@ export class LspToolHandler {
             );
 
             if (completions) {
+                const completionText = (value: unknown): string | undefined => {
+                    if (typeof value === 'string') return value;
+                    if (value && typeof value === 'object' && 'value' in value && typeof (value as { value?: unknown }).value === 'string') {
+                        return (value as { value: string }).value;
+                    }
+                    return undefined;
+                };
+                const completionDocumentation = (value: unknown): string | undefined => {
+                    if (typeof value === 'string') return value.slice(0, 500);
+                    if (value && typeof value === 'object' && 'value' in value && typeof (value as { value?: unknown }).value === 'string') {
+                        return (value as { value: string }).value.slice(0, 500);
+                    }
+                    return undefined;
+                };
                 return {
                     completions: completions.items.slice(0, limit).map(item => ({
                         label: typeof item.label === 'string' ? item.label : item.label.label,
                         kind: vs.CompletionItemKind[item.kind ?? vs.CompletionItemKind.Text],
                         description: typeof item.detail === 'string' ? item.detail : undefined,
+                        insertText: completionText(item.insertText) ?? completionText((item as any).textEdit?.newText),
+                        filterText: item.filterText,
+                        sortText: item.sortText,
+                        documentation: completionDocumentation(item.documentation),
+                        isSnippet: item.insertText instanceof vs.SnippetString,
                     })),
                     totalAvailable: completions.items.length,
                     ...(completions.items.length > limit ? { _note: `正显示 ${limit}/${completions.items.length} 个补全项。如需查看更多请增加 limit 参数。` } : {}),
                 };
             }
-            return { completions: [] };
-        } catch {
-            return { completions: [] };
+            return {
+                completions: [],
+                totalAvailable: 0,
+                _warning: 'Completion provider did not return a result. This is not proof that no values are valid at this position.',
+                _nextSteps: [
+                    'Confirm the file is openable and uses a CWTools-supported PDX language mode.',
+                    'Call get_diagnostics to check whether the language server is still loading or reporting stale diagnostics.',
+                    'Retry get_completion_at after validation/loading becomes fresh if the server is busy.',
+                ],
+            };
+        } catch (error) {
+            return {
+                completions: [],
+                totalAvailable: 0,
+                _warning: `Completion lookup failed: ${error instanceof Error ? error.message : String(error)}. Empty completions are not authoritative.`,
+                _nextSteps: [
+                    'Call get_diagnostics to inspect LSP availability and loading/validation status.',
+                    'Verify the requested 0-based line and column are inside the current file.',
+                    'Use query_rules/query_types as fallback evidence before assuming the value is invalid.',
+                ],
+            };
         }
     }
 

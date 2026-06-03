@@ -231,7 +231,7 @@ let private preferCodeDefinitionOverLocalisation
         tryDefinitionSymbolAt sourceText line character
         |> Option.bind (tryCodeDefinitionBySymbol gameDispatcher game sourcePath)
     | Some target when isLocalisationDefinitionPath target.FileName ->
-        // GoToType already resolved to a loc file — return it directly.
+        // GoToType already resolved to a loc file - return it directly.
         candidate
     | _ -> candidate |> Option.filter isNavigableDefinitionRange
 
@@ -319,7 +319,7 @@ type LintRequestMsg =
     | OpenRequest of VersionedTextDocumentIdentifier
     | WorkComplete of DateTime
 
-/// Shared token computation — walks AST, classifies tokens, encodes to delta int[].
+/// Shared token computation - walks AST, classifies tokens, encodes to delta int[].
 let computeShaderTokens (game: IGame<_>) (filePath: string) (fileText: string) =
     let tokens = ResizeArray<struct (int * int * int * int * int)>()
     let lines: string[] = fileText.Split('\n')
@@ -561,7 +561,7 @@ let computeTokensForFile (game: IGame<_>) (filePath: string) (fileText: string) 
         computeScriptTokens game filePath fileText
 
 
-//──Diagnostic freshness state machine──────────────────────────────────────────────────────
+//-Diagnostic freshness state machine-
 // After AI writes the file, it uses epoch + freshness to determine whether the current diagnosis corresponds to the latest file version
 type DiagnosticFreshness =
     | Fresh      // Grammar + rules + global verification are completed
@@ -570,6 +570,7 @@ type DiagnosticFreshness =
 
 type FileDiagnosticState =
     { version: int option             // Document version (from DidChange)
+      validatedVersion: int option    // Document version that produced these diagnostics
       epoch: int64                     // Increment the counter, lint +1 each time
       updatedAtUnixMs: int64           //Unix millisecond timestamp
       freshness: DiagnosticFreshness   // current status
@@ -580,6 +581,7 @@ type FileDiagnosticState =
 
 type ValidationRuntimeState =
     { inProgress: bool
+      inProgressFile: string
       queueDepth: int
       debounceQueueDepth: int
       lastStartedAtUnixMs: int64
@@ -644,7 +646,7 @@ type Server(client: ILanguageClient) =
     let mutable eu5GameObj: option<IGame<EU5ComputedData>> = None
     let mutable customGameObj: option<IGame<JominiComputedData>> = None
 
-    //──Diagnostic freshness status table───────────────────────────────────────────────────
+    //-Diagnostic freshness status table-
     /// Global diagnostic epoch: incremented each time lint is completed, used by the client to determine whether the diagnosis has been updated
     let diagnosticEpoch = ref 0L
     /// Per-file diagnostic metadata (freshness/epoch/counts), maintained by lint and delayedAnalyze
@@ -654,6 +656,7 @@ type Server(client: ILanguageClient) =
     let runtimeStateLock = obj()
     let mutable validationRuntimeState =
         { inProgress = false
+          inProgressFile = ""
           queueDepth = 0
           debounceQueueDepth = 0
           lastStartedAtUnixMs = 0L
@@ -729,7 +732,7 @@ type Server(client: ILanguageClient) =
     let completionRuntimeSnapshot () =
         lock completionRuntimeLock (fun () -> completionRuntimeState)
 
-    //──PerfCounters performance observation──────────────────────────────────────────────
+    //-PerfCounters performance observation-
     //Lightweight indicator aggregation, periodically output to log, used for long session performance analysis
     let mutable perfLintCount = 0
     let mutable perfRefreshCachesCount = 0
@@ -803,6 +806,7 @@ type Server(client: ILanguageClient) =
         let state = validationRuntimeSnapshot ()
         JsonValue.Record
             [| "inProgress", JsonValue.Boolean state.inProgress
+               "inProgressFile", JsonValue.String state.inProgressFile
                "queueDepth", JsonValue.Number(decimal state.queueDepth)
                "debounceQueueDepth", JsonValue.Number(decimal state.debounceQueueDepth)
                "lastStartedAtUnixMs", JsonValue.Number(decimal state.lastStartedAtUnixMs)
@@ -870,7 +874,7 @@ type Server(client: ILanguageClient) =
                 | _ -> None
         }
 
-    /// Data-driven list of field clearers — keeps cleanupOldGame DRY.
+    /// Data-driven list of field clearers - keeps cleanupOldGame DRY.
     let gameFieldClearers =
         [ (fun () -> stlGameObj <- None)
           (fun () -> hoi4GameObj <- None)
@@ -943,7 +947,7 @@ type Server(client: ILanguageClient) =
     let uiText english chinese =
         if uiIsChinese () then chinese else english
 
-    /// Cached References().Localisation result — invalidated on RefreshLocalisationCaches.
+    /// Cached References().Localisation result - invalidated on RefreshLocalisationCaches.
     /// Avoids repeated materialization of ALL loc entries on every InlayHint/Hover request.
     let mutable cachedLocMap: (string * Entry) list option = None
     let mutable cachedLocMapCount = 0
@@ -1039,7 +1043,7 @@ type Server(client: ILanguageClient) =
     let clearTypeIndexCache () =
         cachedGroupedTypes <- None
 
-    //── Cache partition cleaning function ────────────────────────────────────────────────────
+    //- Cache partition cleaning function -
     // Precise invalidation strategy: avoid unnecessary performance overhead caused by global cleanup
 
     /// Clear the content-related cache of a single file (semanticTokens/codeLens/inlayHint)
@@ -1313,7 +1317,7 @@ type Server(client: ILanguageClient) =
           deleteCount = deleteCount
           data = Array.toList inserted }
 
-    /// Allocation-based GC threshold — triggers non-blocking Gen2 collection
+    /// Allocation-based GC threshold - triggers non-blocking Gen2 collection
     /// after ~50 MB of new allocations instead of a simple locCache.Count check.
     let mutable lastGCAllocBytes = GC.GetTotalAllocatedBytes(false)
     let gcThresholdBytes = 200L * 1024L * 1024L
@@ -1426,9 +1430,65 @@ type Server(client: ILanguageClient) =
 
     let diagnosticData (code: string) (message: string) =
         let category, repairHint = diagnosticCategoryAndHint code message
+        let tryGroup pattern group =
+            let m =
+                System.Text.RegularExpressions.Regex.Match(
+                    message,
+                    pattern,
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+
+            if m.Success && m.Groups.Count > group && m.Groups[group].Success then
+                let value = m.Groups[group].Value.Trim()
+                if String.IsNullOrWhiteSpace value then None else Some value
+            else
+                None
+
+        let firstSome candidates =
+            candidates |> List.tryPick id
+
+        let cleanSymbol (value: string) =
+            value.Trim().Trim([| '\''; '"'; '`'; '.'; ','; ':'; ';'; ')' |])
+
+        let expectedType =
+            firstSome
+                [ tryGroup @"expected value of type\s+['""]?([A-Za-z0-9_.:-]+)" 1
+                  tryGroup @"expected\s+['""]?([A-Za-z0-9_.:-]+)['""]?\s+(?:scope|type|value)" 1
+                  tryGroup @"([A-Za-z0-9_.:-]+)\s+expected" 1 ]
+
+        let actualType =
+            firstSome
+                [ tryGroup @"(?:got|actual|found)\s+['""]?([A-Za-z0-9_.:-]+)" 1
+                  tryGroup @"but\s+(?:got|found)\s+['""]?([A-Za-z0-9_.:-]+)" 1 ]
+
+        let scope =
+            firstSome
+                [ tryGroup @"scope\s*[:=]\s*['""]?([A-Za-z0-9_.:-]+)" 1
+                  tryGroup @"(?:root|this|from|prev|fromfrom)\s*[:=]\s*['""]?([A-Za-z0-9_.:-]+)" 1 ]
+
+        let symbol =
+            firstSome
+                [ tryGroup @"['""]([^'""]{2,160})['""]" 1
+                  tryGroup @"\b(GFX_[A-Za-z0-9_.:-]+)\b" 1
+                  tryGroup @"\b([A-Za-z_][A-Za-z0-9_.:-]{2,})\s+(?:not found|does not exist|is unknown|already defined)" 1 ]
+            |> Option.map cleanSymbol
+
+        let semanticFields =
+            [ "expectedType", expectedType
+              "actualType", actualType
+              "scope", scope
+              "symbol", symbol ]
+            |> List.choose (fun (name, value) ->
+                value
+                |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                |> Option.map (fun text -> name, JsonValue.String text))
+
         JsonValue.Record
-            [| "category", JsonValue.String category
-               "repairHint", JsonValue.String repairHint |]
+            ([ "category", JsonValue.String category
+               "repairHint", JsonValue.String repairHint
+               "confidence", JsonValue.String "low"
+               "metadataSource", JsonValue.String "message_heuristic" ]
+             @ semanticFields
+             |> List.toArray)
 
     let diagnosticUri (f: string) =
         (match Uri.TryCreate(f, UriKind.Absolute) with
@@ -1489,8 +1549,10 @@ type Server(client: ILanguageClient) =
 
     let setFileDiagnosticStateWithEpoch filePath epoch freshness pendingKinds diagnostics =
         let errCount, warnCount = diagnosticCounts diagnostics
+        let validatedVersion = docs.GetVersionByPath(filePath)
         let state =
-            { version = docs.GetVersionByPath(filePath)
+            { version = validatedVersion
+              validatedVersion = validatedVersion
               epoch = epoch
               updatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
               freshness = freshness
@@ -1529,11 +1591,59 @@ type Server(client: ILanguageClient) =
 
     let mutable delayedLocUpdate = false
 
-    /// Paths that define types/enums/scopes — edits here require full RefreshCaches
+    let refreshDomainLock = obj()
+    let mutable pendingRefreshDomains = Set.empty<string>
+    let mutable lastGlobalRefreshAt = DateTime.MinValue
+    let mutable lastLocalisationRefreshAt = DateTime.MinValue
+    let mutable lastRefreshCompletedDomains: string list = []
+    let mutable lastRefreshDomainStatus = "not_started"
+
+    let addPendingRefreshDomains domains =
+        lock refreshDomainLock (fun () ->
+            pendingRefreshDomains <- domains |> List.fold (fun acc domain -> Set.add domain acc) pendingRefreshDomains)
+
+    let pendingRefreshDomainList () =
+        lock refreshDomainLock (fun () -> pendingRefreshDomains |> Set.toList)
+
+    let refreshDomainSnapshotJson () =
+        lock refreshDomainLock (fun () ->
+            JsonValue.Record
+                [| "pendingDomains", JsonValue.Array(pendingRefreshDomains |> Seq.map JsonValue.String |> Seq.toArray)
+                   "lastCompletedDomains", JsonValue.Array(lastRefreshCompletedDomains |> List.map JsonValue.String |> Array.ofList)
+                   "lastGlobalRefreshAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastGlobalRefreshAt))
+                   "lastLocalisationRefreshAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastLocalisationRefreshAt))
+                   "lastStatus", JsonValue.String lastRefreshDomainStatus |])
+
+    let completeRefreshDomains domains status =
+        lock refreshDomainLock (fun () ->
+            let completed = domains |> List.distinct
+            pendingRefreshDomains <- completed |> List.fold (fun acc domain -> Set.remove domain acc) pendingRefreshDomains
+            lastRefreshCompletedDomains <- completed
+            lastRefreshDomainStatus <- status
+            if completed |> List.exists (fun d -> d <> "localisation") then
+                lastGlobalRefreshAt <- DateTime.UtcNow
+            if completed |> List.contains "localisation" then
+                lastLocalisationRefreshAt <- DateTime.UtcNow)
+
+    /// Paths that define types/enums/scopes - edits here require full RefreshCaches
     let typeDefiningSegments = [| "/common/"; "\\common\\"; "/interface/"; "\\interface\\"; "/gfx/"; "\\gfx\\"; "/map/"; "\\map\\"; "/prescripted_countries/"; "\\prescripted_countries\\" |]
     let isTypeDefiningPath (path: string) =
         let lp = path.ToLowerInvariant()
         typeDefiningSegments |> Array.exists (fun seg -> lp.Contains(seg))
+
+    let refreshDomainsForPath (path: string) =
+        let lp = path.ToLowerInvariant().Replace('\\', '/')
+        [ if lp.EndsWith(".yml") then
+              yield "localisation"
+          if lp.Contains("/common/") then
+              yield "types"
+              yield "rules"
+          if lp.Contains("/interface/") || lp.Contains("/gfx/") then
+              yield "sprites_sounds"
+              yield "types"
+          if lp.Contains("/map/") || lp.Contains("/prescripted_countries/") then
+              yield "types" ]
+        |> List.distinct
 
     /// When true, the next delayedAnalyze must run full RefreshCaches
     let mutable needsTypeRefresh = false
@@ -1555,10 +1665,10 @@ type Server(client: ILanguageClient) =
             match reason with
             | "localisation" -> [ "localisation" ]
             | "types" -> [ "types" ]
-            | _ -> []
+            | _ -> refreshDomainsForPath filePath
         setFileDiagnosticState filePath Stale pendingKinds []
 
-    //──Lightweight bracket scanner ───────────────────────────────────────────────────
+    //-Lightweight bracket scanner -
     // Provide precise bracket error location when parser fails
     // O(n) single pass, skipping line comments (#) and double-quoted strings
     let scanBraceIssues (text: string) (filePath: string) =
@@ -1584,7 +1694,7 @@ type Server(client: ILanguageClient) =
                     if stack.Count = 0 then
                         let pos = mkRange filePath (mkPos (lineIdx + 1) col) (mkPos (lineIdx + 1) (col + 1))
                         issues.Add("CW001_UNMATCHED_CLOSE_BRACE", Severity.Error, filePath,
-                            sprintf "Unmatched '}' — no matching '{' found", pos, 1, None)
+                            sprintf "Unmatched '}' - no matching '{' found", pos, 1, None)
                     else
                         stack.Pop() |> ignore
                     col <- col + 1
@@ -1666,6 +1776,7 @@ type Server(client: ILanguageClient) =
             if name.EndsWith(".yml") then
                 if isEditAction && not shallowAnalyze then
                     delayedLocUpdate <- true
+                    addPendingRefreshDomains [ "localisation" ]
                     clearLocalisationCaches ()
                 if isEditAction then markFileStale name "localisation"
 
@@ -1674,8 +1785,10 @@ type Server(client: ILanguageClient) =
             if isEditAction && isTypeDefiningPath name && not shallowAnalyze then
                 needsTypeRefresh <- true
                 lastTypeRefreshRequestAt <- DateTime.UtcNow
+                let domains = refreshDomainsForPath name |> List.filter (fun domain -> domain <> "localisation")
+                addPendingRefreshDomains (if domains.IsEmpty then [ "types" ] else domains)
                 clearTypeCaches ()
-                markFileStale name "types"
+                markFileStale name "path"
 
             // Optimization: only obtain the file text once to avoid repeated GetText calls
             let filetext =
@@ -1736,7 +1849,7 @@ type Server(client: ILanguageClient) =
                     else
                         parserErrors @ locErrors @ astErrors
 
-            //──Publish diagnosis and update freshness status──────────────────────────────────────
+            //-Publish diagnosis and update freshness status-
             let diagnosticsList =
                 match errors with
                 | [] -> []
@@ -1757,9 +1870,7 @@ type Server(client: ILanguageClient) =
 
             //Update diagnostic freshness status table
             let newEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
-            let pendingKinds =
-                [ if delayedLocUpdate then yield "localisation"
-                  if needsTypeRefresh then yield "types" ]
+            let pendingKinds = pendingRefreshDomainList ()
             let freshness =
                 if pendingKinds.IsEmpty then Fresh else Pending
             setFileDiagnosticStateWithEpoch name newEpoch freshness pendingKinds (diagnosticsForFile name visibleDiagnosticsList)
@@ -1783,6 +1894,7 @@ type Server(client: ILanguageClient) =
             let allocBefore = GC.GetTotalAllocatedBytes(false)
             let mutable refreshStatus = "not_needed"
             let now = DateTime.UtcNow
+            let pendingDomainsBeforeAnalyze = pendingRefreshDomainList ()
             let quietEnough =
                 lastTypeRefreshRequestAt = DateTime.MinValue
                 || now - lastTypeRefreshRequestAt >= typeRefreshQuietPeriod
@@ -1818,6 +1930,11 @@ type Server(client: ILanguageClient) =
                     needsTypeRefresh <- false
                     lastTypeRefreshCompletedAt <- DateTime.UtcNow
                     refreshSkipCount <- 0
+                    let completed =
+                        pendingDomainsBeforeAnalyze
+                        |> List.filter (fun domain -> domain <> "localisation")
+                        |> fun domains -> if domains.IsEmpty then [ "types" ] else domains
+                    completeRefreshDomains completed refreshStatus
                 elif needsTypeRefresh then
                     refreshSkipCount <- refreshSkipCount + 1
                     refreshStatus <- $"deferred:skip={refreshSkipCount};quiet={quietEnough};cooldown={cooldownElapsed};force={forceGlobalRefresh}"
@@ -1842,6 +1959,7 @@ type Server(client: ILanguageClient) =
                     locCache.Clear()
                     for fileName, errors in game.LocalisationErrors(true, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
+                    completeRefreshDomains [ "localisation" ] "refresh_localisation"
                 elif doRefresh then
                     logDiag "delayedLocUpdate false"
 
@@ -1849,6 +1967,8 @@ type Server(client: ILanguageClient) =
                     for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
                     didLocRefresh <- true
+                    if pendingDomainsBeforeAnalyze |> List.contains "localisation" then
+                        completeRefreshDomains [ "localisation" ] "refresh_localisation_after_global"
                 else
                     logDiag "LocErrors skipped: no localisation or type refresh"
                 if didLocRefresh then evictIfNeeded locCache
@@ -1872,19 +1992,22 @@ type Server(client: ILanguageClient) =
                 elif didLocRefresh then
                     inlayHintCache.Clear()
 
-                // ── Update the diagnostic status of all files to Fresh ──────────────────────────────
+                // - Update the diagnostic status of all files to Fresh -
                 //After delayedAnalyze completes the global refresh, clear the pending mark
                 if didGlobalWork then
                     let freshEpoch = System.Threading.Interlocked.Increment(diagnosticEpoch)
                     let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    let remainingPendingDomains = pendingRefreshDomainList ()
+                    let nextFreshness =
+                        if remainingPendingDomains.IsEmpty then Fresh else Pending
                     for kvp in fileDiagnosticStates do
-                        if kvp.Value.freshness <> Fresh then
+                        if kvp.Value.freshness <> nextFreshness || kvp.Value.pendingGlobalKinds <> remainingPendingDomains then
                             fileDiagnosticStates.[kvp.Key] <-
                                 { kvp.Value with
                                     epoch = freshEpoch
                                     updatedAtUnixMs = nowMs
-                                    freshness = Fresh
-                                    pendingGlobalKinds = [] }
+                                    freshness = nextFreshness
+                                    pendingGlobalKinds = remainingPendingDomains }
             finally
                 gameStateLock.ExitWriteLock()
 
@@ -1961,6 +2084,7 @@ type Server(client: ILanguageClient) =
                             updateValidationRuntime (fun state ->
                                 { state with
                                     inProgress = true
+                                    inProgressFile = uri.LocalPath
                                     lastStartedAtUnixMs = nowUnixMs ()
                                     lastCycleFile = uri.LocalPath
                                     lastCycleShallow = useShallowAnalyze
@@ -1988,6 +2112,7 @@ type Server(client: ILanguageClient) =
                         updateValidationRuntime (fun state ->
                             { state with
                                 inProgress = false
+                                inProgressFile = ""
                                 lastCompletedAtUnixMs = nowUnixMs ()
                                 lastCycleElapsedMs = int64 (cycleSw.Elapsed.TotalMilliseconds)
                                 lastError = errorMessage })
@@ -2092,7 +2217,7 @@ type Server(client: ILanguageClient) =
                         // New edit arrived reset the debounce timer
                         return! loop (pending |> Map.add ur.uri.LocalPath (ur, force))
                     | Some (OpenRequest ur) ->
-                        // Open requests bypass debounce — forward immediately
+                        // Open requests bypass debounce - forward immediately
                         lintAgent.Post(OpenRequest ur)
                         return! loop pending
                     | Some (WorkComplete _) ->
@@ -2165,7 +2290,7 @@ type Server(client: ILanguageClient) =
                     let warningMsg =
                         uiText
                             (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached, bundled, or workspace rules instead. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
-                            (sprintf "无法从远程仓库更新 %A 的 CWTools 规则。将改用缓存、内置或工作区规则。若校验结果不完整，请运行“CWTools: 运行安装健康检查”。" activeGame)
+                            (sprintf "Failed to update CWTools rules for %A from the remote repository. Using cached, bundled, or workspace rules instead. Run 'CWTools: Run Installation Health Check' if validation looks incomplete." activeGame)
                     logWarning warningMsg
                     client.ShowMessage(
                         { ``type`` = MessageType.Warning
@@ -2176,7 +2301,7 @@ type Server(client: ILanguageClient) =
                     let errorMsg =
                         uiText
                             (sprintf "Failed to update or load CWTools rules for %A. No cached or bundled fallback rules were found at %s. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
-                            (sprintf "无法更新或加载 %A 的 CWTools 规则。未在 %s 找到缓存或内置备用规则。请重新安装 VSIX 或重新运行打包脚本，然后运行“CWTools: 运行安装健康检查”。" activeGame cp)
+                            (sprintf "Failed to update or load CWTools rules for %A. No cached or bundled fallback rules were found at %s. Reinstall the VSIX or run the package script again, then run 'CWTools: Run Installation Health Check'." activeGame cp)
                     rulesError <- Some errorMsg
                     logError errorMsg
                     client.ShowMessage(
@@ -2877,6 +3002,7 @@ type Server(client: ILanguageClient) =
                                           // A2 Fix: declare ALL implemented AI commands so
                                           // strict LSP clients don't reject them.
                                           "cwtools.ai.getScopeAtPosition"
+                                          "cwtools.ai.getCompletionContext"
                                           "cwtools.ai.queryTypes"
                                           "cwtools.ai.queryDefinition"
                                           "cwtools.ai.queryDefinitionByName"
@@ -3047,7 +3173,7 @@ type Server(client: ILanguageClient) =
                                 processWorkspace rootUri
                             finally
                                 gameStateLock.ExitWriteLock()
-                            // Phase 2: precache (no lock needed — reads game data, writes ConcurrentDictionary)
+                            // Phase 2: precache (no lock needed - reads game data, writes ConcurrentDictionary)
                             precacheAllFiles ())
 
                     task.Start()
@@ -3763,7 +3889,7 @@ type Server(client: ILanguageClient) =
                                     // Strip Paradox color codes
                                     let clean = paradoxColorPattern.Replace(clean, "")
                                     let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
-                                    sprintf "💬 %s" truncated
+                                    sprintf "Loc:%s" truncated
         
                                 let fileLines = fileText.Split([|"\r\n"; "\n"|], StringSplitOptions.None)
                                 let getRealEndPos (startPos: LSP.Types.Position) (endPos: LSP.Types.Position) =
@@ -3941,7 +4067,7 @@ type Server(client: ILanguageClient) =
             // Token type indices (must match legend in capabilities):
             async {
                 let semanticTokensFunction (game: IGame<_>) =
-                    // ── Content-hash cache: skip full AST traversal if file unchanged ──
+                    // - Content-hash cache: skip full AST traversal if file unchanged -
                     let filePath = p.textDocument.uri.LocalPath
                     let fileText = docs.GetText(FileInfo(filePath)) |> Option.defaultValue ""
                     let hash = contentHash fileText
@@ -4387,7 +4513,7 @@ type Server(client: ILanguageClient) =
 
                                 None
                             | _ -> None
-                        // ── AI-specific structured query commands ────────────────────────────
+                        // - AI-specific structured query commands -
 
                         | { command = "cwtools.ai.getScopeAtPosition"
                             arguments = uriArg :: lineArg :: colArg :: _ } ->
@@ -4412,7 +4538,7 @@ type Server(client: ILanguageClient) =
                                             scopes.Scopes |> List.tryHead |> Option.map string |> Option.defaultValue "unknown"
                                         let prevChain =
                                             scopes.Scopes
-                                            |> List.tail
+                                            |> List.skip 1
                                             |> List.map string
                                             |> Array.ofList
                                         let fromChain =
@@ -4437,6 +4563,76 @@ type Server(client: ILanguageClient) =
                                         [| "ok", JsonValue.Boolean false
                                            "error", JsonValue.String "LSP server not ready" |]
                             Some scopeResult
+
+
+                        | { command = "cwtools.ai.getCompletionContext"
+                            arguments = uriArg :: lineArg :: colArg :: _ } ->
+                            let filePath =
+                                let raw = uriArg.AsString()
+                                getPathFromDoc (Uri(raw))
+                            let line = lineArg.AsInteger()
+                            let col = colArg.AsInteger()
+                            let position = PosHelper.fromZ line col
+                            let fileContent =
+                                match docs.GetText(FileInfo(filePath)) with
+                                | Some t -> t
+                                | None -> try File.ReadAllText filePath with _ -> ""
+                            let lines = fileContent.Replace("\r\n", "\n").Split('\n')
+                            let lineText =
+                                if line >= 0 && line < lines.Length then lines.[line] else ""
+                            let boundedColumn = Math.Max(0, Math.Min(col, lineText.Length))
+                            let linePrefix = lineText.Substring(0, boundedColumn)
+                            let tokenPrefix =
+                                let m = System.Text.RegularExpressions.Regex.Match(linePrefix, @"[A-Za-z0-9_.:-]+$")
+                                if m.Success then m.Value else ""
+                            let fieldName =
+                                let eqIndex = linePrefix.LastIndexOf("=")
+                                if eqIndex >= 0 then
+                                    let beforeEquals = linePrefix.Substring(0, eqIndex)
+                                    let m = System.Text.RegularExpressions.Regex.Match(beforeEquals, @"([A-Za-z0-9_.:-]+)\s*$")
+                                    if m.Success then m.Groups.[1].Value else ""
+                                else ""
+                            let isValueParameter = linePrefix.Contains("value:")
+                            let expectedValueType =
+                                if isValueParameter then "parameter_value"
+                                elif not (String.IsNullOrWhiteSpace fieldName) then "field_value"
+                                else "unknown"
+                            let scopeJson =
+                                match gameObj with
+                                | Some g ->
+                                    match g.ScopesAtPos position filePath fileContent with
+                                    | Some scopes ->
+                                        let thisScopeStr =
+                                            scopes.Scopes |> List.tryHead |> Option.map string |> Option.defaultValue "unknown"
+                                        let prevChain =
+                                            scopes.Scopes
+                                            |> List.skip 1
+                                            |> List.map string
+                                            |> Array.ofList
+                                        let fromChain =
+                                            scopes.From |> List.map string |> Array.ofList
+                                        JsonValue.Record
+                                            [| "thisScope", JsonValue.String thisScopeStr
+                                               "root", JsonValue.String (scopes.Root.ToString())
+                                               "currentScope", JsonValue.String thisScopeStr
+                                               "prevChain", JsonValue.Array(prevChain |> Array.map JsonValue.String)
+                                               "fromChain", JsonValue.Array(fromChain |> Array.map JsonValue.String) |]
+                                    | None -> JsonValue.Null
+                                | None -> JsonValue.Null
+                            Some(
+                                JsonValue.Record
+                                    [| "ok", JsonValue.Boolean true
+                                       "file", JsonValue.String (filePath.Replace('\\', '/'))
+                                       "line", JsonValue.Number(decimal line)
+                                       "column", JsonValue.Number(decimal col)
+                                       "currentVersion", JsonValue.Number(decimal (docs.GetVersionByPath(filePath) |> Option.defaultValue -1))
+                                       "linePrefix", JsonValue.String linePrefix
+                                       "tokenPrefix", JsonValue.String tokenPrefix
+                                       "fieldName", JsonValue.String fieldName
+                                       "isValueParameter", JsonValue.Boolean isValueParameter
+                                       "expectedValueType", JsonValue.String expectedValueType
+                                       "scope", scopeJson
+                                       "source", JsonValue.String "cwtools.ai.getCompletionContext" |])
 
 
 
@@ -4494,7 +4690,7 @@ type Server(client: ILanguageClient) =
                             Some resultJson
 
 
-                        // ── cwtools.ai.queryDefinition ────────────────────────────────────────────
+                        // - cwtools.ai.queryDefinition -
                         // GoToType + FindAllRefs directly from the AST (replaces file-system grep)
                         | { command = "cwtools.ai.queryDefinition"
                             arguments = uriArg :: lineArg :: colArg :: _ } ->
@@ -4556,7 +4752,7 @@ type Server(client: ILanguageClient) =
                                            "error", JsonValue.String "LSP server not ready" |]
                             Some result
 
-                        // ── cwtools.ai.queryDefinitionByName ──────────────────────────────────────
+                        // - cwtools.ai.queryDefinitionByName -
                         // Find where a named symbol (scripted_trigger, scripted_effect, event, type)
                         // is defined, by searching AllEntities for a top-level key that matches.
                         // Much more practical than position-based GoToType for AI use.
@@ -4633,7 +4829,7 @@ type Server(client: ILanguageClient) =
                                                    "error", JsonValue.String $"Symbol '{name}' not found. Try query_scripted_effects or query_scripted_triggers with a filter instead." |]
                             Some result
 
-                        // ── cwtools.ai.queryScriptedEffects ───────────────────────────────────────
+                        // - cwtools.ai.queryScriptedEffects -
                         // Returns all scripted effects with name, scope constraints and type
                         | { command = "cwtools.ai.queryScriptedEffects"
                             arguments = rest } ->
@@ -4672,7 +4868,7 @@ type Server(client: ILanguageClient) =
                                     JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
                             Some result
 
-                        // ── cwtools.ai.queryScriptedTriggers ─────────────────────────────────────
+                        // - cwtools.ai.queryScriptedTriggers -
                         // Returns all scripted triggers with name, scope constraints and type
                         | { command = "cwtools.ai.queryScriptedTriggers"
                             arguments = rest } ->
@@ -4711,7 +4907,7 @@ type Server(client: ILanguageClient) =
                                     JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
                             Some result
 
-                        // ── cwtools.ai.queryEnums ─────────────────────────────────────────────────
+                        // - cwtools.ai.queryEnums -
                         // Returns enum values from CachedRuleMetadata (available on IGame interface)
                         | { command = "cwtools.ai.queryEnums"
                             arguments = enumNameArg :: rest } ->
@@ -4753,7 +4949,7 @@ type Server(client: ILanguageClient) =
                                                    "error",    JsonValue.String $"Enum '{enumName}' not found" |]
                             Some result
 
-                        // ── cwtools.ai.queryStaticModifiers ───────────────────────────────────────
+                        // - cwtools.ai.queryStaticModifiers -
                         // Returns static modifiers filterable by name fragment
                         | { command = "cwtools.ai.queryStaticModifiers"
                             arguments = rest } ->
@@ -4790,7 +4986,7 @@ type Server(client: ILanguageClient) =
                                     JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
                             Some result
 
-                        // ── cwtools.ai.queryVariables ─────────────────────────────────────────────
+                        // - cwtools.ai.queryVariables -
                         // Returns all scripted @variable = value definitions
                         | { command = "cwtools.ai.queryVariables"
                             arguments = rest } ->
@@ -4822,7 +5018,7 @@ type Server(client: ILanguageClient) =
                                     JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
                             Some result
 
-                        // ── cwtools.ai.getEntityInfo ──────────────────────────────────────────────
+                        // - cwtools.ai.getEntityInfo -
                         // BatchFolds: returns type refs, defined vars, effect/trigger blocks, event_targets
                         // Uses ComputedData cache which is available on IGame<T>.AllEntities()
                         | { command = "cwtools.ai.getEntityInfo"
@@ -4938,7 +5134,7 @@ type Server(client: ILanguageClient) =
                                                "error", JsonValue.String $"No entity found for file: {filePath}" |]
                             Some result
 
-                        // ── cwtools.ai.getDiagnosticsFresh ───────────────────────────────────────
+                        // - cwtools.ai.getDiagnosticsFresh -
                         // Immediately return the diagnostic freshness status of a file (without blocking)
                         | { command = cmd
                             arguments = uriArg :: _ } when
@@ -4950,6 +5146,7 @@ type Server(client: ILanguageClient) =
                             let result =
                                 match fileDiagnosticStates.TryGetValue(filePath) with
                                 | true, state ->
+                                    let currentVersion = docs.GetVersionByPath(filePath)
                                     let freshnessStr =
                                         match state.freshness with
                                         | Fresh -> "fresh" | Pending -> "pending" | Stale -> "stale"
@@ -4964,21 +5161,38 @@ type Server(client: ILanguageClient) =
                                                 match dataJson.TryGetProperty(field) with
                                                 | Some(JsonValue.String value) -> value
                                                 | _ -> fallback
+                                            let optionalDataString field =
+                                                match dataJson.TryGetProperty(field) with
+                                                | Some(JsonValue.String value) when not (String.IsNullOrWhiteSpace value) ->
+                                                    Some(field, JsonValue.String value)
+                                                | _ -> None
+                                            let optionalFields =
+                                                [ "expectedType"
+                                                  "actualType"
+                                                  "scope"
+                                                  "symbol" ]
+                                                |> List.choose optionalDataString
                                             JsonValue.Record
-                                                [| "code", JsonValue.String codeText
+                                                ([ "code", JsonValue.String codeText
                                                    "message", JsonValue.String d.message
                                                    "severity", JsonValue.String (match d.severity with Some DiagnosticSeverity.Error -> "error" | Some DiagnosticSeverity.Warning -> "warning" | Some DiagnosticSeverity.Information -> "info" | Some DiagnosticSeverity.Hint -> "hint" | _ -> "info")
                                                    "category", JsonValue.String (dataString "category" "unknown")
                                                    "repairHint", JsonValue.String (dataString "repairHint" "")
+                                                   "confidence", JsonValue.String (dataString "confidence" "low")
+                                                   "metadataSource", JsonValue.String (dataString "metadataSource" "message_heuristic")
                                                    "data", dataJson
                                                    "line", JsonValue.Number(decimal d.range.start.line)
-                                                   "column", JsonValue.Number(decimal d.range.start.character) |])
+                                                   "column", JsonValue.Number(decimal d.range.start.character) ]
+                                                 @ optionalFields
+                                                 |> List.toArray))
                                         |> Array.ofList
                                     JsonValue.Record
                                         [| "ok",                 JsonValue.Boolean true
                                            "file",              JsonValue.String (filePath.Replace('\\', '/'))
                                            "epoch",             JsonValue.Number(decimal state.epoch)
                                            "version",           JsonValue.Number(decimal (state.version |> Option.defaultValue -1))
+                                           "currentVersion",    JsonValue.Number(decimal (currentVersion |> Option.defaultValue -1))
+                                           "validatedVersion",  JsonValue.Number(decimal (state.validatedVersion |> Option.defaultValue -1))
                                            "updatedAtUnixMs",   JsonValue.Number(decimal state.updatedAtUnixMs)
                                            "freshness",         JsonValue.String freshnessStr
                                            "pendingGlobalKinds",JsonValue.Array(state.pendingGlobalKinds |> List.map JsonValue.String |> Array.ofList)
@@ -4991,6 +5205,8 @@ type Server(client: ILanguageClient) =
                                            "file",      JsonValue.String (filePath.Replace('\\', '/'))
                                            "freshness", JsonValue.String "stale"
                                            "epoch",     JsonValue.Number 0m
+                                           "currentVersion", JsonValue.Number(decimal (docs.GetVersionByPath(filePath) |> Option.defaultValue -1))
+                                           "validatedVersion", JsonValue.Number -1m
                                            "errorCount",JsonValue.Number 0m
                                            "warningCount", JsonValue.Number 0m |]
                             Some result
@@ -4998,7 +5214,7 @@ type Server(client: ILanguageClient) =
                         // waitDiagnosticsFresh is kept as a non-blocking compatibility alias.
                         // Actual waiting stays client-side to avoid holding an LSP read lock.
 
-                        // ── cwtools.ai.getValidationStatus ──────────────────────────────────────
+                        // - cwtools.ai.getValidationStatus -
                         // Return global verification status summary: current epoch, number of pending files, total number of files
                         | { command = "cwtools.ai.getValidationStatus" } ->
                             let currentEpoch = diagnosticEpoch.Value
@@ -5026,6 +5242,7 @@ type Server(client: ILanguageClient) =
                                        "pendingFiles",      JsonValue.Number(decimal pendingFiles)
                                        "pendingGlobalKinds",JsonValue.Array(allPendingKinds |> Array.map JsonValue.String)
                                        "inProgress",        JsonValue.Boolean runtime.inProgress
+                                       "inProgressFile",    JsonValue.String runtime.inProgressFile
                                        "queueDepth",        JsonValue.Number(decimal runtime.queueDepth)
                                        "debounceQueueDepth",JsonValue.Number(decimal runtime.debounceQueueDepth)
                                        "needsTypeRefresh",  JsonValue.Boolean needsTypeRefresh
@@ -5034,7 +5251,9 @@ type Server(client: ILanguageClient) =
                                        "nextAnalyzeDelayMs",JsonValue.Number(decimal (int delayTime.TotalMilliseconds))
                                        "lastTypeRefreshRequestedAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastTypeRefreshRequestAt))
                                        "lastTypeRefreshCompletedAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastTypeRefreshCompletedAt))
+                                       "lastGlobalRefreshAtUnixMs", JsonValue.Number(decimal (dateTimeToUnixMs lastGlobalRefreshAt))
                                        "openDocuments",     JsonValue.Number(decimal (docs.OpenFiles() |> List.length))
+                                       "refreshDomains",    refreshDomainSnapshotJson ()
                                        "runtime",           getRuntimeSnapshotJson ()
                                        "loading",           getLoadingSnapshotJson ()
                                        "completion",        getCompletionSnapshotJson ()
@@ -5043,7 +5262,7 @@ type Server(client: ILanguageClient) =
                                        "caches",            getCacheSnapshotJson () |]
                             Some result
 
-                        // ── cwtools.ai.parseFragment ─────────────────────────────────────────
+                        // - cwtools.ai.parseFragment -
                         // Fragment parsing: accepts code fragment text and returns syntax error (does not write to file)
                         | { command = "cwtools.ai.parseFragment"
                             arguments = codeArg :: _ } ->

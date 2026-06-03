@@ -138,7 +138,7 @@ type msg =
     | Response of int * JsonValue
     | Expire of int  // clean up timed-out pending requests
 
-/// Monotonically increasing request ID — safe under concurrent calls.
+/// Monotonically increasing request ID - safe under concurrent calls.
 let private requestIdCounter = ref 0
 let private nextRequestId () = System.Threading.Interlocked.Increment(requestIdCounter)
 
@@ -167,7 +167,7 @@ let responseAgent =
                     | None -> eprintfn $"Unexpected response %i{id}"
                     return! loop (state |> Map.remove id)
                 | Expire id ->
-                    // If the entry is still present the client never replied — silently drop it.
+                    // If the entry is still present the client never replied - silently drop it.
                     return! loop (state |> Map.remove id)
             }
 
@@ -272,11 +272,11 @@ type RealClient(send: BinaryWriter) =
 
 
 type private PendingTask =
-    /// needsWriteLock = true  → notification mutates game state (e.g. DidChangeConfiguration)
-    /// needsWriteLock = false → notification only touches DocumentStore / MailboxProcessor (thread-safe)
+    /// needsWriteLock = true  -> notification mutates game state (e.g. DidChangeConfiguration)
+    /// needsWriteLock = false -> notification only touches DocumentStore / MailboxProcessor (thread-safe)
     | ProcessNotification of method: string * task: Async<unit> * needsWriteLock: bool
-    /// isReadOnly = true  → can execute concurrently on the thread pool (read lock)
-    /// isReadOnly = false → must execute serially, blocking the loop (write lock)
+    /// isReadOnly = true  -> can execute concurrently on the thread pool (read lock)
+    /// isReadOnly = false -> must execute serially, blocking the loop (write lock)
     | ProcessRequest of id: int * task: Async<string option> * cancel: CancellationTokenSource * isReadOnly: bool
     | Quit
 
@@ -284,15 +284,15 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     let server = serverFactory (RealClient(send))
 
     /// Returns (serialisedResponseTask, isReadOnly).
-    /// isReadOnly = true  → safe to run concurrently with other reads, holding gameStateLock in read mode.
-    /// isReadOnly = false → must run exclusively, holding gameStateLock in write mode.
+    /// isReadOnly = true  -> safe to run concurrently with other reads, holding gameStateLock in read mode.
+    /// isReadOnly = false -> must run exclusively, holding gameStateLock in write mode.
     let processRequest (request: Request) : Async<string option> * bool =
         match request with
         | Initialize(p)         -> server.Initialize(p) |> thenMap serializeInitializeResult |> thenSome, false
         | Shutdown              -> server.Shutdown()     |> thenMap serializeShutdownResponse |> thenSome, false
         | WillSaveWaitUntilTextDocument(p) ->
             server.WillSaveWaitUntilTextDocument(p) |> thenMap serializeTextEditList |> thenSome, false
-        // ── Read-only requests (concurrent execution) ─────────────────────────────
+        // - Read-only requests (concurrent execution) -
         | Completion(p)         -> server.Completion(p)          |> thenMap serializeCompletionListOption,               true
         | Hover(p)              -> server.Hover(p)               |> thenMap serializeHoverOption |> thenMap (Option.defaultValue "null") |> thenSome, true
         | ResolveCompletionItem(p) -> server.ResolveCompletionItem(p) |> thenMap serializeCompletionItem |> thenSome,    true
@@ -339,7 +339,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
             server.ExecuteCommand p |> thenMap serializeExecuteCommandResponseOption, isReadCmd
 
 
-        // ── Write / formatting ────────────────────────────────────────────────────
+        // - Write / formatting -
         | DocumentFormatting(p)     -> server.DocumentFormatting(p)     |> thenMap serializeTextEditList |> thenSome, false
         | DocumentRangeFormatting(p)-> server.DocumentRangeFormatting(p)|> thenMap serializeTextEditList |> thenSome, false
         | DocumentOnTypeFormatting(p)->server.DocumentOnTypeFormatting(p)|> thenMap serializeTextEditList |> thenSome, false
@@ -347,14 +347,14 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenNone,                             false
 
     /// Returns (task, needsWriteLock).
-    /// needsWriteLock = true  → game state mutation (DidChangeConfiguration triggers processWorkspace)
-    /// needsWriteLock = false → only touches DocumentStore, MailboxProcessor, or mutable flags (thread-safe)
+    /// needsWriteLock = true  -> game state mutation (DidChangeConfiguration triggers processWorkspace)
+    /// needsWriteLock = false -> only touches DocumentStore, MailboxProcessor, or mutable flags (thread-safe)
     let processNotification (n: Notification) : Async<unit> * bool =
         match n with
-        // These two mutate gameObj / start processWorkspace → need exclusive Write Lock
+        // These two mutate gameObj / start processWorkspace -> need exclusive Write Lock
         | Initialized            -> server.Initialized(), true
         | DidChangeConfiguration(p) -> server.DidChangeConfiguration(p), true
-        // All others only touch DocumentStore + MailboxProcessor (both thread-safe) → no lock needed
+        // All others only touch DocumentStore + MailboxProcessor (both thread-safe) -> no lock needed
         | DidOpenTextDocument(p)  -> server.DidOpenTextDocument(p), false
         | DidChangeTextDocument(p)-> server.DidChangeTextDocument(p), false
         | WillSaveTextDocument(p) -> server.WillSaveTextDocument(p), false
@@ -368,10 +368,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         System.Collections.Concurrent.ConcurrentDictionary<int, CancellationTokenSource>()
 
     let processQueue =
-        // M7 Fix: unbounded queue — a bounded capacity of 10 can deadlock when the
+        // M7 Fix: unbounded queue - a bounded capacity of 10 can deadlock when the
         // AI sends commands faster than the processing thread consumes them.
         // The reader thread (which calls Add) would block while the processing thread
-        // (which calls Take) waits for more cancel messages from the reader — circular.
+        // (which calls Take) waits for more cancel messages from the reader - circular.
         new System.Collections.Concurrent.BlockingCollection<PendingTask>()
 
     Thread(fun () ->
@@ -442,7 +442,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
             gameStateLock.EnterWriteLock()
             try
                 try
-                    // No explicit timeout — rely on the CancellationToken ($/cancelRequest) for
+                    // No explicit timeout - rely on the CancellationToken ($/cancelRequest) for
                     // aborting long-running writes. A 0ms timeout caused every write to throw
                     // TimeoutException before the task even started.
                     match Async.RunSynchronously(task, cancellationToken = cancel.Token) with
@@ -460,7 +460,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | Quit -> quit <- true
         // Notifications: only acquire Write Lock if the notification mutates game state.
         // Most notifications (DidOpen, DidChange, etc.) only touch DocumentStore and
-        // MailboxProcessor — both thread-safe — so they run lock-free, keeping
+        // MailboxProcessor - both thread-safe - so they run lock-free, keeping
         // Completion/Hover/SemanticTokens responsive during rapid typing.
         | ProcessNotification(_, task, true  (* needsWriteLock *)) ->
             gameStateLock.EnterWriteLock()
@@ -475,4 +475,4 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | ProcessRequest(id, task, cancel, false (* isWrite    *)) ->
             runWriteRequest id task cancel
 
-    Environment.Exit(0)  // normal shutdown — allows finalizers to run
+    Environment.Exit(0)  // normal shutdown - allows finalizers to run

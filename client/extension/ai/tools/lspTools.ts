@@ -1,5 +1,5 @@
 /**
- * LSP Tool Handler — all CWTools Language Server query operations.
+ * LSP Tool Handler - all CWTools Language Server query operations.
  *
  * Handles: scope queries, type queries, rule queries, references,
  * code validation, diagnostics, completions, symbols, and deep API tools.
@@ -93,7 +93,7 @@ function normalizeWorkspaceIncludeGlob(include?: string): string {
     return normalized;
 }
 
-// ─── Context type ────────────────────────────────────────────────────────────
+// - Context type -
 
 /** Structural type for the properties LspToolHandler reads from the executor. */
 export interface LspToolContext {
@@ -107,7 +107,7 @@ export interface LspToolContext {
     multiReplaceFileContent?: (args: any, context?: any) => Promise<any>;
 }
 
-// ─── Handler class ───────────────────────────────────────────────────────────
+// - Handler class -
 
 export class LspToolHandler {
     private cwtRulesCache: { triggers: RuleInfo[]; effects: RuleInfo[]; modifiers: RuleInfo[] } | null = null;
@@ -123,7 +123,7 @@ export class LspToolHandler {
         }
     }
 
-    // ─── Concurrency limiter ─────────────────────────────────────────────────
+    // - Concurrency limiter -
     // The CWTools LSP server is single-threaded (F# async event loop).
     // When the AI agent fires many parallel read-only tool calls, flooding it
     // with simultaneous requests causes queue saturation and deadlocks.
@@ -147,7 +147,7 @@ export class LspToolHandler {
     private releaseLspSlot(): void {
         const next = this.lspQueue.shift();
         if (next) {
-            // Don't decrement — the slot transfers directly to the next waiter
+            // Don't decrement - the slot transfers directly to the next waiter
             next();
         } else {
             this.lspInFlight--;
@@ -164,7 +164,7 @@ export class LspToolHandler {
         return this.clientGetter();
     }
 
-    // ─── LSP request with timeout ─────────────────────────────────────────────
+    // - LSP request with timeout -
 
     /** Default timeout for LSP requests (ms). */
     private static readonly LSP_TIMEOUT_MS = 10_000;
@@ -248,9 +248,9 @@ export class LspToolHandler {
         }
     }
 
-    // ─── Generic LRU+TTL cache (Batch 2.2 upgrade) ────────────────────────────
+    // - Generic LRU+TTL cache (Batch 2.2 upgrade) -
     //
-    // The original cache was unbounded — during long reasoning loops with hundreds
+    // The original cache was unbounded - during long reasoning loops with hundreds
     // of unique query_scope / query_types calls, it could grow without limit.
     // This version adds LRU eviction (oldest entry removed when size > MAX) on top
     // of the existing TTL expiration.
@@ -276,7 +276,7 @@ export class LspToolHandler {
         return freshData;
     }
 
-    // ─── queryScope ──────────────────────────────────────────────────────────
+    // - queryScope -
 
     async queryScope(args: { file: string; line: number; column: number }): Promise<QueryScopeResult> {
         const unknown: QueryScopeResult = {
@@ -360,14 +360,35 @@ export class LspToolHandler {
         }
     }
 
-    // ─── CWTools Deep API tools ──────────────────────────────────────────────
+    // - CWTools Deep API tools -
+
+    private scopeResultFromRaw(raw: any): QueryScopeResult | undefined {
+        if (!raw || raw.ok !== true) return undefined;
+        return {
+            currentScope: raw.thisScope ?? 'unknown',
+            root: raw.root ?? 'unknown',
+            thisScope: raw.thisScope ?? 'unknown',
+            prevChain: Array.isArray(raw.prevChain) ? raw.prevChain : [],
+            fromChain: Array.isArray(raw.fromChain) ? raw.fromChain : [],
+        };
+    }
+
+    private async queryScopeForCompletionContext(args: { file: string; line: number; column: number }): Promise<QueryScopeResult | undefined> {
+        const uri = vs.Uri.file(args.file);
+        const raw = await this.lspRequest(
+            'cwtools.ai.getScopeAtPosition',
+            [uri.toString(), args.line, args.column],
+            1000,
+        ) as any;
+        return this.scopeResultFromRaw(raw);
+    }
 
     async queryDefinition(args: { file: string; line: number; column: number }): Promise<unknown> {
         try {
             const uri = vs.Uri.file(args.file);
             const raw = await this.lspRequest('cwtools.ai.queryDefinition', [uri.toString(), args.line, args.column]) as any;
             if (raw && raw.ok === true) return raw;
-            return { ok: false, error: '未找到定义' };
+            return { ok: false, error: 'Definition not found.' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }
@@ -378,12 +399,12 @@ export class LspToolHandler {
         if (!name) {
             return {
                 ok: false,
-                error: '缺少必要的 symbolName 参数。你必须传入确切的符号名称。示例：query_definition_by_name({ "symbolName": "kuat_has_psionic_research" })',
+                error: 'Missing required symbolName argument. Pass an exact symbol name, for example query_definition_by_name({ "symbolName": "kuat_has_psionic_research" }).',
             };
         }
         try {
             const raw = await this.lspRequest('cwtools.ai.queryDefinitionByName', [name]) as any;
-            return raw ?? { ok: false, error: 'LSP 无响应' };
+            return raw ?? { ok: false, error: 'LSP returned no response.' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }
@@ -396,9 +417,9 @@ export class LspToolHandler {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.queryScriptedEffects', [args.filter ?? '', limit], 20_000) as any;
                 if (!args.filter && raw?.ok && Array.isArray(raw.items) && raw.items.length >= limit) {
-                    raw._note = `正显示前 ${limit} 个结果。请使用 filter 参数进行更精确的搜索。`;
+                    raw._note = `Showing the first ${limit} results. Use the filter argument for a more precise search.`;
                 }
-                return raw ?? { ok: false, error: '无响应' };
+                return raw ?? { ok: false, error: 'No response.' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
@@ -410,9 +431,9 @@ export class LspToolHandler {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.queryScriptedTriggers', [args.filter ?? '', limit], 20_000) as any;
                 if (!args.filter && raw?.ok && Array.isArray(raw.items) && raw.items.length >= limit) {
-                    raw._note = `正显示前 ${limit} 个结果。请使用 filter 参数进行更精确的搜索。`;
+                    raw._note = `Showing the first ${limit} results. Use the filter argument for a more precise search.`;
                 }
-                return raw ?? { ok: false, error: '无响应' };
+                return raw ?? { ok: false, error: 'No response.' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
@@ -422,7 +443,7 @@ export class LspToolHandler {
         return this.cachedLspRead(cacheKey, async () => {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.queryEnums', [args.enumName ?? '', args.limit ?? 500], 20_000) as any;
-                return raw ?? { ok: false, error: '无响应' };
+                return raw ?? { ok: false, error: 'No response.' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
@@ -431,7 +452,7 @@ export class LspToolHandler {
         try {
             const uri = vs.Uri.file(args.file);
             const raw = await this.lspRequest('cwtools.ai.getEntityInfo', [uri.toString()]) as any;
-            return raw ?? { ok: false, error: '无响应' };
+            return raw ?? { ok: false, error: 'No response.' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }
@@ -442,21 +463,21 @@ export class LspToolHandler {
         return this.cachedLspRead(cacheKey, async () => {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.queryStaticModifiers', [args.filter ?? '', args.limit ?? 300], 20_000) as any;
-                return raw ?? { ok: false, error: '无响应' };
+                return raw ?? { ok: false, error: 'No response.' };
             } catch (e) { return { ok: false, error: String(e) }; }
         });
     }
 
     async queryVariables(args: { filter?: string }): Promise<unknown> {
         try {
-            const raw = await this.lspRequest('cwtools.ai.queryVariables', [args.filter ?? '']) as any;
-            return raw ?? { ok: false, error: '无响应' };
+                const raw = await this.lspRequest('cwtools.ai.queryVariables', [args.filter ?? '']) as any;
+                return raw ?? { ok: false, error: 'No response.' };
         } catch (e) {
             return { ok: false, error: String(e) };
         }
     }
 
-    // ─── queryTypes ──────────────────────────────────────────────────────────
+    // - queryTypes -
 
     async queryTypes(args: { typeName: string; filter?: string; limit?: number; vanillaOnly?: boolean }): Promise<QueryTypesResult> {
         try {
@@ -612,7 +633,7 @@ export class LspToolHandler {
         return { rules: rules.slice(0, 80), totalCount: rules.length, truncated: rules.length > 80 };
     }
 
-    // ─── getPdxBlock ─────────────────────────────────────────────────────────
+    // - getPdxBlock -
 
     async getPdxBlock(args: { file: string; symbol: string }): Promise<{ content: string; truncated: boolean }> {
         try {
@@ -640,7 +661,7 @@ export class LspToolHandler {
                 const collectNames = (syms: DocumentSymbolInfo[], depth = 0): string[] => {
                     const names: string[] = [];
                     for (const s of syms) {
-                        const prefix = depth > 0 ? '  '.repeat(depth) + '└ ' : '';
+                        const prefix = depth > 0 ? '  '.repeat(depth) + '- ' : '';
                         names.push(`${prefix}${s.name} (${s.kind}, L${s.range.startLine}-${s.range.endLine})`);
                         if (s.children && s.children.length > 0 && depth < 2) {
                             names.push(...collectNames(s.children, depth + 1));
@@ -813,7 +834,7 @@ export class LspToolHandler {
         } catch { /* skip */ }
     }
 
-    // ─── queryReferences ─────────────────────────────────────────────────────
+    // - queryReferences -
 
     async queryReferences(args: { identifier: string; file?: string }): Promise<QueryReferencesResult> {
         try {
@@ -858,7 +879,7 @@ export class LspToolHandler {
         }
     }
 
-    // ─── getDiagnostics ──────────────────────────────────────────────────────
+    // - getDiagnostics -
 
     async getLspStatus(args: { timeoutMs?: number } = {}): Promise<import('../types').GetLspStatusResult> {
         const requestedTimeout = typeof args.timeoutMs === 'number' && Number.isFinite(args.timeoutMs)
@@ -974,6 +995,12 @@ export class LspToolHandler {
                         code: d.code !== undefined ? String(d.code) : undefined,
                         category: metadata.category,
                         repairHint: metadata.repairHint,
+                        expectedType: metadata.expectedType,
+                        actualType: metadata.actualType,
+                        scope: metadata.scope,
+                        symbol: metadata.symbol,
+                        confidence: metadata.confidence,
+                        metadataSource: metadata.metadataSource,
                         data: metadata.data,
                     });
                 }
@@ -1049,7 +1076,7 @@ export class LspToolHandler {
         };
     }
 
-    // ─── getFileContext ──────────────────────────────────────────────────────
+    // - getFileContext -
 
     async getFileContext(args: { file: string; line: number; radius?: number }): Promise<GetFileContextResult> {
         const radius = args.radius ?? 20;
@@ -1175,7 +1202,7 @@ export class LspToolHandler {
                 }
             }
 
-            // Strategy 2: Fallback — findFiles + manual regex scan (VSCode 1.95+)
+            // Strategy 2: Fallback - findFiles + manual regex scan (VSCode 1.95+)
             if (results.length < limit) {
                 try {
                     const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob);
@@ -1355,7 +1382,7 @@ export class LspToolHandler {
         if (limitReached) {
             returnObj._warning = `[CRITICAL TRUNCATION] Truncation: The output limit of ${limit} files has been reached. The remaining matching files (which may contain hundreds) have been forcibly discarded to protect the large model context! Please narrow your search using the more precise \`query\` or \`directory\` parameters.`;
         }
-        returnObj._hint = "💡 Found what you need? If the match is in a PDX Script (.txt), DO NOT use read_file! Use document_symbols to find its boundaries, then get_pdx_block to read it, or edit_pdx_block to instantly replace it without reading.";
+        returnObj._hint = "Found what you need? If the match is in a PDX Script (.txt), do not use read_file. Use document_symbols to find its boundaries, then get_pdx_block to read it, or edit_pdx_block to replace it directly.";
         return returnObj as import('../types').SearchModFilesResult;
     }
 
@@ -1869,7 +1896,7 @@ export class LspToolHandler {
             }
         }
 
-        // Strategy 2: Fallback — findFiles + manual regex scan (VSCode 1.95+)
+        // Strategy 2: Fallback - findFiles + manual regex scan (VSCode 1.95+)
         if (matches.length < limit) {
             try {
                 const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includePattern);
@@ -1925,7 +1952,7 @@ export class LspToolHandler {
             matches,
             totalMatches,
             truncated,
-            _hint: "💡 If you found your target in a PDX Script (.txt), DO NOT use read_file! Use document_symbols + get_pdx_block to read, or edit_pdx_block to directly replace the node."
+            _hint: "If you found your target in a PDX Script (.txt), do not use read_file. Use document_symbols + get_pdx_block to read it, or edit_pdx_block to directly replace the node."
         };
         if (matches.length === 0) {
             returnObj._warning = buildAbsenceWarning(args.query);
@@ -1938,12 +1965,69 @@ export class LspToolHandler {
         return returnObj as import('../types').GrepResult;
     }
 
-    // ─── getCompletionAt ─────────────────────────────────────────────────────
+    // - getCompletionAt -
 
     async getCompletionAt(args: { file: string; line: number; column: number; limit?: number }): Promise<GetCompletionAtResult> {
+        let context: GetCompletionAtResult['context'] | undefined;
         try {
-            const limit = args.limit ?? 30;
+            const requestedLimit = Number.isFinite(args.limit) ? Math.trunc(args.limit as number) : 30;
+            const limit = Math.max(1, Math.min(200, requestedLimit));
             const uri = vs.Uri.file(args.file);
+            const document = await vs.workspace.openTextDocument(uri);
+            let linePrefix = '';
+            let tokenPrefix: string | undefined;
+            if (args.line >= 0 && args.line < document.lineCount) {
+                const lineText = document.lineAt(args.line).text;
+                const boundedColumn = Math.max(0, Math.min(args.column, lineText.length));
+                linePrefix = lineText.slice(0, boundedColumn);
+                tokenPrefix = linePrefix.match(/[A-Za-z0-9_.:-]+$/)?.[0];
+            }
+            try {
+                const rawContext = await this.lspRequest<Record<string, unknown> | null>(
+                    'cwtools.ai.getCompletionContext',
+                    [uri.toString(), args.line, args.column],
+                    1000,
+                );
+                const rawScope = rawContext?.scope && typeof rawContext.scope === 'object'
+                    ? rawContext.scope as Record<string, unknown>
+                    : undefined;
+                const scope: QueryScopeResult | undefined = rawScope ? {
+                    currentScope: typeof rawScope.currentScope === 'string' ? rawScope.currentScope : 'unknown',
+                    root: typeof rawScope.root === 'string' ? rawScope.root : 'unknown',
+                    thisScope: typeof rawScope.thisScope === 'string' ? rawScope.thisScope : 'unknown',
+                    prevChain: Array.isArray(rawScope.prevChain) ? rawScope.prevChain.map(String) : [],
+                    fromChain: Array.isArray(rawScope.fromChain) ? rawScope.fromChain.map(String) : [],
+                } : undefined;
+                if (rawContext?.ok === true) {
+                    context = {
+                        file: typeof rawContext.file === 'string' ? rawContext.file : args.file,
+                        line: typeof rawContext.line === 'number' ? rawContext.line : args.line,
+                        column: typeof rawContext.column === 'number' ? rawContext.column : args.column,
+                        languageId: document.languageId,
+                        linePrefix: typeof rawContext.linePrefix === 'string' ? rawContext.linePrefix : linePrefix,
+                        tokenPrefix: typeof rawContext.tokenPrefix === 'string' ? rawContext.tokenPrefix : tokenPrefix,
+                        fieldName: typeof rawContext.fieldName === 'string' && rawContext.fieldName ? rawContext.fieldName : undefined,
+                        isValueParameter: typeof rawContext.isValueParameter === 'boolean' ? rawContext.isValueParameter : undefined,
+                        expectedValueType: typeof rawContext.expectedValueType === 'string' ? rawContext.expectedValueType : undefined,
+                        currentVersion: typeof rawContext.currentVersion === 'number' ? rawContext.currentVersion : undefined,
+                        scope,
+                        source: 'cwtools.ai.getCompletionContext',
+                    };
+                }
+            } catch { /* Context enrichment only. */ }
+            if (!context) {
+                const scope = await this.queryScopeForCompletionContext({ file: args.file, line: args.line, column: args.column }).catch(() => undefined);
+                context = {
+                    file: args.file,
+                    line: args.line,
+                    column: args.column,
+                    languageId: document.languageId,
+                    linePrefix,
+                    tokenPrefix,
+                    scope,
+                    source: 'local_text_context',
+                };
+            }
             const position = new vs.Position(args.line, args.column);
             const completions = await this.vsCommand<vs.CompletionList>(
                 'vscode.executeCompletionItemProvider', [uri, position]
@@ -1964,7 +2048,7 @@ export class LspToolHandler {
                     }
                     return undefined;
                 };
-                return {
+                const result: GetCompletionAtResult = {
                     completions: completions.items.slice(0, limit).map(item => ({
                         label: typeof item.label === 'string' ? item.label : item.label.label,
                         kind: vs.CompletionItemKind[item.kind ?? vs.CompletionItemKind.Text],
@@ -1975,12 +2059,17 @@ export class LspToolHandler {
                         documentation: completionDocumentation(item.documentation),
                         isSnippet: item.insertText instanceof vs.SnippetString,
                     })),
+                    context,
                     totalAvailable: completions.items.length,
-                    ...(completions.items.length > limit ? { _note: `正显示 ${limit}/${completions.items.length} 个补全项。如需查看更多请增加 limit 参数。` } : {}),
                 };
+                if (completions.items.length > limit) {
+                    result._note = `Showing ${limit}/${completions.items.length} completions. Increase limit to inspect more candidates.`;
+                }
+                return result;
             }
             return {
                 completions: [],
+                context,
                 totalAvailable: 0,
                 _warning: 'Completion provider did not return a result. This is not proof that no values are valid at this position.',
                 _nextSteps: [
@@ -1992,6 +2081,7 @@ export class LspToolHandler {
         } catch (error) {
             return {
                 completions: [],
+                context,
                 totalAvailable: 0,
                 _warning: `Completion lookup failed: ${error instanceof Error ? error.message : String(error)}. Empty completions are not authoritative.`,
                 _nextSteps: [
@@ -2003,7 +2093,7 @@ export class LspToolHandler {
         }
     }
 
-    // ─── documentSymbols ─────────────────────────────────────────────────────
+    // - documentSymbols -
 
     async documentSymbols(args: { file: string }): Promise<DocumentSymbolsResult> {
         return this.cachedLspRead(`dsym:${args.file}`, async () => {
@@ -2040,7 +2130,7 @@ export class LspToolHandler {
         }, 8000);
     }
 
-    // ─── workspaceSymbols ────────────────────────────────────────────────────
+    // - workspaceSymbols -
 
     async workspaceSymbols(args: { query: string; limit?: number }): Promise<WorkspaceSymbolsResult> {
         try {
@@ -2070,7 +2160,7 @@ export class LspToolHandler {
         }
     }
 
-    // ─── lspOperation ────────────────────────────────────────────────────────
+    // - lspOperation -
 
     async verifyPdxIdentifier(args: import('../types').VerifyPdxIdentifierArgs): Promise<import('../types').VerifyPdxIdentifierResult> {
         const identifier = String(args.identifier ?? '').trim();
@@ -2311,7 +2401,7 @@ export class LspToolHandler {
                     const defs = await this.vsCommand<vs.Location[]>(
                         'vscode.executeDefinitionProvider', [uri, position]
                     );
-                    if (!defs || defs.length === 0) return { locations: [], message: '未找到定义' };
+                    if (!defs || defs.length === 0) return { locations: [], message: 'Definition not found.' };
                     return {
                         locations: defs.map(d => ({
                             file: d.uri.fsPath,
@@ -2328,7 +2418,7 @@ export class LspToolHandler {
                     const refs = await this.vsCommand<vs.Location[]>(
                         'vscode.executeReferenceProvider', [uri, position]
                     );
-                    if (!refs || refs.length === 0) return { references: [], message: '未找到引用' };
+                    if (!refs || refs.length === 0) return { references: [], message: 'References not found.' };
                     return {
                         references: refs.slice(0, 50).map(r => ({
                             file: path.relative(this.ctx.workspaceRoot, r.uri.fsPath).replace(/\\/g, '/'),
@@ -2342,18 +2432,18 @@ export class LspToolHandler {
                     const hovers = await this.vsCommand<vs.Hover[]>(
                         'vscode.executeHoverProvider', [uri, position]
                     );
-                    if (!hovers || hovers.length === 0) return { text: '', message: '无悬停提示信息' };
+                    if (!hovers || hovers.length === 0) return { text: '', message: 'No hover information available.' };
                     const text = hovers.flatMap(h =>
                         h.contents.map(c => typeof c === 'string' ? c : (c as vs.MarkdownString).value)
                     ).join('\n\n');
                     return { text };
                 }
                 case 'rename': {
-                    if (!args.newName) return { error: '重命名操作需要提供 newName 参数' };
+                    if (!args.newName) return { error: 'Rename requires the newName argument.' };
                     const edit = await this.vsCommand<vs.WorkspaceEdit>(
                         'vscode.executeDocumentRenameProvider', [uri, position, args.newName]
                     );
-                    if (!edit) return { error: '当前位置不支持重命名' };
+                    if (!edit) return { error: 'Rename is not supported at this position.' };
                     const changes: Array<{ file: string; edits: number }> = [];
                     edit.entries().forEach(([u, edits]) => {
                         changes.push({ file: path.relative(this.ctx.workspaceRoot, u.fsPath).replace(/\\/g, '/'), edits: edits.length });
@@ -2367,20 +2457,20 @@ export class LspToolHandler {
                         const confirmed = await this.ctx.onPendingWrite(
                             args.file, `Rename: ${changes.length} file(s) affected: ${summary}`, `rename_${Date.now()}`
                         );
-                        if (!confirmed) return { error: '用户拒绝了重命名操作' };
+                        if (!confirmed) return { error: 'The user rejected the rename operation.' };
                     }
                     const applied = await vs.workspace.applyEdit(edit);
-                    if (!applied) return { error: '重命名应用失败 — 工作区拒绝了该修改' };
+                    if (!applied) return { error: 'Rename failed because the workspace rejected the edit.' };
                     return {
                         changes,
-                        message: `重命名已应用：影响了 ${changes.length} 个文件，共计 ${changes.reduce((s, c) => s + c.edits, 0)} 处修改`,
+                        message: `Rename applied across ${changes.length} file(s), ${changes.reduce((s, c) => s + c.edits, 0)} edit(s).`,
                     };
                 }
                 default:
-                    return { error: `未知的 LSP 操作：${args.operation}` };
+                    return { error: `Unknown LSP operation: ${args.operation}` };
             }
         } catch (e) {
-            return { error: `LSP 操作失败：${e instanceof Error ? e.message : String(e)}` };
+            return { error: `LSP operation failed: ${e instanceof Error ? e.message : String(e)}` };
         }
     }
     queryLocalisationIndex(args: import('../types').QueryLocalisationIndexArgs): import('../types').QueryLocalisationIndexResult {
@@ -2496,7 +2586,7 @@ export class LspToolHandler {
             const collectNames = (syms: DocumentSymbolInfo[], depth = 0): string[] => {
                 const names: string[] = [];
                 for (const s of syms) {
-                    const prefix = depth > 0 ? '  '.repeat(depth) + '└ ' : '';
+                    const prefix = depth > 0 ? '  '.repeat(depth) + '- ' : '';
                     names.push(`${prefix}${s.name} (L${s.range.startLine}-${s.range.endLine})`);
                     if (s.children && s.children.length > 0 && depth < 1) {
                         names.push(...collectNames(s.children, depth + 1));

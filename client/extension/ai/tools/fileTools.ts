@@ -1,5 +1,5 @@
 /**
- * File Tool Handler — read, write, edit, patch, and directory operations.
+ * File Tool Handler - read, write, edit, patch, and directory operations.
  *
  * Includes the OpenCode Replacer Suite (8 fuzzy-match strategies) ported from
  * opencode/packages/opencode/src/tool/edit.ts.
@@ -24,7 +24,7 @@ import {
     type WorkspacePathResolution,
 } from '../workspaceSandbox';
 
-// ─── Shared file-system helpers ──────────────────────────────────────────────
+// - Shared file-system helpers -
 
 /** Recursively find files with a given extension under `dir`. */
 export function findFiles(dir: string, ext: string, maxFiles = 500): string[] {
@@ -50,7 +50,7 @@ function walkDir(dir: string, ext: string, results: string[], maxFiles: number):
     }
 }
 
-// ─── Context type ────────────────────────────────────────────────────────────
+// - Context type -
 
 /** Structural type for the properties FileToolHandler reads from the executor. */
 export interface FileToolContext {
@@ -67,29 +67,29 @@ export interface FileToolContext {
     client?: import('vscode-languageclient/node').LanguageClient;
 }
 
-// ─── Handler class ───────────────────────────────────────────────────────────
+// - Handler class -
 
 export class FileToolHandler {
-    /** Per-file edit failure counter — escalates errors for all file types */
+    /** Per-file edit failure counter - escalates errors for all file types */
     private editFailCount = new Map<string, number>();
 
     constructor(private ctx: FileToolContext) { }
 
     /**
      * Build tiered escalation hints based on per-file edit failure count.
-     * - YML files → always redirect to write_localisation
-     * - Other files → gentle hint at 3+, budget exhaustion at 5+
+     * - YML files -> always redirect to write_localisation
+     * - Other files -> gentle hint at 3+, budget exhaustion at 5+
      */
     private buildEditEscalationHint(filePath: string, failCount: number): string {
         const basename = path.basename(filePath);
         if (filePath.endsWith('.yml')) {
-            return `\n\n🚨 YML BLOCKED (failure #${failCount}): You MUST NOT use multi_replace_file_content for .yml files. Use write_localisation(filePath, language, entries) instead — it handles encoding, formatting, and insertion correctly.`;
+            return `\n\nWarning: YML BLOCKED (failure #${failCount}): You MUST NOT use multi_replace_file_content for .yml files. Use write_localisation(filePath, language, entries) instead - it handles encoding, formatting, and insertion correctly.`;
         }
         if (failCount >= 5) {
-            return `\n\n🛑 EDIT BUDGET EXHAUSTED for ${basename} (${failCount} failures). STOP editing this file. Add \`# TODO\` comments for remaining issues and move on to other files.`;
+            return `\n\nStop: EDIT BUDGET EXHAUSTED for ${basename} (${failCount} failures). STOP editing this file. Add \`# TODO\` comments for remaining issues and move on to other files.`;
         }
         if (failCount >= 3) {
-            return `\n\n⚠️ ${basename} has failed ${failCount} edits. MANDATORY: call \`read_file("${filePath}")\` to get the EXACT current content before your next edit attempt. Your oldString does not match the file.`;
+            return `\n\nWarning: ${basename} has failed ${failCount} edits. MANDATORY: call \`read_file("${filePath}")\` to get the EXACT current content before your next edit attempt. Your oldString does not match the file.`;
         }
         return '';
     }
@@ -185,11 +185,11 @@ export class FileToolHandler {
 
     private shouldBypassReadTrackerCheck(filePath: string): boolean {
         const normalized = filePath.replace(/\\/g, '/').toLowerCase();
-        // 1. 所有在 .cwtools-ai 文件夹下的写入操作
+        // 1. All writes under the .cwtools-ai folder
         if (normalized.includes('/.cwtools-ai/') || normalized.startsWith('.cwtools-ai/') || normalized.includes('.cwtools-ai')) {
             return true;
         }
-        // 2. 所有常见的 command 脚本或脚本辅助文件后缀
+        // 2. Common command scripts and helper script suffixes
         const ext = path.extname(filePath).toLowerCase();
         const COMMAND_TEMP_SCRIPT_EXTENSIONS = new Set([
             '.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh',
@@ -219,7 +219,7 @@ export class FileToolHandler {
                 }
             }
         }
-        // 🌟 ReadTracker 写门禁安全拦截 (D1)
+        // ReadTracker write-gate safety interception (D1)
         const readTracker = (context?.agentRunner as any)?.readTracker;
         if (readTracker && !this.shouldBypassReadTrackerCheck(resolution.resolved)) {
             const check = readTracker.canWrite(resolution.resolved);
@@ -358,7 +358,7 @@ export class FileToolHandler {
         }
     }
 
-    // ─── readFile ────────────────────────────────────────────────────────────
+    // - readFile -
 
     async readFile(args: { file: string; startLine?: number; endLine?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
@@ -372,7 +372,7 @@ export class FileToolHandler {
                 return await this.readImageMetadata(args.file);
             }
 
-            // ── Cache: serve full-file reads from memory ───────────────────
+            // - Cache: serve full-file reads from memory -
             if (!args.startLine && !args.endLine) {
                 const cached = getCachedFile(args.file);
                 if (cached !== null) {
@@ -389,15 +389,15 @@ export class FileToolHandler {
                         const headContent = headLines.map((l, i) => `${1 + i} | ${l}`).join('\n');
                         const tailContent = tailLines.map((l, i) => `${totalLines - 19 + i} | ${l}`).join('\n');
                         
-                        let gapInfo = `\n... [${totalLines - 100} lines omitted — use document_symbols to locate, then read_file for specifics] ...\n`;
+                        let gapInfo = `\n... [${totalLines - 100} lines omitted - use document_symbols to locate, then read_file for specifics] ...\n`;
                         let hint = `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`;
 
                         if (args.file.endsWith('.txt')) {
-                            gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
-                            hint = `🚨 FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
+                            gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
+                            hint = `Warning: FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
                         } else if (args.file.endsWith('.yml')) {
-                            gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
-                            hint = `🚨 YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
+                            gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
+                            hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
                         }
 
                         hint += ' Do not conclude that a key/ID is missing from this truncated view; use grep/search_mod_files or verify_pdx_identifier for absence checks.';
@@ -412,7 +412,7 @@ export class FileToolHandler {
                     return { content: cached, totalLines, truncated: false };
                 }
             }
-            // ────────────────────────────────────────────────────────────────
+            // -
 
             let threshold = 150;
             if (args.file.endsWith('.yml')) {
@@ -455,7 +455,7 @@ export class FileToolHandler {
             // Cache the full content for potential re-reads within this loop
             try {
                 const fullContent = (args.startLine !== undefined || args.endLine !== undefined)
-                    ? null  // partial read — don't cache
+                    ? null  // partial read - don't cache
                     : slice.join('\n');
                 if (fullContent !== null) {
                     const stat = fs.statSync(args.file);
@@ -468,15 +468,15 @@ export class FileToolHandler {
                 const tailLines = slice.slice(-20);
                 const headContent = headLines.map((l, i) => `${1 + i} | ${l}`).join('\n');
                 const tailContent = tailLines.map((l, i) => `${totalLines - 19 + i} | ${l}`).join('\n');
-                let gapInfo = `\n... [${totalLines - 100} lines omitted — use document_symbols to locate, then read_file for specifics (max ${threshold} lines at a time)] ...\n`;
+                let gapInfo = `\n... [${totalLines - 100} lines omitted - use document_symbols to locate, then read_file for specifics (max ${threshold} lines at a time)] ...\n`;
                 let hint = `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`;
 
                 if (args.file.endsWith('.txt')) {
-                    gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
-                    hint = `🚨 FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
+                    gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
+                    hint = `Warning: FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
                 } else if (args.file.endsWith('.yml')) {
-                    gapInfo = `\n... [${totalLines - 100} lines omitted — 🛑 STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
-                    hint = `🚨 YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
+                    gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
+                    hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
                 }
 
                 hint += ' Do not conclude that a key/ID is missing from this truncated view; use grep/search_mod_files or verify_pdx_identifier for absence checks.';
@@ -595,7 +595,7 @@ export class FileToolHandler {
         }
     }
 
-    // ─── writeFile ───────────────────────────────────────────────────────────
+    // - writeFile -
 
     async writeFile(args: { file: string; content: string; encoding?: string }, context?: import('../types').AgentToolContext): Promise<import('../types').WriteFileResult> {
         return this.executeWithLock(args.file, async () => {
@@ -645,7 +645,7 @@ export class FileToolHandler {
 
 
 
-    // ─── astMutate ───────────────────────────────────────────────────────────
+    // - astMutate -
 
     async astMutate(args: import('../types').AstMutateArgs, context?: import('../types').AgentToolContext): Promise<import('../types').AstMutateResult> {
         if (!args.filePath || typeof args.filePath !== 'string') {
@@ -776,7 +776,7 @@ export class FileToolHandler {
 
 
 
-    // ─── multiReplaceFileContent ─────────────────────────────────────────────
+    // - multiReplaceFileContent -
 
     async multiReplaceFileContent(args: {
         TargetFile: string;
@@ -885,7 +885,7 @@ export class FileToolHandler {
             let message = `multi_replace_file_content: ${chunks.length} replacement(s) applied to ${path.basename(filePath)}`;
             const errorsDiags = diagnostics.filter((d: any) => d.severity === 'error');
             if (errorsDiags.length > 0) {
-                message += `\\n\\nLSP detected ${errorsDiags.length} error(s) — please fix:\\n` +
+                message += `\\n\\nLSP detected ${errorsDiags.length} error(s) - please fix:\\n` +
                     errorsDiags.slice(0, 5).map((e: any) => `  Line ${e.line + 1}: ${e.message}`).join('\\n');
             }
 
@@ -897,7 +897,7 @@ export class FileToolHandler {
         });
     }
 
-    // ─── applyPatch ──────────────────────────────────────────────────────────
+    // - applyPatch -
 
     async replaceLines(args: import('../types').ReplaceLinesArgs, context?: import('../types').AgentToolContext): Promise<import('../types').ReplaceLinesResult> {
         if (!args.filePath || typeof args.filePath !== 'string') {
@@ -1150,7 +1150,7 @@ export class FileToolHandler {
 
         // P1-5 Fix: capture snapshots of original content BEFORE the confirmation loop.
         // This prevents a bug where user hand-edits a file between the confirm prompt
-        // and the actual write — ensuring retract restores the true pre-AI state.
+        // and the actual write - ensuring retract restores the true pre-AI state.
         const originalContents = new Map<string, string | null>();
         for (const { filePath } of pendingWrites) {
             const { content: prevContent } = this.readTextFile(filePath);
@@ -1167,7 +1167,7 @@ export class FileToolHandler {
                     return {
                         success: false,
                         filesChanged: [],
-                        errors: [`${path.basename(filePath)}: User cancelled write — no files were modified`],
+                        errors: [`${path.basename(filePath)}: User cancelled write - no files were modified`],
                     };
                 }
             }
@@ -1207,7 +1207,7 @@ export class FileToolHandler {
         };
     }
 
-    // ─── listDirectory ───────────────────────────────────────────────────────
+    // - listDirectory -
 
     async listDirectory(args: { directory: string; recursive?: boolean }, context?: import('../types').AgentToolContext): Promise<import('../types').ListDirectoryResult> {
         try {
@@ -1252,7 +1252,7 @@ export class FileToolHandler {
         }
     }
 
-    // ─── globFiles ───────────────────────────────────────────────────────────
+    // - globFiles -
 
     async globFiles(args: { pattern: string; limit?: number }): Promise<{ files: string[]; total: number }> {
         try {
@@ -1265,7 +1265,7 @@ return { files: [], total: 0 };
 } 
 } 
 
-// ─── getLspDiagnosticsForFile ─────────────────────────────────────────── 
+// - getLspDiagnosticsForFile -
 
     /** Extract diagnostics from Problems panel and format */
     private static mapDiagnostics(uri: vs.Uri): ValidationError[] {
@@ -1281,6 +1281,12 @@ return { files: [], total: 0 };
                 column: d.range.start.character,
                 category: metadata.category,
                 repairHint: metadata.repairHint,
+                expectedType: metadata.expectedType,
+                actualType: metadata.actualType,
+                scope: metadata.scope,
+                symbol: metadata.symbol,
+                confidence: metadata.confidence,
+                metadataSource: metadata.metadataSource,
                 data: metadata.data,
             } as ValidationError;
         });
@@ -1386,7 +1392,7 @@ return { files: [], total: 0 };
         try {
             const uri = vs.Uri.file(filePath);
             try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
-            // P3 Fix: debounce diagnostic events — wait 300ms after last change
+            // P3 Fix: debounce diagnostic events - wait 300ms after last change
             // to avoid returning incomplete diagnostics from intermediate LSP states
             await new Promise<void>((resolve) => {
                 let settled = false;
@@ -1409,19 +1415,31 @@ return { files: [], total: 0 };
                     }
                 });
             });
-            return vs.languages.getDiagnostics(uri).map(d => ({
-                code: String(d.code ?? ''),
-                severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
-                    : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
-                        : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
-                message: d.message,
-                line: d.range.start.line,
-                column: d.range.start.character,
-            } as ValidationError));
+            return vs.languages.getDiagnostics(uri).map(d => {
+                const metadata = diagnosticMetadata(d);
+                return {
+                    code: String(d.code ?? ''),
+                    severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                        : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
+                            : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
+                    message: d.message,
+                    line: d.range.start.line,
+                    column: d.range.start.character,
+                    category: metadata.category,
+                    repairHint: metadata.repairHint,
+                    expectedType: metadata.expectedType,
+                    actualType: metadata.actualType,
+                    scope: metadata.scope,
+                    symbol: metadata.symbol,
+                    confidence: metadata.confidence,
+                    metadataSource: metadata.metadataSource,
+                    data: metadata.data,
+                } as ValidationError;
+            });
         } catch { return []; }
     }
 
-    // ─── OpenCode Replacer Suite ─────────────────────────────────────────────
+    // - OpenCode Replacer Suite -
     // Ported from: opencode/packages/opencode/src/tool/edit.ts
     // Strategies extracted to ./replacerSuite.ts for testability.
 
@@ -1448,7 +1466,7 @@ return { files: [], total: 0 };
         return changed === 0 ? diff + '(no changes)\n' : diff;
     }
 
-    // ─── write_localisation ──────────────────────────────────────────────
+    // - write_localisation -
 
     async writeLocalisation(args: {
         filePath: string;
@@ -1492,7 +1510,7 @@ return { files: [], total: 0 };
                     (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, null);
                 }
 
-                // Build a map of existing keys → line index for O(1) lookup
+                // Build a map of existing keys -> line index for O(1) lookup
                 const keyLineMap = new Map<string, number>();
                 // Match any Stellaris loc key: leading space, key chars, colon, optional digits, then space or quote
                 const keyRegex = /^\s+([\w.-]+):\d*\s*(?:"|$)/;
@@ -1508,15 +1526,15 @@ return { files: [], total: 0 };
                 for (const entry of args.entries) {
                     const num = entry.number ?? 0;
                     // Sanitize value for Stellaris yml format
-                    // AI sends JSON \n → 0x0A newline; or JSON \\n → literal \n
+                    // AI sends JSON \n -> 0x0A newline; or JSON \\n -> literal \n
                     // Stellaris needs literal \n (backslash+n) for in-game line breaks
                     const val = entry.value
-                        .replace(/\r\n/g, String.raw`\n`)     // CRLF → literal \n
-                        .replace(/\n/g, String.raw`\n`)        // LF → literal \n
-                        .replace(/\r/g, '')                     // stray CR → remove
-                        .replace(/\t/g, String.raw`\t`)        // tab → literal \t
-                        .replace(/\u201C|\u201D/g, '"')         // smart quotes → ASCII
-                        .replace(/\u2018|\u2019/g, "'");        // smart apostrophes → ASCII
+                        .replace(/\r\n/g, String.raw`\n`)     // CRLF -> literal \n
+                        .replace(/\n/g, String.raw`\n`)        // LF -> literal \n
+                        .replace(/\r/g, '')                     // stray CR -> remove
+                        .replace(/\t/g, String.raw`\t`)        // tab -> literal \t
+                        .replace(/\u201C|\u201D/g, '"')         // smart quotes -> ASCII
+                        .replace(/\u2018|\u2019/g, "'");        // smart apostrophes -> ASCII
                     const formattedLine = ` ${entry.key}:${num} "${val}"`;
 
                     if (keyLineMap.has(entry.key)) {
@@ -1609,7 +1627,7 @@ return { files: [], total: 0 };
         });
     }
 
-    // ─── writeDesignBlueprint ────────────────────────────────────────────────
+    // - writeDesignBlueprint -
 
     async writeDesignBlueprint(args: import('../types').WriteDesignBlueprintArgs, context?: import('../types').AgentToolContext): Promise<import('../types').WriteDesignBlueprintResult> {
         try {
@@ -1692,7 +1710,7 @@ return { files: [], total: 0 };
             const lines: string[] = [];
             lines.push(`# Design Blueprint: ${args.title}`);
             lines.push('');
-            lines.push(`> Auto-generated by AI Agent — Plan Mode`);
+            lines.push(`> Auto-generated by AI Agent - Plan Mode`);
             lines.push(`> Generated: ${new Date().toISOString()}`);
             lines.push('');
 
@@ -1873,7 +1891,7 @@ return { files: [], total: 0 };
             // Scope Chain Verification Checklist
             lines.push('## Scope Chain Verification Checklist');
             lines.push('');
-            lines.push('⚠️ Before Build phase, verify each entity\'s scope matches CWT rules:');
+            lines.push('Warning: Before Build phase, verify each entity\'s scope matches CWT rules:');
             lines.push('');
             // Detect entity types and generate relevant checklist items
             const entityTypes = new Set(args.entities.map(e => e.type));
@@ -1924,7 +1942,7 @@ return { files: [], total: 0 };
         }
     }
 
-    // ─── Git Operations ──────────────────────────────────────────────────────
+    // - Git Operations -
 
     /**
      * Execute safe git operations: status, diff, checkout (revert file to HEAD).
@@ -1948,7 +1966,7 @@ return { files: [], total: 0 };
                     const raw = execSync('git status --porcelain', { cwd: wsRoot, encoding: 'utf-8', timeout: 15_000 });
                     const lines = raw.trim().split('\n').filter(Boolean);
                     if (lines.length === 0) {
-                        return { success: true, message: 'Working tree clean — no modified files.', output: '' };
+                        return { success: true, message: 'Working tree clean - no modified files.', output: '' };
                     }
                     const output = lines.slice(0, 100).join('\n');
                     return {

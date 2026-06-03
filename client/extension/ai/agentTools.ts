@@ -1,11 +1,11 @@
 /**
- * Eddy CWTool Code Module — Agent Tools (Orchestrator)
+ * Eddy CWTool Code Module - Agent Tools (Orchestrator)
  *
  * This file is the public API surface. It re-exports TOOL_DEFINITIONS and
  * the AgentToolExecutor class. Internally, tool implementations are split
  * across domain-specific modules under ./tools/.
  *
- * Consumers (agentRunner.ts, index.ts) import from this file — no change needed.
+ * Consumers (agentRunner.ts, index.ts) import from this file - no change needed.
  */
 
 import * as vs from 'vscode';
@@ -34,18 +34,18 @@ import { loadSkill } from './skills';
 import { validatePlanModeToolUse } from './planModeGuard';
 import { saveProjectWorkflow } from './workflowRegistry';
 
-// ─── Tool Executor ───────────────────────────────────────────────────────────
+// - Tool Executor -
 
 /** Maximum tool result size before truncation.
- * This is a safety-net ceiling — the smarter budgetToolResult in agentRunner.ts
+ * This is a safety-net ceiling - the smarter budgetToolResult in agentRunner.ts
  * handles context-aware dedup/segmentation. This threshold must be >= TOOL_RESULT_BUDGET_MAX
  * so the intelligent budgeting layer gets first crack at the data.
  */
 const MAX_TOOL_RESULT_CHARS = 18000;
 
-// Tool execution timeouts (ms) — prevents hangs on network filesystems or LSP deadlocks
+// Tool execution timeouts (ms) - prevents hangs on network filesystems or LSP deadlocks
 const TOOL_TIMEOUTS: Record<string, number> = {
-    // LSP / CWTools query tools — 45s (LSP can be queued behind heavy indexing)
+    // LSP / CWTools query tools - 45s (LSP can be queued behind heavy indexing)
     query_scope: 45_000,
     query_types: 45_000,
     query_localisation_index: 45_000,
@@ -53,7 +53,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_project_profile: 5_000,
     query_rules: 45_000,
     query_references: 45_000,
-    // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
+    // validate_code - REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
     get_lsp_status: 10_000,
     get_diagnostics: 45_000,
     get_file_context: 45_000,
@@ -74,7 +74,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     get_entity_info: 45_000,
     query_static_modifiers: 45_000,
     query_variables: 45_000,
-    // File tools — 30s
+    // File tools - 30s
     read_file: 30_000,
     write_file: 30_000,
     multi_replace_file_content: 30_000,
@@ -83,7 +83,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     list_directory: 30_000,
     glob_files: 30_000,
     grep: 30_000,
-    // Network/External — 20s
+    // Network/External - 20s
     web_fetch: 20_000,
     search_web: 20_000,
     codesearch: 20_000,
@@ -98,7 +98,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     // Git
     git_ops: 30_000,
     save_workflow: 30_000,
-    // Todo — pure memory operation, very short timeout is enough
+    // Todo - pure memory operation, very short timeout is enough
     todo_write: 5_000,
     run_skill: 30_000,
     // Orchestrator - sub-Agent scheduling takes a long time and is managed by the coordinator's own life cycle and external AbortSignal
@@ -158,7 +158,7 @@ export class AgentToolExecutor {
     /** Step callback for real-time UI progress (subtask events) */
     public onStep?: (step: import('./types').AgentStep) => void;
 
-    // ── Domain handlers ─────────────────────────────────────────────────────
+    // - Domain handlers -
     private fileHandler: FileToolHandler;
     private lspHandler: LspToolHandler;
     private externalHandler: ExternalToolHandler;
@@ -186,7 +186,7 @@ export class AgentToolExecutor {
             ? clientOrGetter
             : () => clientOrGetter;
 
-        // Create domain handlers — each receives `this` as context so they
+        // Create domain handlers - each receives `this` as context so they
         // can read mutable properties (fileWriteMode, callbacks, etc.) at call time.
         this.fileHandler = new FileToolHandler(this);
         this.lspHandler = new LspToolHandler(this, this.clientGetter, findFiles);
@@ -300,7 +300,7 @@ export class AgentToolExecutor {
             }
         }
 
-        // T4.1 — replay short-circuit. When a ReplaySession is attached, serve recorded
+        // T4.1 - replay short-circuit. When a ReplaySession is attached, serve recorded
         // results from the original run's ledger instead of executing live. Misses
         // fall through to live execution (caller can still validate divergence).
         if (mode === 'plan') {
@@ -356,7 +356,7 @@ export class AgentToolExecutor {
                     const elapsedSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
                     context.onStep?.({
                         type: 'orchestrator_progress',
-                        content: `工具 ${toolName} 已执行 ${elapsedSec}s，仍在等待返回...`,
+                        content: `Tool ${toolName} has been running for ${elapsedSec}s and is still waiting for a response...`,
                         toolName,
                         timestamp: Date.now(),
                     });
@@ -367,7 +367,7 @@ export class AgentToolExecutor {
             if (timeout > 0) {
                 timeoutId = setTimeout(() => {
                     if (abortSignal.aborted) return;
-                    const err = new Error(`工具 ${toolName} 执行超时 (${timeout / 1000}s)`);
+                    const err = new Error(`Tool ${toolName} timed out after ${timeout / 1000}s`);
                     err.name = 'TimeoutError';
                     toolAbortController.abort(err);
                 }, timeout);
@@ -410,10 +410,10 @@ export class AgentToolExecutor {
             try {
                 const result = await Promise.race(racePromises);
 
-                // 🌟 ReadTracker 读写同步与黑板 invalidated 级联（T2.2 & B3）
+                // ReadTracker read/write synchronization and Blackboard invalidation cascade (T2.2 & B3)
                 if (readTracker) {
                     const path = require('path');
-                    // 多 Agent 级联失效 (B3)
+                    // Multi-agent cascade invalidation (B3)
                     if (toolName === 'merge_results' && result && typeof result === 'object') {
                         const writtenFiles = (result as any).writtenFiles;
                         if (Array.isArray(writtenFiles)) {
@@ -435,18 +435,18 @@ export class AgentToolExecutor {
                 }
             }
         } catch (e) {
-            if (e instanceof Error && (e.name === 'TimeoutError' || e.message.includes('执行超时'))) {
-                return { error: e.message, hint: '请重试或使用更小范围的操作' };
+            if (e instanceof Error && (e.name === 'TimeoutError' || e.message.includes('timed out'))) {
+                return { error: e.message, hint: 'Retry or use a narrower operation scope.' };
             }
             throw e;
         }
     }
 
-    /** Internal tool dispatch — the actual switch statement, called within a timeout wrapper. */
+    /** Internal tool dispatch - the actual switch statement, called within a timeout wrapper. */
     private async executeInternal(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         let result: unknown;
         switch (toolName as any) {
-            // ── LSP / CWTools query tools ─────────────────────────────────
+            // - LSP / CWTools query tools -
             case 'query_scope':
                 result = await this.lspHandler.queryScope(args as any); break;
             case 'query_types':
@@ -463,7 +463,7 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.queryRules(args as any); break;
             case 'query_references':
                 result = await this.lspHandler.queryReferences(args as any); break;
-            // validate_code — REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
+            // validate_code - REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
             case 'get_lsp_status':
                 result = await this.lspHandler.getLspStatus(args as any); break;
             case 'get_diagnostics':
@@ -510,7 +510,7 @@ export class AgentToolExecutor {
             case 'query_variables':
                 result = await this.lspHandler.queryVariables(args as any); break;
 
-            // ── File tools ────────────────────────────────────────────────
+            // - File tools -
             case 'read_file':
                 result = await this.fileHandler.readFile(args as any, context); break;
             case 'write_file':
@@ -534,7 +534,7 @@ export class AgentToolExecutor {
             case 'git_ops':
                 result = await this.fileHandler.gitOps(args as any); break; // git ops uses workspace wide state mostly
 
-            // ── External / agent tools ────────────────────────────────────
+            // - External / agent tools -
             case 'web_fetch':
                 result = await this.externalHandler.webFetch(args as any, context); break;
             case 'run_command':
@@ -545,7 +545,7 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.searchCode(args as any, context); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any, context); break;
-            // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
+            // ignore_validation_error - REMOVED: AI must fix errors, not suppress them
             case 'remove_ignored_diagnostic':
                 result = await this.externalHandler.removeIgnoredDiagnostic(args as any, context); break;
             case 'get_ignored_diagnostics':
@@ -561,7 +561,7 @@ export class AgentToolExecutor {
 
 
 
-            // ── Media Asset Conversion tools ──────────────────────────
+            // - Media Asset Conversion tools -
             case 'convert_image_to_dds':
                 result = await this.externalHandler.convertImageToDds(args as any, context); break;
             case 'convert_audio':
@@ -581,16 +581,16 @@ export class AgentToolExecutor {
                 result = this.memoryHandler.searchMemory(args as any); break;
             case 'search_memory_disabled': break;
 
-            // ── Persistent memory (cross-session, written to .cwtools-ai-memory.md) ──
+            // - Persistent memory (cross-session, written to .cwtools-ai-memory.md) -
             case 'save_memory':
                 result = await this.memoryHandler.saveMemory(args as any); break;
             case 'save_memory_disabled': break;
 
-            // ── MCP tool call ────────────────────────────────────────────────────
+            // - MCP tool call -
             case 'mcp_call':
                 result = await this.executeMcpTool(args as any, context); break;
 
-            // ── Orchestrator tools ───────────────────────────────────────────────
+            // - Orchestrator tools -
             case 'dispatch_agents': {
                 result = await this.executeDispatchAgents(args, context);
                 break;
@@ -792,6 +792,8 @@ export class AgentToolExecutor {
         const looksLikeDiagnostic = !!message && (
             obj.severity !== undefined
             || obj.code !== undefined
+            || obj.currentVersion !== undefined
+            || obj.validatedVersion !== undefined
             || obj.line !== undefined
             || obj.column !== undefined
             || obj.logicalPath !== undefined
@@ -799,6 +801,12 @@ export class AgentToolExecutor {
             || obj.filePath !== undefined
             || obj.category !== undefined
             || obj.repairHint !== undefined
+            || obj.expectedType !== undefined
+            || obj.actualType !== undefined
+            || obj.scope !== undefined
+            || obj.symbol !== undefined
+            || obj.confidence !== undefined
+            || obj.metadataSource !== undefined
             || obj.data !== undefined
         );
         if (looksLikeDiagnostic) {
@@ -810,8 +818,16 @@ export class AgentToolExecutor {
                 line: this.asNumber(obj.line),
                 column: this.asNumber(obj.column),
                 code: this.asString(obj.code) || undefined,
+                currentVersion: Number.isFinite(Number(obj.currentVersion)) ? Number(obj.currentVersion) : undefined,
+                validatedVersion: Number.isFinite(Number(obj.validatedVersion)) ? Number(obj.validatedVersion) : undefined,
                 category: this.normalizeDiagnosticCategory(obj.category),
                 repairHint: this.asString(obj.repairHint) || undefined,
+                expectedType: this.asString(obj.expectedType) || undefined,
+                actualType: this.asString(obj.actualType) || undefined,
+                scope: this.asString(obj.scope) || undefined,
+                symbol: this.asString(obj.symbol) || undefined,
+                confidence: this.asString(obj.confidence) || undefined,
+                metadataSource: this.asString(obj.metadataSource) || undefined,
                 data: obj.data,
             });
         }
@@ -1112,7 +1128,7 @@ export class AgentToolExecutor {
         return undefined;
     }
 
-    // ─── MCP Connection Pool ─────────────────────────────────────────────────
+    // - MCP Connection Pool -
 
     /** Per-server MCP connection pool.  Avoids re-connecting on every tool call
      *  during a reasoning loop (connect + initialize handshake can take 500ms+). */
@@ -1170,7 +1186,7 @@ export class AgentToolExecutor {
         }
     }
 
-    // ─── MCP Tool Execution ──────────────────────────────────────────────────
+    // - MCP Tool Execution -
 
     /**
      * Execute a tool call via MCP (Model Context Protocol).
@@ -1226,7 +1242,7 @@ export class AgentToolExecutor {
     }
 
     /** Truncate large tool results to avoid overloading context window.
-     * This is a safety-net for extreme cases — the smarter budgetToolResult
+     * This is a safety-net for extreme cases - the smarter budgetToolResult
      * in agentRunner.ts handles normal-sized results with dedup/segmentation.
      */
     private truncateResult(result: unknown): unknown {
@@ -1244,7 +1260,7 @@ export class AgentToolExecutor {
         return result;
     }
 
-    //── Orchestrator scheduling implementation ───────────────────────────────────────────────
+    //- Orchestrator scheduling implementation -
 
     /** Executing Orchestrator abort controller (anti-reentrancy protection) */
     private _activeDispatchAbortController?: AbortController;
@@ -1284,19 +1300,19 @@ export class AgentToolExecutor {
         const maxTasksPerDispatch = isScriptMode ? 8 : 4;
 
         if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
-            return { success: false, error: '请提供 tasks 数组，每个 task 需包含 id、agentType、prompt 字段' };
+            return { success: false, error: 'Provide a tasks array. Each task must include id, agentType, and prompt.' };
         }
 
         if (tasks.length > maxTasksPerDispatch) {
             return {
                 success: false,
-                error: `并发上限保护: 您尝试一次性分派 ${tasks.length} 个任务，超过了当前模式最大允许的 ${maxTasksPerDispatch} 个上限。过长的任务列表会导致大模型生成超时或被截断。请将任务拆分为多批次分步执行。`
+                error: `Concurrency guard: attempted to dispatch ${tasks.length} tasks at once, above the current mode limit of ${maxTasksPerDispatch}. Long task lists can cause model timeout or truncation; split the work into smaller waves.`
             };
         }
 
         // Make sure there is a parentAgentRunner (the Orchestrator needs it to schedule child Agents)
         if (!this.parentAgentRunner) {
-            return { success: false, error: 'Orchestrator 未就绪：缺少 AgentRunner 实例引用。请确保在协调模式下运行。' };
+            return { success: false, error: 'Orchestrator is not ready: missing AgentRunner instance. Run in a coordinator-capable mode.' };
         }
 
         try {
@@ -1312,7 +1328,7 @@ export class AgentToolExecutor {
             }
 
             // Build TaskGraph
-            const userPrompt = (args.userPrompt as string) || '多 Agent 协作任务';
+            const userPrompt = (args.userPrompt as string) || 'Multi-agent collaboration task';
             const graph = TaskGraphEngine.createGraph(userPrompt);
 
             for (const task of tasks) {
@@ -1370,7 +1386,7 @@ export class AgentToolExecutor {
             // Push initial progress
             options.onStep?.({
                 type: 'thinking',
-                content: `🎯 协调器启动: 分派 ${tasks.length} 个子 Agent 任务`,
+                content: `Coordinator started: dispatching ${tasks.length} sub-agent task(s).`,
                 timestamp: Date.now(),
             });
             if (parentRun) {
@@ -1502,7 +1518,7 @@ export class AgentToolExecutor {
             };
         } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
-            return { success: false, error: `协调器执行异常: ${errMsg}` };
+            return { success: false, error: `Coordinator execution failed: ${errMsg}` };
         }
     }
 
@@ -1559,7 +1575,7 @@ export class AgentToolExecutor {
         };
     }
 
-    // ── Public accessors for external consumers ─────────────────────────────
+    // - Public accessors for external consumers -
 
     getTodos(): TodoItem[] { return this.externalHandler.getTodos(); }
     clearTodos(): void { this.externalHandler.clearTodos(); }

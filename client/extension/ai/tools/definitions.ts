@@ -1,6 +1,6 @@
 /**
  * Tool JSON Schema Definitions for AI function calling.
- * Pure data — no runtime dependencies.
+ * Pure data - no runtime dependencies.
  */
 
 import type { ToolDefinition } from '../types';
@@ -26,7 +26,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_types',
-            description: '⚠️ MANDATORY before using any game ID. Query defined instances of a current-game PDXScript type from mod + vanilla cache. PDXscript IDs are routinely hallucinated — always verify through this tool. Set filter to narrow results.',
+            description: 'Warning: MANDATORY before using any game ID. Query defined instances of a current-game PDXScript type from mod + vanilla cache. PDXscript IDs are routinely hallucinated - always verify through this tool. Set filter to narrow results.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -139,7 +139,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
+    // ignore_validation_error - REMOVED: AI must fix errors, not suppress them
     {
         type: 'function',
         function: {
@@ -176,7 +176,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
-                    symbol: { type: 'string', description: 'Symbol name varies by file type: events → "namespace.id" (e.g. "anomaly.1"); common/scripted_triggers/effects/technology/buildings/ship_sizes/static_modifiers → top-level identifier (e.g. "tech_kuat_reactor", "kuat_is_crisis_faction"); section_templates → key value (e.g. "X308_Titan_MID1"); on_actions → action name (e.g. "on_entering_battle", but may have duplicates!); .gui → containerWindowType name (e.g. "kuat_bossbar"); .gfx → pdxmesh name (e.g. "sws_turbolaser_red_mesh"). When unsure, call document_symbols first or just try — the error response lists all available symbols.' },
+                    symbol: { type: 'string', description: 'Symbol name varies by file type: events -> "namespace.id" (e.g. "anomaly.1"); common/scripted_triggers/effects/technology/buildings/ship_sizes/static_modifiers -> top-level identifier (e.g. "tech_kuat_reactor", "kuat_is_crisis_faction"); section_templates -> key value (e.g. "X308_Titan_MID1"); on_actions -> action name (e.g. "on_entering_battle", but may have duplicates!); .gui -> containerWindowType name (e.g. "kuat_bossbar"); .gfx -> pdxmesh name (e.g. "sws_turbolaser_red_mesh"). When unsure, call document_symbols first or just try - the error response lists all available symbols.' },
                 },
                 required: ['file', 'symbol'],
             },
@@ -186,12 +186,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'edit_pdx_block',
-            description: '🌟 ZERO-READ EDIT: Replace a specific PDX AST block entirely by its symbol name, without needing to read the file first. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Uses LSP to find block boundaries automatically. newContent must keep the full outer block and PDX brace structure intact; unsafe brace-breaking writes are rejected before the file changes. If the symbol is not found, the error response includes a full list of available symbols so you can retry immediately. ⚠️ WARNING: on_actions files may have DUPLICATE top-level names (e.g. multiple "on_entering_battle") — only the FIRST match will be edited. For duplicates, use replaceLines with explicit line ranges instead.',
+            description: 'ZERO-READ EDIT: Replace a specific PDX AST block entirely by its symbol name, without needing to read the file first. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Uses LSP to find block boundaries automatically. newContent must keep the full outer block and PDX brace structure intact; unsafe brace-breaking writes are rejected before the file changes. If the symbol is not found, the error response includes a full list of available symbols so you can retry immediately. Warning: on_actions files may have DUPLICATE top-level names (e.g. multiple "on_entering_battle") - only the FIRST match will be edited. For duplicates, use replaceLines with explicit line ranges instead.',
             parameters: {
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
-                    symbol: { type: 'string', description: 'Symbol name varies by file type: events → "namespace.id" (e.g. "anomaly.1"); common types → top-level identifier (e.g. "tech_kuat_reactor"); section_templates → key value; .gui → containerWindowType name; .gfx → pdxmesh name. If unsure, just try — the error lists all available symbols.' },
+                    symbol: { type: 'string', description: 'Symbol name varies by file type: events -> "namespace.id" (e.g. "anomaly.1"); common types -> top-level identifier (e.g. "tech_kuat_reactor"); section_templates -> key value; .gui -> containerWindowType name; .gfx -> pdxmesh name. If unsure, just try - the error lists all available symbols.' },
                     newContent: { type: 'string', description: 'The completely new code block to replace the old one. Must include the outer block definition (e.g. "my_trigger = { ... }", not just the inner content).' },
                 },
                 required: ['file', 'symbol', 'newContent'],
@@ -213,7 +213,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // validate_code — REMOVED: Replaced by get_diagnostics (zero side effects) + multi_replace_file_content inline diagnostics.
+    // validate_code - REMOVED: Replaced by get_diagnostics (zero side effects) + multi_replace_file_content inline diagnostics.
     // get_diagnostics directly reads the diagnostic panel (~50ms), multi_replace_file_content automatically returns to diagnosis after writing.
     {
         type: 'function',
@@ -235,7 +235,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_mod_files',
-            description: 'Search for files containing text patterns. Default: mod workspace. For vanilla: set searchContext="vanilla" + exactMatch=true. Zero results are NOT proof an ID/key is missing; use verify_pdx_identifier before declaring absence. 💡 After finding a target, use get_pdx_block or edit_pdx_block — NOT read_file.',
+            description: 'Search for files containing text patterns. Default: mod workspace. For vanilla: set searchContext="vanilla" + exactMatch=true. Zero results are NOT proof an ID/key is missing; use verify_pdx_identifier before declaring absence. Hint: After finding a target, use get_pdx_block or edit_pdx_block - NOT read_file.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -316,7 +316,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_completion_at',
-            description: 'Get auto-completion suggestions at a specific position. The CWTools language server returns completions from BOTH the current mod AND the vanilla game cache — this is the most token-efficient way to discover valid vanilla identifiers at a given position. Use it to answer "what values can go here?"',
+            description: 'Get auto-completion suggestions and structured context at a specific position. The CWTools language server returns candidates from both the current mod and the vanilla game cache, plus line/token/scope context for deciding what values can go here.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -423,7 +423,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'read_file',
-            description: 'Read file content with optional line range. ⚠️ Large files are auto-truncated with guidance hints. For .txt: prefer get_pdx_block(symbol) over full reads. For .yml: NEVER read full files — use grep/search_mod_files to find keys. Workflow: document_symbols → read_file(startLine, endLine). Images (.dds/.tga/.png/.jpg) return metadata only.',
+            description: 'Read file content with optional line range. Warning: Large files are auto-truncated with guidance hints. For .txt: prefer get_pdx_block(symbol) over full reads. For .yml: NEVER read full files - use grep/search_mod_files to find keys. Workflow: document_symbols -> read_file(startLine, endLine). Images (.dds/.tga/.png/.jpg) return metadata only.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -563,7 +563,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'web_fetch',
-            description: 'Fetch the text content of a public URL (e.g. Paradox wiki pages, GitHub raw files). Converts HTML to plain text. Use for looking up game mechanics, modding documentation, or locating vanilla definitions online. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
+            description: 'Fetch the text content of a public URL (e.g. Paradox wiki pages, GitHub raw files). Converts HTML to plain text. Use for looking up game mechanics, modding documentation, or locating vanilla definitions online. Warning: DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -595,7 +595,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'search_web',
-            description: 'Search the web for information about Paradox modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (cwtools.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
+            description: 'Search the web for information about Paradox modding, PDXScript syntax, game mechanics, or any topic. Uses Brave Search API if configured (cwtools.ai.braveSearchApiKey), otherwise falls back to DuckDuckGo. Returns result summaries with URLs. Warning: DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -610,7 +610,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'codesearch',
-            description: 'Search code repositories and developer documentation semantically (powered by Exa API if configured). Use for finding examples of PDXScript patterns, mod implementation references, or any code-level search. Falls back to Brave Search with code-specific query modifiers if no Exa key configured. ⚠️ DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
+            description: 'Search code repositories and developer documentation semantically (powered by Exa API if configured). Use for finding examples of PDXScript patterns, mod implementation references, or any code-level search. Falls back to Brave Search with code-specific query modifiers if no Exa key configured. Warning: DO NOT use this as your first step for code diagnosis. Always check local rules and vanilla cache first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -665,12 +665,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ─── CWTools Deep API tools ──────────────────────────────────────
+    // - CWTools Deep API tools -
     {
         type: 'function',
         function: {
             name: 'query_definition',
-            description: 'GoToDefinition at a position, or FindAllRefs if no definition exists. Uses CWTools AST — faster than grep. If you know the symbol name, prefer query_definition_by_name instead.',
+            description: 'GoToDefinition at a position, or FindAllRefs if no definition exists. Uses CWTools AST - faster than grep. If you know the symbol name, prefer query_definition_by_name instead.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -686,7 +686,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_definition_by_name',
-            description: 'Find where a named symbol is defined — no file/position needed. Returns file path and line number. Works for any top-level PDXScript key (events, triggers, effects, etc.).',
+            description: 'Find where a named symbol is defined - no file/position needed. Returns file path and line number. Works for any top-level PDXScript key (events, triggers, effects, etc.).',
             parameters: {
                 type: 'object',
                 properties: {
@@ -700,7 +700,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_scripted_effects',
-            description: '⚠️ MANDATORY before using any scripted_effect. Lists all scripted effects with name, scope constraints, and type. PDXscript effect names are frequently hallucinated — always verify here first.',
+            description: 'Warning: MANDATORY before using any scripted_effect. Lists all scripted effects with name, scope constraints, and type. PDXscript effect names are frequently hallucinated - always verify here first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -715,7 +715,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_scripted_triggers',
-            description: '⚠️ MANDATORY before using any scripted_trigger. Lists all scripted triggers with name, scope constraints, and type. Trigger names are frequently hallucinated — always verify here first.',
+            description: 'Warning: MANDATORY before using any scripted_trigger. Lists all scripted triggers with name, scope constraints, and type. Trigger names are frequently hallucinated - always verify here first.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -730,7 +730,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_enums',
-            description: '⚠️ MANDATORY before using any enum field. Query enum values from CWTools rules. Call with no enumName to list all enums, then query specific enum for values. Always verify — enum values are domain-specific.',
+            description: 'Warning: MANDATORY before using any enum field. Query enum values from CWTools rules. Call with no enumName to list all enums, then query specific enum for values. Always verify - enum values are domain-specific.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -759,7 +759,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_static_modifiers',
-            description: '⚠️ MANDATORY before using add_modifier. Lists static modifiers with categories. Modifier names are domain-specific — always verify. Dynamic/engine modifiers may not appear here — use query_rules(category="modifier") as fallback.',
+            description: 'Warning: MANDATORY before using add_modifier. Lists static modifiers with categories. Modifier names are domain-specific - always verify. Dynamic/engine modifiers may not appear here - use query_rules(category="modifier") as fallback.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -784,7 +784,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ─── Blackboard Memory Tools ────────────────────────────────────────
+    // - Blackboard Memory Tools -
     {
         type: 'function',
         function: {
@@ -828,12 +828,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ─── Persistent Memory (Cross-Session) ──────────────────────────────
+    // - Persistent Memory (Cross-Session) -
     {
         type: 'function',
         function: {
             name: 'save_memory',
-            description: 'Persist a learned rule, convention, or important discovery to the project-level memory file (.cwtools-ai-memory.md). This memory persists across sessions — the AI will reference it in every future conversation. Use this sparingly for genuinely important, reusable insights (e.g. coding conventions, namespace patterns, recurring user preferences). Do NOT save transient/task-specific data.',
+            description: 'Persist a learned rule, convention, or important discovery to the project-level memory file (.cwtools-ai-memory.md). This memory persists across sessions - the AI will reference it in every future conversation. Use this sparingly for genuinely important, reusable insights (e.g. coding conventions, namespace patterns, recurring user preferences). Do NOT save transient/task-specific data.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -845,12 +845,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ─── Media Asset Conversion Tools ────────────────────────────────────
+    // - Media Asset Conversion Tools -
     {
         type: 'function',
         function: {
             name: 'convert_image_to_dds',
-            description: '🖼️ Convert a PNG/JPG/TGA image to DDS format (required by Clausewitz engine for icons, sprites, and textures). Uses ImageMagick. Supports DXT5/BC3 compression with mipmaps. Requires ImageMagick installed and accessible. Custom path can be set via cwtools.ai.imageMagickPath setting.',
+            description: 'Convert a PNG/JPG/TGA image to DDS format (required by Clausewitz engine for icons, sprites, and textures). Uses ImageMagick. Supports DXT5/BC3 compression with mipmaps. Requires ImageMagick installed and accessible. Custom path can be set via cwtools.ai.imageMagickPath setting.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -867,7 +867,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'convert_audio',
-            description: '🔊 Convert audio files between formats (MP3→OGG for BGM/voice, MP3→WAV for UI sound effects). Uses ffmpeg. Clausewitz engine requires .ogg (Vorbis) for music/voice and .wav (16-bit PCM) for UI sounds. Requires ffmpeg installed and accessible. Custom path can be set via cwtools.ai.ffmpegPath setting.',
+            description: 'Convert audio files between formats (MP3->OGG for BGM/voice, MP3->WAV for UI sound effects). Uses ffmpeg. Clausewitz engine requires .ogg (Vorbis) for music/voice and .wav (16-bit PCM) for UI sounds. Requires ffmpeg installed and accessible. Custom path can be set via cwtools.ai.ffmpegPath setting.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -885,7 +885,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'deploy_mod_asset',
-            description: '📦 Copy a generated/converted media asset file to its final location in the mod workspace. Requires user permission. Use this after convert_image_to_dds or convert_audio to place files in the correct game directory (e.g. gfx/interface/icons/, sound/vo/). The retract system can undo this operation.',
+            description: 'Copy a generated/converted media asset file to its final location in the mod workspace. Requires user permission. Use this after convert_image_to_dds or convert_audio to place files in the correct game directory (e.g. gfx/interface/icons/, sound/vo/). The retract system can undo this operation.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -897,7 +897,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ─── MCP Tools ──────────────────────────────────────────────────────
+    // - MCP Tools -
     {
         type: 'function',
         function: {
@@ -917,12 +917,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ─── Localisation Tools ──────────────────────────────────────────────
+    // - Localisation Tools -
     {
         type: 'function',
         function: {
             name: 'write_localisation',
-            description: '🌐 MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use multi_replace_file_content, apply_patch, or write_file for .yml localisation files — ALWAYS use this tool instead.',
+            description: 'MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use multi_replace_file_content, apply_patch, or write_file for .yml localisation files - ALWAYS use this tool instead.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -947,7 +947,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ─── Design Blueprint Tools ─────────────────────────────────────────
+    // - Design Blueprint Tools -
     {
         type: 'function',
         function: {
@@ -1154,12 +1154,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ── Git Operations tool ──────────────────────────────────────────────
+    // - Git Operations tool -
     {
         type: 'function',
         function: {
             name: 'git_ops',
-            description: 'Execute safe git operations in the workspace. Use this to inspect changes or revert files to their last committed state when edits have gone wrong. Only available when the workspace has a git repository. Actions: "status" (see modified files), "diff" (see changes for a file), "checkout" (revert a file to HEAD — destructive, discards uncommitted changes to that file).',
+            description: 'Execute safe git operations in the workspace. Use this to inspect changes or revert files to their last committed state when edits have gone wrong. Only available when the workspace has a git repository. Actions: "status" (see modified files), "diff" (see changes for a file), "checkout" (revert a file to HEAD - destructive, discards uncommitted changes to that file).',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1170,14 +1170,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ── Line-Range Replacement tool ──────────────────────────────────────
+    // - Line-Range Replacement tool -
 
-    // ── Orchestrator Tools (Multi-Agent Coordinator) ─────────────────────────────
+    // - Orchestrator Tools (Multi-Agent Coordinator) -
     {
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: '🎯 [Orchestrator/Script Mode] Decompose the current task into multiple sub-tasks and dispatch them to specialist agents for parallel execution. Script Mode may dispatch up to 8 concise tasks per wave; classic Orchestrator mode remains limited to 4. Sub-agents include Explorer (read-only exploration), Builder (code generation), LocWriter (localisation), Reviewer (code review), etc. Agents exchange data via the shared Blackboard and execution order is guaranteed by a DAG.',
+            description: '[Orchestrator/Script Mode] Decompose the current task into multiple sub-tasks and dispatch them to specialist agents for parallel execution. Script Mode may dispatch up to 8 concise tasks per wave; classic Orchestrator mode remains limited to 4. Sub-agents include Explorer (read-only exploration), Builder (code generation), LocWriter (localisation), Reviewer (code review), etc. Agents exchange data via the shared Blackboard and execution order is guaranteed by a DAG.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1190,11 +1190,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                             properties: {
                                 id: { type: 'string', description: 'Unique sub-task ID (e.g. "explore_structure", "build_events")' },
                                 agentType: { type: 'string', enum: ['explore', 'plan', 'build', 'review', 'loc_writer'], description: 'Agent type to execute this task' },
-                                prompt: { type: 'string', description: 'Sub-task description (sent as the agent\'s user message). ⚠️ CRITICAL: KEEP THIS CONCISE to prevent JSON truncation errors. Do NOT embed large file contents or massive path lists here. If you need to pass large data, use `set_memory` first and just pass the memory key in this prompt.' },
+                                prompt: { type: 'string', description: 'Sub-task description (sent as the agent\'s user message). Warning: CRITICAL: KEEP THIS CONCISE to prevent JSON truncation errors. Do NOT embed large file contents or massive path lists here. If you need to pass large data, use `set_memory` first and just pass the memory key in this prompt.' },
                                 dependencies: {
                                     type: 'array',
                                     items: { type: 'string' },
-                                    description: 'List of prerequisite task IDs — this task executes only after all dependencies complete',
+                                    description: 'List of prerequisite task IDs - this task executes only after all dependencies complete',
                                 },
                                 contextFiles: {
                                     type: 'array',
@@ -1226,7 +1226,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_blackboard',
-            description: '📋 Query data from the shared Blackboard. The Blackboard is a cross-agent knowledge store supporting exact key lookup, prefix-based range queries, and type filtering. Types include: file_snapshot, scope_info, diag_result, entity_registry, write_intent, free_text.',
+            description: 'Query data from the shared Blackboard. The Blackboard is a cross-agent knowledge store supporting exact key lookup, prefix-based range queries, and type filtering. Types include: file_snapshot, scope_info, diag_result, entity_registry, write_intent, free_text.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1242,7 +1242,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'merge_results',
-            description: '🔗 [Orchestrator/Script Mode] Merge execution results from multiple sub-agents into a final deliverable. Call after all sub-agents complete to consolidate code generation, localisation, and review report outputs. Available in Orchestrator and Script Mode.',
+            description: '[Orchestrator/Script Mode] Merge execution results from multiple sub-agents into a final deliverable. Call after all sub-agents complete to consolidate code generation, localisation, and review report outputs. Available in Orchestrator and Script Mode.',
             parameters: {
                 type: 'object',
                 properties: {

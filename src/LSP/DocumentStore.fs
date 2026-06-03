@@ -9,7 +9,8 @@ open System.Text
 open Types
 
 type private Version =
-    { text: StringBuilder
+    { syncRoot: obj
+      text: StringBuilder
       mutable version: int
       //Cache StringBuilder.ToString() results to avoid repeated allocation of strings on the hot path
       mutable cachedText: string
@@ -52,7 +53,7 @@ module DocumentStoreUtils =
         let endOffset   = posToOffset range.``end``.line range.``end``.character
         struct (startOffset, endOffset)
 
-    /// Legacy O(n) fallback — kept for correctness validation only.
+    /// Legacy O(n) fallback - kept for correctness validation only.
     let findRange (text: StringBuilder, range: Range) : struct (int * int) =
         let mutable line = 0
         let mutable char = 0
@@ -82,8 +83,7 @@ open DocumentStoreUtils
 [<Sealed>]
 type DocumentStore() =
     /// All open documents, organized by absolute path
-    let activeDocuments = Dictionary<string, Version>()
-    let syncRoot = obj()
+    let activeDocuments = System.Collections.Concurrent.ConcurrentDictionary<string, Version>()
 
     /// Get or create a text cache (the same version only creates a string once)
     let getCachedText (v: Version) =
@@ -106,22 +106,18 @@ type DocumentStore() =
             v.lineOffsets
 
     /// Replace a section of an open file
-    let patch (doc: VersionedTextDocumentIdentifier, range: Range, text: string) : unit =
-        let file = FileInfo(doc.uri.LocalPath)
-        let existing = activeDocuments[file.FullName]
+    let patch (existing: Version, doc: VersionedTextDocumentIdentifier, range: Range, text: string) : unit =
         // Use cached offsets for fast lookup; mark dirty after mutation.
         let offsets = getLineOffsets existing
         let struct (startOffset, endOffset) = findRangeFast (existing.text, offsets, range)
         existing.text.Remove(startOffset, endOffset - startOffset) |> ignore
         existing.text.Insert(startOffset, text) |> ignore
         existing.version <- doc.version
-        // Invalidate cache — next patch/query will rebuild
+        // Invalidate cache - next patch/query will rebuild
         existing.lineOffsetsDirty <- true
 
     /// Replace the entire contents of an open file
-    let replace (doc: VersionedTextDocumentIdentifier, text: string) : unit =
-        let file = FileInfo(doc.uri.LocalPath)
-        let existing = activeDocuments[file.FullName]
+    let replace (existing: Version, doc: VersionedTextDocumentIdentifier, text: string) : unit =
         existing.text.Clear() |> ignore
         existing.text.Append(text) |> ignore
         existing.version <- doc.version
@@ -130,89 +126,89 @@ type DocumentStore() =
         existing.lineOffsetsDirty <- false
 
     member this.Open(doc: DidOpenTextDocumentParams) : unit =
-        lock syncRoot (fun () ->
-            let file = FileInfo(doc.textDocument.uri.LocalPath)
-            let text = StringBuilder(doc.textDocument.text)
-            let offsets = buildLineOffsets text
+        let file = FileInfo(doc.textDocument.uri.LocalPath)
+        let text = StringBuilder(doc.textDocument.text)
+        let offsets = buildLineOffsets text
 
-            let version =
-                { text = text
-                  version = doc.textDocument.version
-                  cachedText = doc.textDocument.text
-                  cachedVersion = doc.textDocument.version
-                  lineOffsets = offsets
-                  lineOffsetsDirty = false }
+        let version =
+            { syncRoot = obj()
+              text = text
+              version = doc.textDocument.version
+              cachedText = doc.textDocument.text
+              cachedVersion = doc.textDocument.version
+              lineOffsets = offsets
+              lineOffsetsDirty = false }
 
-            activeDocuments[file.FullName] <- version)
+        activeDocuments[file.FullName] <- version
 
     member this.Change(doc: DidChangeTextDocumentParams) : unit =
-        lock syncRoot (fun () ->
-            let file = FileInfo(doc.textDocument.uri.LocalPath)
-            let found, existing = activeDocuments.TryGetValue(file.FullName)
-            if not found then () else
+        let file = FileInfo(doc.textDocument.uri.LocalPath)
+        let found, existing = activeDocuments.TryGetValue(file.FullName)
+        if found then
+            lock existing.syncRoot (fun () ->
+                let stillCurrent =
+                    match activeDocuments.TryGetValue(file.FullName) with
+                    | true, current -> Object.ReferenceEquals(current, existing)
+                    | _ -> false
 
-            if doc.textDocument.version <= existing.version then
-                let oldVersion = existing.version
-                let newVersion = doc.textDocument.version
-                dprintfn $"Change %d{newVersion} to doc %s{file.Name} is earlier than existing version %d{oldVersion}"
-            else
-                for change in doc.contentChanges do
-                    match change.range with
-                    | Some range -> patch (doc.textDocument, range, change.text)
-                    | None -> replace (doc.textDocument, change.text))
+                if stillCurrent then
+                    if doc.textDocument.version <= existing.version then
+                        let oldVersion = existing.version
+                        let newVersion = doc.textDocument.version
+                        dprintfn $"Change %d{newVersion} to doc %s{file.Name} is earlier than existing version %d{oldVersion}"
+                    else
+                        for change in doc.contentChanges do
+                            match change.range with
+                            | Some range -> patch (existing, doc.textDocument, range, change.text)
+                            | None -> replace (existing, doc.textDocument, change.text))
 
     /// Get text based on a file path string (avoids creating a FileInfo object)
     member this.GetTextByPath(filePath: string) : string option =
-        lock syncRoot (fun () ->
-            let found, value = activeDocuments.TryGetValue(filePath)
-            if found then Some(getCachedText value) else None)
+        let found, value = activeDocuments.TryGetValue(filePath)
+        if found then
+            lock value.syncRoot (fun () -> Some(getCachedText value))
+        else
+            None
 
     member this.GetText(file: FileInfo) : string option =
         this.GetTextByPath(file.FullName)
 
     member this.GetVersion(file: FileInfo) : int option =
-        lock syncRoot (fun () ->
-            let found, value = activeDocuments.TryGetValue(file.FullName)
-            if found then Some(value.version) else None)
+        let found, value = activeDocuments.TryGetValue(file.FullName)
+        if found then lock value.syncRoot (fun () -> Some(value.version)) else None
 
     /// Get the version number based on the file path string
     member this.GetVersionByPath(filePath: string) : int option =
-        lock syncRoot (fun () ->
-            let found, value = activeDocuments.TryGetValue(filePath)
-            if found then Some(value.version) else None)
+        let found, value = activeDocuments.TryGetValue(filePath)
+        if found then lock value.syncRoot (fun () -> Some(value.version)) else None
 
     member this.Get(file: FileInfo) : option<string * int> =
-        lock syncRoot (fun () ->
-            let found, value = activeDocuments.TryGetValue(file.FullName)
-
-            if found then
-                Some(getCachedText value, value.version)
-            else
-                None)
+        let found, value = activeDocuments.TryGetValue(file.FullName)
+        if found then
+            lock value.syncRoot (fun () -> Some(getCachedText value, value.version))
+        else
+            None
 
     member this.Close(doc: DidCloseTextDocumentParams) : unit =
-        lock syncRoot (fun () ->
-            let file = FileInfo(doc.textDocument.uri.LocalPath)
-            activeDocuments.Remove(file.FullName) |> ignore)
+        let file = FileInfo(doc.textDocument.uri.LocalPath)
+        activeDocuments.TryRemove(file.FullName) |> ignore
 
     member this.OpenFiles() : FileInfo list =
-        lock syncRoot (fun () ->
-            [ for file in activeDocuments.Keys do
-                  yield FileInfo(file) ])
+        [ for file in activeDocuments.Keys do
+              yield FileInfo(file) ]
     
     /// Clean up orphan documents that do not exist to prevent memory leaks
     member this.CleanupOrphanedDocuments(existingFiles: Set<string>) : unit =
-        lock syncRoot (fun () ->
-            let orphanedFiles =
-                activeDocuments.Keys
-                |> Seq.filter (fun filePath -> not (existingFiles.Contains filePath))
-                |> Seq.toList
+        let orphanedFiles =
+            activeDocuments.Keys
+            |> Seq.filter (fun filePath -> not (existingFiles.Contains filePath))
+            |> Seq.toList
 
-            for filePath in orphanedFiles do
-                activeDocuments.Remove(filePath) |> ignore
+        for filePath in orphanedFiles do
+            activeDocuments.TryRemove(filePath) |> ignore
 
-            if orphanedFiles.Length > 0 then
-                dprintfn $"Cleaned up %i{orphanedFiles.Length} orphaned documents")
+        if orphanedFiles.Length > 0 then
+            dprintfn $"Cleaned up %i{orphanedFiles.Length} orphaned documents"
 
     member this.GetTextAtPosition(fileUri: Uri, position: Position) : string =
         match this.GetTextByPath(FileInfo(fileUri.LocalPath).FullName) with

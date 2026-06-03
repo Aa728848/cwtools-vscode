@@ -441,7 +441,7 @@ describe('dispatch_agents tool wiring', () => {
         } as any) as any;
 
         expect(result.success).to.equal(false);
-        expect(result.error).to.include('最大允许的 4 个上限');
+        expect(result.error).to.include('current mode limit of 4');
     });
 
     it('allows script mode to dispatch up to eight tasks but rejects nine', async () => {
@@ -488,7 +488,7 @@ describe('dispatch_agents tool wiring', () => {
             } as any) as any;
 
             expect(rejected.success).to.equal(false);
-            expect(rejected.error).to.include('最大允许的 8 个上限');
+            expect(rejected.error).to.include('current mode limit of 8');
         } finally {
             (Orchestrator.prototype as any).execute = originalExecute;
         }

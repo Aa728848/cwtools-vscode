@@ -2518,8 +2518,16 @@ export class AgentRunner {
                         message: String(d.message ?? ''),
                         line: Number(d.line ?? 0),
                         column: Number(d.column ?? 0),
+                        currentVersion: d.currentVersion,
+                        validatedVersion: d.validatedVersion,
                         category: d.category,
                         repairHint: d.repairHint,
+                        expectedType: d.expectedType,
+                        actualType: d.actualType,
+                        scope: d.scope,
+                        symbol: d.symbol,
+                        confidence: d.confidence,
+                        metadataSource: d.metadataSource,
                         data: d.data,
                     });
                 }
@@ -2816,14 +2824,23 @@ export class AgentRunner {
         const completion = status.completion && typeof status.completion === 'object'
             ? status.completion as Record<string, unknown>
             : {};
+        const refreshDomains = status.refreshDomains && typeof status.refreshDomains === 'object'
+            ? status.refreshDomains as Record<string, unknown>
+            : {};
         return {
             inProgress: status.inProgress,
+            inProgressFile: status.inProgressFile,
             queueDepth: status.queueDepth,
             debounceQueueDepth: status.debounceQueueDepth,
+            pendingGlobalKinds: status.pendingGlobalKinds,
             needsTypeRefresh: status.needsTypeRefresh,
             delayedLocalisationUpdate: status.delayedLocalisationUpdate,
             refreshSkipCount: status.refreshSkipCount,
             nextAnalyzeDelayMs: status.nextAnalyzeDelayMs,
+            lastGlobalRefreshAtUnixMs: status.lastGlobalRefreshAtUnixMs,
+            refreshPendingDomains: Array.isArray(refreshDomains.pendingDomains) ? refreshDomains.pendingDomains.map(String) : undefined,
+            refreshLastCompletedDomains: Array.isArray(refreshDomains.lastCompletedDomains) ? refreshDomains.lastCompletedDomains.map(String) : undefined,
+            refreshLastStatus: typeof refreshDomains.lastStatus === 'string' ? refreshDomains.lastStatus : undefined,
             lastRefreshStatus: typeof runtime.lastRefreshStatus === 'string' ? runtime.lastRefreshStatus : undefined,
             lastCycleElapsedMs: typeof runtime.lastCycleElapsedMs === 'number' ? runtime.lastCycleElapsedMs : undefined,
             lastAnalyzeElapsedMs: typeof runtime.lastAnalyzeElapsedMs === 'number' ? runtime.lastAnalyzeElapsedMs : undefined,
@@ -2845,10 +2862,15 @@ export class AgentRunner {
         if (!compact) return '';
         const parts: string[] = [];
         if (typeof compact.inProgress === 'boolean') parts.push(`inProgress=${compact.inProgress}`);
+        if (typeof compact.inProgressFile === 'string' && compact.inProgressFile) parts.push(`file=${path.basename(compact.inProgressFile)}`);
         if (typeof compact.queueDepth === 'number') parts.push(`queue=${compact.queueDepth}`);
         if (typeof compact.debounceQueueDepth === 'number') parts.push(`debounce=${compact.debounceQueueDepth}`);
+        if (Array.isArray(compact.pendingGlobalKinds) && compact.pendingGlobalKinds.length > 0) parts.push(`pending=${compact.pendingGlobalKinds.join('/')}`);
         if (typeof compact.needsTypeRefresh === 'boolean' && compact.needsTypeRefresh) parts.push('needsTypeRefresh=true');
         if (typeof compact.delayedLocalisationUpdate === 'boolean' && compact.delayedLocalisationUpdate) parts.push('delayedLoc=true');
+        if (Array.isArray(compact.refreshPendingDomains) && compact.refreshPendingDomains.length > 0) parts.push(`domains=${compact.refreshPendingDomains.join('/')}`);
+        if (Array.isArray(compact.refreshLastCompletedDomains) && compact.refreshLastCompletedDomains.length > 0) parts.push(`lastDomains=${compact.refreshLastCompletedDomains.join('/')}`);
+        if (typeof compact.refreshLastStatus === 'string') parts.push(`domainStatus=${compact.refreshLastStatus}`);
         if (typeof compact.nextAnalyzeDelayMs === 'number') parts.push(`nextDelayMs=${compact.nextAnalyzeDelayMs}`);
         if (typeof compact.lastRefreshStatus === 'string') parts.push(`lastRefresh=${compact.lastRefreshStatus}`);
         if (compact.loadingInProgress === true || typeof compact.loadingPhase === 'string') {

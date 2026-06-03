@@ -407,8 +407,16 @@ export interface ValidationError {
     message: string;
     line: number;
     column: number;
+    currentVersion?: number;
+    validatedVersion?: number;
     category?: DiagnosticAnalysisCategory;
     repairHint?: string;
+    expectedType?: string;
+    actualType?: string;
+    scope?: string;
+    symbol?: string;
+    confidence?: 'high' | 'medium' | 'low' | string;
+    metadataSource?: 'lsp_data' | 'message_heuristic' | string;
     data?: unknown;
 }
 
@@ -656,6 +664,20 @@ export interface GetCompletionAtResult {
         documentation?: string;
         isSnippet?: boolean;
     }>;
+    context?: {
+        file: string;
+        line: number;
+        column: number;
+        languageId?: string;
+        linePrefix?: string;
+        tokenPrefix?: string;
+        fieldName?: string;
+        isValueParameter?: boolean;
+        expectedValueType?: string;
+        currentVersion?: number;
+        scope?: QueryScopeResult;
+        source: 'cwtools.ai.getCompletionContext' | 'local_text_context';
+    };
     /** Total completions available from the LSP before slicing */
     totalAvailable?: number;
     _note?: string;
@@ -1124,8 +1146,16 @@ export interface DiagnosticEntry {
     line: number;
     column: number;
     code?: string;
+    currentVersion?: number;
+    validatedVersion?: number;
     category?: DiagnosticAnalysisCategory;
     repairHint?: string;
+    expectedType?: string;
+    actualType?: string;
+    scope?: string;
+    symbol?: string;
+    confidence?: 'high' | 'medium' | 'low' | string;
+    metadataSource?: 'lsp_data' | 'message_heuristic' | string;
     data?: unknown;
 }
 
@@ -1137,6 +1167,7 @@ export interface ValidationStatusSnapshot {
     pendingFiles?: number;
     pendingGlobalKinds?: string[];
     inProgress?: boolean;
+    inProgressFile?: string;
     queueDepth?: number;
     debounceQueueDepth?: number;
     needsTypeRefresh?: boolean;
@@ -1145,6 +1176,14 @@ export interface ValidationStatusSnapshot {
     nextAnalyzeDelayMs?: number;
     lastTypeRefreshRequestedAtUnixMs?: number;
     lastTypeRefreshCompletedAtUnixMs?: number;
+    lastGlobalRefreshAtUnixMs?: number;
+    refreshDomains?: {
+        pendingDomains?: string[];
+        lastCompletedDomains?: string[];
+        lastGlobalRefreshAtUnixMs?: number;
+        lastLocalisationRefreshAtUnixMs?: number;
+        lastStatus?: string;
+    };
     openDocuments?: number;
     runtime?: Record<string, unknown>;
     loading?: Record<string, unknown>;

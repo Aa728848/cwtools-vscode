@@ -336,24 +336,24 @@
             {
                 "command": "-acceptRenameInput",
                 "key": "enter",
-                "when": "renameInputVisible && renameInputFocused && !isComposing"
+                "when": "renameInputVisible && editorTextFocus && !isComposing"
             },
             {
                 "command": "acceptRenameInputWithPreview",
                 "key": "enter",
-                "when": "renameInputVisible && renameInputFocused && !isComposing"
+                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
             },
             {
                 "command": "-acceptRenameInputWithPreview",
                 "key": "ctrl+enter",
                 "mac": "cmd+enter",
-                "when": "renameInputVisible && renameInputFocused && !isComposing"
+                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
             },
             {
                 "command": "acceptRenameInput",
                 "key": "ctrl+enter",
                 "mac": "cmd+enter",
-                "when": "renameInputVisible && renameInputFocused && !isComposing"
+                "when": "renameInputVisible && editorTextFocus && !isComposing"
             },
             {
                 "command": "cwtools.ai.reviewFile",

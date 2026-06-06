@@ -3918,9 +3918,11 @@ type Server(client: ILanguageClient) =
                                     let clean = if clean.StartsWith("\"") && clean.EndsWith("\"") then clean.Substring(1, clean.Length - 2) else clean
                                     let clean = resolveLocRefs clean 0
                                     // Strip Paradox color codes
-                                    let clean = paradoxColorPattern.Replace(clean, "")
-                                    let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
-                                    sprintf "Loc:%s" truncated
+                                    let clean = paradoxColorPattern.Replace(clean, "").Trim()
+                                    if String.IsNullOrWhiteSpace clean then None
+                                    else
+                                        let truncated = if clean.Length > 50 then clean.Substring(0, 50) + "..." else clean
+                                        Some truncated
         
                                 let fileLines = fileText.Split([|"\r\n"; "\n"|], StringSplitOptions.None)
                                 let getRealEndPos (startPos: LSP.Types.Position) (endPos: LSP.Types.Position) =
@@ -3991,13 +3993,16 @@ type Server(client: ILanguageClient) =
                                             // Localization hint
                                             match Map.tryFind rawVal locMap with
                                             | Some tr ->
-                                                let range = convRangeToLSPRange l.Position
-                                                hints.Add {
-                                                    position = getRealEndPos range.start range.``end``
-                                                    label = formatHintLabel tr.desc
-                                                    paddingLeft = true
-                                                    paddingRight = true
-                                                }
+                                                match formatHintLabel tr.desc with
+                                                | Some label ->
+                                                    let range = convRangeToLSPRange l.Position
+                                                    hints.Add {
+                                                        position = getRealEndPos range.start range.``end``
+                                                        label = label
+                                                        paddingLeft = true
+                                                        paddingRight = true
+                                                    }
+                                                | None -> ()
                                             | None -> ()
                                             // Scripted variable hint
                                             tryAddVarHint rawVal l.Position
@@ -4007,13 +4012,16 @@ type Server(client: ILanguageClient) =
                                             let rawVal = lv.Value.ToRawString().Trim('\"')
                                             match Map.tryFind rawVal locMap with
                                             | Some tr ->
-                                                let range = convRangeToLSPRange lv.Position
-                                                hints.Add {
-                                                    position = getRealEndPos range.start range.``end``
-                                                    label = formatHintLabel tr.desc
-                                                    paddingLeft = true
-                                                    paddingRight = true
-                                                }
+                                                match formatHintLabel tr.desc with
+                                                | Some label ->
+                                                    let range = convRangeToLSPRange lv.Position
+                                                    hints.Add {
+                                                        position = getRealEndPos range.start range.``end``
+                                                        label = label
+                                                        paddingLeft = true
+                                                        paddingRight = true
+                                                    }
+                                                | None -> ()
                                             | None -> ()
                                             tryAddVarHint rawVal lv.Position
                                     )

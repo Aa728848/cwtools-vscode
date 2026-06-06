@@ -33,6 +33,11 @@ let private macroParamPattern =
         @"\$([A-Za-z_][A-Za-z0-9_]*)(?:\|([^$]*))?\$",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private macroBracketParamPattern =
+    System.Text.RegularExpressions.Regex(
+        @"\[\[\s*!?\s*([A-Za-z0-9_]+)(?=\]|\s)",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
 let private valueArgTokenBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; '\n'; '\r'|]
 let private completionPrefixBoundaries = [|' '; '\t'; '='; '<'; '>'; '{'; '}'; ','; ':'; '|'; '('; ')'; '['; ']'; '"'; '\''; '\n'; '\r'|]
 
@@ -115,7 +120,8 @@ let private tryGetScriptValueMacroParams (game: IGame) (docs: DocumentStore) (fi
             tryReadTypeFileText docs t.range.FileName
             |> Option.bind (fun sourceText ->
                 let values =
-                    [ for m in macroParamPattern.Matches(sourceText) -> m.Groups.[1].Value ]
+                    [ for m in macroParamPattern.Matches(sourceText) -> m.Groups.[1].Value
+                      for m in macroBracketParamPattern.Matches(sourceText) -> m.Groups.[1].Value ]
                     |> List.distinct
                     |> List.filter (fun x -> x <> "")
 

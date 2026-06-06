@@ -109,6 +109,7 @@ checks.
 | `client/extension/ai/projectProfile.ts` | `/init` project scanning, profile build/read/write, language/encoding detection |
 | `client/extension/ai/chatInit.ts` | `/init` command handler, profile generation and CWTOOLS.md rendering |
 | `client/extension/ai/gameKnowledge.ts` | Per-game PDXScript knowledge blocks (Stellaris, HOI4, EU4, CK2/3, VIC2/3, Imperator, EU5) |
+| `client/extension/ai/skills.ts` | Skill index (built-in/user/project `SKILL.md`), prompt index + on-demand body loading via `run_skill` |
 | `client/extension/ai/memoryParser.ts` | `.cwtools-ai-memory.md` long-term workspace memory read/write/prune |
 | `client/extension/ai/contextBudget.ts` | Token budget management and tool result trimming |
 | `client/extension/ai/contextReferences.ts` | `@file`, `@folder`, `@symbol`, `@blackboard` reference resolution |
@@ -118,6 +119,7 @@ checks.
 | Path | Purpose |
 | --- | --- |
 | `client/extension/ai/runnerPolicy.ts` | Mode-based tool filtering, iteration limits, and slim sub-agent budget |
+| `client/extension/ai/planModeGuard.ts` | Plan-mode write guard: restricts writes to the implementation plan and plan/blueprint/walkthrough artifact files |
 | `client/extension/ai/runner/compaction.ts` | History compaction and context window helpers |
 | `client/extension/ai/runner/checkpoint.ts` | V2 resume state and orphan `tool_call` synthetic replies |
 | `client/extension/ai/runner/writeCoordinator.ts` | `PartitionedWriteQueue` write coordination |
@@ -146,6 +148,7 @@ checks.
 | `client/extension/ai/tools/externalTools.ts` | `run_command` and external process tool handlers |
 | `client/extension/ai/tools/fileTools.ts` | File read/write/edit tool handlers |
 | `client/extension/ai/tools/lspTools.ts` | LSP query, diagnostics, completion, and deep API tool handlers |
+| `client/extension/ai/tools/diagnosticMetadata.ts` | Diagnostic category classification and repair-hint metadata for `analyze_diagnostic_error` |
 | `client/extension/ai/tools/memoryTools.ts` | Memory read/write tool handlers |
 | `client/extension/ai/tools/replacerSuite.ts` | 10-strategy fuzzy string replacement engine (Levenshtein, block anchor, similarity, etc.) |
 | `client/extension/ai/tools/schemaFlatten.ts` | Tool schema auto-flattening for weak-tool-call providers |
@@ -183,6 +186,7 @@ checks.
 | `client/extension/ai/toolCallParser.ts` | Non-standard tool call format parsing (DSML, Qwen, etc.) |
 | `client/extension/ai/jsonRepair.ts` | Incomplete JSON repair |
 | `client/extension/ai/mcpClient.ts` | MCP stdio/SSE client |
+| `client/extension/ai/inlineProvider.ts` | AI inline (FIM) completion for PDXScript with local/LSP fast-paths and LRU cache |
 
 ### Webview
 
@@ -192,7 +196,7 @@ checks.
 | `client/webview/agentManager.ts` | Detached Agent Manager: runs, agents, artifacts, tasks |
 | `client/webview/messageRenderer.ts` | Message rendering including cache sparkline cards |
 | `client/webview/svgIcons.ts` | High-fidelity SVG icon library |
-| `client/webview/chat/` | Extracted chat and Agent Manager browser modules (21 files) |
+| `client/webview/chat/` | Extracted chat and Agent Manager browser modules (22 files) |
 | `client/webview/entityPreview.ts` | Three.js entity renderer |
 | `client/webview/guiPreview.ts` | `.gui` Canvas preview, drag editing, DDS/TGA display |
 | `client/webview/solarSystemPreview.ts` | Star system, orbit, planet interactive preview |
@@ -248,8 +252,11 @@ Important constraints:
   locks in sorted path order.
 - Generic write tools reject `.yml` localisation writes; use
   `write_localisation`.
-- `tools/replacerSuite.ts` provides a 10-strategy fuzzy replacement engine for
-  `edit_file`; changes to replacement strategies should update
+- `tools/replacerSuite.ts` provides a 10-strategy fuzzy replacement engine
+  (`fuzzyReplace`) used by the `FileToolHandler.replace()` helper, which backs
+  `apply_patch` hunk application in `tools/fileTools.ts`
+  (`multi_replace_file_content` uses exact in-range matching, and `replace_lines`
+  is purely line-range based); changes to replacement strategies should update
   `editFileReplacer.test.ts`.
 - `tools/schemaFlatten.ts` auto-flattens deep tool schemas for weak providers;
   `nestArguments()` reverses the flattening before tool execution.
@@ -314,6 +321,10 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
 - `gameKnowledge.ts` provides per-game PDXScript knowledge blocks for 9 games
   (Stellaris, HOI4, EU4, CK2, CK3, VIC2, VIC3, Imperator, EU5) plus a generic
   Paradox fallback. `getGameKnowledge(languageId)` returns the appropriate block.
+- `skills.ts` indexes `SKILL.md` files (built-in, user, and project scopes) and
+  parses their frontmatter. `promptBuilder.ts` injects a compact skill index via
+  `buildSkillIndexPrompt`; full skill bodies are loaded on demand through the
+  `run_skill` tool, keeping the base prompt small.
 - `memoryParser.ts` manages `.cwtools-ai-memory.md` long-term workspace memory:
   reads with caching, appends new entries, and auto-prunes by priority when
   exceeding `MAX_MEMORY_CHARS` (4000 chars / ~1000 tokens).

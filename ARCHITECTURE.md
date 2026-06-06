@@ -120,9 +120,11 @@ sequenceDiagram
 | `providers.ts` / `providers/models/` | Provider facade、默认模型、能力、价格和缓存折扣 |
 | `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
 | `runnerPolicy.ts` | 模式级工具过滤、迭代上限和 slim sub-agent 输出预算 |
+| `planModeGuard.ts` | 计划模式写入守卫：仅放行实现计划与 plan/blueprint/walkthrough 产物文件 |
 | `projectProfile.ts` | `/init` 项目扫描、profile 构建/读写、语言/编码检测 |
 | `chatInit.ts` | `/init` 命令处理器、profile 生成和 CWTOOLS.md 渲染 |
 | `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
+| `skills.ts` | `SKILL.md` 技能索引（built-in/user/project）+ `run_skill` 按需正文加载 |
 | `memoryParser.ts` | `.cwtools-ai-memory.md` 长期工作区记忆读写与自动裁剪 |
 | `workspacePaths.ts` | AI 存储根解析、topic/scratch 目录、多 workspace folder 支持 |
 | `workspaceSandbox.ts` | 路径输入清洗、作用域分类（project/ai/workspace/outside）和信任判定 |
@@ -175,6 +177,7 @@ sequenceDiagram
 | `externalTools.ts` | `run_command` 和外部进程工具处理器 |
 | `fileTools.ts` | 文件读写编辑工具处理器 |
 | `lspTools.ts` | LSP 查询、诊断、补全和深层 API 工具处理器 |
+| `diagnosticMetadata.ts` | 诊断分类（`DiagnosticAnalysisCategory`）与修复提示元数据，服务 `analyze_diagnostic_error` |
 | `memoryTools.ts` | 记忆读写工具处理器 |
 | `replacerSuite.ts` | 10 策略模糊替换引擎（Levenshtein、块锚定、Jaccard 相似度等） |
 | `schemaFlatten.ts` | 深层 schema 自动展平及 `nestArguments()` 反向还原 |
@@ -184,11 +187,11 @@ sequenceDiagram
 `AgentMode` 定义在 `client/extension/ai/types.ts`：
 
 ```text
-build | plan | explore | general | utility | review |
+build | plan | explore | general | utility | review | script |
 gui_expert | script_reviewer | loc_translator | loc_writer | orchestrator
 ```
 
-`general` 为旧会话兼容保留；`utility` 是当前通用工作区任务模式。
+`general` 为旧会话兼容保留；`utility` 是通用工作区任务模式；`script` 是当前面向 PDXScript 的高吞吐脚本模式（动态 workflow 协调器，单次 `dispatch_agents` 最多 8 个任务）。
 
 `workflowRegistry.ts` 当前注册：
 
@@ -224,6 +227,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 - 写工具经由 `PartitionedWriteQueue` 管理；`.yml` 本地化写入必须使用 `write_localisation`。
 - 对 PDXScript 优先使用 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context` 等结构化读取工具。
 - 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。
+- `run_skill` 工具按需加载 `SKILL.md` 正文；`skills.ts` 负责索引、`promptBuilder.ts` 只注入精简技能索引，正文不进入基础 prompt。
 
 ### Orchestrator
 
@@ -310,6 +314,10 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 ### Game Knowledge
 
 `gameKnowledge.ts` 为 9 款 Paradox 游戏提供 PDXScript 知识块（Stellaris、HOI4、EU4、CK2、CK3、VIC2、VIC3、Imperator、EU5），外加一个通用 Paradox 回退。`promptBuilder.ts` 通过 `getGameKnowledge(languageId)` 动态选择注入。
+
+### Skills
+
+`skills.ts` 索引三类作用域的 `SKILL.md` 文件（built-in / user / project），解析其 frontmatter（`name`、`description`、可选 `runAs` / `allowedTools`）。`promptBuilder.ts` 通过 `buildSkillIndexPrompt` 只把精简的技能索引注入系统提示词，受 `SKILL_INDEX_CHAR_LIMIT` 限制；完整技能正文由 `run_skill` 工具按需加载（`loadSkill`，受 `SKILL_BODY_CHAR_LIMIT` 限制），避免长期占用上下文预算。
 
 ### Memory Parser
 
@@ -518,7 +526,7 @@ Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。�
    在 `agentRunner.ts` 的执行流中，系统会自动提取大模型回传响应里的缓存计量。采用极其健壮的兼容性设计，支持包括 `usage.cached_tokens`、`prompt_tokens_details.cached_tokens`（OpenAI/DeepSeek 格式）、以及 `prompt_cache_hit_tokens`（Anthropic 格式）等多源字段，同时精准解析并获取 Claude 3.5 和 DeepSeek 特有的“新建缓存字节（`cache_creation_tokens`）”。
 
 2. **打折费率与成本精算 (Pricing Engine)**：
-   `providers/models/pricing.ts` 中集成了模型缓存节省的精算公式。系统能精准识别模型类型并应用差异化打折率（例如：识别为 `deepseek` 或 `claude` 则触发 0.1× 的 1 折特惠计费，识别为 `gpt-` 系列则触发 0.5× 的 5 折优惠），并将每一轮推断在物理上节省的真实人民币金额（CNY）通过 `savedCostCny` 字段流式发射。
+   `providers/models/pricing.ts` 中集成了模型缓存节省的精算公式（费率数据存于 `providers/models/pricingData.json`）。系统能精准识别模型类型并应用差异化打折率（例如：识别为 `deepseek` 或 `claude` 则触发 0.1× 的 1 折特惠计费，识别为 `gpt-` 系列则触发 0.5× 的 5 折优惠），并将每一轮推断在物理上节省的真实人民币金额（CNY）通过 `savedCostCny` 字段流式发射。
 
 3. **三柱微图 (Cache Sparkline) 极致展现**：
    在前端 Webview（`messageRenderer.ts`）中，系统拦截 `cache_stats` 事件，将“缓存命中数”、“新建缓存数”、“穿透数”三者按比例编译并渲染为视觉效果惊艳的“绿色 (命中) / 蓝色 (新建) / 橙黄色 (穿透) 三柱微图进度条”，并在右侧醒目高亮展现为用户节省的具体金额。
@@ -552,10 +560,12 @@ cwtools-vscode/
         projectProfile.ts     /init 项目扫描和 profile
         chatInit.ts           /init 命令处理器
         gameKnowledge.ts      9 款游戏 PDXScript 知识块
+        skills.ts             SKILL.md 索引 + run_skill 按需加载
         memoryParser.ts       长期工作区记忆
         workspacePaths.ts     AI 存储路径解析
         workspaceSandbox.ts   路径沙盒和作用域分类
         runnerPolicy.ts       模式级工具过滤和迭代上限
+        planModeGuard.ts      计划模式写入守卫
         usageTracker.ts       token 用量和成本跟踪
         diffEngine.ts         结构化 diff 引擎
         fileCache.ts          有界文件缓存
@@ -565,7 +575,7 @@ cwtools-vscode/
       gameProfiles.ts
       vanillaCompare.ts
     webview/
-      chat/                   21 个提取的浏览器模块
+      chat/                   22 个提取的浏览器模块
       messageRenderer.ts      消息渲染（含缓存 sparkline）
       svgIcons.ts             高保真 SVG 图标库
       agentManager.ts
@@ -576,7 +586,7 @@ cwtools-vscode/
       techTreePreview.ts
       entityPreview.ts
     test/
-      unit/                   46 个单元测试文件
+      unit/                   48 个单元测试文件
       suite/
   src/
     LSP/

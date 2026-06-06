@@ -271,7 +271,7 @@ module LanguageServerFeatures =
                     { textDocument = docIdentifier
                       edits = textedits }
 
-                let docChanges = { documentChanges = [ changes ]; changes = Map.empty }
+                let docChanges = { documentChanges = Some [ changes ]; changes = Map.empty }
 
                 do!
                     client.ApplyWorkspaceEdit

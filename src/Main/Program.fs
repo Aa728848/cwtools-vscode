@@ -4268,6 +4268,31 @@ type Server(client: ILanguageClient) =
                     if startLine > endLine then None
                     else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
 
+            let tryFindIdentifierRangeAtPosition filePath (text: string) (position: pos) =
+                let lines = text.Split('\n')
+                let lineIndex = int position.Line - 1
+                if lineIndex < 0 || lineIndex >= lines.Length then None
+                else
+                    let line = lines.[lineIndex].TrimEnd('\r')
+                    let column = position.Column |> int |> max 0 |> min line.Length
+
+                    let seedIndex =
+                        if column < line.Length && isIdentifierChar line.[column] then Some column
+                        elif column > 0 && isIdentifierChar line.[column - 1] then Some(column - 1)
+                        else None
+
+                    seedIndex
+                    |> Option.map (fun index ->
+                        let mutable startIndex = index
+                        while startIndex > 0 && isIdentifierChar line.[startIndex - 1] do
+                            startIndex <- startIndex - 1
+
+                        let mutable endIndex = index + 1
+                        while endIndex < line.Length && isIdentifierChar line.[endIndex] do
+                            endIndex <- endIndex + 1
+
+                        mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
+
             let allTypeDefinitions (game: IGame) =
                 game.Types()
                 |> Map.toSeq
@@ -4325,9 +4350,12 @@ type Server(client: ILanguageClient) =
                             typeInfo
                             |> Option.bind (fun (_, tdi) -> tryFindIdentifierRangeInDefinition tdi.range tdi.id)
 
+                        let fallbackRange = tryFindIdentifierRangeAtPosition path sourceText position
+
                         let renameRanges =
                             refs
                             @ (definitionRange |> Option.toList)
+                            @ (fallbackRange |> Option.toList)
                             |> List.distinctBy rangeKey
 
                         match renameRanges with
@@ -4345,11 +4373,11 @@ type Server(client: ILanguageClient) =
                                     uri, edits)
                                 |> Map.ofList
 
-                            { documentChanges = []; changes = changes }
-                        | _ -> { documentChanges = []; changes = Map.empty }
-                    | None -> { documentChanges = []; changes = Map.empty }
+                            { documentChanges = None; changes = changes }
+                        | _ -> { documentChanges = None; changes = Map.empty }
+                    | None -> { documentChanges = None; changes = Map.empty }
             }
-            |> catchError { documentChanges = []; changes = Map.empty }
+            |> catchError { documentChanges = None; changes = Map.empty }
 
         member this.ExecuteCommand(p: ExecuteCommandParams) : Async<ExecuteCommandResponse option> =
             async {

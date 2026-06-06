@@ -135,7 +135,7 @@ type TextDocumentEdit =
       edits: TextEdit list }
 
 type WorkspaceEdit =
-    { documentChanges: TextDocumentEdit list
+    { documentChanges: TextDocumentEdit list option
       changes: Map<string, TextEdit list> }
 
 type TextDocumentPositionParams =

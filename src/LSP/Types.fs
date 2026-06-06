@@ -383,6 +383,10 @@ type RenameParams =
       position: Position
       newName: string }
 
+type PrepareRenameResult =
+    { range: Range
+      placeholder: string }
+
 type ExecuteCommandParams =
     { command: string
       arguments: JsonValue list }
@@ -426,6 +430,7 @@ type Request =
     | DocumentFormatting of DocumentFormattingParams
     | DocumentRangeFormatting of DocumentRangeFormattingParams
     | DocumentOnTypeFormatting of DocumentOnTypeFormattingParams
+    | PrepareRename of TextDocumentPositionParams
     | Rename of RenameParams
     | ExecuteCommand of ExecuteCommandParams
     | DidChangeWorkspaceFolders of DidChangeWorkspaceFoldersParams
@@ -515,7 +520,7 @@ type ServerCapabilities =
       documentFormattingProvider: bool
       documentRangeFormattingProvider: bool
       documentOnTypeFormattingProvider: DocumentOnTypeFormattingOptions option
-      renameProvider: bool
+      renameProvider: JsonValue
       documentLinkProvider: DocumentLinkOptions option
       executeCommandProvider: ExecuteCommandOptions option
       inlayHintProvider: bool
@@ -536,7 +541,7 @@ let defaultServerCapabilities: ServerCapabilities =
       documentFormattingProvider = false
       documentRangeFormattingProvider = false
       documentOnTypeFormattingProvider = None
-      renameProvider = false
+      renameProvider = JsonValue.Boolean false
       documentLinkProvider = None
       executeCommandProvider = None
       inlayHintProvider = false
@@ -692,6 +697,7 @@ type ILanguageServer =
     abstract member DocumentFormatting: DocumentFormattingParams -> Async<TextEdit list>
     abstract member DocumentRangeFormatting: DocumentRangeFormattingParams -> Async<TextEdit list>
     abstract member DocumentOnTypeFormatting: DocumentOnTypeFormattingParams -> Async<TextEdit list>
+    abstract member PrepareRename: TextDocumentPositionParams -> Async<PrepareRenameResult option>
     abstract member Rename: RenameParams -> Async<WorkspaceEdit>
     abstract member ExecuteCommand: ExecuteCommandParams -> Async<ExecuteCommandResponse option>
     abstract member DidChangeWorkspaceFolders: DidChangeWorkspaceFoldersParams -> Async<unit>

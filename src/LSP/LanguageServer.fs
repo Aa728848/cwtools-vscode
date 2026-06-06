@@ -84,6 +84,12 @@ let private serializeDocumentLink = serializerFactory<DocumentLink> jsonWriteOpt
 let private serializeWorkspaceEdit =
     serializerFactory<WorkspaceEdit> jsonWriteOptions
 
+let private serializePrepareRenameResult =
+    serializerFactory<PrepareRenameResult> jsonWriteOptions
+
+let private serializePrepareRenameResultOption =
+    Option.map serializePrepareRenameResult
+
 let private serializeSemanticTokens =
     serializerFactory<SemanticTokens> jsonWriteOptions
 
@@ -343,6 +349,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | DocumentFormatting(p)     -> server.DocumentFormatting(p)     |> thenMap serializeTextEditList |> thenSome, false
         | DocumentRangeFormatting(p)-> server.DocumentRangeFormatting(p)|> thenMap serializeTextEditList |> thenSome, false
         | DocumentOnTypeFormatting(p)->server.DocumentOnTypeFormatting(p)|> thenMap serializeTextEditList |> thenSome, false
+        | PrepareRename(p)          -> server.PrepareRename(p)          |> thenMap serializePrepareRenameResultOption |> thenMap (Option.defaultValue "null") |> thenSome, true
         | Rename(p)                 -> server.Rename(p)                 |> thenMap serializeWorkspaceEdit |> thenSome, false
         | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenNone,                             false
 

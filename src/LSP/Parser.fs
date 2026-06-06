@@ -328,6 +328,7 @@ let parseRequest (method: string, json: JsonValue) : Request =
     | "textDocument/formatting" -> DocumentFormatting(parseDocumentFormattingParams json)
     | "textDocument/rangeFormatting" -> DocumentRangeFormatting(parseDocumentRangeFormattingParams json)
     | "textDocument/onTypeFormatting" -> DocumentOnTypeFormatting(parseDocumentOnTypeFormattingParams json)
+    | "textDocument/prepareRename" -> PrepareRename(parseTextDocumentPositionParams json)
     | "textDocument/rename" -> Rename(parseRenameParams json)
     | "workspace/executeCommand" -> ExecuteCommand(parseExecuteCommandParams json)
     | "workspace/didChangeWorkspaceFolders" -> DidChangeWorkspaceFolders(parseDidChangeWorkspaceFoldersParams json)

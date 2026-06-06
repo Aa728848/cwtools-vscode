@@ -3049,7 +3049,8 @@ type Server(client: ILanguageClient) =
                                           "cwtools.exportTypes"
                                           "getFileTypes" ] }
                             inlayHintProvider = true
-                            renameProvider = true
+                            renameProvider =
+                                JsonValue.Record [| "prepareProvider", JsonValue.Boolean true |]
                             semanticTokensProvider =
                                 Some
                                     { legend =
@@ -4271,6 +4272,166 @@ type Server(client: ILanguageClient) =
         member this.DocumentRangeFormatting(_: DocumentRangeFormattingParams) = async { return [] }
         member this.DocumentOnTypeFormatting(_: DocumentOnTypeFormattingParams) = async { return [] }
         member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = async { () }
+
+        member this.PrepareRename(p: TextDocumentPositionParams) =
+            let sameFile left right =
+                String.Equals(left, right, StringComparison.OrdinalIgnoreCase)
+
+            let isSymbolBoundaryChar (c: char) =
+                Char.IsLetterOrDigit c
+                || c = '_'
+                || c = '$'
+                || c = ':'
+                || c = '@'
+                || c = '-'
+                || c = '/'
+
+            let isDottedCandidateChar (c: char) =
+                isSymbolBoundaryChar c || c = '.'
+
+            let readDocumentText filePath =
+                docs.GetText(FileInfo(filePath))
+                |> Option.defaultValue (try File.ReadAllText filePath with _ -> "")
+
+            let tryGetSingleLineTextInRange (text: string) (target: range) =
+                let lines = text.Split('\n')
+                let startLine = int target.StartLine - 1
+                let endLine = int target.EndLine - 1
+                if startLine <> endLine || startLine < 0 || startLine >= lines.Length then None
+                else
+                    let line = lines.[startLine].TrimEnd('\r')
+                    let startColumn = int target.StartColumn |> max 0 |> min line.Length
+                    let endColumn = int target.EndColumn |> max startColumn |> min line.Length
+                    Some(line.Substring(startColumn, endColumn - startColumn))
+
+            let tryFindDottedCandidateRangeAtPosition filePath (text: string) (position: pos) =
+                let lines = text.Split('\n')
+                let lineIndex = int position.Line - 1
+                if lineIndex < 0 || lineIndex >= lines.Length then None
+                else
+                    let line = lines.[lineIndex].TrimEnd('\r')
+                    let column = position.Column |> int |> max 0 |> min line.Length
+
+                    let seedIndex =
+                        if column < line.Length && isDottedCandidateChar line.[column] then Some column
+                        elif column > 0 && isDottedCandidateChar line.[column - 1] then Some(column - 1)
+                        else None
+
+                    seedIndex
+                    |> Option.map (fun index ->
+                        let mutable startIndex = index
+                        while startIndex > 0 && isDottedCandidateChar line.[startIndex - 1] do
+                            startIndex <- startIndex - 1
+
+                        let mutable endIndex = index + 1
+                        while endIndex < line.Length && isDottedCandidateChar line.[endIndex] do
+                            endIndex <- endIndex + 1
+
+                        mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
+
+            let tryFindIdentifierRangeInRange (text: string) (target: range) (symbol: string) =
+                let needle = normalizeDefinitionSymbol symbol
+                if String.IsNullOrWhiteSpace needle then None
+                else
+                    let lines = text.Split('\n')
+                    let startLine = max 0 (int target.StartLine - 1)
+                    let endLine = min (lines.Length - 1) (max startLine (int target.EndLine - 1))
+
+                    let tryFindOnLine lineIndex =
+                        if lineIndex < 0 || lineIndex >= lines.Length then None
+                        else
+                            let line = lines.[lineIndex].TrimEnd('\r')
+                            let minColumn = if lineIndex = startLine then int target.StartColumn |> max 0 |> min line.Length else 0
+                            let maxColumn = if lineIndex = endLine then int target.EndColumn |> max minColumn |> min line.Length else line.Length
+
+                            let rec loop startIndex =
+                                let index = line.IndexOf(needle, startIndex, StringComparison.Ordinal)
+                                if index < 0 || index + needle.Length > maxColumn then None
+                                elif index < minColumn then loop (index + 1)
+                                else
+                                    let beforeOk = index = 0 || not (isSymbolBoundaryChar line.[index - 1])
+                                    let afterIndex = index + needle.Length
+                                    let afterOk = afterIndex >= line.Length || not (isSymbolBoundaryChar line.[afterIndex])
+                                    if beforeOk && afterOk then
+                                        Some(mkRange target.FileName (mkPos (lineIndex + 1) index) (mkPos (lineIndex + 1) afterIndex))
+                                    else
+                                        loop (index + 1)
+
+                            loop minColumn
+
+                    if startLine > endLine then None
+                    else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
+
+            let allTypeDefinitions (game: IGame) =
+                game.Types()
+                |> Map.toSeq
+                |> Seq.collect (fun (typeName, infos) -> infos |> Seq.map (fun tdi -> typeName, tdi))
+
+            let tryTypeDefinitionAtPosition (game: IGame) filePath text position =
+                allTypeDefinitions game
+                |> Seq.tryFind (fun (_, tdi) ->
+                    sameFile tdi.range.FileName filePath
+                    && (tryFindIdentifierRangeInRange text tdi.range tdi.id
+                        |> Option.exists (fun identifierRange -> rangeContainsPos identifierRange position)))
+
+            let tryTypeDefinitionForRange (game: IGame) (target: range) =
+                allTypeDefinitions game
+                |> Seq.tryFind (fun (_, tdi) ->
+                    sameFile tdi.range.FileName target.FileName
+                    && (rangeContainsRange tdi.range target || rangeContainsRange target tdi.range))
+
+            async {
+                return
+                    match gameObj with
+                    | Some game ->
+                        let position = PosHelper.fromZ p.position.line p.position.character
+                        let path = getPathFromDoc p.textDocument.uri
+                        let sourceText = readDocumentText path
+
+                        let lineRange =
+                            let lines = sourceText.Split('\n')
+                            let lineIndex = int position.Line - 1
+                            if lineIndex < 0 || lineIndex >= lines.Length then None
+                            else
+                                let line = lines.[lineIndex].TrimEnd('\r')
+                                Some(mkRange path (mkPos (lineIndex + 1) 0) (mkPos (lineIndex + 1) line.Length))
+
+                        let typeInfoAtCursor = tryTypeDefinitionAtPosition game path sourceText position
+
+                        let typeInfoFromDefinition =
+                            match typeInfoAtCursor with
+                            | Some _ -> None
+                            | None ->
+                                game.GoToType position path sourceText
+                                |> preferCodeDefinitionOverLocalisation
+                                    gameDispatcher
+                                    game
+                                    path
+                                    sourceText
+                                    p.position.line
+                                    p.position.character
+                                |> Option.bind (tryTypeDefinitionForRange game)
+
+                        let semanticRange =
+                            typeInfoAtCursor
+                            |> Option.orElse typeInfoFromDefinition
+                            |> Option.bind (fun (_, tdi) ->
+                                lineRange |> Option.bind (fun r -> tryFindIdentifierRangeInRange sourceText r tdi.id))
+
+                        let textRange =
+                            semanticRange
+                            |> Option.orElseWith (fun () -> tryFindDottedCandidateRangeAtPosition path sourceText position)
+
+                        textRange
+                        |> Option.bind (fun r ->
+                            tryGetSingleLineTextInRange sourceText r
+                            |> Option.map (fun placeholder ->
+                                { range = convRangeToLSPRange r
+                                  placeholder = placeholder }))
+                    | None -> None
+            }
+            |> catchError None
+
         member this.Rename(p: RenameParams) =
             let sameFile left right =
                 String.Equals(left, right, StringComparison.OrdinalIgnoreCase)
@@ -4288,12 +4449,14 @@ type Server(client: ILanguageClient) =
             let isIdentifierChar (c: char) =
                 Char.IsLetterOrDigit c
                 || c = '_'
-                || c = '.'
                 || c = '$'
                 || c = ':'
                 || c = '@'
                 || c = '-'
                 || c = '/'
+
+            let isDottedCandidateChar (c: char) =
+                isIdentifierChar c || c = '.'
 
             let readDocumentText filePath =
                 docs.GetText(FileInfo(filePath))
@@ -4356,6 +4519,77 @@ type Server(client: ILanguageClient) =
 
                         mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
 
+            let tryFindDottedCandidateRangeAtPosition filePath (text: string) (position: pos) =
+                let lines = text.Split('\n')
+                let lineIndex = int position.Line - 1
+                if lineIndex < 0 || lineIndex >= lines.Length then None
+                else
+                    let line = lines.[lineIndex].TrimEnd('\r')
+                    let column = position.Column |> int |> max 0 |> min line.Length
+
+                    let seedIndex =
+                        if column < line.Length && isDottedCandidateChar line.[column] then Some column
+                        elif column > 0 && isDottedCandidateChar line.[column - 1] then Some(column - 1)
+                        else None
+
+                    seedIndex
+                    |> Option.map (fun index ->
+                        let mutable startIndex = index
+                        while startIndex > 0 && isDottedCandidateChar line.[startIndex - 1] do
+                            startIndex <- startIndex - 1
+
+                        let mutable endIndex = index + 1
+                        while endIndex < line.Length && isDottedCandidateChar line.[endIndex] do
+                            endIndex <- endIndex + 1
+
+                        mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
+
+            let tryGetSingleLineTextInRange (target: range) =
+                let text = readDocumentText target.FileName
+                let lines = text.Split('\n')
+                let startLine = int target.StartLine - 1
+                let endLine = int target.EndLine - 1
+                if startLine <> endLine || startLine < 0 || startLine >= lines.Length then None
+                else
+                    let line = lines.[startLine].TrimEnd('\r')
+                    let startColumn = int target.StartColumn |> max 0 |> min line.Length
+                    let endColumn = int target.EndColumn |> max startColumn |> min line.Length
+                    Some(line.Substring(startColumn, endColumn - startColumn))
+
+            let tryFindIdentifierRangeInRange (target: range) (symbol: string) =
+                let needle = normalizeDefinitionSymbol symbol
+                if String.IsNullOrWhiteSpace needle then None
+                else
+                    let text = readDocumentText target.FileName
+                    let lines = text.Split('\n')
+                    let startLine = max 0 (int target.StartLine - 1)
+                    let endLine = min (lines.Length - 1) (max startLine (int target.EndLine - 1))
+
+                    let tryFindOnLine lineIndex =
+                        if lineIndex < 0 || lineIndex >= lines.Length then None
+                        else
+                            let line = lines.[lineIndex].TrimEnd('\r')
+                            let minColumn = if lineIndex = startLine then int target.StartColumn |> max 0 |> min line.Length else 0
+                            let maxColumn = if lineIndex = endLine then int target.EndColumn |> max minColumn |> min line.Length else line.Length
+
+                            let rec loop startIndex =
+                                let index = line.IndexOf(needle, startIndex, StringComparison.Ordinal)
+                                if index < 0 || index + needle.Length > maxColumn then None
+                                elif index < minColumn then loop (index + 1)
+                                else
+                                    let beforeOk = index = 0 || not (isIdentifierChar line.[index - 1])
+                                    let afterIndex = index + needle.Length
+                                    let afterOk = afterIndex >= line.Length || not (isIdentifierChar line.[afterIndex])
+                                    if beforeOk && afterOk then
+                                        Some(mkRange target.FileName (mkPos (lineIndex + 1) index) (mkPos (lineIndex + 1) afterIndex))
+                                    else
+                                        loop (index + 1)
+
+                            loop minColumn
+
+                    if startLine > endLine then None
+                    else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
+
             let allTypeDefinitions (game: IGame) =
                 game.Types()
                 |> Map.toSeq
@@ -4402,18 +4636,45 @@ type Server(client: ILanguageClient) =
 
                         let typeInfo = typeInfoAtCursor |> Option.orElse typeInfoFromDefinition
 
-                        let refs =
+                        let lineRangeAtCursor =
+                            let lines = sourceText.Split('\n')
+                            let lineIndex = int position.Line - 1
+                            if lineIndex < 0 || lineIndex >= lines.Length then None
+                            else
+                                let line = lines.[lineIndex].TrimEnd('\r')
+                                Some(mkRange path (mkPos (lineIndex + 1) 0) (mkPos (lineIndex + 1) line.Length))
+
+                        let fallbackRange =
                             match typeInfo with
-                            | Some(typeName, tdi) -> game.FindAllRefsByType typeName tdi.id
+                            | Some(_, tdi) ->
+                                lineRangeAtCursor
+                                |> Option.bind (fun r -> tryFindIdentifierRangeInRange r tdi.id)
+                            | None -> tryFindDottedCandidateRangeAtPosition path sourceText position
+
+                        let renameSymbol =
+                            match typeInfo with
+                            | Some(_, tdi) -> Some tdi.id
                             | None ->
-                                game.FindAllRefs position path sourceText
-                                |> Option.defaultValue []
+                                fallbackRange
+                                |> Option.bind tryGetSingleLineTextInRange
+                                |> Option.map normalizeDefinitionSymbol
+                                |> Option.filter (String.IsNullOrWhiteSpace >> not)
+
+                        let refs =
+                            let rawRefs =
+                                match typeInfo with
+                                | Some(typeName, tdi) -> game.FindAllRefsByType typeName tdi.id
+                                | None ->
+                                    game.FindAllRefs position path sourceText
+                                    |> Option.defaultValue []
+
+                            match renameSymbol with
+                            | Some symbol -> rawRefs |> List.choose (fun r -> tryFindIdentifierRangeInRange r symbol)
+                            | None -> []
 
                         let definitionRange =
                             typeInfo
                             |> Option.bind (fun (_, tdi) -> tryFindIdentifierRangeInDefinition tdi.range tdi.id)
-
-                        let fallbackRange = tryFindIdentifierRangeAtPosition path sourceText position
 
                         let renameRanges =
                             refs

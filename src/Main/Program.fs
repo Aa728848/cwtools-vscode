@@ -3681,6 +3681,33 @@ type Server(client: ILanguageClient) =
             |> catchError []
 
         member this.WorkspaceSymbols(p: WorkspaceSymbolParams) =
+            let symbolKindForType (typeName: string) =
+                let t = typeName.ToLowerInvariant()
+                if t.Contains("event") then SymbolKind.Interface
+                elif t.Contains("trigger") then SymbolKind.Function
+                elif t.Contains("effect") then SymbolKind.Method
+                elif t.Contains("variable") then SymbolKind.Variable
+                elif t.Contains("modifier") then SymbolKind.Property
+                elif t.Contains("namespace") then SymbolKind.Namespace
+                elif t.Contains("decision") || t.Contains("edict") || t.Contains("policy") then SymbolKind.Enum
+                elif t.Contains("technology") || t.Contains("component") then SymbolKind.Module
+                elif t.Contains("building") || t.Contains("district") then SymbolKind.Constructor
+                elif t.Contains("flag") || t.Contains("value") then SymbolKind.Constant
+                else SymbolKind.Class
+
+            let symbolScore query (typeName: string) (id: string) =
+                if String.IsNullOrWhiteSpace query then 0
+                else
+                    let typeName = typeName.ToLowerInvariant()
+                    let id = id.ToLowerInvariant()
+                    if id = query then 0
+                    elif id.StartsWith(query) then 1
+                    elif typeName = query then 2
+                    elif typeName.StartsWith(query) then 3
+                    elif id.Contains(query) then 4
+                    elif typeName.Contains(query) then 5
+                    else 6
+
             async {
                 return
                     match gameObj with
@@ -3700,12 +3727,16 @@ type Server(client: ILanguageClient) =
                                     || tdi.id.ToLowerInvariant().Contains(query)
                                     || typeName.ToLowerInvariant().Contains(query))
                                 |> List.map (fun tdi ->
+                                    let kind = symbolKindForType typeName
                                     { name = tdi.id
-                                      kind = SymbolKind.Class
+                                      kind = kind
                                       location =
                                         { uri = Uri(tdi.range.FileName)
                                           range = convRangeToLSPRange tdi.range }
                                       containerName = Some typeName }))
+                        |> List.sortBy (fun symbol ->
+                            let container = symbol.containerName |> Option.defaultValue ""
+                            symbolScore query container symbol.name, symbol.name.Length, symbol.name, container)
                         |> List.truncate 200
                     | None -> []
             }
@@ -4178,21 +4209,129 @@ type Server(client: ILanguageClient) =
         member this.DocumentOnTypeFormatting(_: DocumentOnTypeFormattingParams) = async { return [] }
         member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = async { () }
         member this.Rename(p: RenameParams) =
+            let sameFile left right =
+                String.Equals(left, right, StringComparison.OrdinalIgnoreCase)
+
+            let sameRange (left: range) (right: range) =
+                sameFile left.FileName right.FileName
+                && left.StartLine = right.StartLine
+                && left.StartColumn = right.StartColumn
+                && left.EndLine = right.EndLine
+                && left.EndColumn = right.EndColumn
+
+            let rangeKey (r: range) =
+                (r.FileName.ToLowerInvariant(), r.StartLine, r.StartColumn, r.EndLine, r.EndColumn)
+
+            let isIdentifierChar (c: char) =
+                Char.IsLetterOrDigit c
+                || c = '_'
+                || c = '.'
+                || c = '$'
+                || c = ':'
+                || c = '@'
+                || c = '-'
+                || c = '/'
+
+            let readDocumentText filePath =
+                docs.GetText(FileInfo(filePath))
+                |> Option.defaultValue (try File.ReadAllText filePath with _ -> "")
+
+            let tryFindIdentifierRangeInDefinition (definitionRange: range) (symbol: string) =
+                let needle = normalizeDefinitionSymbol symbol
+                if String.IsNullOrWhiteSpace needle then None
+                else
+                    let text = readDocumentText definitionRange.FileName
+                    let lines = text.Split('\n')
+                    let startLine = max 0 (int definitionRange.StartLine - 1)
+                    let rangeEndLine = max startLine (int definitionRange.EndLine - 1)
+                    let endLine = min (lines.Length - 1) (min rangeEndLine (startLine + 120))
+
+                    let tryFindOnLine lineIndex =
+                        if lineIndex < 0 || lineIndex >= lines.Length then None
+                        else
+                            let line = lines.[lineIndex].TrimEnd('\r')
+
+                            let rec loop startIndex =
+                                let index = line.IndexOf(needle, startIndex, StringComparison.Ordinal)
+                                if index < 0 then None
+                                else
+                                    let beforeOk = index = 0 || not (isIdentifierChar line.[index - 1])
+                                    let afterIndex = index + needle.Length
+                                    let afterOk = afterIndex >= line.Length || not (isIdentifierChar line.[afterIndex])
+                                    if beforeOk && afterOk then
+                                        Some(mkRange definitionRange.FileName (mkPos (lineIndex + 1) index) (mkPos (lineIndex + 1) afterIndex))
+                                    else
+                                        loop (index + 1)
+
+                            loop 0
+
+                    if startLine > endLine then None
+                    else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
+
+            let allTypeDefinitions (game: IGame) =
+                game.Types()
+                |> Map.toSeq
+                |> Seq.collect (fun (typeName, infos) -> infos |> Seq.map (fun tdi -> typeName, tdi))
+
+            let tryTypeDefinitionAtPosition (game: IGame) filePath position =
+                allTypeDefinitions game
+                |> Seq.tryFind (fun (_, tdi) ->
+                    sameFile tdi.range.FileName filePath
+                    && (tryFindIdentifierRangeInDefinition tdi.range tdi.id
+                        |> Option.exists (fun identifierRange -> rangeContainsPos identifierRange position)))
+
+            let tryTypeDefinitionForRange (game: IGame) (target: range) =
+                allTypeDefinitions game
+                |> Seq.tryFind (fun (_, tdi) ->
+                    sameFile tdi.range.FileName target.FileName
+                    && (sameRange tdi.range target
+                        || rangeContainsRange tdi.range target
+                        || rangeContainsRange target tdi.range))
+
             async {
                 return
                     match gameObj with
                     | Some game ->
                         let position = PosHelper.fromZ p.position.line p.position.character
                         let path = getPathFromDoc p.textDocument.uri
+                        let sourceText = readDocumentText path
+
+                        let typeInfoAtCursor = tryTypeDefinitionAtPosition game path position
+
+                        let typeInfoFromDefinition =
+                            match typeInfoAtCursor with
+                            | Some _ -> None
+                            | None ->
+                                game.GoToType position path sourceText
+                                |> preferCodeDefinitionOverLocalisation
+                                    gameDispatcher
+                                    game
+                                    path
+                                    sourceText
+                                    p.position.line
+                                    p.position.character
+                                |> Option.bind (tryTypeDefinitionForRange game)
+
+                        let typeInfo = typeInfoAtCursor |> Option.orElse typeInfoFromDefinition
 
                         let refs =
-                            game.FindAllRefs
-                                position
-                                path
-                                (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
+                            match typeInfo with
+                            | Some(typeName, tdi) -> game.FindAllRefsByType typeName tdi.id
+                            | None ->
+                                game.FindAllRefs position path sourceText
+                                |> Option.defaultValue []
 
-                        match refs with
-                        | Some gotos when gotos.Length > 0 ->
+                        let definitionRange =
+                            typeInfo
+                            |> Option.bind (fun (_, tdi) -> tryFindIdentifierRangeInDefinition tdi.range tdi.id)
+
+                        let renameRanges =
+                            refs
+                            @ (definitionRange |> Option.toList)
+                            |> List.distinctBy rangeKey
+
+                        match renameRanges with
+                        | gotos when gotos.Length > 0 ->
                             let changes =
                                 gotos
                                 |> List.groupBy (fun r -> r.FileName)

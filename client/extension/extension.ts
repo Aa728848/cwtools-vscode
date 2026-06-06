@@ -30,7 +30,7 @@ import { registerVanillaCompare } from './vanillaCompare';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import type { GameProfile } from './gameProfiles';
-import { IndexService } from './indexing/indexService';
+import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
 
 export let defaultClient: LanguageClient;
 let fileList: FileListItem[];
@@ -126,6 +126,85 @@ function countRuleFiles(folder?: string): number {
 
 function firstWorkspacePath(): string | undefined {
 	return workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function indexedWorkspaceSymbolKind(entry: WorkspaceSymbolEntry): vs.SymbolKind {
+	switch (entry.kind.toLowerCase()) {
+		case 'sprite':
+		case 'spritetype':
+		case 'texture':
+		case 'asset':
+			return vs.SymbolKind.Object;
+		case 'gui':
+		case 'windowtype':
+		case 'containertype':
+		case 'buttontype':
+		case 'icontype':
+			return vs.SymbolKind.Interface;
+		case 'namespace':
+			return vs.SymbolKind.Namespace;
+		case 'event':
+			return vs.SymbolKind.Event;
+		case 'trigger':
+			return vs.SymbolKind.Function;
+		case 'effect':
+			return vs.SymbolKind.Method;
+		case 'modifier':
+			return vs.SymbolKind.Property;
+		default:
+			return entry.source === 'gui' ? vs.SymbolKind.Interface : vs.SymbolKind.Object;
+	}
+}
+
+function workspaceSymbolScore(entry: WorkspaceSymbolEntry, query: string): number {
+	if (!query) return 0;
+	const name = entry.name.toLowerCase();
+	const kind = entry.kind.toLowerCase();
+	if (name === query) return 0;
+	if (name.startsWith(query)) return 1;
+	if (kind === query) return 2;
+	if (kind.startsWith(query)) return 3;
+	if (name.includes(query)) return 4;
+	return 5;
+}
+
+function registerIndexedWorkspaceSymbols(context: ExtensionContext, indexService: IndexService): void {
+	context.subscriptions.push(
+		vs.languages.registerWorkspaceSymbolProvider({
+			async provideWorkspaceSymbols(query, token) {
+				await indexService.ensureWorkspaceSymbolsReady({ includeVanilla: false });
+				if (token.isCancellationRequested) return [];
+
+				const normalizedQuery = query.trim();
+				const queryLower = normalizedQuery.toLowerCase();
+				const entries = [
+					...indexService.queryWorkspaceSymbols({ name: normalizedQuery, source: 'asset', origin: 'workspace', limit: 120 }),
+					...indexService.queryWorkspaceSymbols({ name: normalizedQuery, source: 'gui', origin: 'workspace', limit: 120 }),
+				];
+				const seen = new Set<string>();
+				const unique = entries
+					.filter(entry => {
+						const key = `${entry.file}:${entry.line}:${entry.name}:${entry.kind}`;
+						if (seen.has(key)) return false;
+						seen.add(key);
+						return true;
+					})
+					.sort((a, b) =>
+						workspaceSymbolScore(a, queryLower) - workspaceSymbolScore(b, queryLower)
+						|| a.name.localeCompare(b.name)
+						|| a.file.localeCompare(b.file)
+					)
+					.slice(0, 200);
+
+				return unique.map(entry => {
+					const line = Math.max(0, entry.line - 1);
+					const location = new vs.Location(vs.Uri.file(entry.file), new vs.Range(line, 0, line, 0));
+					const container = entry.container ? `${entry.container} / ${entry.kind}` : entry.kind;
+					return new vs.SymbolInformation(entry.name, indexedWorkspaceSymbolKind(entry), container, location);
+				});
+			}
+		})
+	);
 }
 
 function resolveBundledRulesPath(context: ExtensionContext, languageId: string): string {
@@ -704,6 +783,7 @@ export async function activate(context: ExtensionContext) {
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
 	registerLocalizationFeatures(context, indexService);
+	registerIndexedWorkspaceSymbols(context, indexService);
 
 	// Register completion provider for @ constants in .gui, .asset, .gfx files
 	context.subscriptions.push(
@@ -751,7 +831,9 @@ export async function activate(context: ExtensionContext) {
 	// Fix #8: shared game language list (was duplicated as gameLanguages and gameLanguages2)
 	const gameLanguages = [...getAllLanguageIds(), 'paradox'];
 	const docSelector = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
+	const legacyClientRenameProviderEnabled = false;
 
+	if (legacyClientRenameProviderEnabled) {
 	context.subscriptions.push(
 		vs.languages.registerRenameProvider(docSelector, {
 			async provideRenameEdits(document, position, newName, _token) {
@@ -828,6 +910,7 @@ export async function activate(context: ExtensionContext) {
 			}
 		})
 	);
+	}
 
 	// CodeLens click command — properly converts JSON args to VSCode types
 	safeRegisterCommand(context, 'cwtools.showReferences', async (uriStr: string, pos: any, locs?: any[]) => {

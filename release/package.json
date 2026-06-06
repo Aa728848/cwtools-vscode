@@ -334,6 +334,28 @@
         ],
         "keybindings": [
             {
+                "command": "-acceptRenameInput",
+                "key": "enter",
+                "when": "renameInputVisible && editorTextFocus && !isComposing"
+            },
+            {
+                "command": "acceptRenameInputWithPreview",
+                "key": "enter",
+                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
+            },
+            {
+                "command": "-acceptRenameInputWithPreview",
+                "key": "ctrl+enter",
+                "mac": "cmd+enter",
+                "when": "renameInputVisible && editorTextFocus && !isComposing && config.editor.rename.enablePreview"
+            },
+            {
+                "command": "acceptRenameInput",
+                "key": "ctrl+enter",
+                "mac": "cmd+enter",
+                "when": "renameInputVisible && editorTextFocus && !isComposing"
+            },
+            {
                 "command": "cwtools.ai.reviewFile",
                 "key": "ctrl+shift+r",
                 "mac": "cmd+shift+r",
@@ -1234,6 +1256,7 @@
                 "editor.autoIndent": "none",
                 "editor.wordWrap": "on"
             },
+            "editor.rename.enablePreview": true,
             "files.associations": {
                 "*.shader": "pdx-shader",
                 "*.fxh": "pdx-shader"

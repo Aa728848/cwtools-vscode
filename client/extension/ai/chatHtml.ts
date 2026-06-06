@@ -289,7 +289,35 @@ ${stylesheetLinks}
                 </div>
                 <div class="settings-group">
                     <label class="settings-label">防抖延迟 (ms)</label>
-                    <input class="settings-input" id="inlineDebounce" type="number" min="100" step="100" placeholder="500" />
+                    <input class="settings-input" id="inlineDebounce" type="number" min="100" step="100" placeholder="200" />
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">最大生成 Tokens</label>
+                    <input class="settings-input" id="inlineMaxTokens" type="number" min="16" step="16" placeholder="128" />
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">光标前上下文行数</label>
+                    <input class="settings-input" id="inlineContextBefore" type="number" min="0" step="1" placeholder="20" />
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">光标后上下文行数</label>
+                    <input class="settings-input" id="inlineContextAfter" type="number" min="1" step="1" placeholder="10" />
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">请求超时 (ms)</label>
+                    <input class="settings-input" id="inlineRequestTimeout" type="number" min="500" step="100" placeholder="1500" />
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">MCP 缓存 TTL (ms)</label>
+                    <input class="settings-input" id="inlineMcpCacheTtl" type="number" min="0" step="1000" placeholder="30000" />
+                </div>
+                <div class="settings-toggle-row" style="margin-top:12px;">
+                    <span class="settings-toggle-label">启用 LSP 快路径</span>
+                    <label class="toggle-switch"><input type="checkbox" id="inlineLspFastPath"><span class="toggle-track"></span></label>
+                </div>
+                <div class="settings-toggle-row" style="margin-top:12px;">
+                    <span class="settings-toggle-label">注入 MCP 上下文</span>
+                    <label class="toggle-switch"><input type="checkbox" id="inlineIncludeMcp"><span class="toggle-track"></span></label>
                 </div>
                 <div class="settings-toggle-row" style="margin-top:12px;">
                     <span class="settings-toggle-label">防重叠代码修剪 (Overlap Stripping)</span>

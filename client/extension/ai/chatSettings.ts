@@ -71,6 +71,13 @@ export class ChatSettingsManager {
                 model: config.inlineCompletion.model,
                 endpoint: config.inlineCompletion.endpoint,
                 debounceMs: config.inlineCompletion.debounceMs,
+                maxTokens: config.inlineCompletion.maxTokens,
+                contextBeforeLines: config.inlineCompletion.contextBeforeLines,
+                contextAfterLines: config.inlineCompletion.contextAfterLines,
+                includeMcpContext: config.inlineCompletion.includeMcpContext,
+                mcpCacheTtlMs: config.inlineCompletion.mcpCacheTtlMs,
+                requestTimeoutMs: config.inlineCompletion.requestTimeoutMs,
+                lspFastPath: config.inlineCompletion.lspFastPath,
                 overlapStripping: config.inlineCompletion.overlapStripping,
             },
             mcp: {
@@ -188,6 +195,13 @@ export class ChatSettingsManager {
             await cfg.update('inlineCompletion.model', settings.inlineCompletion.model, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.endpoint', settings.inlineCompletion.endpoint, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.maxTokens', settings.inlineCompletion.maxTokens, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.contextBeforeLines', settings.inlineCompletion.contextBeforeLines, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.contextAfterLines', settings.inlineCompletion.contextAfterLines, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.includeMcpContext', settings.inlineCompletion.includeMcpContext, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.mcpCacheTtlMs', settings.inlineCompletion.mcpCacheTtlMs, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.requestTimeoutMs', settings.inlineCompletion.requestTimeoutMs, vs.ConfigurationTarget.Global);
+            await cfg.update('inlineCompletion.lspFastPath', settings.inlineCompletion.lspFastPath, vs.ConfigurationTarget.Global);
             await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
         }
 

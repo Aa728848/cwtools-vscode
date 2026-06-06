@@ -5969,8 +5969,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         (document.getElementById('inlineEnabled') as HTMLInputElement).checked = current.inlineCompletion?.enabled ?? false;
         const overlapEl = document.getElementById('inlineOverlapStripping') as HTMLInputElement | null;
         if (overlapEl) overlapEl.checked = current.inlineCompletion?.overlapStripping ?? true;
+        const lspFastPathEl = document.getElementById('inlineLspFastPath') as HTMLInputElement | null;
+        if (lspFastPathEl) lspFastPathEl.checked = current.inlineCompletion?.lspFastPath ?? true;
+        const includeMcpEl = document.getElementById('inlineIncludeMcp') as HTMLInputElement | null;
+        if (includeMcpEl) includeMcpEl.checked = current.inlineCompletion?.includeMcpContext ?? false;
         (document.getElementById('inlineEndpoint') as HTMLInputElement).value = current.inlineCompletion?.endpoint || '';
-        (document.getElementById('inlineDebounce') as HTMLInputElement).value = current.inlineCompletion?.debounceMs || 500;
+        (document.getElementById('inlineDebounce') as HTMLInputElement).value = String(current.inlineCompletion?.debounceMs ?? 200);
+        (document.getElementById('inlineMaxTokens') as HTMLInputElement).value = String(current.inlineCompletion?.maxTokens ?? 128);
+        (document.getElementById('inlineContextBefore') as HTMLInputElement).value = String(current.inlineCompletion?.contextBeforeLines ?? 20);
+        (document.getElementById('inlineContextAfter') as HTMLInputElement).value = String(current.inlineCompletion?.contextAfterLines ?? 10);
+        (document.getElementById('inlineRequestTimeout') as HTMLInputElement).value = String(current.inlineCompletion?.requestTimeoutMs ?? 1500);
+        (document.getElementById('inlineMcpCacheTtl') as HTMLInputElement).value = String(current.inlineCompletion?.mcpCacheTtlMs ?? 30000);
         (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'confirm';
         updateQuickWriteModeSelector(current.agentFileWriteMode || 'confirm');
         // Brave Search API key — show masked placeholder if already set
@@ -6385,6 +6394,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return (document.getElementById('settingsModelInput') as HTMLInputElement).value.trim();
     }
 
+    function parseInlineNumber(id: string, fallback: number): number {
+        const el = document.getElementById(id) as HTMLInputElement | null;
+        const parsed = parseInt(el?.value || '', 10);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
     function toggleAccordion(id: string) { document.getElementById(id)!.classList.toggle('open'); }
 
     function saveSettings() {
@@ -6432,7 +6447,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     provider: (document.getElementById('inlineProvider') as HTMLSelectElement).value,
                     model: (document.getElementById('inlineModelInput') as HTMLInputElement).value.trim(),
                     endpoint: (document.getElementById('inlineEndpoint') as HTMLInputElement).value.trim(),
-                    debounceMs: parseInt((document.getElementById('inlineDebounce') as HTMLInputElement).value) || 500,
+                    debounceMs: parseInlineNumber('inlineDebounce', 200),
+                    maxTokens: parseInlineNumber('inlineMaxTokens', 128),
+                    contextBeforeLines: parseInlineNumber('inlineContextBefore', 20),
+                    contextAfterLines: parseInlineNumber('inlineContextAfter', 10),
+                    includeMcpContext: (document.getElementById('inlineIncludeMcp') as HTMLInputElement | null)?.checked ?? false,
+                    mcpCacheTtlMs: parseInlineNumber('inlineMcpCacheTtl', 30000),
+                    requestTimeoutMs: parseInlineNumber('inlineRequestTimeout', 1500),
+                    lspFastPath: (document.getElementById('inlineLspFastPath') as HTMLInputElement | null)?.checked ?? true,
                     overlapStripping: (document.getElementById('inlineOverlapStripping') as HTMLInputElement | null)?.checked ?? true,
                 },
                 mcp: { servers: mcpServers },
@@ -6467,7 +6489,21 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
                 maxContextTokens: 0, agentFileWriteMode: 'confirm',
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
-                inlineCompletion: { enabled: false, provider: '', model: '', endpoint: '', debounceMs: 1500 },
+                inlineCompletion: {
+                    enabled: false,
+                    provider: '',
+                    model: '',
+                    endpoint: '',
+                    debounceMs: 200,
+                    maxTokens: 128,
+                    contextBeforeLines: 20,
+                    contextAfterLines: 10,
+                    includeMcpContext: false,
+                    mcpCacheTtlMs: 30000,
+                    requestTimeoutMs: 1500,
+                    lspFastPath: true,
+                    overlapStripping: true
+                },
                 mcp: { servers: [] }
             }
         });

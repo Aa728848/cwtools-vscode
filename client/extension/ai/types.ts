@@ -98,6 +98,13 @@ export interface AIUserConfig {
     inlineCompletion: {
         enabled: boolean;
         debounceMs: number;
+        maxTokens: number;
+        contextBeforeLines: number;
+        contextAfterLines: number;
+        includeMcpContext: boolean;
+        mcpCacheTtlMs: number;
+        requestTimeoutMs: number;
+        lspFastPath: boolean;
         provider: string;
         model: string;
         endpoint: string;
@@ -1748,6 +1755,13 @@ export interface PanelSettings {
         model: string;
         endpoint: string;
         debounceMs: number;
+        maxTokens: number;
+        contextBeforeLines: number;
+        contextAfterLines: number;
+        includeMcpContext: boolean;
+        mcpCacheTtlMs: number;
+        requestTimeoutMs: number;
+        lspFastPath: boolean;
         overlapStripping: boolean;
     };
     mcp?: {

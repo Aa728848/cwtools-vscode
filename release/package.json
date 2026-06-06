@@ -701,10 +701,62 @@
                 "cwtools.ai.inlineCompletion.debounceMs": {
                     "scope": "window",
                     "type": "integer",
-                    "default": 500,
-                    "minimum": 200,
+                    "default": 200,
+                    "minimum": 100,
                     "maximum": 5000,
                     "description": "%configuration.cwtools.ai.inlineCompletion.debounceMs.description%"
+                },
+                "cwtools.ai.inlineCompletion.maxTokens": {
+                    "scope": "window",
+                    "type": "integer",
+                    "default": 128,
+                    "minimum": 16,
+                    "maximum": 1024,
+                    "description": "%configuration.cwtools.ai.inlineCompletion.maxTokens.description%"
+                },
+                "cwtools.ai.inlineCompletion.contextBeforeLines": {
+                    "scope": "window",
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 0,
+                    "maximum": 200,
+                    "description": "%configuration.cwtools.ai.inlineCompletion.contextBeforeLines.description%"
+                },
+                "cwtools.ai.inlineCompletion.contextAfterLines": {
+                    "scope": "window",
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 200,
+                    "description": "%configuration.cwtools.ai.inlineCompletion.contextAfterLines.description%"
+                },
+                "cwtools.ai.inlineCompletion.includeMcpContext": {
+                    "scope": "window",
+                    "type": "boolean",
+                    "default": false,
+                    "description": "%configuration.cwtools.ai.inlineCompletion.includeMcpContext.description%"
+                },
+                "cwtools.ai.inlineCompletion.mcpCacheTtlMs": {
+                    "scope": "window",
+                    "type": "integer",
+                    "default": 30000,
+                    "minimum": 0,
+                    "maximum": 300000,
+                    "description": "%configuration.cwtools.ai.inlineCompletion.mcpCacheTtlMs.description%"
+                },
+                "cwtools.ai.inlineCompletion.requestTimeoutMs": {
+                    "scope": "window",
+                    "type": "integer",
+                    "default": 1500,
+                    "minimum": 500,
+                    "maximum": 30000,
+                    "description": "%configuration.cwtools.ai.inlineCompletion.requestTimeoutMs.description%"
+                },
+                "cwtools.ai.inlineCompletion.lspFastPath": {
+                    "scope": "window",
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%configuration.cwtools.ai.inlineCompletion.lspFastPath.description%"
                 },
                 "cwtools.ai.inlineCompletion.overlapStripping": {
                     "scope": "window",

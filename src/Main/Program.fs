@@ -1938,32 +1938,46 @@ type Server(client: ILanguageClient) =
     let revalidateDeferredDynamicFiles (files: string list) =
         match gameObj with
         | None -> ()
-        | Some game ->
-            for path in files do
-                try
-                    let filetext =
-                        try docs.GetText(FileInfo(path)) with _ -> None
-                    gameStateLock.EnterWriteLock()
-                    let astErrors =
-                        try game.UpdateFile false path filetext
-                        finally gameStateLock.ExitWriteLock()
+        | Some game when not files.IsEmpty ->
+            try
+                let normalisedTargets = files |> List.map normaliseCachePath |> Set.ofList
+                gameStateLock.EnterWriteLock()
+                let valErrors =
+                    try
+                        game.ValidationErrors()
                         |> List.map (fun e ->
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
-                    let locErrors =
+                    finally
+                        gameStateLock.ExitWriteLock()
+                let diagsByFile =
+                    valErrors
+                    |> List.map parserErrorToDiagnostics
+                    |> List.filter diagnosticFilter
+                    |> List.filter (fun (f, _) -> normalisedTargets.Contains(normaliseCachePath f))
+                    |> List.groupBy (fun (f, _) -> normaliseCachePath f)
+                    |> Map.ofList
+                let epoch = nextDiagnosticEpoch ()
+                for path in files do
+                    let valDiags =
+                        diagsByFile
+                        |> Map.tryFind (normaliseCachePath path)
+                        |> Option.map (List.map snd)
+                        |> Option.defaultValue []
+                    let locDiags =
                         match locCache.TryGetValue(path) with
                         | true, errors ->
                             errors
                             |> List.map (fun e ->
                                 (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                            |> List.map parserErrorToDiagnostics
+                            |> List.filter diagnosticFilter
+                            |> List.map snd
                         | false, _ -> []
-                    let visible =
-                        (astErrors @ locErrors)
-                        |> List.map parserErrorToDiagnostics
-                        |> List.filter diagnosticFilter
-                    let fileDiags = diagnosticsForFile path visible
+                    let fileDiags = valDiags @ locDiags
                     client.PublishDiagnostics { uri = diagnosticUri path; diagnostics = fileDiags }
-                    setFileDiagnosticState path Fresh [] fileDiags
-                with e -> logDiag $"Deferred dynamic revalidation failed for {path}: {e.Message}"
+                    setFileDiagnosticStateWithEpoch path epoch Fresh [] fileDiags
+            with e -> logDiag $"Deferred dynamic revalidation failed: {e.Message}"
+        | _ -> ()
 
     let scheduleDeferredDynamicRevalidation (files: string list) =
         let delay = max 0 dynamicDeferDelayMs
@@ -3438,8 +3452,6 @@ type Server(client: ILanguageClient) =
                     )
                 )
 
-                // 若保存的是 inline_script 模板，连带重验证其直接 caller —— inline_script
-                // 改动会改变 caller 的展开结果，否则 caller 诊断要等下次打开/编辑才刷新。
                 let savedPath = (getPathFromDoc p.textDocument.uri).Replace('\\', '/').ToLowerInvariant()
                 let marker = "/common/inline_scripts/"
                 let markerIdx = savedPath.IndexOf(marker, StringComparison.Ordinal)
@@ -3449,7 +3461,7 @@ type Server(client: ILanguageClient) =
                         try
                             let scriptName = savedPath.Substring(markerIdx + marker.Length)
                             for caller in game.GetInlineScriptCallers scriptName do
-                                lintAgent.Post(UpdateRequest({ uri = diagnosticUri caller; version = 0 }, true))
+                                lintAgent.Post(OpenRequest({ uri = diagnosticUri caller; version = 0 }))
                         with e -> logDiag $"inline_script caller re-lint failed: {e.Message}"
                     | None -> ()
             }

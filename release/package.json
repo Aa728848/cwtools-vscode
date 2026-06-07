@@ -558,6 +558,26 @@
                     "default": 2,
                     "description": "%configuration.cwtools.maxFileSize.description%"
                 },
+                "cwtools.diagnostics.deferDynamicParameterDiagnostics": {
+                    "scope": "window",
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%configuration.cwtools.diagnostics.deferDynamicParameterDiagnostics.description%"
+                },
+                "cwtools.diagnostics.dynamicPreflightTimeoutMs": {
+                    "scope": "window",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 2000,
+                    "description": "%configuration.cwtools.diagnostics.dynamicPreflightTimeoutMs.description%"
+                },
+                "cwtools.diagnostics.dynamicPreflightMaxEntities": {
+                    "scope": "window",
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 2000,
+                    "description": "%configuration.cwtools.diagnostics.dynamicPreflightMaxEntities.description%"
+                },
                 "cwtools.checkForUpdates": {
                     "scope": "window",
                     "type": "boolean",

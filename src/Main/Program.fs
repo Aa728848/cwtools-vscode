@@ -691,6 +691,12 @@ type Server(client: ILanguageClient) =
     let fileDiagnosticStates =
         System.Collections.Concurrent.ConcurrentDictionary<string, FileDiagnosticState>()
 
+    let mutable dynamicPreflightTimeoutMs = 2000
+    let mutable dynamicPreflightMaxEntities = 2000
+    let mutable deferDynamicParameterDiagnostics = true
+    let mutable dynamicDeferDelayMs = 1500
+    let dynamicDeferMaxFiles = 500
+
     let runtimeStateLock = obj()
     let mutable validationRuntimeState =
         { inProgress = false
@@ -1535,6 +1541,13 @@ type Server(client: ILanguageClient) =
              logWarning f
              Uri "/")
 
+    let isDynamicParameterError (code: string) (message: string) (related: CWRelatedError list option) =
+        code = "CW274"
+        || message.Contains("results in an error")
+        || (match related with
+            | Some rs -> rs |> List.exists (fun (r: CWRelatedError) -> r.message = "Related source")
+            | None -> false)
+
     let parserErrorToDiagnostics e =
         let code, sev, file, error, (position: range), length, related = e
 
@@ -1921,6 +1934,45 @@ type Server(client: ILanguageClient) =
             perfLintCount <- perfLintCount + 1
             maybePerfReport "lint"
         }
+
+    let revalidateDeferredDynamicFiles (files: string list) =
+        match gameObj with
+        | None -> ()
+        | Some game ->
+            for path in files do
+                try
+                    let filetext =
+                        try docs.GetText(FileInfo(path)) with _ -> None
+                    gameStateLock.EnterWriteLock()
+                    let astErrors =
+                        try game.UpdateFile false path filetext
+                        finally gameStateLock.ExitWriteLock()
+                        |> List.map (fun e ->
+                            (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                    let locErrors =
+                        match locCache.TryGetValue(path) with
+                        | true, errors ->
+                            errors
+                            |> List.map (fun e ->
+                                (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                        | false, _ -> []
+                    let visible =
+                        (astErrors @ locErrors)
+                        |> List.map parserErrorToDiagnostics
+                        |> List.filter diagnosticFilter
+                    let fileDiags = diagnosticsForFile path visible
+                    client.PublishDiagnostics { uri = diagnosticUri path; diagnostics = fileDiags }
+                    setFileDiagnosticState path Fresh [] fileDiags
+                with e -> logDiag $"Deferred dynamic revalidation failed for {path}: {e.Message}"
+
+    let scheduleDeferredDynamicRevalidation (files: string list) =
+        let delay = max 0 dynamicDeferDelayMs
+        Task.Run(fun () ->
+            try
+                if delay > 0 then System.Threading.Thread.Sleep(delay)
+                revalidateDeferredDynamicFiles files
+            with e -> logDiag $"Deferred dynamic revalidation scheduling failed: {e.Message}")
+        |> ignore
 
     let mutable delayTime = TimeSpan(0, 0, 5)
 
@@ -2769,11 +2821,44 @@ type Server(client: ILanguageClient) =
                            "enable", JsonValue.Boolean(true) |]
                 )
 
-                let valErrors =
+                (try
+                    let preflightSw = Stopwatch.StartNew()
+                    let forced =
+                        game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
+                    preflightSw.Stop()
+                    logDiag
+                        $"Dynamic parameter preflight forced {forced} entities in {preflightSw.ElapsedMilliseconds}ms (timeout {dynamicPreflightTimeoutMs}ms, cap {dynamicPreflightMaxEntities})"
+                 with e -> logDiag $"Dynamic parameter preflight error: {e.Message}")
+
+                let allValErrors =
                     game.ValidationErrors()
                     |> List.map (fun e ->
                         (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
-                validationErrorCount <- valErrors.Length
+                validationErrorCount <- allValErrors.Length
+
+                let dynamicErrors, plainErrors =
+                    if deferDynamicParameterDiagnostics then
+                        allValErrors
+                        |> List.partition (fun (code, _, _, message, _, _, related) ->
+                            isDynamicParameterError code message related)
+                    else
+                        [], allValErrors
+
+                let candidateDeferredFiles =
+                    dynamicErrors
+                    |> List.map (fun (_, _, f, _, _, _, _) -> f)
+                    |> List.distinctBy normaliseCachePath
+
+                let useDefer =
+                    not candidateDeferredFiles.IsEmpty
+                    && candidateDeferredFiles.Length <= dynamicDeferMaxFiles
+
+                let valErrors = if useDefer then plainErrors else allValErrors
+                let deferredFiles = if useDefer then candidateDeferredFiles else []
+
+                if useDefer then
+                    logDiag
+                        $"Deferring {dynamicErrors.Length} dynamic-parameter diagnostics across {deferredFiles.Length} files until post-load revalidation"
 
                 let locRaw = game.LocalisationErrors(true, true)
                 localisationErrorCount <- locRaw.Length
@@ -2802,6 +2887,13 @@ type Server(client: ILanguageClient) =
 
                 let loadedNormalised = loadedFilePaths |> List.map normaliseCachePath |> Set.ofList
                 let loadEpoch = nextDiagnosticEpoch ()
+                let deferredNormalised = deferredFiles |> List.map normaliseCachePath |> Set.ofList
+
+                let initialFreshnessFor filePath =
+                    if deferredNormalised.Contains(normaliseCachePath filePath) then
+                        Pending, [ "dynamicParameters" ]
+                    else
+                        Fresh, []
 
                 for filePath in loadedFilePaths do
                     let diagnostics =
@@ -2809,15 +2901,23 @@ type Server(client: ILanguageClient) =
                         |> Map.tryFind (normaliseCachePath filePath)
                         |> Option.map (List.map snd)
                         |> Option.defaultValue []
-                    setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] diagnostics
+                    let freshness, pendingKinds = initialFreshnessFor filePath
+                    setFileDiagnosticStateWithEpoch filePath loadEpoch freshness pendingKinds diagnostics
 
                 diagnosticsByFile
                 |> Map.toSeq
                 |> Seq.iter (fun (_, entries) ->
                     match entries with
                     | (filePath, _) :: _ when not (loadedNormalised.Contains(normaliseCachePath filePath)) ->
-                        setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] (entries |> List.map snd)
+                        let freshness, pendingKinds = initialFreshnessFor filePath
+                        setFileDiagnosticStateWithEpoch filePath loadEpoch freshness pendingKinds (entries |> List.map snd)
                     | _ -> ())
+
+                if useDefer then
+                    for filePath in deferredFiles do
+                        if not (fileDiagnosticStates.ContainsKey filePath) then
+                            setFileDiagnosticStateWithEpoch filePath loadEpoch Pending [ "dynamicParameters" ] []
+                    scheduleDeferredDynamicRevalidation deferredFiles
 
                 // L6 Fix: non-blocking optimised GC avoids a 100ms freeze on load
                 maybeCollectGarbage ()
@@ -3191,6 +3291,21 @@ type Server(client: ILanguageClient) =
                 | JsonValue.Number x -> maxFileSize <- int x
                 | _ -> ()
 
+                let applyDiagnosticsConfig () =
+                    try
+                        let diag = config.Item("diagnostics")
+                        match diag.Item("deferDynamicParameterDiagnostics") with
+                        | JsonValue.Boolean b -> deferDynamicParameterDiagnostics <- b
+                        | _ -> ()
+                        match diag.Item("dynamicPreflightTimeoutMs") with
+                        | JsonValue.Number x -> dynamicPreflightTimeoutMs <- max 0 (int x)
+                        | _ -> ()
+                        match diag.Item("dynamicPreflightMaxEntities") with
+                        | JsonValue.Number x -> dynamicPreflightMaxEntities <- max 0 (int x)
+                        | _ -> ()
+                    with _ -> ()
+                applyDiagnosticsConfig ()
+
                 logInfo $"New configuration %s{p.ToString()} - requiresReload: %b{requiresReload}"
 
                 match cachePath with
@@ -3322,6 +3437,21 @@ type Server(client: ILanguageClient) =
                         true
                     )
                 )
+
+                // 若保存的是 inline_script 模板，连带重验证其直接 caller —— inline_script
+                // 改动会改变 caller 的展开结果，否则 caller 诊断要等下次打开/编辑才刷新。
+                let savedPath = (getPathFromDoc p.textDocument.uri).Replace('\\', '/').ToLowerInvariant()
+                let marker = "/common/inline_scripts/"
+                let markerIdx = savedPath.IndexOf(marker, StringComparison.Ordinal)
+                if markerIdx >= 0 then
+                    match gameObj with
+                    | Some game ->
+                        try
+                            let scriptName = savedPath.Substring(markerIdx + marker.Length)
+                            for caller in game.GetInlineScriptCallers scriptName do
+                                lintAgent.Post(UpdateRequest({ uri = diagnosticUri caller; version = 0 }, true))
+                        with e -> logDiag $"inline_script caller re-lint failed: {e.Message}"
+                    | None -> ()
             }
 
         member this.DidCloseTextDocument(p: DidCloseTextDocumentParams) = async { 

@@ -1524,7 +1524,7 @@ async function fetchTextureRaw(uri: string): Promise<THREE.Texture | null> {
         }
 
         // Fetch binary DDS via webview resource URI
-        if (uri.includes('.dds')) {
+        if (uri.toLowerCase().includes('.dds')) {
             const resp = await fetch(uri);
             if (!resp.ok) return null;
             const buffer = await resp.arrayBuffer();

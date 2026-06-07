@@ -10,6 +10,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { decodeDds, decodeTga, type DdsResult } from './ddsDecoder';
+import { matchesExt, stripExt } from './fileExtensions';
+import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 
 // ─── LRU Cache ──────────────────────────────────────────────────────────────
 
@@ -343,7 +345,7 @@ async function scanDirForGfx(
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
                 await scanDirForGfx(full, map, scannedFiles, maxFiles);
-            } else if (entry.name.endsWith('.gfx')) {
+            } else if (matchesExt(entry.name, '.gfx')) {
                 scannedFiles.count++;
                 try {
                     const content = await fs.promises.readFile(full, 'utf-8');
@@ -537,9 +539,9 @@ async function scanRooms(): Promise<RoomEntry[]> {
     const seen = new Set<string>();
 
     // Workspace files
-    const uris = await vs.workspace.findFiles('gfx/portraits/city_sets/**/*.dds');
+    const uris = await vs.workspace.findFiles('gfx/portraits/city_sets/**/*.[dD][dD][sS]');
     for (const uri of uris) {
-        const base = path.basename(uri.fsPath, '.dds');
+        const base = stripExt(path.basename(uri.fsPath), '.dds');
         if (!seen.has(base)) {
             seen.add(base);
             entries.push({ name: base, uri });
@@ -566,8 +568,8 @@ async function scanDirForDds(dir: string, entries: RoomEntry[], seen: Set<string
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
                 await scanDirForDds(full, entries, seen);
-            } else if (entry.name.endsWith('.dds')) {
-                const base = path.basename(entry.name, '.dds');
+            } else if (matchesExt(entry.name, '.dds')) {
+                const base = stripExt(entry.name, '.dds');
                 if (!seen.has(base)) {
                     seen.add(base);
                     entries.push({ name: base, uri: vs.Uri.file(full) });
@@ -662,12 +664,14 @@ function resolveAssetPath(document: vs.TextDocument, relativePath: string): stri
     // Search all roots (workspace + vanilla)
     for (const root of getSearchRoots()) {
         const full = path.join(root, rootRelativePath);
-        if (fs.existsSync(full)) return full;
+        const resolved = fs.existsSync(full) ? full : resolveCaseInsensitivePath(full);
+        if (resolved) return resolved;
     }
 
     // Try relative to the document itself (for files outside workspace)
     const fromDoc = path.join(path.dirname(document.uri.fsPath), rootRelativePath);
-    if (fs.existsSync(fromDoc)) return fromDoc;
+    const resolvedFromDoc = fs.existsSync(fromDoc) ? fromDoc : resolveCaseInsensitivePath(fromDoc);
+    if (resolvedFromDoc) return resolvedFromDoc;
 
     return null;
 }
@@ -682,7 +686,8 @@ function resolveAssetPathRaw(relativePath: string): string | null {
     const rootRelativePath = normalized.replace(/^[\\/]+/, '');
     for (const root of getSearchRoots()) {
         const full = path.join(root, rootRelativePath);
-        if (fs.existsSync(full)) return full;
+        const resolved = fs.existsSync(full) ? full : resolveCaseInsensitivePath(full);
+        if (resolved) return resolved;
     }
     return null;
 }
@@ -784,7 +789,7 @@ function cleanupOldTempFiles() {
         const files = fs.readdirSync(tmp);
         const now = Date.now();
         for (const file of files) {
-            if (file.startsWith('cwt_prev_') && file.endsWith('.png')) {
+            if (file.startsWith('cwt_prev_') && matchesExt(file, '.png')) {
                 const fullPath = path.join(tmp, file);
                 const stat = fs.statSync(fullPath);
                 // Delete if older than 24 hours
@@ -850,7 +855,7 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
     gfxWatcher.onDidCreate(() => { gfxIndexDirty = true; });
     gfxWatcher.onDidDelete(() => { gfxIndexDirty = true; });
 
-    const roomWatcher = vs.workspace.createFileSystemWatcher('**/gfx/portraits/city_sets/**/*.dds');
+    const roomWatcher = vs.workspace.createFileSystemWatcher('**/gfx/portraits/city_sets/**/*.[dD][dD][sS]');
     context.subscriptions.push(roomWatcher);
     roomWatcher.onDidChange(() => { roomCacheDirty = true; });
     roomWatcher.onDidCreate(() => { roomCacheDirty = true; });
@@ -858,7 +863,7 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
 
     // Clear image cache when workspace changes significantly
     const textWatcher = vs.workspace.onDidSaveTextDocument(doc => {
-        if (doc.fileName.endsWith('.gfx')) {
+        if (matchesExt(doc.fileName, '.gfx')) {
             gfxIndexDirty = true;
         }
     });

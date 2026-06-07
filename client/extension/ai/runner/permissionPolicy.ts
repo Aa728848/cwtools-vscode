@@ -1,5 +1,5 @@
 import { getProjectWorkspaceRoot } from '../workspacePaths';
-import * as path from 'path';
+import { isPathInsideOrEqual } from '../workspaceSandbox';
 
 export interface PermissionRule {
     id: string;
@@ -77,13 +77,9 @@ export class PermissionPolicyStore {
                 const command = (args['CommandLine'] as string) || '';
                 const cwd = (args['Cwd'] as string) || wsRoot;
 
-                // 2. 严格的路径包含关系校验：防止 startsWith 产生目录前缀截断绕过（如 /workspace 与 /workspace-malicious）
-                const normScope = path.resolve(rule.cwdScope).toLowerCase();
-                const normCwd = path.resolve(cwd).toLowerCase();
-                const relative = path.relative(normScope, normCwd);
-                const isSubdir = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-
-                if (!isSubdir) {
+                // 2. 严格的路径包含关系校验：复用 isPathInsideOrEqual（平台条件折叠 + 防目录前缀截断绕过，
+                //    如 /workspace 与 /workspace-malicious）。Windows 折叠大小写、Linux/macOS 区分大小写。
+                if (!isPathInsideOrEqual(cwd, rule.cwdScope)) {
                     continue;
                 }
 

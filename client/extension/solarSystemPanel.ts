@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import { parseSolarSystemFile, resolveValue, type SolarSystem, type CelestialBody } from './solarSystemParser';
 import { decodeDds, decodeTga } from './ddsDecoder';
 import { buildSpriteIndex, type SpriteInfo } from './guiParser';
+import { matchesExt, matchesAnyExt } from './fileExtensions';
 
 // ── WebView message types ──────────────────────────────────────────────────────
 type SolarPanelMessage =
@@ -90,7 +91,7 @@ export class SolarSystemPanel {
         const invalidateSpriteCache = (uri: vscode.Uri) => {
             if (!this._spriteIndexCache) return;
             const key = uri.fsPath.replace(/\\/g, '/').toLowerCase();
-            if (key.endsWith('.gfx')) {
+            if (matchesExt(key, '.gfx')) {
                 this._spriteIndexCache = null;
             }
         };
@@ -230,7 +231,7 @@ export class SolarSystemPanel {
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
                     await this._findGfxFiles(full, result, maxFiles);
-                } else if (entry.name.endsWith('.gfx')) {
+                } else if (matchesExt(entry.name, '.gfx')) {
                     try {
                         const content = await fs.promises.readFile(full, 'utf-8');
                         result.push({ path: full, content });
@@ -250,7 +251,7 @@ export class SolarSystemPanel {
                 try {
                     const entries = await fs.promises.readdir(dir, { withFileTypes: true });
                     await Promise.all(entries.map(async (entry) => {
-                        if (!entry.isFile() || !entry.name.endsWith('.txt')) return;
+                        if (!entry.isFile() || !matchesExt(entry.name, '.txt')) return;
                         try {
                             const content = await fs.promises.readFile(path.join(dir, entry.name), 'utf-8');
                             const rootRegex = /(?:^|\n)([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{/g;
@@ -377,7 +378,7 @@ export class SolarSystemPanel {
                 try {
                     const entries = await fs.promises.readdir(envDir, { withFileTypes: true });
                     for (const e of entries) {
-                        if (e.isFile() && e.name.toLowerCase().startsWith(pic.toLowerCase() + '_') && (e.name.endsWith('.dds') || e.name.endsWith('.png') || e.name.endsWith('.tga'))) {
+                        if (e.isFile() && e.name.toLowerCase().startsWith(pic.toLowerCase() + '_') && matchesAnyExt(e.name, ['.dds', '.png', '.tga'])) {
                             const match = e.name.substring(pic.length + 1).match(/^(sky|l0[0-9])/i);
                             if (match) {
                                 const group = match[1]!.toLowerCase();
@@ -534,7 +535,7 @@ export class SolarSystemPanel {
                 for (const e of entries) {
                     if (e.isDirectory()) {
                         await scanDir(path.join(dirPath, e.name));
-                    } else if (e.isFile() && e.name.endsWith('.yml')) {
+                    } else if (e.isFile() && matchesExt(e.name, '.yml')) {
                         const isTarget = targetLangs.some(lang => e.name.toLowerCase().includes(`l_${lang}.yml`));
                         if (isTarget) {
                             try {

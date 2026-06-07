@@ -5,6 +5,7 @@ import type { AgentMode } from '../types';
 import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { FILE_SCOPED_WRITE_TOOLS, MUTATING_TOOLS, SUB_AGENT_EXCLUDES } from '../tools/registry';
+import { isPathInsideOrEqual, foldPathCase } from '../workspaceSandbox';
 
 /**
  * Orchestrator 子 Agent 物理沙盒隔离规范 (Sub-Agent Sandbox)
@@ -74,7 +75,7 @@ export function buildSubAgentSandbox(
         // 2.3 融合 taskNode.plannedFiles 明确规划的物理变更文件路径
         if (taskNode.plannedFiles && taskNode.plannedFiles.length > 0) {
             taskNode.plannedFiles.forEach(f => {
-                scopes.push(path.normalize(f).toLowerCase());
+                scopes.push(path.normalize(f));
             });
         }
 
@@ -96,48 +97,32 @@ export function buildSubAgentSandbox(
     return sandbox;
 }
 
-/**
- * 在 Host 层拦截子 Agent 的工具与路径调用，执行沙盒安全强校验
- */
+
 function targetMatchesWriteScope(targetFile: string, writeScope: string[], workspaceRoot: string): boolean {
     const absTarget = path.isAbsolute(targetFile) ? targetFile : path.resolve(workspaceRoot, targetFile);
-    const relTarget = path.relative(workspaceRoot, absTarget).replace(/\\/g, '/').toLowerCase();
+    const relTarget = foldPathCase(path.relative(workspaceRoot, absTarget).replace(/\\/g, '/'));
 
     for (const scope of writeScope) {
-        const absScope = path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope);
-        const relScope = path.relative(workspaceRoot, absScope).replace(/\\/g, '/').toLowerCase();
+        const scopeLower = scope.toLowerCase();
 
-        if (
-            scope.startsWith('.') &&
-            scope.toLowerCase() !== TOPIC_ARTIFACT_SCOPE &&
-            relTarget.endsWith(scope.toLowerCase())
-        ) {
-            return true;
+        if (scope.startsWith('.') && scopeLower !== TOPIC_ARTIFACT_SCOPE) {
+            if (relTarget.endsWith(foldPathCase(scope))) return true;
+            continue;
         }
-        if (
-            scope.toLowerCase() === TOPIC_ARTIFACT_SCOPE &&
-            (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`))
-        ) {
-            return true;
+
+        if (scopeLower === TOPIC_ARTIFACT_SCOPE) {
+            if (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`)) return true;
+            continue;
         }
-        if (scope.toLowerCase() === 'localisation' && relTarget.includes('localisation')) {
-            return true;
+
+        if (scopeLower === 'localisation') {
+            if (relTarget.toLowerCase().includes('localisation')) return true;
+            continue;
         }
-        if (relTarget.includes(relScope) || relTarget === relScope) {
-            return true;
-        }
-        if (!scope.startsWith('.') && scope.toLowerCase() !== 'localisation') {
-            const ext = path.extname(relScope);
-            if (ext) {
-                const relScopeDir = path.dirname(relScope).replace(/\\/g, '/');
-                if (relScopeDir && relScopeDir !== '.' && relScopeDir !== '/' && relScopeDir !== '') {
-                    const requiredPrefix = relScopeDir.endsWith('/') ? relScopeDir : relScopeDir + '/';
-                    if (relTarget.startsWith(requiredPrefix) || relTarget === relScopeDir) {
-                        return true;
-                    }
-                }
-            }
-        }
+
+        const absScope = path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope);
+        const scopeRoot = path.extname(absScope) ? path.dirname(absScope) : absScope;
+        if (isPathInsideOrEqual(absTarget, scopeRoot)) return true;
     }
 
     return false;
@@ -205,10 +190,6 @@ export function enforceSubAgentSafety(
             return { allowed: true }; // 参数为空时不作硬路径拦截，防止报错
         }
 
-        // 将目标物理路径规格化为统一的工作区正斜杠相对路径
-        const absTarget = path.isAbsolute(targetFile) ? targetFile : path.resolve(workspaceRoot, targetFile);
-        const relTarget = path.relative(workspaceRoot, absTarget).replace(/\\/g, '/').toLowerCase();
-
         if (sandbox.writeScope && sandbox.writeScope.length > 0 && targetFiles.length > 1) {
             const invalidTarget = targetFiles.find(target => !targetMatchesWriteScope(target, sandbox.writeScope!, workspaceRoot));
             if (invalidTarget) {
@@ -219,58 +200,9 @@ export function enforceSubAgentSafety(
             }
         }
 
-        // 如果存在具体的限制范围，验证写入是否越权越界
+        // 单文件写入校验：复用 targetMatchesWriteScope 作为唯一权威实现，避免双份逻辑漂移
         if (sandbox.writeScope && sandbox.writeScope.length > 0) {
-            let matchesScope = false;
-            for (const scope of sandbox.writeScope) {
-                // 将许可范围也规格化为统一的工作区正斜杠相对路径
-                const absScope = path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope);
-                const relScope = path.relative(workspaceRoot, absScope).replace(/\\/g, '/').toLowerCase();
-
-                // 1) 后缀或子片段模糊约束 (如 '.gui' 或 'localisation')
-                if (
-                    scope.startsWith('.') &&
-                    scope.toLowerCase() !== TOPIC_ARTIFACT_SCOPE &&
-                    relTarget.endsWith(scope.toLowerCase())
-                ) {
-                    matchesScope = true;
-                    break;
-                }
-                if (
-                    scope.toLowerCase() === TOPIC_ARTIFACT_SCOPE &&
-                    (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`))
-                ) {
-                    matchesScope = true;
-                    break;
-                }
-                if (scope.toLowerCase() === 'localisation' && relTarget.includes('localisation')) {
-                    matchesScope = true;
-                    break;
-                }
-
-                // 2) 物理相对路径完全或前缀匹配
-                if (relTarget.includes(relScope) || relTarget === relScope) {
-                    matchesScope = true;
-                    break;
-                }
-
-                // 3) 允许在其父目录下进行写入（即同属于一个模块目录，如 common/buildings）
-                if (!scope.startsWith('.') && scope.toLowerCase() !== 'localisation') {
-                    const ext = path.extname(relScope);
-                    if (ext) {
-                        const relScopeDir = path.dirname(relScope).replace(/\\/g, '/');
-                        if (relScopeDir && relScopeDir !== '.' && relScopeDir !== '/' && relScopeDir !== '') {
-                            const requiredPrefix = relScopeDir.endsWith('/') ? relScopeDir : relScopeDir + '/';
-                            if (relTarget.startsWith(requiredPrefix) || relTarget === relScopeDir) {
-                                matchesScope = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (!matchesScope) {
+            if (!targetMatchesWriteScope(targetFile, sandbox.writeScope, workspaceRoot)) {
                 return {
                     allowed: false,
                     reason: `子 Agent 沙盒物理拦截：写入目标文件路径 '${targetFile}' 不在许可的作用域范围 [${sandbox.writeScope.join(', ')}] 内，拒绝操作。`

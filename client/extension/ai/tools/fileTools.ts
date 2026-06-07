@@ -23,6 +23,7 @@ import {
     resolveWorkspacePathInput,
     type WorkspacePathResolution,
 } from '../workspaceSandbox';
+import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
 
 // - Shared file-system helpers -
 
@@ -44,7 +45,7 @@ function walkDir(dir: string, ext: string, results: string[], maxFiles: number):
             if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
                 walkDir(fullPath, ext, results, maxFiles);
             }
-        } else if (entry.name.endsWith(ext)) {
+        } else if (matchesExt(entry.name, ext)) {
             results.push(fullPath);
         }
     }
@@ -82,7 +83,7 @@ export class FileToolHandler {
      */
     private buildEditEscalationHint(filePath: string, failCount: number): string {
         const basename = path.basename(filePath);
-        if (filePath.endsWith('.yml')) {
+        if (matchesExt(filePath, '.yml')) {
             return `\n\nWarning: YML BLOCKED (failure #${failCount}): You MUST NOT use multi_replace_file_content for .yml files. Use write_localisation(filePath, language, entries) instead - it handles encoding, formatting, and insertion correctly.`;
         }
         if (failCount >= 5) {
@@ -346,7 +347,7 @@ export class FileToolHandler {
         let shouldAddBom = hasBom;
         if (requestedEncoding) {
             shouldAddBom = requestedEncoding === 'utf8bom';
-        } else if (filePath.endsWith('.yml')) {
+        } else if (matchesExt(filePath, '.yml')) {
             shouldAddBom = true;
         } else {
             shouldAddBom = false; // Fallback to no BOM for all other files if requestedEncoding is not set and hasBom is false for a new file.
@@ -373,8 +374,7 @@ export class FileToolHandler {
             if (readTracker) { readTracker.markRead(args.file); }
 
             const ext = path.extname(args.file).toLowerCase();
-            const IMAGE_EXTS = ['.dds', '.tga', '.png', '.jpg', '.jpeg', '.bmp'];
-            if (IMAGE_EXTS.includes(ext)) {
+            if (GRAPHICS_EXTS.includes(ext)) {
                 return await this.readImageMetadata(args.file);
             }
 
@@ -385,7 +385,7 @@ export class FileToolHandler {
                     const lines = cached.split('\n');
                     const totalLines = lines.length;
                     let threshold = 150;
-                    if (args.file.endsWith('.yml')) {
+                    if (matchesExt(args.file, '.yml')) {
                         threshold = 50;
                     }
 
@@ -398,10 +398,10 @@ export class FileToolHandler {
                         let gapInfo = `\n... [${totalLines - 100} lines omitted - use document_symbols to locate, then read_file for specifics] ...\n`;
                         let hint = `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`;
 
-                        if (args.file.endsWith('.txt')) {
+                        if (matchesExt(args.file, '.txt')) {
                             gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
                             hint = `Warning: FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
-                        } else if (args.file.endsWith('.yml')) {
+                        } else if (matchesExt(args.file, '.yml')) {
                             gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
                             hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
                         }
@@ -421,7 +421,7 @@ export class FileToolHandler {
             // -
 
             let threshold = 150;
-            if (args.file.endsWith('.yml')) {
+            if (matchesExt(args.file, '.yml')) {
                 threshold = 50;
             }
 
@@ -477,10 +477,10 @@ export class FileToolHandler {
                 let gapInfo = `\n... [${totalLines - 100} lines omitted - use document_symbols to locate, then read_file for specifics (max ${threshold} lines at a time)] ...\n`;
                 let hint = `The file has ${totalLines} lines in total. The first 100 lines and the last 20 lines are displayed. Suggestion: call document_symbols("${args.file}") to get the structure, then use read_file(startLine, endLine) to read precisely (each time up to ${threshold} lines).`;
 
-                if (args.file.endsWith('.txt')) {
+                if (matchesExt(args.file, '.txt')) {
                     gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
                     hint = `Warning: FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
-                } else if (args.file.endsWith('.yml')) {
+                } else if (matchesExt(args.file, '.yml')) {
                     gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
                     hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
                 }

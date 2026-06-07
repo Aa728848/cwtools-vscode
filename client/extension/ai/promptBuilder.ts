@@ -751,16 +751,17 @@ ${trimmed}
             const relPath = path.relative(this.workspaceRoot, options.activeFile).replace(/\\/g, '/');
             contextParts.push(`**Current file**: \`${relPath}\``);
 
-            // Determine file type
-            if (relPath.startsWith('events/')) {
+            // Determine file type (compare case-insensitively against lowercase Paradox dir conventions)
+            const relLower = relPath.toLowerCase();
+            if (relLower.startsWith('events/')) {
                 contextParts.push('**File type**: Event definitions');
-            } else if (relPath.includes('common/scripted_triggers')) {
+            } else if (relLower.includes('common/scripted_triggers')) {
                 contextParts.push('**File type**: Scripted triggers');
-            } else if (relPath.includes('common/scripted_effects')) {
+            } else if (relLower.includes('common/scripted_effects')) {
                 contextParts.push('**File type**: Scripted effects');
-            } else if (relPath.startsWith('localisation/') || relPath.startsWith('localization/')) {
+            } else if (relLower.startsWith('localisation/') || relLower.startsWith('localization/')) {
                 contextParts.push('**File type**: Localisation');
-            } else if (relPath.includes('common/')) {
+            } else if (relLower.includes('common/')) {
                 const parts = relPath.split('/');
                 contextParts.push(`**File type**: ${parts[1] ?? 'common'}`);
             }

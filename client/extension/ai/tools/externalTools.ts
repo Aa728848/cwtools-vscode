@@ -590,8 +590,14 @@ export class ExternalToolHandler {
             /\d*>{1,2}\s*\S/,
             /</,
             /(^|[^&])&(?!&)/,
-            /\b(?:rm|del|erase|rmdir|remove-item|ri|rd|format|shutdown|reboot)\b/i,
+            /\b(?:rm|del|erase|rmdir|remove-item|ri|rd|format|shutdown|reboot|mkfs|shred)\b/i,
             /\b(?:set-content|add-content|out-file|tee-object|export-\w+|new-item|ni|copy-item|cp|move-item|mv|rename-item|ren|set-item|set-location|cd|push-location|pop-location)\b/i,
+            // POSIX write/modify commands — never classify as read-only
+            /\b(?:mkdir|touch|ln|chmod|chown|truncate|tee|install|mkfifo)\b/i,
+            // Hidden writes/exec behind flags: sed -i, find -delete/-exec, awk redirect/system()
+            /\bsed\b[^|]*\s-i\b/i,
+            /\bfind\b[^|]*\s-(?:delete|exec|execdir|ok)\b/i,
+            /\bawk\b[^|]*(?:>|\bsystem\s*\()/i,
             /\b(?:start-process|invoke-expression|iex|invoke-webrequest|iwr|invoke-restmethod|curl|wget)\b/i,
             /\b(?:node|python|py|powershell|pwsh)\s+-(?:e|c|command|encodedcommand)\b/i,
         ];
@@ -601,7 +607,7 @@ export class ExternalToolHandler {
             /^git\s+(?:log|status|diff|show|rev-parse|branch|tag|remote)(?:\s|$)/i,
             /^git\s+stash\s+list(?:\s|$)/i,
             /^(?:dotnet\s+(?:--version|--info)|node\s+--version|npm\s+(?:list|ls|--version)|npx\s+--version|mmx\s+--version)$/i,
-            /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where|findstr)(?:\s|$)/i,
+            /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where|findstr|stat|file|basename|dirname|realpath|readlink|printenv|cut|tr|comm|column|nl|tree)(?:\s|$)/i,
             /^(?:get-childitem|gci|get-content|gc|select-string|sls|get-item|gi|test-path|resolve-path|get-location|pwd|get-command|get-help|get-module)(?:\s|$)/i,
             /^(?:where-object|\?|select-object|sort-object|measure-object|format-table|format-list|format-wide|out-string)(?:\s|$)/i,
         ];
@@ -838,8 +844,13 @@ export class ExternalToolHandler {
         args.command = aliasNormalized.command;
         const crossWorkspacePathAccess = aliasNormalized.crossWorkspacePathAccess;
         const DESTRUCTIVE_BLOCKED = [
-            /\brm\s+-rf\b/i, /\bdel\s+\/[fqs]/i, /\bformat\b/i,
+            /\brm\s+-[a-z]*r[a-z]*f/i,                          // rm -rf, -Rf, -rdf…
+            /\brm\s+-[a-z]*f[a-z]*r/i,                          // rm -fr, -fdr…
+            /\brm\b(?=[^|]*\s-r\b)(?=[^|]*\s-f\b)/i,            // rm -r … -f (any order)
+            /\brm\b(?=[^|]*--recursive\b)(?=[^|]*--force\b)/i,  // rm --recursive --force
+            /\bdel\s+\/[fqs]/i, /\bformat\b/i,
             /\brmdir\b.*\/s/i, /\bshutdown\b/i, /\breboot\b/i,
+            /\bmkfs\b/i, /\bshred\b/i, /\bfind\b[^|]*\s-delete\b/i,
             /\bcurl\b.*\|\s*bash/i, /\bwget\b.*\|\s*sh/i,
         ];
         // Inline interpreter commands: not destructive, but should never be auto-approved.
@@ -864,6 +875,8 @@ export class ExternalToolHandler {
             'npm list', 'npm ls', 'npm --version', 'npx --version',
             'cat', 'type', 'echo', 'dir', 'ls', 'grep', 'rg',
             'wc', 'head', 'tail', 'which', 'where', 'mmx --version',
+            'stat', 'file', 'basename', 'dirname', 'realpath', 'readlink',
+            'printenv', 'cut', 'tr', 'comm', 'column', 'nl', 'tree',
         ];
         const cmdLower = args.command.trim().toLowerCase();
         const startsWithCommandPrefix = (prefix: string) =>
@@ -888,7 +901,7 @@ export class ExternalToolHandler {
             /^node\s+--version$/i,
             /^npm\s+(?:list|ls|--version)(?:\s|$)/i,
             /^npx\s+--version$/i,
-            /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where)(?:\s|$)/i,
+            /^(?:cat|type|echo|dir|ls|grep|rg|wc|head|tail|which|where|stat|file|basename|dirname|realpath|readlink|printenv|cut|tr|comm|column|nl|tree)(?:\s|$)/i,
             /^mmx\s+--version$/i,
         ];
         const isSingleSafeCommand = !args.command.includes('|') && SAFE_AUTO_APPROVE_PATTERNS.some(pat => pat.test(cmdLower));

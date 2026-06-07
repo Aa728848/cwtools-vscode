@@ -6,14 +6,17 @@
     <AssemblyName>CWTools Server</AssemblyName>
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
     <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <Tailcalls>true</Tailcalls>
     <PublishReadyToRun>false</PublishReadyToRun>
     <PublishReadyToRunComposite>false</PublishReadyToRunComposite>
     <PublishTrimmed>false</PublishTrimmed>
-    <SelfContained>true</SelfContained>
+    <!-- Self-contained only when a RID is supplied (e.g. publish -r linux-x64); a plain
+         `dotnet build` with no RID stays framework-dependent so it does not error with
+         NETSDK1031. Release packaging (package.ps1) always passes an explicit -r. -->
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
     <TrimMode>partial</TrimMode>
   </PropertyGroup>
   <ItemGroup>

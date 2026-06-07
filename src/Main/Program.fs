@@ -130,10 +130,18 @@ let private tryFindProjectRoot filePath =
     tryFindDescriptorRoot filePath
     |> Option.orElseWith (fun () -> tryFindContentRoot filePath)
 
+// Path equality: case-insensitive on Windows (case-insensitive FS), case-sensitive on
+// Linux/macOS, mirroring the filesystem. Use ONLY for filesystem path comparisons,
+// NOT for PDX symbol/identifier matching (those stay OrdinalIgnoreCase, engine-mirrored).
+let private pathComparison =
+    if RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+    then StringComparison.OrdinalIgnoreCase
+    else StringComparison.Ordinal
+
 let private isAllowedDefinitionTarget (sourcePath: string) (targetPath: string) =
     match tryFindProjectRoot sourcePath, tryFindProjectRoot targetPath with
     | Some sourceRoot, Some targetRoot ->
-        String.Equals(sourceRoot, targetRoot, StringComparison.OrdinalIgnoreCase)
+        String.Equals(sourceRoot, targetRoot, pathComparison)
     | _ -> true
 
 let private normalizeDefinitionSymbol (symbol: string) =
@@ -4275,7 +4283,7 @@ type Server(client: ILanguageClient) =
 
         member this.PrepareRename(p: TextDocumentPositionParams) =
             let sameFile left right =
-                String.Equals(left, right, StringComparison.OrdinalIgnoreCase)
+                String.Equals(left, right, pathComparison)
 
             let isSymbolBoundaryChar (c: char) =
                 Char.IsLetterOrDigit c
@@ -4434,7 +4442,7 @@ type Server(client: ILanguageClient) =
 
         member this.Rename(p: RenameParams) =
             let sameFile left right =
-                String.Equals(left, right, StringComparison.OrdinalIgnoreCase)
+                String.Equals(left, right, pathComparison)
 
             let sameRange (left: range) (right: range) =
                 sameFile left.FileName right.FileName
@@ -4754,7 +4762,7 @@ type Server(client: ILanguageClient) =
                                 |> List.map (fun lockey -> $" %s{lockey}%s{generatedStrings}")
                                 |> List.distinct
 
-                            let text = String.Join(Environment.NewLine, keys)
+                            let text = String.Join("\r\n", keys)
 
                             client.CustomNotification(
                                 "createVirtualFile",
@@ -4774,7 +4782,7 @@ type Server(client: ILanguageClient) =
                                 |> List.map (fun lockey -> $" %s{lockey}%s{generatedStrings}")
                                 |> List.distinct
 
-                            let text = String.Join(Environment.NewLine, keys)
+                            let text = String.Join("\r\n", keys)
 
                             client.CustomNotification(
                                 "createVirtualFile",
@@ -4824,7 +4832,7 @@ type Server(client: ILanguageClient) =
                                 |> List.map (fun e ->
                                     $"%s{e.range.FileName}, {e.range.StartLine}, {e.range.StartColumn}, %s{e.code}, {e.severity}, \"%s{e.message}\"")
 
-                            let text = String.Join(Environment.NewLine, texts)
+                            let text = String.Join("\r\n", texts)
 
                             client.CustomNotification(
                                 "createVirtualFile",
@@ -4855,7 +4863,7 @@ type Server(client: ILanguageClient) =
                                     | FileResource(f, _) -> f
                                     | FileWithContentResource(f, _) -> f)
 
-                            let text = String.Join(Environment.NewLine, text)
+                            let text = String.Join("\r\n", text)
 
                             client.CustomNotification(
                                 "createVirtualFile",
@@ -4868,7 +4876,7 @@ type Server(client: ILanguageClient) =
                         | { command = "listAllLocFiles"
                             arguments = _ } ->
                             let locs = game.AllLoadedLocalisation()
-                            let text = String.Join(Environment.NewLine, locs)
+                            let text = String.Join("\r\n", locs)
 
                             client.CustomNotification(
                                 "createVirtualFile",
@@ -4977,7 +4985,7 @@ type Server(client: ILanguageClient) =
                             arguments = _ } ->
                             match gameObj with
                             | Some game ->
-                                let header = "type,name,file,line" + Environment.NewLine
+                                let header = "type,name,file,line" + "\r\n"
 
                                 let res =
                                     game.Types()
@@ -4993,7 +5001,7 @@ type Server(client: ILanguageClient) =
                                             td.id
                                             (td.range.FileName.Replace('\\', '/'))
                                             td.range.StartLine)
-                                    |> String.concat Environment.NewLine
+                                    |> String.concat "\r\n"
 
                                 client.CustomNotification(
                                     "createVirtualFile",
@@ -5527,7 +5535,7 @@ type Server(client: ILanguageClient) =
                                     let tryEntityFromGame (g: IGame<'T>) =
                                         g.AllEntities()
                                         |> Seq.tryFind (fun struct (e, _) ->
-                                            String.Equals(e.filepath, filePath, StringComparison.OrdinalIgnoreCase))
+                                            String.Equals(e.filepath, filePath, pathComparison))
                                         |> Option.map (fun struct (e, lazyData) ->
                                             let cd = lazyData.Force()
 

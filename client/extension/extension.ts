@@ -320,10 +320,12 @@ function normalizeDetectionText(value: string): string {
 }
 
 function normalizedPath(value: string): string {
+	// Only fold case on Windows (case-insensitive FS); keep case on Linux/macOS (case-sensitive).
+	const fold = (s: string) => (os.platform() === 'win32' ? s.toLowerCase() : s);
 	try {
-		return path.resolve(value).toLowerCase();
+		return fold(path.resolve(value));
 	} catch {
-		return value.toLowerCase();
+		return fold(value);
 	}
 }
 

@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { parseGuiFile, buildSpriteIndex, serializePosition, serializeSize, serializeProperty, serializeNewElement, type GuiElement } from './guiParser';
 import { decodeDds, decodeTga, type DdsResult } from './ddsDecoder';
+import { matchesExt } from './fileExtensions';
 
 // ── WebView message types ──────────────────────────────────────────────────────
 type GuiPanelMessage =
@@ -261,7 +262,7 @@ export class GuiPanel {
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
                     await this._findGfxFiles(full, result, maxFiles);
-                } else if (entry.name.endsWith('.gfx')) {
+                } else if (matchesExt(entry.name, '.gfx')) {
                     try {
                         const content = await fs.promises.readFile(full, 'utf-8');
                         result.push({ path: full, content });
@@ -282,7 +283,7 @@ export class GuiPanel {
             try {
                 const entries = await fs.promises.readdir(dir, { withFileTypes: true });
                 await Promise.all(entries.map(async (entry) => {
-                    if (!entry.isFile() || !entry.name.endsWith('.txt')) return;
+                    if (!entry.isFile() || !matchesExt(entry.name, '.txt')) return;
                     try {
                         const content = await fs.promises.readFile(path.join(dir, entry.name), 'utf-8');
                         // Match only top-level keys: no leading whitespace

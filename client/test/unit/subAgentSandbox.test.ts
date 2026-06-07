@@ -232,6 +232,67 @@ describe('SubAgentSandbox', () => {
             expect(result.allowed).to.be.true;
         });
 
+        // ── 跨平台与作用域边界（采纳评审 #3：directory-scope-from-file / 子串逃逸 / 前缀边界 / 大小写）──
+        it('directory-scope-from-file：放行同目录兄弟文件写入', () => {
+            const sandbox = {
+                agentId: 'builder_sibling',
+                role: 'build',
+                mode: 'build' as any,
+                writeScope: ['common/buildings/kuat_buildings.txt', '.cwtools-ai'],
+                permissionPolicy: 'delegate_to_parent' as const
+            };
+            // 同目录的另一个文件（由文件推导出目录作用域）→ 放行
+            const sibling = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'common/buildings/sol_buildings.txt' }, process.cwd());
+            expect(sibling.allowed).to.be.true;
+            // 同目录更深一层 → 仍在目录内 → 放行
+            const deeper = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'common/buildings/sub/extra.txt' }, process.cwd());
+            expect(deeper.allowed).to.be.true;
+        });
+
+        it('子串逃逸：拒绝 common/buildings_evil（防前缀截断绕过）', () => {
+            const sandbox = {
+                agentId: 'builder_escape',
+                role: 'build',
+                mode: 'build' as any,
+                writeScope: ['common/buildings/kuat_buildings.txt'],
+                permissionPolicy: 'delegate_to_parent' as const
+            };
+            const escape = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'common/buildings_evil/backdoor.txt' }, process.cwd());
+            expect(escape.allowed).to.be.false;
+            expect(escape.reason).to.include('写入目标文件路径');
+        });
+
+        it('.cwtools-ai 前缀边界：拒绝 .cwtools-ai-evil，仅精确或 / 前缀放行', () => {
+            const sandbox = {
+                agentId: 'builder_topic_boundary',
+                role: 'build',
+                mode: 'build' as any,
+                writeScope: ['.cwtools-ai'],
+                permissionPolicy: 'delegate_to_parent' as const
+            };
+            const evil = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools-ai-evil/x.md' }, process.cwd());
+            expect(evil.allowed).to.be.false;
+            const ok = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools-ai/topic/walkthrough.md' }, process.cwd());
+            expect(ok.allowed).to.be.true;
+        });
+
+        it('平台条件折叠：Windows 大小写无关、Linux 区分大小写', () => {
+            const sandbox = {
+                agentId: 'builder_case',
+                role: 'build',
+                mode: 'build' as any,
+                writeScope: ['common/buildings/kuat_buildings.txt'],
+                permissionPolicy: 'delegate_to_parent' as const
+            };
+            // 大小写不同的目录：Windows（大小写不敏感）放行，Linux（大小写敏感）拦截
+            const caseVariant = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: 'common/Buildings/Other.txt' }, process.cwd());
+            if (process.platform === 'win32') {
+                expect(caseVariant.allowed).to.be.true;
+            } else {
+                expect(caseVariant.allowed).to.be.false;
+            }
+        });
+
         it('非写入且无害的工具，应该在默认沙盒下放行', () => {
             const sandbox = {
                 agentId: 'builder_read',

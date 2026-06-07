@@ -6,6 +6,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { buildEntityGraph, type EntityDefinition, type EntityGraph } from './entityAssetParser';
+import { matchesExt } from './fileExtensions';
+import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
+import { isPathInsideOrEqual } from './pathScope';
 
 // ── WebView message types ──────────────────────────────────────────────────────
 type EntityPanelMessage =
@@ -456,9 +459,11 @@ export class EntityPanel {
             }
 
             const targetFsPath = vscode.Uri.file(targetDef.filePath).fsPath;
-            // Security check: Must be inside workspace folders
+            // Security check: must be inside a workspace folder. Uses isPathInsideOrEqual
+            // (path.relative semantics, Windows-only case folding) so `/repo-mod` does NOT
+            // match `/repo-mod-evil` and case is not wrongly folded on Linux.
             const workspaceFolders = vscode.workspace.workspaceFolders || [];
-            const isInsideWorkspace = workspaceFolders.some(wf => targetFsPath.toLowerCase().startsWith(wf.uri.fsPath.toLowerCase()));
+            const isInsideWorkspace = workspaceFolders.some(wf => isPathInsideOrEqual(targetFsPath, wf.uri.fsPath));
             
             if (!isInsideWorkspace) {
                 vscode.window.showErrorMessage(`[CWTools] 跨文件写入被拦截：不允许修改位于当前工作区外部的原版或 Mod 资产文件 (${targetDef.filePath})。`);
@@ -915,13 +920,18 @@ export class EntityPanel {
         const tryPath = (base: string): string | undefined => {
             for (const ext of extensions) {
                 const p = base.replace(/\.(dds|png|tga)$/i, ext);
-                if (fs.existsSync(p)) {
-                    return this._panel.webview.asWebviewUri(vscode.Uri.file(p)).toString();
+                const resolved = fs.existsSync(p) ? p : resolveCaseInsensitivePath(p);
+                if (resolved) {
+                    return this._panel.webview.asWebviewUri(vscode.Uri.file(resolved)).toString();
                 }
             }
             // If no extension in original, try adding .dds
-            if (!/\.(dds|png|tga)$/i.test(base) && fs.existsSync(base + '.dds')) {
-                return this._panel.webview.asWebviewUri(vscode.Uri.file(base + '.dds')).toString();
+            if (!/\.(dds|png|tga)$/i.test(base)) {
+                const ddsPath = base + '.dds';
+                const resolved = fs.existsSync(ddsPath) ? ddsPath : resolveCaseInsensitivePath(ddsPath);
+                if (resolved) {
+                    return this._panel.webview.asWebviewUri(vscode.Uri.file(resolved)).toString();
+                }
             }
             return undefined;
         };
@@ -1265,7 +1275,7 @@ export class EntityPanel {
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
                     await this._findFiles(full, ext, result, maxFiles);
-                } else if (entry.name.endsWith(ext)) {
+                } else if (matchesExt(entry.name, ext)) {
                     try {
                         const content = await fs.promises.readFile(full, 'utf-8');
                         result.push({ path: full, content });

@@ -164,14 +164,19 @@ describe('PromptBuilder context budgeting', () => {
         expect(String(context[0]!.content)).to.include('never user-requested deliverables');
     });
 
-    it('tells agents to use PowerShell-style run_command paths on Windows', () => {
+    it('tells agents to use platform-appropriate run_command env-var syntax', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSystemPromptForMode('utility');
 
-        expect(prompt).to.include('run_command` uses PowerShell in every mode');
-        expect(prompt).to.include('$env:CWT_AGENT_SCRATCH_DIR');
-        expect(prompt).to.include('$env:CWT_AGENT_HELPER_SCRIPT');
+        if (process.platform === 'win32') {
+            expect(prompt).to.include('PowerShell in every mode');
+            expect(prompt).to.include('$env:CWT_AGENT_SCRATCH_DIR');
+            expect(prompt).to.include('$env:CWT_AGENT_HELPER_SCRIPT');
+        } else {
+            expect(prompt).to.include('/bin/sh');
+            expect(prompt).to.include('$CWT_AGENT_SCRATCH_DIR');
+        }
         expect(prompt).to.not.include('%CWT_AGENT_SCRATCH_DIR%');
         expect(prompt).to.not.include('cmd.exe');
         expect(prompt).to.not.include('%VAR%');

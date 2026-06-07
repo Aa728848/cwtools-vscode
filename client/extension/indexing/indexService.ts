@@ -28,6 +28,7 @@
 
 import * as vscode from 'vscode';
 import { ErrorReporter } from '../ai/errorReporter';
+import { matchesExt } from '../fileExtensions';
 import { getAllProfiles, getLocalisationDirectoryGlob } from '../gameProfiles';
 import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex } from './locParser';
 import {
@@ -215,7 +216,7 @@ export class IndexService implements vscode.Disposable {
 	async updateFile(uri: vscode.Uri): Promise<void> {
 		try {
 			const filePath = uri.fsPath;
-			if (filePath.endsWith('.yml')) {
+			if (matchesExt(filePath, '.yml')) {
 				await this._indexSingleLocFile(uri);
 			} else if (isWorkspaceSymbolFile(filePath)) {
 				if (this._workspaceSymbolStatus !== 'ready') return;

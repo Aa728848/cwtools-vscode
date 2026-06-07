@@ -7,6 +7,7 @@
 import * as vs from 'vscode';
 import type { IndexService, LocEntry } from './indexing/indexService';
 import { parseLocFile } from './indexing/locParser';
+import { matchesExt } from './fileExtensions';
 
 // Paradox color code mapping
 const COLOR_MAP: Record<string, string> = {
@@ -48,7 +49,7 @@ type LocLookupEntry = { value: string; uri: vs.Uri; line: number };
 const openDocumentLocCache = new Map<string, Map<string, LocLookupEntry>>();
 
 function isYmlDocument(document: vs.TextDocument): boolean {
-    return document.uri.scheme === 'file' && document.fileName.endsWith('.yml');
+    return document.uri.scheme === 'file' && matchesExt(document.fileName, '.yml');
 }
 
 function cacheOpenDocumentLocalisation(document: vs.TextDocument): void {
@@ -97,7 +98,7 @@ function findLocEntry(
  * Apply color decorations to a .yml editor
  */
 function updateColorDecorations(editor: vs.TextEditor) {
-    if (!editor.document.fileName.endsWith('.yml')) return;
+    if (!matchesExt(editor.document.fileName, '.yml')) return;
 
     const text = editor.document.getText();
     const markerRanges: vs.DecorationOptions[] = [];

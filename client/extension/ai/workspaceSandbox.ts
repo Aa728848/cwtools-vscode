@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as vs from 'vscode';
 import { getAiStorageRoot, getAiStorageRootCandidates } from './workspacePaths';
+import { isPathInsideOrEqual } from '../pathScope';
 
 export type WorkspacePathScope = 'project' | 'ai' | 'workspace' | 'outside';
 
@@ -15,16 +16,11 @@ export interface WorkspacePathResolution {
     isWithinAnyWorkspace: boolean;
 }
 
-export function isPathInsideOrEqual(candidate: string, root: string): boolean {
-    if (!root) return false;
-    const isWindows = process.platform === 'win32';
-    const normalizedCandidate = path.resolve(candidate);
-    const normalizedRoot = path.resolve(root);
-    const checkCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
-    const checkRoot = isWindows ? normalizedRoot.toLowerCase() : normalizedRoot;
-    const relative = path.relative(checkRoot, checkCandidate);
-    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-}
+// Path-scope helpers (foldPathCase / isPathInsideOrEqual) live in the neutral
+// ../pathScope module (no vscode/fs/AI deps) so UI modules can share them too;
+// re-exported here so existing AI-layer imports keep working unchanged.
+export { foldPathCase } from '../pathScope';
+export { isPathInsideOrEqual };
 
 export function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

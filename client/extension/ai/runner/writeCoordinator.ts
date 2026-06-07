@@ -15,6 +15,10 @@ export class WriteQueue {
                 .catch((err) => { ErrorReporter.warn(SOURCE.AGENT_RUNNER, 'WriteQueue: swallowed rejected write to keep queue alive', err); });
         });
     }
+
+    afterCurrent<T>(fn: () => Promise<T>): Promise<T> {
+        return this.queue.then(fn);
+    }
 }
 
 // PartitionedWriteQueue: per-file-path write serialization.
@@ -26,11 +30,11 @@ export class PartitionedWriteQueue {
     private queues = new Map<string, WriteQueue>();
     private static readonly IDLE_CLEANUP_MS = 30_000;
 
-    enqueue(
+    enqueue<T>(
         files: string[],
-        fn: () => Promise<void>,
+        fn: () => Promise<T>,
         options?: { waitTimeoutMs?: number; timeoutMessage?: string }
-    ): Promise<void> {
+    ): Promise<T> {
         const sorted = [...new Set(files)].sort();
         const seq = Date.now();
         let started = false;
@@ -38,9 +42,9 @@ export class PartitionedWriteQueue {
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
         // Mark all involved queues as active
         for (const f of sorted) this.getQueue(f).lastUsedSeq = seq;
-        const acquire = (idx: number): Promise<void> => {
+        const acquire = (idx: number): Promise<T> => {
             if (idx >= sorted.length) {
-                if (cancelledBeforeStart) return Promise.resolve();
+                if (cancelledBeforeStart) return Promise.resolve(undefined as T);
                 started = true;
                 if (timeoutId) {
                     clearTimeout(timeoutId);
@@ -60,7 +64,7 @@ export class PartitionedWriteQueue {
             return result;
         }
 
-        return new Promise<void>((resolve, reject) => {
+        return new Promise<T>((resolve, reject) => {
             timeoutId = setTimeout(() => {
                 if (started) return;
                 cancelledBeforeStart = true;
@@ -76,6 +80,17 @@ export class PartitionedWriteQueue {
         });
     }
 
+    async afterCurrentWrites<T>(files: string[], fn: () => Promise<T>): Promise<T> {
+        const sorted = [...new Set(files)].sort();
+        for (const f of sorted) {
+            const q = this.queues.get(f);
+            if (q) {
+                await q.afterCurrent(async () => undefined);
+            }
+        }
+        return fn();
+    }
+
     private getQueue(filePath: string): WriteQueue {
         let q = this.queues.get(filePath);
         if (!q) {
@@ -86,12 +101,15 @@ export class PartitionedWriteQueue {
     }
 
     private scheduleCleanup(filePath: string, seqAtEnqueue: number): void {
-        setTimeout(() => {
+        const timer = setTimeout(() => {
             const q = this.queues.get(filePath);
             // Only remove if the queue hasn't been used since we enqueued
             if (q && q.lastUsedSeq === seqAtEnqueue) {
                 this.queues.delete(filePath);
             }
         }, PartitionedWriteQueue.IDLE_CLEANUP_MS);
+        if (typeof (timer as any).unref === 'function') {
+            (timer as any).unref();
+        }
     }
 }

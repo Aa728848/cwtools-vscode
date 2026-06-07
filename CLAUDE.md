@@ -119,10 +119,10 @@ checks.
 | Path | Purpose |
 | --- | --- |
 | `client/extension/ai/runnerPolicy.ts` | Mode-based tool filtering, iteration limits, and slim sub-agent budget |
-| `client/extension/ai/planModeGuard.ts` | Plan-mode write guard: restricts writes to the implementation plan and plan/blueprint/walkthrough artifact files |
+| `client/extension/ai/planModeGuard.ts` | Plan-mode write guard (plan/blueprint/walkthrough artifact files only) and read-only `git_ops` gating (`validateGitOpsForMode`) for non-writing modes |
 | `client/extension/ai/runner/compaction.ts` | History compaction and context window helpers |
 | `client/extension/ai/runner/checkpoint.ts` | V2 resume state and orphan `tool_call` synthetic replies |
-| `client/extension/ai/runner/writeCoordinator.ts` | `PartitionedWriteQueue` write coordination |
+| `client/extension/ai/runner/writeCoordinator.ts` | `PartitionedWriteQueue` write coordination + `afterCurrentWrites` read-after-write barrier |
 | `client/extension/ai/runner/fallbackPolicy.ts` | Model fallback and API error retry management |
 | `client/extension/ai/runner/cancellation.ts` | LLM generation termination and exception throwing |
 | `client/extension/ai/runner/stepEmitter.ts` | Fine-grained step and token delta streaming broadcast |
@@ -243,21 +243,30 @@ Important constraints:
 - `runner/toolInvocation.ts` normalizes tool calls, repairs args, derives risk
   metadata, extracts target paths, and assigns stable invocation IDs.
 - `runner/toolScheduler.ts` enforces concurrency classes and per-file write
-  exclusion.
+  exclusion. Reads of a file with an in-flight write are ordered after it via
+  `writeCoordinator.afterCurrentWrites`; `getAgentToolTargetFiles` extracts paths
+  for `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` too.
 - `runner/commandPreflight.ts` classifies `run_command`; high-risk or escalated
   commands must require user permission.
+- `planModeGuard.ts` also gates `git_ops` in non-writing modes
+  (`validateGitOpsForMode`): explore/review/script/orchestrator/plan may only run
+  `status`/`diff`; enforced before execution in `agentRunner` and `agentTools`.
 - `runner/permissionPolicy.ts` must keep hardened `cwdScope` checks based on
   `path.relative`, not string-prefix tests.
 - File writes go through `PartitionedWriteQueue`; multi-file writes acquire
   locks in sorted path order.
 - Generic write tools reject `.yml` localisation writes; use
   `write_localisation`.
+- `edit_file(filePath, oldString, newString, replaceAll?)` is the single-occurrence
+  fuzzy edit primitive (registry `EDIT`, `per-file-write`); it shares the same
+  guards as the other edit tools (`.yml` reject, brace check, ReadTracker,
+  pending-write confirmation).
 - `tools/replacerSuite.ts` provides a 10-strategy fuzzy replacement engine
   (`fuzzyReplace`) used by the `FileToolHandler.replace()` helper, which backs
-  `apply_patch` hunk application in `tools/fileTools.ts`
-  (`multi_replace_file_content` uses exact in-range matching, and `replace_lines`
-  is purely line-range based); changes to replacement strategies should update
-  `editFileReplacer.test.ts`.
+  the `edit_file` tool and `apply_patch` hunk application in `tools/fileTools.ts`
+  (`multi_replace_file_content` matches exact in-range text then falls back to
+  `fuzzyReplace`, and `replace_lines` is purely line-range based); changes to
+  replacement strategies should update `editFileReplacer.test.ts`.
 - `tools/schemaFlatten.ts` auto-flattens deep tool schemas for weak providers;
   `nestArguments()` reverses the flattening before tool execution.
 

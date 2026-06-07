@@ -36,7 +36,7 @@ import { getModelPricing, getCacheDiscountFactor } from './pricing';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { repairToolArgs } from './tools/argRepair';
-import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace, TOOL_RESULT_BUDGET_BASE } from './contextBudget';
+import { budgetToolResult as _budgetToolResult, compactMessagesInPlace as _compactMessagesInPlace, getToolResultBudget } from './contextBudget';
 import type { CompactMessagesOptions } from './contextBudget';
 import { AGENT, SOURCE } from './messages';
 import { ErrorReporter } from './errorReporter';
@@ -59,7 +59,7 @@ import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, too
 import { buildToolInvocation } from './runner/toolInvocation';
 import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash, DoomLoopState } from './runner/doomLoopDetector';
 import { ReadTracker } from './runner/readTracker';
-import { validatePlanModeToolUse } from './planModeGuard';
+import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 
 export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
 export { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } from './runner/toolScheduler';
@@ -153,11 +153,6 @@ export const CHARS_PER_TOKEN = 4;
 // How many recent messages to keep un-compressed during compaction
 // Mid-loop compaction: check every N iterations within reasoningLoop
 // Mid-loop compaction triggers at this fraction of context limit
-
-// Minimum tool result budget (even for tiny context windows)
-const TOOL_RESULT_BUDGET_MIN = 3000;
-// Maximum tool result budget (even for huge context windows like 1M)
-const TOOL_RESULT_BUDGET_MAX = 18000;
 
 // ─── Batch 2.3: Checkpoint mechanism ─────────────────────────────────────────
 // Save a lightweight progress checkpoint every N iterations within the reasoning loop.
@@ -1283,12 +1278,7 @@ export class AgentRunner {
         const contextLimit = bypassSandbox ? Number.MAX_SAFE_INTEGER : baseContextLimit;
         
         const midLoopThreshold = Math.floor(contextLimit * MID_LOOP_COMPACTION_RATIO);
-        // Scale tool result budget proportionally to context window (linear interpolation)
-        // 128K → 8000 chars, 200K → 12500, 1M → 30000 (capped)
-        const toolResultBudget = Math.min(
-            TOOL_RESULT_BUDGET_MAX,
-            Math.max(TOOL_RESULT_BUDGET_MIN, Math.floor(TOOL_RESULT_BUDGET_BASE * (baseContextLimit / DEFAULT_CONTEXT_LIMIT)))
-        );
+        const toolResultBudget = getToolResultBudget(baseContextLimit);
 
         const maxToolIterations = resolveMaxToolIterations({
             mode,
@@ -2033,6 +2023,28 @@ export class AgentRunner {
                         continue;
                     }
                 }
+                if (toolName === 'git_ops') {
+                    const guard = validateGitOpsForMode(mode, toolArgs);
+                    if (!guard.allowed) {
+                        emitStep({
+                            type: 'validation',
+                            content: guard.reason ?? 'Current mode blocked this git operation.',
+                            timestamp: Date.now(),
+                            invocationId: ci.invocationId,
+                        });
+                        toolResults[i] = {
+                            success: false,
+                            error: guard.reason ?? 'Current mode blocked this git operation.',
+                        };
+                        await runLedger.appendEvent(
+                            runRecord.runId,
+                            'tool_call_end',
+                            { success: false, error: toolResults[i].error },
+                            { invocationId: ci.invocationId }
+                        );
+                        continue;
+                    }
+                }
 
                 if (READ_ONLY_TOOLS.has(toolName)) {
                     // Collect consecutive read-only tools to batch them in parallel
@@ -2043,25 +2055,33 @@ export class AgentRunner {
                     }
                     await Promise.all(batchIndices.map(async idx => {
                         const callInfo = parsedCalls[idx]!;
-                        const releaseLock = await toolScheduler.acquireLock(callInfo.concurrencyClass);
-                        try {
-                            options?.abortSignal?.throwIfAborted();
-                            await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: callInfo.toolName }, { invocationId: callInfo.invocationId });
-                            const rawRes = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs, agentToolContext);
-                            toolResults[idx] = await this.processToolResult(
-                                callInfo.toolName,
-                                callInfo.invocationId,
-                                runRecord.runId,
-                                options?.topicId || 'default',
-                                rawRes
-                            );
-                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
-                        } catch (e: any) {
-                            if (e?.name === 'AbortError') throw e;
-                            toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
-                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
-                        } finally {
-                            releaseLock();
+                        const runReadTool = async () => {
+                            const releaseLock = await toolScheduler.acquireLock(callInfo.concurrencyClass);
+                            try {
+                                options?.abortSignal?.throwIfAborted();
+                                await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: callInfo.toolName }, { invocationId: callInfo.invocationId });
+                                const rawRes = await this.toolExecutor.execute(callInfo.toolName, callInfo.toolArgs, agentToolContext);
+                                toolResults[idx] = await this.processToolResult(
+                                    callInfo.toolName,
+                                    callInfo.invocationId,
+                                    runRecord.runId,
+                                    options?.topicId || 'default',
+                                    rawRes
+                                );
+                                await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
+                            } catch (e: any) {
+                                if (e?.name === 'AbortError') throw e;
+                                toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
+                                await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
+                            } finally {
+                                releaseLock();
+                            }
+                        };
+                        const readPaths = callInfo.targetPaths.length > 0 ? callInfo.targetPaths : [];
+                        if (readPaths.length > 0) {
+                            await this.writeQueue.afterCurrentWrites(readPaths, runReadTool);
+                        } else {
+                            await runReadTool();
                         }
                     }));
                 } else {

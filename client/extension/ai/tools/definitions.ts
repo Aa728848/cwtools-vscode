@@ -171,7 +171,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_pdx_block',
-            description: 'Extract exactly one complete AST block by symbol name. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). If the symbol is not found, the error response includes a full list of available symbols with line ranges so you can retry with the correct name.',
+            description: 'Extract exactly one complete AST block by symbol name. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Returns 1-based startLine/endLine that can be passed directly to replace_lines. If the symbol is not found, the error response includes a full list of available symbols with line ranges so you can retry with the correct name.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -219,7 +219,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_file_context',
-            description: 'Get code context around a specific line, including symbol info. Use when you already know a line number from grep/search results. For extracting entire blocks by name, prefer get_pdx_block instead.',
+            description: 'Get code context around a specific line, including symbol info. Input line is 0-based for compatibility with grep/search results; returned startLine/endLine and line prefixes are 1-based for direct replace_lines use. For extracting entire blocks by name, prefer get_pdx_block instead.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -347,7 +347,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'document_symbols',
-            description: 'Get all symbols defined in a file as a hierarchical tree with line ranges. Use this FIRST to understand file structure without reading content. Combine with get_pdx_block/edit_pdx_block for zero-read workflows.',
+            description: 'Get all symbols defined in a file as a hierarchical tree with 0-based line ranges from VS Code/LSP. Use this FIRST to understand file structure without reading content. Combine with get_pdx_block/edit_pdx_block for zero-read workflows.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -448,6 +448,24 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'File encoding. Non-localisation files should use utf8. Omit to let the system auto-detect.' },
                 },
                 required: ['file', 'content'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'edit_file',
+            description: 'Replace one exact or fuzzy-matched text fragment in an existing non-localisation file. Prefer this for current oldString/newString edits when line numbers are not reliable. Set replaceAll=true only when every occurrence should change. Never use for .yml localisation files; use write_localisation instead.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filePath: { type: 'string', description: 'Absolute or workspace-relative file path.' },
+                    oldString: { type: 'string', description: 'The current text to replace. Include enough surrounding context to make the match unique.' },
+                    newString: { type: 'string', description: 'Replacement text.' },
+                    replaceAll: { type: 'boolean', description: 'If true, replace all occurrences of the matched text. Default false.' },
+                    encoding: { type: 'string', enum: ['utf8', 'utf8bom'], description: 'Optional encoding override. Omit to preserve existing encoding.' },
+                },
+                required: ['filePath', 'oldString', 'newString'],
             },
         },
     },

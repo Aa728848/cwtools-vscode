@@ -185,6 +185,14 @@ describe('agent tool file path safety', () => {
         expect(replaceResult.success).to.equal(false);
         expect(replaceResult.message).to.include('write_localisation');
 
+        const editResult = await handler.editFile({
+            filePath: ymlRel,
+            oldString: ' old_key:0 "Old"',
+            newString: ' old_key:0 "New"',
+        }, ctx) as any;
+        expect(editResult.success).to.equal(false);
+        expect(editResult.message).to.include('write_localisation');
+
         const patchResult = await handler.applyPatch({
             patch: [
                 `--- a/${ymlRel}`,
@@ -198,6 +206,23 @@ describe('agent tool file path safety', () => {
         expect(patchResult.success).to.equal(false);
         expect(patchResult.errors.join('\n')).to.include('write_localisation');
         expect(fs.readFileSync(ymlAbs, 'utf8')).to.equal(original);
+    });
+
+    it('applies edit_file replacements through the shared fuzzy replacer', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'notes.md');
+        fs.writeFileSync(fileAbs, '  old title  \n  old body  \n', 'utf8');
+
+        const result = await handler.editFile({
+            filePath: fileAbs,
+            oldString: 'old title\nold body',
+            newString: 'new title\nnew body',
+        }, makeContext()) as any;
+
+        expect(result.success).to.equal(true);
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal('new title\nnew body\n');
+        expect(result.stats.linesAdded).to.equal(0);
+        expect(result.stats.linesRemoved).to.equal(0);
     });
 
     it('replaces an explicit line range with replace_lines', async () => {
@@ -332,6 +357,29 @@ describe('agent tool file path safety', () => {
         expect(fs.readFileSync(fileAbs, 'utf8')).to.equal(original);
     });
 
+    it('returns escalating read-before-edit hints after repeated apply_patch failures', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'notes.md');
+        fs.writeFileSync(fileAbs, 'current line\n', 'utf8');
+
+        const patch = [
+            '--- a/notes.md',
+            '+++ b/notes.md',
+            '@@',
+            '-missing line',
+            '+new line',
+            '',
+        ].join('\n');
+
+        await handler.applyPatch({ patch }, makeContext());
+        await handler.applyPatch({ patch }, makeContext());
+        const thirdResult = await handler.applyPatch({ patch }, makeContext());
+
+        expect(thirdResult.success).to.equal(false);
+        expect(thirdResult.errors.join('\n')).to.include('MANDATORY: call `read_file');
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.equal('current line\n');
+    });
+
     it('ignores PDX brace-like text in strings and comments during edit safety checks', async () => {
         const handler = createFileHandler();
         const fileAbs = path.join(workspaceRoot, 'events', 'string_braces_events.txt');
@@ -362,6 +410,24 @@ describe('agent tool file path safety', () => {
         expect(result.message).to.include('Localisation files must be written under');
         const rejectedPath = path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'scratch', 'bad_l_english.yml');
         expect(fs.existsSync(rejectedPath)).to.equal(false);
+    });
+
+    it('reports list_directory truncation metadata without claiming a full total', async () => {
+        const handler = createFileHandler();
+        const dirAbs = path.join(workspaceRoot, 'many-files');
+        fs.mkdirSync(dirAbs, { recursive: true });
+        for (let i = 0; i < 205; i++) {
+            fs.writeFileSync(path.join(dirAbs, `file-${String(i).padStart(3, '0')}.txt`), 'x', 'utf8');
+        }
+
+        const result = await handler.listDirectory({ directory: dirAbs });
+
+        expect(result.entries).to.have.length(200);
+        expect(result.truncated).to.equal(true);
+        expect(result.hasMore).to.equal(true);
+        expect(result.returnedCount).to.equal(200);
+        expect(result.limit).to.equal(200);
+        expect(result).to.not.have.property('total');
     });
 
     it('extracts write target paths for runner scheduling without marking localisation as superseded', () => {

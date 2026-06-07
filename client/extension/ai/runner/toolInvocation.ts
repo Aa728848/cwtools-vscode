@@ -81,6 +81,7 @@ export function getToolMetadata(toolName: string): {
     // 7. Core writing tools (per-file partitioned queue)
     if (
         name === 'write_file' ||
+        name === 'edit_file' ||
         name === 'multi_replace_file_content' ||
         name === 'replace_lines' ||
         name === 'apply_patch' ||

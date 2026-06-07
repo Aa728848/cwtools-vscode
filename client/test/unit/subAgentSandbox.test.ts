@@ -193,6 +193,26 @@ describe('SubAgentSandbox', () => {
             expect(gitResult.allowed).to.be.false;
         });
 
+        it('blocks non-file-scoped mutating tools in read-only sub-agent sandboxes', () => {
+            const sandbox = {
+                agentId: 'readonly_state_tool',
+                role: 'explore',
+                mode: 'explore' as any,
+                writeScope: [],
+                permissionPolicy: 'deny' as const
+            };
+
+            const result = enforceSubAgentSafety(
+                sandbox,
+                'remove_ignored_diagnostic',
+                { diagnosticKey: 'bad_key', reason: 'test' },
+                process.cwd()
+            );
+
+            expect(result.allowed).to.equal(false);
+            expect(result.reason).to.include('remove_ignored_diagnostic');
+        });
+
         it('allows writable workers to store topic walkthrough artifacts', () => {
             const sandbox = {
                 agentId: 'builder_topic_artifact',
@@ -223,6 +243,33 @@ describe('SubAgentSandbox', () => {
 
             const result = enforceSubAgentSafety(sandbox, 'read_file', { TargetFile: 'common/events.txt' }, process.cwd());
             expect(result.allowed).to.be.true;
+        });
+
+        it('allows plan-mode artifact edits without allowing project file edits', () => {
+            const workspaceRoot = process.cwd();
+            const sandbox = {
+                agentId: 'plan_card_editor',
+                role: 'plan',
+                mode: 'plan' as any,
+                writeScope: [],
+                permissionPolicy: 'deny' as const
+            };
+
+            const artifactResult = enforceSubAgentSafety(
+                sandbox,
+                'edit_file',
+                { filePath: path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'annotations.md') },
+                workspaceRoot
+            );
+            expect(artifactResult.allowed).to.equal(true);
+
+            const projectResult = enforceSubAgentSafety(
+                sandbox,
+                'edit_file',
+                { filePath: path.join(workspaceRoot, 'common', 'events', 'test.txt') },
+                workspaceRoot
+            );
+            expect(projectResult.allowed).to.equal(false);
         });
     });
 });

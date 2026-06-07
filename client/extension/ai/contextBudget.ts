@@ -20,6 +20,7 @@ export function getToolResultBudget(maxContextTokens?: number): number {
 
 /** Default budget per tool result (characters). */
 export const TOOL_RESULT_BUDGET_BASE = 12000;
+export const TOOL_RESULT_BUDGET_HARD_STUB = 60000;
 
 export interface CompactMessagesOptions {
     preserveTailBytes?: boolean;

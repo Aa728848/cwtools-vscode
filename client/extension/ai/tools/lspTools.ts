@@ -635,11 +635,11 @@ export class LspToolHandler {
 
     // - getPdxBlock -
 
-    async getPdxBlock(args: { file: string; symbol: string }): Promise<{ content: string; truncated: boolean }> {
+    async getPdxBlock(args: { file: string; symbol: string }, context?: import('../types').AgentToolContext): Promise<{ content: string; truncated: boolean; startLine?: number; endLine?: number; lineNumberBase?: 1; error?: string }> {
         try {
             const symbols = await this.documentSymbols({ file: args.file });
             if (symbols.symbols.length === 0) {
-                return { content: `Error: Could not parse symbols in file (or file is empty/invalid).`, truncated: false };
+                return { content: `Error: Could not parse symbols in file (or file is empty/invalid).`, truncated: false, error: 'Could not parse symbols in file (or file is empty/invalid).' };
             }
 
             let targetSymbol: DocumentSymbolInfo | null = null;
@@ -672,11 +672,13 @@ export class LspToolHandler {
                 const allNames = collectNames(symbols.symbols);
                 const preview = allNames.slice(0, 30).join('\n');
                 const suffix = allNames.length > 30 ? `\n... and ${allNames.length - 30} more` : '';
-                return { content: `Error: Symbol '${args.symbol}' not found in file.\n\nAvailable symbols in this file:\n${preview}${suffix}\n\nTry using one of these exact names.`, truncated: false };
+                return { content: `Error: Symbol '${args.symbol}' not found in file.\n\nAvailable symbols in this file:\n${preview}${suffix}\n\nTry using one of these exact names.`, truncated: false, error: `Symbol '${args.symbol}' not found in file.` };
             }
 
             const tsym = targetSymbol as DocumentSymbolInfo;
             const content = fs.readFileSync(args.file, 'utf-8');
+            const readTracker = (context?.agentRunner as any)?.readTracker;
+            if (readTracker) { readTracker.markRead(args.file); }
             const lines = content.split('\n');
             // document_symbols is 0-indexed line numbers
             const slice = lines.slice(tsym.range.startLine, tsym.range.endLine + 1);
@@ -688,9 +690,16 @@ export class LspToolHandler {
                 resultText = resultText.substring(0, MAX_CHARS) + '\n... [Block truncated due to extreme size]';
             }
 
-            return { content: resultText, truncated };
+            return {
+                content: resultText,
+                truncated,
+                startLine: tsym.range.startLine + 1,
+                endLine: tsym.range.endLine + 1,
+                lineNumberBase: 1,
+            };
         } catch (e) {
-            return { content: `Error reading PDX Block: ${e instanceof Error ? e.message : String(e)}`, truncated: false };
+            const message = e instanceof Error ? e.message : String(e);
+            return { content: `Error reading PDX Block: ${message}`, truncated: false, error: message };
         }
     }
 
@@ -1078,10 +1087,12 @@ export class LspToolHandler {
 
     // - getFileContext -
 
-    async getFileContext(args: { file: string; line: number; radius?: number }): Promise<GetFileContextResult> {
+    async getFileContext(args: { file: string; line: number; radius?: number }, context?: import('../types').AgentToolContext): Promise<GetFileContextResult> {
         const radius = args.radius ?? 20;
         try {
             const content = fs.readFileSync(args.file, 'utf-8');
+            const readTracker = (context?.agentRunner as any)?.readTracker;
+            if (readTracker) { readTracker.markRead(args.file); }
             const lines = content.split('\n');
             const startLine = Math.max(0, args.line - radius);
             const endLine = Math.min(lines.length - 1, args.line + radius);
@@ -1097,11 +1108,14 @@ export class LspToolHandler {
             else if (relPath.startsWith('localisation')) fileType = 'localisation';
 
             return {
-                code: contextLines.join('\n'),
+                code: contextLines.map((line, idx) => `${startLine + idx + 1} | ${line}`).join('\n'),
                 fileType,
+                startLine: startLine + 1,
+                endLine: endLine + 1,
+                lineNumberBase: 1,
             };
-        } catch {
-            return { code: '', fileType: 'unknown' };
+        } catch (e) {
+            return { code: '', fileType: 'unknown', error: e instanceof Error ? e.message : String(e) };
         }
     }
 
@@ -1824,6 +1838,20 @@ export class LspToolHandler {
     }
 
     async grep(args: import('../types').GrepArgs): Promise<import('../types').GrepResult> {
+        try {
+            return await this.grepImpl(args);
+        } catch (e) {
+            return {
+                matches: [],
+                totalMatches: 0,
+                truncated: false,
+                error: e instanceof Error ? e.message : String(e),
+                _hint: 'grep failed before completing the search. Fix the query or use a non-regex search.',
+            } as any;
+        }
+    }
+
+    private async grepImpl(args: import('../types').GrepArgs): Promise<import('../types').GrepResult> {
         const limit = Math.min(args.limit ?? 50, 200);
         const matches: Array<{ file: string; line: number; content: string }> = [];
         let totalMatches = 0;
@@ -2123,9 +2151,9 @@ export class LspToolHandler {
                         : undefined,
                 });
 
-                return { symbols: symbols.map(s => mapSymbol(s, 0)) };
-            } catch {
-                return { symbols: [] };
+                return { symbols: symbols.map(s => mapSymbol(s, 0)), lineNumberBase: 0 };
+            } catch (e) {
+                return { symbols: [], lineNumberBase: 0, error: e instanceof Error ? e.message : String(e) };
             }
         }, 8000);
     }
@@ -2155,8 +2183,8 @@ export class LspToolHandler {
                     line: s.location.range.start.line,
                 })),
             };
-        } catch {
-            return { symbols: [] };
+        } catch (e) {
+            return { symbols: [], error: e instanceof Error ? e.message : String(e) };
         }
     }
 

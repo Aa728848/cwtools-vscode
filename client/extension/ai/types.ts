@@ -443,6 +443,10 @@ export interface GetFileContextResult {
         requiredScopes: string[];
     };
     fileType: string;
+    startLine?: number;
+    endLine?: number;
+    lineNumberBase?: 1;
+    error?: string;
 }
 
 export interface SearchModFilesArgs {
@@ -557,6 +561,7 @@ export interface GrepResult {
     _warning?: string;
     _nextSteps?: string[];
     _hint?: string;
+    error?: string;
 }
 
 export interface GetCompletionAtArgs {
@@ -591,6 +596,8 @@ export interface DocumentSymbolInfo {
 
 export interface DocumentSymbolsResult {
     symbols: DocumentSymbolInfo[];
+    lineNumberBase?: 0;
+    error?: string;
 }
 
 export interface WorkspaceSymbolsArgs {
@@ -607,6 +614,7 @@ export interface WorkspaceSymbolsResult {
     }>;
     _warning?: string;
     _hint?: string;
+    error?: string;
 }
 
 export interface VerifyPdxIdentifierArgs {
@@ -815,6 +823,7 @@ export type AgentToolName =
     | 'todo_write'
     | 'read_file'
     | 'write_file'
+    | 'edit_file'
     | 'multi_replace_file_content'
     | 'replace_lines'
     | 'list_directory'
@@ -992,6 +1001,11 @@ export interface ListDirectoryResult {
         size?: number;
     }>;
     path: string;
+    truncated?: boolean;
+    hasMore?: boolean;
+    returnedCount?: number;
+    limit?: number;
+    error?: string;
 }
 
 export interface CodesearchArgs {

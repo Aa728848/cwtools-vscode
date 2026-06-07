@@ -4,6 +4,7 @@ import type { TaskNode } from './types';
 import type { AgentMode } from '../types';
 import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
+import { FILE_SCOPED_WRITE_TOOLS, MUTATING_TOOLS, SUB_AGENT_EXCLUDES } from '../tools/registry';
 
 /**
  * Orchestrator 子 Agent 物理沙盒隔离规范 (Sub-Agent Sandbox)
@@ -41,16 +42,11 @@ export function buildSubAgentSandbox(
 
     // ─── 1. 计算允许的工具集 ───
     // 默认黑名单拦截高危/交互型特权工具
-    const defaultExcludes = new Set<string>([
-        'web_fetch', 'search_web', 'codesearch',
-        'run_command', 'git_ops', 'save_workflow',
-        'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
-    ]);
+    const defaultExcludes = new Set<string>(SUB_AGENT_EXCLUDES);
 
     // 如果是只读或者 plan 规划角色，额外禁止所有物理写入工具
     if (profile.toolBudget === 'read_only' || profile.toolBudget === 'plan') {
-        const writeTools = ['write_file', 'replace_file_content', 'multi_replace_file_content', 'write_localisation', 'replace_lines', 'apply_patch', 'write_design_blueprint'];
-        writeTools.forEach(t => defaultExcludes.add(t));
+        MUTATING_TOOLS.forEach(t => defaultExcludes.add(t));
     }
 
     // 假设注册的完整工具白名单（基于可用工具过滤去重）
@@ -154,11 +150,7 @@ export function enforceSubAgentSafety(
     workspaceRoot: string
 ): { allowed: boolean; reason?: string } {
     // W7 fix: 针对 excluded 敏感特权工具直接物理阻断
-    const excludedTools = new Set<string>([
-        'web_fetch', 'search_web', 'codesearch',
-        'run_command', 'git_ops', 'save_workflow',
-        'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
-    ]);
+    const excludedTools = new Set<string>(SUB_AGENT_EXCLUDES);
 
     if (excludedTools.has(toolName)) {
         if (toolName === 'run_command') {
@@ -173,12 +165,15 @@ export function enforceSubAgentSafety(
         };
     }
 
-    // ─── 1. 判断是否属于文件写入类工具 ───
-    const writeTools = new Set<string>([
-        'write_file', 'replace_file_content', 'multi_replace_file_content', 'write_localisation', 'replace_lines', 'apply_patch', 'write_design_blueprint'
-    ]);
+    if (sandbox.writeScope && sandbox.writeScope.length === 0 && MUTATING_TOOLS.has(toolName) && !FILE_SCOPED_WRITE_TOOLS.has(toolName)) {
+        return {
+            allowed: false,
+            reason: `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用会修改状态的工具 '${toolName}'`
+        };
+    }
 
-    if (writeTools.has(toolName)) {
+    // ─── 1. 判断是否属于按文件路径写入类工具 ───
+    if (FILE_SCOPED_WRITE_TOOLS.has(toolName)) {
         const targetFiles = getAgentToolTargetFiles(toolName, args || {}, workspaceRoot);
         const isPlanCardArtifactWrite = sandbox.mode === 'plan'
             && targetFiles.length > 0

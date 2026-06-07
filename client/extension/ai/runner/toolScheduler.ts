@@ -51,6 +51,14 @@ export function getAgentToolTargetFiles(
         case 'git_ops':
             add(args.file);
             break;
+        case 'edit_file':
+            add(args.filePath);
+            break;
+        case 'read_file':
+        case 'get_pdx_block':
+        case 'get_file_context':
+            add(args.file);
+            break;
         case 'multi_replace_file_content':
             add(args.TargetFile);
             break;

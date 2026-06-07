@@ -120,7 +120,7 @@ sequenceDiagram
 | `providers.ts` / `providers/models/` | Provider facade、默认模型、能力、价格和缓存折扣 |
 | `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
 | `runnerPolicy.ts` | 模式级工具过滤、迭代上限和 slim sub-agent 输出预算 |
-| `planModeGuard.ts` | 计划模式写入守卫：仅放行实现计划与 plan/blueprint/walkthrough 产物文件 |
+| `planModeGuard.ts` | 计划模式写入守卫：仅放行实现计划与 plan/blueprint/walkthrough 产物文件；并提供非写入模式的只读 `git_ops` 门控（`validateGitOpsForMode`） |
 | `projectProfile.ts` | `/init` 项目扫描、profile 构建/读写、语言/编码检测 |
 | `chatInit.ts` | `/init` 命令处理器、profile 生成和 CWTOOLS.md 渲染 |
 | `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
@@ -151,7 +151,7 @@ sequenceDiagram
 | --- | --- |
 | `compaction.ts` | 历史压缩与上下文窗口辅助 |
 | `checkpoint.ts` | V2 断点恢复元数据和孤儿 `tool_call` 补齐 |
-| `writeCoordinator.ts` | `PartitionedWriteQueue` 写入协调 |
+| `writeCoordinator.ts` | `PartitionedWriteQueue` 写入协调 + `afterCurrentWrites` 读后于写屏障 |
 | `fallbackPolicy.ts` | 模型备选及 API 报错重试管理 |
 | `cancellation.ts` | 大模型生成终止判定与异常抛出 |
 | `stepEmitter.ts` | 细粒度步骤与 token 增量流式广播 |
@@ -221,11 +221,13 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 - `tools/permissions.ts` 从 registry 读取权限元数据，统一执行 mode/sub-agent 访问校验。
 - `tools/argRepair.ts` 在 Runner 执行工具前修复常见参数名和类型漂移。
 - `runner/toolInvocation.ts` 在执行前归一化 tool call，派生风险元数据，提取目标文件并生成稳定 `invocationId`。
-- `runner/toolScheduler.ts` 根据 `concurrencyClass` 实施并发上限和 per-file-write 互斥。
+- `runner/toolScheduler.ts` 根据 `concurrencyClass` 实施并发上限和 per-file-write 互斥；对存在在途写入的文件，读操作经 `writeCoordinator.afterCurrentWrites` 排在其后。`getAgentToolTargetFiles` 同时为 `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` 提取目标路径。
 - `runner/commandPreflight.ts` 对 `run_command` 做风险分级；destructive 或 escalated 命令必须经由用户授权。
+- `planModeGuard.ts` 的 `validateGitOpsForMode` 在 explore/review/script/orchestrator/plan 等非写入模式下只放行 `status`/`diff` 的 `git_ops`，由 `agentRunner`/`agentTools` 在执行前拦截变更性 action。
 - `runner/permissionPolicy.ts` 的 `cwdScope` 判断使用 `path.relative`，避免前缀绕过。
 - 写工具经由 `PartitionedWriteQueue` 管理；`.yml` 本地化写入必须使用 `write_localisation`。
-- 对 PDXScript 优先使用 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context` 等结构化读取工具。
+- `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语（registry `EDIT`、`per-file-write`），复用 `fuzzyReplace` 与既有写守卫。
+- 对 PDXScript 优先使用 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context` 等结构化读取工具。`get_pdx_block`/`get_file_context` 现会 `markRead` 并返回 1 基行号，读/搜索工具出错时返回 `error` 字段区别于空结果。
 - 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。
 - `run_skill` 工具按需加载 `SKILL.md` 正文；`skills.ts` 负责索引、`promptBuilder.ts` 只注入精简技能索引，正文不进入基础 prompt。
 
@@ -333,7 +335,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ### Replacer Suite
 
-`tools/replacerSuite.ts` 提供 10 种递进式模糊字符串替换策略：
+`tools/replacerSuite.ts` 提供 10 种递进式模糊字符串替换策略，经 `FileToolHandler.replace()` 供 `edit_file` 工具与 `apply_patch` 的 hunk 应用消费（`multi_replace_file_content` 精确未命中时也回退到该引擎）：
 
 1. 直接匹配
 2. Unicode 归一化（BOM、CRLF、全角/半角、智能引号）
@@ -586,7 +588,7 @@ cwtools-vscode/
       techTreePreview.ts
       entityPreview.ts
     test/
-      unit/                   48 个单元测试文件
+      unit/                   49 个单元测试文件
       suite/
   src/
     LSP/

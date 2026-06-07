@@ -31,8 +31,9 @@ import { validateToolAccess } from './tools/permissions';
 import { runLedger } from './runner/runLedger';
 import { queryProjectProfile } from './projectProfile';
 import { loadSkill } from './skills';
-import { validatePlanModeToolUse } from './planModeGuard';
+import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { saveProjectWorkflow } from './workflowRegistry';
+import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 
 // - Tool Executor -
 
@@ -41,7 +42,7 @@ import { saveProjectWorkflow } from './workflowRegistry';
  * handles context-aware dedup/segmentation. This threshold must be >= TOOL_RESULT_BUDGET_MAX
  * so the intelligent budgeting layer gets first crack at the data.
  */
-const MAX_TOOL_RESULT_CHARS = 18000;
+const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 
 // Tool execution timeouts (ms) - prevents hangs on network filesystems or LSP deadlocks
 const TOOL_TIMEOUTS: Record<string, number> = {
@@ -77,6 +78,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     // File tools - 30s
     read_file: 30_000,
     write_file: 30_000,
+    edit_file: 30_000,
     multi_replace_file_content: 30_000,
     replace_lines: 30_000,
     apply_patch: 30_000,
@@ -313,6 +315,15 @@ export class AgentToolExecutor {
                 };
             }
         }
+        if (toolName === 'git_ops') {
+            const guard = validateGitOpsForMode(mode, args);
+            if (!guard.allowed) {
+                return {
+                    success: false,
+                    error: guard.reason,
+                };
+            }
+        }
 
         const replaySession = (context?.runnerOptions as any)?.replaySession;
         if (replaySession) {
@@ -469,7 +480,7 @@ export class AgentToolExecutor {
             case 'get_diagnostics':
                 result = await this.lspHandler.getDiagnostics(args as any); break;
             case 'get_file_context':
-                result = await this.lspHandler.getFileContext(args as any); break;
+                result = await this.lspHandler.getFileContext(args as any, context); break;
             case 'search_mod_files':
                 result = await this.lspHandler.searchModFiles(args as any); break;
             case 'find_sprite_candidates':
@@ -487,7 +498,7 @@ export class AgentToolExecutor {
             case 'verify_pdx_identifier':
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
             case 'get_pdx_block':
-                result = await this.lspHandler.getPdxBlock(args as any); break;
+                result = await this.lspHandler.getPdxBlock(args as any, context); break;
             case 'edit_pdx_block':
                 result = await this.lspHandler.editPdxBlock(args as any, context); break;
             case 'edit_pdx_block_disabled': break;
@@ -515,6 +526,8 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.readFile(args as any, context); break;
             case 'write_file':
                 result = await this.fileHandler.writeFile(args as any, context); break;
+            case 'edit_file':
+                result = await this.fileHandler.editFile(args as any, context); break;
             case 'multi_replace_file_content':
                 result = await this.fileHandler.multiReplaceFileContent(args as any, context); break;
             case 'replace_lines':
@@ -1254,6 +1267,7 @@ export class AgentToolExecutor {
             return {
                 _truncated: true,
                 _originalLength: json.length,
+                preview: budgetToolResult(result, 18000),
                 _note: `Result exceeded ${MAX_TOOL_RESULT_CHARS} chars safety limit. Use targeted queries (add filter, limit, or file parameters) for smaller results.`,
             };
         }

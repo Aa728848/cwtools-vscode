@@ -1,11 +1,37 @@
 import * as path from 'path';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { WRITE_TOOLS } from './tools/registry';
+import type { AgentMode } from './types';
 
 export interface PlanModeGuardResult {
     allowed: boolean;
     reason?: string;
     targetPaths?: string[];
+}
+
+const READ_ONLY_GIT_ACTIONS = new Set(['status', 'diff']);
+const READ_ONLY_GIT_MODES = new Set<AgentMode>(['plan', 'explore', 'review', 'script_reviewer', 'orchestrator', 'script']);
+
+export function isReadOnlyGitAction(action: unknown): boolean {
+    return typeof action === 'string' && READ_ONLY_GIT_ACTIONS.has(action);
+}
+
+export function validateGitOpsForMode(
+    mode: AgentMode,
+    args: Record<string, unknown>
+): { allowed: boolean; reason?: string } {
+    if (!READ_ONLY_GIT_MODES.has(mode)) {
+        return { allowed: true };
+    }
+
+    if (isReadOnlyGitAction(args.action)) {
+        return { allowed: true };
+    }
+
+    return {
+        allowed: false,
+        reason: `${mode} mode only permits read-only git_ops actions: status and diff.`,
+    };
 }
 
 const PLAN_FILE_RE = /^(implementation|implement)[ _-]?plan\.md$/i;
@@ -113,14 +139,7 @@ export function validatePlanModeToolUse(
     }
 
     if (toolName === 'git_ops') {
-        const action = typeof args.action === 'string' ? args.action : '';
-        if (action === 'status' || action === 'diff') {
-            return { allowed: true };
-        }
-        return {
-            allowed: false,
-            reason: 'Plan mode only permits read-only git_ops actions: status and diff.',
-        };
+        return validateGitOpsForMode('plan', args);
     }
 
     const targets = precomputedTargets && precomputedTargets.length > 0
@@ -129,7 +148,7 @@ export function validatePlanModeToolUse(
             ? extractPatchTargets(args, workspaceRoot)
             : getAgentToolTargetFiles(toolName, args, workspaceRoot, topicId);
 
-    const planFileWriteTools = new Set(['write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch']);
+    const planFileWriteTools = new Set(['write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch']);
     if (planFileWriteTools.has(toolName) && targets.length > 0 && targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot))) {
         return { allowed: true, targetPaths: targets };
     }

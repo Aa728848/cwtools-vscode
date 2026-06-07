@@ -94,6 +94,12 @@ export class FileToolHandler {
         return '';
     }
 
+    private recordEditFailure(filePath: string): string {
+        const failCount = (this.editFailCount.get(filePath) || 0) + 1;
+        this.editFailCount.set(filePath, failCount);
+        return this.buildEditEscalationHint(filePath, failCount);
+    }
+
     private async executeWithLock<T>(filePath: string, operation: () => Promise<T> | T): Promise<T> {
         if (!this.ctx.vfsLocks) return operation();
 
@@ -348,14 +354,14 @@ export class FileToolHandler {
         }
 
         const finalContent = shouldAddBom ? '\uFEFF' + content : content;
-        const readTracker = (context?.agentRunner as any)?.readTracker;
-        if (readTracker) { readTracker.markWritten(filePath); }
         const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
         if (vfsOverlay) {
             vfsOverlay.set(filePath, finalContent);
         } else {
             fs.writeFileSync(filePath, finalContent, 'utf-8');
         }
+        const readTracker = (context?.agentRunner as any)?.readTracker;
+        if (readTracker) { readTracker.markWritten(filePath); }
     }
 
     // - readFile -
@@ -644,6 +650,94 @@ export class FileToolHandler {
     }
 
 
+    async editFile(args: import('../types').EditFileArgs, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
+        if (!args.filePath || typeof args.filePath !== 'string') {
+            return { success: false, message: 'Error: missing or invalid "filePath".' };
+        }
+        if (typeof args.oldString !== 'string' || typeof args.newString !== 'string') {
+            return { success: false, message: 'Error: edit_file requires string oldString and newString.' };
+        }
+
+        return this.executeWithLock(args.filePath, async () => {
+            try {
+                args.filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'edit_file', context);
+                const ymlReject = this.rejectGenericYmlWrite('edit_file', args.filePath);
+                if (ymlReject) return ymlReject as any;
+            } catch (e) {
+                return { success: false, message: String(e) };
+            }
+
+            const filePath = args.filePath;
+            const fileExists = fs.existsSync(filePath);
+            const { content: originalContent, hasBom } = this.readTextFile(filePath, context);
+            let newContent: string;
+
+            try {
+                if (args.oldString.length === 0) {
+                    if (fileExists && originalContent.length > 0) {
+                        const hint = this.recordEditFailure(filePath);
+                        return { success: false, message: `edit_file refused an empty oldString for existing file ${path.basename(filePath)}. Use write_file for whole-file replacement or provide the exact text to replace.${hint}` };
+                    }
+                    newContent = args.newString;
+                } else {
+                    const oldText = this.convertLineEnding(this.normalizeLineEndings(args.oldString), this.detectLineEnding(originalContent));
+                    const nextText = this.convertLineEnding(this.normalizeLineEndings(args.newString), this.detectLineEnding(originalContent));
+                    newContent = this.replace(originalContent, oldText, nextText, args.replaceAll === true);
+                }
+            } catch (e) {
+                const hint = this.recordEditFailure(filePath);
+                return { success: false, message: `edit_file failed for ${path.basename(filePath)}: ${e instanceof Error ? e.message : String(e)}${hint}` };
+            }
+
+            if (newContent === originalContent) {
+                return { success: true, message: `edit_file made no changes to ${path.basename(filePath)}.` };
+            }
+
+            const pdxStructureReject = this.rejectUnsafePdxStructureWrite('edit_file', filePath, originalContent, newContent);
+            if (pdxStructureReject) {
+                const hint = this.recordEditFailure(filePath);
+                return { success: false, message: pdxStructureReject + hint };
+            }
+
+            const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
+            const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
+                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `edit_${crypto.randomUUID()}`);
+                if (!confirmed) {
+                    return { success: false, message: 'User cancelled the edit_file operation', pendingDiff: diff };
+                }
+            } else if (this.ctx.onAutoWritten && !vfsOverlay) {
+                this.ctx.onAutoWritten(filePath, !fileExists);
+            }
+
+            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0;
+            (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, fileExists ? originalContent : null);
+            try {
+                this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
+            } catch (e) {
+                return { success: false, message: `Write failed: ${String(e)}` };
+            }
+
+            this.editFailCount.delete(filePath);
+            const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch);
+            const diagnostics = freshResult.diagnostics;
+            const oldLineCount = originalContent.length === 0 ? 0 : originalContent.split(/\r?\n/).length;
+            const newLineCount = newContent.length === 0 ? 0 : newContent.split(/\r?\n/).length;
+            return {
+                success: true,
+                message: `edit_file: updated ${path.basename(filePath)}`,
+                diff,
+                diagnostics,
+                freshness: freshResult.freshness,
+                pendingGlobalKinds: freshResult.pendingGlobalKinds,
+                stats: {
+                    linesAdded: Math.max(0, newLineCount - oldLineCount),
+                    linesRemoved: Math.max(0, oldLineCount - newLineCount),
+                },
+            };
+        });
+    }
+
 
     // - astMutate -
 
@@ -837,8 +931,15 @@ export class FileToolHandler {
                 }
 
                 if (!section.includes(oldText)) {
-                    errors.push(`Chunk ${i+1}: TargetContent not found in the specified line range [${chunk.StartLine}, ${chunk.EndLine}]. Check your string matching.`);
-                    continue;
+                    try {
+                        const fuzzySection = this.replace(section, oldText, nextText, false);
+                        const newSectionLines = fuzzySection.split('\n');
+                        lines.splice(startIdx, endIdx - startIdx + 1, ...newSectionLines);
+                        continue;
+                    } catch {
+                        errors.push(`Chunk ${i+1}: TargetContent not found in the specified line range [${chunk.StartLine}, ${chunk.EndLine}]. Check your string matching.`);
+                        continue;
+                    }
                 }
                 
                 const newSection = section.replace(oldText, nextText);
@@ -849,15 +950,13 @@ export class FileToolHandler {
             }
 
             if (errors.length > 0) {
-                const failCount = (this.editFailCount.get(filePath) || 0) + 1;
-                this.editFailCount.set(filePath, failCount);
-                return { success: false, message: `Multi-replace failed with ${errors.length} error(s):\\n- ${errors.join('\\n- ')}` + this.buildEditEscalationHint(filePath, failCount) } as any;
+                return { success: false, message: `Multi-replace failed with ${errors.length} error(s):\\n- ${errors.join('\\n- ')}` + this.recordEditFailure(filePath) } as any;
             }
 
             content = lines.join(ending);
             const pdxStructureReject = this.rejectUnsafePdxStructureWrite('multi_replace_file_content', filePath, originalContent, content);
             if (pdxStructureReject) {
-                return { success: false, message: pdxStructureReject } as any;
+                return { success: false, message: pdxStructureReject + this.recordEditFailure(filePath) } as any;
             }
             const diff = this.buildUnifiedDiff(filePath, originalContent, content);
 
@@ -920,10 +1019,10 @@ export class FileToolHandler {
             const endLine = Math.trunc(args.endLine);
 
             if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) {
-                return { success: false, message: 'replace_lines requires numeric startLine and endLine.' };
+                return { success: false, message: 'replace_lines requires numeric startLine and endLine.' + this.recordEditFailure(filePath) };
             }
             if (startLine < 1 || endLine < startLine || endLine > lines.length) {
-                return { success: false, message: `Invalid line range [${args.startLine}, ${args.endLine}] for file with ${lines.length} lines.` };
+                return { success: false, message: `Invalid line range [${args.startLine}, ${args.endLine}] for file with ${lines.length} lines.` + this.recordEditFailure(filePath) };
             }
 
             const ending = this.detectLineEnding(originalContent);
@@ -959,7 +1058,7 @@ export class FileToolHandler {
                 const preview = normalizedCurrentRange.split('\n').slice(0, 12).join('\n');
                 return {
                     success: false,
-                    message: `replace_lines safety check failed for ${path.basename(filePath)} lines ${startLine}-${endLine}: ${guardErrors.join('; ')}. The file may have changed since the line numbers were chosen. Re-read the current context with get_file_context/read_file, then retry with updated line numbers and expectedContent.`,
+                    message: `replace_lines safety check failed for ${path.basename(filePath)} lines ${startLine}-${endLine}: ${guardErrors.join('; ')}. The file may have changed since the line numbers were chosen. Re-read the current context with get_file_context/read_file, then retry with updated line numbers and expectedContent.` + this.recordEditFailure(filePath),
                     currentContentPreview: preview,
                 } as any;
             }
@@ -975,7 +1074,7 @@ export class FileToolHandler {
 
             const pdxStructureReject = this.rejectUnsafePdxStructureWrite('replace_lines', filePath, originalContent, newContent);
             if (pdxStructureReject) {
-                return { success: false, message: pdxStructureReject };
+                return { success: false, message: pdxStructureReject + this.recordEditFailure(filePath) };
             }
 
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
@@ -1133,6 +1232,14 @@ export class FileToolHandler {
         }
 
         if (errors.length > 0) {
+            const hints: string[] = [];
+            for (const filePath of byFile.keys()) {
+                const hint = this.recordEditFailure(filePath);
+                if (hint) hints.push(hint.trim());
+            }
+            if (hints.length > 0) {
+                errors.push(...hints);
+            }
             return { success: false, filesChanged: [], errors };
         }
 
@@ -1145,6 +1252,14 @@ export class FileToolHandler {
         }
 
         if (errors.length > 0) {
+            const hints: string[] = [];
+            for (const filePath of byFile.keys()) {
+                const hint = this.recordEditFailure(filePath);
+                if (hint) hints.push(hint.trim());
+            }
+            if (hints.length > 0) {
+                errors.push(...hints);
+            }
             return { success: false, filesChanged: [], errors };
         }
 
@@ -1180,7 +1295,7 @@ export class FileToolHandler {
             (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContents.get(filePath) ?? null);
             preWriteEpochs.set(filePath, (await this.queryDiagnosticsFresh(filePath))?.epoch ?? 0);
             try {
-                this.writeTextFile(filePath, newContent, hasBom);
+                this.writeTextFile(filePath, newContent, hasBom, undefined, context);
                 filesChanged.push(path.relative(this.ctx.workspaceRoot, filePath).replace(/\\/g, '/'));
             } catch (e) {
                 errors.push(`Writing ${path.basename(filePath)} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -1212,17 +1327,19 @@ export class FileToolHandler {
     async listDirectory(args: { directory: string; recursive?: boolean }, context?: import('../types').AgentToolContext): Promise<import('../types').ListDirectoryResult> {
         try {
             const dirPath = this.resolveAndAssertInWorkspace(args.directory, context);
+            const limit = 200;
 
             if (!fs.existsSync(dirPath)) {
-                return { entries: [], path: dirPath };
+                return { entries: [], path: dirPath, truncated: false, hasMore: false, returnedCount: 0, limit };
             }
 
             const entries: Array<{ name: string; type: 'file' | 'directory'; size?: number }> = [];
-            this.listDirRecursive(dirPath, dirPath, entries, args.recursive ?? false, 0, 3);
+            this.listDirRecursive(dirPath, dirPath, entries, args.recursive ?? false, 0, 3, limit + 1);
+            const hasMore = entries.length > limit;
 
-            return { entries: entries.slice(0, 200), path: dirPath };
-        } catch {
-            return { entries: [], path: args.directory };
+            return { entries: entries.slice(0, limit), path: dirPath, truncated: hasMore, hasMore, returnedCount: Math.min(entries.length, limit), limit };
+        } catch (e) {
+            return { entries: [], path: args.directory, truncated: false, hasMore: false, returnedCount: 0, limit: 200, error: e instanceof Error ? e.message : String(e) };
         }
     }
 
@@ -1232,18 +1349,19 @@ export class FileToolHandler {
         results: Array<{ name: string; type: 'file' | 'directory'; size?: number }>,
         recursive: boolean,
         depth: number,
-        maxDepth: number
+        maxDepth: number,
+        maxEntries = 200
     ): void {
-        if (depth > maxDepth || results.length >= 200) return;
+        if (depth > maxDepth || results.length >= maxEntries) return;
         const entries = fs.readdirSync(currentDir, { withFileTypes: true });
         for (const entry of entries) {
-            if (results.length >= 200) break;
+            if (results.length >= maxEntries) break;
             if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
             const relPath = path.relative(baseDir, path.join(currentDir, entry.name)).replace(/\\/g, '/');
             if (entry.isDirectory()) {
                 results.push({ name: relPath + '/', type: 'directory' });
                 if (recursive) {
-                    this.listDirRecursive(baseDir, path.join(currentDir, entry.name), results, recursive, depth + 1, maxDepth);
+                    this.listDirRecursive(baseDir, path.join(currentDir, entry.name), results, recursive, depth + 1, maxDepth, maxEntries);
                 }
             } else {
                 const stat = fs.statSync(path.join(currentDir, entry.name));
@@ -1254,16 +1372,17 @@ export class FileToolHandler {
 
     // - globFiles -
 
-    async globFiles(args: { pattern: string; limit?: number }): Promise<{ files: string[]; total: number }> {
+    async globFiles(args: { pattern: string; limit?: number }): Promise<{ files: string[]; truncated: boolean; hasMore: boolean; returnedCount: number; limit: number; error?: string }> {
         try {
             const limit = Math.min(args.limit ?? 200, 500);
-            const uris = await vs.workspace.findFiles(args.pattern, '**/node_modules/**', limit); 
-const files = uris.map(u => u.fsPath); 
-return { files, total: files.length }; 
-} catch { 
-return { files: [], total: 0 }; 
-} 
-} 
+            const uris = await vs.workspace.findFiles(args.pattern, '**/node_modules/**', limit + 1);
+            const hasMore = uris.length > limit;
+            const files = uris.slice(0, limit).map(u => u.fsPath);
+            return { files, truncated: hasMore, hasMore, returnedCount: files.length, limit };
+        } catch (e) {
+            return { files: [], truncated: false, hasMore: false, returnedCount: 0, limit: Math.min(args.limit ?? 200, 500), error: e instanceof Error ? e.message : String(e) };
+        }
+    }
 
 // - getLspDiagnosticsForFile -
 
@@ -1591,6 +1710,8 @@ return { files: [], total: 0 };
                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                     await fs.promises.writeFile(filePath, withBom, 'utf-8');
                 }
+                const readTracker = (context?.agentRunner as any)?.readTracker;
+                if (readTracker) { readTracker.markWritten(filePath); }
 
                 // Clear failure counter for this file since we succeeded
                 this.editFailCount.delete(filePath);

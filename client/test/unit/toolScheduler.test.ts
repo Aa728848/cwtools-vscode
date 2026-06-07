@@ -29,6 +29,48 @@ describe('ToolScheduler V2 concurrencyClass Dispatch (P2-3)', () => {
         expect(paths).to.be.an('array');
     });
 
+    it('extracts read and edit paths for same-file queue coordination', () => {
+        const mod = loadModule();
+        const normalize = (value: string) => value.replace(/\\/g, '/');
+
+        expect(normalize(mod.getAgentToolTargetFiles('edit_file', { filePath: 'src/main.ts' }, 'C:/project')[0]!))
+            .to.equal('C:/project/src/main.ts');
+        expect(normalize(mod.getAgentToolTargetFiles('read_file', { file: 'src/main.ts' }, 'C:/project')[0]!))
+            .to.equal('C:/project/src/main.ts');
+        expect(normalize(mod.getAgentToolTargetFiles('get_pdx_block', { file: 'events/test.txt' }, 'C:/project')[0]!))
+            .to.equal('C:/project/events/test.txt');
+        expect(normalize(mod.getAgentToolTargetFiles('get_file_context', { file: 'common/test.txt' }, 'C:/project')[0]!))
+            .to.equal('C:/project/common/test.txt');
+    });
+
+    it('waits same-file read barriers until the current write finishes and preserves return values', async () => {
+        const { PartitionedWriteQueue } = require('../../extension/ai/runner/writeCoordinator') as typeof import('../../extension/ai/runner/writeCoordinator');
+        const queue = new PartitionedWriteQueue();
+        const events: string[] = [];
+        let releaseWrite!: () => void;
+
+        const writeResult = queue.enqueue(['C:/project/src/main.ts'], async () => {
+            events.push('write-start');
+            await new Promise<void>(resolve => { releaseWrite = resolve; });
+            events.push('write-end');
+            return 'write-result';
+        });
+
+        await Promise.resolve();
+        const readResult = queue.afterCurrentWrites(['C:/project/src/main.ts'], async () => {
+            events.push('read');
+            return 'read-result';
+        });
+
+        await Promise.resolve();
+        expect(events).to.deep.equal(['write-start']);
+
+        releaseWrite();
+        expect(await writeResult).to.equal('write-result');
+        expect(await readResult).to.equal('read-result');
+        expect(events).to.deep.equal(['write-start', 'write-end', 'read']);
+    });
+
     it('extracts save_workflow target paths when the id is deterministic', () => {
         const mod = loadModule();
         const paths = mod.getAgentToolTargetFiles('save_workflow', { id: 'Review Flow', title: 'unused' }, 'C:/project');

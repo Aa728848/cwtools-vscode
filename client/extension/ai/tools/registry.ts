@@ -7,7 +7,7 @@ export type AgentToolName =
     | 'query_localisation_index' | 'query_workspace_index' | 'query_project_profile' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'edit_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
-    | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file'
+    | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
     | 'glob_files' | 'lsp_operation' | 'web_fetch' | 'run_command'
     | 'search_web' | 'codesearch' | 'apply_patch' | 'multi_replace_file_content'
@@ -66,7 +66,7 @@ const BASE_READ: AgentToolName[] = [
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics'
 ];
 const EDIT: AgentToolName[] = [
-    'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
+    'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
     'edit_pdx_block', 'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'set_memory', 'get_memory', 'search_memory', 'save_memory'];
@@ -78,6 +78,18 @@ const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', '
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>(['web_fetch', 'search_web', 'codesearch', 'run_command', 'git_ops', 'save_workflow', ...MEDIA]);
+const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
+    'write_file',
+    'edit_file',
+    'multi_replace_file_content',
+    'replace_lines',
+    'apply_patch',
+    'edit_pdx_block',
+    'write_localisation',
+    'write_design_blueprint',
+    'deploy_mod_asset',
+    'save_workflow',
+]);
 
 // Mutating tools: 改变工作区 / 记忆 / 黑板状态的工具。doom-loop 检测见到 mutating 成功
 // 后会清空对应文件的 pairFrequency 窗口,避免把 verify-after-write 误判为重复。
@@ -102,7 +114,7 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, 'todo_write', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, 'todo_write', 'write_file', 'edit_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY]);
@@ -213,5 +225,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
 
 export const TOOL_DEFINITIONS = SCHEMA_DEFINITIONS;
 export const WRITE_TOOLS = WRITE_TOOLS_SET;
+export const MUTATING_TOOLS = MUTATING_TOOLS_SET;
+export const FILE_SCOPED_WRITE_TOOLS = FILE_SCOPED_WRITE_TOOLS_SET;
 export const SUB_AGENT_EXCLUDES = SUB_AGENT_EXCLUDES_SET;
 export const READ_ONLY_TOOLS = new Set(SCHEMA_DEFINITIONS.map(s => s.function.name).filter(n => !WRITE_TOOLS_SET.has(n)));

@@ -1998,6 +1998,25 @@ type Server(client: ILanguageClient) =
             with e -> logDiag $"Deferred dynamic revalidation scheduling failed: {e.Message}")
         |> ignore
 
+    /// Parameter-expansion errors for scripted_effect / scripted_trigger / script_value now live
+    /// on their CALL sites (see CommonValidation.valScriptedEffectParams); the definition file only
+    /// carries an Information marker (code "CW274D") whose related entries point at those call
+    /// sites. Single-file validation of the definition validates the definition in isolation and
+    /// cannot reproduce these cross-file errors, so opening it would otherwise clear the marker.
+    /// When such a definition file is opened or edited we refresh the affected call files — plus
+    /// the definition itself, to restore its marker — through the non-clobbering deferred path.
+    /// Gated on the file actually having carried a "CW274D" marker, so ordinary files pay nothing.
+    let refreshDynamicCallSitesForDefinition (defFile: string) (priorDiagnostics: Diagnostic list) =
+        let callFiles =
+            priorDiagnostics
+            |> List.filter (fun (d: Diagnostic) -> d.code = Some "CW274D")
+            |> List.collect (fun d -> d.relatedInformation)
+            |> List.map (fun ri -> getPathFromDoc ri.location.uri)
+            |> List.distinctBy normaliseCachePath
+        if not callFiles.IsEmpty then
+            logDiag $"Refreshing {callFiles.Length} call-site file(s) for definition {defFile}"
+            scheduleDeferredDynamicRevalidation (defFile :: callFiles)
+
     let mutable delayTime = TimeSpan(0, 0, 5)
 
 
@@ -2205,7 +2224,16 @@ type Server(client: ILanguageClient) =
                                     lastCycleEditAction = isEditAction
                                     lastError = None })
                             logDiag $"lint force: %b{force}, shallow: %b{useShallowAnalyze}"
+                            // Capture the file's prior diagnostics BEFORE lint overwrites them, so
+                            // we can detect a scripted_effect/value definition marker and refresh
+                            // its call sites (single-file lint cannot reproduce those cross-file).
+                            let lintPath = getPathFromDoc uri
+                            let priorDiagnostics =
+                                match fileDiagnosticStates.TryGetValue(lintPath) with
+                                | true, state -> state.diagnostics
+                                | _ -> []
                             do! lint uri useShallowAnalyze false isEditAction
+                            refreshDynamicCallSitesForDefinition lintPath priorDiagnostics
 
                             if not useShallowAnalyze then
                                 let didGlobalWork = delayedAnalyze force

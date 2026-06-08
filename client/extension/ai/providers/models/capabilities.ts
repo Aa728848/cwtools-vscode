@@ -28,20 +28,28 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'claude-3': true,
     'claude-4': true,
     'gemini-3.1-pro-preview': true,
+    'gemini-3.1-pro': true,
     'gemini-3-flash-preview': true,
     'gemini-3.1-flash-lite-preview': true,
+    'gemini-3.1-flash-lite': true,
+    'gemini-3.5-flash': true,
+    'gemini-3.5-flash-lite': true,
     'gemini-2.5-pro': true,
     'gemini-2.5-flash': true,
     'gemini-2.5-flash-lite': true,
     'gemini': true,
+    'MiniMax-M3': false,
     'MiniMax-M2': false,
     'glm-5v-turbo': true,
     'glm-4.1v-thinking': true,
     'glm-4.1v-thinking-flash': true,
     'glm-5v': true,
+    'glm-5v-flash': true,
     'glm-4v': true,
     'glm-4.5v': true,
     'glm-5.1': false,
+    'glm-5-air': false,
+    'glm-5-flash': false,
     'glm-5-turbo': false,
     'glm-5': false,
     'glm-4.7': false,
@@ -51,6 +59,10 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'qwen3.6-plus': false,
     'qwen3.5-plus': false,
     'qwen3.6-flash': false,
+    'qwen3.7-max': false,
+    'qwen3.7-plus': false,
+    'qwen3.7-flash': false,
+    'qwen3.6-27b': true,
     'qwen3-235b-a22b': false,
     'qwen3-32b': false,
     'qwen-max': false,
@@ -69,8 +81,8 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'mimo-v2-flash': false,
     'kimi-k2.6': true,
     'kimi-k2.5': true,
-    'qwen3.7': true,
-    'Qwen3.7': true
+    'qwen3.7': false,
+    'Qwen3.7': false
 };
 
 /**
@@ -135,13 +147,13 @@ export const ALWAYS_THINKING_PREFIXES: string[] = [
  * Per-model context window sizes (tokens).
  */
 export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
-    'gpt-5.5': 1000000,
-    'gpt-5.5-pro': 1000000,
+    'gpt-5.5': 1050000,
+    'gpt-5.5-pro': 1050000,
     'gpt-5.5-instant': 200000,
     'gpt-5.3-instant': 128000,
-    'gpt-5.4': 1000000,
-    'gpt-5.4-mini': 200000,
-    'gpt-5.4-nano': 128000,
+    'gpt-5.4': 1050000,
+    'gpt-5.4-mini': 400000,
+    'gpt-5.4-nano': 400000,
     'gpt-5-mini': 200000,
     'gpt-5-nano': 400000,
     'gpt-4-vision': 128000,
@@ -149,6 +161,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'claude-opus-4-6': 1000000,
     'claude-sonnet-4-6': 1000000,
     'claude-haiku-4-5': 200000,
+    'MiniMax-M3': 1000000,
     'MiniMax-M2.7': 200000,
     'MiniMax-M2.7-highspeed': 200000,
     'MiniMax-M2.5': 200000,
@@ -156,8 +169,13 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'MiniMax-M2.1': 200000,
     'MiniMax-M2': 200000,
     'glm-5.1': 200000,
+    'glm-5.1-highspeed': 200000,
     'glm-5': 200000,
+    'glm-5-air': 200000,
+    'glm-5-flash': 200000,
     'glm-5-turbo': 128000,
+    'glm-5v': 128000,
+    'glm-5v-flash': 128000,
     'glm-5v-turbo': 128000,
     'glm-4.1v-thinking': 128000,
     'glm-4.1v-thinking-flash': 128000,
@@ -165,15 +183,25 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'glm-4.7-flash': 128000,
     'glm-z1-flash': 128000,
     'glm-4-flash': 128000,
+    'qwen3.7-max': 1000000,
+    'qwen3.7-plus': 1000000,
+    'qwen3.7-flash': 1000000,
+    'qwen3.7-flash-thinking': 1000000,
+    'qwen3.6-max': 1000000,
     'qwen3.6-max-preview': 1000000,
     'qwen3.6-plus': 1000000,
     'qwen3.5-plus': 1000000,
-    'qwen3.6-flash': 128000,
+    'qwen3.6-flash': 1000000,
+    'qwen3.6-27b': 262144,
     'qwen3-235b-a22b': 128000,
     'qwen3-32b': 128000,
     'gemini-3.1-pro-preview': 1048576,
     'gemini-3-flash-preview': 1048576,
     'gemini-3.1-flash-lite-preview': 1048576,
+    'gemini-3.5-flash': 1048576,
+    'gemini-3.5-flash-lite': 1048576,
+    'gemini-3.1-pro': 2097152,
+    'gemini-3.1-flash-lite': 1048576,
     'gemini-2.5-pro': 1048576,
     'gemini-2.5-flash': 1048576,
     'gemini-2.5-flash-lite': 1048576,
@@ -233,8 +261,8 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'Kimi-K2': 128000,
     'moonshot': 128000,
     'kimi': 128000,
-    'MiniMax': 200000,
-    'minimax': 200000,
+    'MiniMax': 1000000,
+    'minimax': 1000000,
     'mimo': 1000000,
     'Llama-3.3': 128000,
     'Llama-3.2': 128000,
@@ -250,17 +278,36 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'Step-2': 128000,
     'gemini': 1048576,
     'claude-opus-4-8': 1000000,
-    'gemini-3.5-flash': 1048576,
-    'gemini-3.1-pro': 2097152,
-    'gemini-3.1-flash-lite': 1048576,
     'grok-build-8.1': 131072,
     'qwen3.6-plus-free': 1000000,
     'qwen3.7-max-free': 1000000,
     'nemotron-3-super-free': 131072,
     'phi-4-reasoning': 16384,
-    'qwen3.7-max': 1000000,
     'Qwen3.7-Max': 1000000,
-    'glm-5.1-highspeed': 200000,
+    'openrouter:deepseek/deepseek-v4-pro': 1048576,
+    'openrouter:anthropic/claude-opus-4.8': 1000000,
+    'openrouter:anthropic/claude-sonnet-4.6': 1000000,
+    'openrouter:anthropic/claude-haiku-4.5': 200000,
+    'openrouter:google/gemini-3.1-pro-preview': 1048576,
+    'openrouter:google/gemini-3.5-flash': 1048576,
+    'openrouter:openai/gpt-5.5': 1050000,
+    'openrouter:qwen/qwen3.7-max': 1000000,
+    'openrouter:moonshotai/kimi-k2.6': 262144,
+    'siliconflow:deepseek-ai/DeepSeek-V4-Pro': 1048576,
+    'siliconflow:deepseek-ai/DeepSeek-V4-Flash': 1048576,
+    'siliconflow:Pro/zai-org/GLM-5.1': 202752,
+    'siliconflow:Pro/zai-org/GLM-5': 202752,
+    'siliconflow:Pro/moonshotai/Kimi-K2.6': 262144,
+    'siliconflow:Qwen/Qwen3.6-27B': 262144,
+    'deepinfra:deepseek-ai/DeepSeek-V4-Pro': 1048576,
+    'deepinfra:deepseek-ai/DeepSeek-V4-Flash': 1048576,
+    'deepinfra:deepseek-ai/DeepSeek-V3.2': 163840,
+    'deepinfra:Qwen/Qwen3.7-Max': 256000,
+    'deepinfra:Qwen/Qwen3.6-35B-A3B': 262144,
+    'deepinfra:meta-llama/Llama-3.3-70B-Instruct-Turbo': 131072,
+    'together:deepseek-ai/DeepSeek-V4-Pro': 1048576,
+    'together:Qwen/Qwen3.7-Max': 1000000,
+    'together:meta-llama/Llama-3.3-70B-Instruct': 131072,
 };
 
 /**
@@ -268,14 +315,26 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
  */
 export function getModelContextTokens(model: string, providerId?: string): number {
     if (!model) return 0;
+    const providerKey = providerId ? `${providerId}:${model}` : '';
+    if (providerKey && providerKey in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[providerKey]!;
     if (model in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[model]!;
     
     const keys = Object.keys(MODEL_CONTEXT_TOKENS).sort((a, b) => b.length - a.length);
     for (const key of keys) {
-        if (model.startsWith(key)) return MODEL_CONTEXT_TOKENS[key]!;
+        if (providerId && !key.startsWith(`${providerId}:`)) continue;
+        const modelKey = providerId && key.startsWith(`${providerId}:`) ? key.slice(providerId.length + 1) : key;
+        if (model.startsWith(modelKey)) return MODEL_CONTEXT_TOKENS[key]!;
     }
     for (const key of keys) {
-        if (model.includes(key)) return MODEL_CONTEXT_TOKENS[key]!;
+        if (providerId && !key.startsWith(`${providerId}:`)) continue;
+        const modelKey = providerId && key.startsWith(`${providerId}:`) ? key.slice(providerId.length + 1) : key;
+        if (model.includes(modelKey)) return MODEL_CONTEXT_TOKENS[key]!;
+    }
+    if (providerId) {
+        for (const key of keys) {
+            if (key.includes(':')) continue;
+            if (model.startsWith(key) || model.includes(key)) return MODEL_CONTEXT_TOKENS[key]!;
+        }
     }
     
     if (providerId) {

@@ -118,6 +118,11 @@ describe('getModelContextTokens', () => {
         expect(getModelContextTokens('nonexistent-model', 'openai')).to.equal(provider.maxContextTokens);
     });
 
+    it('uses provider-specific context override when available', () => {
+        expect(getModelContextTokens('google/gemini-3.1-pro-preview', 'openrouter')).to.equal(1048576);
+        expect(getModelContextTokens('gemini-3.1-pro', 'google')).to.equal(2097152);
+    });
+
     it('returns 0 for completely unknown model and provider', () => {
         expect(getModelContextTokens('nonexistent-model')).to.equal(0);
     });

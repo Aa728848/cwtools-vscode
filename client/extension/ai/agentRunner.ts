@@ -1598,7 +1598,8 @@ export class AgentRunner {
                 }
                 const totalTokens = response.usage?.total_tokens ?? (promptTokens + completionTokens);
 
-                const pricing = getModelPricing(response.model ?? options?.model ?? '');
+                const responseProviderId = (response as any).__providerId ?? options?.providerId ?? activeProviderConfig.provider;
+                const pricing = getModelPricing(response.model ?? options?.model ?? '', responseProviderId);
                  // Cache-aware cost calculation: cached tokens billed at discounted rate
                 const cachedTokens = response.usage?.cached_tokens ?? 
                                      (response.usage as any)?.prompt_tokens_details?.cached_tokens ?? 

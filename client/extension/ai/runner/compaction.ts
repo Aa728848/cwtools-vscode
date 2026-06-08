@@ -198,7 +198,7 @@ export async function maybeCompactHistory(
         });
 
         if (tokenAccumulator && compactionResponse.usage) {
-            const pricing = getModelPricing(compactionResponse.model ?? options?.model ?? '');
+            const pricing = getModelPricing(compactionResponse.model ?? options?.model ?? '', options?.providerId);
             tokenAccumulator.input += compactionResponse.usage.prompt_tokens;
             tokenAccumulator.output += compactionResponse.usage.completion_tokens;
             tokenAccumulator.total += compactionResponse.usage.total_tokens;

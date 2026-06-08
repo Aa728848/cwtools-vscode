@@ -7,24 +7,29 @@ describe('getModelPricing', () => {
     });
 
     it('exact match: claude-sonnet-4-6', () => {
-        expect(getModelPricing('claude-sonnet-4-6')).to.deep.equal([21.6, 108]);
+        expect(getModelPricing('claude-sonnet-4-6')).to.deep.equal([20.46, 102.30]);
     });
 
     it('exact match: gpt-5.5', () => {
-        expect(getModelPricing('gpt-5.5')).to.deep.equal([36, 216]);
+        expect(getModelPricing('gpt-5.5')).to.deep.equal([34.10, 204.59]);
     });
 
     it('exact match: deepseek-v4-pro', () => {
-        expect(getModelPricing('deepseek-v4-pro')).to.deep.equal([3.00, 6.00]);
+        expect(getModelPricing('deepseek-v4-pro')).to.deep.equal([2.97, 5.93]);
     });
 
     it('prefix match: dated model tag', () => {
-        expect(getModelPricing('claude-opus-4-7-20251101')).to.deep.equal([36, 180]);
+        expect(getModelPricing('claude-opus-4-7-20251101')).to.deep.equal([34.10, 170.50]);
     });
 
     it('contains match: substring', () => {
         const result = getModelPricing('some-prefix-claude-sonnet-4-6-suffix');
-        expect(result).to.deep.equal([21.6, 108]);
+        expect(result).to.deep.equal([20.46, 102.30]);
+    });
+
+    it('provider-specific override beats base model pricing', () => {
+        expect(getModelPricing('deepseek-ai/DeepSeek-V4-Pro', 'siliconflow')).to.deep.equal([3.00, 6.00]);
+        expect(getModelPricing('deepseek-ai/DeepSeek-V4-Pro', 'deepinfra')).to.deep.equal([8.87, 17.73]);
     });
 
     it('unknown model returns [0, 0]', () => {

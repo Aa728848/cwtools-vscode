@@ -6,19 +6,32 @@ import pricingData from './pricingData.json';
 
 export const MODEL_PRICING: Record<string, number[]> = pricingData;
 
-/** Look up per-million-token cost for a model. Falls back to [0, 0] if unknown. */
-export function getModelPricing(model: string): [number, number] {
+/** Look up per-million-token CNY cost for a model. Falls back to [0, 0] if unknown. */
+export function getModelPricing(model: string, providerId?: string): [number, number] {
     if (!model) return [0, 0];
+    const providerEntry = providerId ? MODEL_PRICING[`${providerId}:${model}`] : undefined;
+    if (providerEntry) return [providerEntry[0]!, providerEntry[1]!];
+
     const entry = MODEL_PRICING[model];
     if (entry) return [entry[0]!, entry[1]!];
     // Case-insensitive matching for model names like "DeepSeek-V4-Pro" vs "deepseek-v4-pro"
     const lower = model.toLowerCase();
+    const providerPrefix = providerId ? `${providerId.toLowerCase()}:` : '';
     if (lower.includes('free') || lower.includes('pickle')) return [0, 0];
     for (const key of Object.keys(MODEL_PRICING)) {
-        if (lower.startsWith(key.toLowerCase())) { const v = MODEL_PRICING[key]!; return [v[0]!, v[1]!]; }
+        const normalizedKey = key.toLowerCase();
+        if (providerPrefix && !normalizedKey.startsWith(providerPrefix)) continue;
+        const modelKey = providerPrefix ? normalizedKey.slice(providerPrefix.length) : normalizedKey;
+        if (lower.startsWith(modelKey)) { const v = MODEL_PRICING[key]!; return [v[0]!, v[1]!]; }
     }
     for (const key of Object.keys(MODEL_PRICING)) {
-        if (lower.includes(key.toLowerCase())) { const v = MODEL_PRICING[key]!; return [v[0]!, v[1]!]; }
+        const normalizedKey = key.toLowerCase();
+        if (providerPrefix && !normalizedKey.startsWith(providerPrefix)) continue;
+        const modelKey = providerPrefix ? normalizedKey.slice(providerPrefix.length) : normalizedKey;
+        if (lower.includes(modelKey)) { const v = MODEL_PRICING[key]!; return [v[0]!, v[1]!]; }
+    }
+    if (providerId) {
+        return getModelPricing(model);
     }
     return [0, 0];
 }

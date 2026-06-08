@@ -31,40 +31,131 @@ function normalizeCustomApiFormatSetting(value: unknown): CustomApiFormat {
     }
 }
 
-function buildModelsRequest(
+interface ModelsRequestCandidate {
+    url: string;
+    headers: Record<string, string>;
+    label: string;
+}
+
+function normalizeModelEndpointBase(endpoint: string): string {
+    return endpoint
+        .replace(/\/chat\/completions\/?(?:\?.*)?$/i, '')
+        .replace(/\/responses\/?(?:\?.*)?$/i, '')
+        .replace(/\/messages\/?(?:\?.*)?$/i, '')
+        .replace(/\/models\/[^/]+:(?:streamGenerateContent|generateContent)(?:\?.*)?$/i, '')
+        .replace(/\/models\/?(?:\?.*)?$/i, '')
+        .replace(/\/+$/, '');
+}
+
+function uniqueModelRequests(candidates: ModelsRequestCandidate[]): ModelsRequestCandidate[] {
+    const seen = new Set<string>();
+    const result: ModelsRequestCandidate[] = [];
+    for (const candidate of candidates) {
+        const key = `${candidate.url}|${JSON.stringify(candidate.headers)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(candidate);
+    }
+    return result;
+}
+
+function buildVersionedModelEndpointBases(endpoint: string, versionPath = 'v1'): string[] {
+    const cleanEndpoint = normalizeModelEndpointBase(endpoint);
+    const isVersioned = /\/v\d+(?:beta|alpha)?$/i.test(cleanEndpoint);
+    return isVersioned
+        ? [cleanEndpoint]
+        : [`${cleanEndpoint}/${versionPath}`, cleanEndpoint];
+}
+
+function buildModelsRequests(
     providerId: string,
     endpoint: string,
     apiKey: string,
     customApiFormat: CustomApiFormat
-): { url: string; headers: Record<string, string> } {
-    const cleanEndpoint = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '');
+): ModelsRequestCandidate[] {
+    const cleanEndpoint = normalizeModelEndpointBase(endpoint);
     if (providerId === 'custom' && customApiFormat === 'gemini-generate-content') {
         const url = `${cleanEndpoint.endsWith('/models') ? cleanEndpoint : `${cleanEndpoint}/models`}${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
-        return { url, headers: apiKey ? { 'x-goog-api-key': apiKey } : {} };
+        return [{ url, headers: apiKey ? { 'x-goog-api-key': apiKey } : {}, label: 'Gemini /models' }];
     }
     if (providerId === 'custom' && customApiFormat === 'anthropic-messages') {
-        return {
-            url: `${cleanEndpoint}/models`,
-            headers: apiKey ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } : {},
+        const authCandidates = (url: string, route: string): ModelsRequestCandidate[] => {
+            if (!apiKey) return [{ url, headers: {}, label: `${route} without auth` }];
+            return [
+                {
+                    url,
+                    headers: { Accept: 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+                    label: `${route} with x-api-key`,
+                },
+                {
+                    url,
+                    headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}`, 'anthropic-version': '2023-06-01' },
+                    label: `${route} with bearer`,
+                },
+                { url, headers: { Accept: 'application/json' }, label: `${route} without auth` },
+            ];
         };
+        return uniqueModelRequests(buildVersionedModelEndpointBases(endpoint)
+            .flatMap(base => [
+                ...authCandidates(`${base}/models`, `Anthropic ${base.replace(cleanEndpoint, '') || ''}/models`),
+                ...authCandidates(`${base}/providers`, `Anthropic ${base.replace(cleanEndpoint, '') || ''}/providers`),
+            ]));
     }
-    return {
+    return [{
         url: `${cleanEndpoint}/models`,
         headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    };
+        label: 'OpenAI /models',
+    }];
 }
 
 function normalizeModelList(data: any, customApiFormat: CustomApiFormat): any[] {
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.data)) return data.data;
-    if (customApiFormat === 'gemini-generate-content' && Array.isArray(data?.models)) {
-        return data.models
-            .filter((m: any) => !Array.isArray(m.supportedGenerationMethods) || m.supportedGenerationMethods.includes('generateContent'))
-            .map((m: any) => ({
+    const normalizeModel = (m: any): any => {
+        if (typeof m === 'string') return { id: m };
+        if (m && typeof m === 'object') {
+            return {
                 ...m,
-                id: typeof m.name === 'string' ? m.name.replace(/^models\//, '') : m.id,
-            }));
+                id: m.id ?? (typeof m.name === 'string' ? m.name.replace(/^models\//, '') : undefined) ?? m.model,
+            };
+        }
+        return {};
+    };
+    const normalizeProviderModels = (providers: any): any[] => {
+        const entries = Array.isArray(providers)
+            ? providers.map((p: any) => [p?.name ?? p?.id, p] as const)
+            : (providers && typeof providers === 'object' ? Object.entries(providers) : []);
+        return entries
+            .flatMap(([providerName, providerValue]: any) => {
+                const models = Array.isArray(providerValue)
+                    ? providerValue
+                    : (Array.isArray(providerValue?.models)
+                        ? providerValue.models
+                        : (Array.isArray(providerValue?.data) ? providerValue.data : []));
+                return models.map((m: any) => typeof m === 'string'
+                    ? { id: m, provider: providerName }
+                    : { ...m, provider: m.provider ?? providerName });
+            })
+            .map(normalizeModel)
+            .filter((m: any) => m.id);
+    };
+
+    const list = Array.isArray(data)
+        ? data
+        : (Array.isArray(data?.data) ? data.data : undefined);
+    if (list && list.some((p: any) => Array.isArray(p?.models))) {
+        return normalizeProviderModels(list);
     }
+    if (list) return list.map(normalizeModel).filter((m: any) => m.id);
+    if (Array.isArray(data?.models)) {
+        if (customApiFormat === 'gemini-generate-content') {
+            return data.models
+                .filter((m: any) => !Array.isArray(m.supportedGenerationMethods) || m.supportedGenerationMethods.includes('generateContent'))
+                .map(normalizeModel)
+                .filter((m: any) => m.id);
+        }
+        return data.models.map(normalizeModel).filter((m: any) => m.id);
+    }
+    const providerModels = normalizeProviderModels(data?.providers ?? data?.provider);
+    if (providerModels.length > 0) return providerModels;
     return [];
 }
 
@@ -346,8 +437,8 @@ export class ChatSettingsManager {
             return;
         }
 
-        if (provider.requiresApiKey && !apiKey) {
-            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: '需要 API Key 才能拉取模型列表' });
+        if (provider.requiresApiKey && !apiKey && providerId !== 'custom') {
+            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: 'API Key is required to fetch models' });
             return;
         }
 
@@ -359,41 +450,59 @@ export class ChatSettingsManager {
         }
 
         try {
-            const { url: modelsUrl, headers } = buildModelsRequest(providerId, endpoint, apiKey, customApiFormat);
-            const res = await fetch(modelsUrl, { headers });
-            if (res.ok) {
-                const data = await res.json() as any;
-                const modelList: any[] = normalizeModelList(data, customApiFormat);
-                if (modelList.length > 0) {
-                    const dynModels = modelList.map((m: any) => m.id).filter(Boolean);
-                    const dynContexts: Record<string, number> = {};
-                    const { getModelContextTokens } = await import('./providers');
-
-                    modelList.forEach((m: any) => {
-                        let c = m.context_length
-                            || m.context_window
-                            || m.max_context_length
-                            || m.top_provider?.context_length
-                            || 0;
-
-                        if (!c && m.id) {
-                            c = getModelContextTokens(m.id, providerId);
-                        }
-
-                        if (c) dynContexts[m.id] = c;
-                    });
-
-                    const apiHasContext = modelList.some((m: any) => m.context_length || m.context_window || m.top_provider?.context_length);
-                    const inferredCount = Object.keys(dynContexts).length;
-                    const ctxNote = apiHasContext
-                        ? `（已从 API 获取 ${inferredCount} 个模型的上下文大小）`
-                        : `（API 未返回上下文大小，已通过模型族推断 ${inferredCount}/${dynModels.length} 个）`;
-
-                    this.postMessage({ type: 'apiModelsFetched', providerId, models: modelList, dynContexts, ctxNote });
-                    return;
+            const candidates = buildModelsRequests(providerId, endpoint, apiKey, customApiFormat);
+            const errors: string[] = [];
+            for (const candidate of candidates) {
+                const res = await fetch(candidate.url, { headers: candidate.headers });
+                if (!res.ok) {
+                    errors.push(`${candidate.label}: ${res.status}`);
+                    continue;
                 }
+                let data: any;
+                try {
+                    data = await res.json() as any;
+                } catch {
+                    errors.push(`${candidate.label}: non-JSON response`);
+                    continue;
+                }
+                const modelList: any[] = normalizeModelList(data, customApiFormat);
+                if (modelList.length === 0) {
+                    errors.push(`${candidate.label}: empty or unknown response`);
+                    continue;
+                }
+                const uniqueById = new Map<string, any>();
+                for (const model of modelList) {
+                    if (model.id && !uniqueById.has(model.id)) uniqueById.set(model.id, model);
+                }
+                const normalizedModelList = Array.from(uniqueById.values());
+                const dynModels = normalizedModelList.map((m: any) => m.id).filter(Boolean);
+                const dynContexts: Record<string, number> = {};
+                const { getModelContextTokens } = await import('./providers');
+
+                normalizedModelList.forEach((m: any) => {
+                    let c = m.context_length
+                        || m.context_window
+                        || m.max_context_length
+                        || m.top_provider?.context_length
+                        || 0;
+
+                    if (!c && m.id) {
+                        c = getModelContextTokens(m.id, providerId);
+                    }
+
+                    if (c) dynContexts[m.id] = c;
+                });
+
+                const apiHasContext = normalizedModelList.some((m: any) => m.context_length || m.context_window || m.top_provider?.context_length);
+                const inferredCount = Object.keys(dynContexts).length;
+                const ctxNote = apiHasContext
+                    ? `(context tokens from API for ${inferredCount} models; ${candidate.label})`
+                    : `(context tokens inferred for ${inferredCount}/${dynModels.length} models; ${candidate.label})`;
+
+                this.postMessage({ type: 'apiModelsFetched', providerId, models: normalizedModelList, dynContexts, ctxNote });
+                return;
             }
-            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: `接口返回未知数据结构 (状态码: ${res.status})` });
+            this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: `Could not fetch model list from discovery endpoints: ${errors.join('; ')}` });
         } catch (e: unknown) {
             this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: String(e) });
         }

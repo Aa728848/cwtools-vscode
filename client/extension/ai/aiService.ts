@@ -71,6 +71,15 @@ export function normalizeCustomApiFormat(value: unknown): CustomApiFormat {
     }
 }
 
+function normalizeAnthropicMessagesEndpoint(endpoint: string): string {
+    const cleanEndpoint = endpoint
+        .replace(/\/messages\/?(?:\?.*)?$/i, '')
+        .replace(/\/+$/, '');
+    return /\/v\d+(?:beta|alpha)?$/i.test(cleanEndpoint)
+        ? cleanEndpoint
+        : `${cleanEndpoint}/v1`;
+}
+
 // ─── API Key Management ──────────────────────────────────────────────────────
 
 const KEY_PREFIX = 'cwtools.ai.apiKey.';
@@ -1378,11 +1387,15 @@ export class AIService {
         onToolCallDelta?: (toolName: string, argsBuf: string) => void,
         providerId: string = 'claude'
     ): Promise<ChatCompletionResponse> {
-        const url = `${endpoint}/messages`;
+        const url = `${normalizeAnthropicMessagesEndpoint(endpoint)}/messages`;
         // Force stream=true so we get SSE — enables thinking tokens and unblocks UI
         const claudeRequest = toClaudeRequest({ ...request, stream: true });
+        // Claude Code-style relays often expose models that reject temperature entirely.
+        if (providerId === 'custom') {
+            delete claudeRequest.temperature;
+        }
 
-        const response = await this.fetchWithRetry(url, {
+        const sendClaudeRequest = (): Promise<Response> => this.fetchWithRetry(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1392,6 +1405,28 @@ export class AIService {
             body: JSON.stringify(claudeRequest),
             signal: controller.signal,
         }, providerId);
+
+        let response = await sendClaudeRequest();
+        if (!response.ok) {
+            const errorText = await response.text();
+            if (
+                response.status === 400
+                && claudeRequest.temperature !== undefined
+                && /temperature/i.test(errorText)
+                && /deprecated|not supported|unsupported/i.test(errorText)
+            ) {
+                delete claudeRequest.temperature;
+                response = await sendClaudeRequest();
+                if (response.ok) {
+                    ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retried Claude request without deprecated temperature parameter.`);
+                } else {
+                    const retryErrorText = await response.text();
+                    throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${retryErrorText}`);
+                }
+            } else {
+                throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${errorText}`);
+            }
+        }
 
         if (!response.ok) {
             const errorText = await response.text();

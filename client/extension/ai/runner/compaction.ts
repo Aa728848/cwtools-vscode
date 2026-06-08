@@ -6,7 +6,7 @@ import { getModelPricing } from '../pricing';
 import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
 import type { PromptBuilder } from '../promptBuilder';
-import { estimateTokenCount, CHARS_PER_TOKEN } from '../agentRunner';
+import { estimateTokenCount, CHARS_PER_TOKEN, supportsOpenAiStylePrefixCache } from '../agentRunner';
 
 // Compact when conversation exceeds this fraction of provider context
 export const COMPACTION_THRESHOLD_RATIO = 0.95;
@@ -217,7 +217,7 @@ export async function maybeCompactHistory(
                 timestamp: Date.now(),
             });
 
-            const supportsPrefixCache = (options?.providerId ?? '').startsWith('deepseek') || (options?.providerId ?? '').startsWith('openai');
+            const supportsPrefixCache = supportsOpenAiStylePrefixCache(options?.providerId ?? '', deps.aiService.getConfig().customApiFormat);
 
             if (supportsPrefixCache) {
                 const systemMsg = history[0]?.role === 'system' ? history[0] : undefined;

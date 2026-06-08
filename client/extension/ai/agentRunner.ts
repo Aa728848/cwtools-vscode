@@ -17,6 +17,7 @@ import type {
     AgentMode,
     ChatCompletionResponse,
     ContentPart,
+    CustomApiFormat,
     TokenUsage,
     AgentRunMetrics,
     AnalyzeDiagnosticErrorResult,
@@ -148,6 +149,14 @@ export function estimateTokenCount(text: string): number {
 
 // Backward-compat alias for non-text token estimation (images etc.)
 export const CHARS_PER_TOKEN = 4;
+
+export function supportsOpenAiStylePrefixCache(providerId: string, customApiFormat?: CustomApiFormat): boolean {
+    if (providerId.startsWith('deepseek') || providerId.startsWith('openai')) return true;
+    if (providerId === 'custom') {
+        return customApiFormat === 'openai-chat-completions' || customApiFormat === 'openai-responses';
+    }
+    return false;
+}
 // Compact when conversation exceeds this fraction of provider context
 // Default context limit if unknown
 // How many recent messages to keep un-compressed during compaction
@@ -785,8 +794,9 @@ export class AgentRunner {
             }
         }
 
-        const providerForPrompt = options?.providerId ?? this.aiService.getConfig().provider;
-        const supportsPrefixCache = providerForPrompt.startsWith('deepseek') || providerForPrompt.startsWith('openai');
+        const promptConfig = this.aiService.getConfig();
+        const providerForPrompt = options?.providerId ?? promptConfig.provider;
+        const supportsPrefixCache = supportsOpenAiStylePrefixCache(providerForPrompt, promptConfig.customApiFormat);
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
         // to ensure byte-level stability across API calls for cache hits.
         let systemPrompt = options?.useSlimPrompt
@@ -1181,8 +1191,7 @@ export class AgentRunner {
         const activeProviderId = options?.providerId ?? this.aiService.getConfig().provider;
         const activeModel = (options?.model ?? this.aiService.getConfig().model ?? '').toLowerCase();
         const preserveMimoReasoningContent = activeProviderId.startsWith('mimo') || activeModel.startsWith('mimo-v2');
-        const supportsPrefixCache = activeProviderId.startsWith('deepseek')
-            || activeProviderId.startsWith('openai')
+        const supportsPrefixCache = supportsOpenAiStylePrefixCache(activeProviderId, this.aiService.getConfig().customApiFormat)
             || preserveMimoReasoningContent;
         const compactionOptions: CompactMessagesOptions = {
             preserveTailBytes: supportsPrefixCache,

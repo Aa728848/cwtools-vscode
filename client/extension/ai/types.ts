@@ -68,6 +68,12 @@ export interface AIProviderConfig {
     registerUrl?: string;
 }
 
+export type CustomApiFormat =
+    | 'openai-chat-completions'
+    | 'openai-responses'
+    | 'anthropic-messages'
+    | 'gemini-generate-content';
+
 export interface AIProviderUserConfig {
     /** Provider ID, e.g. 'deepseek', 'openai' */
     providerId: string;
@@ -86,6 +92,8 @@ export interface AIUserConfig {
     endpoint: string;
     /** Legacy plaintext key — only read for migration; write via SecretStorage */
     apiKey: string;
+    /** Wire protocol used when provider === 'custom'. */
+    customApiFormat: CustomApiFormat;
     maxRetries: number;
     /** Absolute wall-clock timeout for one chat completion request. */
     requestTimeoutMs: number;
@@ -1597,7 +1605,7 @@ export type WebViewMessage =
     | { type: 'openSettings' }
     | { type: 'saveSettings'; settings: PanelSettings }
     | { type: 'detectOllamaModels'; endpoint: string }
-    | { type: 'fetchApiModels'; providerId: string; endpoint: string; apiKey: string }
+    | { type: 'fetchApiModels'; providerId: string; endpoint: string; apiKey: string; customApiFormat?: CustomApiFormat }
     | { type: 'deleteApiKey'; providerId: string }
     | { type: 'testConnection'; settings: PanelSettings } | { type: 'deleteDynamicModel'; providerId: string; modelId: string }
     | { type: 'installSkill'; source: string }
@@ -1741,6 +1749,8 @@ export interface ProviderMeta {
     requiresApiKey: boolean;
     defaultEndpoint: string;
     supportsFIM: boolean;
+    maxContextTokens?: number;
+    registerUrl?: string;
 }
 
 /** Ollama model info for the settings UI */
@@ -1756,6 +1766,7 @@ export interface PanelSettings {
     model: string;
     apiKey: string;
     endpoint: string;
+    customApiFormat?: CustomApiFormat;
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
     /** Reasoning effort / thinking depth (multi-provider) */

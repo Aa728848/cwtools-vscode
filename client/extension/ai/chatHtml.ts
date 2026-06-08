@@ -226,6 +226,16 @@ ${stylesheetLinks}
                     <select class="settings-select" id="settingsProvider"></select>
                     <div class="settings-hint" id="providerHint" style="margin-top: 4px;"></div>
                 </div>
+                <div class="settings-group" id="customApiFormatGroup" style="display:none">
+                    <label class="settings-label">Custom API Format</label>
+                    <select class="settings-select" id="customApiFormat">
+                        <option value="openai-chat-completions">OpenAI Chat Completions</option>
+                        <option value="openai-responses">OpenAI Responses API</option>
+                        <option value="anthropic-messages">Anthropic Messages</option>
+                        <option value="gemini-generate-content">Gemini Native generateContent</option>
+                    </select>
+                    <div class="settings-hint" id="customApiFormatHint"></div>
+                </div>
                 <div class="settings-group">
                     <label class="settings-label">Model</label>
                     <div class="model-row" style="position:relative">

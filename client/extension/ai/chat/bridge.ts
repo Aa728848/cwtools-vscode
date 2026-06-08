@@ -90,7 +90,7 @@ export async function routeWebviewMessage(
             await provider.settingsManager.detectOllamaModels(msg.endpoint);
             break;
         case 'fetchApiModels':
-            await provider.settingsManager.fetchApiModels(msg.providerId, msg.endpoint, msg.apiKey);
+            await provider.settingsManager.fetchApiModels(msg.providerId, msg.endpoint, msg.apiKey, msg.customApiFormat);
             break;
         case 'deleteApiKey':
             await provider.settingsManager.deleteApiKey(msg.providerId, sourceSurface);

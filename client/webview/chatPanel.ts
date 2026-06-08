@@ -2756,6 +2756,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     const providerSel = document.getElementById('settingsProvider');
     if (providerSel) providerSel.addEventListener('change', onProviderChange);
+    const customApiFormatSel = document.getElementById('customApiFormat');
+    if (customApiFormatSel) customApiFormatSel.addEventListener('change', () => updateCustomApiFormatUI());
     const endpointInp = document.getElementById('settingsEndpoint');
     if (endpointInp) endpointInp.addEventListener('input', onEndpointChange);
 
@@ -5944,6 +5946,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 maxContextTokens: p.maxContextTokens,
             })),
             current,
+            customApiFormat: current.customApiFormat,
             ollamaModels: (ollamaModels || []).map((m: any) => ({ name: m.name, size: m.size, parameterSize: m.parameterSize })),
         });
         if (isManagerShell() && settingsPage.classList.contains('active') && settingsPageSignature === lastSettingsPageSignature) {
@@ -5962,6 +5965,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         inlineSel.innerHTML = '<option value="">- 与对话相同 -</option>' + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         (document.getElementById('settingsApiKey') as HTMLInputElement).value = '';
         (document.getElementById('settingsEndpoint') as HTMLInputElement).value = current.endpoint || '';
+        const customFormatSel = document.getElementById('customApiFormat') as HTMLSelectElement | null;
+        if (customFormatSel) customFormatSel.value = current.customApiFormat || 'openai-chat-completions';
         // Auto-fill context size: prefer per-model lookup, then user-saved value
         const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
         (document.getElementById('settingsCtx') as HTMLInputElement).value = initCtx;
@@ -6103,6 +6108,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         updateInlineProviderSelect();
         updateInlineModelSelect(current.inlineCompletion?.provider, current.inlineCompletion?.model, ollamaModels);
         inlineProviderSel.onchange = () => updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
+        updateCustomApiFormatUI(current.provider);
         updateModelUI(current.provider, current.model, ollamaModels);
         updateApiKeyStatus(current.provider, providers);
         settingsPage.classList.add('active');
@@ -6191,8 +6197,31 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         refreshSettingsOverview();
     }
 
+    function getCustomApiFormat() {
+        return (document.getElementById('customApiFormat') as HTMLSelectElement | null)?.value || 'openai-chat-completions';
+    }
+
+    function updateCustomApiFormatUI(providerId?: string) {
+        const id = providerId || (document.getElementById('settingsProvider') as HTMLSelectElement | null)?.value || '';
+        const group = document.getElementById('customApiFormatGroup') as HTMLElement | null;
+        const hint = document.getElementById('customApiFormatHint') as HTMLElement | null;
+        const format = getCustomApiFormat();
+        if (group) group.style.display = id === 'custom' ? '' : 'none';
+        if (!hint) return;
+        const hints: Record<string, string> = {
+            'openai-chat-completions': 'POST {endpoint}/chat/completions, Authorization: Bearer <key>',
+            'openai-responses': 'POST {endpoint}/responses, Authorization: Bearer <key>',
+            'anthropic-messages': 'POST {endpoint}/messages, x-api-key: <key>',
+            'gemini-generate-content': 'POST {endpoint}/models/{model}:generateContent?key=<key>',
+        };
+        hint.textContent = hints[format] ?? hints['openai-chat-completions'] ?? '';
+        updateEndpointHint(id);
+        refreshSettingsOverview();
+    }
+
     function onProviderChange() {
         const id = (document.getElementById('settingsProvider') as HTMLSelectElement).value;
+        updateCustomApiFormatUI(id);
         updateModelUI(id, '', settingsOllamaModels);
         updateEndpointHint(id);
         updateApiKeyStatus(id, settingsProviders);
@@ -6261,6 +6290,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const provider = settingsProviders.find(p => p.id === providerId);
         const hint = document.getElementById('endpointHint');
         const ep = document.getElementById('settingsEndpoint') as HTMLInputElement | null;
+        if (providerId === 'custom' && hint && ep) {
+            const format = getCustomApiFormat();
+            const examples: Record<string, string> = {
+                'openai-chat-completions': 'https://example.com/v1',
+                'openai-responses': 'https://api.openai.com/v1',
+                'anthropic-messages': 'https://api.anthropic.com/v1',
+                'gemini-generate-content': 'https://generativelanguage.googleapis.com/v1beta',
+            };
+            hint.textContent = 'Custom format endpoint example: ' + (examples[format] || examples['openai-chat-completions']);
+            if (!ep.value) ep.placeholder = examples[format] ?? examples['openai-chat-completions'] ?? '';
+            return;
+        }
         if (provider && hint && ep) { hint.textContent = '默认: ' + (provider.defaultEndpoint || '由 provider 决定'); if (!ep.value) ep.placeholder = provider.defaultEndpoint || '留空使用默认'; }
     }
 
@@ -6386,7 +6427,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             type: 'fetchApiModels',
             providerId: (document.getElementById('settingsProvider') as HTMLSelectElement).value,
             endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
-            apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value
+            apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value,
+            customApiFormat: getCustomApiFormat()
         });
     }
 
@@ -6437,6 +6479,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 model: getSelectedModel(),
                 apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value,
                 endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
+                customApiFormat: getCustomApiFormat(),
                 maxContextTokens: parseInt((document.getElementById('settingsCtx') as HTMLInputElement).value) || 0,
                 agentFileWriteMode: (document.getElementById('agentWriteMode') as HTMLSelectElement).value,
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
@@ -6487,6 +6530,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 model: getSelectedModel(),
                 apiKey: (document.getElementById('settingsApiKey') as HTMLInputElement).value,
                 endpoint: (document.getElementById('settingsEndpoint') as HTMLInputElement).value.trim(),
+                customApiFormat: getCustomApiFormat(),
                 maxContextTokens: 0, agentFileWriteMode: 'confirm',
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 inlineCompletion: {

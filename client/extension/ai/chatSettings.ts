@@ -11,12 +11,62 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import { promisify } from 'util';
-import type { PanelSettings, HostMessage } from './types';
+import type { PanelSettings, HostMessage, CustomApiFormat } from './types';
 import type { AIService } from './aiService';
 
 const execAsync = promisify(cp.exec);
 
 type PostMessageFn = (msg: HostMessage) => void;
+const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
+
+function normalizeCustomApiFormatSetting(value: unknown): CustomApiFormat {
+    switch (value) {
+        case 'openai-chat-completions':
+        case 'openai-responses':
+        case 'anthropic-messages':
+        case 'gemini-generate-content':
+            return value;
+        default:
+            return DEFAULT_CUSTOM_API_FORMAT;
+    }
+}
+
+function buildModelsRequest(
+    providerId: string,
+    endpoint: string,
+    apiKey: string,
+    customApiFormat: CustomApiFormat
+): { url: string; headers: Record<string, string> } {
+    const cleanEndpoint = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '');
+    if (providerId === 'custom' && customApiFormat === 'gemini-generate-content') {
+        const url = `${cleanEndpoint.endsWith('/models') ? cleanEndpoint : `${cleanEndpoint}/models`}${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
+        return { url, headers: apiKey ? { 'x-goog-api-key': apiKey } : {} };
+    }
+    if (providerId === 'custom' && customApiFormat === 'anthropic-messages') {
+        return {
+            url: `${cleanEndpoint}/models`,
+            headers: apiKey ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } : {},
+        };
+    }
+    return {
+        url: `${cleanEndpoint}/models`,
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    };
+}
+
+function normalizeModelList(data: any, customApiFormat: CustomApiFormat): any[] {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
+    if (customApiFormat === 'gemini-generate-content' && Array.isArray(data?.models)) {
+        return data.models
+            .filter((m: any) => !Array.isArray(m.supportedGenerationMethods) || m.supportedGenerationMethods.includes('generateContent'))
+            .map((m: any) => ({
+                ...m,
+                id: typeof m.name === 'string' ? m.name.replace(/^models\//, '') : m.id,
+            }));
+    }
+    return [];
+}
 
 export let lastAISettingsWriteTime = 0;
 
@@ -32,17 +82,20 @@ export class ChatSettingsManager {
         const { BUILTIN_PROVIDERS, fetchOllamaModels, MODEL_CONTEXT_TOKENS } = await import('./providers');
         const config = this.aiService.getConfig();
 
-        const providers = Object.values(BUILTIN_PROVIDERS).map(p => ({
-            id: p.id,
-            name: p.name,
-            models: p.models,
-            defaultModel: p.defaultModel,
-            requiresApiKey: p.requiresApiKey,
-            defaultEndpoint: p.endpoint,
-            maxContextTokens: p.maxContextTokens,
-            supportsFIM: p.supportsFIM,
-            registerUrl: p.registerUrl,
-        }));
+        const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
+            const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
+            return {
+                id: p.id,
+                name: p.name,
+                models: p.models,
+                defaultModel: p.defaultModel,
+                requiresApiKey: p.requiresApiKey,
+                defaultEndpoint: p.endpoint,
+                maxContextTokens: p.maxContextTokens,
+                supportsFIM: customNonFim ? false : p.supportsFIM,
+                registerUrl: p.registerUrl,
+            };
+        });
 
         const hasKeyMap: Record<string, boolean> = {};
         for (const p of providers) {
@@ -54,6 +107,7 @@ export class ChatSettingsManager {
             model: config.model,
             apiKey: '',
             endpoint: config.endpoint || '',
+            customApiFormat: config.customApiFormat,
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: config.agentFileWriteMode,
             reasoningEffort: config.reasoningEffort,
@@ -169,6 +223,7 @@ export class ChatSettingsManager {
         lastAISettingsWriteTime = Date.now();
         await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
         await cfg.update('model', settings.model, vs.ConfigurationTarget.Global);
+        await cfg.update('customApiFormat', normalizeCustomApiFormatSetting(settings.customApiFormat), vs.ConfigurationTarget.Global);
         if (settings.apiKey !== undefined) {
             const trimmedKey = settings.apiKey.trim();
             if (trimmedKey.length > 0 && !trimmedKey.startsWith('•')) {
@@ -276,11 +331,12 @@ export class ChatSettingsManager {
         }
     }
 
-    async fetchApiModels(providerId: string, endpointOverride: string, apiKeyOverride: string): Promise<void> {
+    async fetchApiModels(providerId: string, endpointOverride: string, apiKeyOverride: string, customApiFormatOverride?: CustomApiFormat): Promise<void> {
         const { getEffectiveEndpoint, getProvider } = await import('./providers');
         const saved = this.aiService.getConfig();
         const provider = getProvider(providerId);
         const endpoint = endpointOverride || getEffectiveEndpoint(providerId, saved.endpoint);
+        const customApiFormat = normalizeCustomApiFormatSetting(customApiFormatOverride ?? saved.customApiFormat);
 
         let apiKey = apiKeyOverride;
         if (!apiKey) apiKey = await this.aiService.getKeyForProvider(providerId) || '';
@@ -303,19 +359,13 @@ export class ChatSettingsManager {
         }
 
         try {
-            const modelsUrl = endpoint.replace(/\/chat\/completions$/, '').replace(/\/+$/, '') + '/models';
-            const headers: Record<string, string> = {};
-            if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-            const res = await fetch(modelsUrl, {
-                headers
-            });
+            const { url: modelsUrl, headers } = buildModelsRequest(providerId, endpoint, apiKey, customApiFormat);
+            const res = await fetch(modelsUrl, { headers });
             if (res.ok) {
                 const data = await res.json() as any;
-                const modelList: any[] = Array.isArray(data)
-                    ? data
-                    : (Array.isArray(data?.data) ? data.data : null);
-                if (modelList) {
-                    const dynModels = modelList.map((m: any) => m.id);
+                const modelList: any[] = normalizeModelList(data, customApiFormat);
+                if (modelList.length > 0) {
+                    const dynModels = modelList.map((m: any) => m.id).filter(Boolean);
                     const dynContexts: Record<string, number> = {};
                     const { getModelContextTokens } = await import('./providers');
 
@@ -370,6 +420,7 @@ export class ChatSettingsManager {
             ? rawSettingsKey
             : await this.aiService.getKeyForProvider(providerId);
         const endpoint = settings?.endpoint || getEffectiveEndpoint(providerId, saved.endpoint);
+        const customApiFormat = normalizeCustomApiFormatSetting(settings?.customApiFormat ?? saved.customApiFormat);
         const model = settings?.model || undefined;
 
         if (!providerId) {
@@ -388,7 +439,7 @@ export class ChatSettingsManager {
         try {
             await this.aiService.chatCompletion(
                 [{ role: 'user', content: 'Hi' }],
-                { maxTokens: 5, providerId, model, apiKey, endpoint }
+                { maxTokens: 5, providerId, model, apiKey, endpoint, customApiFormat }
             );
             this.postMessage({ type: 'testConnectionResult', ok: true, message: '连接成功 ✓' });
         } catch (e: unknown) {

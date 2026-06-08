@@ -650,6 +650,24 @@
                     "default": "",
                     "description": "%configuration.cwtools.ai.endpoint.description%"
                 },
+                "cwtools.ai.customApiFormat": {
+                    "scope": "window",
+                    "type": "string",
+                    "enum": [
+                        "openai-chat-completions",
+                        "openai-responses",
+                        "anthropic-messages",
+                        "gemini-generate-content"
+                    ],
+                    "enumDescriptions": [
+                        "%configuration.cwtools.ai.customApiFormat.enum.openai-chat-completions%",
+                        "%configuration.cwtools.ai.customApiFormat.enum.openai-responses%",
+                        "%configuration.cwtools.ai.customApiFormat.enum.anthropic-messages%",
+                        "%configuration.cwtools.ai.customApiFormat.enum.gemini-generate-content%"
+                    ],
+                    "default": "openai-chat-completions",
+                    "description": "%configuration.cwtools.ai.customApiFormat.description%"
+                },
                 "cwtools.ai.agentFileWriteMode": {
                     "scope": "window",
                     "type": "string",

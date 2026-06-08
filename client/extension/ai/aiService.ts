@@ -14,6 +14,8 @@ import type {
     ChatMessage,
     ToolDefinition,
     AIUserConfig,
+    CustomApiFormat,
+    ContentPart,
 } from './types';
 import {
     getProvider,
@@ -37,6 +39,7 @@ const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
 const DEFAULT_CHAT_COMPLETION_TIMEOUT_MS = 20 * 60 * 1000;
 const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
 const MAX_CHAT_COMPLETION_TIMEOUT_MS = 60 * 60 * 1000;
+const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
 
 export function normalizeChatCompletionTimeoutMs(value: unknown): number {
     const raw = typeof value === 'number' ? value : Number(value);
@@ -54,6 +57,18 @@ function formatDuration(ms: number): string {
 function errorFromReason(reason: unknown, fallback: string): Error {
     if (reason instanceof Error) return reason;
     return new Error(reason === undefined || reason === null ? fallback : String(reason));
+}
+
+export function normalizeCustomApiFormat(value: unknown): CustomApiFormat {
+    switch (value) {
+        case 'openai-chat-completions':
+        case 'openai-responses':
+        case 'anthropic-messages':
+        case 'gemini-generate-content':
+            return value;
+        default:
+            return DEFAULT_CUSTOM_API_FORMAT;
+    }
 }
 
 // ─── API Key Management ──────────────────────────────────────────────────────
@@ -138,6 +153,10 @@ export class AIService {
         return this.modelOverride;
     }
 
+    private resolveCustomApiFormat(providerId: string, format?: unknown): CustomApiFormat {
+        return providerId === 'custom' ? normalizeCustomApiFormat(format) : DEFAULT_CUSTOM_API_FORMAT;
+    }
+
     /**
      * Read the current user configuration for AI.
      */
@@ -150,6 +169,7 @@ export class AIService {
             model: this.modelOverride ?? cfg.get<string>('model', ''),
             endpoint: cfg.get<string>('endpoint', ''),
             apiKey: '',
+            customApiFormat: normalizeCustomApiFormat(cfg.get<string>('customApiFormat', DEFAULT_CUSTOM_API_FORMAT)),
             maxRetries: Math.max(1, cfg.get<number>('maxRetries') || 3),
             requestTimeoutMs: normalizeChatCompletionTimeoutMs(cfg.get<number>('requestTimeoutMs')),
             maxContextTokens: cfg.get<number>('maxContextTokens', 0),
@@ -229,6 +249,7 @@ export class AIService {
             model?: string;        // Override model
             apiKey?: string;       // Override API key (for test-without-save)
             endpoint?: string;     // Override endpoint
+            customApiFormat?: CustomApiFormat; // Override custom provider wire protocol
             /** Real-time callback for incremental reasoning/thinking tokens */
             onThinking?: (text: string) => void;
             /** Real-time callback for incremental text content tokens (streaming typewriter effect) */
@@ -258,6 +279,7 @@ export class AIService {
         const config = this.getConfig();
         const providerId = options?.providerId ?? config.provider;
         const provider = getProvider(providerId);
+        const customApiFormat = this.resolveCustomApiFormat(providerId, options?.customApiFormat ?? config.customApiFormat);
 
         // Some providers (for example Ollama) do not require an API key.
         let apiKey = '';
@@ -372,14 +394,20 @@ export class AIService {
 
         try {
             // MiniMax Token Plan uses Anthropic Messages API format
-            const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan';
+            const isAnthropicCompat = providerId === 'claude' || providerId === 'minimax-token-plan' || customApiFormat === 'anthropic-messages';
+            if (customApiFormat === 'openai-responses') {
+                return await this.callOpenAIResponses(endpoint, apiKey, request, providerId, controller, options?.onTextDelta);
+            }
+            if (customApiFormat === 'gemini-generate-content') {
+                return await this.callGeminiGenerateContent(endpoint, apiKey, request, providerId, controller, options?.onTextDelta, options?.onToolCallDelta);
+            }
             // Use streaming for OpenAI-compat providers when they support it.
             if (provider.supportsStreaming && provider.isOpenAICompatible && !isAnthropicCompat) {
                 return await this.callOpenAICompatibleStreaming(endpoint, apiKey, { ...request, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta);
             } else if (isAnthropicCompat) {
                 // L4 Fix: fully migrate callClaude to SSE — enables real-time thinking tokens
                 // and eliminates the previous blocking response.json() approach.
-                return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta);
+                return await this.callClaude(endpoint, apiKey, request, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId);
             } else {
                 return await this.callOpenAICompatible(endpoint, apiKey, request, providerId, controller);
             }
@@ -971,6 +999,363 @@ export class AIService {
         } as ChatCompletionResponse;
     }
 
+    private buildOpenAIResponsesPayload(request: ChatCompletionRequest): Record<string, unknown> {
+        const payload: Record<string, unknown> = {
+            model: request.model,
+            input: this.toResponsesInput(request.messages),
+            temperature: request.temperature,
+            max_output_tokens: request.max_tokens,
+        };
+        if (request.tools && request.tools.length > 0) {
+            payload.tools = request.tools.map(t => ({
+                type: 'function',
+                name: t.function.name,
+                description: t.function.description,
+                parameters: t.function.parameters,
+            }));
+            payload.tool_choice = 'auto';
+        }
+        if (request.reasoning_effort) {
+            payload.reasoning = { effort: request.reasoning_effort };
+        }
+        return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+    }
+
+    private toResponsesInput(messages: ChatMessage[]): Array<Record<string, unknown>> {
+        const input: Array<Record<string, unknown>> = [];
+        for (const msg of messages) {
+            if (msg.role === 'tool') {
+                input.push({
+                    type: 'function_call_output',
+                    call_id: msg.tool_call_id ?? msg.name ?? 'call_unknown',
+                    output: this.messageContentToText(msg.content),
+                });
+                continue;
+            }
+
+            const content = this.toResponsesContent(msg.content);
+            if (content.length > 0) {
+                input.push({
+                    role: msg.role,
+                    content,
+                });
+            }
+
+            if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+                for (const tc of msg.tool_calls) {
+                    input.push({
+                        type: 'function_call',
+                        id: tc.id,
+                        call_id: tc.id,
+                        name: tc.function.name,
+                        arguments: tc.function.arguments,
+                    });
+                }
+            }
+        }
+        return input;
+    }
+
+    private toResponsesContent(content: ChatMessage['content']): Array<Record<string, unknown>> {
+        if (!content) return [];
+        if (typeof content === 'string') return [{ type: 'input_text', text: content }];
+        return content.map(part => {
+            if (part.type === 'text') {
+                return { type: 'input_text', text: part.text };
+            }
+            return {
+                type: 'input_image',
+                image_url: part.image_url.url,
+                detail: part.image_url.detail ?? 'auto',
+            };
+        });
+    }
+
+    private async callOpenAIResponses(
+        endpoint: string,
+        apiKey: string,
+        request: ChatCompletionRequest,
+        providerId: string,
+        controller: AbortController,
+        onTextDelta?: (text: string) => void
+    ): Promise<ChatCompletionResponse> {
+        const cleanEndpoint = endpoint.replace(/\/+$/, '');
+        const url = cleanEndpoint.endsWith('/responses') ? cleanEndpoint : `${cleanEndpoint}/responses`;
+        const response = await this.fetchWithRetry(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...this.buildAuthHeaders(providerId, apiKey),
+            },
+            body: JSON.stringify(this.buildOpenAIResponsesPayload(request)),
+            signal: controller.signal,
+        }, providerId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`${getProvider(providerId).name} Responses API error (${response.status}): ${errorText}`);
+        }
+
+        const data = await response.json() as any;
+        const outputItems: any[] = Array.isArray(data.output) ? data.output : [];
+        const contentParts: string[] = [];
+        const toolCalls: NonNullable<ChatMessage['tool_calls']> = [];
+
+        const hasAggregateOutputText = typeof data.output_text === 'string' && data.output_text;
+        if (hasAggregateOutputText) {
+            contentParts.push(data.output_text);
+        }
+
+        for (const item of outputItems) {
+            if (!hasAggregateOutputText && item?.type === 'message' && Array.isArray(item.content)) {
+                for (const part of item.content) {
+                    const text = part?.text ?? part?.content?.[0]?.text;
+                    if ((part?.type === 'output_text' || part?.type === 'text') && typeof text === 'string') {
+                        contentParts.push(text);
+                    }
+                }
+            } else if (item?.type === 'function_call') {
+                toolCalls.push({
+                    id: item.call_id ?? item.id ?? `call_${toolCalls.length}`,
+                    type: 'function',
+                    function: {
+                        name: item.name ?? '',
+                        arguments: typeof item.arguments === 'string' ? item.arguments : JSON.stringify(item.arguments ?? {}),
+                    },
+                });
+            }
+        }
+
+        const text = contentParts.join('');
+        if (text) onTextDelta?.(text);
+        const usage = data.usage ?? {};
+        return {
+            id: data.id,
+            object: data.object ?? 'response',
+            created: data.created_at ?? Math.floor(Date.now() / 1000),
+            model: data.model ?? request.model,
+            choices: [{
+                index: 0,
+                message: {
+                    role: 'assistant',
+                    content: text || null,
+                    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                },
+                finish_reason: toolCalls.length > 0 ? 'tool_calls' : (data.status === 'incomplete' ? 'length' : 'stop'),
+            }],
+            usage: {
+                prompt_tokens: usage.input_tokens ?? usage.prompt_tokens ?? 0,
+                completion_tokens: usage.output_tokens ?? usage.completion_tokens ?? 0,
+                total_tokens: usage.total_tokens ?? ((usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)),
+                cached_tokens: usage.input_tokens_details?.cached_tokens,
+            },
+        } as ChatCompletionResponse;
+    }
+
+    private buildGeminiUrl(endpoint: string, model: string): string {
+        const cleanEndpoint = endpoint.replace(/\/+$/, '');
+        if (cleanEndpoint.includes(':generateContent')) return cleanEndpoint;
+        const encodedModel = encodeURIComponent(model.replace(/^models\//, ''));
+        if (cleanEndpoint.endsWith('/models')) {
+            return `${cleanEndpoint}/${encodedModel}:generateContent`;
+        }
+        return `${cleanEndpoint}/models/${encodedModel}:generateContent`;
+    }
+
+    private withGeminiKey(url: string, apiKey: string): string {
+        if (!apiKey.trim() || /[?&]key=/.test(url)) return url;
+        return `${url}${url.includes('?') ? '&' : '?'}key=${encodeURIComponent(apiKey)}`;
+    }
+
+    private buildGeminiPayload(request: ChatCompletionRequest): Record<string, unknown> {
+        const systemParts: Array<Record<string, unknown>> = [];
+        const contents: Array<Record<string, unknown>> = [];
+        const toolCallNames = new Map<string, string>();
+
+        for (const msg of request.messages) {
+            if (msg.role === 'system') {
+                const text = this.messageContentToText(msg.content);
+                if (text) systemParts.push({ text });
+                continue;
+            }
+
+            if (msg.role === 'tool') {
+                const name = toolCallNames.get(msg.tool_call_id ?? '') ?? msg.name ?? msg.tool_call_id ?? 'tool_result';
+                contents.push({
+                    role: 'user',
+                    parts: [{
+                        function_response: {
+                            name,
+                            response: { result: this.messageContentToText(msg.content) },
+                        },
+                    }],
+                });
+                continue;
+            }
+
+            const parts = this.toGeminiParts(msg.content);
+            if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+                for (const tc of msg.tool_calls) {
+                    toolCallNames.set(tc.id, tc.function.name);
+                    parts.push({
+                        function_call: {
+                            name: tc.function.name,
+                            args: this.parseJsonObject(tc.function.arguments),
+                        },
+                    });
+                }
+            }
+            if (parts.length > 0) {
+                contents.push({
+                    role: msg.role === 'assistant' ? 'model' : 'user',
+                    parts,
+                });
+            }
+        }
+
+        const payload: Record<string, unknown> = {
+            contents,
+            generation_config: {
+                temperature: request.temperature,
+                max_output_tokens: request.max_tokens,
+                ...(request.thinking_config ? { thinking_config: request.thinking_config } : {}),
+            },
+        };
+        if (systemParts.length > 0) {
+            payload.system_instruction = { parts: systemParts };
+        }
+        if (request.tools && request.tools.length > 0) {
+            payload.tools = [{
+                function_declarations: request.tools.map(t => ({
+                    name: t.function.name,
+                    description: t.function.description,
+                    parameters: t.function.parameters,
+                })),
+            }];
+            payload.tool_config = {
+                function_calling_config: { mode: 'AUTO' },
+            };
+        }
+        return payload;
+    }
+
+    private toGeminiParts(content: ChatMessage['content']): Array<Record<string, unknown>> {
+        if (!content) return [];
+        if (typeof content === 'string') return content ? [{ text: content }] : [];
+        return content.map(part => {
+            if (part.type === 'text') return { text: part.text };
+            return this.toGeminiImagePart(part);
+        });
+    }
+
+    private toGeminiImagePart(part: Extract<ContentPart, { type: 'image_url' }>): Record<string, unknown> {
+        const url = part.image_url.url;
+        const dataMatch = /^data:([^;,]+);base64,(.+)$/i.exec(url);
+        if (dataMatch) {
+            return {
+                inline_data: {
+                    mime_type: dataMatch[1],
+                    data: dataMatch[2],
+                },
+            };
+        }
+        return {
+            file_data: {
+                file_uri: url,
+                mime_type: 'image/*',
+            },
+        };
+    }
+
+    private async callGeminiGenerateContent(
+        endpoint: string,
+        apiKey: string,
+        request: ChatCompletionRequest,
+        providerId: string,
+        controller: AbortController,
+        onTextDelta?: (text: string) => void,
+        onToolCallDelta?: (toolName: string, argsBuf: string) => void
+    ): Promise<ChatCompletionResponse> {
+        const url = this.withGeminiKey(this.buildGeminiUrl(endpoint, request.model), apiKey);
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['x-goog-api-key'] = apiKey;
+        const response = await this.fetchWithRetry(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(this.buildGeminiPayload(request)),
+            signal: controller.signal,
+        }, providerId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`${getProvider(providerId).name} Gemini API error (${response.status}): ${errorText}`);
+        }
+
+        const data = await response.json() as any;
+        const candidate = Array.isArray(data.candidates) ? data.candidates[0] : undefined;
+        const parts: any[] = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+        const textParts: string[] = [];
+        const toolCalls: NonNullable<ChatMessage['tool_calls']> = [];
+
+        for (const part of parts) {
+            if (typeof part?.text === 'string') {
+                textParts.push(part.text);
+                continue;
+            }
+            const fn = part?.functionCall ?? part?.function_call;
+            if (fn) {
+                const args = typeof fn.args === 'string' ? fn.args : JSON.stringify(fn.args ?? {});
+                const id = `gemini_call_${toolCalls.length}`;
+                toolCalls.push({
+                    id,
+                    type: 'function',
+                    function: { name: fn.name ?? '', arguments: args },
+                });
+                onToolCallDelta?.(fn.name ?? '', args);
+            }
+        }
+
+        const text = textParts.join('');
+        if (text) onTextDelta?.(text);
+        const usage = data.usageMetadata ?? {};
+        const finish = String(candidate?.finishReason ?? '').toUpperCase();
+        return {
+            id: `gemini-${Date.now()}`,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: request.model,
+            choices: [{
+                index: 0,
+                message: {
+                    role: 'assistant',
+                    content: text || null,
+                    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                },
+                finish_reason: toolCalls.length > 0 ? 'tool_calls' : (finish === 'MAX_TOKENS' ? 'length' : 'stop'),
+            }],
+            usage: {
+                prompt_tokens: usage.promptTokenCount ?? 0,
+                completion_tokens: usage.candidatesTokenCount ?? 0,
+                total_tokens: usage.totalTokenCount ?? ((usage.promptTokenCount ?? 0) + (usage.candidatesTokenCount ?? 0)),
+            },
+        } as ChatCompletionResponse;
+    }
+
+    private messageContentToText(content: ChatMessage['content']): string {
+        if (!content) return '';
+        if (typeof content === 'string') return content;
+        return content.map(part => part.type === 'text' ? part.text : `[image] ${part.image_url.url}`).join('\n');
+    }
+
+    private parseJsonObject(value: string): Record<string, unknown> {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+
     /**
      * Call Claude Messages API using Server-Sent Events streaming.
      *
@@ -990,7 +1375,8 @@ export class AIService {
         controller: AbortController,
         onThinking?: (text: string) => void,
         onTextDelta?: (text: string) => void,
-        onToolCallDelta?: (toolName: string, argsBuf: string) => void
+        onToolCallDelta?: (toolName: string, argsBuf: string) => void,
+        providerId: string = 'claude'
     ): Promise<ChatCompletionResponse> {
         const url = `${endpoint}/messages`;
         // Force stream=true so we get SSE — enables thinking tokens and unblocks UI
@@ -1005,11 +1391,11 @@ export class AIService {
             },
             body: JSON.stringify(claudeRequest),
             signal: controller.signal,
-        }, 'claude');
+        }, providerId);
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Claude API error (${response.status}): ${errorText}`);
+            throw new Error(`${getProvider(providerId).name} API error (${response.status}): ${errorText}`);
         }
 
         const reader = response.body?.getReader();

@@ -1000,7 +1000,17 @@ type Server(client: ILanguageClient) =
         match cachedLocMap with
         | Some m -> m
         | None ->
-            let m = game.References().Localisation
+            let refs = game.References()
+            let m =
+                if languages.Length <= 1 then
+                    refs.Localisation
+                else
+                    // Resolve duplicate keys by configured language priority (languages.[0] wins), not loc file-path order.
+                    let map = System.Collections.Generic.Dictionary<string, Entry>()
+                    for (k, e) in refs.Localisation do map.[k] <- e
+                    for lang in Array.rev languages do
+                        for (k, e) in refs.LocalisationForLang lang do map.[k] <- e
+                    [ for kvp in map -> (kvp.Key, kvp.Value) ]
             cachedLocMap <- Some m
             cachedLocMapCount <- m.Length
             m
@@ -3214,6 +3224,9 @@ type Server(client: ILanguageClient) =
                 if languages <> newLanguages then
                     languages <- newLanguages
                     requiresReload <- true
+                    // Language priority changed: drop the cached loc map so hover/inlay rebuild in the new primary language.
+                    cachedLocMap <- None
+                    cachedLocMapCount <- 0
 
                 match config.Item("localisation").Item("generated_strings") with
                 | JsonValue.String newString -> generatedStrings <- updateIfChanged generatedStrings newString

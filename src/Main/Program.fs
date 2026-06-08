@@ -1998,14 +1998,6 @@ type Server(client: ILanguageClient) =
             with e -> logDiag $"Deferred dynamic revalidation scheduling failed: {e.Message}")
         |> ignore
 
-    /// Parameter-expansion errors for scripted_effect / scripted_trigger / script_value now live
-    /// on their CALL sites (see CommonValidation.valScriptedEffectParams); the definition file only
-    /// carries an Information marker (code "CW274D") whose related entries point at those call
-    /// sites. Single-file validation of the definition validates the definition in isolation and
-    /// cannot reproduce these cross-file errors, so opening it would otherwise clear the marker.
-    /// When such a definition file is opened or edited we refresh the affected call files — plus
-    /// the definition itself, to restore its marker — through the non-clobbering deferred path.
-    /// Gated on the file actually having carried a "CW274D" marker, so ordinary files pay nothing.
     let refreshDynamicCallSitesForDefinition (defFile: string) (priorDiagnostics: Diagnostic list) =
         let callFiles =
             priorDiagnostics
@@ -2035,12 +2027,9 @@ type Server(client: ILanguageClient) =
                 lastTypeRefreshCompletedAt = DateTime.MinValue
                 || now - lastTypeRefreshCompletedAt >= typeRefreshCooldown
             let skipLimitReached = refreshSkipCount >= maxRefreshSkipCount
-            // Even force=true refreshes respect a minimum 2s cooldown to prevent
-            // storm-like rebuilds when saving multiple files in rapid succession.
             let forceCooldownOk =
                 lastTypeRefreshCompletedAt = DateTime.MinValue
                 || now - lastTypeRefreshCompletedAt >= TimeSpan.FromSeconds(2.0)
-            // Conditionally skip RefreshCaches while edits are still arriving.
             let doRefresh =
                 needsTypeRefresh
                 && (skipLimitReached
@@ -2056,8 +2045,6 @@ type Server(client: ILanguageClient) =
                     monitorLog Refresh $"RefreshCaches allocDeltaMB={(allocAfterRefresh - allocBefore) / 1048576L} force={forceGlobalRefresh} skipLimit={skipLimitReached} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     perfRefreshCachesCount <- perfRefreshCachesCount + 1
                     didGlobalWork <- true
-                    // Force blocking Gen2 GC after RefreshCaches: old RuleValidationService/InfoService
-                    // instances are dead, reclaim their large memoization dictionaries immediately.
                     GC.Collect(2, GCCollectionMode.Default, true, true)
                     GC.WaitForPendingFinalizers()
                     needsTypeRefresh <- false
@@ -2115,11 +2102,6 @@ type Server(client: ILanguageClient) =
                 if allocAfterLoc - allocBeforeLoc > gcThresholdBytes then
                     GC.Collect(2, GCCollectionMode.Optimized, false, false)
 
-                // Effect/trigger sets may have changed invalidate all semantic caches.
-                // Unlike the old Clear() which caused VSCode to lose all highlighting,
-                // we now keep stale entries: SemanticTokensFull will return cached data
-                // when the entity is not yet rebuilt, then VSCode re-requests once the
-                // AST is ready. We clear codeLens because it's cheaper to recompute.
                 if doRefresh then
                     clearAllDerivedCaches ()
                 elif didLocRefresh then

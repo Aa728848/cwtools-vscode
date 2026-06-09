@@ -2194,40 +2194,45 @@ type Server(client: ILanguageClient) =
 
                     try
                         try
-                            let shallowAnalyse = DateTime.Now < nextTime
-                            let useShallowAnalyze = shallowAnalyse && (not force)
-                            updateValidationRuntime (fun state ->
-                                { state with
-                                    inProgress = true
-                                    inProgressFile = uri.LocalPath
-                                    lastStartedAtUnixMs = nowUnixMs ()
-                                    lastCycleFile = uri.LocalPath
-                                    lastCycleShallow = useShallowAnalyze
-                                    lastCycleEditAction = isEditAction
-                                    lastError = None })
-                            logDiag $"lint force: %b{force}, shallow: %b{useShallowAnalyze}"
-                            // Capture the file's prior diagnostics BEFORE lint overwrites them, so
-                            // we can detect a scripted_effect/value definition marker and refresh
-                            // its call sites (single-file lint cannot reproduce those cross-file).
                             let lintPath = getPathFromDoc uri
-                            let priorDiagnostics =
-                                match fileDiagnosticStates.TryGetValue(lintPath) with
-                                | true, state -> state.diagnostics
-                                | _ -> []
-                            do! lint uri useShallowAnalyze false isEditAction
-                            refreshDynamicCallSitesForDefinition lintPath priorDiagnostics
-
-                            if not useShallowAnalyze then
-                                let didGlobalWork = delayedAnalyze force
-                                logDiag "lint after delayed"
-                                // Somehow get updated localisation errors after loccache is updated.
-                                // Re-lint only when global caches actually changed.
-                                if didGlobalWork then
-                                    do! lint uri true false false  // re-lint after cache refresh is never an "edit"
-                                nextTime <- DateTime.Now.Add(delayTime)
-                                needsDeepAnalyse <- needsTypeRefresh || delayedLocUpdate
+                            
+                            let alreadyFresh =
+                                (not isEditAction)
+                                && (not force)
+                                && (match fileDiagnosticStates.TryGetValue(lintPath) with
+                                    | true, state -> state.freshness = Fresh
+                                    | _ -> false)
+                            if alreadyFresh then
+                                logDiag $"Skip open/focus lint (already fresh): {lintPath}"
                             else
-                                needsDeepAnalyse <- true
+                                let shallowAnalyse = DateTime.Now < nextTime
+                                let useShallowAnalyze = shallowAnalyse && (not force)
+                                updateValidationRuntime (fun state ->
+                                    { state with
+                                        inProgress = true
+                                        inProgressFile = uri.LocalPath
+                                        lastStartedAtUnixMs = nowUnixMs ()
+                                        lastCycleFile = uri.LocalPath
+                                        lastCycleShallow = useShallowAnalyze
+                                        lastCycleEditAction = isEditAction
+                                        lastError = None })
+                                logDiag $"lint force: %b{force}, shallow: %b{useShallowAnalyze}"
+                                let priorDiagnostics =
+                                    match fileDiagnosticStates.TryGetValue(lintPath) with
+                                    | true, state -> state.diagnostics
+                                    | _ -> []
+                                do! lint uri useShallowAnalyze false isEditAction
+                                refreshDynamicCallSitesForDefinition lintPath priorDiagnostics
+
+                                if not useShallowAnalyze then
+                                    let didGlobalWork = delayedAnalyze force
+                                    logDiag "lint after delayed"
+                                    if didGlobalWork then
+                                        do! lint uri true false false  
+                                    nextTime <- DateTime.Now.Add(delayTime)
+                                    needsDeepAnalyse <- needsTypeRefresh || delayedLocUpdate
+                                else
+                                    needsDeepAnalyse <- true
                         with e ->
                             errorMessage <- Some e.Message
                             logError $"uri %A{uri.LocalPath} \n exception %A{e}"
@@ -4078,9 +4083,11 @@ type Server(client: ILanguageClient) =
                     | true, (cachedHash, cachedHints) when cachedHash = hash -> return cachedHints
                     | _ ->
                         let inlayHintFunction (game: IGame<_>) =
-                            let entityOpt = 
-                                game.AllEntities() 
-                                |> Seq.tryPick (fun struct (e, _) -> if FileInfo(e.filepath).FullName = filePath then Some e else None)
+                            let normalizedTarget = filePath.Replace('\\', '/').ToLowerInvariant()
+                            let entityOpt =
+                                game.AllEntities()
+                                |> Seq.tryPick (fun struct (e, _) ->
+                                    if e.filepath.Replace('\\', '/').ToLowerInvariant() = normalizedTarget then Some e else None)
                             
                             match entityOpt with
                             | None -> []

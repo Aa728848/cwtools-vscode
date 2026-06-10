@@ -425,6 +425,53 @@ describe('dispatch_agents tool wiring', () => {
         }
     });
 
+    it('routes localisation yml planned-file tasks to loc_writer with write_localisation guidance', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+        executor.parentAgentRunner = { run: async () => undefined } as any;
+
+        let capturedGraph: import('../../extension/ai/orchestrator/types').TaskGraph | undefined;
+        const originalExecute = Orchestrator.prototype.execute;
+        (Orchestrator.prototype as any).execute = async (graph: import('../../extension/ai/orchestrator/types').TaskGraph) => {
+            capturedGraph = graph;
+            return {
+                success: true,
+                summary: 'ok',
+                agentResults: new Map(),
+                totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                failedNodes: [],
+                cancelledNodes: [],
+            };
+        };
+
+        try {
+            const result = await executor.execute('dispatch_agents', {
+                userPrompt: 'localisation update',
+                tasks: [{
+                    id: 'build_loc',
+                    agentType: 'build',
+                    prompt: 'Update the title text in this yml file.',
+                    plannedFiles: ['localisation/english/demo_l_english.yml'],
+                }],
+            }, {
+                runnerOptions: { abortSignal: new AbortController().signal },
+                onStep: () => undefined,
+            } as any) as any;
+
+            expect(result.success).to.equal(true);
+            const node = capturedGraph?.nodes.get('build_loc');
+            expect(node?.agentType).to.equal('loc_writer');
+            expect(node?.prompt).to.include('write_localisation');
+            expect(node?.prompt).to.include('Do not use `write_file`');
+        } finally {
+            (Orchestrator.prototype as any).execute = originalExecute;
+        }
+    });
+
     it('returns compact sub-agent summaries without internal truncation markers', async () => {
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
@@ -788,6 +835,57 @@ describe('Orchestrator runtime safety', () => {
         expect(result.writtenFiles).to.deep.equal([
             require('path').resolve(workspaceRoot, 'events/subagent_target.txt'),
         ]);
+    });
+
+    it('executeSubAgent: removes generic write tools for pure localisation yml tasks', async () => {
+        const workspaceRoot = process.cwd();
+        let capturedOptions: any;
+        const runner = {
+            toolExecutor: { workspaceRoot },
+            run: async (_prompt: string, _context: any, _history: any[], options: any) => {
+                capturedOptions = options;
+                return {
+                    code: '',
+                    explanation: 'done',
+                    validationErrors: [],
+                    isValid: true,
+                    retryCount: 0,
+                    steps: [],
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                };
+            },
+        };
+        const orchestrator = new Orchestrator(runner as any);
+        const node = {
+            id: 'loc_writer',
+            agentType: 'loc_writer',
+            prompt: 'update localisation keys',
+            plannedFiles: ['localisation/english/demo_l_english.yml'],
+            dependencies: [],
+            priority: 'normal',
+            status: 'pending',
+            retryCount: 0,
+            maxRetries: 0,
+        };
+
+        const result = await (orchestrator as any).executeSubAgent(
+            node,
+            new Blackboard(),
+            { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            new AbortController().signal,
+            () => undefined,
+            { topicId: 'topic-1' },
+        );
+
+        expect(result.success).to.equal(true);
+        expect(capturedOptions.excludeTools).to.include.members([
+            'write_file',
+            'edit_file',
+            'replace_lines',
+            'multi_replace_file_content',
+            'apply_patch',
+        ]);
+        expect(capturedOptions.excludeTools).to.not.include('write_localisation');
     });
 });
 

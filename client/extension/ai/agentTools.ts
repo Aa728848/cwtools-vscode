@@ -109,6 +109,52 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     merge_results: 30_000,
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
+const LOCALISATION_YML_TOOL_GUARD = [
+    'Localisation YML routing guard:',
+    '- These targets are Paradox localisation .yml files. Use `write_localisation` only.',
+    '- Do not use `write_file`, `edit_file`, `replace_lines`, `multi_replace_file_content`, or `apply_patch` on localisation YAML.',
+    '- If the request describes a line/text replacement, convert it into exact localisation key upserts through `write_localisation`.',
+].join('\n');
+
+function isLocalisationYmlPath(value: unknown): boolean {
+    if (typeof value !== 'string') return false;
+    const normalized = value.trim().replace(/\\/g, '/').toLowerCase();
+    if (!normalized.endsWith('.yml')) return false;
+    return /(?:^|\/)(localisation|localisation_synced|localization)(?:\/|$)/.test(normalized);
+}
+
+function promptMentionsLocalisationYml(prompt: unknown): boolean {
+    if (typeof prompt !== 'string') return false;
+    const normalized = prompt.replace(/\\/g, '/').toLowerCase();
+    return normalized.includes('.yml') && /(localisation|localisation_synced|localization)/.test(normalized);
+}
+
+function normalizeDispatchTaskForLocalisationYml<T extends {
+    agentType: string;
+    prompt: string;
+    contextFiles?: string[];
+    plannedFiles?: string[];
+}>(task: T): T {
+    const plannedFiles = Array.isArray(task.plannedFiles) ? task.plannedFiles : [];
+    const contextFiles = Array.isArray(task.contextFiles) ? task.contextFiles : [];
+    const localisationTargets = [...plannedFiles, ...contextFiles].filter(isLocalisationYmlPath);
+    const hasLocalisationYml = localisationTargets.length > 0 || promptMentionsLocalisationYml(task.prompt);
+    if (!hasLocalisationYml) return task;
+
+    const hasOnlyLocalisationPlannedFiles = plannedFiles.length > 0 && plannedFiles.every(isLocalisationYmlPath);
+    const nextTask = { ...task };
+    if (hasOnlyLocalisationPlannedFiles && nextTask.agentType !== 'loc_writer') {
+        nextTask.agentType = 'loc_writer';
+    }
+
+    if (!nextTask.prompt.includes('write_localisation')) {
+        const targetLine = localisationTargets.length > 0
+            ? `\nTargets: ${Array.from(new Set(localisationTargets)).map(file => `\`${file}\``).join(', ')}`
+            : '';
+        nextTask.prompt = `${nextTask.prompt.trim()}\n\n${LOCALISATION_YML_TOOL_GUARD}${targetLine}`;
+    }
+    return nextTask;
+}
 
 function stripInternalTruncationMarker(text: string): string {
     return text
@@ -1350,6 +1396,7 @@ export class AgentToolExecutor {
                 error: `Concurrency guard: attempted to dispatch ${tasks.length} tasks at once, above the current mode limit of ${maxTasksPerDispatch}. Long task lists can cause model timeout or truncation; split the work into smaller waves.`
             };
         }
+        const normalizedTasks = tasks.map(task => normalizeDispatchTaskForLocalisationYml(task));
 
         // Make sure there is a parentAgentRunner (the Orchestrator needs it to schedule child Agents)
         if (!this.parentAgentRunner) {
@@ -1372,7 +1419,7 @@ export class AgentToolExecutor {
             const userPrompt = (args.userPrompt as string) || 'Multi-agent collaboration task';
             const graph = TaskGraphEngine.createGraph(userPrompt);
 
-            for (const task of tasks) {
+            for (const task of normalizedTasks) {
                 TaskGraphEngine.addNode(
                     graph,
                     task.id,
@@ -1392,7 +1439,7 @@ export class AgentToolExecutor {
 
             // Instantiate Orchestrator
             const orchestrator = new Orchestrator(this.parentAgentRunner, {
-                maxConcurrency: isScriptMode ? Math.min(8, Math.max(1, tasks.length)) : undefined,
+                maxConcurrency: isScriptMode ? Math.min(8, Math.max(1, normalizedTasks.length)) : undefined,
             });
             const parentRunPromise = context?.agentRunner?.getActiveRunRecordPromise?.()
                 ?? this.parentAgentRunner.getActiveRunRecordPromise?.();
@@ -1427,11 +1474,11 @@ export class AgentToolExecutor {
             // Push initial progress
             options.onStep?.({
                 type: 'thinking',
-                content: `Coordinator started: dispatching ${tasks.length} sub-agent task(s).`,
+                content: `Coordinator started: dispatching ${normalizedTasks.length} sub-agent task(s).`,
                 timestamp: Date.now(),
             });
             if (parentRun) {
-                for (const task of tasks) {
+                for (const task of normalizedTasks) {
                     await runLedger.appendEvent(
                         parentRun.runId,
                         'subagent_start',
@@ -1525,7 +1572,7 @@ export class AgentToolExecutor {
                         ).catch(() => {});
                     }
                 }
-                const taskMeta = tasks.find(task => task.id === id);
+                const taskMeta = normalizedTasks.find(task => task.id === id);
                 agentSummaries.push({
                     id,
                     agentType: taskMeta?.agentType,

@@ -1195,7 +1195,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: '[Orchestrator/Script Mode] Decompose the current task into multiple sub-tasks and dispatch them to specialist agents for parallel execution. Script Mode may dispatch up to 8 concise tasks per wave; classic Orchestrator mode remains limited to 4. Sub-agents include Explorer (read-only exploration), Builder (code generation), LocWriter (localisation), Reviewer (code review), etc. Agents exchange data via the shared Blackboard and execution order is guaranteed by a DAG.',
+            description: '[Orchestrator/Script Mode] Decompose the current task into multiple sub-tasks and dispatch them to specialist agents for parallel execution. Script Mode may dispatch up to 8 concise tasks per wave; classic Orchestrator mode remains limited to 4. Sub-agents include Explorer (read-only exploration), Builder (code generation), LocWriter (localisation), Reviewer (code review), etc. Agents exchange data via the shared Blackboard and execution order is guaranteed by a DAG. Any task that writes localisation/localization .yml files must be assigned to loc_writer and must use write_localisation, not generic edit tools.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1222,7 +1222,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                                 plannedFiles: {
                                     type: 'array',
                                     items: { type: 'string' },
-                                    description: 'Expected project files this sub-task will modify. Provide this for Builder tasks whenever the approved plan, blueprint, diagnostics, or file manifest already identifies the targets. It lets the orchestrator avoid concurrent write conflicts and narrow child write scope when files are known. If exploration must discover the files first, dispatch that exploration before the Builder task.',
+                                    description: 'Expected project files this sub-task will modify. Provide this for Builder tasks whenever the approved plan, blueprint, diagnostics, or file manifest already identifies the targets. It lets the orchestrator avoid concurrent write conflicts and narrow child write scope when files are known. If these targets include localisation/localization .yml files, use agentType="loc_writer"; the child must call write_localisation only. If exploration must discover the files first, dispatch that exploration before the Builder task.',
                                 },
                                 plannedEntities: {
                                     type: 'array',

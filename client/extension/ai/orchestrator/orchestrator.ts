@@ -44,6 +44,20 @@ const SUB_AGENT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const SUB_AGENT_IDLE_CHECK_MS = 30 * 1000;
 const SUB_AGENT_IDLE_NOTICE_INTERVAL_MS = 30 * 1000;
 const CLARIFICATION_PREFIX = 'BLOCKED_FOR_ORCHESTRATOR';
+const LOCALISATION_GENERIC_WRITE_TOOLS = [
+    'write_file',
+    'edit_file',
+    'replace_lines',
+    'multi_replace_file_content',
+    'apply_patch',
+];
+
+function isLocalisationYmlPath(value: unknown): boolean {
+    if (typeof value !== 'string') return false;
+    const normalized = value.trim().replace(/\\/g, '/').toLowerCase();
+    if (!normalized.endsWith('.yml')) return false;
+    return /(?:^|\/)(localisation|localisation_synced|localization)(?:\/|$)/.test(normalized);
+}
 
 function formatDurationMs(ms: number): string {
     if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
@@ -339,6 +353,15 @@ export class Orchestrator {
         const workspaceRoot = this.agentRunner.toolExecutor?.workspaceRoot || process.cwd();
         const { buildSubAgentSandbox } = require('./subAgentSandbox');
         const sandbox = buildSubAgentSandbox(taskNode, workspaceRoot);
+        const plannedFiles = Array.isArray(taskNode.plannedFiles) ? taskNode.plannedFiles : [];
+        const onlyLocalisationYmlWrites = plannedFiles.length > 0 && plannedFiles.every(isLocalisationYmlPath);
+        const excludedTools = [
+            'web_fetch', 'search_web', 'codesearch',
+            'run_command', 'git_ops',
+
+            'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
+            ...(onlyLocalisationYmlWrites ? LOCALISATION_GENERIC_WRITE_TOOLS : []),
+        ];
 
         const runnerOptions: AgentRunnerOptions = {
             sandbox,
@@ -363,12 +386,7 @@ export class Orchestrator {
             // 2. run_command / mmx_* / convert_* / deploy_mod_asset requires user permission approval or involves external creation.
             // The child Agent should not pop up interactive cards to the user, and the assets should be selected from the original game files and project files.
             // 3. If the subtask requires network information, it should be searched by Orchestrator and injected through contextFiles before dispatching.
-            excludeTools: [
-                'web_fetch', 'search_web', 'codesearch', 
-                'run_command', 'git_ops',
-
-                'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
-            ],
+            excludeTools: excludedTools,
         };
 
         const writtenFiles: string[] = [];

@@ -148,6 +148,32 @@ describe('PromptBuilder context budgeting', () => {
         }
     });
 
+    it('injects only the current topic memory and keeps frozen prompts memory-free', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const workspaceRoot = makeWorkspace();
+        try {
+            const topicA = path.join(workspaceRoot, '.cwtools-ai', 'topic-memory-a');
+            const topicB = path.join(workspaceRoot, '.cwtools-ai', 'topic-memory-b');
+            fs.mkdirSync(topicA, { recursive: true });
+            fs.mkdirSync(topicB, { recursive: true });
+            fs.writeFileSync(path.join(topicA, '.cwtools-ai-memory.md'), '# Memory\n\nTOPIC_A_MEMORY', 'utf8');
+            fs.writeFileSync(path.join(topicB, '.cwtools-ai-memory.md'), '# Memory\n\nTOPIC_B_MEMORY', 'utf8');
+
+            const builder = new PromptBuilder(workspaceRoot);
+            const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-memory-a');
+            const dynamic = builder.buildDynamicPromptBlock(undefined, 'topic-memory-a');
+            const frozen = builder.buildFrozenSystemPrompt('build');
+
+            expect(prompt).to.include('TOPIC_A_MEMORY');
+            expect(prompt).to.not.include('TOPIC_B_MEMORY');
+            expect(String(dynamic[0]!.content)).to.include('TOPIC_A_MEMORY');
+            expect(frozen).to.not.include('TOPIC_A_MEMORY');
+            expect(frozen).to.not.include('TOPIC_B_MEMORY');
+        } finally {
+            cleanupWorkspace(workspaceRoot);
+        }
+    });
+
     it('tells agents to reuse one temporary helper script per task', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());

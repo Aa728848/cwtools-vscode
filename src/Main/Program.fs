@@ -1951,6 +1951,13 @@ type Server(client: ILanguageClient) =
         | Some game when not files.IsEmpty ->
             try
                 let normalisedTargets = files |> List.map normaliseCachePath |> Set.ofList
+                (try
+                    let warmSw = Stopwatch.StartNew()
+                    let warmed = game.ForceDynamicParameterData(0, 0)
+                    warmSw.Stop()
+                    logDiag
+                        $"Deferred revalidation warmed {warmed} dynamic-parameter entities (uncapped) in {warmSw.ElapsedMilliseconds}ms"
+                 with e -> logDiag $"Deferred revalidation warm-up error: {e.Message}")
                 gameStateLock.EnterWriteLock()
                 let valErrors =
                     try

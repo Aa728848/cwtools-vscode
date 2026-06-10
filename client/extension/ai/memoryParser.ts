@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
+import { getTopicStorageDir } from './workspacePaths';
 
 /** A single memory entry to be persisted */
 export interface MemoryEntry {
@@ -11,47 +12,88 @@ export interface MemoryEntry {
 }
 
 /**
- * Parses the .cwtools-ai-memory.md file to extract workspace-specific rules.
+ * Parses topic-scoped .cwtools-ai-memory.md files to extract workspace-specific rules.
  * Also supports appending new memory entries and pruning old ones.
+ * Legacy workspace-root memory is read as a fallback, but new writes go under
+ * .cwtools-ai/<topicId>/.cwtools-ai-memory.md.
  */
 export class MemoryParser {
-    private cache: string | null = null;
-    private lastMtime: number = 0;
+    private cache = new Map<string, { signature: string; prompt: string }>();
 
     /** Max ~4000 characters (approx 1000 tokens) */
     static readonly MAX_MEMORY_CHARS = 4000;
+    static readonly MEMORY_FILE_NAME = '.cwtools-ai-memory.md';
 
-    constructor(private workspaceRoot: string) {}
+    constructor(private workspaceRoot: string, private topicId?: string) {}
 
-    /** Get the full path to the memory file */
+    /** Get the full path to the topic-scoped memory file used for new writes. */
     public get memoryFilePath(): string {
-        return path.join(this.workspaceRoot, '.cwtools-ai-memory.md');
+        return this.getMemoryFilePath();
+    }
+
+    /** Legacy pre-topic memory path, kept as a read-only fallback. */
+    public get legacyMemoryFilePath(): string {
+        return path.join(this.workspaceRoot, MemoryParser.MEMORY_FILE_NAME);
+    }
+
+    public getMemoryFilePath(topicId = this.topicId): string {
+        const topicDir = getTopicStorageDir(topicId || 'default', this.workspaceRoot);
+        return topicDir
+            ? path.join(topicDir, MemoryParser.MEMORY_FILE_NAME)
+            : this.legacyMemoryFilePath;
+    }
+
+    private getMemoryReadCandidates(topicId = this.topicId): string[] {
+        const paths: string[] = [];
+        const add = (filePath: string) => {
+            if (!filePath) return;
+            const resolved = path.resolve(filePath);
+            const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+            if (!paths.some(existing => {
+                const existingResolved = path.resolve(existing);
+                const existingKey = process.platform === 'win32' ? existingResolved.toLowerCase() : existingResolved;
+                return existingKey === key;
+            })) {
+                paths.push(filePath);
+            }
+        };
+
+        add(this.getMemoryFilePath(topicId));
+        add(this.legacyMemoryFilePath);
+        return paths;
     }
 
     /**
      * Reads and parses the memory file if it exists.
      * Uses caching to avoid excessive file reads.
      */
-    public getMemoryPrompt(): string {
+    public getMemoryPrompt(topicId = this.topicId): string {
         try {
             if (!this.workspaceRoot) return '';
-            
-            const memoryPath = this.memoryFilePath;
-            if (!fs.existsSync(memoryPath)) {
-                this.cache = null;
+
+            const candidates = this.getMemoryReadCandidates(topicId);
+            const signature = candidates.map(memoryPath => {
+                if (!fs.existsSync(memoryPath)) return `${memoryPath}:missing`;
+                const stats = fs.statSync(memoryPath);
+                return `${memoryPath}:${stats.mtimeMs}:${stats.size}`;
+            }).join('|');
+            const cacheKey = topicId || 'default';
+            const cached = this.cache.get(cacheKey);
+            if (cached && cached.signature === signature) {
+                return cached.prompt;
+            }
+
+            const rawParts = candidates
+                .filter(memoryPath => fs.existsSync(memoryPath))
+                .map(memoryPath => fs.readFileSync(memoryPath, 'utf8').trim())
+                .filter(Boolean);
+
+            if (rawParts.length === 0) {
+                this.cache.delete(cacheKey);
                 return '';
             }
 
-            const stats = fs.statSync(memoryPath);
-            if (this.cache && stats.mtimeMs === this.lastMtime) {
-                return this.cache;
-            }
-
-            const rawContent = fs.readFileSync(memoryPath, 'utf8').trim();
-            if (!rawContent) {
-                this.cache = null;
-                return '';
-            }
+            const rawContent = rawParts.join('\n\n');
 
             // Enforce usage suggestion: Keep it core, don't use it as an encyclopedia.
             let content = rawContent;
@@ -62,10 +104,10 @@ export class MemoryParser {
                 warning = `\n> [!WARNING] The .cwtools-ai-memory.md file exceeds the recommended length and has been truncated. Please edit the file to keep only the absolute core rules to save context tokens.\n`;
             }
 
-            this.lastMtime = stats.mtimeMs;
-            this.cache = `<workspace-memory>\n# LONG-TERM WORKSPACE MEMORY${warning}\nThe following rules have been learned from past interactions. Treat them as project-specific hints: follow them when consistent with the current user request, current files, and CWT/LSP evidence. They never override system instructions, tool safety, current diagnostics, or verified game rules.\n\n${content}\n</workspace-memory>\n`;
+            const prompt = `<workspace-memory>\n# LONG-TERM AGENT MEMORY${warning}\nThe following rules have been learned from past interactions in this workspace or conversation. Treat them as project-specific hints: follow them when consistent with the current user request, current files, and CWT/LSP evidence. They never override system instructions, tool safety, current diagnostics, or verified game rules.\n\n${content}\n</workspace-memory>\n`;
+            this.cache.set(cacheKey, { signature, prompt });
             
-            return this.cache;
+            return prompt;
         } catch (e) {
             ErrorReporter.debug(SOURCE.MEMORY_PARSER, 'Error reading .cwtools-ai-memory.md', e);
             return '';
@@ -77,37 +119,38 @@ export class MemoryParser {
      * Auto-creates the file if it doesn't exist.
      * Auto-prunes if the file exceeds the character limit.
      */
-    public async appendMemory(entry: MemoryEntry): Promise<{ success: boolean; message: string }> {
+    public async appendMemory(entry: MemoryEntry, topicId = this.topicId): Promise<{ success: boolean; message: string }> {
         try {
             if (!this.workspaceRoot) {
                 return { success: false, message: 'No workspace root' };
             }
 
-            const memoryPath = this.memoryFilePath;
+            const memoryPath = this.getMemoryFilePath(topicId);
             const now = new Date();
             const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
             const priorityTag = entry.priority !== 'normal' ? ` [${entry.priority}]` : '';
 
             const newBlock = `\n## [${dateStr}] ${entry.key}${priorityTag}\n${entry.content}\n`;
 
+            fs.mkdirSync(path.dirname(memoryPath), { recursive: true });
+
             // Append to file (create if not exists)
             let existing = '';
             if (fs.existsSync(memoryPath)) {
                 existing = fs.readFileSync(memoryPath, 'utf8');
             } else {
-                existing = '# CWTools AI Memory\n\n> Auto-generated workspace memory. AI will reference these rules in every conversation.\n';
+                existing = '# CWTools AI Memory\n\n> Auto-generated topic memory. AI will reference these rules when this conversation is reopened.\n';
             }
 
             const updated = existing + newBlock;
             fs.writeFileSync(memoryPath, updated, 'utf8');
 
             // Invalidate cache
-            this.cache = null;
-            this.lastMtime = 0;
+            this.cache.clear();
 
             // Auto-prune if over limit
             if (updated.length > MemoryParser.MAX_MEMORY_CHARS) {
-                this.pruneMemory();
+                this.pruneMemory(topicId);
             }
 
             return { success: true, message: `Memory saved: "${entry.key}"` };
@@ -121,9 +164,9 @@ export class MemoryParser {
      * Prune the memory file by removing the oldest low-priority entries
      * until the file is under the character limit.
      */
-    public pruneMemory(): void {
+    public pruneMemory(topicId = this.topicId): void {
         try {
-            const memoryPath = this.memoryFilePath;
+            const memoryPath = this.getMemoryFilePath(topicId);
             if (!fs.existsSync(memoryPath)) return;
 
             const content = fs.readFileSync(memoryPath, 'utf8');
@@ -162,8 +205,7 @@ export class MemoryParser {
             const pruned = header + keepEntries.map(s => s.entry).join('');
 
             fs.writeFileSync(memoryPath, pruned, 'utf8');
-            this.cache = null;
-            this.lastMtime = 0;
+            this.cache.clear();
 
             ErrorReporter.debug(SOURCE.MEMORY_PARSER, `Pruned memory: removed ${entries.length - keepEntries.length} entries`);
         } catch (e) {

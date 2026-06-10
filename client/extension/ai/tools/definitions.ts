@@ -851,7 +851,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'save_memory',
-            description: 'Persist a learned rule, convention, or important discovery to the project-level memory file (.cwtools-ai-memory.md). This memory persists across sessions - the AI will reference it in every future conversation. Use this sparingly for genuinely important, reusable insights (e.g. coding conventions, namespace patterns, recurring user preferences). Do NOT save transient/task-specific data.',
+            description: 'Persist a learned rule, convention, or important discovery to the current conversation topic memory file (.cwtools-ai/<topicId>/.cwtools-ai-memory.md). This memory persists when the topic is reopened. Use this sparingly for genuinely important, reusable insights (e.g. coding conventions, namespace patterns, recurring user preferences). Do NOT save transient/task-specific data.',
             parameters: {
                 type: 'object',
                 properties: {

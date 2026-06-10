@@ -594,9 +594,9 @@ export class AgentToolExecutor {
                 result = this.memoryHandler.searchMemory(args as any); break;
             case 'search_memory_disabled': break;
 
-            // - Persistent memory (cross-session, written to .cwtools-ai-memory.md) -
+            // - Persistent memory (cross-session, written to the topic-scoped .cwtools-ai-memory.md) -
             case 'save_memory':
-                result = await this.memoryHandler.saveMemory(args as any); break;
+                result = await this.memoryHandler.saveMemory(args as any, context); break;
             case 'save_memory_disabled': break;
 
             // - MCP tool call -

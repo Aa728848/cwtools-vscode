@@ -144,7 +144,8 @@ export class PromptBuilder {
             recentWrittenFiles?: string[];
             blockedSubAgents?: string[];
             decisions?: string[];
-        }
+        },
+        includeMemory = true
     ): string {
         const gameId = languageId ?? this.detectGameLanguageId();
         const gameKnowledge = getGameKnowledge(gameId);
@@ -215,8 +216,10 @@ export class PromptBuilder {
         }
         if (projectRules) finalPrompt += projectRules + '\n';
 
-        const memoryPrompt = this.memoryParser.getMemoryPrompt();
-        if (memoryPrompt) finalPrompt += memoryPrompt + '\n';
+        if (includeMemory) {
+            const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId);
+            if (memoryPrompt) finalPrompt += memoryPrompt + '\n';
+        }
 
         // Inject approved design blueprint in Build mode
         if (mode === 'build') {
@@ -249,8 +252,8 @@ export class PromptBuilder {
         const cached = this._frozenPromptCache.get(cacheKey);
         if (cached !== undefined) return cached;
 
-        // Force stable mode by leaving topicId, runId, and pinned undefined
-        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId);
+        // Force stable mode by leaving topicId, runId, pinned, and memory undefined.
+        const prompt = this.buildSystemPromptForMode(mode, providerId, languageId, undefined, undefined, undefined, false);
         // LRU eviction: drop oldest entry once we exceed the cap (Map iterates in insertion order).
         if (this._frozenPromptCache.size >= PromptBuilder.FROZEN_PROMPT_CACHE_MAX) {
             const oldestKey = this._frozenPromptCache.keys().next().value;
@@ -302,6 +305,9 @@ export class PromptBuilder {
             const blueprintPrompt = this.getDesignBlueprintPrompt(topicId);
             if (blueprintPrompt) dynamicParts.push(blueprintPrompt);
         }
+
+        const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId);
+        if (memoryPrompt) dynamicParts.push(memoryPrompt);
 
         // 1. Compacted Summary (来自历史会话看板的压缩)
         if (topicId && runId) {

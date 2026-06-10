@@ -657,16 +657,18 @@ export class ExternalToolHandler {
         }
 
         try {
-            const memoryPath = path.join(this.ctx.workspaceRoot, '.cwtools-ai-memory.md');
-            const entry = `\n- **Ignored Validation Error / Whitelist**: \`${args.errorId}\` (Reason: ${args.reason})\n`;
-            
-            if (fs.existsSync(memoryPath)) {
-                fs.appendFileSync(memoryPath, entry, 'utf8');
-            } else {
-                fs.writeFileSync(memoryPath, `# CWTools AI Local Memory\n${entry}`, 'utf8');
-            }
+            const { MemoryParser } = await import('../memoryParser');
+            const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
+            const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
+            const result = await parser.appendMemory({
+                key: 'Ignored Validation Error / Whitelist',
+                content: `\`${args.errorId}\` (Reason: ${args.reason})`,
+                priority: 'high',
+            });
 
-            return { success: true, message: 'Error successfully whitelisted and saved to local memory.' };
+            return result.success
+                ? { success: true, message: 'Error successfully whitelisted and saved to local memory.' }
+                : result;
         } catch (e) {
             return { success: false, message: `Failed to save memory: ${e instanceof Error ? e.message : String(e)}` };
         }

@@ -78,13 +78,14 @@ export class MemoryToolHandler {
     }
 
     /** save_memory tool execution */
-    async saveMemory(args: { key: string; content: string; priority?: 'high' | 'normal' | 'low' }): Promise<unknown> {
+    async saveMemory(args: { key: string; content: string; priority?: 'high' | 'normal' | 'low' }, context?: import('../types').AgentToolContext): Promise<unknown> {
         const { key, content, priority } = args;
         if (!key || !content) {
             return { success: false, message: 'Missing key or content' };
         } else {
             const { MemoryParser } = await import('../memoryParser');
-            const parser = new MemoryParser(this.ctx.workspaceRoot);
+            const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
+            const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
             return await parser.appendMemory({ key, content, priority: priority || 'normal' });
         }
     }

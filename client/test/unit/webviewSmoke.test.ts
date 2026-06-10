@@ -71,10 +71,13 @@ describe('webview smoke checks', () => {
             '.topics-panel',
             '.subagent-fullscreen-view',
             '.annotatable-plan',
+            '.md-table-wrap',
             '.md-codeblock',
         ]) {
             expect(css).to.include(selector);
         }
+        expect(css).to.include('overflow-x:auto');
+        expect(css).to.include('width:max-content');
         for (const id of ['chatArea', 'input', 'sendBtn', 'slashPopup', 'artifactDrawer', 'topicsPanel', 'btnWorkspace']) {
             expect(html).to.include(`id="${id}"`);
         }

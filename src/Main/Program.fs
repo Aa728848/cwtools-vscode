@@ -82,6 +82,103 @@ let private codeLensNameFieldPattern =
         @"(?:^|[\s{])\b(name|id|key)\b\s*=\s*(""?[A-Za-z0-9_.$:@-]+""?)",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase ||| System.Text.RegularExpressions.RegexOptions.Compiled)
 
+let private localisationHeaderPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^\s*\uFEFF?(l_[A-Za-z0-9_]+)\s*:\s*(#.*)?$",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private localisationEntryPattern =
+    System.Text.RegularExpressions.Regex(
+        @"^(\s*)([^\s:#][^:\s]*)\s*:\s*(\d*)\s*(.*)$",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
+let private splitLines (text: string) =
+    System.Text.RegularExpressions.Regex.Split(text, "\r\n|\n|\r")
+
+let private detectLineEnding (text: string) =
+    if text.Contains("\r\n") then "\r\n"
+    elif text.Contains("\r") then "\r"
+    else "\n"
+
+let private getFormattingIndent (options: DocumentFormattingOptions) =
+    if options.insertSpaces then
+        String.replicate (max 1 options.tabSize) " "
+    else
+        "\t"
+
+let private looksLikeLocalisationYaml (lines: string array) =
+    let rec loop index =
+        if index >= lines.Length then
+            false
+        else
+            let trimmed = lines.[index].Trim()
+
+            if String.IsNullOrEmpty trimmed || trimmed.StartsWith("#") then
+                loop (index + 1)
+            else
+                localisationHeaderPattern.IsMatch(lines.[index])
+
+    loop 0
+
+let private formatLocalisationYaml (options: DocumentFormattingOptions) (text: string) =
+    let lines = splitLines text
+
+    if not (looksLikeLocalisationYaml lines) then
+        None
+    else
+        let indent = getFormattingIndent options
+        let mutable sawHeader = false
+
+        let formattedLines =
+            lines
+            |> Array.map (fun line ->
+                let trimmedRight = line.TrimEnd()
+                let headerMatch = localisationHeaderPattern.Match(trimmedRight)
+
+                if headerMatch.Success then
+                    sawHeader <- true
+                    let language = headerMatch.Groups.[1].Value
+
+                    let suffix =
+                        if headerMatch.Groups.[2].Success then
+                            " " + headerMatch.Groups.[2].Value.Trim()
+                        else
+                            ""
+
+                    language + ":" + suffix
+                elif sawHeader then
+                    if String.IsNullOrWhiteSpace trimmedRight then
+                        ""
+                    else
+                        let trimmedStart = trimmedRight.TrimStart()
+
+                        if trimmedStart.StartsWith("#") then
+                            let existingIndent = trimmedRight.Substring(0, trimmedRight.Length - trimmedStart.Length)
+                            let lineIndent = if existingIndent.Length = 0 then indent else existingIndent
+                            lineIndent + trimmedStart
+                        else
+                            let entryMatch = localisationEntryPattern.Match(trimmedRight)
+
+                            if entryMatch.Success then
+                                let existingIndent = entryMatch.Groups.[1].Value
+                                let lineIndent = if existingIndent.Length = 0 then indent else existingIndent
+                                let key = entryMatch.Groups.[2].Value
+                                let version = entryMatch.Groups.[3].Value
+                                let value = entryMatch.Groups.[4].Value.Trim()
+                                let prefix = if String.IsNullOrEmpty version then key + ":" else key + ":" + version
+
+                                if String.IsNullOrEmpty value then
+                                    lineIndent + prefix
+                                else
+                                    lineIndent + prefix + " " + value
+                            else
+                                trimmedRight
+                else
+                    trimmedRight)
+
+        let formatted = String.Join(detectLineEnding text, formattedLines)
+        if formatted = text then None else Some formatted
+
 let private isLocalisationDefinitionPath (filePath: string) =
     let normalized = filePath.Replace('\\', '/').ToLowerInvariant()
     normalized.EndsWith(".yml")
@@ -4439,18 +4536,26 @@ type Server(client: ILanguageClient) =
 
                 match fileText with
                 | Some fileText ->
-                    match
-                        CKParser.parseString fileText path,
-                        Path.GetExtension(path.AsSpan()).Equals(".gui", StringComparison.OrdinalIgnoreCase)
-                        || Path.GetExtension(path.AsSpan()).Equals(".yml", StringComparison.OrdinalIgnoreCase)
-                    with
-                    | Success(sl, _, _), false ->
-                        let formatted = CKPrinter.printTopLevelKeyValueList sl
+                    let extension = Path.GetExtension(path.AsSpan())
 
-                        return
-                            [ { range = createRange 0 0 100000 0
-                                newText = formatted } ]
-                    | _ -> return []
+                    if extension.Equals(".yml", StringComparison.OrdinalIgnoreCase) then
+                        match formatLocalisationYaml p.options fileText with
+                        | Some formatted ->
+                            return
+                                [ { range = createRange 0 0 100000 0
+                                    newText = formatted } ]
+                        | None -> return []
+                    elif extension.Equals(".gui", StringComparison.OrdinalIgnoreCase) then
+                        return []
+                    else
+                        match CKParser.parseString fileText path with
+                        | Success(sl, _, _) ->
+                            let formatted = CKPrinter.printTopLevelKeyValueList sl
+
+                            return
+                                [ { range = createRange 0 0 100000 0
+                                    newText = formatted } ]
+                        | _ -> return []
                 | None -> return []
             }
             |> catchError []

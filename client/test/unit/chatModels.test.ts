@@ -242,7 +242,7 @@ describe('chat markdown and mention helpers', () => {
         expect(html).to.include('<h1>Title</h1>');
         expect(html).to.include('<ul>');
         expect(html).to.include('<strong>second</strong>');
-        expect(html).to.include('<table>');
+        expect(html).to.include('<div class="md-table-wrap"><table>');
         expect(html).to.include('&lt; b');
     });
 

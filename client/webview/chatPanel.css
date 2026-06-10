@@ -387,8 +387,11 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .msg-bubble li { margin:2px 0; }
 .msg-bubble blockquote { margin:6px 0; padding:4px 10px; border-left:3px solid var(--accent); background:rgba(255,255,255,0.04); border-radius:0 4px 4px 0; opacity:0.85; }
 .msg-bubble hr { border:none; border-top:1px solid var(--border); margin:8px 0; }
+.msg-bubble .md-table-wrap { max-width:100%; overflow-x:auto; margin:6px 0; }
 .msg-bubble table { border-collapse:collapse; width:100%; margin:6px 0; font-size:12px; }
+.msg-bubble .md-table-wrap table { width:max-content; min-width:100%; margin:0; }
 .msg-bubble th,.msg-bubble td { border:1px solid var(--border); padding:4px 8px; text-align:left; }
+.msg-bubble .md-table-wrap th,.msg-bubble .md-table-wrap td { white-space:nowrap; word-break:normal; overflow-wrap:normal; vertical-align:top; }
 .msg-bubble th { background:rgba(255,255,255,0.05); font-weight:600; }
 .msg-bubble strong { font-weight:700; }
 .msg-bubble em { font-style:italic; }
@@ -825,6 +828,7 @@ body.chat-empty .composer-menu, body.chat-empty .model-menu { top: calc(100% + 6
 .ap-row:hover, .ap-row-active { background: rgba(100,149,237,0.06); }
 .ap-row-annotated { background: rgba(255,200,50,0.05); }
 .ap-section-text { font-size: 12px; line-height: 1.55; color: var(--fg); opacity: 0.9; pointer-events: none; }
+.ap-section-text .md-table-wrap { pointer-events: auto; }
 .ap-heading { display: block; margin-bottom: 2px; }
 .ap-h1 { font-size: 13px; color: var(--fg); }
 .ap-h2 { font-size: 12px; opacity: 0.9; }

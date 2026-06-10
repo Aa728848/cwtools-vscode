@@ -122,7 +122,7 @@ export function renderMarkdown(rawText: string, labels: MarkdownLabels = {}): st
                 rows.forEach(row => {
                     table += '<tr>' + row.map(cell => '<td>' + renderInlineMarkdown(cell) + '</td>').join('') + '</tr>';
                 });
-                out.push(table + '</tbody></table>');
+                out.push('<div class="md-table-wrap">' + table + '</tbody></table></div>');
             }
             continue;
         }

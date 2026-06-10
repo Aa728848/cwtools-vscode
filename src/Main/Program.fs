@@ -4213,18 +4213,17 @@ type Server(client: ILanguageClient) =
                     | true, (cachedHash, cachedHints) when cachedHash = hash -> return cachedHints
                     | _ ->
                         let inlayHintFunction (game: IGame<_>) =
-                            let normalizedTarget = filePath.Replace('\\', '/').ToLowerInvariant()
-                            let entityOpt =
-                                game.AllEntities()
-                                |> Seq.tryPick (fun struct (e, _) ->
-                                    if e.filepath.Replace('\\', '/').ToLowerInvariant() = normalizedTarget then Some e else None)
-                            
-                            match entityOpt with
-                            | None -> []
-                            | Some entity ->
+                            // Parse the live editor text directly: the game entity AST lags
+                            // behind edits until the debounced lint runs game.UpdateFile, so
+                            // its positions go stale whenever an edit changes line counts.
+                            match CKParser.parseString fileText filePath with
+                            | Failure _ -> None
+                            | Success(statements, _, _) ->
+                                let rootNode =
+                                    CWTools.Process.STLProcess.simpleProcess.ProcessNode () "root" (mkZeroFile filePath) statements
                                 let locMap = getOrBuildLocMap game |> Map.ofList
                                 let hints = ResizeArray<InlayHint>()
-                                let targetPath = entity.filepath
+                                let targetPath = filePath
         
                                 // Build scripted variable lookup map
                                 let globalVars = game.ScriptedVariables()
@@ -4393,21 +4392,36 @@ type Server(client: ILanguageClient) =
                                     )
                                     n.Nodes |> Seq.iter visitNode
         
-                                visitNode entity.entity
-                                
-                                hints 
+                                visitNode rootNode
+
+                                hints
                                 |> Seq.distinctBy (fun h -> h.position.line, h.label)
                                 |> Seq.toList
+                                |> Some
                             
                         let visitor = 
                             { new IGameVisitor<_> with 
                                 member this.Visit game = inlayHintFunction game 
                             }
                         
-                        let generatedHints = gameDispatcher.Dispatch visitor |> Option.defaultValue []
-                        cachePut inlayHintCache filePath (hash, generatedHints)
-                        evictIfNeeded inlayHintCache
-                        return generatedHints
+                        match gameDispatcher.Dispatch visitor |> Option.flatten with
+                        | Some generatedHints ->
+                            cachePut inlayHintCache filePath (hash, generatedHints)
+                            evictIfNeeded inlayHintCache
+                            return generatedHints
+                        | None ->
+                            // Parse failed (typically mid-edit unbalanced braces).
+                            // Keep the previous hints visible instead of flickering them
+                            // away, and never cache stale positions under the new hash.
+                            match inlayHintCache.TryGetValue(filePath) with
+                            | true, (_, cachedHints) -> return cachedHints
+                            | _ ->
+                                // No prior hints (e.g. non-script file): cache the empty
+                                // result so repeated requests don't re-parse; the next
+                                // text change produces a new hash and recomputes.
+                                cachePut inlayHintCache filePath (hash, [])
+                                evictIfNeeded inlayHintCache
+                                return []
             }
             |> catchError []
         member this.DocumentLink(p: DocumentLinkParams) =

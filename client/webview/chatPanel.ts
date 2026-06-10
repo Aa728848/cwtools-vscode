@@ -207,6 +207,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const userMessagePayloadMap = new Map<number, UserMessageInputPayload>();
     let settingsProviders: any[] = [];
     let settingsOllamaModels: any[] = [];
+    // Per-provider endpoint overrides shown in the settings UI, keyed by provider id.
+    // Lets us swap the endpoint field when switching providers without leaking values.
+    let settingsProviderEndpoints: Record<string, string> = {};
 
     // Custom absolute positioned dropdown logic
     function setupApDropdown(inputId: string, dropdownId: string, getOptions: () => string[], onSelect?: (val: string) => void) {
@@ -5933,6 +5936,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function showSettingsPage(providers: any[], current: any, ollamaModels: any[]) {
         settingsProviders = providers;
         settingsOllamaModels = ollamaModels || [];
+        // Seed the per-provider endpoint map so switching providers swaps the field value.
+        settingsProviderEndpoints = {};
+        for (const p of providers || []) settingsProviderEndpoints[p.id] = p.userEndpoint || '';
+        if (current?.provider && current.endpoint) settingsProviderEndpoints[current.provider] = current.endpoint;
         updateQuickModelSelector(providers, current, ollamaModels);
         updateQuickWriteModeSelector(current.agentFileWriteMode || 'confirm');
         const settingsPageSignature = JSON.stringify({
@@ -6221,6 +6228,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function onProviderChange() {
         const id = (document.getElementById('settingsProvider') as HTMLSelectElement).value;
+        // Swap the endpoint field to the newly-selected provider's saved value so
+        // one provider's endpoint never carries over into another.
+        const epField = document.getElementById('settingsEndpoint') as HTMLInputElement | null;
+        if (epField) epField.value = settingsProviderEndpoints[id] || '';
         updateCustomApiFormatUI(id);
         updateModelUI(id, '', settingsOllamaModels);
         updateEndpointHint(id);
@@ -6306,7 +6317,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function onEndpointChange() {
-        if ((document.getElementById('settingsProvider') as HTMLSelectElement).value === 'ollama') {
+        const providerId = (document.getElementById('settingsProvider') as HTMLSelectElement).value;
+        // Track the live value per provider so switching away and back preserves it.
+        const epField = document.getElementById('settingsEndpoint') as HTMLInputElement | null;
+        if (providerId && epField) settingsProviderEndpoints[providerId] = epField.value;
+        if (providerId === 'ollama') {
             settingsOllamaModels = [];
             document.getElementById('settingsModelSelect')!.style.display = 'none';
             document.getElementById('settingsModelInput')!.style.display = '';

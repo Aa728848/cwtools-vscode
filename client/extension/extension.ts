@@ -1008,6 +1008,9 @@ export async function activate(context: ExtensionContext) {
 
 	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
 	const aiService = new AIService(context);
+	// Retire the legacy global endpoint into the per-provider map early so quick-switching
+	// providers before opening settings cannot leak one provider's endpoint into another.
+	void aiService.migrateLegacyEndpoint();
 	const workspaceRoot = getProjectWorkspaceRoot();
 	// AgentToolExecutor gets a lazy getter so it can be registered before client starts
 	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot, indexService, context.globalStorageUri.fsPath, context.extensionPath);

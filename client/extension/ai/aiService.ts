@@ -171,12 +171,17 @@ export class AIService {
      */
     getConfig(): AIUserConfig {
         const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const provider = cfg.get<string>('provider', 'openai');
+        const providerEndpoints = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
+        // Per-provider endpoint wins; legacy global endpoint only ever applies to the
+        const endpoint = (providerEndpoints[provider] || cfg.get<string>('endpoint', '') || '').trim();
         return {
             enabled: cfg.get<boolean>('enabled', false),
-            provider: cfg.get<string>('provider', 'openai'),
+            provider,
             // In-memory override wins over persisted setting (avoids LS restart on quick-switch)
             model: this.modelOverride ?? cfg.get<string>('model', ''),
-            endpoint: cfg.get<string>('endpoint', ''),
+            endpoint,
+            providerEndpoints,
             apiKey: '',
             customApiFormat: normalizeCustomApiFormat(cfg.get<string>('customApiFormat', DEFAULT_CUSTOM_API_FORMAT)),
             maxRetries: Math.max(1, cfg.get<number>('maxRetries') || 3),
@@ -203,6 +208,42 @@ export class AIService {
                 servers: cfg.get<import('./types').MCPServerConfig[]>('mcp.servers', []),
             },
         };
+    }
+
+    /**
+     * Resolve the user-configured endpoint override for an arbitrary provider id
+     * (no provider default applied — pass the result to getEffectiveEndpoint for that).
+     * The legacy global `endpoint` is only honoured for the currently-active provider,
+     * so it never leaks into other providers.
+     */
+    getEndpointForProvider(providerId: string): string {
+        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const map = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
+        const perProvider = (map[providerId] || '').trim();
+        if (perProvider) return perProvider;
+        const activeProvider = cfg.get<string>('provider', '');
+        if (providerId === activeProvider) return (cfg.get<string>('endpoint', '') || '').trim();
+        return '';
+    }
+
+    /**
+     * One-time migration: fold the legacy global `endpoint` into the per-provider
+     * map under the active provider, then clear the legacy value. Idempotent —
+     * a no-op once the legacy value is empty.
+     */
+    async migrateLegacyEndpoint(): Promise<void> {
+        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const legacy = (cfg.get<string>('endpoint', '') || '').trim();
+        if (!legacy) return;
+        const provider = cfg.get<string>('provider', '');
+        if (provider) {
+            const map = { ...(cfg.get<Record<string, string>>('providerEndpoints', {}) || {}) };
+            if (!map[provider]) {
+                map[provider] = legacy;
+                await cfg.update('providerEndpoints', map, vs.ConfigurationTarget.Global);
+            }
+        }
+        await cfg.update('endpoint', undefined, vs.ConfigurationTarget.Global);
     }
 
     /**
@@ -462,7 +503,7 @@ export class AIService {
             }
         }
 
-        const endpoint = options?.endpoint || getEffectiveEndpoint(providerId, config.inlineCompletion.endpoint || config.endpoint);
+        const endpoint = options?.endpoint || getEffectiveEndpoint(providerId, config.inlineCompletion.endpoint || this.getEndpointForProvider(providerId));
         if (!endpoint) {
             throw new Error(`${provider.name} endpoint is not configured. Please set an API endpoint in the AI Settings panel.`);
         }
@@ -1615,7 +1656,7 @@ export class AIService {
         // Prompt for model selection
         if (providerId === 'ollama') {
             // Auto-detect models from running Ollama instance
-            const userEndpoint = vs.workspace.getConfiguration('cwtools.ai').get<string>('endpoint', '');
+            const userEndpoint = this.getEndpointForProvider('ollama');
             const ollamaEndpoint = userEndpoint || provider.endpoint;
 
             await vs.window.withProgress(
@@ -1718,13 +1759,15 @@ export class AIService {
                     ? '输入 Ollama 的 API 地址 (留空使用默认 http://localhost:11434/v1)'
                     : '输入自定义渠道的 OpenAI 兼容 API 地址，例如 https://example.com/v1',
                 placeHolder: providerId === 'ollama' ? 'http://localhost:11434/v1' : 'https://example.com/v1',
-                value: vs.workspace.getConfiguration('cwtools.ai').get<string>('endpoint', ''),
+                value: this.getEndpointForProvider(providerId),
                 ignoreFocusOut: true,
             });
             if (epInput !== undefined) {
-                await vs.workspace.getConfiguration('cwtools.ai').update(
-                    'endpoint', epInput, vs.ConfigurationTarget.Global
-                );
+                const cfg = vs.workspace.getConfiguration('cwtools.ai');
+                const map = { ...(cfg.get<Record<string, string>>('providerEndpoints', {}) || {}) };
+                const trimmed = epInput.trim();
+                if (trimmed) map[providerId] = trimmed; else delete map[providerId];
+                await cfg.update('providerEndpoints', map, vs.ConfigurationTarget.Global);
             }
             
             const ctxInput = await vs.window.showInputBox({

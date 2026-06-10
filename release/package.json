@@ -650,6 +650,15 @@
                     "default": "",
                     "description": "%configuration.cwtools.ai.endpoint.description%"
                 },
+                "cwtools.ai.providerEndpoints": {
+                    "scope": "window",
+                    "type": "object",
+                    "default": {},
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "%configuration.cwtools.ai.providerEndpoints.description%"
+                },
                 "cwtools.ai.customApiFormat": {
                     "scope": "window",
                     "type": "string",

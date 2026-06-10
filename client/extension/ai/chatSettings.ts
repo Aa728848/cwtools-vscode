@@ -171,6 +171,8 @@ export class ChatSettingsManager {
     /** Build the settingsData payload and send it to the WebView */
     async buildAndSendSettingsData(showPanel = false, targetSurface?: 'chat' | 'manager'): Promise<void> {
         const { BUILTIN_PROVIDERS, fetchOllamaModels, MODEL_CONTEXT_TOKENS } = await import('./providers');
+        // Fold any legacy global endpoint into the per-provider map before reading config.
+        await this.aiService.migrateLegacyEndpoint();
         const config = this.aiService.getConfig();
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
@@ -182,6 +184,7 @@ export class ChatSettingsManager {
                 defaultModel: p.defaultModel,
                 requiresApiKey: p.requiresApiKey,
                 defaultEndpoint: p.endpoint,
+                userEndpoint: this.aiService.getEndpointForProvider(p.id),
                 maxContextTokens: p.maxContextTokens,
                 supportsFIM: customNonFim ? false : p.supportsFIM,
                 registerUrl: p.registerUrl,
@@ -330,7 +333,15 @@ export class ChatSettingsManager {
             && !settings.exaApiKey.startsWith('•')) {
             await cfg.update('exaApiKey', settings.exaApiKey.trim(), vs.ConfigurationTarget.Global);
         }
-        await cfg.update('endpoint', settings.endpoint, vs.ConfigurationTarget.Global);
+        // Endpoints are stored per-provider so switching providers cannot leak an
+        // endpoint into another provider. The legacy global `endpoint` is retired.
+        {
+            const map = { ...(cfg.get<Record<string, string>>('providerEndpoints', {}) || {}) };
+            const trimmed = (settings.endpoint || '').trim();
+            if (trimmed) map[settings.provider] = trimmed; else delete map[settings.provider];
+            await cfg.update('providerEndpoints', map, vs.ConfigurationTarget.Global);
+            await cfg.update('endpoint', undefined, vs.ConfigurationTarget.Global);
+        }
         await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);
         await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
         await cfg.update('reasoningEffort', settings.reasoningEffort, vs.ConfigurationTarget.Global);
@@ -426,7 +437,7 @@ export class ChatSettingsManager {
         const { getEffectiveEndpoint, getProvider } = await import('./providers');
         const saved = this.aiService.getConfig();
         const provider = getProvider(providerId);
-        const endpoint = endpointOverride || getEffectiveEndpoint(providerId, saved.endpoint);
+        const endpoint = endpointOverride || getEffectiveEndpoint(providerId, this.aiService.getEndpointForProvider(providerId));
         const customApiFormat = normalizeCustomApiFormatSetting(customApiFormatOverride ?? saved.customApiFormat);
 
         let apiKey = apiKeyOverride;
@@ -528,7 +539,7 @@ export class ChatSettingsManager {
         const apiKey = (rawSettingsKey && !rawSettingsKey.startsWith('\u2022'))
             ? rawSettingsKey
             : await this.aiService.getKeyForProvider(providerId);
-        const endpoint = settings?.endpoint || getEffectiveEndpoint(providerId, saved.endpoint);
+        const endpoint = settings?.endpoint || getEffectiveEndpoint(providerId, this.aiService.getEndpointForProvider(providerId));
         const customApiFormat = normalizeCustomApiFormatSetting(settings?.customApiFormat ?? saved.customApiFormat);
         const model = settings?.model || undefined;
 

@@ -90,6 +90,8 @@ export interface AIUserConfig {
     provider: string;
     model: string;
     endpoint: string;
+    /** Per-provider endpoint overrides, keyed by provider id. Source of truth for endpoints. */
+    providerEndpoints: Record<string, string>;
     /** Legacy plaintext key — only read for migration; write via SecretStorage */
     apiKey: string;
     /** Wire protocol used when provider === 'custom'. */
@@ -1748,6 +1750,8 @@ export interface ProviderMeta {
     defaultModel: string;
     requiresApiKey: boolean;
     defaultEndpoint: string;
+    /** User-saved endpoint override for this provider (empty if none). */
+    userEndpoint?: string;
     supportsFIM: boolean;
     maxContextTokens?: number;
     registerUrl?: string;

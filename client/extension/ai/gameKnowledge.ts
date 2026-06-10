@@ -85,6 +85,22 @@ You can chain scopes using dot notation (e.g. \`owner.capital.owner\`) or nested
 - \`from\` / \`root\` / \`prev\` are used for context-relative references.
 Treat common logical scope links as plausible hardcoded native links, then verify before final blueprint/build with \`query_scope\`, \`query_rules(category="scope_change")\`, completions, diagnostics, or a verified project/vanilla archetype. Do NOT reject them solely because an explicit scope_change rule is missing; do NOT finalize them solely from memory.
 
+### Optional Scope Operator \`scope?\` (NEW syntax — DO NOT flag as an error)
+Recent Stellaris versions support the **optional / null-safe scope operator**: a trailing \`?\` on a scope link. \`scope? = { ... }\` is shorthand for "enter \`scope\` only if it exists" — it folds an existence guard into the scope change itself.
+- These two forms are **equivalent**:
+  \`\`\`
+  # Old form — explicit existence guard:
+  exists = owner
+  owner = { ... }
+
+  # New form — optional scope (SAME meaning, do NOT reject):
+  owner? = { ... }
+  \`\`\`
+- Works on chained links too: \`owner.capital_scope? = { ... }\` enters the block only if \`owner.capital_scope\` resolves to a valid scope.
+- **NEVER flag \`scope?\` as a syntax error or suggest removing the \`?\`.** It is valid modern PDXScript.
+- When the target scope may be null/absent, prefer \`scope? = { ... }\` over a separate \`exists = scope\` line — it is more concise and avoids the scope being entered on a non-existent target.
+- Still verify the underlying scope link is real (via \`query_scope\` / completions); the \`?\` only changes existence handling, not whether the link itself is valid.
+
 ## Vanilla Game Cache — Query Strategy
 The CWTools language server has already indexed the entire vanilla game.
 Use the shared evidence hierarchy for vanilla knowledge: CWT/LSP schema and typed indexes first, current project examples second, bounded vanilla archetype evidence third, web last.

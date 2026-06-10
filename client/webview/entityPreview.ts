@@ -1032,44 +1032,40 @@ function pdxAnimToClip(anim: ParsedAnimation, clipName: string, boneNameMap?: Ma
         // Use remapped name if available, otherwise original
         const targetName = boneNameMap?.get(boneIdx) ?? bone.name;
 
-        // Build time array: one time per sample
-        const sampleCount = bone.rotations
-            ? bone.rotations.length / 4
-            : bone.translations
-                ? bone.translations.length / 3
-                : bone.scales
-                    ? bone.scales.length
-                    : 0;
+        const tCount = bone.translations ? Math.floor(bone.translations.length / 3) : 0;
+        const qCount = bone.rotations ? Math.floor(bone.rotations.length / 4) : 0;
+        const sCount = bone.scales ? bone.scales.length : 0;
 
-        if (sampleCount === 0) continue;
+        if (tCount === 0 && qCount === 0 && sCount === 0) continue;
 
-        const times = new Float32Array(sampleCount);
-        for (let i = 0; i < sampleCount; i++) {
-            times[i] = i / anim.fps;
-        }
+        const makeTimes = (n: number) => {
+            const times = new Float32Array(n);
+            for (let i = 0; i < n; i++) times[i] = i / anim.fps;
+            return times as unknown as number[];
+        };
 
         // Translation track
-        if (bone.translations && bone.translations.length >= sampleCount * 3) {
+        if (bone.translations && tCount > 0) {
             tracks.push(new THREE.VectorKeyframeTrack(
                 `${targetName}.position`,
-                times as unknown as number[],
+                makeTimes(tCount),
                 bone.translations as unknown as number[],
             ));
         }
 
         // Rotation track (quaternion xyzw)
-        if (bone.rotations && bone.rotations.length >= sampleCount * 4) {
+        if (bone.rotations && qCount > 0) {
             tracks.push(new THREE.QuaternionKeyframeTrack(
                 `${targetName}.quaternion`,
-                times as unknown as number[],
+                makeTimes(qCount),
                 bone.rotations as unknown as number[],
             ));
         }
 
         // Scale track (uniform → expand to xyz)
-        if (bone.scales && bone.scales.length >= sampleCount) {
-            const scaleData = new Float32Array(sampleCount * 3);
-            for (let i = 0; i < sampleCount; i++) {
+        if (bone.scales && sCount > 0) {
+            const scaleData = new Float32Array(sCount * 3);
+            for (let i = 0; i < sCount; i++) {
                 const s = bone.scales[i]!;
                 scaleData[i * 3] = s;
                 scaleData[i * 3 + 1] = s;
@@ -1077,7 +1073,7 @@ function pdxAnimToClip(anim: ParsedAnimation, clipName: string, boneNameMap?: Ma
             }
             tracks.push(new THREE.VectorKeyframeTrack(
                 `${targetName}.scale`,
-                times as unknown as number[],
+                makeTimes(sCount),
                 scaleData as unknown as number[],
             ));
         }
@@ -1770,15 +1766,21 @@ function buildGeometry(subMesh: ParsedSubMesh): THREE.BufferGeometry {
 
     // Skinning attributes
     if (subMesh.skin) {
-        const boneCount = subMesh.skin.boneCount || 4;
         const vertexCount = subMesh.positions.length / 3;
+
+        const declared = subMesh.skin.boneCount || 4;
+        const derived = vertexCount > 0
+            ? Math.round(subMesh.skin.boneIndices.length / vertexCount)
+            : declared;
+        const stride = derived >= 1 && derived <= 8 ? derived : declared;
+        const influences = Math.min(stride, 4);
 
         // First pass: find the majority bone index among valid vertices
         const boneCounts = new Map<number, number>();
         for (let v = 0; v < vertexCount; v++) {
-            for (let b = 0; b < boneCount; b++) {
-                const idx = subMesh.skin.boneIndices[v * boneCount + b] ?? -1;
-                const wt = subMesh.skin.weights[v * boneCount + b] ?? 0;
+            for (let b = 0; b < influences; b++) {
+                const idx = subMesh.skin.boneIndices[v * stride + b] ?? -1;
+                const wt = subMesh.skin.weights[v * stride + b] ?? 0;
                 if (idx >= 0 && wt > 0.001) {
                     boneCounts.set(idx, (boneCounts.get(idx) || 0) + 1);
                 }
@@ -1795,14 +1797,12 @@ function buildGeometry(subMesh: ParsedSubMesh): THREE.BufferGeometry {
         const skinWeights = new Float32Array(vertexCount * 4);
         for (let v = 0; v < vertexCount; v++) {
             let weightSum = 0;
-            for (let b = 0; b < 4; b++) {
-                if (b < boneCount) {
-                    const rawIdx = subMesh.skin.boneIndices[v * boneCount + b] ?? -1;
-                    const rawWt = subMesh.skin.weights[v * boneCount + b] ?? 0;
-                    skinIndices[v * 4 + b] = rawIdx >= 0 ? rawIdx : 0;
-                    skinWeights[v * 4 + b] = rawIdx >= 0 ? rawWt : 0;
-                    weightSum += skinWeights[v * 4 + b]!;
-                }
+            for (let b = 0; b < influences; b++) {
+                const rawIdx = subMesh.skin.boneIndices[v * stride + b] ?? -1;
+                const rawWt = subMesh.skin.weights[v * stride + b] ?? 0;
+                skinIndices[v * 4 + b] = rawIdx >= 0 ? rawIdx : 0;
+                skinWeights[v * 4 + b] = rawIdx >= 0 ? rawWt : 0;
+                weightSum += skinWeights[v * 4 + b]!;
             }
             // Unbound vertices: bind to the majority bone so they move
             // with the rest of the submesh instead of collapsing to origin.

@@ -1631,8 +1631,7 @@ export class FileToolHandler {
 
                 // Build a map of existing keys -> line index for O(1) lookup
                 const keyLineMap = new Map<string, number>();
-                // Match any Stellaris loc key: leading space, key chars, colon, optional digits, then space or quote
-                const keyRegex = /^\s+([\w.-]+):\d*\s*(?:"|$)/;
+                const keyRegex = /^\s*([\w.-]+):\d*\s*"/;
                 for (let i = 0; i < lines.length; i++) {
                     const m = lines[i]!.match(keyRegex);
                     if (m) keyLineMap.set(m[1]!, i);

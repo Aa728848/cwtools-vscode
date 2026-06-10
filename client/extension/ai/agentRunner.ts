@@ -1614,7 +1614,7 @@ export class AgentRunner {
                                      (response.usage as any)?.prompt_tokens_details?.cached_tokens ?? 
                                      (response.usage as any)?.prompt_cache_hit_tokens ??
                                      (response.usage as any)?.cached_content_token_count ?? 0;
-                const uncachedInputTokens = promptTokens - cachedTokens;
+                const uncachedInputTokens = Math.max(0, promptTokens - cachedTokens);
                 const cacheDiscount = getCacheDiscountFactor(response.model ?? options?.model ?? '');
                 const cachedCost = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount;
                 const uncachedCost = (uncachedInputTokens / 1_000_000) * pricing[0];
@@ -1635,7 +1635,7 @@ export class AgentRunner {
                 // Emit cache hit rate, cache creation, and saved costs for real-time auditing in the UI
                 const cacheCreationTokens = response.usage?.cache_creation_tokens ?? 0;
                 if (cachedTokens > 0 || cacheCreationTokens > 0) {
-                    const hitRate = promptTokens > 0 ? (cachedTokens / promptTokens) : 0;
+                    const hitRate = promptTokens > 0 ? Math.min(1, cachedTokens / promptTokens) : 0;
                     const savedCostCny = (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
                     
                     emitStep({
@@ -1884,16 +1884,24 @@ export class AgentRunner {
                 }
                 let toolArgs: Record<string, unknown>;
                 let toolArgsParseError: string | undefined;
-                try {
-                    toolArgs = JSON.parse(toolCall.function.arguments);
-                } catch (e) {
-                    // Attempt common JSON repairs before giving up (Issue #2 fix)
-                    const repaired = this.tryRepairJson(toolCall.function.arguments);
-                    if (repaired !== null) {
-                        toolArgs = repaired;
-                    } else {
-                        toolArgs = {};
-                        toolArgsParseError = `JSON parse error: ${e instanceof Error ? e.message : String(e)}. Raw arguments: ${toolCall.function.arguments?.substring(0, 200)}`;
+                const rawToolArgs = toolCall.function.arguments;
+                if (!rawToolArgs || !rawToolArgs.trim()) {
+                    // Zero-parameter tool calls legitimately arrive with empty arguments
+                    // (e.g. Anthropic streams no input_json_delta for an empty input) —
+                    // not a parse failure.
+                    toolArgs = {};
+                } else {
+                    try {
+                        toolArgs = JSON.parse(rawToolArgs);
+                    } catch (e) {
+                        // Attempt common JSON repairs before giving up (Issue #2 fix)
+                        const repaired = this.tryRepairJson(rawToolArgs);
+                        if (repaired !== null) {
+                            toolArgs = repaired;
+                        } else {
+                            toolArgs = {};
+                            toolArgsParseError = `JSON parse error: ${e instanceof Error ? e.message : String(e)}. Raw arguments: ${rawToolArgs.substring(0, 200)}`;
+                        }
                     }
                 }
 

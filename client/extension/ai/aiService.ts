@@ -30,7 +30,6 @@ import {
 } from './providers';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
-import { runLedger, RunLedger } from './runner/runLedger';
 
 // ─── Module-level constants ──────────────────────────────────────────────────
 
@@ -411,6 +410,10 @@ export class AIService {
         if (!options?.disableThinking) {
             const rEffort = config.reasoningEffort || 'high';
             if (config.provider === 'deepseek' || config.provider === 'openai') {
+                request.reasoning_effort = rEffort;
+            } else if (config.provider === 'claude' || customApiFormat === 'anthropic-messages') {
+                // Consumed by toClaudeRequest: mapped to output_config.effort and
+                // adaptive thinking on models that support them (Fable 5, Opus/Sonnet 4.6+).
                 request.reasoning_effort = rEffort;
             } else if (config.provider === 'qwen' && (lowerModel.includes('qwen3') || lowerModel.includes('qwen-max'))) {
                 request.enable_thinking = true;
@@ -1489,8 +1492,8 @@ export class AIService {
         let cachedTokens = 0;
         let cacheCreationTokens = 0;
 
-        // Tool-use blocks: index → { id, name, argsBuf }
-        const toolBlocks: Record<number, { id: string; name: string; argsBuf: string }> = {};
+        // Tool-use blocks: index → { id, name, argsBuf, startInput }
+        const toolBlocks: Record<number, { id: string; name: string; argsBuf: string; startInput?: unknown }> = {};
         let currentBlockIdx = -1;
         let currentBlockType = '';
 
@@ -1533,6 +1536,9 @@ export class AIService {
                                 id: (block?.id as string) ?? '',
                                 name: (block?.name as string) ?? '',
                                 argsBuf: '',
+                                // Some relays put the full input on the start block; Anthropic
+                                // sends `input: {}` here and streams the rest as input_json_delta.
+                                startInput: block?.input,
                             };
                         }
                         break;
@@ -1552,6 +1558,12 @@ export class AIService {
                                 textBuf += chunk;
                                 if (chunk && onTextDelta) onTextDelta(chunk);
                             }
+                        } else if (deltaType === 'thinking_delta') {
+                            // Claude thinking blocks stream as thinking_delta (delta.thinking),
+                            // not text_delta — without this branch reasoning text is dropped.
+                            const chunk = (delta?.thinking as string) ?? '';
+                            reasoningBuf += chunk;
+                            if (chunk && onThinking) onThinking(chunk);
                         } else if (deltaType === 'input_json_delta') {
                             const idx = (evt.index as number) ?? currentBlockIdx;
                             if (toolBlocks[idx]) {
@@ -1578,15 +1590,27 @@ export class AIService {
         if (stopReason === 'tool_use') finishReason = 'tool_calls';
         else if (stopReason === 'max_tokens') finishReason = 'length';
 
-        // Build synthetic tool_calls array from accumulated blocks
+        // Build synthetic tool_calls array from accumulated blocks.
+        // A tool call with no parameters streams zero input_json_delta events, so
+        // argsBuf stays '' — fall back to the start-block input, then to '{}', so
+        // downstream JSON.parse never sees an empty string.
         const toolCalls = Object.keys(toolBlocks).length > 0
             ? Object.entries(toolBlocks)
                 .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([, tb]) => ({
-                    id: tb.id,
-                    type: 'function' as const,
-                    function: { name: tb.name, arguments: tb.argsBuf },
-                }))
+                .map(([, tb]) => {
+                    let args = tb.argsBuf.trim();
+                    if (!args) {
+                        const si = tb.startInput;
+                        args = (si && typeof si === 'object' && Object.keys(si as object).length > 0)
+                            ? JSON.stringify(si)
+                            : '{}';
+                    }
+                    return {
+                        id: tb.id,
+                        type: 'function' as const,
+                        function: { name: tb.name, arguments: args },
+                    };
+                })
             : undefined;
 
         const message: ChatMessage & { tool_calls?: typeof toolCalls } = {
@@ -1597,19 +1621,12 @@ export class AIService {
         };
         if (toolCalls && toolCalls.length > 0) message.tool_calls = toolCalls;
 
-        // 🌟 记录 Claude 的 Cache 命中率及消费数据
-        const latestRunId = RunLedger.getLatestActiveRunId();
-        if (latestRunId) {
-            runLedger.appendEvent(latestRunId, 'cache_stats', {
-                providerId: 'anthropic',
-                model: modelBuf || 'claude-3-5-sonnet',
-                inputTokens,
-                cachedTokens,
-                cacheCreationTokens,
-                outputTokens,
-                hitRate: inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0
-            }).catch(() => {});
-        }
+        // Anthropic usage semantics: input_tokens is the UNCACHED REMAINDER only.
+        // Normalize to OpenAI semantics (prompt_tokens = full prompt) so downstream
+        // hit-rate and cost math (cached/prompt) stays in [0, 1].
+        const totalPromptTokens = inputTokens + cachedTokens + cacheCreationTokens;
+        // Note: the per-call cache_stats ledger event is appended by agentRunner from
+        // the returned usage — appending it here too double-counted cache dashboards.
 
         return {
             model: modelBuf || undefined,
@@ -1618,10 +1635,11 @@ export class AIService {
                 finish_reason: finishReason,
             }],
             usage: {
-                prompt_tokens: inputTokens,
+                prompt_tokens: totalPromptTokens,
                 completion_tokens: outputTokens,
-                total_tokens: inputTokens + outputTokens,
+                total_tokens: totalPromptTokens + outputTokens,
                 cached_tokens: cachedTokens,
+                cache_creation_tokens: cacheCreationTokens,
             },
         } as ChatCompletionResponse;
     }

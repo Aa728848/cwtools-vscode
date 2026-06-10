@@ -20,6 +20,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-4o': true,
     'gpt-4-vision': true,
     'gpt-5': true,
+    'claude-fable-5': true,
     'claude-opus-4-8': true,
     'claude-opus-4-7': true,
     'claude-opus-4-6': true,
@@ -157,6 +158,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-5-mini': 200000,
     'gpt-5-nano': 400000,
     'gpt-4-vision': 128000,
+    'claude-fable-5': 1000000,
     'claude-opus-4-7': 1000000,
     'claude-opus-4-6': 1000000,
     'claude-sonnet-4-6': 1000000,
@@ -394,6 +396,56 @@ export function getModelOutputTokens(model: string, providerId?: string): number
     if (lower.includes('glm')) {
         return 128000;
     }
-    
+
     return 32768;
+}
+
+// ─── Anthropic per-model request feature detection ──────────────────────────
+
+/** Request-shaping features of an Anthropic (Claude) model. */
+export interface AnthropicModelFeatures {
+    /** Model supports `thinking: {type: 'adaptive'}` (Fable 5, Opus/Sonnet 4.6+). */
+    adaptiveThinking: boolean;
+    /**
+     * Model supports `thinking.display` and omits thinking text by default
+     * (Fable 5, Opus 4.7+) — must send `display: 'summarized'` to receive
+     * non-empty thinking_delta text.
+     */
+    thinkingDisplay: boolean;
+    /** Model supports `output_config: {effort}` (Fable 5, Opus 4.5+, Sonnet 4.6). */
+    effort: boolean;
+    /** `temperature`/`top_p`/`top_k` return HTTP 400 (Fable 5, Opus 4.7+). */
+    samplingRemoved: boolean;
+}
+
+/**
+ * Detect Anthropic request features by model ID. Tolerates provider prefixes
+ * (`openrouter:anthropic/claude-opus-4.8`), dotted versions and deployment
+ * suffixes (`claude-fable-5[1m]`).
+ */
+export function getAnthropicModelFeatures(model: string): AnthropicModelFeatures {
+    const none: AnthropicModelFeatures = { adaptiveThinking: false, thinkingDisplay: false, effort: false, samplingRemoved: false };
+    if (!model) return none;
+    const lower = model.toLowerCase();
+    if (!lower.includes('claude')) return none;
+
+    const opusMinor = lower.match(/claude-opus-(\d+)[.-](\d+)/);
+    const opusVer = opusMinor ? Number(opusMinor[1]) + Number(opusMinor[2]) / 10 : 0;
+    const sonnetMinor = lower.match(/claude-sonnet-(\d+)[.-](\d+)/);
+    const sonnetVer = sonnetMinor ? Number(sonnetMinor[1]) + Number(sonnetMinor[2]) / 10 : 0;
+    const isFable = lower.includes('claude-fable');
+
+    // Fable 5 / Opus 4.7+: adaptive-only thinking, display param, sampling params removed
+    if (isFable || opusVer >= 4.7) {
+        return { adaptiveThinking: true, thinkingDisplay: true, effort: true, samplingRemoved: true };
+    }
+    // Opus 4.6 / Sonnet 4.6: adaptive thinking + effort; sampling still accepted
+    if (opusVer >= 4.6 || sonnetVer >= 4.6) {
+        return { adaptiveThinking: true, thinkingDisplay: false, effort: true, samplingRemoved: false };
+    }
+    // Opus 4.5: effort only (manual extended thinking is not auto-enabled here)
+    if (opusVer >= 4.5) {
+        return { adaptiveThinking: false, thinkingDisplay: false, effort: true, samplingRemoved: false };
+    }
+    return none;
 }

@@ -17,7 +17,8 @@ import {
     ALWAYS_THINKING_PREFIXES,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
-    getModelOutputTokens
+    getModelOutputTokens,
+    getAnthropicModelFeatures
 } from './providers/models/capabilities';
 
 // Re-export for external backward compatibility
@@ -30,7 +31,8 @@ export {
     ALWAYS_THINKING_PREFIXES,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
-    getModelOutputTokens
+    getModelOutputTokens,
+    getAnthropicModelFeatures
 };
 
 /**
@@ -463,6 +465,28 @@ export function toClaudeRequest(request: ChatCompletionRequest): Record<string, 
     }
     if (request.stream) {
         claudeRequest.stream = true;
+    }
+
+    // Model-gated request shaping for newer Anthropic models (Fable 5 / Opus 4.x / Sonnet 4.6).
+    // reasoning_effort doubles as the "thinking wanted" signal: aiService only sets it
+    // when the call is not thinking-disabled (e.g. inline completion stays fast).
+    const anthropicFeatures = getAnthropicModelFeatures(request.model);
+    if (anthropicFeatures.samplingRemoved) {
+        // temperature/top_p/top_k return HTTP 400 on Fable 5 / Opus 4.7+
+        delete claudeRequest.temperature;
+    }
+    if (request.reasoning_effort) {
+        if (anthropicFeatures.effort) {
+            claudeRequest.output_config = { effort: request.reasoning_effort };
+        }
+        if (anthropicFeatures.adaptiveThinking) {
+            // display: 'summarized' restores thinking text on models that omit it by default
+            claudeRequest.thinking = anthropicFeatures.thinkingDisplay
+                ? { type: 'adaptive', display: 'summarized' }
+                : { type: 'adaptive' };
+            // Anthropic rejects sampling params alongside thinking
+            delete claudeRequest.temperature;
+        }
     }
 
     return claudeRequest;

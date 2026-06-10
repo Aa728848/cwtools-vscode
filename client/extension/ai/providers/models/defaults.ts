@@ -28,6 +28,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         endpoint: 'https://api.anthropic.com/v1',
         defaultModel: 'claude-opus-4-8',
         models: [
+            'claude-fable-5',
             'claude-opus-4-8',
             'claude-opus-4-7',
             'claude-opus-4-6',

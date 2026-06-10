@@ -1813,6 +1813,8 @@ type Server(client: ILanguageClient) =
     let typeRefreshQuietPeriod = TimeSpan.FromSeconds(5.0)
     /// Bound full cache rebuild cadence during normal editing sessions.
     let typeRefreshCooldown = TimeSpan.FromSeconds(20.0)
+    /// Minimum spacing between *forced* (save-triggered) full rebuilds, so that
+    let forceRefreshCooldown = TimeSpan.FromSeconds(15.0)
     /// How many consecutive deep-analyze cycles have skipped RefreshCaches
     let mutable refreshSkipCount = 0
     /// Maximum consecutive skips before forcing a full refresh
@@ -2133,7 +2135,7 @@ type Server(client: ILanguageClient) =
             let skipLimitReached = refreshSkipCount >= maxRefreshSkipCount
             let forceCooldownOk =
                 lastTypeRefreshCompletedAt = DateTime.MinValue
-                || now - lastTypeRefreshCompletedAt >= TimeSpan.FromSeconds(2.0)
+                || now - lastTypeRefreshCompletedAt >= forceRefreshCooldown
             let doRefresh =
                 needsTypeRefresh
                 && (skipLimitReached
@@ -2149,8 +2151,8 @@ type Server(client: ILanguageClient) =
                     monitorLog Refresh $"RefreshCaches allocDeltaMB={(allocAfterRefresh - allocBefore) / 1048576L} force={forceGlobalRefresh} skipLimit={skipLimitReached} {getPerfMemorySnapshot()}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     perfRefreshCachesCount <- perfRefreshCachesCount + 1
                     didGlobalWork <- true
-                    GC.Collect(2, GCCollectionMode.Default, true, true)
-                    GC.WaitForPendingFinalizers()
+                    // Non-blocking, non-compacting reclaim. The previous blocking compacting
+                    GC.Collect(2, GCCollectionMode.Optimized, false, false)
                     needsTypeRefresh <- false
                     lastTypeRefreshCompletedAt <- DateTime.UtcNow
                     refreshSkipCount <- 0
@@ -2188,7 +2190,11 @@ type Server(client: ILanguageClient) =
                     logDiag "delayedLocUpdate false"
 
                     locCache.Clear()
-                    for fileName, errors in game.LocalisationErrors(false, true) |> List.groupBy _.range.FileName do
+                    // force=true: recompute the (small) mod-entity loc errors affected by the
+                    // type refresh. forceGlobal=false: reuse cached vanilla global localisation
+                    // (156k keys, unchanged during a mod edit) instead of revalidating it every
+                    // refresh. The yml-edit path above still passes forceGlobal=true.
+                    for fileName, errors in game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
                         locCache.[fileName] <- errors
                     didLocRefresh <- true
                     if pendingDomainsBeforeAnalyze |> List.contains "localisation" then
@@ -3560,16 +3566,9 @@ type Server(client: ILanguageClient) =
                 )
             }
 
-        member this.WillSaveTextDocument(p: WillSaveTextDocumentParams) =
-            async {
-                lintAgent.Post(
-                    UpdateRequest(
-                        { uri = p.textDocument.uri
-                          version = 0 },
-                        true
-                    )
-                )
-            }
+        member this.WillSaveTextDocument(_: WillSaveTextDocumentParams) =
+            // No-op: DidSaveTextDocument already posts a forced deep lint after the save
+            async { () }
 
         // P0 Fix: was TODO() return empty edit list instead of crashing
         member this.WillSaveWaitUntilTextDocument(_: WillSaveTextDocumentParams) = async { return [] }

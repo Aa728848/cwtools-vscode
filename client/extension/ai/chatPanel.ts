@@ -2587,7 +2587,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const candidates = getTopicFileCandidates(topicId, 'walkthrough.md', getProjectWorkspaceRoot());
             const wtPath = candidates[0];
             if (wtPath) {
-                const mdContent = this.buildOrchestratorWalkthroughMarkdown(dispatchResults, result);
+                const runEvents = this.currentRunId
+                    ? (runLedger.getSnapshot(this.currentRunId)?.events ?? [])
+                    : [];
+                const mdContent = this.buildOrchestratorWalkthroughMarkdown(dispatchResults, result, runEvents);
                 try {
                     await fs.promises.mkdir(path.dirname(wtPath), { recursive: true });
                     await fs.promises.writeFile(wtPath, mdContent, 'utf-8');
@@ -2600,15 +2603,45 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    private buildOrchestratorWalkthroughMarkdown(dispatchResults: Array<Record<string, any>>, result: GenerationResult): string {
+    private collectSubagentFileChangesFromEvents(events: AgentRunEvent[]): Map<string, Set<string>> {
+        const filesByAgent = new Map<string, Set<string>>();
+        const add = (agentIdValue: unknown, fileValue: unknown) => {
+            const file = typeof fileValue === 'string' ? fileValue.trim() : '';
+            if (!file) return;
+            const agentId = this.shortPlainText(agentIdValue, 100) || 'unknown';
+            if (!filesByAgent.has(agentId)) filesByAgent.set(agentId, new Set<string>());
+            filesByAgent.get(agentId)!.add(file);
+        };
+
+        for (const event of events) {
+            const payload = event.payload && typeof event.payload === 'object'
+                ? event.payload as Record<string, unknown>
+                : {};
+            if (event.type === 'subagent_end' && Array.isArray(payload.filesWritten)) {
+                const agentId = event.agentId || payload.taskNodeId || payload.agentId;
+                for (const file of payload.filesWritten) add(agentId, file);
+            } else if (event.type === 'file_change') {
+                const agentId = event.agentId || payload.taskNodeId || payload.agentId;
+                const source = typeof payload.source === 'string' ? payload.source : '';
+                if (!agentId && source !== 'subagent') continue;
+                add(agentId || 'unknown', payload.filePath);
+            }
+        }
+
+        return filesByAgent;
+    }
+
+    private buildOrchestratorWalkthroughMarkdown(dispatchResults: Array<Record<string, any>>, result: GenerationResult, runEvents: AgentRunEvent[] = []): string {
         const title = "Multi-Agent Coordination Walkthrough (多 Agent 协作全局报告)";
         const topicTitle = this.topicManager.currentTopic?.title || "PDXScript 多 Agent 协作任务";
         const topicId = this.topicManager.currentTopic?.id || 'default';
         const workspaceRoot = getProjectWorkspaceRoot();
         const taskLookup = new Map(this.extractDispatchTasks(result).map(task => [task.id, task]));
+        const ledgerFileChanges = this.collectSubagentFileChangesFromEvents(runEvents);
         const failedNodes = new Set<string>();
         const cancelledNodes = new Set<string>();
         const changedFiles = new Map<string, { file: string; agentIds: Set<string> }>();
+        const recordedAgentFileKeys = new Set<string>();
         const batchSections: string[] = [];
         const agentSections: string[] = [];
         const manifestRows: string[] = [];
@@ -2617,14 +2650,36 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         let totalTokens = 0;
         let totalCost = 0;
 
+        const stripInternalTruncationMarker = (text: string): string => {
+            return text
+                .replace(/\n?\s*\.{3}\s*\[truncated, full length:\s*\d+\]\s*$/i, '')
+                .replace(/\s*\.{3}\(truncated, full length:\s*\d+\)\s*$/i, '')
+                .trimEnd();
+        };
+        const trimIncompleteMarkdownTail = (text: string): string => {
+            let next = text.trimEnd();
+            while (/(^|\n)\s*(?:[-*+]\s*|\d+[.)]\s*)$/.test(next)) {
+                next = next.replace(/(^|\n)\s*(?:[-*+]\s*|\d+[.)]\s*)$/, '').trimEnd();
+            }
+            return next;
+        };
         const markdownText = (value: unknown, maxLength: number): string => {
-            const text = String(value ?? '')
+            const text = stripInternalTruncationMarker(String(value ?? '')
                 .replace(/\r\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
-                .trim();
+                .trim());
             if (!text) return '';
             if (text.length <= maxLength) return text;
-            return `${text.slice(0, maxLength).trimEnd()}\n\n... [truncated, full length: ${text.length}]`;
+            let preview = text.slice(0, maxLength).trimEnd();
+            const paragraphBreak = preview.lastIndexOf('\n\n');
+            const lineBreak = preview.lastIndexOf('\n');
+            if (paragraphBreak > maxLength * 0.55) {
+                preview = preview.slice(0, paragraphBreak).trimEnd();
+            } else if (lineBreak > maxLength * 0.75) {
+                preview = preview.slice(0, lineBreak).trimEnd();
+            }
+            preview = trimIncompleteMarkdownTail(preview);
+            return `${preview}\n\n_内容较长，已自动压缩：显示前 ${preview.length} / ${text.length} 字符。_`;
         };
         const tableCell = (value: unknown, maxLength = 140): string => {
             const text = this.shortPlainText(value, maxLength).replace(/\|/g, '\\|');
@@ -2642,11 +2697,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const relPath = path.relative(workspaceRoot, absPath) || file;
             return `[\`${path.basename(absPath)}\`](file:///${absPath.replace(/\\/g, '/')}) - \`${relPath}\``;
         };
-        const recordFile = (agentId: string, file: string): void => {
+        const recordFile = (agentId: string, file: string): boolean => {
             const absPath = path.isAbsolute(file) ? file : path.join(workspaceRoot, file);
             const key = absPath.toLowerCase();
+            const agentFileKey = `${agentId}\0${key}`;
+            if (recordedAgentFileKeys.has(agentFileKey)) return false;
+            recordedAgentFileKeys.add(agentFileKey);
             if (!changedFiles.has(key)) changedFiles.set(key, { file: absPath, agentIds: new Set<string>() });
             changedFiles.get(key)?.agentIds.add(agentId);
+            return true;
         };
 
         dispatchResults.forEach((batch, batchIndex) => {
@@ -2674,9 +2733,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const id = this.shortPlainText(agent.id, 100) || `agent_${batchIndex + 1}_${agentIndex + 1}`;
                 const task = taskLookup.get(id);
                 const role = agent.agentType || task?.agentType || 'agent';
-                const files: string[] = Array.isArray(agent.filesWritten)
+                const resultFiles: string[] = Array.isArray(agent.filesWritten)
                     ? agent.filesWritten.filter((file: unknown): file is string => typeof file === 'string' && !!file)
                     : [];
+                const ledgerFiles = Array.from(ledgerFileChanges.get(id) ?? []);
+                const files = Array.from(new Set([...resultFiles, ...ledgerFiles]));
                 const status = agent.success
                     ? '✅ 成功'
                     : agent.needsClarification
@@ -2690,9 +2751,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         ? (agent.clarification || agent.error || '子 Agent 请求父 Agent 决策。')
                         : (agent.error || '子 Agent 未返回成功结果。');
 
-                totalFilesCount += files.length;
                 for (const file of files) {
-                    recordFile(id, file);
+                    if (recordFile(id, file)) totalFilesCount++;
                 }
 
                 manifestRows.push(`| ${batchIndex + 1} | \`${tableCell(id, 100)}\` | \`${tableCell(role, 60)}\` | ${status} | ${files.length} | ${Number(agent.tokenUsed || 0)} | ${tableCell(resultSummary, 180)} |`);
@@ -2722,6 +2782,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 agentSections.push(agentLines.join('\n'));
             });
         });
+
+        for (const [agentId, files] of ledgerFileChanges.entries()) {
+            for (const file of files) {
+                if (recordFile(agentId, file)) totalFilesCount++;
+            }
+        }
 
         const tokenTotal = result.tokenUsage?.total || totalTokens || 0;
         const costTotal = result.tokenUsage?.estimatedCostCny ?? totalCost ?? 0;

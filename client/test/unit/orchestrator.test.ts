@@ -425,6 +425,56 @@ describe('dispatch_agents tool wiring', () => {
         }
     });
 
+    it('returns compact sub-agent summaries without internal truncation markers', async () => {
+        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
+        const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
+        const executor = new AgentToolExecutor({
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+        } as any, process.cwd());
+        executor.parentAgentRunner = { run: async () => undefined } as any;
+
+        const originalExecute = Orchestrator.prototype.execute;
+        (Orchestrator.prototype as any).execute = async () => ({
+            success: true,
+            summary: 'ok',
+            agentResults: new Map([[
+                'writer',
+                {
+                    nodeId: 'writer',
+                    success: true,
+                    output: `${'summary line\n'.repeat(220)}2.`,
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: ['events/writer.txt'],
+                    stepCount: 2,
+                },
+            ]]),
+            totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            failedNodes: [],
+            cancelledNodes: [],
+        });
+
+        try {
+            const result = await executor.execute('dispatch_agents', {
+                userPrompt: 'compact output',
+                tasks: [{
+                    id: 'writer',
+                    agentType: 'build',
+                    prompt: 'write something',
+                }],
+            }, {
+                runnerOptions: { abortSignal: new AbortController().signal },
+                onStep: () => undefined,
+            } as any) as any;
+
+            expect(result.success).to.equal(true);
+            expect(result.agents[0].outputSummary).to.not.include('truncated, full length');
+            expect(result.agents[0].outputSummary.trim()).to.not.match(/(^|\n)\s*2\.\s*$/);
+        } finally {
+            (Orchestrator.prototype as any).execute = originalExecute;
+        }
+    });
+
     it('keeps classic orchestrator dispatches capped at four tasks', async () => {
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const executor = new AgentToolExecutor({
@@ -679,6 +729,65 @@ describe('Orchestrator runtime safety', () => {
         expect(result).to.not.equal('__timeout__');
         expect(result.success).to.equal(false);
         expect(result.error).to.include('manual abort');
+    });
+
+    it('executeSubAgent: records successful write targets when tool results omit filePath', async () => {
+        const workspaceRoot = process.cwd();
+        const runner = {
+            toolExecutor: { workspaceRoot },
+            run: async (_prompt: string, _context: any, _history: any[], options: any) => {
+                options.onStep({
+                    type: 'tool_call',
+                    content: 'call edit_file',
+                    toolName: 'edit_file',
+                    toolArgs: { filePath: 'events/subagent_target.txt', oldString: 'a', newString: 'b' },
+                    invocationId: 'inv-write',
+                    timestamp: Date.now(),
+                });
+                options.onStep({
+                    type: 'tool_result',
+                    content: 'result edit_file',
+                    toolName: 'edit_file',
+                    toolResult: { success: true, message: 'edit_file: updated subagent_target.txt' },
+                    invocationId: 'inv-write',
+                    timestamp: Date.now(),
+                });
+                return {
+                    code: '',
+                    explanation: 'done',
+                    validationErrors: [],
+                    isValid: true,
+                    retryCount: 0,
+                    steps: [],
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                };
+            },
+        };
+        const orchestrator = new Orchestrator(runner as any);
+        const node = {
+            id: 'writer',
+            agentType: 'build',
+            prompt: 'edit target',
+            dependencies: [],
+            priority: 'normal',
+            status: 'pending',
+            retryCount: 0,
+            maxRetries: 0,
+        };
+
+        const result = await (orchestrator as any).executeSubAgent(
+            node,
+            new Blackboard(),
+            { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            new AbortController().signal,
+            () => undefined,
+            { topicId: 'topic-1' },
+        );
+
+        expect(result.success).to.equal(true);
+        expect(result.writtenFiles).to.deep.equal([
+            require('path').resolve(workspaceRoot, 'events/subagent_target.txt'),
+        ]);
     });
 });
 

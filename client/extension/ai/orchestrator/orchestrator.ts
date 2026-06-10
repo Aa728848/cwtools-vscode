@@ -20,6 +20,7 @@ import type {
 import type {
     AgentMode,
     AgentStep,
+    AgentToolName,
     TokenUsage,
     GenerationResult,
 } from '../types';
@@ -31,6 +32,8 @@ import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG } from '../messages';
 import { runLedger, RunLedger } from '../runner/runLedger';
+import { getAgentToolTargetFiles } from '../runner/toolScheduler';
+import { WRITE_TOOLS } from '../tools/registry';
 
 // Type references of AgentRunner and AgentToolExecutor (to avoid circular dependencies, use import type)
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
@@ -333,8 +336,9 @@ export class Orchestrator {
             ?? profile.suggestedModel
             ?? orchestratorOptions.model;
 
+        const workspaceRoot = this.agentRunner.toolExecutor?.workspaceRoot || process.cwd();
         const { buildSubAgentSandbox } = require('./subAgentSandbox');
-        const sandbox = buildSubAgentSandbox(taskNode, this.agentRunner.toolExecutor?.workspaceRoot || '');
+        const sandbox = buildSubAgentSandbox(taskNode, workspaceRoot);
 
         const runnerOptions: AgentRunnerOptions = {
             sandbox,
@@ -368,10 +372,35 @@ export class Orchestrator {
         };
 
         const writtenFiles: string[] = [];
+        const writtenFileKeys = new Set<string>();
+        const toolTargetsByInvocation = new Map<string, string[]>();
         const fileSnapshots = new Map<string, string | null>();
         let stepCount = 0;
         let lastActivityAt = Date.now();
         let lastIdleNoticeAt = 0;
+        const rememberWrittenFile = (filePath: unknown) => {
+            if (typeof filePath !== 'string' || !filePath.trim()) return;
+            const normalized = path.isAbsolute(filePath)
+                ? path.resolve(filePath)
+                : path.resolve(workspaceRoot, filePath);
+            const key = normalized.toLowerCase();
+            if (writtenFileKeys.has(key)) return;
+            writtenFileKeys.add(key);
+            writtenFiles.push(normalized);
+        };
+        const rememberWrittenFilesFromResult = (result: Record<string, unknown>) => {
+            for (const key of ['filePath', 'file', 'TargetFile', 'targetRelativePath']) {
+                rememberWrittenFile(result[key]);
+            }
+            for (const key of ['filesChanged', 'writtenFiles', 'filesWritten']) {
+                const files = result[key];
+                if (!Array.isArray(files)) continue;
+                for (const file of files) rememberWrittenFile(file);
+            }
+        };
+        const isSuccessfulWriteResult = (result: Record<string, unknown>) => {
+            return result.success !== false && !result.error && !result.skipped;
+        };
 
         //Listen to step count and file writing
         const forwardStep = (step: AgentStep, marksActivity = true) => {
@@ -380,11 +409,20 @@ export class Orchestrator {
                 lastActivityAt = Date.now();
             }
             step.agentId = taskNode.id; //Add subagent ID
-            //Extract the written file path from tool_result
-            if (step.type === 'tool_result' && step.toolResult) {
+            if (step.type === 'tool_call' && step.toolName && WRITE_TOOLS.has(step.toolName as AgentToolName) && step.toolArgs && step.invocationId) {
+                const targets = getAgentToolTargetFiles(step.toolName, step.toolArgs as Record<string, unknown>, workspaceRoot, orchestratorOptions.topicId);
+                if (targets.length > 0) toolTargetsByInvocation.set(step.invocationId, targets);
+            }
+            // Extract written file paths from successful write tool results. Some file tools
+            // return only a message/diff, so keep the target path from the paired tool_call.
+            if (step.type === 'tool_result' && step.toolName && WRITE_TOOLS.has(step.toolName as AgentToolName) && step.toolResult) {
                 const result = step.toolResult as Record<string, unknown>;
-                if (result.success && typeof result.filePath === 'string') {
-                    writtenFiles.push(result.filePath);
+                if (isSuccessfulWriteResult(result)) {
+                    rememberWrittenFilesFromResult(result);
+                    const targets = step.invocationId ? toolTargetsByInvocation.get(step.invocationId) : undefined;
+                    if (targets) {
+                        for (const file of targets) rememberWrittenFile(file);
+                    }
                 }
             }
             onStep(step);

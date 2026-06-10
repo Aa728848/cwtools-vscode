@@ -110,14 +110,41 @@ const TOOL_TIMEOUTS: Record<string, number> = {
 };
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 
+function stripInternalTruncationMarker(text: string): string {
+    return text
+        .replace(/\n?\s*\.{3}\s*\[truncated, full length:\s*\d+\]\s*$/i, '')
+        .replace(/\s*\.{3}\(truncated, full length:\s*\d+\)\s*$/i, '')
+        .trimEnd();
+}
+
+function trimIncompleteMarkdownTail(text: string): string {
+    let next = text.trimEnd();
+    while (/(^|\n)\s*(?:[-*+]\s*|\d+[.)]\s*)$/.test(next)) {
+        next = next.replace(/(^|\n)\s*(?:[-*+]\s*|\d+[.)]\s*)$/, '').trimEnd();
+    }
+    return next;
+}
+
 function compactAgentOutputForReport(output: unknown, maxLength = 1600): string | undefined {
-    const text = String(output ?? '')
+    const text = stripInternalTruncationMarker(String(output ?? '')
         .replace(/\r\n/g, '\n')
         .replace(/\n{3,}/g, '\n\n')
-        .trim();
+        .trim());
     if (!text) return undefined;
     if (text.length <= maxLength) return text;
-    return text.slice(0, maxLength).trimEnd() + `\n\n... [truncated, full length: ${text.length}]`;
+    if (maxLength < 80) {
+        return `_Output omitted because the combined summary budget was exhausted. Original length: ${text.length} characters._`;
+    }
+    let preview = text.slice(0, maxLength).trimEnd();
+    const paragraphBreak = preview.lastIndexOf('\n\n');
+    const lineBreak = preview.lastIndexOf('\n');
+    if (paragraphBreak > maxLength * 0.55) {
+        preview = preview.slice(0, paragraphBreak).trimEnd();
+    } else if (lineBreak > maxLength * 0.75) {
+        preview = preview.slice(0, lineBreak).trimEnd();
+    }
+    preview = trimIncompleteMarkdownTail(preview);
+    return `${preview}\n\n_内容较长，已自动压缩：显示前 ${preview.length} / ${text.length} 字符。_`;
 }
 
 /**
@@ -1569,7 +1596,7 @@ export class AgentToolExecutor {
             const limit = Math.min(MAX_PER_AGENT, remaining);
             let output = agentResult.output;
             if (output.length > limit) {
-                output = output.substring(0, limit) + `...(truncated, full length: ${agentResult.output.length})`;
+                output = compactAgentOutputForReport(agentResult.output, limit) || '';
             }
             totalOutputLen += output.length;
             agentOutputs.push({ id, output, files: agentResult.writtenFiles });

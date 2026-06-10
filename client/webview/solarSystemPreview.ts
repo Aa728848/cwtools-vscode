@@ -204,6 +204,8 @@ let editMode = false;
 let scaleMode: 'readable' | 'true' = 'readable';
 const BODY_DISPLAY_SIZE_SCALE = 0.6;
 const STAR_DISPLAY_SIZE_MULTIPLIER = 1.00;
+// Stellaris hard limit: no body may exist beyond this orbit distance from the system center
+const MAX_ORBIT_DISTANCE = 500;
 
 // Data
 interface CelestialClass {
@@ -244,6 +246,22 @@ function orbitToRenderRadius(radius: number): number {
 
 function renderRadiusToOrbit(radius: number): number {
     return scaleMode === 'readable' ? radius / 1.25 : radius;
+}
+
+/**
+ * Clamp a drag orbit so the body stays within MAX_ORBIT_DISTANCE of the system center.
+ * All inputs are in render units; (dx, dy) is the offset from the parent and orbitDist its length.
+ * Returns the largest orbit distance (render units) along the same direction inside the limit.
+ */
+function clampOrbitToSystemLimit(parentX: number, parentY: number, dx: number, dy: number, orbitDist: number): number {
+    if (orbitDist <= 0) return orbitDist;
+    const limit = orbitToRenderRadius(MAX_ORBIT_DISTANCE);
+    const ux = dx / orbitDist, uy = dy / orbitDist;
+    const pd = parentX * ux + parentY * uy;
+    const disc = pd * pd - (parentX * parentX + parentY * parentY - limit * limit);
+    if (disc <= 0) return 0; // parent already at/outside the limit in this direction
+    const maxDist = -pd + Math.sqrt(disc);
+    return Math.min(orbitDist, Math.max(0, maxDist));
 }
 
 function getBodyTitle(body: CelestialBody): string {
@@ -404,10 +422,13 @@ function render() {
     renderedBodies = [];
     starPulse = 1.0; // no animation, constant glow
 
-    // Draw asteroid belts
-    for (const belt of system.asteroidBelts) {
-        drawOrbitEllipse(ctx, 0, 0, orbitToRenderRadius(belt.radius), belt.beltType.includes('icy') ? 'rgba(140,180,220,0.2)' : 'rgba(160,140,100,0.2)', true);
+    // System radius limit indicator (edit mode)
+    if (editMode) {
+        drawSystemBoundary(ctx);
     }
+
+    // Draw asteroid belts
+    system.asteroidBelts.forEach((belt, i) => drawAsteroidBelt(ctx, belt, i));
 
     // Draw bodies
     for (const body of system.bodies) {
@@ -431,6 +452,98 @@ function render() {
     }
 
     requestAnimationFrame(render);
+}
+
+// ─── Asteroid Belt Rendering ────────────────────────────────────────────────
+
+interface BeltParticle {
+    angle: number;   // orbital angle in radians
+    radial: number;  // normalized radial offset within the belt band, -1..1
+    size: number;    // base size in world units
+    alpha: number;
+}
+
+/** Deterministic PRNG so belt rocks stay stable across animation frames */
+function mulberry32(seed: number): () => number {
+    let a = seed >>> 0;
+    return () => {
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+const beltParticleCache = new Map<string, BeltParticle[]>();
+
+function getBeltParticles(belt: AsteroidBelt, beltIndex: number): BeltParticle[] {
+    const key = `${beltIndex}|${belt.radius}|${belt.beltType}`;
+    const cached = beltParticleCache.get(key);
+    if (cached) return cached;
+
+    const rand = mulberry32(Math.round(belt.radius) * 7919 + beltIndex * 104729 + 1);
+    const count = Math.max(160, Math.min(560, Math.round(belt.radius * 2.4)));
+    const particles: BeltParticle[] = [];
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            angle: rand() * Math.PI * 2,
+            // Sum of two uniforms: denser toward the belt centerline
+            radial: rand() + rand() - 1,
+            size: 0.6 + rand() * 1.5,
+            alpha: 0.25 + rand() * 0.55,
+        });
+    }
+    beltParticleCache.set(key, particles);
+    return particles;
+}
+
+function drawAsteroidBelt(ctx: CanvasRenderingContext2D, belt: AsteroidBelt, beltIndex: number) {
+    const renderR = orbitToRenderRadius(belt.radius);
+    if (renderR <= 0) return;
+    const icy = belt.beltType.includes('icy');
+    const halfWidth = Math.max(5, renderR * 0.045);
+
+    // Faint guide ring marking the belt centerline (follows the orbit toggle)
+    drawOrbitEllipse(ctx, 0, 0, renderR, icy ? 'rgba(140,180,220,0.18)' : 'rgba(160,140,100,0.18)', true);
+
+    // Scattered rocks: always visible since the belt is a physical object, not an orbit guide
+    ctx.save();
+    ctx.fillStyle = icy ? '#A8CCE0' : '#A08A6A';
+    for (const p of getBeltParticles(belt, beltIndex)) {
+        const r = renderR + p.radial * halfWidth;
+        const wx = Math.cos(p.angle) * r;
+        const wy = Math.sin(p.angle) * r;
+        const proj = project(wx, wy, 0);
+        const s = Math.max(0.5, Math.min(3.5, p.size * proj.scale));
+        ctx.globalAlpha = p.alpha;
+        ctx.fillRect(proj.x - s / 2, proj.y - s / 2, s, s);
+    }
+    ctx.restore();
+}
+
+/** Dashed circle marking the Stellaris system radius limit (edit mode only) */
+function drawSystemBoundary(ctx: CanvasRenderingContext2D) {
+    const renderR = orbitToRenderRadius(MAX_ORBIT_DISTANCE);
+    const steps = 160;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 96, 96, 0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+        const angle = (i / steps) * Math.PI * 2;
+        const p = project(Math.cos(angle) * renderR, Math.sin(angle) * renderR, 0);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const labelPos = project(Math.cos(Math.PI / 4) * renderR, Math.sin(Math.PI / 4) * renderR, 0);
+    ctx.fillStyle = 'rgba(255, 96, 96, 0.7)';
+    ctx.font = '10px sans-serif';
+    ctx.fillText(`轨道上限 ${MAX_ORBIT_DISTANCE}`, labelPos.x + 6, labelPos.y - 4);
+    ctx.restore();
 }
 
 function drawOrbitEllipse(
@@ -1141,6 +1254,8 @@ function setupControls() {
             const world = screenToWorld(clickScreenX, clickScreenY);
             const dist = Math.round(renderRadiusToOrbit(Math.sqrt(world.x * world.x + world.y * world.y)));
             const angle = Math.round(Math.atan2(world.y, world.x) * 180 / Math.PI);
+            // Stellaris does not allow bodies beyond MAX_ORBIT_DISTANCE from the system center
+            const clampedDist = Math.min(MAX_ORBIT_DISTANCE, Math.max(20, dist));
 
             const sizeMap: Record<string, number> = {
                 'pc_gas_giant': 25,
@@ -1149,11 +1264,11 @@ function setupControls() {
                 'pc_f_star': 30, 'pc_k_star': 25, 'pc_m_star': 20, 'pc_t_star': 15,
             };
 
-            setEditStatus('正在添加...');
+            setEditStatus(dist > MAX_ORBIT_DISTANCE ? `已限制在最大轨道距离 ${MAX_ORBIT_DISTANCE}，正在添加...` : '正在添加...');
             vscode.postMessage({
                 command: 'addPlanet',
                 systemEndLine: system.endLine,
-                orbitDistance: Math.max(20, dist),
+                orbitDistance: clampedDist,
                 orbitAngle: ((angle % 360) + 360) % 360,
                 planetClass: planetClass,
                 size: sizeMap[planetClass] || 15,
@@ -1324,10 +1439,11 @@ function setupControls() {
             const mouseWorld = screenToWorld(mouseScreenX, mouseScreenY);
             const parentWorld = screenToWorld(dragParentX, dragParentY);
 
-            // Orbit = mouse_world - parent_world
+            // Orbit = mouse_world - parent_world, clamped to the system radius limit
             const dx = mouseWorld.x - parentWorld.x;
             const dy = mouseWorld.y - parentWorld.y;
-            const orbitDist = Math.sqrt(dx * dx + dy * dy);
+            const orbitDistRaw = Math.sqrt(dx * dx + dy * dy);
+            const orbitDist = clampOrbitToSystemLimit(parentWorld.x, parentWorld.y, dx, dy, orbitDistRaw);
             const rawOrbitDist = renderRadiusToOrbit(orbitDist);
             const orbitAngle = Math.atan2(dy, dx) * 180 / Math.PI;
 
@@ -1350,11 +1466,12 @@ function setupControls() {
                 const divisors360 = [3,4,5,6,8,9,10,12,15,18,20,24,30,36,40,45,60,72,90,120,180,360];
                 const validN = divisors360.filter(d => d >= 3);
 
-                // Find closest valid segment count to the raw orbit
+                // Find closest valid segment count to the raw orbit (keep within system limit)
                 const rawN = N0 * rawOrbitDist / R0;
                 let bestN = N0;
                 let bestDiff = Infinity;
                 for (const n of validN) {
+                    if (Math.round(R0 * n / N0) > MAX_ORBIT_DISTANCE) continue;
                     const diff = Math.abs(n - rawN);
                     if (diff < bestDiff) { bestDiff = diff; bestN = n; }
                 }
@@ -1893,19 +2010,25 @@ function updatePropertiesPanel() {
             const line = parseInt(input.getAttribute('data-line')!);
             const vorType = input.getAttribute('data-vor-type') as 'min' | 'max' | 'value';
             const otherInput = panel.querySelector<HTMLInputElement>(`.vor-input[data-prop="${prop}"][data-line="${line}"][data-vor-type="${vorType === 'min' ? 'max' : 'min'}"]`);
+            // Stellaris system radius limit: orbit_distance values may not exceed MAX_ORBIT_DISTANCE
+            const clampOrbit = (v: number) => prop === 'orbit_distance' ? Math.min(MAX_ORBIT_DISTANCE, v) : v;
 
             if (vorType === 'value') {
+                const value = clampOrbit(parseFloat(input.value) || 0);
+                input.value = String(value);
                 setEditStatus('正在应用...');
                 vscode.postMessage({
                     command: 'updateProperty',
                     line,
                     property: prop,
-                    value: parseFloat(input.value) || 0,
+                    value,
                     valueType: 'fixed',
                 });
             } else {
-                const min = vorType === 'min' ? (parseFloat(input.value) || 0) : (parseFloat(otherInput?.value ?? '0') || 0);
-                const max = vorType === 'max' ? (parseFloat(input.value) || 0) : (parseFloat(otherInput?.value ?? '0') || 0);
+                const rawSelf = clampOrbit(parseFloat(input.value) || 0);
+                input.value = String(rawSelf);
+                const min = vorType === 'min' ? rawSelf : clampOrbit(parseFloat(otherInput?.value ?? '0') || 0);
+                const max = vorType === 'max' ? rawSelf : clampOrbit(parseFloat(otherInput?.value ?? '0') || 0);
                 setEditStatus('正在应用...');
                 vscode.postMessage({
                     command: 'updateProperty',
@@ -2104,6 +2227,7 @@ window.addEventListener('message', (event) => {
     if (msg.command === 'render') {
         const isFirstRender = allSystems.length === 0;
         allSystems = msg.data;
+        beltParticleCache.clear();
         dynamicClasses = msg.dynamicClasses || [];
         portraits = msg.portraits || {};
         planetIcons = msg.planetIcons || {};

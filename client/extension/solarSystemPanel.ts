@@ -9,6 +9,14 @@ import { decodeDds, decodeTga } from './ddsDecoder';
 import { buildSpriteIndex, type SpriteInfo } from './guiParser';
 import { matchesExt, matchesAnyExt } from './fileExtensions';
 
+// Stellaris hard limit: no body may exist beyond this orbit distance from the system center.
+// Webview clamps first; these are defense-in-depth checks on the document-editing side.
+const MAX_ORBIT_DISTANCE = 500;
+
+function clampOrbitDistance(value: number): number {
+    return Math.min(MAX_ORBIT_DISTANCE, Math.max(0, value));
+}
+
 // ── WebView message types ──────────────────────────────────────────────────────
 type SolarPanelMessage =
     | { command: 'goToLine'; line: number }
@@ -633,6 +641,16 @@ export class SolarSystemPanel {
         }
 
         const property = msg.property;
+        // Defense in depth: orbit_distance may not exceed the Stellaris system radius limit
+        if (property === 'orbit_distance') {
+            if (typeof msg.value === 'number') {
+                msg.value = Math.min(MAX_ORBIT_DISTANCE, msg.value);
+            } else if (msg.value && typeof msg.value === 'object') {
+                const range = msg.value as { min?: number; max?: number };
+                if (typeof range.min === 'number') range.min = Math.min(MAX_ORBIT_DISTANCE, range.min);
+                if (typeof range.max === 'number') range.max = Math.min(MAX_ORBIT_DISTANCE, range.max);
+            }
+        }
         const newValueStr = this._formatValue(property, msg.value, msg.valueType);
 
         // Search for the property starting from the given line
@@ -759,7 +777,7 @@ export class SolarSystemPanel {
         const indent = closingLine.text.match(/^(\s*)/)?.[1] ?? '';
         const planetIndent = indent + '\t';
 
-        const planetCode = `${planetIndent}planet = { class = ${msg.planetClass} orbit_distance = ${msg.orbitDistance} orbit_angle = ${msg.orbitAngle} size = ${msg.size} }\n`;
+        const planetCode = `${planetIndent}planet = { class = ${msg.planetClass} orbit_distance = ${clampOrbitDistance(msg.orbitDistance)} orbit_angle = ${msg.orbitAngle} size = ${msg.size} }\n`;
 
         const edit = new vscode.WorkspaceEdit();
         edit.insert(doc.uri, new vscode.Position(insertLineIdx, 0), planetCode);
@@ -1167,6 +1185,8 @@ export class SolarSystemPanel {
         isLockedOrbit?: boolean;
     }) {
         const log = SolarSystemPanel._getLog();
+        // Defense in depth: keep the absolute orbit within the Stellaris system radius limit
+        msg.targetResolvedOrbit = Math.min(MAX_ORBIT_DISTANCE, msg.targetResolvedOrbit);
         log.appendLine(`--- movePlanetOrbit msg: bodyLine=${msg.bodyLine} endLine=${msg.bodyEndLine} targetOrbit=${msg.targetResolvedOrbit} angle=${msg.targetOrbitAngle} isRing=${msg.isRingWorld}`);
 
         if (!this._document) { log.appendLine('  ABORT: no document'); return; }

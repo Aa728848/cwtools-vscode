@@ -55,7 +55,7 @@ export const STELLARIS_KNOWLEDGE = `
 - **\`defines\`**: redefine the specific define, **but the enclosing block must be included as well** (e.g. wrap your override in its \`NGameplay = { ... }\` block).
 - **Localisation / events / interface / fonts**: generally LIOS (last loaded wins). Events are usually LIOS but be careful — verify per case.
 
-\* \`technology\` is mostly LIOS in practice but emits a DUPL-type "already exists" error; to fully override you may need to also carry the \`potential\` block from the vanilla entry.
+\\* \`technology\` is mostly LIOS in practice but emits a DUPL-type "already exists" error; to fully override you may need to also carry the \`potential\` block from the vanilla entry.
 
 ### Operating rules for the Agent
 1. **NEVER tell the user to "just redefine the key in a new file, it overrides vanilla" without first checking the folder's resolution mode.** For FIOS/FIXES/DUPL/NO folders that advice is wrong and the override will silently fail or error.

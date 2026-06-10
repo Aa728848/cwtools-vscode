@@ -128,6 +128,7 @@
   "commands.cwtools.ai.codeAction.fixAll": "AI: Fix all CWTools errors in file",
   "commands.cwtools.ai.manageIgnoredDiagnostics.title": "AI: Manage Ignored Diagnostics",
   "configuration.cwtools.ai.ignoredDiagnostics.description": "List of diagnostic keys (e.g. external mod keys) to be completely ignored by the LSP Problems panel and AI Agent. Modifiable via 'Manage Ignored Diagnostics' command.",
+  "configuration.cwtools.ai.enhancedDiagnostics.description": "Localize validation errors in the Problems panel: when the VS Code display language is Chinese, recognized messages are replaced with a Chinese translation including fix advice; otherwise a 💡 fix-advice line is appended to the English message.",
   "configuration.cwtools.ai.braveSearchApiKey.description": "Brave Search API key for web_search tool. Get one at https://brave.com/search/api/",
   "configuration.cwtools.ai.exaApiKey.description": "Exa API key for codesearch tool. Get one at https://exa.ai",
   "configuration.cwtools.ai.mcp.servers.description": "MCP (Model Context Protocol) server configurations for extending AI tool capabilities.",

@@ -9,6 +9,7 @@
  */
 
 import * as vs from 'vscode';
+import { diagnosticCodeString } from './diagnosticI18n';
 
 // ── i18n ─────────────────────────────────────────────────────────────────────
 
@@ -121,8 +122,8 @@ export function registerCodeActions(
             const line = diag.range.start.line + 1;
             await sendProgrammaticMessage(
                 isChinese()
-                    ? `请修复文件 \`${relPath}\` 第 ${line} 行的 CWTools 错误：\`${diag.message}\`（错误代码：${diag.code ?? 'N/A'}）`
-                    : `Fix the CWTools error in \`${relPath}\` at line ${line}: \`${diag.message}\` (code: ${diag.code ?? 'N/A'})`
+                    ? `请修复文件 \`${relPath}\` 第 ${line} 行的 CWTools 错误：\`${diag.message}\`（错误代码：${diagnosticCodeString(diag.code) ?? 'N/A'}）`
+                    : `Fix the CWTools error in \`${relPath}\` at line ${line}: \`${diag.message}\` (code: ${diagnosticCodeString(diag.code) ?? 'N/A'})`
             );
         })
     );
@@ -134,8 +135,8 @@ export function registerCodeActions(
             const line = diag.range.start.line + 1;
             await sendProgrammaticMessage(
                 isChinese()
-                    ? `请解释文件 \`${relPath}\` 第 ${line} 行的 CWTools 错误：\`${diag.message}\`（错误代码：${diag.code ?? 'N/A'}）。说明原因、影响和修复方法。`
-                    : `Explain the CWTools error in \`${relPath}\` at line ${line}: \`${diag.message}\` (code: ${diag.code ?? 'N/A'}). Describe the cause, impact, and how to fix it.`
+                    ? `请解释文件 \`${relPath}\` 第 ${line} 行的 CWTools 错误：\`${diag.message}\`（错误代码：${diagnosticCodeString(diag.code) ?? 'N/A'}）。说明原因、影响和修复方法。`
+                    : `Explain the CWTools error in \`${relPath}\` at line ${line}: \`${diag.message}\` (code: ${diagnosticCodeString(diag.code) ?? 'N/A'}). Describe the cause, impact, and how to fix it.`
             );
         })
     );

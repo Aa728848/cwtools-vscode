@@ -17,6 +17,7 @@ import { getCachedFile, setCachedFile } from '../fileCache';
 import { getToolResultBudget } from '../contextBudget';
 import { fuzzyReplace } from './replacerSuite';
 import { diagnosticMetadata } from './diagnosticMetadata';
+import { diagnosticCodeString } from '../../diagnosticI18n';
 import { getTopicStorageDir } from '../workspacePaths';
 import {
     isSecuritySandboxDisabled,
@@ -1391,7 +1392,7 @@ export class FileToolHandler {
         return vs.languages.getDiagnostics(uri).map(d => {
             const metadata = diagnosticMetadata(d);
             return {
-                code: String(d.code ?? ''),
+                code: diagnosticCodeString(d.code) ?? '',
                 severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
                     : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
                         : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',
@@ -1537,7 +1538,7 @@ export class FileToolHandler {
             return vs.languages.getDiagnostics(uri).map(d => {
                 const metadata = diagnosticMetadata(d);
                 return {
-                    code: String(d.code ?? ''),
+                    code: diagnosticCodeString(d.code) ?? '',
                     severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
                         : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
                             : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint',

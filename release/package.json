@@ -888,6 +888,12 @@
                     "default": [],
                     "description": "%configuration.cwtools.ai.ignoredDiagnostics.description%"
                 },
+                "cwtools.ai.enhancedDiagnostics": {
+                    "scope": "resource",
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%configuration.cwtools.ai.enhancedDiagnostics.description%"
+                },
                 "cwtools.ai.braveSearchApiKey": {
                     "scope": "window",
                     "type": "string",

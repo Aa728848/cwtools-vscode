@@ -1655,12 +1655,37 @@ type Server(client: ILanguageClient) =
             | Some rs -> rs |> List.exists (fun (r: CWRelatedError) -> r.message = "Related source")
             | None -> false)
 
+    /// Documentation page for CW error codes; anchors are the lowercase code (e.g. #cw102).
+    let diagnosticDocsUrl =
+        "https://github.com/Aa728848/cwtools-vscode/blob/main/docs/diagnostic-codes.md"
+
+    let diagnosticTags (code: string) (message: string) =
+        if code = "CW236" || code = "CW253" then
+            Some [ DiagnosticTagDeprecated ]
+        elif code = "CW224" || code = "CW251" || message = "This error is retired" then
+            Some [ DiagnosticTagUnnecessary ]
+        else
+            None
+
+    let diagnosticCodeDescription (code: string) =
+        if code.StartsWith("CW", StringComparison.OrdinalIgnoreCase) then
+            // CW001_MISSING_CLOSE_BRACE etc. share the CW001 docs section
+            let shortCode = code.Split('_').[0].ToLowerInvariant()
+            Some { CodeDescription.href = diagnosticDocsUrl + "#" + shortCode }
+        else
+            None
+
     let parserErrorToDiagnostics e =
         let code, sev, file, error, (position: range), length, related = e
 
         let startC, endC =
             match length with
-            | 0 -> 0, (int position.StartColumn)
+            | 0 ->
+                // No key length available: highlight the reported range itself,
+                // never the whole line prefix before it.
+                let s = int position.StartColumn
+                let endCol = int position.EndColumn
+                if endCol > s then s, endCol else s, s + 1
             | _ -> (int position.StartColumn), (int position.StartColumn) + length
 
         let startLine = (int position.StartLine) - 1
@@ -1672,8 +1697,10 @@ type Server(client: ILanguageClient) =
                   ``end`` = { line = startLine; character = endC } }
               severity = Some(sevToDiagSev sev)
               code = Some code
-              source = Some code
+              codeDescription = diagnosticCodeDescription code
+              source = Some "CWTools"
               message = error
+              tags = diagnosticTags code error
               data = Some(diagnosticData code error)
               relatedInformation =
                 related

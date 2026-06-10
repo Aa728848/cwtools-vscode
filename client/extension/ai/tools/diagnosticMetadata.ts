@@ -1,5 +1,6 @@
 import * as vs from 'vscode';
 import type { DiagnosticAnalysisCategory } from '../types';
+import { diagnosticCodeString } from '../../diagnosticI18n';
 
 export interface DiagnosticMetadata {
     category: DiagnosticAnalysisCategory;
@@ -144,7 +145,7 @@ export function classifyDiagnosticFallback(message: string, code?: string): Diag
 export function diagnosticMetadata(diagnostic: vs.Diagnostic): DiagnosticMetadata {
     const data = (diagnostic as vs.Diagnostic & { data?: unknown }).data;
     const dataObj = data && typeof data === 'object' ? data as Record<string, unknown> : undefined;
-    const fallback = classifyDiagnosticFallback(diagnostic.message, diagnostic.code !== undefined ? String(diagnostic.code) : undefined);
+    const fallback = classifyDiagnosticFallback(diagnostic.message, diagnosticCodeString(diagnostic.code));
     return {
         category: isDiagnosticCategory(dataObj?.category) ? dataObj.category : fallback.category,
         repairHint: typeof dataObj?.repairHint === 'string' ? dataObj.repairHint : fallback.repairHint,

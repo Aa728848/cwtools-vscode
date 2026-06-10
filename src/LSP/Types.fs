@@ -109,12 +109,24 @@ let writeDiagnosticSeverity i =
 
 type DiagnosticRelatedInformation = { location: Location; message: string }
 
+/// LSP CodeDescription: a URL with documentation for the diagnostic's error code.
+type CodeDescription = { href: string }
+
+// LSP DiagnosticTag values: 1 = Unnecessary (faded), 2 = Deprecated (strikethrough).
+[<Literal>]
+let DiagnosticTagUnnecessary = 1
+
+[<Literal>]
+let DiagnosticTagDeprecated = 2
+
 type Diagnostic =
     { range: Range
       severity: DiagnosticSeverity option
       code: string option
+      codeDescription: CodeDescription option
       source: string option
       message: string
+      tags: int list option
       data: JsonValue option
       relatedInformation: DiagnosticRelatedInformation list }
 

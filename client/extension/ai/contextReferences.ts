@@ -10,6 +10,7 @@ import * as path from 'path';
 import * as vs from 'vscode';
 import type { BaseContextItem, ContextItem, ContextItemType } from './types';
 import { ErrorReporter } from './errorReporter';
+import { diagnosticCodeString } from '../diagnosticI18n';
 import { SOURCE } from './messages';
 import type { Blackboard } from './orchestrator/blackboard';
 import type { BlackboardEntry } from './orchestrator/types';
@@ -539,7 +540,8 @@ export class ContextReferenceManager {
                     : diag.severity === vs.DiagnosticSeverity.Warning ? 'warning'
                         : diag.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
                 const loc = `${this.workspaceLabel(uri.fsPath)}:${diag.range.start.line + 1}:${diag.range.start.character + 1}`;
-                const code = diag.code !== undefined ? ` [${String(diag.code)}]` : '';
+                const codeValue = diagnosticCodeString(diag.code);
+                const code = codeValue !== undefined ? ` [${codeValue}]` : '';
                 entries.push(`- ${severity} ${loc}${code}: ${diag.message.replace(/\s+/g, ' ')}`);
             }
         }

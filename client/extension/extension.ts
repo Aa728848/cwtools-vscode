@@ -25,6 +25,7 @@ import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelPr
 import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
+import { enrichDiagnosticsInPlace, diagnosticCodeString } from './diagnosticI18n';
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
@@ -1193,7 +1194,7 @@ export async function activate(context: ExtensionContext) {
 					continue;
 				}
 				
-				const code = diag.code ? String(diag.code) : 'Unknown Code';
+				const code = diagnosticCodeString(diag.code) ?? 'Unknown Code';
 				
 				const match = diag.message.match(/'([^']+)'/) || diag.message.match(/"([^"]+)"/);
 				const matchUnexpected = diag.message.match(/^([^\s]+) is unexpected in/);
@@ -1500,20 +1501,24 @@ export async function activate(context: ExtensionContext) {
 				handleDiagnostics: (uri, diagnostics, next) => {
 					const config = workspace.getConfiguration('cwtools.ai');
 					const ignored = config.get<string[]>('ignoredDiagnostics', []);
-					if (ignored.length === 0) {
-						next(uri, diagnostics);
-						return;
-					}
-					const filtered = diagnostics.filter(diag => {
-						// If the diagnostic message contains any of the ignored keys, we filter it out.
-						for (const key of ignored) {
-							if (diag.message.includes(`'${key}'`) || diag.message.includes(`"${key}"`) || diag.message.includes(key)) {
-								return false;
+					let result = diagnostics;
+					if (ignored.length > 0) {
+						// Ignore-list matching runs against the original server message,
+						// before any enrichment rewrites it.
+						result = diagnostics.filter(diag => {
+							// If the diagnostic message contains any of the ignored keys, we filter it out.
+							for (const key of ignored) {
+								if (diag.message.includes(`'${key}'`) || diag.message.includes(`"${key}"`) || diag.message.includes(key)) {
+									return false;
+								}
 							}
-						}
-						return true;
-					});
-					next(uri, filtered);
+							return true;
+						});
+					}
+					if (config.get<boolean>('enhancedDiagnostics', true)) {
+						enrichDiagnosticsInPlace(result, vs.env.language.startsWith('zh'));
+					}
+					next(uri, result);
 				},
 				provideDocumentLinks: async (document, token, next) => {
 					const links = await next(document, token);

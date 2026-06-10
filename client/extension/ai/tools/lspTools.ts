@@ -23,6 +23,7 @@ import type {
 } from '../types';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
 import { diagnosticMetadata } from './diagnosticMetadata';
+import { diagnosticCodeString } from '../../diagnosticI18n';
 
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
@@ -1001,7 +1002,7 @@ export class LspToolHandler {
                         message: d.message,
                         line: d.range.start.line,
                         column: d.range.start.character,
-                        code: d.code !== undefined ? String(d.code) : undefined,
+                        code: diagnosticCodeString(d.code),
                         category: metadata.category,
                         repairHint: metadata.repairHint,
                         expectedType: metadata.expectedType,

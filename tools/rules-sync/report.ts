@@ -68,6 +68,8 @@ interface FolderFieldReport {
     omittedNewFields?: number;
     /** Vanilla definitions missing a ## type_key_filter subtype (on_actions/game_rules). */
     missingSubtypes?: string[];
+    /** cwt subtypes whose key no longer exists in vanilla (removed or renamed). */
+    staleSubtypes?: Array<{ name: string; renameTo?: string }>;
 }
 
 interface ReportData {
@@ -609,6 +611,25 @@ function collectDefinitionFields(content: string, relPath: string, stats: Folder
     }
 }
 
+/** Closest rename candidate by token Jaccard similarity (>= 0.5), e.g.
+ *  can_planet_auto_migrate -> can_colony_auto_migrate. */
+function closestName(name: string, candidates: string[]): string | undefined {
+    const tokens = new Set(name.split('_'));
+    let best: string | undefined;
+    let bestScore = 0.5;
+    for (const candidate of candidates) {
+        const candidateTokens = new Set(candidate.split('_'));
+        let shared = 0;
+        for (const token of tokens) if (candidateTokens.has(token)) shared++;
+        const score = shared / (tokens.size + candidateTokens.size - shared);
+        if (score > bestScore) {
+            bestScore = score;
+            best = candidate;
+        }
+    }
+    return best;
+}
+
 function findCoveringCwtFiles(folder: string, coverage: CwtCommonCoverage): string[] {
     let probe = folder;
     while (probe) {
@@ -729,12 +750,19 @@ function buildFolderReports(
             }
         }
         let missingSubtypes: string[] = [];
+        let staleSubtypes: Array<{ name: string; renameTo?: string }> = [];
         if (covered && enumerated) {
             const filters = new Set<string>();
             for (const file of cwtFiles) {
                 for (const name of coverage.fileTypeKeyFilters.get(file) ?? []) filters.add(name);
             }
             missingSubtypes = Array.from(stats.defNames).filter(name => !filters.has(name)).sort();
+            // The reverse direction catches removals and renames: a rename shows
+            // up as one missing + one stale entry, paired by token similarity.
+            staleSubtypes = Array.from(filters)
+                .filter(name => !stats.defNames.has(name))
+                .sort()
+                .map(name => ({ name, renameTo: closestName(name, missingSubtypes) }));
         }
         const byCount = (a: FieldFinding, b: FieldFinding) => b.count - a.count || a.field.localeCompare(b.field);
         newFields.sort(byCount);
@@ -744,7 +772,7 @@ function buildFolderReports(
             omittedNewFields = newFields.length - DYNAMIC_FIELD_KEEP;
             newFields = newFields.slice(0, DYNAMIC_FIELD_KEEP);
         }
-        if (!covered || newFields.length || maybeCovered.length || missingSubtypes.length) {
+        if (!covered || newFields.length || maybeCovered.length || missingSubtypes.length || staleSubtypes.length) {
             reports.push({
                 folder: stats.folder,
                 covered,
@@ -754,6 +782,7 @@ function buildFolderReports(
                 maybeCovered,
                 omittedNewFields: omittedNewFields || undefined,
                 missingSubtypes: missingSubtypes.length ? missingSubtypes : undefined,
+                staleSubtypes: staleSubtypes.length ? staleSubtypes : undefined,
             });
         }
     }
@@ -977,7 +1006,7 @@ const tabs = [];
 for (const diff of DATA.diffs) {
   tabs.push({ id: diff.kind, label: KIND_LABELS[diff.kind] || diff.kind, count: diff.added.length + diff.removed.length + diff.changed.length, render: () => renderDiff(diff) });
 }
-tabs.push({ id: 'fields', label: 'Common 字段级参数', count: DATA.folders.reduce((n, f) => n + f.newFields.length + (f.missingSubtypes || []).length + (f.covered ? 0 : 1), 0), render: renderFolders });
+tabs.push({ id: 'fields', label: 'Common 字段级参数', count: DATA.folders.reduce((n, f) => n + f.newFields.length + (f.missingSubtypes || []).length + (f.staleSubtypes || []).length + (f.covered ? 0 : 1), 0), render: renderFolders });
 
 function cards() {
   const host = document.getElementById('cards');
@@ -990,9 +1019,11 @@ function cards() {
   const uncovered = DATA.folders.filter(f => !f.covered).length;
   const fieldCount = DATA.folders.reduce((n, f) => n + f.newFields.length, 0);
   const subtypeCount = DATA.folders.reduce((n, f) => n + (f.missingSubtypes || []).length, 0);
+  const staleCount = DATA.folders.reduce((n, f) => n + (f.staleSubtypes || []).length, 0);
   if (uncovered) items.push({ tab: 'fields', cls: 'del', num: uncovered, lbl: '未覆盖目录' });
   if (fieldCount) items.push({ tab: 'fields', cls: 'add', num: fieldCount, lbl: '新字段候选' });
   if (subtypeCount) items.push({ tab: 'fields', cls: 'chg', num: subtypeCount, lbl: '缺少 subtype 补全' });
+  if (staleCount) items.push({ tab: 'fields', cls: 'del', num: staleCount, lbl: '陈旧 subtype' });
   host.innerHTML = items.map(i => '<div class="card" data-tab="' + i.tab + '"><div class="num ' + i.cls + '">' + i.num + '</div><div class="lbl">' + esc(i.lbl) + '</div></div>').join('')
     || '<div class="card"><div class="num add">0</div><div class="lbl">无差异，规则与游戏文档一致</div></div>';
   host.querySelectorAll('.card[data-tab]').forEach(el => el.addEventListener('click', () => activate(el.dataset.tab)));
@@ -1101,16 +1132,21 @@ function renderFolders() {
       if (f.covered && !showFields) continue;
       const fieldMatch = fl => fl.field.includes(q);
       const missing = f.missingSubtypes || [];
-      if (q && !f.folder.includes(q) && !f.newFields.some(fieldMatch) && !f.maybeCovered.some(fieldMatch) && !missing.some(n => n.includes(q))) continue;
+      const stale = f.staleSubtypes || [];
+      if (q && !f.folder.includes(q) && !f.newFields.some(fieldMatch) && !f.maybeCovered.some(fieldMatch) && !missing.some(n => n.includes(q)) && !stale.some(s => s.name.includes(q))) continue;
       const newFields = q ? f.newFields.filter(fl => f.folder.includes(q) || fieldMatch(fl)) : f.newFields;
       const maybe = q ? f.maybeCovered.filter(fl => f.folder.includes(q) || fieldMatch(fl)) : f.maybeCovered;
       const missingShown = q ? missing.filter(n => f.folder.includes(q) || n.includes(q)) : missing;
       let body = '';
       if (!f.covered) {
         body = '<div class="body"><span class="desc">原版存在 ' + f.definitionCount + ' 个定义，但配置中没有任何 <span class="tag">path = "game/common/' + esc(f.folder) + '"</span> 规则。</span></div>';
-      } else if (missing.length) {
-        body = '<div class="body"><div class="desc" style="padding:4px 0">该目录由 CWTools 内置校验处理，cwt 通过 subtype 枚举原版定义提供补全。以下 ' + missingShown.length + ' 个原版定义缺少 <span class="tag">## type_key_filter</span> subtype：</div>'
-          + missingShown.map(n => '<span class="tag">' + esc(n) + '</span>').join('') + '</div>';
+      } else if (missing.length || stale.length) {
+        body = '<div class="body">'
+          + (missingShown.length ? '<div class="desc" style="padding:4px 0">以下 ' + missingShown.length + ' 个原版定义缺少 <span class="tag">## type_key_filter</span> subtype：</div>'
+            + missingShown.map(n => '<span class="tag">' + esc(n) + '</span>').join('') : '')
+          + (stale.length ? '<div class="desc" style="padding:8px 0 4px">以下 ' + stale.length + ' 个 cwt subtype 在原版中已不存在（已移除或改名，应清理）：</div>'
+            + stale.map(s => '<div><span class="tag">' + esc(s.name) + '</span>' + (s.renameTo ? ' <span class="desc">→ 疑似改名为</span> <span class="tag">' + esc(s.renameTo) + '</span>' : ' <span class="badge del">已移除</span>') + '</div>').join('') : '')
+          + '</div>';
       } else {
         body = '<div class="body">'
           + (newFields.length ? fieldTable(newFields) : '<span class="desc">无未知字段</span>')
@@ -1120,8 +1156,10 @@ function renderFolders() {
       }
       const sub = !f.covered
         ? '<span class="badge del">未覆盖</span> 定义 ' + f.definitionCount + ' 个'
-        : missing.length
-        ? '规则文件: ' + f.cwtFiles.map(esc).join(', ') + ' · 定义 ' + f.definitionCount + ' 个 · <span class="badge chg">缺少 subtype ' + missing.length + ' 个</span>'
+        : (missing.length || stale.length)
+        ? '规则文件: ' + f.cwtFiles.map(esc).join(', ') + ' · 定义 ' + f.definitionCount + ' 个'
+          + (missing.length ? ' · <span class="badge chg">缺少 subtype ' + missing.length + ' 个</span>' : '')
+          + (stale.length ? ' · <span class="badge del">陈旧 subtype ' + stale.length + ' 个</span>' : '')
         : '规则文件: ' + f.cwtFiles.map(esc).join(', ') + ' · 定义 ' + f.definitionCount + ' 个 · 新字段 ' + (newFields.length + (f.omittedNewFields || 0));
       blocks.push('<details class="folder' + (f.covered ? '' : ' uncovered') + '"' + (q || !f.covered ? ' open' : '') + '><summary>common/' + esc(f.folder) + '<span class="sub">' + sub + '</span></summary>' + body + '</details>');
     }

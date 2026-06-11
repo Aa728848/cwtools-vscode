@@ -17,6 +17,7 @@ NPM shortcuts are also available:
 npm run rules:stellaris:scan
 npm run rules:stellaris:check
 npm run rules:stellaris:update
+npm run rules:stellaris:report
 ```
 
 Default inputs:
@@ -31,6 +32,12 @@ Modes:
 - `scan` writes `rules.generated.json` and generated CWT candidates.
 - `check` scans, compares with current CWT config, and writes `check\rules-sync-check-report.json`.
 - `update` scans and writes append-only generated candidates under `update\generated` for review.
+- `report` compares fresh game `script_documentation` and vanilla `common/` against the
+  config baseline (`config\logs\*` plus CWT files) and writes a self-contained visual
+  HTML report to `report\rules-sync-report.html` (added/removed/changed triggers,
+  effects, modifiers, scopes, localisation commands, plus folder coverage and
+  definition-field-level findings). The report opens in the browser automatically;
+  pass `--no-open` to skip. Read-only: it never modifies the config.
 
 Only effects and triggers are converted into generated CWT candidates. Modifiers and scopes stay in `rules.generated.json` because they are loaded from the game logs directly.
 

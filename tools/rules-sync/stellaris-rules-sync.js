@@ -15,6 +15,8 @@ Modes:
   scan    Generate rules.generated.json and generated CWT candidates.
   check   Generate, compare with the config, and write a check report. Default mode.
   update  Generate append-only CWT candidates under the output directory for review.
+  report  Compare fresh game docs + vanilla common against the config baseline and
+          write a self-contained visual HTML report (opens in browser).
 
 Options:
   --docs <path>              Stellaris script_documentation directory.
@@ -27,6 +29,7 @@ Options:
   --no-vanilla-common        Do not inventory vanilla Stellaris common/ definitions.
   --no-config-common         Do not inventory config/common CWT definitions.
   --no-cwt                   Do not emit generated CWT candidate files during scan.
+  --no-open                  Do not open the HTML report in the browser (report mode).
   --ci                       Preserve check exit code 2 when drift is found.
 `);
 }
@@ -36,8 +39,8 @@ function parseArgs(argv) {
     let mode = 'check';
     if (args[0] && !args[0].startsWith('-')) mode = args.shift();
     if (mode === 'help' || mode === '--help' || mode === '-h') return { help: true };
-    if (!['scan', 'check', 'update'].includes(mode)) {
-        throw new Error(`Unknown mode "${mode}". Expected scan, check, or update.`);
+    if (!['scan', 'check', 'update', 'report'].includes(mode)) {
+        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, or report.`);
     }
 
     const opts = {
@@ -51,6 +54,7 @@ function parseArgs(argv) {
         vanillaCommon: '',
         includeConfigCommon: true,
         emitCwt: true,
+        openReport: true,
         ci: false,
     };
 
@@ -87,6 +91,9 @@ function parseArgs(argv) {
                 break;
             case '--no-cwt':
                 opts.emitCwt = false;
+                break;
+            case '--no-open':
+                opts.openReport = false;
                 break;
             case '--ci':
                 opts.ci = true;
@@ -173,6 +180,18 @@ function resolveTsNodeBin() {
     return tsNodeBin;
 }
 
+function openInBrowser(filePath) {
+    const opener = process.platform === 'win32'
+        ? { command: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', `start "" "${filePath}"`] }
+        : process.platform === 'darwin'
+        ? { command: 'open', args: [filePath] }
+        : { command: 'xdg-open', args: [filePath] };
+    const result = spawnSync(opener.command, opener.args, { stdio: 'ignore', shell: false });
+    if (result.error || (result.status ?? 0) !== 0) {
+        console.log(`[rules-sync] Open manually: ${filePath}`);
+    }
+}
+
 function buildCommonArgs(opts) {
     const commonArgs = [];
     const configCommon = path.join(opts.config, 'common');
@@ -197,6 +216,25 @@ function main() {
     assertDir('Script documentation', opts.docs);
     assertDir('Config', opts.config);
     fs.mkdirSync(opts.out, { recursive: true });
+
+    if (opts.mode === 'report') {
+        const reportScript = path.join(repoRoot, 'tools', 'rules-sync', 'report.ts');
+        const reportOut = path.join(opts.out, 'report');
+        const reportArgs = ['--docs', opts.docs, '--config', opts.config, '--output', reportOut];
+        if (opts.includeVanillaCommon) {
+            const vanillaCommon = opts.vanillaCommon || defaultVanillaCommonDir();
+            assertDir('Vanilla common', vanillaCommon);
+            reportArgs.push('--vanilla-common', vanillaCommon);
+        }
+        console.log(`[rules-sync] mode=report`);
+        console.log(`[rules-sync] docs=${opts.docs}`);
+        console.log(`[rules-sync] config=${opts.config}`);
+        console.log(`[rules-sync] out=${reportOut}`);
+        runTsNode(reportScript, reportArgs, false, opts.ci);
+        const htmlPath = path.join(reportOut, 'rules-sync-report.html');
+        if (opts.openReport && fs.existsSync(htmlPath)) openInBrowser(htmlPath);
+        return;
+    }
 
     const previous = copyPreviousSnapshot(opts.out, opts.previous);
     const parseLog = path.join(repoRoot, 'tools', 'rules-sync', 'parse-log.ts');

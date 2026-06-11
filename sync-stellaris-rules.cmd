@@ -8,9 +8,11 @@ echo Select Stellaris rules sync mode:
 echo   1. scan   - generate rules.generated.json and CWT candidates
 echo   2. check  - generate and compare with current config
 echo   3. update - generate append-only candidates for review
+echo   4. report - visual HTML comparison report (opens in browser)
 echo   Q. quit
-choice /C 123Q /N /M "Choose 1, 2, 3, or Q: "
-if errorlevel 4 exit /b 0
+choice /C 1234Q /N /M "Choose 1, 2, 3, 4, or Q: "
+if errorlevel 5 exit /b 0
+if errorlevel 4 set "MODE=report"
 if errorlevel 3 set "MODE=update"
 if errorlevel 2 set "MODE=check"
 if errorlevel 1 set "MODE=scan"

@@ -449,9 +449,8 @@ let setupLogger (client: ILanguageClient) =
 
 type LintRequestMsg =
     | UpdateRequest of VersionedTextDocumentIdentifier * bool
-    /// DidOpen/DidFocus: deep lint without marking needsTypeRefresh.
-    /// Opening a file does not change its content, so the type index stays valid.
     | OpenRequest of VersionedTextDocumentIdentifier
+    | RevalidateRequest of VersionedTextDocumentIdentifier
     | WorkComplete of DateTime
 
 /// Shared token computation - walks AST, classifies tokens, encodes to delta int[].
@@ -2122,16 +2121,54 @@ type Server(client: ILanguageClient) =
             with e -> logDiag $"Deferred dynamic revalidation failed: {e.Message}"
         | _ -> ()
 
+    let deferredRevalidationLock = obj ()
+    let mutable pendingDeferredRevalidationFiles: Set<string> = Set.empty
+    let mutable deferredRevalidationInFlight = false
+
     let scheduleDeferredDynamicRevalidation (files: string list) =
         let delay = max 0 dynamicDeferDelayMs
-        Task.Run(fun () ->
-            try
-                if delay > 0 then System.Threading.Thread.Sleep(delay)
-                revalidateDeferredDynamicFiles files
-            with e -> logDiag $"Deferred dynamic revalidation scheduling failed: {e.Message}")
-        |> ignore
+        let shouldStart =
+            lock deferredRevalidationLock (fun () ->
+                pendingDeferredRevalidationFiles <-
+                    files |> List.fold (fun acc f -> Set.add f acc) pendingDeferredRevalidationFiles
+                if deferredRevalidationInFlight then
+                    false
+                else
+                    deferredRevalidationInFlight <- true
+                    true)
+        if shouldStart then
+            Task.Run(fun () ->
+                let mutable go = true
+                while go do
+                    (try
+                        if delay > 0 then System.Threading.Thread.Sleep(delay)
+                        let batch =
+                            lock deferredRevalidationLock (fun () ->
+                                let b = pendingDeferredRevalidationFiles |> Set.toList
+                                pendingDeferredRevalidationFiles <- Set.empty
+                                b)
+                        if not batch.IsEmpty then revalidateDeferredDynamicFiles batch
+                     with e -> logDiag $"Deferred dynamic revalidation scheduling failed: {e.Message}")
+                    go <-
+                        lock deferredRevalidationLock (fun () ->
+                            if Set.isEmpty pendingDeferredRevalidationFiles then
+                                deferredRevalidationInFlight <- false
+                                false
+                            else
+                                true))
+            |> ignore
 
-    let refreshDynamicCallSitesForDefinition (defFile: string) (priorDiagnostics: Diagnostic list) =
+    let dynamicDefinitionPathMarkers =
+        [| "common/inline_scripts/"
+           "common/scripted_effects/"
+           "common/scripted_triggers/"
+           "common/script_values/" |]
+
+    let isDynamicDefinitionPath (path: string) =
+        let normalised = path.Replace('\\', '/').ToLowerInvariant()
+        dynamicDefinitionPathMarkers |> Array.exists normalised.Contains
+
+    let refreshDynamicCallSitesForDefinition (defFile: string) (priorDiagnostics: Diagnostic list) (isEditAction: bool) =
         let callFiles =
             priorDiagnostics
             |> List.filter (fun (d: Diagnostic) -> d.code = Some "CW274D")
@@ -2141,6 +2178,12 @@ type Server(client: ILanguageClient) =
         if not callFiles.IsEmpty then
             logDiag $"Refreshing {callFiles.Length} call-site file(s) for definition {defFile}"
             scheduleDeferredDynamicRevalidation (defFile :: callFiles)
+        elif isEditAction && isDynamicDefinitionPath defFile then
+            // Saving a dynamic-definition file wipes its cross-entity diagnostics
+            // (single-file validation sees no call sites). Re-derive them from a
+            // deferred full validation even without a prior CW274D hint.
+            logDiag $"Scheduling deferred revalidation for edited dynamic definition {defFile}"
+            scheduleDeferredDynamicRevalidation [ defFile ]
 
     let mutable delayTime = TimeSpan(0, 0, 5)
 
@@ -2359,7 +2402,7 @@ type Server(client: ILanguageClient) =
                                     | true, state -> state.diagnostics
                                     | _ -> []
                                 do! lint uri useShallowAnalyze false isEditAction
-                                refreshDynamicCallSitesForDefinition lintPath priorDiagnostics
+                                refreshDynamicCallSitesForDefinition lintPath priorDiagnostics isEditAction
 
                                 if not useShallowAnalyze then
                                     let didGlobalWork = delayedAnalyze force
@@ -2431,6 +2474,19 @@ type Server(client: ILanguageClient) =
                             return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, false, false))
                         else
                             return! loop inprogress state  // edit request already queued, skip open
+                    // Caller revalidation after a definition save: force past the
+                    // already-fresh skip, but do not treat as an edit action.
+                    | Some (RevalidateRequest ur), false ->
+                        analyze ur true false
+                        return! loop true state
+                    | Some (RevalidateRequest ur), true ->
+                        match Map.tryFind ur.uri.LocalPath state with
+                        | Some (_, _, true) ->
+                            return! loop inprogress state  // queued edit supersedes revalidation
+                        | Some (queued, _, false) ->
+                            return! loop inprogress (state |> Map.add ur.uri.LocalPath (queued, true, false))
+                        | None ->
+                            return! loop inprogress (state |> Map.add ur.uri.LocalPath (ur, true, false))
                     | Some (WorkComplete time), _ ->
                         nextAnalyseTime <- time
 
@@ -2485,6 +2541,10 @@ type Server(client: ILanguageClient) =
                     | Some (OpenRequest ur) ->
                         // Open requests bypass debounce - forward immediately
                         lintAgent.Post(OpenRequest ur)
+                        return! loop pending
+                    | Some (RevalidateRequest ur) ->
+                        // Revalidation requests bypass debounce - forward immediately
+                        lintAgent.Post(RevalidateRequest ur)
                         return! loop pending
                     | Some (WorkComplete _) ->
                         // Ignore WorkComplete messages in debounce agent
@@ -3619,7 +3679,7 @@ type Server(client: ILanguageClient) =
                         try
                             let scriptName = savedPath.Substring(markerIdx + marker.Length)
                             for caller in game.GetInlineScriptCallers scriptName do
-                                lintAgent.Post(OpenRequest({ uri = diagnosticUri caller; version = 0 }))
+                                lintAgent.Post(RevalidateRequest({ uri = diagnosticUri caller; version = 0 }))
                         with e -> logDiag $"inline_script caller re-lint failed: {e.Message}"
                     | None -> ()
             }

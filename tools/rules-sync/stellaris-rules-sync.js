@@ -181,9 +181,20 @@ function resolveTsNodeBin() {
 }
 
 function openInBrowser(filePath) {
-    const opener = process.platform === 'win32'
-        ? { command: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', `start "" "${filePath}"`] }
-        : process.platform === 'darwin'
+    if (process.platform === 'win32') {
+        // Node re-quotes composite args for cmd.exe, which mangles
+        // `start "" "path"`; pass the command line verbatim instead.
+        const result = spawnSync(
+            process.env.ComSpec || 'cmd.exe',
+            ['/d', '/s', '/c', `start "" "${filePath}"`],
+            { stdio: 'ignore', shell: false, windowsVerbatimArguments: true }
+        );
+        if (result.error || (result.status ?? 0) !== 0) {
+            console.log(`[rules-sync] Open manually: ${filePath}`);
+        }
+        return;
+    }
+    const opener = process.platform === 'darwin'
         ? { command: 'open', args: [filePath] }
         : { command: 'xdg-open', args: [filePath] };
     const result = spawnSync(opener.command, opener.args, { stdio: 'ignore', shell: false });

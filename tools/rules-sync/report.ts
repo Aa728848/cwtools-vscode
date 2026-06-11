@@ -362,10 +362,11 @@ interface CwtCommonCoverage {
     enumValues: Map<string, Set<string>>;
     /** type name -> common folder it loads from (type[NAME] = { path = ... }). */
     typeFolders: Map<string, string>;
+    /** type names declared with type_per_file = yes. */
+    typePerFile: Set<string>;
     /** cwt file -> type names referenced as <type> keys/values. */
     fileTypeRefs: Map<string, Set<string>>;
-    /** cwt files using a key-position scalar wildcard: fields are custom, skip checks. */
-    fileWildcardKeys: Set<string>;
+    wildcardKeyDepths: Map<string, Set<number>>;
     /** cwt file -> ## type_key_filter subtype names. */
     fileTypeKeyFilters: Map<string, Set<string>>;
     /** "planet_$_build_speed_mult"-style modifier generation patterns from type rules. */
@@ -379,8 +380,9 @@ function scanCwtCommonCoverage(configDir: string): CwtCommonCoverage {
     const fileGroupRefs = new Map<string, Set<string>>();
     const enumValues = new Map<string, Set<string>>();
     const typeFolders = new Map<string, string>();
+    const typePerFile = new Set<string>();
     const fileTypeRefs = new Map<string, Set<string>>();
-    const fileWildcardKeys = new Set<string>();
+    const wildcardKeyDepths = new Map<string, Set<number>>();
     const fileTypeKeyFilters = new Map<string, Set<string>>();
     const dollarPatterns = new Set<string>();
     for (const file of walkCwtFiles(configDir)) {
@@ -412,14 +414,8 @@ function scanCwtCommonCoverage(configDir: string): CwtCommonCoverage {
         }
         if (typeRefs.size) fileTypeRefs.set(relFile, typeRefs);
         collectEnumValues(stripped, enumValues);
-        collectTypeFolders(stripped, typeFolders);
-        // scalar / localisation in key position mean the field keys are custom
-        // content (localisation keys etc.). Only rule bodies count: inside the
-        // top-level types/enums blocks `localisation = { ... }` is the standard
-        // type-localisation declaration, not a field rule.
-        if (ruleBodyLines(stripped).some(line => /^\s*(scalar|localisation)\s*==?(\s|$)/.test(line))) {
-            fileWildcardKeys.add(relFile);
-        }
+        collectTypeFolders(stripped, typeFolders, typePerFile);
+        collectWildcardKeyDepths(stripped, wildcardKeyDepths);
         // Modifier generation patterns: "planet_$_build_speed_mult" = Planets
         for (const match of strippedText.matchAll(/"([A-Za-z0-9_]*\$[A-Za-z0-9_$]*)"\s*==?|(?:^|[\s{])([A-Za-z0-9_]*\$[A-Za-z0-9_$]*)\s*==?/g)) {
             dollarPatterns.add((match[1] ?? match[2]!).toLowerCase());
@@ -442,27 +438,37 @@ function scanCwtCommonCoverage(configDir: string): CwtCommonCoverage {
         }
         fileVocabulary.set(relFile, vocab);
     }
-    return { pathToFiles, fileVocabulary, aliasGroupKeys, fileGroupRefs, enumValues, typeFolders, fileTypeRefs, fileWildcardKeys, fileTypeKeyFilters, dollarPatterns };
+    return { pathToFiles, fileVocabulary, aliasGroupKeys, fileGroupRefs, enumValues, typeFolders, typePerFile, fileTypeRefs, wildcardKeyDepths, fileTypeKeyFilters, dollarPatterns };
 }
 
-/** Lines outside the top-level types/enums blocks, i.e. actual rule bodies. */
-function ruleBodyLines(strippedLines: string[]): string[] {
-    const result: string[] = [];
+function collectWildcardKeyDepths(strippedLines: string[], into: Map<string, Set<number>>) {
     let depth = 0;
+    let currentRule = '';
     let inDeclarationBlock = false;
     for (const line of strippedLines) {
-        if (depth === 0 && /^\s*(types|enums)\s*==?\s*\{/.test(line)) inDeclarationBlock = true;
-        if (!inDeclarationBlock) result.push(line);
+        if (depth === 0) {
+            currentRule = '';
+            if (/^\s*(types|enums)\s*==?\s*\{/.test(line)) {
+                inDeclarationBlock = true;
+            } else {
+                const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_.\-]*)\s*==?\s*\{/);
+                if (match && !inDeclarationBlock) currentRule = match[1]!.toLowerCase();
+            }
+        } else if (currentRule && /^\s*(scalar|localisation)\s*==?(\s|$)/.test(line)) {
+            const depths = into.get(currentRule) ?? new Set<number>();
+            depths.add(depth);
+            into.set(currentRule, depths);
+        }
         depth += countBraceDelta(line);
         if (depth <= 0) {
             depth = 0;
             inDeclarationBlock = false;
+            currentRule = '';
         }
     }
-    return result;
 }
 
-function collectTypeFolders(strippedLines: string[], typeFolders: Map<string, string>) {
+function collectTypeFolders(strippedLines: string[], typeFolders: Map<string, string>, typePerFile: Set<string>) {
     for (let i = 0; i < strippedLines.length; i++) {
         const line = strippedLines[i] ?? '';
         const match = line.match(/(?:^|\s)type\[([A-Za-z_][A-Za-z0-9_.\-]*)\]\s*=\s*\{/);
@@ -474,6 +480,7 @@ function collectTypeFolders(strippedLines: string[], typeFolders: Map<string, st
         while (j < strippedLines.length && depth > 0) {
             const pathMatch = rest.match(/path\s*=\s*"game\/common\/([^"]+)"/);
             if (pathMatch && !typeFolders.has(name)) typeFolders.set(name, normalizeCommonPath(pathMatch[1]!));
+            if (/(?:^|\s)type_per_file\s*=\s*yes\b/.test(rest)) typePerFile.add(name);
             j++;
             rest = strippedLines[j] ?? '';
             depth += countBraceDelta(rest);
@@ -737,9 +744,9 @@ function buildFolderReports(
         }
         let newFields: FieldFinding[] = [];
         const maybeCovered: FieldFinding[] = [];
-        // Folders whose rule uses a key-position scalar wildcard have custom
-        // field keys; they are not part of rule checking.
-        const wildcardKeys = cwtFiles.some(file => coverage.fileWildcardKeys.has(file));
+        const wildcardKeys = Array.from(coverage.typeFolders.entries()).some(([typeName, typeFolder]) =>
+            (stats.folder === typeFolder || stats.folder.startsWith(`${typeFolder}/`))
+            && (coverage.wildcardKeyDepths.get(typeName)?.has(coverage.typePerFile.has(typeName) ? 2 : 1) ?? false));
         const enumerated = ENUMERATED_SUBTYPE_FOLDERS.has(stats.folder);
         if (covered && !wildcardKeys && !enumerated) {
             for (const [field, info] of stats.fields) {

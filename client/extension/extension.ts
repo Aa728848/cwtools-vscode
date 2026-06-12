@@ -25,7 +25,7 @@ import { AIService, AgentToolExecutor, AgentRunner, PromptBuilder, AIChatPanelPr
 import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
-import { enrichDiagnosticsInPlace, diagnosticCodeString } from './diagnosticI18n';
+import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnoredKey } from './diagnosticI18n';
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
@@ -1193,21 +1193,35 @@ export async function activate(context: ExtensionContext) {
 				if (diag.severity !== vs.DiagnosticSeverity.Error) {
 					continue;
 				}
-				
+
 				const code = diagnosticCodeString(diag.code) ?? 'Unknown Code';
-				
+
+				const addKey = (key: string) => {
+					if (!candidatesByCode.has(code)) {
+						candidatesByCode.set(code, new Set<string>());
+					}
+					candidatesByCode.get(code)!.add(key);
+				};
+
+				if (code.toUpperCase().startsWith('CW274')) {
+					for (const ri of diag.relatedInformation ?? []) {
+						const riMatch = ri.message.match(/'([^']+)'/) || ri.message.match(/"([^"]+)"/);
+						if (riMatch && riMatch[1]) {
+							addKey(riMatch[1]);
+						}
+					}
+					continue;
+				}
+
 				const match = diag.message.match(/'([^']+)'/) || diag.message.match(/"([^"]+)"/);
 				const matchUnexpected = diag.message.match(/^([^\s]+) is unexpected in/);
 				const matchUnknown = diag.message.match(/^Unknown [^\s]+ ([^\s]+)/);
 
-				const key = match && match[1] ? match[1] 
-							: (matchUnexpected && matchUnexpected[1] ? matchUnexpected[1] 
+				const key = match && match[1] ? match[1]
+							: (matchUnexpected && matchUnexpected[1] ? matchUnexpected[1]
 							: (matchUnknown && matchUnknown[1] ? matchUnknown[1] : diag.message));
 
-				if (!candidatesByCode.has(code)) {
-					candidatesByCode.set(code, new Set<string>());
-				}
-				candidatesByCode.get(code)!.add(key);
+				addKey(key);
 			}
 		}
 
@@ -1504,16 +1518,11 @@ export async function activate(context: ExtensionContext) {
 					let result = diagnostics;
 					if (ignored.length > 0) {
 						// Ignore-list matching runs against the original server message,
-						// before any enrichment rewrites it.
-						result = diagnostics.filter(diag => {
-							// If the diagnostic message contains any of the ignored keys, we filter it out.
-							for (const key of ignored) {
-								if (diag.message.includes(`'${key}'`) || diag.message.includes(`"${key}"`) || diag.message.includes(key)) {
-									return false;
-								}
-							}
-							return true;
-						});
+						// before any enrichment rewrites it. relatedInformation is matched
+						// too: call-site relocated errors (CW274 inline_script expansion)
+						// carry the actual error text only there.
+						result = diagnostics.filter(diag =>
+							!ignored.some(key => diagnosticMatchesIgnoredKey(diag, key)));
 					}
 					if (config.get<boolean>('enhancedDiagnostics', true)) {
 						enrichDiagnosticsInPlace(result, vs.env.language.startsWith('zh'));

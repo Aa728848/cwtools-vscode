@@ -440,3 +440,11 @@ export function enrichDiagnosticsInPlace(diagnostics: EnrichableDiagnostic[], is
         }
     }
 }
+
+export function diagnosticMatchesIgnoredKey(
+    diag: { message: string; relatedInformation?: readonly { message: string }[] },
+    key: string,
+): boolean {
+    if (diag.message.includes(key)) return true;
+    return (diag.relatedInformation ?? []).some(ri => ri.message.includes(key));
+}

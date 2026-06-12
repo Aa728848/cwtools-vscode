@@ -24,7 +24,7 @@ import type {
 import { isPathInsideOrEqual } from '../workspaceSandbox';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { stripLineNumberPrefixes } from './replacerSuite';
-import { diagnosticCodeString } from '../../diagnosticI18n';
+import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
 
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools-ai[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
@@ -948,14 +948,8 @@ export class LspToolHandler {
                 : d.severity === vs.DiagnosticSeverity.Warning ? 'warning'
                     : d.severity === vs.DiagnosticSeverity.Information ? 'info' : 'hint';
 
-        const ignoredKeyForDiagnostic = (d: vs.Diagnostic): string | undefined => {
-            for (const key of ignored) {
-                if (d.message.includes(`'${key}'`) || d.message.includes(`"${key}"`) || d.message.includes(key)) {
-                    return key;
-                }
-            }
-            return undefined;
-        };
+        const ignoredKeyForDiagnostic = (d: vs.Diagnostic): string | undefined =>
+            ignored.find(key => diagnosticMatchesIgnoredKey(d, key));
 
         for (const [uri, diags] of allPairs) {
             if (diags.length === 0) continue;

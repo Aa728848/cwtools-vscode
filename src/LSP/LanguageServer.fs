@@ -10,10 +10,9 @@ open Types
 open LSP.Json.Ser
 open JsonExtensions
 
-/// Shared reader-writer lock that coordinates concurrent read-only LSP requests
-/// against mutating write operations (file updates, cache refreshes).
-/// Exposed so Program.fs can acquire the write side during game-state mutations.
 let gameStateLock = new ReaderWriterLockSlim()
+let mutable completionLockTimeoutMs = 350
+let mutable completionTimeoutFallback: (CompletionParams -> CompletionList option) option = None
 
 let private jsonWriteOptions =
     { defaultJsonWriteOptions with
@@ -278,12 +277,13 @@ type RealClient(send: BinaryWriter) =
 
 
 type private PendingTask =
-    /// needsWriteLock = true  -> notification mutates game state (e.g. DidChangeConfiguration)
-    /// needsWriteLock = false -> notification only touches DocumentStore / MailboxProcessor (thread-safe)
     | ProcessNotification of method: string * task: Async<unit> * needsWriteLock: bool
-    /// isReadOnly = true  -> can execute concurrently on the thread pool (read lock)
-    /// isReadOnly = false -> must execute serially, blocking the loop (write lock)
-    | ProcessRequest of id: int * task: Async<string option> * cancel: CancellationTokenSource * isReadOnly: bool
+    | ProcessRequest of
+        id: int *
+        task: Async<string option> *
+        cancel: CancellationTokenSource *
+        isReadOnly: bool *
+        lockFallback: (unit -> string option) option
     | Quit
 
 let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryReader, send: BinaryWriter) =
@@ -353,9 +353,6 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | Rename(p)                 -> server.Rename(p)                 |> thenMap serializeWorkspaceEdit |> thenSome, false
         | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenNone,                             false
 
-    /// Returns (task, needsWriteLock).
-    /// needsWriteLock = true  -> game state mutation (DidChangeConfiguration triggers processWorkspace)
-    /// needsWriteLock = false -> only touches DocumentStore, MailboxProcessor, or mutable flags (thread-safe)
     let processNotification (n: Notification) : Async<unit> * bool =
         match n with
         // These two mutate gameObj / start processWorkspace -> need exclusive Write Lock
@@ -375,10 +372,6 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         System.Collections.Concurrent.ConcurrentDictionary<int, CancellationTokenSource>()
 
     let processQueue =
-        // M7 Fix: unbounded queue - a bounded capacity of 10 can deadlock when the
-        // AI sends commands faster than the processing thread consumes them.
-        // The reader thread (which calls Add) would block while the processing thread
-        // (which calls Take) waits for more cancel messages from the reader - circular.
         new System.Collections.Concurrent.BlockingCollection<PendingTask>()
 
     Thread(fun () ->
@@ -403,9 +396,18 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                     let task, needsWriteLock = processNotification n
                     processQueue.Add(ProcessNotification(method, task, needsWriteLock))
                 | Parser.RequestMessage(id, method, json) ->
-                    let task, isReadOnly = processRequest (Parser.parseRequest (method, json))
+                    let parsed = Parser.parseRequest (method, json)
+                    let task, isReadOnly = processRequest parsed
+                    let lockFallback =
+                        match parsed with
+                        | Completion p ->
+                            Some(fun () ->
+                                completionTimeoutFallback
+                                |> Option.bind (fun provider -> provider p)
+                                |> serializeCompletionListOption)
+                        | _ -> None
                     let cancel = new CancellationTokenSource()
-                    processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly))
+                    processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
                     pendingRequests[id] <- cancel
                 | Parser.ResponseMessage(id, result) -> responseAgent.Post(Response(id, result))
 
@@ -420,24 +422,44 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
 
     // Helper: run a read-only task concurrently on the .NET thread pool,
     // acquiring a shared read lock so concurrent writes are properly blocked.
-    let startReadOnlyRequest (id: int) (task: Async<string option>) (cancel: CancellationTokenSource) =
+    let startReadOnlyRequest
+        (id: int)
+        (task: Async<string option>)
+        (cancel: CancellationTokenSource)
+        (lockFallback: (unit -> string option) option)
+        =
         Async.Start(
             async {
-                gameStateLock.EnterReadLock()
-                try
-                    if not cancel.IsCancellationRequested then
-                        try
-                            match! task with
-                            | Some result -> 
-                                if result = "[[CANCEL]]" then 
-                                    let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
-                                    writeClient (send, errText)
-                                else respond (send, id, result)
-                            | None        -> respond (send, id, "null")
-                        with :? OperationCanceledException -> ()
-                finally
-                    gameStateLock.ExitReadLock()
-                    pendingRequests.TryRemove(id) |> ignore
+                let acquired =
+                    match lockFallback with
+                    | Some _ -> gameStateLock.TryEnterReadLock(completionLockTimeoutMs)
+                    | None ->
+                        gameStateLock.EnterReadLock()
+                        true
+
+                if acquired then
+                    try
+                        if not cancel.IsCancellationRequested then
+                            try
+                                match! task with
+                                | Some result ->
+                                    if result = "[[CANCEL]]" then
+                                        let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
+                                        writeClient (send, errText)
+                                    else respond (send, id, result)
+                                | None        -> respond (send, id, "null")
+                            with :? OperationCanceledException -> ()
+                    finally
+                        gameStateLock.ExitReadLock()
+                        pendingRequests.TryRemove(id) |> ignore
+                else
+                    try
+                        if not cancel.IsCancellationRequested then
+                            match lockFallback |> Option.bind (fun fb -> fb ()) with
+                            | Some result -> respond (send, id, result)
+                            | None -> respond (send, id, "null")
+                    finally
+                        pendingRequests.TryRemove(id) |> ignore
             },
             cancel.Token
         )
@@ -449,9 +471,6 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
             gameStateLock.EnterWriteLock()
             try
                 try
-                    // No explicit timeout - rely on the CancellationToken ($/cancelRequest) for
-                    // aborting long-running writes. A 0ms timeout caused every write to throw
-                    // TimeoutException before the task even started.
                     match Async.RunSynchronously(task, cancellationToken = cancel.Token) with
                     | Some result -> respond (send, id, result)
                     | None        -> respond (send, id, "null")
@@ -465,10 +484,6 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     while not quit do
         match processQueue.Take() with
         | Quit -> quit <- true
-        // Notifications: only acquire Write Lock if the notification mutates game state.
-        // Most notifications (DidOpen, DidChange, etc.) only touch DocumentStore and
-        // MailboxProcessor - both thread-safe - so they run lock-free, keeping
-        // Completion/Hover/SemanticTokens responsive during rapid typing.
         | ProcessNotification(_, task, true  (* needsWriteLock *)) ->
             gameStateLock.EnterWriteLock()
             try
@@ -477,9 +492,9 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 gameStateLock.ExitWriteLock()
         | ProcessNotification(_, task, false (* no lock needed *)) ->
             Async.RunSynchronously(task)
-        | ProcessRequest(id, task, cancel, true  (* isReadOnly *)) ->
-            startReadOnlyRequest id task cancel
-        | ProcessRequest(id, task, cancel, false (* isWrite    *)) ->
+        | ProcessRequest(id, task, cancel, true (* isReadOnly *), lockFallback) ->
+            startReadOnlyRequest id task cancel lockFallback
+        | ProcessRequest(id, task, cancel, false (* isWrite    *), _) ->
             runWriteRequest id task cancel
 
     Environment.Exit(0)  // normal shutdown - allows finalizers to run

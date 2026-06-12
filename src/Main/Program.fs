@@ -751,6 +751,7 @@ type CompletionRuntimeState =
     { totalRequests: int
       cacheHits: int
       cacheMisses: int
+      lockTimeoutFallbacks: int
       lastStartedAtUnixMs: int64
       lastCompletedAtUnixMs: int64
       lastElapsedMs: int64
@@ -834,6 +835,7 @@ type Server(client: ILanguageClient) =
         { totalRequests = 0
           cacheHits = 0
           cacheMisses = 0
+          lockTimeoutFallbacks = 0
           lastStartedAtUnixMs = 0L
           lastCompletedAtUnixMs = 0L
           lastElapsedMs = 0L
@@ -1132,6 +1134,15 @@ type Server(client: ILanguageClient) =
     let completionListCache =
         System.Collections.Concurrent.ConcurrentDictionary<string, DateTime * CompletionList option>()
 
+    /// Last successfully computed completion list per file (line, list).
+    /// Served as the degraded instant response when a completion request cannot
+    /// acquire the game-state read lock (long UpdateFile/RefreshCaches in flight).
+    /// Deliberately NOT cleared on edit - surviving edits is its purpose.
+    /// Evicted on DidClose; hard cap guards pathological many-file sessions.
+    let staleCompletionFallbackCacheMaxEntries = 128
+    let staleCompletionFallbackCache =
+        System.Collections.Concurrent.ConcurrentDictionary<string, int * CompletionList>()
+
     let normaliseCachePath (filePath: string) =
         try FileInfo(filePath).FullName.Replace('\\', '/').ToLowerInvariant()
         with _ -> filePath.Replace('\\', '/').ToLowerInvariant()
@@ -1270,6 +1281,7 @@ type Server(client: ILanguageClient) =
                "cacheHits", JsonValue.Number(decimal state.cacheHits)
                "cacheMisses", JsonValue.Number(decimal state.cacheMisses)
                "cacheHitRate", JsonValue.Number(decimal hitRate)
+               "lockTimeoutFallbacks", JsonValue.Number(decimal state.lockTimeoutFallbacks)
                "lastStartedAtUnixMs", JsonValue.Number(decimal state.lastStartedAtUnixMs)
                "lastCompletedAtUnixMs", JsonValue.Number(decimal state.lastCompletedAtUnixMs)
                "lastElapsedMs", JsonValue.Number(decimal state.lastElapsedMs)
@@ -1286,6 +1298,36 @@ type Server(client: ILanguageClient) =
                     (match state.lastError with
                      | Some error -> JsonValue.String error
                      | None -> JsonValue.Null) |]
+
+    do
+        LSP.LanguageServer.completionTimeoutFallback <-
+            Some(fun (p: CompletionParams) ->
+                let filePath = getPathFromDoc p.textDocument.uri
+                updateCompletionRuntime (fun state ->
+                    { state with
+                        totalRequests = state.totalRequests + 1
+                        lockTimeoutFallbacks = state.lockTimeoutFallbacks + 1
+                        lastCompletedAtUnixMs = nowUnixMs ()
+                        lastFile = filePath
+                        lastLine = p.position.line
+                        lastCharacter = p.position.character })
+                let result =
+                    match staleCompletionFallbackCache.TryGetValue(normaliseCachePath filePath) with
+                    | true, (line, cached) when line = p.position.line ->
+                        let sanitize (item: CompletionItem) =
+                            match item.textEdit with
+                            | Some te ->
+                                { item with
+                                    textEdit = None
+                                    insertText = item.insertText |> Option.orElse (Some te.newText) }
+                            | None -> item
+                        { cached with
+                            isIncomplete = true
+                            items = cached.items |> List.map sanitize }
+                    | _ -> { isIncomplete = true; items = [] }
+                monitorLog Completion
+                    $"Completion lock-timeout fallback file={filePath} line={p.position.line} char={p.position.character} staleItems={result.items.Length}"
+                Some result)
 
     let clearCacheWriteTimesForFile (filePath: string) =
         let fullPath = try FileInfo(filePath).FullName with _ -> filePath
@@ -2083,14 +2125,14 @@ type Server(client: ILanguageClient) =
                     logDiag
                         $"Deferred revalidation warmed {warmed} dynamic-parameter entities (uncapped) in {warmSw.ElapsedMilliseconds}ms"
                  with e -> logDiag $"Deferred revalidation warm-up error: {e.Message}")
-                gameStateLock.EnterWriteLock()
+                gameStateLock.EnterReadLock()
                 let valErrors =
                     try
                         game.ValidationErrors()
                         |> List.map (fun e ->
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     finally
-                        gameStateLock.ExitWriteLock()
+                        gameStateLock.ExitReadLock()
                 let diagsByFile =
                     valErrors
                     |> List.map parserErrorToDiagnostics
@@ -3691,6 +3733,8 @@ type Server(client: ILanguageClient) =
             // Clean all file-level caches to prevent memory leaks from closed files
             forgetFileCaches localPath
             forgetFileCaches fullPath
+            staleCompletionFallbackCache.TryRemove(normaliseCachePath localPath) |> ignore
+            staleCompletionFallbackCache.TryRemove(normaliseCachePath fullPath) |> ignore
             (locCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
             clearRangeCache ()
         }
@@ -3748,6 +3792,14 @@ type Server(client: ILanguageClient) =
                     let result = completion gameObj p docs debugMode clientSupportsInsertReplaceEdit
                     completionListCache.[cacheKey] <- (now, result)
                     evictCompletionListCacheIfNeeded ()
+                    match result with
+                    | Some r ->
+                        let fallbackKey = normaliseCachePath filePath
+                        if staleCompletionFallbackCache.Count >= staleCompletionFallbackCacheMaxEntries
+                           && not (staleCompletionFallbackCache.ContainsKey fallbackKey) then
+                            staleCompletionFallbackCache.Clear()
+                        staleCompletionFallbackCache.[fallbackKey] <- (p.position.line, r)
+                    | None -> ()
                     sw.Stop()
                     let allocAfter = GC.GetTotalAllocatedBytes(false)
                     let count = result |> Option.map (fun r -> r.items.Length) |> Option.defaultValue 0

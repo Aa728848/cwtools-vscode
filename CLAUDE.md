@@ -79,6 +79,10 @@ checks.
 | `client/extension/indexing/locParser.ts` | Localisation YML parsing and query helpers |
 | `client/extension/indexing/workspaceSymbolParser.ts` | PDXScript / asset / gui symbol parsing and queries |
 | `client/extension/codeActions.ts` | AI quick fixes and diagnostic explanations |
+| `client/extension/diagnosticI18n.ts` | Client-side diagnostic Chinese translation, fix advice, ignore-key matching |
+| `client/extension/fileExtensions.ts` | Shared case-insensitive extension matching (`matchesExt`, `GRAPHICS_EXTS`) |
+| `client/extension/fsCaseInsensitive.ts` | Case-insensitive path resolution for case-sensitive filesystems |
+| `client/extension/pathScope.ts` | Neutral `isPathInsideOrEqual` / `foldPathCase` shared by UI and AI layers |
 | `client/extension/*Panel.ts` / `*Parser.ts` | GUI, solar system, event chain, tech tree, and entity previews |
 | `client/extension/vanillaCompare.ts` | Vanilla file diff and block migration commands |
 | `client/extension/locDecorations.ts` | Localisation editor features backed by `IndexService` |
@@ -92,7 +96,7 @@ checks.
 | --- | --- |
 | `client/extension/ai/agentRunner.ts` | Main AI reasoning and tool execution loop |
 | `client/extension/ai/agentTools.ts` | Tool dispatch, timeout, shared blackboard, and orchestrator tool entry |
-| `client/extension/ai/aiService.ts` | Multi-provider HTTP/SSE AI client, request adaptation, and fallback |
+| `client/extension/ai/aiService.ts` | Multi-provider HTTP/SSE AI client, request adaptation, fallback, and custom wire formats (`customApiFormat`) |
 | `client/extension/ai/promptBuilder.ts` | Prompt facade, project context, and mode system prompts |
 | `client/extension/ai/prompt/sections/baseSystem.ts` | Base system prompt section |
 | `client/extension/ai/prompt/sections/modePrompts.ts` | Per-mode prompt sections |
@@ -110,7 +114,7 @@ checks.
 | `client/extension/ai/chatInit.ts` | `/init` command handler, profile generation and CWTOOLS.md rendering |
 | `client/extension/ai/gameKnowledge.ts` | Per-game PDXScript knowledge blocks (Stellaris, HOI4, EU4, CK2/3, VIC2/3, Imperator, EU5) |
 | `client/extension/ai/skills.ts` | Skill index (built-in/user/project `SKILL.md`), prompt index + on-demand body loading via `run_skill` |
-| `client/extension/ai/memoryParser.ts` | `.cwtools-ai-memory.md` long-term workspace memory read/write/prune |
+| `client/extension/ai/memoryParser.ts` | Topic-scoped `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` long-term memory read/write/prune (legacy root file read as fallback) |
 | `client/extension/ai/contextBudget.ts` | Token budget management and tool result trimming |
 | `client/extension/ai/contextReferences.ts` | `@file`, `@folder`, `@symbol`, `@blackboard` reference resolution |
 
@@ -259,14 +263,21 @@ Important constraints:
   `write_localisation`.
 - `edit_file(filePath, oldString, newString, replaceAll?)` is the single-occurrence
   fuzzy edit primitive (registry `EDIT`, `per-file-write`); it shares the same
-  guards as the other edit tools (`.yml` reject, brace check, ReadTracker,
-  pending-write confirmation).
+  guards as the other edit tools (`.yml` reject, ReadTracker, pending-write
+  confirmation).
+- `apply_patch`, `multi_replace_file_content`, and `ast_mutate` are retired from
+  the model-visible toolset (`agentTools.execute()` redirects them to
+  `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`); their
+  implementations remain for internal callers only. Do not re-expose them.
+- `read_file` output is line-number prefixed (`N | line`);
+  `tools/replacerSuite.ts` exports `stripLineNumberPrefixes` and `fuzzyReplace`
+  strips pasted prefixes as a fallback strategy so prefixed text in
+  `edit_file` args still matches.
 - `tools/replacerSuite.ts` provides a 10-strategy fuzzy replacement engine
-  (`fuzzyReplace`) used by the `FileToolHandler.replace()` helper, which backs
-  the `edit_file` tool and `apply_patch` hunk application in `tools/fileTools.ts`
-  (`multi_replace_file_content` matches exact in-range text then falls back to
-  `fuzzyReplace`, and `replace_lines` is purely line-range based); changes to
-  replacement strategies should update `editFileReplacer.test.ts`.
+  (`fuzzyReplace`) used by the `FileToolHandler.replace()` helper backing the
+  `edit_file` tool and internal hunk application in `tools/fileTools.ts`
+  (`replace_lines` is purely line-range based); changes to replacement
+  strategies should update `editFileReplacer.test.ts`.
 - `tools/schemaFlatten.ts` auto-flattens deep tool schemas for weak providers;
   `nestArguments()` reverses the flattening before tool execution.
 
@@ -299,7 +310,20 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
 - ReadTracker & File I/O is constrained in Extension Host. Webviews must only
   request files via IPC; do not perform direct raw file handling or I/O tracking inside the browser sandbox.
 - Orchestrator sub-agents must be constrained through
-  `orchestrator/subAgentSandbox.ts` and `enforceSubAgentSafety`.
+  `orchestrator/subAgentSandbox.ts` and `enforceSubAgentSafety`. Sub-agents whose
+  `plannedFiles` are all localisation `.yml` are forced onto `write_localisation`
+  (generic write tools excluded) and `dispatch_agents` upgrades such tasks to
+  `loc_writer`.
+- The custom provider supports four wire formats via `customApiFormat`
+  (`openai-chat-completions`, `openai-responses`, `anthropic-messages`,
+  `gemini-generate-content`). Endpoints are stored per provider in
+  `cwtools.ai.providerEndpoints`; the legacy global `cwtools.ai.endpoint` is
+  migrated by `aiService.migrateLegacyEndpoint()` — do not reintroduce it.
+- `extension.ts` enriches LSP diagnostics through
+  `client/extension/diagnosticI18n.ts` (Chinese translation + fix advice,
+  gated by `cwtools.ai.enhancedDiagnostics`); ignore-list matching runs against
+  the original server message before enrichment. Diagnostic codes link to
+  `docs/diagnostic-codes.md` via server-side `codeDescription`.
 
 ## Project Profile & `/init`
 
@@ -334,9 +358,11 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
   parses their frontmatter. `promptBuilder.ts` injects a compact skill index via
   `buildSkillIndexPrompt`; full skill bodies are loaded on demand through the
   `run_skill` tool, keeping the base prompt small.
-- `memoryParser.ts` manages `.cwtools-ai-memory.md` long-term workspace memory:
-  reads with caching, appends new entries, and auto-prunes by priority when
-  exceeding `MAX_MEMORY_CHARS` (4000 chars / ~1000 tokens).
+- `memoryParser.ts` manages topic-scoped long-term memory at
+  `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` (the legacy workspace-root file
+  is still read as a fallback): cached reads keyed by topic, appends, and
+  priority-based auto-prune when exceeding `MAX_MEMORY_CHARS` (4000 chars /
+  ~1000 tokens).
 - `usageTracker.ts` persists cumulative token usage, cost, and cache statistics
   across sessions. Used by the settings overview and Agent Manager dashboard.
 
@@ -357,6 +383,15 @@ Webviews run in a browser sandbox. They cannot access Node.js, `fs`, `path`,
 ## F# And Shader Notes
 
 `global.json` pins .NET SDK `9.0.300` with `latestMinor` roll-forward.
+`src/Main/Main.fsproj` lists `RuntimeIdentifiers` for `win-x64`, `linux-x64`,
+and `osx-x64`; a plain `dotnet build` works without an explicit RID.
+
+Server-side diagnostics carry `codeDescription` links to
+`docs/diagnostic-codes.md` plus LSP `tags`; keep new diagnostic codes documented
+there. The server also implements `.yml`/PDX document formatting and a
+completion read-lock timeout fallback (stale-cache degraded response) — keep
+filesystem path comparisons platform-conditional (`OrdinalIgnoreCase` only on
+Windows).
 
 Shader support spans `src/Main/Program.fs`, `src/Main/GameLoader.fs`, and
 `submodules/cwtools/CWTools/Game/PdxShaderFeatures.fs`.

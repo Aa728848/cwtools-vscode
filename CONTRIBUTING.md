@@ -76,7 +76,13 @@ npm run rules:stellaris
 npm run rules:stellaris:scan
 npm run rules:stellaris:check
 npm run rules:stellaris:update
+npm run rules:stellaris:report
 ```
+
+`rules:stellaris:report` 会把最新游戏 `script_documentation` 日志、原版 `common/`
+与 CWT 配置基线做只读对比，并生成自包含 HTML 报告
+（`tools/rules-sync/report.ts`，默认自动在浏览器打开，可用 `--no-open` 关闭）。
+详见 [tools/rules-sync/README.md](./tools/rules-sync/README.md)。
 
 
 ## 运行和调试
@@ -116,7 +122,7 @@ client/
       chatInit.ts             /init command handler
       gameKnowledge.ts        Per-game PDXScript knowledge blocks (9 games)
       skills.ts               SKILL.md index (built-in/user/project) + run_skill body loading
-      memoryParser.ts         .cwtools-ai-memory.md long-term memory
+      memoryParser.ts         Topic-scoped .cwtools-ai-memory.md long-term memory
       workspacePaths.ts       AI storage root, topic/scratch dirs
       workspaceSandbox.ts     Path sanitization and scope classification
       runnerPolicy.ts         Mode-based tool filtering and iteration limits
@@ -135,6 +141,10 @@ client/
     indexing/                 Shared localisation + workspace-symbol knowledge layer
     gameProfiles.ts           Multi-game profile registry
     extension.ts              Activation and command registration
+    diagnosticI18n.ts         Client-side diagnostic Chinese translation + fix advice
+    fileExtensions.ts         Case-insensitive extension matching helpers
+    fsCaseInsensitive.ts      Case-insensitive path resolution (Linux/macOS)
+    pathScope.ts              Shared isPathInsideOrEqual / foldPathCase helpers
     vanillaCompare.ts         Vanilla file diff and block migration
   webview/                    Browser-sandboxed Webview scripts
     chat/                     Extracted chat and Agent Manager modules (22 files)
@@ -142,7 +152,7 @@ client/
     svgIcons.ts               High-fidelity SVG icon library
     *Preview.ts               GUI, solar system, event chain, tech tree, entity previews
   test/
-    unit/                     ts-mocha unit tests (49 files)
+    unit/                     ts-mocha unit tests (53 files)
     suite/                    VS Code integration tests
 
 src/
@@ -150,6 +160,12 @@ src/
   Main/                       CWTools Server executable
   Languages/                  Resource strings
   CSharpExtensions/           Helper project
+
+docs/
+  diagnostic-codes.md         CWxxx diagnostic code reference (codeDescription targets)
+
+tools/
+  rules-sync/                 Stellaris rules scan/check/update/report tooling
 
 submodules/
   cwtools/                    Upstream CWTools F# library
@@ -213,12 +229,13 @@ Webview 运行在浏览器沙盒中：
 - 技能系统：`SKILL.md` 文件（built-in / user / project 三类作用域）由 `skills.ts` 建立索引，`promptBuilder.ts` 只注入精简的技能索引；完整技能正文通过 `run_skill` 工具按需加载，避免撑大基础 prompt。
 - 计划模式写入受 `planModeGuard.ts` 约束：仅允许写入实现计划（`implementation_plan.md`）与 plan/blueprint/walkthrough 等产物文件，其余写操作一律拦截。
 - 只读导向模式（explore/review/script_reviewer/orchestrator/script/plan）下的 `git_ops` 只放行 `status`/`diff`，变更性 action 由 `planModeGuard.ts` 的 `validateGitOpsForMode` 在 `agentRunner`/`agentTools` 执行前拦截。
-- `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语，复用 `fuzzyReplace` 与既有写守卫（`.yml` 拒绝、花括号、ReadTracker、pending-write）。新增同类编辑工具时记得同步 `editFailCount` 升级与 `doomLoopDetector` 归一化。
+- `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语，复用 `fuzzyReplace` 与既有写守卫（`.yml` 拒绝、ReadTracker、pending-write）。新增同类编辑工具时记得同步 `editFailCount` 升级与 `doomLoopDetector` 归一化。
+- `apply_patch`、`multi_replace_file_content`、`ast_mutate` 已从模型可见工具集中退役：`agentTools.execute()` 会拦截这些调用并引导改用 `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`；实现保留仅供内部调用，不要重新暴露。
 - 同一文件的读操作会经 `writeCoordinator.afterCurrentWrites` 排在在途写入之后；`getAgentToolTargetFiles` 已为 `read_file`/`get_pdx_block`/`get_file_context`/`edit_file` 补齐路径提取。
-- `get_file_context`/`get_pdx_block` 现会 `markRead` 并返回 1 基 `startLine`/`endLine`，可直接衔接 `replace_lines`；读/搜索工具出错时返回 `error` 字段以区别于"空结果"。
+- `get_file_context`/`get_pdx_block` 现会 `markRead` 并返回 1 基 `startLine`/`endLine`，可直接衔接 `replace_lines`；读/搜索工具出错时返回 `error` 字段以区别于"空结果"。`read_file` 输出带 `N | ` 行号前缀，`replacerSuite.ts` 的 `stripLineNumberPrefixes` 会在 `edit_file` 匹配失败时剥离模型误粘贴的行号前缀。
 - 诊断修复元数据集中在 `tools/diagnosticMetadata.ts`：为 `analyze_diagnostic_error` 提供诊断分类（`DiagnosticAnalysisCategory`）与修复提示，修改时同步更新 `diagnosticMetadata.test.ts`。
 - 新增用户可见运行步骤时，通过 `runner/runLedger.ts` 写事件；新增事件类型时同步 `runTimeline.ts`、`runInspector.ts` 和 `runReducers.ts`。
-- 文件编辑的模糊匹配策略集中在 `tools/replacerSuite.ts`（`fuzzyReplace`），由 `tools/fileTools.ts` 的 `replace()` 辅助方法消费，用于 `edit_file` 工具与 `apply_patch` 的 hunk 应用（`multi_replace_file_content` 先做范围内精确匹配，未命中再回退 `fuzzyReplace`，`replace_lines` 完全按行号替换）。它包含 10 种递进式匹配算法（直接匹配、Unicode 归一化、行级 trim、块锚定、空白归一化、缩进弹性、转义归一化、边界 trim、上下文感知、Jaccard 相似度）。修改替换策略时请同步更新 `editFileReplacer.test.ts`。
+- 文件编辑的模糊匹配策略集中在 `tools/replacerSuite.ts`（`fuzzyReplace`），由 `tools/fileTools.ts` 的 `replace()` 辅助方法消费，用于 `edit_file` 工具与内部 hunk 应用（`replace_lines` 完全按行号替换）。它包含 10 种递进式匹配算法（直接匹配、Unicode 归一化、行级 trim、块锚定、空白归一化、缩进弹性、转义归一化、边界 trim、上下文感知、Jaccard 相似度）。修改替换策略时请同步更新 `editFileReplacer.test.ts`。
 - 面向弱工具调用能力的 Provider，`tools/schemaFlatten.ts` 可自动将深层嵌套 schema 展平；执行工具前由 `nestArguments()` 反向还原。
 - `runner/readTracker.ts` 在 Extension Host 中跟踪文件的读取状态（mtime + SHA-256 hash），防止 Agent 未读即写或写入已被外部修改的文件。
 - `runner/runReducers.ts` 提供纯函数式的事件投影 reducer，用于从 JSONL 事件流重建 run 状态、工具时间线、Agent 拓扑图和缓存统计快照。新增事件类型时必须更新对应 reducer。
@@ -228,7 +245,9 @@ Webview 运行在浏览器沙盒中：
 - `runnerPolicy.ts` 集中管理模式级工具过滤、每种模式的迭代次数上限、slim sub-agent 输出预算。
 - `projectProfile.ts` 处理 `/init` 命令的项目扫描：目录检测、本地化语言/编码检测、命名空间/标识符采样、游戏检测、prompt card 生成和 `queryProjectProfile` 工具处理器。
 - `gameKnowledge.ts` 按 languageId 提供 9 款游戏的 PDXScript 知识块，由 `promptBuilder.ts` 动态选择注入。
-- `memoryParser.ts` 管理 `.cwtools-ai-memory.md` 长期工作区记忆：按优先级自动裁剪，上限 ~4000 字符。
+- `memoryParser.ts` 管理 topic 级长期记忆 `.cwtools-ai/<topicId>/.cwtools-ai-memory.md`（旧的工作区根目录文件仍作为读取回退）：按优先级自动裁剪，上限 ~4000 字符。
+- 多 Agent 协作中，`plannedFiles` 全部为本地化 `.yml` 的子任务会被自动升级为 `loc_writer` 角色，且沙盒会屏蔽通用写工具，只允许 `write_localisation`。
+- Custom Provider 通过 `cwtools.ai.customApiFormat` 支持四种线协议（`openai-chat-completions`、`openai-responses`、`anthropic-messages`、`gemini-generate-content`）；endpoint 按 Provider 存储在 `cwtools.ai.providerEndpoints`，旧的全局 `cwtools.ai.endpoint` 由 `migrateLegacyEndpoint()` 自动迁移，不要重新引入。
 - `usageTracker.ts` 跨会话持久化累计 token 用量、成本和缓存统计数据。
 
 ### F#、Shader 和 Vanilla Compare
@@ -250,6 +269,7 @@ Webview 运行在浏览器沙盒中：
 | AI 工具 / Prompt / Workflow / Orchestrator | 相关单测，再视范围执行 `npm run test:unit` |
 | AI Runner Pipeline (reducers/replay/ledger) | `reducers.test.ts`、`runLedger.test.ts`、`resumeStateV2.test.ts` |
 | AI Tool Execution (replacer/arg repair) | `editFileReplacer.test.ts`、`argRepair.test.ts`、`toolInvocation.test.ts` |
+| 诊断 i18n / ReadTracker / 命令安全 | `diagnosticI18n.test.ts`、`readTracker.test.ts`、`runCommandReadonly.test.ts`、`commandPreflight.test.ts` |
 | Project Profile / `/init` | `projectProfile.test.ts` |
 | IndexService / GameProfile | 相关单测 + `npm run test:unit` |
 | Webview | `npm run compile`，在开发宿主中打开对应面板检查控制台 |
@@ -257,7 +277,7 @@ Webview 运行在浏览器沙盒中：
 | 服务端入口 / 发布 | `dotnet build src/Main/`，必要时 `npm run verify` |
 | 发布前总检 | `npm run verify` |
 
-常见单测文件（49 个）包括：`agentToolSafety.test.ts`、`agentRunnerState.test.ts`、`agentRunnerFallback.test.ts`、`agentRunnerToolRepair.test.ts`、`agentResumeState.test.ts`、`agentSessionCoordinator.test.ts`、`agentUiBroadcaster.test.ts`、`agentManagerContracts.test.ts`、`agentManagerRunSnapshot.test.ts`、`aiServiceTimeout.test.ts`、`argRepair.test.ts`、`artifactPanelModel.test.ts`、`artifactStore.test.ts`、`chatFormatters.test.ts`、`chatModels.test.ts`、`commandPreflight.test.ts`、`contextBudget.test.ts`、`contextMemory.test.ts`、`diagnosticMetadata.test.ts`、`diffEngine.test.ts`、`editFileReplacer.test.ts`、`gameProfiles.test.ts`、`graphicsFeatures.test.ts`、`indexService.test.ts`、`jsonRepair.test.ts`、`messageRenderer.test.ts`、`orchestrator.test.ts`、`pdxshader-grammar.test.ts`、`permissionPolicy.test.ts`、`planModeGuard.test.ts`、`pricing.test.ts`、`projectProfile.test.ts`、`promptBuilderContext.test.ts`、`promptBuilderSnapshot.test.ts`、`promptBuilderSprite.test.ts`、`providers.test.ts`、`reducers.test.ts`、`resumeStateV2.test.ts`、`runLedger.test.ts`、`runnerPolicy.test.ts`、`subAgentSandbox.test.ts`、`toolCallParser.test.ts`、`toolDefinitions.test.ts`、`toolInvocation.test.ts`、`toolScheduler.test.ts`、`webviewSmoke.test.ts`、`workflowRegistry.test.ts`、`workflowViewModel.test.ts`、`workspaceSymbolParser.test.ts`。
+常见单测文件（53 个）包括：`agentToolSafety.test.ts`、`agentRunnerState.test.ts`、`agentRunnerFallback.test.ts`、`agentRunnerToolRepair.test.ts`、`agentResumeState.test.ts`、`agentSessionCoordinator.test.ts`、`agentUiBroadcaster.test.ts`、`agentManagerContracts.test.ts`、`agentManagerRunSnapshot.test.ts`、`aiServiceTimeout.test.ts`、`argRepair.test.ts`、`artifactPanelModel.test.ts`、`artifactStore.test.ts`、`chatFormatters.test.ts`、`chatModels.test.ts`、`commandPreflight.test.ts`、`contextBudget.test.ts`、`contextMemory.test.ts`、`diagnosticI18n.test.ts`、`diagnosticMetadata.test.ts`、`diffEngine.test.ts`、`editFileReplacer.test.ts`、`gameProfiles.test.ts`、`graphicsFeatures.test.ts`、`indexService.test.ts`、`jsonRepair.test.ts`、`memoryParser.test.ts`、`messageRenderer.test.ts`、`orchestrator.test.ts`、`pdxshader-grammar.test.ts`、`permissionPolicy.test.ts`、`planModeGuard.test.ts`、`pricing.test.ts`、`projectProfile.test.ts`、`promptBuilderContext.test.ts`、`promptBuilderSnapshot.test.ts`、`promptBuilderSprite.test.ts`、`providers.test.ts`、`readTracker.test.ts`、`reducers.test.ts`、`resumeStateV2.test.ts`、`runCommandReadonly.test.ts`、`runLedger.test.ts`、`runnerPolicy.test.ts`、`subAgentSandbox.test.ts`、`toolCallParser.test.ts`、`toolDefinitions.test.ts`、`toolInvocation.test.ts`、`toolScheduler.test.ts`、`webviewSmoke.test.ts`、`workflowRegistry.test.ts`、`workflowViewModel.test.ts`、`workspaceSymbolParser.test.ts`。
 
 ## Pull Request 清单
 

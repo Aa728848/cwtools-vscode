@@ -47,6 +47,10 @@ Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访�
 | `indexing/locParser.ts` | 本地化 YML 纯解析与查询 helper |
 | `indexing/workspaceSymbolParser.ts` | PDXScript / asset / gui 符号解析、查询与引用提取 |
 | `codeActions.ts` | AI 诊断修复、解释和批量修复 Code Actions |
+| `diagnosticI18n.ts` | 客户端诊断本地化：中文翻译 + 修复建议、`source` 归一化、ignore-key 匹配 |
+| `fileExtensions.ts` | 跨平台大小写不敏感扩展名匹配（`matchesExt`、`GRAPHICS_EXTS`），UI 与 AI 层共用 |
+| `fsCaseInsensitive.ts` | 大小写不敏感路径解析（用于 Linux/macOS 上大小写不匹配的资源引用） |
+| `pathScope.ts` | 中立的 `isPathInsideOrEqual` / `foldPathCase` 路径包含判定，UI 与 AI 沙盒共用 |
 | `guiPanel.ts` / `guiParser.ts` | `.gui` 文件解析与 Canvas 预览宿主 |
 | `solarSystemPanel.ts` / `solarSystemParser.ts` | `solar_system_initializers/` 星系预览 |
 | `eventChainPanel.ts` / `eventChainParser.ts` | 事件链扫描、子图和源码跳转 |
@@ -115,7 +119,7 @@ sequenceDiagram
 | --- | --- |
 | `agentRunner.ts` | 推理循环、工具权限、workflow 应用、上下文压缩、检查点、回退 |
 | `agentTools.ts` | 工具分发、超时、共享黑板和 orchestrator 工具入口 |
-| `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配和回退 |
+| `aiService.ts` | 各 AI Provider HTTP/SSE 客户端、请求适配、回退和 custom 线协议分发（`customApiFormat`） |
 | `promptBuilder.ts` / `prompt/sections/` | Prompt facade、项目上下文和模式系统提示词 |
 | `providers.ts` / `providers/models/` | Provider facade、默认模型、能力、价格和缓存折扣 |
 | `types.ts` | 消息、工具、模式、上下文、Artifact、设置类型 |
@@ -125,7 +129,7 @@ sequenceDiagram
 | `chatInit.ts` | `/init` 命令处理器、profile 生成和 CWTOOLS.md 渲染 |
 | `gameKnowledge.ts` | 按 languageId 选择的 9 款游戏 PDXScript 知识块 |
 | `skills.ts` | `SKILL.md` 技能索引（built-in/user/project）+ `run_skill` 按需正文加载 |
-| `memoryParser.ts` | `.cwtools-ai-memory.md` 长期工作区记忆读写与自动裁剪 |
+| `memoryParser.ts` | topic 级 `.cwtools-ai/<topicId>/.cwtools-ai-memory.md` 长期记忆读写与自动裁剪 |
 | `workspacePaths.ts` | AI 存储根解析、topic/scratch 目录、多 workspace folder 支持 |
 | `workspaceSandbox.ts` | 路径输入清洗、作用域分类（project/ai/workspace/outside）和信任判定 |
 | `usageTracker.ts` | 跨会话 token 用量、成本和缓存统计持久化 |
@@ -227,6 +231,8 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 - `runner/permissionPolicy.ts` 的 `cwdScope` 判断使用 `path.relative`，避免前缀绕过。
 - 写工具经由 `PartitionedWriteQueue` 管理；`.yml` 本地化写入必须使用 `write_localisation`。
 - `edit_file(filePath, oldString, newString, replaceAll?)` 是单处模糊替换原语（registry `EDIT`、`per-file-write`），复用 `fuzzyReplace` 与既有写守卫。
+- `apply_patch`、`multi_replace_file_content`、`ast_mutate` 已从模型可见工具集退役：`agentTools.execute()` 拦截并引导改用 `edit_file`/`replace_lines`/`edit_pdx_block`/`write_localisation`，实现仅保留给内部调用。
+- `read_file` 输出带 `N | ` 行号前缀；`write_file`/`edit_file` 会自动剥离误粘贴的前缀（`replacerSuite.ts` 的 `stripLineNumberPrefixes` 兼作 `fuzzyReplace` 的回退匹配策略）。
 - 对 PDXScript 优先使用 `query_workspace_index`、`document_symbols`、`get_pdx_block`、`get_file_context` 等结构化读取工具。`get_pdx_block`/`get_file_context` 现会 `markRead` 并返回 1 基行号，读/搜索工具出错时返回 `error` 字段区别于空结果。
 - 当前多 Agent 调度工具是 `dispatch_agents`，配套 `query_blackboard` 和 `merge_results`。
 - `run_skill` 工具按需加载 `SKILL.md` 正文；`skills.ts` 负责索引、`promptBuilder.ts` 只注入精简技能索引，正文不进入基础 prompt。
@@ -315,7 +321,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ### Game Knowledge
 
-`gameKnowledge.ts` 为 9 款 Paradox 游戏提供 PDXScript 知识块（Stellaris、HOI4、EU4、CK2、CK3、VIC2、VIC3、Imperator、EU5），外加一个通用 Paradox 回退。`promptBuilder.ts` 通过 `getGameKnowledge(languageId)` 动态选择注入。
+`gameKnowledge.ts` 为 9 款 Paradox 游戏提供 PDXScript 知识块（Stellaris、HOI4、EU4、CK2、CK3、VIC2、VIC3、Imperator、EU5），外加一个通用 Paradox 回退。`promptBuilder.ts` 通过 `getGameKnowledge(languageId)` 动态选择注入。Stellaris 知识块包含 `common/` 各目录的覆盖/加载顺序规则（LIOS/FIOS/FIXES/DUPL/NO）和可选作用域操作符 `scope?` 的说明。
 
 ### Skills
 
@@ -323,10 +329,10 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ### Memory Parser
 
-`memoryParser.ts` 管理 `.cwtools-ai-memory.md` 长期工作区记忆文件：
+`memoryParser.ts` 管理 topic 级长期记忆文件 `.cwtools-ai/<topicId>/.cwtools-ai-memory.md`（旧的工作区根目录 `.cwtools-ai-memory.md` 仍作为读取回退，新写入一律落到 topic 路径）：
 
-- 缓存读取（按 mtime 检查刷新）
-- 追加新记忆条目（含日期和优先级标签）
+- 按 topic 缓存读取（按签名检查刷新），多个 topic 可同时缓存
+- 追加新记忆条目（含日期和优先级标签），自动创建 topic 目录
 - 超出 `MAX_MEMORY_CHARS`（~4000 字符）时按优先级自动裁剪
 
 ### Usage Tracker
@@ -335,7 +341,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 ### Replacer Suite
 
-`tools/replacerSuite.ts` 提供 10 种递进式模糊字符串替换策略，经 `FileToolHandler.replace()` 供 `edit_file` 工具与 `apply_patch` 的 hunk 应用消费（`multi_replace_file_content` 精确未命中时也回退到该引擎）：
+`tools/replacerSuite.ts` 提供 10 种递进式模糊字符串替换策略，经 `FileToolHandler.replace()` 供 `edit_file` 工具与内部 hunk 应用消费：
 
 1. 直接匹配
 2. Unicode 归一化（BOM、CRLF、全角/半角、智能引号）
@@ -348,7 +354,7 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 9. 上下文感知
 10. Jaccard 相似度滑动窗口
 
-匹配失败时 `findNearestMatch` 返回最佳部分匹配信息，帮助 AI 自我纠正。
+匹配失败时 `findNearestMatch` 返回最佳部分匹配信息，帮助 AI 自我纠正。`stripLineNumberPrefixes` 可剥离 `read_file` 输出的 `N | ` 行号前缀，并作为 `fuzzyReplace` 的回退匹配策略。
 
 ### Schema Flatten
 
@@ -390,7 +396,16 @@ Webview 维护规则：
 | `src/CSharpExtensions/` | C# 辅助扩展 |
 | `submodules/cwtools/` | 上游 CWTools F# 库子模块 |
 
-`src/Main/Main.fsproj` 默认引用 `submodules/cwtools/CWTools/CWTools.fsproj`。如需使用本地 CWTools，可在 `src/Main/cwtools.local.props` 中设置 `UseLocalCwtools=True` 和 `CwtoolsPath`。
+`src/Main/Main.fsproj` 默认引用 `submodules/cwtools/CWTools/CWTools.fsproj`。如需使用本地 CWTools，可在 `src/Main/cwtools.local.props` 中设置 `UseLocalCwtools=True` 和 `CwtoolsPath`。项目使用 `RuntimeIdentifiers`（复数）声明 `win-x64`/`linux-x64`/`osx-x64`，无 RID 的普通 `dotnet build` 也能成功；文件系统比较按平台条件化（仅 Windows 用 `OrdinalIgnoreCase`）。
+
+### 诊断、格式化与补全降级
+
+- **诊断元数据**：服务端发布的每条 `Diagnostic` 携带 `codeDescription`（指向 `docs/diagnostic-codes.md#<code>` 的 URL）和 LSP `tags`（Deprecated/Unnecessary）。`docs/diagnostic-codes.md` 是中英双语的 CWxxx 错误码参考，标题锚点与错误码一一对应。
+- **客户端诊断增强**：`client/extension/diagnosticI18n.ts` 在 LSP middleware 中把英文校验消息替换为中文翻译 + 修复建议（非中文环境追加英文 💡 建议行），由 `cwtools.ai.enhancedDiagnostics` 开关控制；ignore-list 匹配在增强之前针对原始服务端消息执行。
+- **动态参数诊断延迟**：动态参数类诊断可延迟到工作区加载完成后批量预热再重发，由 `cwtools.diagnostics.deferDynamicParameterDiagnostics` / `dynamicPreflightTimeoutMs` / `dynamicPreflightMaxEntities` 配置。
+- **文档格式化**：服务端实现 `DocumentFormatting`——`.yml` 本地化文件归一化缩进并保留 BOM/换行风格，PDX 脚本经 `CKPrinter` 整文档格式化。
+- **补全锁降级**：`src/LSP/LanguageServer.fs` 对 Completion 请求使用 `TryEnterReadLock`（默认 350ms 超时），超时后从 stale-completion 缓存返回降级结果，避免长校验阻塞补全。
+- **RevalidateRequest**：编辑 `inline_scripts/` 定义文件保存后，绕过防抖立即重新校验其调用方文件。
 
 ### Shader 支持
 
@@ -426,12 +441,11 @@ Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 | `npm run check:release` | 发布前质量门 |
 | `npm run verify` | `lint + compile + unit + release gate` 综合验证 |
 
-规则同步脚本：
+规则同步脚本（`tools/rules-sync/`）：
 
-- `npm run rules:stellaris`
-- `npm run rules:stellaris:scan`
-- `npm run rules:stellaris:check`
-- `npm run rules:stellaris:update`
+- `npm run rules:stellaris` — 交互式入口
+- `npm run rules:stellaris:scan` / `check` / `update` — 扫描、校验（支持 `--ci`）、更新
+- `npm run rules:stellaris:report` — 只读对比游戏 `script_documentation` 日志、原版 `common/` 与 CWT 配置基线，生成自包含 HTML 报告（`tools/rules-sync/report.ts`，默认自动打开浏览器，`--no-open` 关闭）
 
 .NET 常用命令：
 
@@ -479,7 +493,7 @@ Webview 与 Extension Host 是完全隔离的运行环境。由于 Webview 运�
 
 ### 子 Agent 沙盒
 
-`orchestrator/subAgentSandbox.ts` 在分派每个子任务时构造 `SubAgentSandbox`：默认排除高危/交互式特权工具，对只读/计划角色禁用写工具，并根据角色与 `taskNode.plannedFiles` 收紧 `writeScope`。`enforceSubAgentSafety` 在 Host 层做最终拦截。
+`orchestrator/subAgentSandbox.ts` 在分派每个子任务时构造 `SubAgentSandbox`：默认排除高危/交互式特权工具，对只读/计划角色禁用写工具，并根据角色与 `taskNode.plannedFiles` 收紧 `writeScope`。路径包含判定复用 `pathScope.ts` 的 `isPathInsideOrEqual`/`foldPathCase`（仅 Windows 折叠大小写）。`plannedFiles` 全部为本地化 `.yml` 的子任务会额外屏蔽通用写工具、只允许 `write_localisation`，且 `dispatch_agents` 会把此类任务自动升级为 `loc_writer` 角色。`enforceSubAgentSafety` 在 Host 层做最终拦截。
 
 ### 运行账本与恢复
 
@@ -497,10 +511,13 @@ Webview 与 Extension Host 是完全隔离的运行环境。由于 Webview 运�
 
 `aiService.ts` 负责不同 Provider 的请求兼容：
 
-- Claude 使用 Anthropic Messages API 适配。
+- Claude 使用 Anthropic Messages API 适配；`capabilities.ts` 的 `getAnthropicModelFeatures` 按模型派生 adaptive thinking / effort / sampling 移除等请求特性。
+- Custom Provider 支持四种线协议，由 `cwtools.ai.customApiFormat` 选择：`openai-chat-completions`（默认）、`openai-responses`、`anthropic-messages`、`gemini-generate-content`。
+- Endpoint 按 Provider 存储在 `cwtools.ai.providerEndpoints`（map）；旧的全局 `cwtools.ai.endpoint` 由 `migrateLegacyEndpoint()` 一次性迁移。
 - GLM 使用 `{id}.{secret}` 生成 HS256 JWT。
 - DeepSeek/Qwen 等非标准工具调用由 `toolCallParser.ts` 回退解析。
 - 不支持 `tool_choice` 的 Provider 会进行请求清理。
+- 模型定价与上下文窗口支持 `providerId:model` 作用域键（如 `openrouter:*`），`getModelPricing` / `getModelContextTokens` 优先匹配 Provider 级条目再回退裸模型名。
 
 ### 内存和性能
 
@@ -519,6 +536,8 @@ Extension/AI 代码优先使用 `ErrorReporter`，避免裸 `console.error`。�
 - `client/extension/ai/workflowI18n.ts`
 - `client/webview/chat/i18n.ts`
 - `client/webview/chat/messages.*.ts`
+
+CWTools 诊断消息的中文化不走上述模块：F# 服务端硬编码英文文本，由 `client/extension/diagnosticI18n.ts` 在 LSP middleware 中按消息形态 + CW 错误码翻译并附加修复建议（见"诊断、格式化与补全降级"一节）。
 
 ### 前缀缓存（Prompt Cache）度量审计与高保真展现 (D3 重构)
 
@@ -575,6 +594,10 @@ cwtools-vscode/
       indexing/
       extension.ts
       gameProfiles.ts
+      diagnosticI18n.ts       客户端诊断中文翻译 + 修复建议
+      fileExtensions.ts       大小写不敏感扩展名匹配
+      fsCaseInsensitive.ts    大小写不敏感路径解析
+      pathScope.ts            共享路径包含判定
       vanillaCompare.ts
     webview/
       chat/                   22 个提取的浏览器模块
@@ -588,8 +611,10 @@ cwtools-vscode/
       techTreePreview.ts
       entityPreview.ts
     test/
-      unit/                   49 个单元测试文件
+      unit/                   53 个单元测试文件
       suite/
+  docs/
+    diagnostic-codes.md       CWxxx 诊断码中英双语参考（codeDescription 链接目标）
   src/
     LSP/
     Main/
@@ -603,7 +628,7 @@ cwtools-vscode/
     workflows/                package.md
   tools/
     check-release.js
-    rules-sync/
+    rules-sync/               规则 scan/check/update/report 工具（report.ts 生成 HTML 对比报告）
   release/
     bin/
     rules/

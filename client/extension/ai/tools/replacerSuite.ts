@@ -246,10 +246,6 @@ function* similarityReplacer(content: string, find: string): Generator<string> {
 
 // ─── Nearest match finder (for enhanced error messages) ─────────────────────
 
-/**
- * Find the best partial match in content for reporting purposes.
- * Returns { startLine (1-based), endLine (1-based), similarity, preview } or null.
- */
 export function findNearestMatch(content: string, find: string): {
     startLine: number; endLine: number; similarity: number; preview: string;
 } | null {
@@ -302,6 +298,19 @@ export function findNearestMatch(content: string, find: string): {
     };
 }
 
+// ─── Line-number prefix stripping ───────────────────────────────────────────
+
+/** Matches the `N | ` prefix that read_file prepends to every output line. */
+const LINE_NUMBER_PREFIX = /^\s*\d+\s*\|( |$)/;
+
+export function stripLineNumberPrefixes(text: string): string | null {
+    const lines = text.split('\n');
+    const nonEmpty = lines.filter(l => l.trim().length > 0);
+    if (nonEmpty.length === 0) return null;
+    if (!nonEmpty.every(l => LINE_NUMBER_PREFIX.test(l))) return null;
+    return lines.map(l => l.replace(LINE_NUMBER_PREFIX, '')).join('\n');
+}
+
 // ─── Main replace function ──────────────────────────────────────────────────
 
 const REPLACERS = [
@@ -317,25 +326,40 @@ const REPLACERS = [
     similarityReplacer,
 ] as const;
 
-/**
- * Try each of the 10 Replacers in order, first match wins.
- * Throws if no strategy can find oldString in content.
- * Error message includes nearest match info to help the AI self-correct.
- */
 export function fuzzyReplace(content: string, oldString: string, newString: string, replaceAll: boolean): string {
     if (oldString === newString) throw new Error('oldString and newString are identical — no change needed');
-    for (const replacer of REPLACERS) {
-        for (const search of replacer(content, oldString)) {
-            const idx = content.indexOf(search);
-            if (idx === -1) continue;
-            if (replaceAll) return search.length > 0 ? content.split(search).join(newString) : content;
-            const lastIdx = content.lastIndexOf(search);
-            if (idx !== lastIdx) throw new Error(
-                'Multiple matches found. Provide more context in oldString to make it unique, or use replaceAll=true.'
-            );
-            return content.substring(0, idx) + newString + content.substring(idx + search.length);
+
+    const findMatch = (find: string): string | null => {
+        for (const replacer of REPLACERS) {
+            for (const search of replacer(content, find)) {
+                if (content.indexOf(search) !== -1) return search;
+            }
+        }
+        return null;
+    };
+
+    let search = findMatch(oldString);
+    let replacement = newString;
+    if (search === null) {
+        const strippedOld = stripLineNumberPrefixes(oldString);
+        if (strippedOld !== null && strippedOld !== oldString) {
+            search = findMatch(strippedOld);
+            if (search !== null) {
+                replacement = stripLineNumberPrefixes(newString) ?? newString;
+            }
         }
     }
+
+    if (search !== null) {
+        const idx = content.indexOf(search);
+        if (replaceAll) return search.length > 0 ? content.split(search).join(replacement) : content;
+        const lastIdx = content.lastIndexOf(search);
+        if (idx !== lastIdx) throw new Error(
+            'Multiple matches found. Provide more context in oldString to make it unique, or use replaceAll=true.'
+        );
+        return content.substring(0, idx) + replacement + content.substring(idx + search.length);
+    }
+
     // Enhanced error: find nearest match to help AI self-correct
     const nearest = findNearestMatch(content, oldString);
     let errMsg = 'Content not found. Do NOT omit context or use "..." in oldString! Include the full text from start to end of the replacement, ensuring whitespace matches exactly.';

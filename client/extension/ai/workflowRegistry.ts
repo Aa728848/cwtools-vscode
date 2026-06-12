@@ -147,7 +147,7 @@ registerWorkflow({
 			// Asset lookup
 			'find_sprite_candidates', 'find_sound_candidates',
 			// Write
-			'write_file', 'multi_replace_file_content', 'replace_lines',
+			'write_file', 'edit_file', 'replace_lines',
 			'edit_pdx_block', 'write_localisation',
 			// Reflection
 			'analyze_diagnostic_error',
@@ -405,7 +405,7 @@ registerWorkflow({
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			'find_sprite_candidates', 'find_sound_candidates',
 			'query_rules',
-			'write_file', 'multi_replace_file_content', 'replace_lines',
+			'write_file', 'edit_file', 'replace_lines',
 			'edit_pdx_block',
 			'todo_write',
 		],

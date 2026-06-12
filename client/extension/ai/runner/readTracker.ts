@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import * as crypto from 'crypto';
 
 export interface ReadFileInfo {
@@ -9,9 +10,16 @@ export interface ReadFileInfo {
 export class ReadTracker {
     private readonly readMap = new Map<string, ReadFileInfo>();
 
-    /**
-     * 标记一个文件为已读，并保存其时间戳与 hash 值
-     */
+    private normalizeKey(filePath: string): string {
+        let resolved: string;
+        try {
+            resolved = path.resolve(filePath);
+        } catch {
+            resolved = filePath;
+        }
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    }
+
     markRead(filePath: string): void {
         try {
             if (!fs.existsSync(filePath)) {
@@ -21,7 +29,7 @@ export class ReadTracker {
             const content = fs.readFileSync(filePath);
             const byteHash = crypto.createHash('sha256').update(content).digest('hex');
 
-            this.readMap.set(filePath, {
+            this.readMap.set(this.normalizeKey(filePath), {
                 mtime: stat.mtimeMs,
                 byteHash
             });
@@ -30,16 +38,12 @@ export class ReadTracker {
         }
     }
 
-    /**
-     * 判断一个文件在执行写操作前，是否已被正确读取且中途未发生外部篡改
-     */
     canWrite(filePath: string): { ok: boolean; reason?: string } {
         if (!fs.existsSync(filePath)) {
-            // 如果物理文件尚不存在，则说明是新文件写入，直接放行
             return { ok: true };
         }
 
-        const info = this.readMap.get(filePath);
+        const info = this.readMap.get(this.normalizeKey(filePath));
         if (!info) {
             return {
                 ok: false,
@@ -76,15 +80,15 @@ export class ReadTracker {
                 const content = fs.readFileSync(filePath);
                 const byteHash = crypto.createHash('sha256').update(content).digest('hex');
 
-                this.readMap.set(filePath, {
+                this.readMap.set(this.normalizeKey(filePath), {
                     mtime: stat.mtimeMs,
                     byteHash
                 });
             } else {
-                this.readMap.delete(filePath);
+                this.readMap.delete(this.normalizeKey(filePath));
             }
         } catch {
-            this.readMap.delete(filePath);
+            this.readMap.delete(this.normalizeKey(filePath));
         }
     }
 
@@ -92,7 +96,7 @@ export class ReadTracker {
      * 清理某个特定文件的读记录（例如在多 Agent 场景下子 Agent 改写了文件，需要强制父 Agent 重新读取）
      */
     invalidate(filePath: string): void {
-        this.readMap.delete(filePath);
+        this.readMap.delete(this.normalizeKey(filePath));
     }
 
     /**

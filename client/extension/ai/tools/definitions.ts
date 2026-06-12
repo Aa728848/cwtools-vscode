@@ -474,7 +474,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'replace_lines',
-            description: 'Replace an explicit 1-based line range in a non-localisation file. Prefer this over multi_replace_file_content when you already know exact boundaries from document_symbols/get_file_context, or when multi_replace_file_content reports nearest matching line numbers. To avoid replacing the wrong code after concurrent edits, include expectedContent or expectedStartText/expectedEndText whenever possible. Never use for .yml localisation files; use write_localisation instead.',
+            description: 'Replace an explicit 1-based line range in a non-localisation file. Prefer this over edit_file when you already know exact boundaries from document_symbols/get_file_context, or when edit_file reports nearest matching line numbers. To avoid replacing the wrong code after concurrent edits, include expectedContent or expectedStartText/expectedEndText whenever possible. Never use for .yml localisation files; use write_localisation instead.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -535,7 +535,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
                     errorCode: { type: 'string', description: 'Optional diagnostic code or compact error message.' },
                     message: { type: 'string', description: 'Optional raw failure message from a tool or validation step.' },
                     previousAttempt: { type: 'string', description: 'Optional summary of the last attempted fix. Helps detect repeated blind retries.' },
-                    toolName: { type: 'string', description: 'Optional name of the tool that failed, e.g. multi_replace_file_content, write_localisation, get_diagnostics.' },
+                    toolName: { type: 'string', description: 'Optional name of the tool that failed, e.g. edit_file, write_localisation, get_diagnostics.' },
                     diagnosticsSnapshot: { type: 'object', description: 'Optional raw get_diagnostics result, write-tool diagnostics payload, or compact diagnostic object to classify without querying diagnostics again.' },
                     toolResult: { type: 'object', description: 'Optional raw failed tool result to classify without querying diagnostics again.' },
                     reflection: { type: 'string', description: 'Optional legacy free-form analysis from the model. Kept for backward compatibility; the host still returns deterministic routing advice.' }
@@ -639,50 +639,12 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    {
-        type: 'function',
-        function: {
-            name: 'apply_patch',
-            description: 'Apply a unified diff patch to one or more files atomically. Use this when you already have a valid git-style patch, especially for coordinated multi-file changes. For ordinary PDXScript edits with exact line boundaries, prefer replace_lines; for exact current-text snippets in one file, use multi_replace_file_content. All hunks must succeed or none are written.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    patch: { type: 'string', description: 'Unified diff patch string (--- a/file ... +++ b/file ... @@ ...). File paths relative to workspace root or absolute.' },
-                    cwd: { type: 'string', description: 'Working directory for resolving relative paths (defaults to workspace root)' },
-                },
-                required: ['patch'],
-            },
-        },
-    },
-
-    {
-        type: 'function',
-        function: {
-            name: 'multi_replace_file_content',
-            description: 'Perform multiple independent, non-contiguous replacements in an existing non-localisation file. TargetContent must match the current file exactly inside the supplied line range. For exact line boundaries, prefer replace_lines because it does not depend on string matching. Never use for .yml localisation files; use write_localisation instead.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    TargetFile: { type: 'string', description: 'Absolute path of the target file to modify.' },
-                    Instruction: { type: 'string', description: 'Explanation of why this edit is being made and the reasoning behind it.' },
-                    ReplacementChunks: {
-                        type: 'array',
-                        items: {
-                            type: 'object',
-                            properties: {
-                                StartLine: { type: 'number', description: 'The starting line number of the chunk (1-indexed).' },
-                                EndLine: { type: 'number', description: 'The ending line number of the chunk (1-indexed).' },
-                                TargetContent: { type: 'string', description: 'The exact old code sequence to be replaced, which must strictly match the local file content.' },
-                                ReplacementContent: { type: 'string', description: 'The new code content to replace it with.' },
-                            },
-                            required: ['StartLine', 'EndLine', 'TargetContent', 'ReplacementContent'],
-                        },
-                    },
-                },
-                required: ['TargetFile', 'Instruction', 'ReplacementChunks'],
-            },
-        },
-    },
+    // apply_patch / multi_replace_file_content — RETIRED from the model-visible toolset.
+    // Their semantics fully overlap edit_file (fuzzy old/new replacement) and
+    // replace_lines (guarded line ranges); offering all of them diluted tool choice
+    // and multiplied edit-failure modes. The handler implementations remain for
+    // internal callers (edit_pdx_block delegates to multiReplaceFileContent) and
+    // stale histories hit a redirect in AgentToolExecutor.execute.
     // - CWTools Deep API tools -
     {
         type: 'function',
@@ -940,7 +902,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_localisation',
-            description: 'MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use multi_replace_file_content, apply_patch, or write_file for .yml localisation files - ALWAYS use this tool instead.',
+            description: 'MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, replace_lines, or write_file for .yml localisation files - ALWAYS use this tool instead.',
             parameters: {
                 type: 'object',
                 properties: {

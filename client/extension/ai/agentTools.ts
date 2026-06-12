@@ -35,18 +35,8 @@ import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard'
 import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 
-// - Tool Executor -
-
-/** Maximum tool result size before truncation.
- * This is a safety-net ceiling - the smarter budgetToolResult in agentRunner.ts
- * handles context-aware dedup/segmentation. This threshold must be >= TOOL_RESULT_BUDGET_MAX
- * so the intelligent budgeting layer gets first crack at the data.
- */
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
-
-// Tool execution timeouts (ms) - prevents hangs on network filesystems or LSP deadlocks
 const TOOL_TIMEOUTS: Record<string, number> = {
-    // LSP / CWTools query tools - 45s (LSP can be queued behind heavy indexing)
     query_scope: 45_000,
     query_types: 45_000,
     query_localisation_index: 45_000,
@@ -54,7 +44,6 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_project_profile: 5_000,
     query_rules: 45_000,
     query_references: 45_000,
-    // validate_code - REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
     get_lsp_status: 10_000,
     get_diagnostics: 45_000,
     get_file_context: 45_000,
@@ -75,7 +64,6 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     get_entity_info: 45_000,
     query_static_modifiers: 45_000,
     query_variables: 45_000,
-    // File tools - 30s
     read_file: 30_000,
     write_file: 30_000,
     edit_file: 30_000,
@@ -85,29 +73,34 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     list_directory: 30_000,
     glob_files: 30_000,
     grep: 30_000,
-    // Network/External - 20s
     web_fetch: 20_000,
     search_web: 20_000,
     codesearch: 20_000,
-    // Shell - requires user permission approval (infinite wait), command execution has independent internal timeoutMs protection,
-    // Set outer timeout to 0 = disabled, AbortSignal is responsible for global interrupt instead
     run_command: 0,
-    // Media Asset Conversion
     convert_image_to_dds: 60_000,
     convert_audio: 60_000,
-    // Media asset deployment - requires permission approval, also disables outer timeout
     deploy_mod_asset: 0,
-    // Git
     git_ops: 30_000,
     save_workflow: 30_000,
-    // Todo - pure memory operation, very short timeout is enough
     todo_write: 5_000,
     run_skill: 30_000,
-    // Orchestrator - sub-Agent scheduling takes a long time and is managed by the coordinator's own life cycle and external AbortSignal
-    // Relax the timeout to 1 hour to prevent unexpected timeouts and zombie retries due to slow response of large language models
     dispatch_agents: 3600_000,
     merge_results: 30_000,
 };
+
+
+const WRITE_CONFIRMATION_TOOLS = new Set<string>([
+    'write_file',
+    'edit_file',
+    'multi_replace_file_content',
+    'replace_lines',
+    'apply_patch',
+    'ast_mutate',
+    'edit_pdx_block',
+    'write_localisation',
+    'lsp_operation',
+]);
+
 const DEFAULT_TOOL_TIMEOUT = 30_000;
 const LOCALISATION_YML_TOOL_GUARD = [
     'Localisation YML routing guard:',
@@ -331,7 +324,12 @@ export class AgentToolExecutor {
     invalidateCacheForFile(filePath: string): void {
         this.lspHandler.invalidateCacheForFile(filePath);
     }
-    
+
+    /** Reset per-file edit failure counters; called at the start of each agent run. */
+    resetEditFailureTracking(): void {
+        this.fileHandler.resetEditFailureTracking();
+    }
+
     get vfsOverlay(): Map<string, string> | undefined {
         return this.parentRunnerOptions?.vfsOverlay;
     }
@@ -341,13 +339,14 @@ export class AgentToolExecutor {
         return this.externalHandler;
     }
 
-    /**
-     * Execute a tool by name with the given arguments.
-     * Results are automatically truncated if too large.
-     * Each tool execution is wrapped in a Promise.race with a category-specific timeout
-     * to prevent hangs on network filesystems, LSP deadlocks, or unresponsive external services.
-     */
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
+        // Redirect retired edit tools to the consolidated edit toolset instead of failing
+        if (toolName === 'apply_patch' || toolName === 'multi_replace_file_content' || toolName === 'ast_mutate') {
+            return {
+                success: false,
+                message: `${toolName} has been retired. Use edit_file(filePath, oldString, newString) for text replacement, replace_lines(filePath, startLine, endLine, newContent, expectedContent) for line-range edits, edit_pdx_block(file, symbol, newContent) for whole PDX blocks, or write_file for new/whole-file writes. For .yml localisation files use write_localisation.`,
+            };
+        }
         const readTracker = (context?.agentRunner as any)?.readTracker;
         const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
         if (isSubAgent && toolName === 'git_ops') {
@@ -375,9 +374,6 @@ export class AgentToolExecutor {
             }
         }
 
-        // T4.1 - replay short-circuit. When a ReplaySession is attached, serve recorded
-        // results from the original run's ledger instead of executing live. Misses
-        // fall through to live execution (caller can still validate divergence).
         if (mode === 'plan') {
             const guard = validatePlanModeToolUse(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
             if (!guard.allowed) {
@@ -416,6 +412,16 @@ export class AgentToolExecutor {
             } else {
                 timeout = DEFAULT_TOOL_TIMEOUT;
             }
+        }
+        if (
+            timeout > 0
+            && WRITE_CONFIRMATION_TOOLS.has(toolName)
+            && this.fileWriteMode === 'confirm'
+            && (args as Record<string, unknown>)?._autoApply !== true
+            && context?.runnerOptions?.forceAutoApplyWrites !== true
+            && context?.runnerOptions?.useSlimPrompt !== true
+        ) {
+            timeout = 0;
         }
         try {
             const parentAbortSignal = context?.runnerOptions?.abortSignal;

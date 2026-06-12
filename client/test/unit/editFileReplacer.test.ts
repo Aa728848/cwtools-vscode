@@ -295,4 +295,46 @@ describe('FileToolHandler.replace — OpenCode Replacer Suite', () => {
             expect(result).to.equal('Y\nY');
         });
     });
+
+    // ─── Line-number prefix stripping (read_file `N | ` output) ────────────
+
+    describe('Line-number prefix stripping', () => {
+        it('strips read_file-style prefixes from oldString and matches', () => {
+            const content = 'country_event = {\n\tid = test.1\n\tis_triggered_only = yes\n}';
+            const oldStr = '12 | \tid = test.1\n13 | \tis_triggered_only = yes';
+            const result = replace(content, oldStr, '\tid = test.2\n\tis_triggered_only = yes');
+            expect(result).to.equal('country_event = {\n\tid = test.2\n\tis_triggered_only = yes\n}');
+        });
+
+        it('strips prefixes from newString when it is prefixed too', () => {
+            const content = 'a = 1\nb = 2';
+            const result = replace(content, '1 | a = 1', '1 | a = 9');
+            expect(result).to.equal('a = 9\nb = 2');
+        });
+
+        it('keeps newString intact when only oldString is prefixed', () => {
+            const content = 'a = 1\nb = 2';
+            const result = replace(content, '2 | b = 2', 'b = 7');
+            expect(result).to.equal('a = 1\nb = 7');
+        });
+
+        it('does not strip when content legitimately contains the same text', () => {
+            // Exact match must win before any stripping is attempted
+            const content = 'value = "5 | pipe"';
+            const result = replace(content, '5 | pipe', '5 | changed');
+            expect(result).to.equal('value = "5 | changed"');
+        });
+
+        it('does not strip when only some lines carry prefixes', () => {
+            const content = 'alpha\nbeta';
+            expect(() => replace(content, '1 | alpha\nnot-prefixed-and-not-present', 'X')).to.throw('Content not found');
+        });
+
+        it('strips prefixes with varying widths and blank lines', () => {
+            const content = 'first\n\nsecond';
+            const oldStr = ' 9 | first\n\n10 | second';
+            const result = replace(content, oldStr, 'merged');
+            expect(result).to.equal('merged');
+        });
+    });
 });

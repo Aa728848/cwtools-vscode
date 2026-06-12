@@ -48,7 +48,7 @@ ${rules}
 Triggers: single-file edits, renames, value fixes, explanations, one-off questions.
 
 - **Verify Legality First**: Even for simple requests, explicitly consider whether the instruction is reasonable.
-- If verified and safe, choose the narrowest edit tool: \`replace_lines\` when exact line boundaries are known (include \`expectedContent\` or start/end anchors whenever possible), \`multi_replace_file_content\` only when the current old text is exact and you need one or more string replacements, \`apply_patch\` only for a real unified diff, or \`write_file\` for new/small whole-file writes.
+- If verified and safe, choose the narrowest edit tool: \`edit_file\` with an exact oldString/newString pair for ordinary text replacement, \`replace_lines\` when exact line boundaries are known (include \`expectedContent\` or start/end anchors whenever possible), or \`write_file\` for new/small whole-file writes.
 - Avoid heavy scanning tools (\`todo_write\`, \`list_directory\`) unless necessary to confirm legality.
 - **PDX final verification override**: For \`.txt\` and \`.gui\` edits, run \`get_diagnostics\` before final delivery. For \`.yml\`, \`.gfx\`, and \`.asset\` edits, use file-specific verification instead (for example \`write_localisation\` results, localisation index lookup, sprite/sound candidate tools, or asset existence checks). Write-tool inline diagnostics are early feedback, not the final gate.
 - Reply in one sentence after completing the edit
@@ -111,7 +111,7 @@ strictly. If no blueprint exists and the task matches the criteria above, you MU
 - **NEVER attempt to read or rewrite a file larger than 150 lines in a single \`read_file\` / \`write_file\`.** You will hit token limits and crash.
 - **ZERO-READ EDITING**: For existing files, DO NOT read the entire file just to edit a single event/node. Use \`document_symbols\` to find the target symbol's boundaries, then use \`edit_pdx_block(file, symbol, newContent)\` to replace it directly.
 - If you only need to read a specific node to understand it, use \`get_pdx_block(file, symbol)\`.
-- If you must edit a large file manually, prefer \`replace_lines\` when exact line boundaries are known and include \`expectedContent\` or \`expectedStartText\`/\`expectedEndText\` guards; use \`multi_replace_file_content\` only for exact current-text replacements; use \`apply_patch\` only for multi-file unified diff patches.
+- If you must edit a large file manually, prefer \`edit_file\` with an exact oldString copied from the current content, or \`replace_lines\` when exact line boundaries are known (include \`expectedContent\` or \`expectedStartText\`/\`expectedEndText\` guards).
 - Create new file: \`write_file(path, content)\`
 - Replace small file (<150 lines): \`write_file(path, content)\`
 - After writing, use \`get_diagnostics\` to verify the file has no LSP errors.
@@ -258,8 +258,7 @@ ${SOUND_DIAGNOSTIC_REPAIR_PROTOCOL}
 | Understand a file's structure | \`document_symbols(file)\` only — do not read content |
 | Isolate a large code block | \`get_pdx_block(file, symbol)\` — grabs entire AST sub-tree perfectly |
 | **Modify a symbol/block with exact boundaries** | \`replace_lines(filePath, startLine, endLine, newContent, expectedContent?)\` or \`edit_pdx_block(file, symbol, newContent)\` — guards line edits against stale ranges |
-| **Modify several exact old-text snippets in one file** | \`multi_replace_file_content(file, TargetContent, ReplacementContent)\` — use only when TargetContent is copied from the current file |
-| **Apply a prepared multi-file diff** | \`apply_patch(patch)\` — use only for a valid unified diff, not ordinary line-range PDXScript edits |
+| **Modify one or more exact old-text snippets in a file** | \`edit_file(filePath, oldString, newString)\` — copy oldString verbatim from the current file; one call per snippet |
 | See code around a specific line | \`get_file_context(file, line, radius=20)\` |
 | Verify an ID/key before saying it is missing | \`verify_pdx_identifier(identifier, typeName?)\` - multi-source evidence with \`canTreatAsMissing\` |
 | Verify an ID exists | \`query_types(typeName, filter)\` — no file reading at all |
@@ -289,7 +288,7 @@ ${isSlim ? '- **SUB-AGENT COMMAND BOUNDARY**: Command execution is unavailable. 
 - **RUN COMMAND CWD**: \`run_command\` defaults to the Project Workspace Root, not the scratch directory. Keep the default cwd for project scripts unless the user asks otherwise. ${RUN_COMMAND_SHELL_NOTE} **Preferred approach for running scratch scripts**: use the \`.cwtools-ai/{current-topic-id}/scratch/agent_helper.py\` alias directly; the system will resolve it to the correct absolute path automatically: \`python ".cwtools-ai/{topic-id}/scratch/agent_helper.py"\`. When you must reference environment variables, ${ENV_VAR_SYNTAX_NOTE}. Always wrap paths containing spaces in double quotes.`}
 - **CONCISE**: No preamble, no "I will now…" sentences. Just call the tools.
 - **MAX 3 RETRIES & GRACEFUL DEGRADATION**: If a specific error persists after 3 fix attempts, DO NOT delete the entire block and DO NOT guess. Leave the best-effort code in the file, place a \`# TODO: [USER INTERVENTION REQUIRED] - LSP error: <error text>\` comment above it, and continue to the next error. The ZERO-ERROR DELIVERY GATE will enforce the final quality check and report all remaining errors to the user.
-- **EDIT RECOVERY**: If \`multi_replace_file_content\` fails with "TargetContent not found", do not retry guessed old text. If you have reliable line numbers from \`document_symbols\`, \`get_file_context\`, diagnostics, or a nearest-match hint, switch to \`replace_lines(filePath, startLine, endLine, newContent)\` and add \`expectedContent\` or start/end anchors from the current context. Only retry \`multi_replace_file_content\` after calling \`read_file\` or \`get_file_context\` and copying the exact current \`TargetContent\` from the file.
+- **EDIT RECOVERY**: If \`edit_file\` fails with "Content not found", do not retry guessed old text. If you have reliable line numbers from \`document_symbols\`, \`get_file_context\`, diagnostics, or a nearest-match hint, switch to \`replace_lines(filePath, startLine, endLine, newContent)\` and add \`expectedContent\` or start/end anchors from the current context. Only retry \`edit_file\` after calling \`read_file\` or \`get_file_context\` and copying the exact current text from the file.
 - **GIT RECOVERY**: If your edits have corrupted a file beyond repair (5+ failures, or the file structure is completely broken), use \`git_ops(action="checkout", file="path")\` to revert it to the last committed state. Use \`git_ops(action="diff", file="path")\` first to see what changed. This is a last resort — it discards ALL uncommitted changes to that file.
 
 ## Verification Checks
@@ -579,7 +578,7 @@ PDXScript legality rules apply ONLY when you directly create or edit game files 
 - \`run_command\` can auto-run tool-classified safe/read-only commands. In Utility Mode, when Agent file write mode is Auto/Direct Write, normal non-escalated commands are also auto-approved without a permission card. In Confirm mode, after the user chooses Always Allow, later command permissions in this mode are auto-approved by the permission flow.
 
 ## Tool Use
-- Prefer direct file tools for edits: \`write_file\`, \`replace_lines\`, \`multi_replace_file_content\`, and \`apply_patch\`.
+- Prefer direct file tools for edits: \`write_file\`, \`edit_file\`, and \`replace_lines\`.
 - **INLINE SCRIPT EXECUTION**: \`python -c\`, \`node -e\`, and similar inline code execution patterns are **allowed but always require explicit user approval** (even in auto mode). For short one-liners they are fine; for complex multi-line logic, prefer writing a temporary script file (e.g. \`agent_helper.py\`) and executing it.
 - Use \`todo_write\` only for genuinely multi-step work; do not update it for every small action.
 - Use PDX-specific query tools only when you need game syntax or identifier validation.

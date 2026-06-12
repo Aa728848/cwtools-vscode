@@ -902,7 +902,7 @@ ${trimmed}
             : '';
         return {
             role: 'user',
-            content: `The code you generated has validation errors. Please fix ONLY the specific error lines listed below using \`replace_lines\` with expectedContent/start-end guards when the line range is clear, or \`multi_replace_file_content\` only after copying exact current TargetContent — do NOT rewrite the entire file.\n\n**Errors:**\n${errorList}${spriteGuidance}${soundGuidance}\nFix each error individually. After fixing, call \`get_diagnostics\` to verify.`,
+            content: `The code you generated has validation errors. Please fix ONLY the specific error lines listed below using \`replace_lines\` with expectedContent/start-end guards when the line range is clear, or \`edit_file\` only after copying the exact current text into oldString — do NOT rewrite the entire file.\n\n**Errors:**\n${errorList}${spriteGuidance}${soundGuidance}\nFix each error individually. After fixing, call \`get_diagnostics\` to verify.`,
         };
     }
 }

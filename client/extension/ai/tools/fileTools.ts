@@ -15,7 +15,7 @@ import { tokenize, TokenType } from '../../pdxTokenizer';
 import type { ValidationError } from '../types';
 import { getCachedFile, setCachedFile } from '../fileCache';
 import { getToolResultBudget } from '../contextBudget';
-import { fuzzyReplace } from './replacerSuite';
+import { fuzzyReplace, stripLineNumberPrefixes } from './replacerSuite';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString } from '../../diagnosticI18n';
 import { getTopicStorageDir } from '../workspacePaths';
@@ -85,7 +85,7 @@ export class FileToolHandler {
     private buildEditEscalationHint(filePath: string, failCount: number): string {
         const basename = path.basename(filePath);
         if (matchesExt(filePath, '.yml')) {
-            return `\n\nWarning: YML BLOCKED (failure #${failCount}): You MUST NOT use multi_replace_file_content for .yml files. Use write_localisation(filePath, language, entries) instead - it handles encoding, formatting, and insertion correctly.`;
+            return `\n\nWarning: YML BLOCKED (failure #${failCount}): You MUST NOT use generic edit tools (edit_file/write_file/replace_lines) for .yml files. Use write_localisation(filePath, language, entries) instead - it handles encoding, formatting, and insertion correctly.`;
         }
         if (failCount >= 5) {
             return `\n\nStop: EDIT BUDGET EXHAUSTED for ${basename} (${failCount} failures). STOP editing this file. Add \`# TODO\` comments for remaining issues and move on to other files.`;
@@ -100,6 +100,10 @@ export class FileToolHandler {
         const failCount = (this.editFailCount.get(filePath) || 0) + 1;
         this.editFailCount.set(filePath, failCount);
         return this.buildEditEscalationHint(filePath, failCount);
+    }
+
+    resetEditFailureTracking(): void {
+        this.editFailCount.clear();
     }
 
     private async executeWithLock<T>(filePath: string, operation: () => Promise<T> | T): Promise<T> {
@@ -184,6 +188,36 @@ export class FileToolHandler {
         try {
             return await Promise.race([
                 onPermissionRequest(id, tool, description, command),
+                abortDeny,
+            ]);
+        } finally {
+            if (onAbort) abortSignal.removeEventListener('abort', onAbort);
+        }
+    }
+
+    private async confirmPendingWrite(
+        filePath: string,
+        newContent: string,
+        messageId: string,
+        context?: import('../types').AgentToolContext
+    ): Promise<boolean> {
+        const onPendingWrite = this.ctx.onPendingWrite;
+        if (!onPendingWrite) return false;
+
+        const abortSignal = context?.runnerOptions?.abortSignal;
+        if (abortSignal?.aborted) return false;
+        if (!abortSignal) {
+            return onPendingWrite(filePath, newContent, messageId);
+        }
+
+        let onAbort: (() => void) | undefined;
+        const abortDeny = new Promise<boolean>((resolve) => {
+            onAbort = () => resolve(false);
+            abortSignal.addEventListener('abort', onAbort, { once: true });
+        });
+        try {
+            return await Promise.race([
+                onPendingWrite(filePath, newContent, messageId),
                 abortDeny,
             ]);
         } finally {
@@ -416,7 +450,8 @@ export class FileToolHandler {
                             _hint: hint,
                         };
                     }
-                    return { content: cached, totalLines, truncated: false };
+                    const numberedCached = lines.map((l, i) => `${1 + i} | ${l}`).join('\n');
+                    return { content: numberedCached, totalLines, truncated: false };
                 }
             }
             // -
@@ -610,7 +645,11 @@ export class FileToolHandler {
                 args.file = await this.resolveAndAuthorizeWrite(args.file, 'write_file', context);
                 const ymlReject = this.rejectGenericYmlWrite('write_file', args.file);
                 if (ymlReject) return ymlReject;
-                
+
+                // Defensive: content copied verbatim from read_file output carries
+                // `N | ` prefixes on every line — writing them would corrupt the file.
+                args.content = stripLineNumberPrefixes(args.content) ?? args.content;
+
                 // Security blocking has been removed: allowing AI to overwrite files directly
                 const { content: originalContent, hasBom } = this.readTextFile(args.file, context);
                 (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(args.file, originalContent);
@@ -625,7 +664,7 @@ export class FileToolHandler {
                 const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
                 if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
                     const messageId = `write_${crypto.randomUUID()}`;
-                    const confirmed = await this.ctx.onPendingWrite(args.file, args.content, messageId);
+                    const confirmed = await this.confirmPendingWrite(args.file, args.content, messageId, context);
                     if (!confirmed) {
                         return { success: false, message: 'User cancelled the write operation' };
                     }
@@ -703,7 +742,7 @@ export class FileToolHandler {
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
             const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
             if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
-                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `edit_${crypto.randomUUID()}`);
+                const confirmed = await this.confirmPendingWrite(filePath, newContent, `edit_${crypto.randomUUID()}`, context);
                 if (!confirmed) {
                     return { success: false, message: 'User cancelled the edit_file operation', pendingDiff: diff };
                 }
@@ -840,7 +879,7 @@ export class FileToolHandler {
         const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
 
         if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
-            const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `ast_${Date.now()}`);
+            const confirmed = await this.confirmPendingWrite(filePath, newContent, `ast_${Date.now()}`, context);
             if (!confirmed) {
                 return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
             }
@@ -963,7 +1002,7 @@ export class FileToolHandler {
 
             const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
             if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
-                const confirmed = await this.ctx.onPendingWrite(filePath, content, `multireplace_${Date.now()}`);
+                const confirmed = await this.confirmPendingWrite(filePath, content, `multireplace_${Date.now()}`, context);
                 if (!confirmed) {
                     return { success: false, message: 'User cancelled the multi_replace operation', pendingDiff: diff };
                 }
@@ -1032,7 +1071,11 @@ export class FileToolHandler {
             const guardErrors: string[] = [];
 
             if (typeof args.expectedContent === 'string') {
-                const expected = this.convertLineEnding(this.normalizeLineEndings(args.expectedContent), '\n');
+                // Models copy expectedContent straight from numbered read_file
+                // output — strip `N | ` prefixes before comparing, otherwise the
+                // guard fails spuriously and sends the model into a retry loop.
+                const expectedRaw = stripLineNumberPrefixes(args.expectedContent) ?? args.expectedContent;
+                const expected = this.convertLineEnding(this.normalizeLineEndings(expectedRaw), '\n');
                 if (normalizedCurrentRange !== expected) {
                     guardErrors.push('expectedContent did not match the current line range');
                 }
@@ -1044,13 +1087,15 @@ export class FileToolHandler {
                 }
             }
             if (typeof args.expectedStartText === 'string' && args.expectedStartText.trim()) {
-                const expectedStart = this.convertLineEnding(this.normalizeLineEndings(args.expectedStartText), '\n').trimStart();
+                const expectedStartRaw = stripLineNumberPrefixes(args.expectedStartText) ?? args.expectedStartText;
+                const expectedStart = this.convertLineEnding(this.normalizeLineEndings(expectedStartRaw), '\n').trimStart();
                 if (!normalizedCurrentRange.trimStart().startsWith(expectedStart)) {
                     guardErrors.push('expectedStartText did not match the current line range');
                 }
             }
             if (typeof args.expectedEndText === 'string' && args.expectedEndText.trim()) {
-                const expectedEnd = this.convertLineEnding(this.normalizeLineEndings(args.expectedEndText), '\n').trimEnd();
+                const expectedEndRaw = stripLineNumberPrefixes(args.expectedEndText) ?? args.expectedEndText;
+                const expectedEnd = this.convertLineEnding(this.normalizeLineEndings(expectedEndRaw), '\n').trimEnd();
                 if (!normalizedCurrentRange.trimEnd().endsWith(expectedEnd)) {
                     guardErrors.push('expectedEndText did not match the current line range');
                 }
@@ -1064,7 +1109,8 @@ export class FileToolHandler {
                 } as any;
             }
 
-            const replacement = this.convertLineEnding(this.normalizeLineEndings(args.newContent), '\n');
+            const newContentRaw = stripLineNumberPrefixes(args.newContent) ?? args.newContent;
+            const replacement = this.convertLineEnding(this.normalizeLineEndings(newContentRaw), '\n');
             const replacementLines = replacement.length === 0 ? [] : replacement.split('\n');
             lines.splice(startLine - 1, endLine - startLine + 1, ...replacementLines);
             const newContent = lines.join(ending);
@@ -1081,7 +1127,7 @@ export class FileToolHandler {
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
             const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
             if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
-                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, `replace_lines_${Date.now()}`);
+                const confirmed = await this.confirmPendingWrite(filePath, newContent, `replace_lines_${Date.now()}`, context);
                 if (!confirmed) {
                     return { success: false, message: 'User cancelled the replace_lines operation', pendingDiff: diff };
                 }
@@ -1278,7 +1324,7 @@ export class FileToolHandler {
         if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
             for (const { filePath, newContent } of pendingWrites) {
                 const messageId = `patch_${crypto.randomUUID()}`;
-                const confirmed = await this.ctx.onPendingWrite(filePath, newContent, messageId);
+                const confirmed = await this.confirmPendingWrite(filePath, newContent, messageId, context);
                 if (!confirmed) {
                     return {
                         success: false,
@@ -1694,7 +1740,7 @@ export class FileToolHandler {
                 // Confirm mode
                 if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
                     const messageId = `writeloc_${crypto.randomUUID()}`;
-                    const confirmed = await this.ctx.onPendingWrite(filePath, withBom, messageId);
+                    const confirmed = await this.confirmPendingWrite(filePath, withBom, messageId, context);
                     if (!confirmed) {
                         return { success: false, message: 'User rejected localisation write.' };
                     }

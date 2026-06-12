@@ -617,6 +617,55 @@ describe('agent tool file path safety', () => {
         expect(pendingWrite.called).to.equal(false);
         expect(fs.readFileSync(fileAbs, 'utf8')).to.include('id = kuat.2');
     });
+
+    it('accepts replace_lines expectedContent copied from numbered read_file output', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'events', 'numbered_guard_events.txt');
+        fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
+        fs.writeFileSync(fileAbs, 'country_event = {\n\tid = guard.1\n}\n', 'utf8');
+
+        const result = await handler.replaceLines({
+            filePath: fileAbs,
+            startLine: 2,
+            endLine: 2,
+            expectedContent: '2 | \tid = guard.1',
+            newContent: '\tid = guard.2',
+        }, makeContext()) as any;
+
+        expect(result.success).to.equal(true);
+        expect(fs.readFileSync(fileAbs, 'utf8')).to.include('id = guard.2');
+    });
+
+    it('strips line-number prefixes from replace_lines newContent before writing', async () => {
+        const handler = createFileHandler();
+        const fileAbs = path.join(workspaceRoot, 'events', 'numbered_content_events.txt');
+        fs.mkdirSync(path.dirname(fileAbs), { recursive: true });
+        fs.writeFileSync(fileAbs, 'country_event = {\n\tid = strip.1\n}\n', 'utf8');
+
+        const result = await handler.replaceLines({
+            filePath: fileAbs,
+            startLine: 2,
+            endLine: 2,
+            newContent: '2 | \tid = strip.2',
+        }, makeContext()) as any;
+
+        expect(result.success).to.equal(true);
+        const written = fs.readFileSync(fileAbs, 'utf8');
+        expect(written).to.include('\tid = strip.2');
+        expect(written).to.not.include('2 | ');
+    });
+
+    it('strips line-number prefixes from write_file content copied from read output', async () => {
+        const handler = createFileHandler();
+        const result = await handler.writeFile({
+            file: 'common/defines/numbered_defines.txt',
+            content: '1 | NDefines = {\n2 | \tNGame = { something = 1 }\n3 | }',
+        }, makeContext());
+
+        expect(result.success).to.equal(true);
+        const written = fs.readFileSync(path.join(workspaceRoot, 'common', 'defines', 'numbered_defines.txt'), 'utf8');
+        expect(written).to.equal('NDefines = {\n\tNGame = { something = 1 }\n}');
+    });
 });
 
 describe('agent sprite candidate tool contract', () => {

@@ -295,22 +295,20 @@ const _REVIEW_MODE_TOOLS: AgentToolName[] = [
 
 /** Loc Translator mode: read localisation files, write translated output */
 const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
-    'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
+    'read_file', 'write_file', 'edit_file', 'replace_lines',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
     'query_localisation_index', 'query_workspace_index',
-    // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
     'write_localisation', 'git_ops', 'save_workflow',
 ];
 
 /** Loc Writer mode: create new localisation entries from scratch */
 const _LOC_WRITER_TOOLS: AgentToolName[] = [
-    'read_file', 'write_file', 'multi_replace_file_content', 'replace_lines', 'apply_patch',
+    'read_file', 'write_file', 'edit_file', 'replace_lines',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
     'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
     'query_types', 'query_rules', 'query_references', 'query_localisation_index', 'query_workspace_index',
-    // W9 fix: remove web_fetch/search_web/codesearch, localization Agent does not require network search capabilities
     'todo_write',
     'write_localisation', 'git_ops', 'save_workflow',
 ];
@@ -1187,6 +1185,11 @@ export class AgentRunner {
     ): Promise<string> {
         const runRecord = await this.activeRunRecordPromise!;
         this.readTracker.reset();
+        // Per-run reset of edit failure counters (top-level runs only: sub-agents
+        // share the executor and must not clear the parent run's counters).
+        if (!options?.useSlimPrompt) {
+            this.toolExecutor.resetEditFailureTracking();
+        }
         let iteration = 0;
         const activeProviderId = options?.providerId ?? this.aiService.getConfig().provider;
         const activeModel = (options?.model ?? this.aiService.getConfig().model ?? '').toLowerCase();
@@ -1541,7 +1544,7 @@ export class AgentRunner {
                     });
                     messages.push({
                         role: 'user',
-                        content: `[SYSTEM] Your previous response was forcefully terminated by the API server (likely due to hard length limits or timeout). Please DO NOT output massive text blocks, and DO NOT use write_file for files over 150 lines. Break your task into small steps using multi_replace_file_content.`
+                        content: `[SYSTEM] Your previous response was forcefully terminated by the API server (likely due to hard length limits or timeout). Please DO NOT output massive text blocks, and DO NOT use write_file for files over 150 lines. Break your task into small steps using edit_file or replace_lines.`
                     });
                     continue;
                 }
@@ -1746,7 +1749,7 @@ export class AgentRunner {
                 }
                 messages.push({
                     role: 'user',
-                    content: `[SYSTEM] Your previous response was truncated by the API max_tokens length limit. Please DO NOT output massive blocks of text. Break down your modifications into smaller steps. Use todo_write to plan them, and execute a single multi_replace_file_content/apply_patch per response.`
+                    content: `[SYSTEM] Your previous response was truncated by the API max_tokens length limit. Please DO NOT output massive blocks of text. Break down your modifications into smaller steps. Use todo_write to plan them, and execute a single edit_file/replace_lines per response.`
                 });
                 continue;
             }
@@ -2155,27 +2158,24 @@ export class AgentRunner {
                             if (isSupersededWrite) {
                                 toolResults[i] = { skipped: true, message: `已被后续对 ${primaryFilePath} 的写入操作覆盖，跳过本次写入` };
                             } else if (toolName === 'write_file') {
-                                const content = (toolArgs['content'] as string) || '';
-                                let openCount = 0, closeCount = 0;
-                                for (let c = 0; c < content.length; c++) {
-                                    if (content[c] === '{') openCount++;
-                                    if (content[c] === '}') closeCount++;
-                                }
-                                if (openCount !== closeCount) {
-                                    toolResults[i] = { error: `Pre-flight Syntax Reject: Unbalanced braces detected (open: ${openCount}, close: ${closeCount}). This almost ALWAYS means your code output was truncated due to API length limits. DO NOT retry write_file with the same massive file! Instead, split your task using todo_write, or use multi_replace_file_content to apply the changes incrementally.` };
-                                } else {
-                                    const args = (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite) ? { ...toolArgs, _autoApply: true } : toolArgs;
-                                    const rawRes = await this.toolExecutor.execute(toolName, args, agentToolContext);
-                                    toolResults[i] = await this.processToolResult(
-                                        toolName,
-                                        ci.invocationId,
-                                        runRecord.runId,
-                                        options?.topicId || 'default',
-                                        rawRes
-                                    );
-                                    const r = toolResults[i] as Record<string, unknown>;
-                                    if (r && (r.success || r.confirmed) && primaryFilePath) confirmedWrittenFiles.add(primaryFilePath);
-                                }
+                                // Brace validation is handled inside FileToolHandler via the
+                                // tokenizer-based rejectUnsafePdxStructureWrite guard, which
+                                // ignores braces in strings/comments and only applies to PDX
+                                // extensions. The old naive character count here spuriously
+                                // rejected valid PDX files (commented/quoted braces) and
+                                // non-PDX content (markdown/json), telling the model to switch
+                                // tools for no reason.
+                                const args = (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite) ? { ...toolArgs, _autoApply: true } : toolArgs;
+                                const rawRes = await this.toolExecutor.execute(toolName, args, agentToolContext);
+                                toolResults[i] = await this.processToolResult(
+                                    toolName,
+                                    ci.invocationId,
+                                    runRecord.runId,
+                                    options?.topicId || 'default',
+                                    rawRes
+                                );
+                                const r = toolResults[i] as Record<string, unknown>;
+                                if (r && (r.success || r.confirmed) && primaryFilePath) confirmedWrittenFiles.add(primaryFilePath);
                             } else if (WRITE_TOOLS.has(toolName) && primaryFilePath && (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite)) {
                                 const rawRes = await this.toolExecutor.execute(toolName, { ...toolArgs, _autoApply: true }, agentToolContext);
                                 toolResults[i] = await this.processToolResult(

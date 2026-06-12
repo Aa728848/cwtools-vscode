@@ -23,6 +23,7 @@ import type {
 } from '../types';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
 import { diagnosticMetadata } from './diagnosticMetadata';
+import { stripLineNumberPrefixes } from './replacerSuite';
 import { diagnosticCodeString } from '../../diagnosticI18n';
 
 function isAgentTempPath(filePath: string): boolean {
@@ -249,16 +250,11 @@ export class LspToolHandler {
         }
     }
 
-    // - Generic LRU+TTL cache (Batch 2.2 upgrade) -
-    //
-    // The original cache was unbounded - during long reasoning loops with hundreds
-    // of unique query_scope / query_types calls, it could grow without limit.
-    // This version adds LRU eviction (oldest entry removed when size > MAX) on top
-    // of the existing TTL expiration.
 
     private static readonly LSP_CACHE_MAX_SIZE = 128;
 
     private async cachedLspRead<T>(key: string, fetcher: () => Promise<T>, ttlMs = 5000): Promise<T> {
+        key = key.replace(/\\/g, '/');
         const now = Date.now();
         const cached = this.lspReadCache.get(key);
         if (cached && cached.expiresAt > now) {
@@ -2593,6 +2589,7 @@ export class LspToolHandler {
         if (!this.ctx.multiReplaceFileContent) {
             return { success: false, message: 'File writing operations are unavailable in this context.' };
         }
+        this.invalidateCacheForFile(args.file);
         const symbols = await this.documentSymbols({ file: args.file });
         if (symbols.symbols.length === 0) {
             return { success: false, message: 'Could not parse symbols in file. File might be invalid or empty.' };
@@ -2640,6 +2637,19 @@ export class LspToolHandler {
         // The split needs to preserve the exact string to be a precise match
         const targetContent = content.split(isCRLF ? '\r\n' : '\n').slice(startLine - 1, endLine).join(isCRLF ? '\r\n' : '\n');
 
+        if (!targetContent.includes(args.symbol)) {
+            const preview = targetContent.split(/\r?\n/).slice(0, 3).join('\n');
+            return {
+                success: false,
+                message: `edit_pdx_block aborted: lines ${startLine}-${endLine} do not contain the symbol '${args.symbol}' — the symbol ranges are stale (the file changed after the last parse). Current content at those lines starts with:\n${preview}\n\nWait for diagnostics to refresh or call document_symbols again, verify the symbol's current range, then retry.`,
+            };
+        }
+
+        const readTracker = (context?.agentRunner as { readTracker?: { markRead(file: string): void } } | undefined)?.readTracker;
+        readTracker?.markRead(args.file);
+
+        const cleanedNewContent = stripLineNumberPrefixes(args.newContent) ?? args.newContent;
+
         return await this.ctx.multiReplaceFileContent({
             TargetFile: args.file,
             Instruction: `Update PDX block: ${args.symbol}`,
@@ -2647,7 +2657,7 @@ export class LspToolHandler {
                 StartLine: startLine,
                 EndLine: endLine,
                 TargetContent: targetContent,
-                ReplacementContent: args.newContent
+                ReplacementContent: cleanedNewContent
             }]
         }, context);
     }

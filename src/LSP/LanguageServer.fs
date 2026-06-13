@@ -11,7 +11,7 @@ open LSP.Json.Ser
 open JsonExtensions
 
 let gameStateLock = new ReaderWriterLockSlim()
-let mutable completionLockTimeoutMs = 350
+let mutable completionLockTimeoutMs = 150
 let mutable completionTimeoutFallback: (CompletionParams -> CompletionList option) option = None
 
 let private jsonWriteOptions =

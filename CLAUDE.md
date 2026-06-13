@@ -459,6 +459,34 @@ Vanilla block migration lives in `client/extension/vanillaCompare.ts`. When
 editing block migration, keep replacements ordered from bottom to top so earlier
 line offsets are not invalidated by later edits.
 
+## Incremental Scripted-Type Refresh
+
+Editing/saving a definition under `common/scripted_triggers/`,
+`common/scripted_effects/`, or `common/script_values/` can patch the type index
+incrementally instead of triggering a full `RefreshCaches` (the source of the
+old 15–25s "must reload the project" latency). Gated by the `experimental`
+server flag.
+
+- Entry point is the `src/Main/Program.fs` lint path: when `isIncrementalScriptedPath`
+  (the 3 scripted dirs) matches and `experimental` is on, it calls
+  `IGame.RefreshScriptedTypes` and does NOT set `needsTypeRefresh`; file deletion
+  goes through `IGame.RemoveScriptedTypes`.
+- Upstream impl (`submodules/cwtools`): `RulesManager.RefreshScriptedTypes` drops
+  old `typeDefInfo` entries by `range.FileName`, runs a single
+  `getTypesFromDefinitions` pass over just the changed entities, and reuses
+  `buildServices` to rebuild the three services (`RuleValidationService` /
+  `InfoService` / `CompletionService`); `ResourceManager.RemoveFile` removes a file
+  from the VFS.
+- Must run inside the `gameStateLock` write lock. Falls back to a full refresh on
+  `false`/exception, on non-whitelisted types, or after 25 consecutive patches.
+- `isDynamicDefinitionPath` (4 dirs, incl. `inline_scripts/`) drives call-site
+  revalidation and is a SEPARATE predicate from the incremental whitelist — do not
+  merge them. `inline_scripts` is intentionally excluded from the fast path (it is
+  not a `type[...]`) and keeps the full-refresh + call-site revalidation behavior.
+- Call-site revalidation reuses the reverse index (`TypeReferenceIndex` /
+  `FindAllRefsByType`); the type-reference cache is cleared only on full
+  `RefreshCaches`, not on incremental patches.
+
 ## Verification Choices
 
 Use the narrowest validation that matches the change:

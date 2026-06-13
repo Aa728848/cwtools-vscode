@@ -1,6 +1,6 @@
 {
   "name": "cwtools-vscode",
-  "version": "2.2.3",
+  "version": "2.5.0",
   "scripts": {
     "compile": "tsc -p ./.config/tsconfig.extension.json && rollup -c",
     "pack": "powershell -ExecutionPolicy Bypass -File ./package.ps1",

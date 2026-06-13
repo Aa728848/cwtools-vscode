@@ -257,6 +257,7 @@ Webview 运行在浏览器沙盒中：
 - 高频 shader 语义计算应复用已有 hash 缓存与 lazy built-in 集合，避免把大量顶级定义塞回 `Program.fs`。
 - 字符串区间扫描要保留对转义双引号 `\"` 的处理。
 - `client/extension/vanillaCompare.ts` 的块级迁移应按起始行从后往前应用 `WorkspaceEdit`，避免替换导致行号偏移。
+- **自定义 scripted 类型增量刷新**接入点跨多个层：`src/Main/Program.fs` 的 lint 路径（`isIncrementalScriptedPath` 判定 + 写锁内调 `IGame.RefreshScriptedTypes` / `RemoveScriptedTypes`），上游 `RulesManager.RefreshScriptedTypes`、`ResourceManager.RemoveFile` 与各游戏 `IGame` 实现（仅 Stellaris 真增量，其余返回 `false` 回退全量）。改动横跨 `submodules/cwtools` 这个**独立 git submodule**，须先在 submodule 内提交，再回根仓库提交其指针。详见 [CLAUDE.md](./CLAUDE.md) 的「Incremental Scripted-Type Refresh」。
 
 ## 测试和验证
 
@@ -275,6 +276,7 @@ Webview 运行在浏览器沙盒中：
 | Webview | `npm run compile`，在开发宿主中打开对应面板检查控制台 |
 | F# LSP | `dotnet build src/LSP/` |
 | 服务端入口 / 发布 | `dotnet build src/Main/`，必要时 `npm run verify` |
+| 自定义 scripted 类型增量刷新 | `dotnet build src/Main/`；行为验证需在扩展开发宿主开启 `experimental`，手测脚本定义文件的增/改/删是否即时生效且无重复/丢失 |
 | 发布前总检 | `npm run verify` |
 
 常见单测文件（53 个）包括：`agentToolSafety.test.ts`、`agentRunnerState.test.ts`、`agentRunnerFallback.test.ts`、`agentRunnerToolRepair.test.ts`、`agentResumeState.test.ts`、`agentSessionCoordinator.test.ts`、`agentUiBroadcaster.test.ts`、`agentManagerContracts.test.ts`、`agentManagerRunSnapshot.test.ts`、`aiServiceTimeout.test.ts`、`argRepair.test.ts`、`artifactPanelModel.test.ts`、`artifactStore.test.ts`、`chatFormatters.test.ts`、`chatModels.test.ts`、`commandPreflight.test.ts`、`contextBudget.test.ts`、`contextMemory.test.ts`、`diagnosticI18n.test.ts`、`diagnosticMetadata.test.ts`、`diffEngine.test.ts`、`editFileReplacer.test.ts`、`gameProfiles.test.ts`、`graphicsFeatures.test.ts`、`indexService.test.ts`、`jsonRepair.test.ts`、`memoryParser.test.ts`、`messageRenderer.test.ts`、`orchestrator.test.ts`、`pdxshader-grammar.test.ts`、`permissionPolicy.test.ts`、`planModeGuard.test.ts`、`pricing.test.ts`、`projectProfile.test.ts`、`promptBuilderContext.test.ts`、`promptBuilderSnapshot.test.ts`、`promptBuilderSprite.test.ts`、`providers.test.ts`、`readTracker.test.ts`、`reducers.test.ts`、`resumeStateV2.test.ts`、`runCommandReadonly.test.ts`、`runLedger.test.ts`、`runnerPolicy.test.ts`、`subAgentSandbox.test.ts`、`toolCallParser.test.ts`、`toolDefinitions.test.ts`、`toolInvocation.test.ts`、`toolScheduler.test.ts`、`webviewSmoke.test.ts`、`workflowRegistry.test.ts`、`workflowViewModel.test.ts`、`workspaceSymbolParser.test.ts`。

@@ -1,5 +1,53 @@
 # Changelog
 
+## [2.5.0] - 2026-06-13
+> 本条目汇总自 2.2.3 以来的主要能力演进（按主题归并，非逐提交流水）。
+
+### ⚡ 自定义 scripted 类型增量刷新（本版核心）
+- **[功能] 保存即时生效**：编辑并保存 `common/scripted_triggers/`、`common/scripted_effects/`、`common/script_values/` 下的定义文件时，不再触发整库全量 `RefreshCaches`，而是仅增量重建受影响的类型索引并复用同一构造逻辑重建补全/校验/Info 三服务，使自定义触发器、效果、脚本值在其它文件中**保存后近乎瞬时**可补全、可跨文件校验，告别"必须重载项目"。
+- **[功能] 删除只更新关联**：删除上述定义文件时按来源文件精确移除其类型条目，并借助类型引用反向索引（`TypeReferenceIndex` / `FindAllRefsByType`）只重新校验真正引用了被删定义的文件。
+- **[增强] 关联调用方重校验**：增量成功后会把当前打开的其它文件排入重校验队列，覆盖"新增定义后旧的未定义诊断不清除"的场景。
+- **[安全] 全量回退守卫**：增量在游戏状态写锁内执行；遇到异常、非白名单类型或连续 25 次增量后自动回退到全量刷新做校正。`inline_scripts` 等非"叶子类型"仍走全量 + 调用方重校验路径。功能由 `experimental` 开关控制。
+
+### 🤖 AI 多 Agent 编排
+- **[功能] Orchestrator 协作框架**：引入 DAG 任务图、拓扑调度、跨 Agent 共享黑板、写意图/实体注册冲突检测和审查-自动修复质量门。
+- **[安全] 子 Agent 沙盒**：`enforceSubAgentSafety` 在宿主层拦截越权工具与越界写入，本地化 `.yml` 子任务自动收敛为 `loc_writer` 且只允许 `write_localisation`。
+- **[功能] 可选 worktree 隔离**：支持按 Agent 创建独立 git worktree 做并行写入隔离。
+- **[增强] 多 Agent 工具集**：统一为 `dispatch_agents` / `query_blackboard` / `merge_results`。
+
+### ⚙️ Runner 执行管线
+- **[功能] V2 断点恢复**：为孤儿 `tool_call` 注入合成中断回复，结构化压缩摘要前置，支持中断续跑。
+- **[功能] 运行账本与回放**：每次运行落盘为 `AgentRunEvent` JSONL，配套纯函数事件投影 reducer（run 状态 / 工具时间线 / Agent 拓扑 / 缓存统计）与 recorded-tool 回放。
+- **[增强] 流式与防循环**：细粒度步骤/Token 增量流式广播；doom-loop 语义检测防止重复无效循环。
+
+### 🛡️ 权限与安全边界
+- **[安全] 分层权限引擎**：`policyEngine` 以分层 profile 解析权限（当前 shadow 模式只记录不强制），仅 user/approvals 层可放宽，mode/workflow/role/task 只能收紧。
+- **[功能] 自动审查与写模式梯**：只读式 `autoReviewer` 从结构化元数据审批、风险 3 与升级一律转交用户；写模式快速梯 confirm / auto / auto_review / full。
+- **[安全] 命令与环境收口**：`run_command` 经 preflight 分词与风险分级，高危/升级命令必须授权；shell 环境变量 allowlist；MCP 工具经 `executeMcpTool` 单点权限收口。
+
+### 🧰 工具系统重构
+- **[增强] 模糊编辑原语**：`edit_file` 采用 10 策略递进式模糊替换；`read_file` 行号前缀可被自动剥离回退匹配。
+- **[功能] 弱工具调用兼容**：`schemaFlatten` 自动展平深层 schema、`argRepair` 修复参数漂移。
+- **[变更] 退役旧写工具**：`apply_patch` / `multi_replace_file_content` / `ast_mutate` 退出模型可见工具集，统一引导至 `edit_file` / `replace_lines` / `edit_pdx_block` / `write_localisation`。
+- **[增强] 结构化读取**：`get_pdx_block` / `get_file_context` / `document_symbols` 优先于原始扫描，并接入 ReadTracker 读后写完整性校验。
+
+### 🔌 多 Provider 与成本
+- **[功能] Custom 四种线协议**：`customApiFormat` 支持 `openai-chat-completions` / `openai-responses` / `anthropic-messages` / `gemini-generate-content`；endpoint 按 Provider 存储并自动迁移旧全局配置。
+- **[功能] 前缀缓存度量**：嗅探多厂商缓存计量字段，应用差异化打折精算省钱金额，前端以"命中/新建/穿透"三柱微图与会话仪表盘高保真呈现。
+- **[增强] 作用域定价**：定价与上下文窗口支持 `providerId:model` 作用域键。
+
+### 🧠 项目智能
+- **[功能] `/init` 项目档案**：扫描工作区构建 `ProjectProfile`，生成 `CWTOOLS.md` 规则并注入系统提示词。
+- **[功能] 多游戏知识与技能**：为 9 款 Paradox 游戏提供 PDXScript 知识块；`SKILL.md` 技能系统按需经 `run_skill` 加载正文；topic 级长期记忆与自动裁剪。
+
+### 🌐 诊断中文化与服务端加固
+- **[功能] 诊断增强**：`diagnosticI18n` 在 LSP middleware 中提供中文翻译 + 修复建议，诊断码 `codeDescription` 链接到 `docs/diagnostic-codes.md`，动态参数诊断可延迟预热重发。
+- **[增强] 格式化与降级**：服务端实现 `.yml`/PDX 文档格式化；补全请求读锁超时回退 stale-cache 降级结果。
+- **[功能] 三平台发布与 fallback 规则**：服务端三平台产物，规则缺失时从内置 `stellaris-rules.zip` 内存读取回退；`rules-sync` 提供 scan/check/update/report。
+
+### 🪐 可视化预览
+- **[功能] 多面板预览**：实体 3D（Three.js）、`.gui` Canvas 预览与拖拽编辑、星系/行星、事件链图、科技依赖图。
+
 ## [2.2.3] - 2026-05-26
 ### 🛠️ 启动机制加固与预备回退机制增强
 - **[功能] 启动状态主动自检**：

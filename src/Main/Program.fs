@@ -1857,6 +1857,32 @@ type Server(client: ILanguageClient) =
         let lp = path.ToLowerInvariant()
         typeDefiningSegments |> Array.exists (fun seg -> lp.Contains(seg))
 
+    let scriptedIncrementalPathMarkers =
+        [| "common/scripted_effects/"
+           "common/scripted_triggers/"
+           "common/script_values/" |]
+
+    let isIncrementalScriptedPath (path: string) =
+        let normalised = path.Replace('\\', '/').ToLowerInvariant()
+        scriptedIncrementalPathMarkers |> Array.exists normalised.Contains
+
+    let dynamicDefinitionPathMarkers =
+        [| "common/inline_scripts/"
+           "common/scripted_effects/"
+           "common/scripted_triggers/"
+           "common/script_values/" |]
+
+    let isDynamicDefinitionPath (path: string) =
+        let normalised = path.Replace('\\', '/').ToLowerInvariant()
+        dynamicDefinitionPathMarkers |> Array.exists normalised.Contains
+
+    let scriptedTypeKeys =
+        [ "scripted_trigger"; "scripted_effect"; "script_value" ]
+
+    let incrementalScriptedRefreshEnabled () = experimental
+    let maxIncrementalScriptedPatchCount = 25
+    let mutable incrementalScriptedPatchCount = 0
+
     let refreshDomainsForPath (path: string) =
         let lp = path.ToLowerInvariant().Replace('\\', '/')
         [ if lp.EndsWith(".yml") then
@@ -1895,6 +1921,43 @@ type Server(client: ILanguageClient) =
             | "types" -> [ "types" ]
             | _ -> refreshDomainsForPath filePath
         setFileDiagnosticState filePath Stale pendingKinds []
+
+    let scriptedDefinitionsForFiles (game: IGame) (files: string list) =
+        let targetFiles = files |> List.map normaliseCachePath |> Set.ofList
+
+        let types = game.Types()
+
+        scriptedTypeKeys
+        |> List.collect (fun typeName ->
+            types
+            |> Map.tryFind typeName
+            |> Option.defaultValue [||]
+            |> Array.choose (fun info ->
+                if targetFiles.Contains(normaliseCachePath info.range.FileName) then
+                    Some(typeName, info.id)
+                else
+                    None)
+            |> Array.toList)
+        |> List.distinct
+
+    let referenceFilesForDefinitions (game: IGame) (definitions: (string * string) list) =
+        definitions
+        |> List.collect (fun (typeName, id) ->
+            try
+                game.FindAllRefsByType typeName id |> List.map _.FileName
+            with e ->
+                logDiag $"FindAllRefsByType failed for %s{typeName}:%s{id}: %s{e.Message}"
+                [])
+        |> List.distinctBy normaliseCachePath
+
+    let mutable scheduleDeferredDynamicRevalidationImpl: string list -> unit = fun _ -> ()
+    let mutable scheduleOpenFileScriptedRevalidationImpl: string -> unit = fun _ -> ()
+
+    let scheduleDeferredDynamicRevalidation files =
+        scheduleDeferredDynamicRevalidationImpl files
+
+    let scheduleOpenFileScriptedRevalidation file =
+        scheduleOpenFileScriptedRevalidationImpl file
 
     //-Lightweight bracket scanner -
     // Provide precise bracket error location when parser fails
@@ -2008,9 +2071,12 @@ type Server(client: ILanguageClient) =
                     clearLocalisationCaches ()
                 if isEditAction then markFileStale name "localisation"
 
+            let canTryIncrementalScriptedRefresh =
+                incrementalScriptedRefreshEnabled () && isIncrementalScriptedPath name
+
             // Mark type refresh needed ONLY if the file was EDITED (not just opened).
             // Opening a file does not change its content, so the type/enum index is still valid.
-            if isEditAction && isTypeDefiningPath name && not shallowAnalyze then
+            if isEditAction && isTypeDefiningPath name && not shallowAnalyze && not canTryIncrementalScriptedRefresh then
                 needsTypeRefresh <- true
                 lastTypeRefreshRequestAt <- DateTime.UtcNow
                 let domains = refreshDomainsForPath name |> List.filter (fun domain -> domain <> "localisation")
@@ -2062,9 +2128,52 @@ type Server(client: ILanguageClient) =
                 | Some game ->
                     gameStateLock.EnterWriteLock()
                     let allocBeforeUpdate = GC.GetTotalAllocatedBytes(false)
-                    let astErrors = 
-                        try game.UpdateFile shallowAnalyze name filetext
-                        finally gameStateLock.ExitWriteLock()
+                    let astErrors =
+                        try
+                            let priorScriptedCallFiles =
+                                if isEditAction && not shallowAnalyze && canTryIncrementalScriptedRefresh then
+                                    let definitions = scriptedDefinitionsForFiles game [ name ]
+                                    referenceFilesForDefinitions game definitions
+                                else
+                                    []
+
+                            let updateErrors = game.UpdateFile shallowAnalyze name filetext
+
+                            if isEditAction && not shallowAnalyze && canTryIncrementalScriptedRefresh then
+                                let handled =
+                                    try game.RefreshScriptedTypes [ name ]
+                                    with e ->
+                                        logDiag $"Incremental scripted refresh failed for {name}: {e.Message}"
+                                        false
+
+                                if handled then
+                                    incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
+                                    clearTypeCaches ()
+                                    markFileStale name "types"
+                                    let priorRevalidateFiles =
+                                        priorScriptedCallFiles
+                                        |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath name)
+                                    if not priorRevalidateFiles.IsEmpty then
+                                        scheduleDeferredDynamicRevalidation priorRevalidateFiles
+                                    scheduleOpenFileScriptedRevalidation name
+                                    monitorLog Refresh $"RefreshScriptedTypes file={name} patches={incrementalScriptedPatchCount}"
+
+                                    if incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
+                                        needsTypeRefresh <- true
+                                        lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                        addPendingRefreshDomains [ "types"; "rules" ]
+                                        incrementalScriptedPatchCount <- 0
+                                else
+                                    needsTypeRefresh <- true
+                                    lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                    addPendingRefreshDomains [ "types"; "rules" ]
+                                    clearTypeCaches ()
+                                    markFileStale name "types"
+                                    incrementalScriptedPatchCount <- 0
+
+                            updateErrors
+                        finally
+                            gameStateLock.ExitWriteLock()
                         |> List.map (fun e ->
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     let allocAfterUpdate = GC.GetTotalAllocatedBytes(false)
@@ -2167,55 +2276,65 @@ type Server(client: ILanguageClient) =
     let mutable pendingDeferredRevalidationFiles: Set<string> = Set.empty
     let mutable deferredRevalidationInFlight = false
 
-    let scheduleDeferredDynamicRevalidation (files: string list) =
-        let delay = max 0 dynamicDeferDelayMs
-        let shouldStart =
-            lock deferredRevalidationLock (fun () ->
-                pendingDeferredRevalidationFiles <-
-                    files |> List.fold (fun acc f -> Set.add f acc) pendingDeferredRevalidationFiles
-                if deferredRevalidationInFlight then
-                    false
-                else
-                    deferredRevalidationInFlight <- true
-                    true)
-        if shouldStart then
-            Task.Run(fun () ->
-                let mutable go = true
-                while go do
-                    (try
-                        if delay > 0 then System.Threading.Thread.Sleep(delay)
-                        let batch =
+    do
+        scheduleDeferredDynamicRevalidationImpl <- fun (files: string list) ->
+            let delay = max 0 dynamicDeferDelayMs
+            let shouldStart =
+                lock deferredRevalidationLock (fun () ->
+                    pendingDeferredRevalidationFiles <-
+                        files |> List.fold (fun acc f -> Set.add f acc) pendingDeferredRevalidationFiles
+                    if deferredRevalidationInFlight then
+                        false
+                    else
+                        deferredRevalidationInFlight <- true
+                        true)
+            if shouldStart then
+                Task.Run(fun () ->
+                    let mutable go = true
+                    while go do
+                        (try
+                            if delay > 0 then System.Threading.Thread.Sleep(delay)
+                            let batch =
+                                lock deferredRevalidationLock (fun () ->
+                                    let b = pendingDeferredRevalidationFiles |> Set.toList
+                                    pendingDeferredRevalidationFiles <- Set.empty
+                                    b)
+                            if not batch.IsEmpty then revalidateDeferredDynamicFiles batch
+                         with e -> logDiag $"Deferred dynamic revalidation scheduling failed: {e.Message}")
+                        go <-
                             lock deferredRevalidationLock (fun () ->
-                                let b = pendingDeferredRevalidationFiles |> Set.toList
-                                pendingDeferredRevalidationFiles <- Set.empty
-                                b)
-                        if not batch.IsEmpty then revalidateDeferredDynamicFiles batch
-                     with e -> logDiag $"Deferred dynamic revalidation scheduling failed: {e.Message}")
-                    go <-
-                        lock deferredRevalidationLock (fun () ->
-                            if Set.isEmpty pendingDeferredRevalidationFiles then
-                                deferredRevalidationInFlight <- false
-                                false
-                            else
-                                true))
-            |> ignore
-
-    let dynamicDefinitionPathMarkers =
-        [| "common/inline_scripts/"
-           "common/scripted_effects/"
-           "common/scripted_triggers/"
-           "common/script_values/" |]
-
-    let isDynamicDefinitionPath (path: string) =
-        let normalised = path.Replace('\\', '/').ToLowerInvariant()
-        dynamicDefinitionPathMarkers |> Array.exists normalised.Contains
+                                if Set.isEmpty pendingDeferredRevalidationFiles then
+                                    deferredRevalidationInFlight <- false
+                                    false
+                                else
+                                    true))
+                |> ignore
 
     let refreshDynamicCallSitesForDefinition (defFile: string) (priorDiagnostics: Diagnostic list) (isEditAction: bool) =
+        let indexedCallFiles =
+            if isEditAction && isDynamicDefinitionPath defFile then
+                match gameObj with
+                | Some game ->
+                    try
+                        gameStateLock.EnterReadLock()
+                        try
+                            let definitions = scriptedDefinitionsForFiles game [ defFile ]
+                            referenceFilesForDefinitions game definitions
+                        finally
+                            gameStateLock.ExitReadLock()
+                    with e ->
+                        logDiag $"Indexed dynamic revalidation lookup failed for {defFile}: {e.Message}"
+                        []
+                | None -> []
+            else
+                []
+
         let callFiles =
-            priorDiagnostics
-            |> List.filter (fun (d: Diagnostic) -> d.code = Some "CW274D")
-            |> List.collect (fun d -> d.relatedInformation)
-            |> List.map (fun ri -> getPathFromDoc ri.location.uri)
+            (priorDiagnostics
+             |> List.filter (fun (d: Diagnostic) -> d.code = Some "CW274D")
+             |> List.collect (fun d -> d.relatedInformation)
+             |> List.map (fun ri -> getPathFromDoc ri.location.uri))
+            @ indexedCallFiles
             |> List.distinctBy normaliseCachePath
         if not callFiles.IsEmpty then
             logDiag $"Refreshing {callFiles.Length} call-site file(s) for definition {defFile}"
@@ -2267,6 +2386,7 @@ type Server(client: ILanguageClient) =
                     GC.Collect(2, GCCollectionMode.Optimized, false, false)
                     needsTypeRefresh <- false
                     lastTypeRefreshCompletedAt <- DateTime.UtcNow
+                    incrementalScriptedPatchCount <- 0
                     refreshSkipCount <- 0
                     let completed =
                         pendingDomainsBeforeAnalyze
@@ -2565,6 +2685,13 @@ type Server(client: ILanguageClient) =
                 }
 
             loop false Map.empty)
+
+    do
+        scheduleOpenFileScriptedRevalidationImpl <- fun changedFile ->
+            let changed = normaliseCachePath changedFile
+            for doc in docs.OpenFiles() do
+                if normaliseCachePath doc.FullName <> changed then
+                    lintAgent.Post(RevalidateRequest({ uri = Uri(doc.FullName); version = 0 }))
 
     /// Debounce agent for DidChangeTextDocument lintAgent.
     /// Waits 1.5 seconds of inactivity before forwarding the lint request.
@@ -3746,6 +3873,51 @@ type Server(client: ILanguageClient) =
                     | FileChangeType.Created -> lintAgent.Post(UpdateRequest({ uri = change.uri; version = 0 }, true))
                     | FileChangeType.Deleted ->
                         let path = getPathFromDoc change.uri
+                        if incrementalScriptedRefreshEnabled () && isIncrementalScriptedPath path then
+                            match gameObj with
+                            | Some game ->
+                                let mutable handled = false
+                                let mutable callFiles: string list = []
+                                gameStateLock.EnterWriteLock()
+                                try
+                                    try
+                                        let definitions = scriptedDefinitionsForFiles game [ path ]
+                                        callFiles <- referenceFilesForDefinitions game definitions
+                                        handled <- game.RemoveScriptedTypes [ path ]
+                                    with e ->
+                                        logDiag $"Incremental scripted delete failed for {path}: {e.Message}"
+                                        handled <- false
+                                finally
+                                    gameStateLock.ExitWriteLock()
+
+                                if handled then
+                                    incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
+                                    clearTypeCaches ()
+                                    let revalidateFiles =
+                                        callFiles
+                                        |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath path)
+                                    if not revalidateFiles.IsEmpty then
+                                        scheduleDeferredDynamicRevalidation revalidateFiles
+                                    monitorLog Refresh $"RemoveScriptedTypes file={path} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
+
+                                    if incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
+                                        needsTypeRefresh <- true
+                                        lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                        addPendingRefreshDomains [ "types"; "rules" ]
+                                        incrementalScriptedPatchCount <- 0
+                                else
+                                    needsTypeRefresh <- true
+                                    lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                    addPendingRefreshDomains [ "types"; "rules" ]
+                                    clearTypeCaches ()
+                                    incrementalScriptedPatchCount <- 0
+                            | None -> ()
+                        elif isTypeDefiningPath path then
+                            needsTypeRefresh <- true
+                            lastTypeRefreshRequestAt <- DateTime.UtcNow
+                            let domains = refreshDomainsForPath path |> List.filter (fun domain -> domain <> "localisation")
+                            addPendingRefreshDomains (if domains.IsEmpty then [ "types" ] else domains)
+                            clearTypeCaches ()
                         client.PublishDiagnostics { uri = change.uri; diagnostics = [] }
                         forgetFileCaches path
                         fileDiagnosticStates.TryRemove(path) |> ignore

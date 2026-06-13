@@ -23,6 +23,7 @@
   "commands.saveGraphJson.title": "Save graph as json",
   "configuration.title": "CWTools configuration",
   "configuration.cwtools.trace.server.description": "Traces the communication between VSCode and the language server.",
+  "configuration.cwtools.editor.formatIndentOnPaste.description": "Auto-adjust the indentation of pasted PDX code blocks to match the surrounding brace nesting.",
   "configuration.cwtools.localisation.languages.description": "The list of languages to validate localisation for.",
   "configuration.cwtools.localisation.generated_strings.description": "The placeholder string used when generating missing localisation strings.",
   "configuration.cwtools.errors.vanilla.description": "Whether or not to show errors for vanilla files",

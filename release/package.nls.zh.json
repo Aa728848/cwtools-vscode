@@ -23,6 +23,7 @@
   "commands.saveGraphJson.title": "将图保存为 JSON",
   "configuration.title": "CWTools 配置",
   "configuration.cwtools.trace.server.description": "跟踪 VSCode 与语言服务器之间的通信。",
+  "configuration.cwtools.editor.formatIndentOnPaste.description": "粘贴 PDX 代码块时按括号层级自动适配缩进。",
   "configuration.cwtools.localisation.languages.description": "用于验证本地化的语言列表。",
   "configuration.cwtools.localisation.generated_strings.description": "生成缺失本地化字符串时使用的占位符字符串。",
   "configuration.cwtools.errors.vanilla.description": "是否显示原版文件的错误",

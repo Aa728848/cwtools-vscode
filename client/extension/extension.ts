@@ -28,6 +28,7 @@ import { registerCodeActions } from './codeActions';
 import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnoredKey } from './diagnosticI18n';
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
 import { registerVanillaCompare } from './vanillaCompare';
+import { registerPdxIndentFormatter } from './pdxIndentFormatter';
 import { getProjectWorkspaceRoot } from './ai/workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import type { GameProfile } from './gameProfiles';
@@ -1483,10 +1484,15 @@ export async function activate(context: ExtensionContext) {
 
 	// ── Vanilla Code Comparison: block-level and file-level diff against vanilla game ──
 	registerVanillaCompare(context);
+	registerPdxIndentFormatter(context);
 
 	const init = async function (language: string, isVanillaFolder: boolean) {
 		vs.languages.setLanguageConfiguration(language, {
 			wordPattern: /"?([^\s.]+)"?/,
+			indentationRules: {
+				increaseIndentPattern: /((\{\s*))$/,
+				decreaseIndentPattern: /^\s*((\}))/
+			},
 			autoClosingPairs: [
 				{ open: '{', close: '}' },
 				{ open: '[', close: ']' },

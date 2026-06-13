@@ -390,6 +390,12 @@
             "type": "object",
             "title": "%configuration.title%",
             "properties": {
+                "cwtools.editor.formatIndentOnPaste": {
+                    "scope": "language-overridable",
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%configuration.cwtools.editor.formatIndentOnPaste.description%"
+                },
                 "cwtools.trace.server": {
                     "scope": "window",
                     "type": "string",
@@ -1253,7 +1259,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[hoi4]": {
                 "files.autoGuessEncoding": true,
@@ -1264,7 +1271,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[eu4]": {
                 "files.autoGuessEncoding": true,
@@ -1275,7 +1283,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[ck2]": {
                 "files.autoGuessEncoding": true,
@@ -1286,7 +1295,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[imperator]": {
                 "files.autoGuessEncoding": true,
@@ -1297,7 +1307,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[vic2]": {
                 "files.autoGuessEncoding": true,
@@ -1308,7 +1319,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[ck3]": {
                 "files.autoGuessEncoding": true,
@@ -1319,7 +1331,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[vic3]": {
                 "files.autoGuessEncoding": true,
@@ -1330,7 +1343,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[eu5]": {
                 "files.autoGuessEncoding": true,
@@ -1341,7 +1355,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[customparadox]": {
                 "files.autoGuessEncoding": true,
@@ -1352,7 +1367,8 @@
                 },
                 "editor.insertSpaces": false,
                 "editor.acceptSuggestionOnEnter": "off",
-                "editor.suggest.insertMode": "replace"
+                "editor.suggest.insertMode": "replace",
+                "editor.formatOnPaste": true
             },
             "[yaml]": {
                 "files.autoGuessEncoding": true,
@@ -1360,6 +1376,9 @@
                 "editor.insertSpaces": true,
                 "editor.autoIndent": "none",
                 "editor.wordWrap": "on"
+            },
+            "[paradox]": {
+                "editor.formatOnPaste": true
             },
             "editor.rename.enablePreview": true,
             "files.associations": {

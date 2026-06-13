@@ -2150,6 +2150,13 @@ type Server(client: ILanguageClient) =
                                     incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
                                     clearTypeCaches ()
                                     markFileStale name "types"
+                                    (try
+                                        locCache.Clear()
+                                        for fileName, errors in
+                                            game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
+                                            locCache.[fileName] <- errors
+                                        evictIfNeeded locCache
+                                     with e -> logDiag $"Incremental loc-error refresh failed for {name}: {e.Message}")
                                     let priorRevalidateFiles =
                                         priorScriptedCallFiles
                                         |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath name)

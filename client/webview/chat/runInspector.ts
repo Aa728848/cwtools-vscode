@@ -110,6 +110,31 @@ export function formatEventPayload(event: any, i18n?: ChatI18nText): string {
         return html;
     }
 
+    if (event.type === 'policy_resolved') {
+        let html = `<div class="inspector-policy">`;
+        html += `<h4>${svgIcon('shield')} Policy ${escapeHtml(String(payload.action || ''))}${payload.shadow ? ' (shadow)' : ''}</h4>`;
+        html += `<div class="inspector-section"><strong>Tool:</strong> <code>${escapeHtml(String(payload.tool || ''))}</code> · ${escapeHtml(String(payload.subject || ''))} · risk ${Number(payload.riskLevel ?? 0)}</div>`;
+        if (Array.isArray(payload.matchedRules) && payload.matchedRules.length > 0) {
+            html += `<div class="inspector-section"><strong>Matched rules:</strong><ul>${payload.matchedRules.map((r: string) => `<li><code>${escapeHtml(r)}</code></li>`).join('')}</ul></div>`;
+        }
+        html += `</div>`;
+        return html;
+    }
+
+    if (event.type === 'reviewer_decision' || event.type === 'approval_rule_created') {
+        let html = `<div class="inspector-policy">`;
+        if (event.type === 'reviewer_decision') {
+            html += `<h4>${svgIcon('shield')} Auto-review: ${escapeHtml(String(payload.verdict || ''))}${payload.fromCache ? ' (cached)' : ''}</h4>`;
+            if (payload.command) html += `<div class="inspector-section"><code>${escapeHtml(String(payload.command))}</code></div>`;
+            if (payload.rationale) html += `<div class="inspector-section">${escapeHtml(String(payload.rationale))}</div>`;
+        } else {
+            html += `<h4>${svgIcon('check')} Approval rule created (${escapeHtml(String(payload.createdBy || 'user'))})</h4>`;
+            html += `<div class="inspector-section"><code>${escapeHtml((payload.commandPrefix || []).join(' '))}</code> · scope ${escapeHtml(String(payload.scope || 'session'))}</div>`;
+        }
+        html += `</div>`;
+        return html;
+    }
+
     if (event.type === 'compaction_end') {
         let html = `<div class="inspector-compaction">`;
         html += `<h4>${svgIcon('package')} ${t?.compactionDone ?? 'Context compaction complete'}</h4>`;

@@ -51,6 +51,17 @@ const EVENT_GROUP_MAP: Record<string, TimelineGroupId> = {
     'resume_state_saved': 'context',
     'subagent_start': 'subagents',
     'subagent_end': 'subagents',
+    'policy_resolved': 'permissions',
+    'approval_rule_created': 'permissions',
+    'denial_feedback_emitted': 'permissions',
+    'reviewer_decision': 'permissions',
+    'reviewer_cache_invalidated': 'permissions',
+    'sandbox_denied': 'subagents',
+    'subagent_policy_derived': 'subagents',
+    'mcp_tool_registered': 'tools',
+    'worktree_created': 'files',
+    'worktree_diff_collected': 'files',
+    'worktree_cleaned': 'files',
 };
 
 import type { ChatI18nText } from './i18n';

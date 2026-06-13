@@ -44,7 +44,19 @@ export type AgentRunEventType =
     | 'blackboard_read'
     | 'conflict_detected'
     | 'quality_gate_decision'
-    | 'subagent_refused';
+    | 'subagent_refused'
+    | 'policy_resolved'
+    | 'approval_rule_created'
+    | 'denial_feedback_emitted'
+    | 'sandbox_denied'
+    | 'subagent_policy_derived'
+    | 'mcp_tool_registered'
+    | 'reviewer_decision'
+    | 'reviewer_cache_invalidated'
+    | 'env_allowlist_shadow'
+    | 'worktree_created'
+    | 'worktree_diff_collected'
+    | 'worktree_cleaned';
 
 export interface AgentRunEvent {
     eventId: string;

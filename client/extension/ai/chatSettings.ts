@@ -204,6 +204,10 @@ export class ChatSettingsManager {
             customApiFormat: config.customApiFormat,
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: config.agentFileWriteMode,
+            approvals: {
+                reviewer: vs.workspace.getConfiguration('cwtools.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
+            },
+            securitySandboxDisabled: vs.workspace.getConfiguration('cwtools.ai').get<boolean>('developer.disableSecuritySandbox') === true,
             reasoningEffort: config.reasoningEffort,
             braveSearchApiKey: (() => {
                 const k = vs.workspace.getConfiguration('cwtools.ai').get<string>('braveSearchApiKey') ?? '';
@@ -275,9 +279,34 @@ export class ChatSettingsManager {
         await this.buildAndSendSettingsData();
     }
 
-    async quickChangeWriteMode(mode: 'confirm' | 'auto'): Promise<void> {
-        const nextMode = mode === 'auto' ? 'auto' : 'confirm';
-        await vs.workspace.getConfiguration('cwtools.ai').update('agentFileWriteMode', nextMode, vs.ConfigurationTarget.Global);
+    /**
+     * Quick ladder from the chat composer: confirm < auto < auto_review < full.
+     * auto_review = auto write + read-only LLM reviewer at the approval boundary.
+     * full = sandbox and approval boundaries removed for this workspace
+     * (cwtools.ai.developer.disableSecuritySandbox); calls are still logged.
+     * The tier fully determines all underlying settings.
+     */
+    async quickChangeWriteMode(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): Promise<void> {
+        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        const nextWriteMode = mode === 'confirm' ? 'confirm' : 'auto';
+        const nextReviewer = mode === 'auto_review' ? 'auto_review' : 'user';
+        await cfg.update('agentFileWriteMode', nextWriteMode, vs.ConfigurationTarget.Global);
+        await cfg.update('approvals.reviewer', nextReviewer, vs.ConfigurationTarget.Global);
+
+        const sandboxDisabled = cfg.get<boolean>('developer.disableSecuritySandbox') === true;
+        if ((mode === 'full') !== sandboxDisabled) {
+            await cfg.update('developer.disableSecuritySandbox', mode === 'full' ? true : undefined, vs.ConfigurationTarget.Global);
+        }
+
+        // Keep the shadow policy preset aligned with the ladder, but never clobber a
+        // manual read-only / trusted-automation choice.
+        const LADDER_PRESETS: Record<string, string> = { confirm: 'workspace-auto', auto: 'workspace-auto', auto_review: 'workspace-auto-review', full: 'full-access' };
+        const ladderPresetValues = new Set(Object.values(LADDER_PRESETS));
+        const preset = cfg.get<string>('policy.preset', 'workspace-auto');
+        const nextPreset = LADDER_PRESETS[mode]!;
+        if (ladderPresetValues.has(preset) && preset !== nextPreset) {
+            await cfg.update('policy.preset', nextPreset, vs.ConfigurationTarget.Global);
+        }
         await this.buildAndSendSettingsData();
     }
 
@@ -344,6 +373,9 @@ export class ChatSettingsManager {
         }
         await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);
         await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
+        if (settings.approvals?.reviewer) {
+            await cfg.update('approvals.reviewer', settings.approvals.reviewer, vs.ConfigurationTarget.Global);
+        }
         await cfg.update('reasoningEffort', settings.reasoningEffort, vs.ConfigurationTarget.Global);
         await cfg.update('enabled', true, vs.ConfigurationTarget.Global);
         if (settings.inlineCompletion) {

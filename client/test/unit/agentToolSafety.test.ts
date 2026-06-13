@@ -5,13 +5,17 @@ import * as path from 'path';
 
 let diagnosticPairs: Array<[any, any[]]> = [];
 let ignoredDiagnostics: string[] = [];
+let permissionsConfig: any;
+let stubConfigOverrides: Record<string, any> = {};
 
 const vscodeStub = {
     workspace: {
         workspaceFolders: [],
         getConfiguration: () => ({
             get: <T>(key: string, defaultValue?: T): T | undefined => {
+                if (key in stubConfigOverrides) return stubConfigOverrides[key] as T;
                 if (key === 'ignoredDiagnostics') return ignoredDiagnostics as T;
+                if (key === 'permissions') return permissionsConfig as T;
                 return defaultValue;
             },
         }),
@@ -1385,6 +1389,8 @@ describe('agent tool progress and aborts', () => {
     });
 
     afterEach(() => {
+        permissionsConfig = undefined;
+        stubConfigOverrides = {};
         cleanupWorkspace(workspaceRoot);
     });
 
@@ -1450,17 +1456,110 @@ describe('agent tool progress and aborts', () => {
         }
     });
 
-    it('routes dynamic MCP tool names without treating them as unknown registry tools', async () => {
+    it('routes dynamic MCP tool names through mcp_call mode validation', async () => {
         const executor = createExecutor();
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true, routed: true });
 
-        const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
+        const blocked = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
             runnerOptions: { mode: 'build' },
         } as any) as any;
+        expect(blocked.success).to.equal(false);
+        expect(blocked.error).to.include("not allowed in current mode 'build'");
+        expect(blocked.error).to.include('mcp_call');
+        expect(executeInternal.called).to.equal(false);
 
-        expect(result).to.deep.include({ success: true, routed: true });
+        const routed = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
+            runnerOptions: { mode: 'general' },
+        } as any) as any;
+        expect(routed).to.deep.include({ success: true, routed: true });
         expect(executeInternal.calledOnce).to.equal(true);
         expect(executeInternal.firstCall.args[0]).to.equal('mcp_filesystem_read_file');
+    });
+
+    it('denies MCP tools to orchestrator sub-agents by default at the execution chokepoint', async () => {
+        const executor = createExecutor();
+        const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
+            runnerOptions: { mode: 'general', useSlimPrompt: true },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('denied for orchestrator sub-agents');
+        expect(result.error).to.include('cwtools.ai.permissions');
+    });
+
+    it('lets an explicit allow pattern grant sub-agent MCP access', async () => {
+        permissionsConfig = { mcp: { 'filesystem_read_*': 'allow' } };
+        const executor = createExecutor();
+        const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
+            runnerOptions: { mode: 'general', useSlimPrompt: true },
+        } as any) as any;
+
+        // Permission gate passed; failure comes from the unconfigured server, not the sandbox.
+        expect(result.success).to.equal(false);
+        expect(result.error).to.not.include('denied for orchestrator sub-agents');
+        expect(result.error).to.include('not found in configuration');
+    });
+
+    it('applies the same permission patterns to generic mcp_call and fails closed on ask', async () => {
+        permissionsConfig = { mcp: { 'filesystem_*': 'ask' } };
+        const executor = createExecutor();
+        const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
+            runnerOptions: { mode: 'general' },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('requires approval');
+        expect(result.error).to.include("'filesystem_*'");
+    });
+
+    it('forwards top-level dynamic MCP args to the MCP call', async () => {
+        const executor = createExecutor();
+        const callTool = sinon.stub().resolves({ ok: true });
+        sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });
+
+        const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
+            runnerOptions: { mode: 'general' },
+        } as any) as any;
+
+        expect(result.success).to.equal(true);
+        expect(callTool.calledOnce).to.equal(true);
+        expect(callTool.firstCall.args[0]).to.equal('read_file');
+        expect(callTool.firstCall.args[1]).to.deep.equal({ path: 'README.md' });
+    });
+
+    it('keeps mcp_call nested arguments intact', async () => {
+        const executor = createExecutor();
+        const callTool = sinon.stub().resolves({ ok: true });
+        sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });
+
+        const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file', arguments: { path: 'a.txt' } }, {
+            runnerOptions: { mode: 'general' },
+        } as any) as any;
+
+        expect(result.success).to.equal(true);
+        expect(callTool.firstCall.args[1]).to.deep.equal({ path: 'a.txt' });
+    });
+
+    it('resolves underscore server names through the dynamic registration map', async () => {
+        stubConfigOverrides = { 'mcp.registerDynamicTools': true, 'mcp.servers': [{ name: 'my_server' }] };
+        const executor = createExecutor();
+        const callTool = sinon.stub().resolves({ ok: true });
+        const getMcpClient = sinon.stub(executor as any, 'getMcpClient').resolves({
+            callTool,
+            listTools: async () => ({ tools: [{ name: 'read_file', description: 'd', inputSchema: { type: 'object', properties: {} } }] }),
+        });
+
+        const defs = await executor.getDynamicMcpToolDefinitions('general' as any);
+        expect(defs.map((d: any) => d.function.name)).to.include('mcp_my_server_read_file');
+
+        const result = await executor.execute('mcp_my_server_read_file', { path: 'x' }, {
+            runnerOptions: { mode: 'general' },
+        } as any) as any;
+
+        expect(result.success).to.equal(true);
+        expect(getMcpClient.lastCall.args[0]).to.equal('my_server');
+        expect(callTool.firstCall.args[0]).to.equal('read_file');
+        expect(callTool.firstCall.args[1]).to.deep.equal({ path: 'x' });
     });
 
     it('keeps generic mcp_call behind normal registry mode validation', async () => {

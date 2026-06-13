@@ -133,7 +133,10 @@ checks.
 | `client/extension/ai/runner/toolScheduler.ts` | Concurrency class-based scheduling and per-file write exclusion |
 | `client/extension/ai/runner/toolInvocation.ts` | Tool call normalization, risk metadata, target path extraction, stable IDs |
 | `client/extension/ai/runner/commandPreflight.ts` | `run_command` tokenization and risk classification |
-| `client/extension/ai/runner/permissionPolicy.ts` | Low-risk pre-approval rules and `cwdScope` validation |
+| `client/extension/ai/runner/permissionPolicy.ts` | Low-risk pre-approval rules, `cwdScope` validation, checkpoint serialize/restore |
+| `client/extension/ai/runner/policyEngine.ts` | Layered permission profiles, typed rule matching/specificity, actionable denials (shadow-mode resolver) |
+| `client/extension/ai/runner/autoReviewer.ts` | Read-only LLM approval reviewer: decision cache, fail-open to ask_user, never widens sandbox |
+| `client/extension/ai/runner/shellEnv.ts` | Shell env allowlist builder (per-platform baseline + user additions) |
 | `client/extension/ai/runner/runLedger.ts` | Run accounting, event JSONL, and frontend `runSnapshot` data source |
 | `client/extension/ai/runner/runReducers.ts` | Pure event-projection reducers: run state, tool timeline, agent graph, cache stats |
 | `client/extension/ai/runner/runReplay.ts` | Run replay engine — recorded-tool mode with LLM re-invocation |
@@ -169,6 +172,7 @@ checks.
 | `client/extension/ai/orchestrator/conflictDetector.ts` | Blackboard-based write intent and entity registration conflict detection |
 | `client/extension/ai/orchestrator/qualityGate.ts` | Review and auto-fix pipeline |
 | `client/extension/ai/orchestrator/subAgentSandbox.ts` | `SubAgentSandbox` construction and `enforceSubAgentSafety` interception |
+| `client/extension/ai/orchestrator/worktreeManager.ts` | Opt-in per-agent git worktree isolation: create / `--binary` diff / apply / retention cleanup |
 
 ### AI Agent — Workspace & Chat Infrastructure
 
@@ -292,8 +296,8 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
   `cacheCreationTokens`, `hitRate`, and `savedCostCny` for real-time sparkline cards.
 - `runner/runReducers.ts` contains pure event-projection reducers:
   `reduceRunState`, `reduceToolTimeline`, `reduceAgentGraph`, `reduceCacheStats`,
-  and `reduceAll`. These are side-effect-free and designed for unit testing and
-  JSONL replay. New event types must update the relevant reducer.
+  `reducePolicyActivity`, and `reduceAll`. These are side-effect-free and designed
+  for unit testing and JSONL replay. New event types must update the relevant reducer.
 - `runner/runReplay.ts` enables re-running a recorded agent run with new
   prompt/model/provider overrides. Mode A (recorded-tool) answers tool calls
   from the original ledger; Mode B (full-replay) is deferred. `ReplaySession`
@@ -314,6 +318,50 @@ The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
   `plannedFiles` are all localisation `.yml` are forced onto `write_localisation`
   (generic write tools excluded) and `dispatch_agents` upgrades such tasks to
   `loc_writer`.
+- Agent boundary & permissions (docs/agent-boundary-permissions-plan.md):
+  - `runner/policyEngine.ts` resolves layered profiles (only `user` and
+    `approvals` layers may loosen; mode/workflow/role/task tighten-only;
+    protectedPaths lower into global-default deny rules). It currently runs in
+    shadow mode from `agentRunner.shadowPolicyResolve` (`cwtools.ai.policy.shadow`,
+    default on; preset via `cwtools.ai.policy.preset`) and logs `policy_resolved`
+    events without enforcing.
+  - Approval learning: the permission card's "always allow" and auto-review's
+    `approve_with_rule` create session rules in `PermissionPolicyStore`
+    (deduped) via `deriveCommandPrefix`; commands carrying inline-eval flags
+    (`-c`/`-e`/`-p`/`--eval`/`-Command`/`-EncodedCommand`) never learn rules.
+    Rules persist through V2 checkpoints (`AgentResumeState.permissionRules`)
+    so resumed runs do not re-prompt. Rule changes invalidate the reviewer cache.
+  - Auto-review (`cwtools.ai.approvals.reviewer` = `user` | `auto_review`):
+    `runner/autoReviewer.ts` reviews from structured metadata only; escalations
+    and risk-3 always go to the user; reviewer rules are session-scoped and
+    capped at risk 2; inline-eval commands are never served from or written to
+    the reviewer decision cache (`hasInlineEvalPayload`).
+  - Write-mode quick ladder (composer selector / `quickChangeWriteMode`):
+    confirm < auto < auto_review < full. auto_review sets
+    `agentFileWriteMode=auto` + `approvals.reviewer=auto_review`; full maps to
+    `cwtools.ai.developer.disableSecuritySandbox=true` (everything
+    auto-resolves at the approval boundary, still fully logged; the ladder is
+    its only entry/exit). The ladder aligns `cwtools.ai.policy.preset` across
+    `workspace-auto` / `workspace-auto-review` / `full-access` (manual
+    `read-only`/`trusted-automation` presets are not clobbered). Approval is
+    mode-agnostic: utility has no auto-approve privilege — every mode shares
+    safe-command auto-approval, learned rules, reviewer, then user. Escalation
+    is decided from structured flags (`preflight.escalation` /
+    `requiresEscalation` / `context.escalation`); the `[ESCALATION]`
+    description regex is only a fallback.
+  - MCP: dynamic `mcp_<server>_<tool>` names share `mcp_call` registry gating;
+    `executeMcpTool` is the single permission chokepoint (sub-agents default
+    deny unless a `cwtools.ai.permissions.mcp` allow pattern matches). The main
+    agent intentionally defaults to allow when no pattern matches (compat
+    default until the enforcement rollout step); add a `"*": "ask"` pattern to
+    fail closed. Optional dynamic registration via
+    `cwtools.ai.mcp.registerDynamicTools` keeps a reverse name map so server
+    names containing `_` resolve unambiguously.
+  - Shell env allowlist via `cwtools.ai.shell.envAllowlist` (`off`/`log`/`enforce`,
+    default `log`) with additions in `cwtools.ai.shell.envAllowlistAdditions`.
+  - `dispatch_agents` rejects tasks whose `plannedFiles` escape the workspace;
+    `buildSubAgentSandbox` clamps child write scope to parent writable roots and
+    reports `rejectedScopes` (`subagent_policy_derived` event).
 - The custom provider supports four wire formats via `customApiFormat`
   (`openai-chat-completions`, `openai-responses`, `anthropic-messages`,
   `gemini-generate-content`). Endpoints are stored per provider in

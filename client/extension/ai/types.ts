@@ -744,6 +744,7 @@ export interface AgentToolContext {
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     onTodoUpdate?: (todos: import('./types').TodoItem[]) => void;
+    escalation?: boolean;
 }
 
 // Union type for all tool args/results
@@ -1344,6 +1345,8 @@ export interface AgentResumeState {
     lastStableEventId?: string;
     tailMessageCount?: number;
     compacted?: boolean;
+    /** Session/workflow permission rules learned from approvals; restored on resume. */
+    permissionRules?: import('./runner/permissionPolicy').PermissionRule[];
 }
 
 // ─── Agent Execution ─────────────────────────────────────────────────────────
@@ -1616,7 +1619,7 @@ export type WebViewMessage =
     | { type: 'confirmWriteFile'; messageId: string }
     | { type: 'cancelWriteFile'; messageId: string }
     | { type: 'quickChangeModel'; model: string }
-    | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' }
+    | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
     | { type: 'slashCommand'; command: string }
     | { type: 'permissionResponse'; permissionId: string; allowed: boolean; alwaysAllow?: boolean }
     /** Submit inline annotations collected in the webview back to AI for revision */
@@ -1773,6 +1776,10 @@ export interface PanelSettings {
     customApiFormat?: CustomApiFormat;
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
+    /** Approval reviewer: 'user' shows cards; 'auto_review' routes to the read-only LLM reviewer first. */
+    approvals?: { reviewer?: 'user' | 'auto_review' };
+    /** Mirror of cwtools.ai.developer.disableSecuritySandbox — the 'full' write tier. */
+    securitySandboxDisabled?: boolean;
     /** Reasoning effort / thinking depth (multi-provider) */
     reasoningEffort: 'low' | 'medium' | 'high' | 'max';
     /** Brave Search API key for web_search tool (optional) */

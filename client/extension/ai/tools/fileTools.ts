@@ -177,7 +177,7 @@ export class FileToolHandler {
         const abortSignal = context?.runnerOptions?.abortSignal;
         if (abortSignal?.aborted) return false;
         if (!abortSignal) {
-            return onPermissionRequest(id, tool, description, command);
+            return onPermissionRequest(id, tool, description, command, context);
         }
 
         let onAbort: (() => void) | undefined;
@@ -187,7 +187,7 @@ export class FileToolHandler {
         });
         try {
             return await Promise.race([
-                onPermissionRequest(id, tool, description, command),
+                onPermissionRequest(id, tool, description, command, context),
                 abortDeny,
             ]);
         } finally {
@@ -253,7 +253,7 @@ export class FileToolHandler {
                     `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
                     toolName,
                     `[ESCALATION] AI requests permission to modify another workspace root: ${resolution.resolved}`,
-                    context,
+                    context ? { ...context, escalation: true } : context,
                     resolution.resolved
                 );
                 if (!allowed) {

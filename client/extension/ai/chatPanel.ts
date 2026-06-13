@@ -41,7 +41,9 @@ import { UI, SOURCE } from './messages';
 import { ContextReferenceManager } from './contextReferences';
 import { AgentSessionCoordinator } from './agentSessionCoordinator';
 import { runLedger, type AgentRunEvent } from './runner/runLedger';
-import { PermissionPolicyStore } from './runner/permissionPolicy';
+import { PermissionPolicyStore, deriveCommandPrefix, hasInlineEvalPayload } from './runner/permissionPolicy';
+import { isSecuritySandboxDisabled } from './workspaceSandbox';
+import { AutoReviewer } from './runner/autoReviewer';
 import { AgentUiBroadcaster } from './agentUiBroadcaster';
 import { ArtifactStore } from './artifactStore';
 import { getAllWorkflows, getWorkflow } from './workflowRegistry';
@@ -2093,7 +2095,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         activePendingInteractions.set(id, command ? `[run_command] ${command}` : `[${tool}] ${description}`);
         const requestMode = this.currentMode;
-        const isEscalationRequest = /\[ESCALATION\]|escalation/i.test(description);
+        // Structured flags from preflight/tool context decide escalation; the
+        // description-tag regex stays only as a fail-safe fallback.
+        const isEscalationRequest = context?.preflight?.escalation === true
+            || context?.preflight?.requiresEscalation === true
+            || context?.escalation === true
+            || /\[ESCALATION\]|escalation/i.test(description);
         const resolveAutomatically = (reason: string): Promise<boolean> => {
             activePendingInteractions.delete(id);
             if (this.currentRunId) {
@@ -2106,7 +2113,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
             return Promise.resolve(true);
         };
-        
+
+        // Full-access tier: the user explicitly removed sandbox and approval
+        // boundaries for this workspace. Every request auto-resolves; the call is
+        // still fully logged and visible in the run timeline.
+        if (isSecuritySandboxDisabled()) {
+            return resolveAutomatically('full-access');
+        }
+
         // 联动 PermissionPolicyStore 进行高精细粒度低风险命令豁免，保障安全边界
         if (tool === 'run_command' && !isEscalationRequest) {
             const riskLevel = context?.preflight?.riskLevel ?? 0;
@@ -2123,14 +2137,27 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
         }
 
-        if (tool === 'run_command' && requestMode === 'utility') {
-            const autoWriteMode = this.aiService.getConfig().agentFileWriteMode === 'auto';
-            if (autoWriteMode && !isEscalationRequest) {
-                // Auto-approve Utility mode commands when the session or global auto mode allows it.
-                return resolveAutomatically('utility-auto-mode');
-            }
+        // Auto-review: reviewer swap at the approval boundary; ask_user falls through to the card.
+        // Mode-agnostic: utility/build/script all share this exact funnel.
+        const reviewerMode = vs.workspace.getConfiguration('cwtools.ai').get<string>('approvals.reviewer', 'user');
+        if (reviewerMode === 'auto_review' && !isEscalationRequest) {
+            return this.runAutoReview(id, tool, description, command, context).then(decision => {
+                if (decision !== undefined) return decision;
+                return this.promptUserPermission(id, tool, description, command, context, requestMode);
+            });
         }
 
+        return this.promptUserPermission(id, tool, description, command, context, requestMode);
+    }
+
+    private promptUserPermission(
+        id: string,
+        tool: string,
+        description: string,
+        command: string | undefined,
+        context: any,
+        requestMode: AgentMode
+    ): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
             this.pendingPermissionResolvers.set(id, (allowed: boolean) => {
                 resolve(allowed);
@@ -2142,6 +2169,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 preflight: context?.preflight
             });
 
+            const isEscalation = /\[ESCALATION\]|escalation/i.test(description);
+            const riskLevel = context?.preflight?.riskLevel ?? 2;
             const card: PendingPermissionCardMessage = {
                 type: 'permissionRequest',
                 permissionId: id,
@@ -2149,12 +2178,82 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 description,
                 command,
                 preflight: context?.preflight,
-                // 只有低风险 (riskLevel <= 1) 指令才允许点击 always allow
-                allowAlways: tool === 'run_command',
+                allowAlways: tool === 'run_command' && !isEscalation && riskLevel <= 1,
             };
             this.pendingPermissionCards.set(id, card);
             this.postMessage(card);
         });
+    }
+
+    private autoReviewer?: AutoReviewer;
+
+    private getAutoReviewer(): AutoReviewer {
+        if (!this.autoReviewer) {
+            this.autoReviewer = new AutoReviewer(async (system, user) => {
+                const res = await this.aiService.chatCompletion(
+                    [{ role: 'system', content: system }, { role: 'user', content: user }],
+                    { temperature: 0, maxTokens: 300, disableThinking: true, requestTimeoutMs: 30_000 }
+                );
+                const content = res.choices?.[0]?.message?.content;
+                return typeof content === 'string' ? content : JSON.stringify(content ?? '');
+            });
+        }
+        return this.autoReviewer;
+    }
+
+    /** Returns true/false when the reviewer decided, undefined to fall back to the user. */
+    private async runAutoReview(
+        id: string,
+        tool: string,
+        description: string,
+        command: string | undefined,
+        context: any
+    ): Promise<boolean | undefined> {
+        const preflight = context?.preflight;
+        const decision = await this.getAutoReviewer().review({
+            id,
+            runId: this.currentRunId,
+            toolName: tool,
+            riskLevel: preflight?.riskLevel ?? 2,
+            command,
+            cwd: preflight?.cwd ?? context?.cwd,
+            classification: preflight?.classification,
+            systemReason: description,
+            escalation: !!preflight?.escalation || !!preflight?.requiresEscalation,
+            inlineEval: !!command && hasInlineEvalPayload(command),
+        });
+        if (this.currentRunId) {
+            runLedger.appendEvent(this.currentRunId, 'reviewer_decision', {
+                tool, command, verdict: decision.verdict, rationale: decision.rationale, fromCache: !!decision.fromCache,
+            }, { invocationId: id }).catch(() => {});
+        }
+        if (decision.verdict === 'ask_user') return undefined;
+        activePendingInteractions.delete(id);
+        const allowed = decision.verdict !== 'deny';
+        if (allowed && decision.verdict === 'approve_with_rule' && tool === 'run_command' && command) {
+            // Reviewer rules are session-scoped and capped at risk 2 — never exempt destructive calls.
+            const prefixWords = deriveCommandPrefix(command);
+            if (prefixWords[0]) {
+                const created = PermissionPolicyStore.getInstance().addRule({
+                    tool: 'run_command',
+                    commandPrefix: prefixWords,
+                    cwdScope: preflight?.cwd || getProjectWorkspaceRoot(),
+                    riskMax: Math.min(2, Math.max(1, preflight?.riskLevel ?? 1)) as 1 | 2,
+                    sessionOnly: true,
+                });
+                if (this.currentRunId) {
+                    runLedger.appendEvent(this.currentRunId, 'approval_rule_created', {
+                        ruleId: created.id, tool: 'run_command', commandPrefix: prefixWords, scope: 'session', createdBy: 'auto_review',
+                    }, { invocationId: id }).catch(() => {});
+                }
+            }
+        }
+        if (this.currentRunId) {
+            runLedger.appendEvent(this.currentRunId, 'permission_resolved', {
+                allowed, reviewer: 'auto_review', rationale: decision.rationale,
+            }, { invocationId: id }).catch(() => {});
+        }
+        return allowed;
     }
 
     public resolvePermissionRequest(permissionId: string, allowed: boolean, alwaysAllow?: boolean): void {
@@ -2172,21 +2271,30 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.pendingPermissionDetails.delete(permissionId);
 
             if (alwaysAllow && allowed) {
-                if (details?.command) {
-                    const cmd = details.command.trim().replace(/\s+/g, ' ');
-                    const words = cmd.split(' ');
-                    const prefixWords = (words[0]?.toLowerCase() === 'git' && words[1])
-                        ? [words[0], words[1]]
-                        : [words[0] || ''];
+                const riskLevel = details?.preflight?.riskLevel ?? 1;
+                // Defense in depth: never persist exemptions for risk >= 2 even if the UI sent alwaysAllow.
+                if (details?.command && riskLevel <= 1) {
+                    const prefixWords = deriveCommandPrefix(details.command);
                     if (prefixWords[0]) {
-                        const riskLevel = details.preflight?.riskLevel ?? 1;
-                        PermissionPolicyStore.getInstance().addRule({
+                        const created = PermissionPolicyStore.getInstance().addRule({
                             tool: 'run_command',
                             commandPrefix: prefixWords,
                             cwdScope: details.cwd || getProjectWorkspaceRoot(),
-                            riskMax: Math.max(1, riskLevel) as any,
+                            riskMax: 1,
                             sessionOnly: true
                         });
+                        if (this.currentRunId) {
+                            runLedger.appendEvent(this.currentRunId, 'approval_rule_created', {
+                                ruleId: created.id, tool: 'run_command', commandPrefix: prefixWords, scope: 'session', createdBy: 'user',
+                            }, { invocationId: permissionId }).catch(() => {});
+                        }
+                        // Rule-set change invalidates cached reviewer decisions.
+                        if (this.autoReviewer) {
+                            this.autoReviewer.invalidateCache();
+                            if (this.currentRunId) {
+                                runLedger.appendEvent(this.currentRunId, 'reviewer_cache_invalidated', { reason: 'approval_rule_created' }).catch(() => {});
+                            }
+                        }
                     }
                 }
             }

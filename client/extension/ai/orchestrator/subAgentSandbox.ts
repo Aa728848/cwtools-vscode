@@ -6,6 +6,7 @@ import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { FILE_SCOPED_WRITE_TOOLS, MUTATING_TOOLS, SUB_AGENT_EXCLUDES } from '../tools/registry';
 import { isPathInsideOrEqual, foldPathCase } from '../workspaceSandbox';
+import { clampWriteScopeToRoots } from '../runner/policyEngine';
 
 /**
  * Orchestrator 子 Agent 物理沙盒隔离规范 (Sub-Agent Sandbox)
@@ -20,6 +21,8 @@ export interface SubAgentSandbox {
     plannedEntities?: string[];
     permissionPolicy: 'deny' | 'delegate_to_parent' | 'allow_readonly';
     vfsOverlay?: Map<string, string>;
+    /** plannedFiles dropped because they escaped the parent writable roots. */
+    rejectedScopes?: string[];
 }
 
 const TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
@@ -29,7 +32,8 @@ const TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
  */
 export function buildSubAgentSandbox(
     taskNode: TaskNode,
-    _workspaceRoot: string
+    workspaceRoot: string,
+    parentWritableRoots?: string[]
 ): SubAgentSandbox {
     const profile = getAgentProfile(taskNode.agentType);
     const role = taskNode.agentType;
@@ -73,10 +77,15 @@ export function buildSubAgentSandbox(
         }
 
         // 2.3 融合 taskNode.plannedFiles 明确规划的物理变更文件路径
+        // Phase 3: child write scope is the intersection with parent writable roots — escapes are dropped.
         if (taskNode.plannedFiles && taskNode.plannedFiles.length > 0) {
-            taskNode.plannedFiles.forEach(f => {
-                scopes.push(path.normalize(f));
-            });
+            const { clamped, rejected } = clampWriteScopeToRoots(
+                taskNode.plannedFiles.map(f => path.normalize(f)),
+                parentWritableRoots ?? [workspaceRoot],
+                workspaceRoot
+            );
+            (clamped ?? []).forEach(f => scopes.push(f));
+            if (rejected.length > 0) sandbox.rejectedScopes = rejected;
         }
 
         if (scopes.length > 0) {

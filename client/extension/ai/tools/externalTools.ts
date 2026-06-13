@@ -836,10 +836,8 @@ export class ExternalToolHandler {
         timedOut?: boolean;
     }> {
         // Safety: deny obviously dangerous commands and shell control operators.
-        // Utility mode is intentionally broader for project tooling/scripts, so it
-        // may invoke PowerShell hosts; other modes still require escalation there.
-        const mode = context?.runnerOptions?.mode;
-        const isUtilityMode = mode === 'utility';
+        // Approval behavior is mode-agnostic: every mode shares the same
+        // safe-command auto-approval, learned rules, and approval boundary.
         const topicId = context?.runnerOptions?.topicId || 'default';
         args.command = this.normalizeAgentWorkspaceCommand(args.command, topicId);
         const aliasNormalized = this.normalizeWorkspaceFolderAliasCommand(args.command);
@@ -910,7 +908,6 @@ export class ExternalToolHandler {
         const isAutoApproveSafeCommand = isReadOnlyCommand || isSingleSafeCommand;
 
         const bypassSandbox = isSecuritySandboxDisabled();
-        const fileWriteMode = vs.workspace.getConfiguration('cwtools.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'confirm');
         let escalationReason = '';
 
         if (!bypassSandbox) {
@@ -981,9 +978,10 @@ export class ExternalToolHandler {
             preflight.riskLevel
         );
         const safeAutoApprove = isAutoApproveSafeCommand && !hasShellControlOperator && !args.requestEscalation && !currentEscalationReason;
-        const utilityAutoApprove = isUtilityMode && fileWriteMode === 'auto' && !args.requestEscalation && !currentEscalationReason;
-        // Command auto-runs only when the tool classifies it as safe or it matches pre-approved session policy
-        let requiresPermission = (isInterpreterInline || !(safeAutoApprove || utilityAutoApprove)) && !approvedByPolicy;
+        // Command auto-runs only when the tool classifies it as safe or it matches pre-approved session policy.
+        // All agent modes share this gate; mode-specific privileges were removed so the
+        // approval boundary (learned rules -> auto-review -> user) is the single decision point.
+        let requiresPermission = (isInterpreterInline || !safeAutoApprove) && !approvedByPolicy;
         
         // Escalation overrides MUST always prompt user regardless of policy/auto configurations
         if (preflight.requiresEscalation || currentEscalationReason) {
@@ -1039,7 +1037,7 @@ export class ExternalToolHandler {
             if (scratchDir) fs.mkdirSync(scratchDir, { recursive: true });
             if (mediaDir) fs.mkdirSync(mediaDir, { recursive: true });
         } catch { /* best effort */ }
-        const commandEnv = {
+        const commandEnv: Record<string, string | undefined> = {
             ...process.env,
             CWT_WORKSPACE_ROOT: this.ctx.workspaceRoot,
             CWT_AGENT_TOPIC_ID: topicId,
@@ -1048,6 +1046,23 @@ export class ExternalToolHandler {
             CWT_AGENT_HELPER_SCRIPT: helperScript,
             CWT_AGENT_MEDIA_DIR: mediaDir,
         };
+        // Env allowlist: 'log' shadow-reports what enforcement would drop; 'enforce' filters.
+        let spawnEnv = commandEnv;
+        try {
+            const shellCfg = vs.workspace.getConfiguration('cwtools.ai');
+            const envMode = shellCfg.get<string>('shell.envAllowlist', 'log');
+            if (envMode === 'log' || envMode === 'enforce') {
+                const { buildSandboxedEnv } = await import('../runner/shellEnv');
+                const { env, dropped } = buildSandboxedEnv(commandEnv, {
+                    userAdditions: shellCfg.get<string[]>('shell.envAllowlistAdditions', []),
+                });
+                if (envMode === 'enforce') spawnEnv = env;
+                else if (dropped.length > 0) {
+                    const { ErrorReporter } = await import('../errorReporter');
+                    ErrorReporter.debug('shellEnv', `env allowlist would drop ${dropped.length} vars: ${dropped.slice(0, 20).join(', ')}`);
+                }
+            }
+        } catch { /* allowlist must not break command execution */ }
 
         let stdoutBuf = '';
         let stderrBuf = '';
@@ -1070,7 +1085,7 @@ export class ExternalToolHandler {
         }>(resolve => {
             let proc: ReturnType<typeof spawn>;
             try {
-                proc = spawn(shell, shellArgs, { cwd, env: commandEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+                proc = spawn(shell, shellArgs, { cwd, env: spawnEnv, stdio: ['ignore', 'pipe', 'pipe'] });
             } catch (e) {
                 resolve({
                     stdout: '',

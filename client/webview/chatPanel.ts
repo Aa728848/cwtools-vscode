@@ -268,7 +268,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let activeWorkflowId: string | null = null;
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
-    let quickWriteMode: 'confirm' | 'auto' = 'confirm';
+    let quickWriteMode: 'confirm' | 'auto' | 'auto_review' | 'full' = 'confirm';
+    /** Last known host-side cwtools.ai.developer.disableSecuritySandbox value (the 'full' tier). */
+    let settingsSandboxDisabled = false;
     let sideWorkspaceContent: HTMLElement | null = null;
     let settingsInSideWorkspace = false;
     let lastSettingsPageSignature = '';
@@ -2067,8 +2069,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
     }
 
-    function updateQuickWriteModeSelector(mode: 'confirm' | 'auto' | string | undefined): void {
-        quickWriteMode = mode === 'auto' ? 'auto' : 'confirm';
+    /** Map host settings to the quick ladder tier: confirm < auto < auto_review < full. */
+    function deriveWriteTier(current: any): 'confirm' | 'auto' | 'auto_review' | 'full' {
+        settingsSandboxDisabled = current?.securitySandboxDisabled === true;
+        if (settingsSandboxDisabled) return 'full';
+        const writeMode = current?.agentFileWriteMode === 'auto' ? 'auto' : 'confirm';
+        if (writeMode === 'auto' && current?.approvals?.reviewer === 'auto_review') return 'auto_review';
+        return writeMode;
+    }
+
+    function updateQuickWriteModeSelector(mode: 'confirm' | 'auto' | 'auto_review' | 'full' | string | undefined): void {
+        quickWriteMode = mode === 'auto' || mode === 'auto_review' || mode === 'full' ? mode : 'confirm';
         const select = document.getElementById('quickWriteModeSelect') as HTMLSelectElement | null;
         if (select) select.value = quickWriteMode;
         const label = document.getElementById('quickWriteModeLabel');
@@ -2076,16 +2087,34 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const display = getQuickWriteModeLabel(quickWriteMode);
         if (label) label.textContent = display;
         if (trigger) {
-            trigger.title = chatI18n.locale === 'zh-cn'
-                ? `写入模式：${display}`
-                : `Write mode: ${display}`;
+            trigger.classList.toggle('write-mode-elevated', quickWriteMode === 'auto_review');
+            trigger.classList.toggle('write-mode-danger', quickWriteMode === 'full');
+            trigger.title = (chatI18n.locale === 'zh-cn' ? `写入模式：${display}` : `Write mode: ${display}`)
+                + (getQuickWriteModeDesc(quickWriteMode) ? ` — ${getQuickWriteModeDesc(quickWriteMode)}` : '');
         }
         renderQuickWriteModeMenu();
     }
 
-    function getQuickWriteModeLabel(mode: 'confirm' | 'auto'): string {
-        if (chatI18n.locale === 'zh-cn') return mode === 'auto' ? '自动写入' : '确认写入';
-        return mode === 'auto' ? 'Auto write' : 'Confirm write';
+    function getQuickWriteModeLabel(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): string {
+        if (chatI18n.locale === 'zh-cn') {
+            if (mode === 'full') return '完全放行';
+            return mode === 'auto_review' ? '自动审批' : mode === 'auto' ? '自动写入' : '确认写入';
+        }
+        if (mode === 'full') return 'Full access';
+        return mode === 'auto_review' ? 'Auto approve' : mode === 'auto' ? 'Auto write' : 'Confirm write';
+    }
+
+    function getQuickWriteModeDesc(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): string {
+        if (chatI18n.locale === 'zh-cn') {
+            if (mode === 'full') return '解除沙箱与审批边界：所有命令与写入直接执行（高危，仅限可信任务）';
+            if (mode === 'auto_review') return '自动写入 + 评审模型审批大部分命令；拿不准或高危才询问';
+            if (mode === 'auto') return '文件直接写入；风险操作仍询问';
+            return '写入前出 diff 确认';
+        }
+        if (mode === 'full') return 'Removes sandbox and approval boundaries; everything runs without asking (dangerous)';
+        if (mode === 'auto_review') return 'Auto write + reviewer screens most calls; only uncertain or destructive ones ask';
+        if (mode === 'auto') return 'Files write directly; risky calls still ask';
+        return 'Diff confirmation before writes';
     }
 
     function renderQuickWriteModeMenu(): void {
@@ -2094,22 +2123,38 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (title) title.textContent = chatI18n.locale === 'zh-cn' ? '写入模式' : 'Write mode';
         if (!list) return;
         list.innerHTML = '';
-        (['confirm', 'auto'] as const).forEach(mode => {
+        (['confirm', 'auto', 'auto_review', 'full'] as const).forEach(mode => {
             const btn = document.createElement('button');
-            btn.className = 'model-menu-item';
+            btn.className = 'model-menu-item model-menu-item-stacked';
+            if (mode === 'auto_review') btn.classList.add('write-mode-item-elevated');
+            if (mode === 'full') btn.classList.add('write-mode-item-danger');
             btn.type = 'button';
-            btn.textContent = getQuickWriteModeLabel(mode);
+            const nameEl = document.createElement('span');
+            nameEl.textContent = getQuickWriteModeLabel(mode);
+            const descEl = document.createElement('span');
+            descEl.className = 'write-mode-item-desc';
+            descEl.textContent = getQuickWriteModeDesc(mode);
+            btn.appendChild(nameEl);
+            btn.appendChild(descEl);
             btn.classList.toggle('active', mode === quickWriteMode);
             btn.addEventListener('click', () => {
                 updateQuickWriteModeSelector(mode);
-                const agentWriteMode = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
-                if (agentWriteMode) agentWriteMode.value = quickWriteMode;
+                syncSettingsControlsToWriteTier();
                 refreshSettingsOverview();
                 setWriteModeMenuOpen(false);
                 vscode.postMessage({ type: 'quickChangeWriteMode', mode: quickWriteMode });
             });
             list.appendChild(btn);
         });
+    }
+
+    /** Mirror the quick ladder into the settings-page controls so both stay coherent. */
+    function syncSettingsControlsToWriteTier(): void {
+        const agentWriteMode = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
+        if (agentWriteMode) agentWriteMode.value = quickWriteMode === 'confirm' ? 'confirm' : 'auto';
+        const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
+        if (autoReviewEl) autoReviewEl.checked = quickWriteMode === 'auto_review';
+        settingsSandboxDisabled = quickWriteMode === 'full';
     }
 
     const quickModelSel = document.getElementById('quickModelSelect');
@@ -2125,8 +2170,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     if (quickWriteModeSel) {
         quickWriteModeSel.addEventListener('change', () => {
             updateQuickWriteModeSelector(quickWriteModeSel.value);
-            const agentWriteMode = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
-            if (agentWriteMode) agentWriteMode.value = quickWriteMode;
+            syncSettingsControlsToWriteTier();
             refreshSettingsOverview();
             vscode.postMessage({ type: 'quickChangeWriteMode', mode: quickWriteMode });
         });
@@ -2143,8 +2187,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     if (chatI18n.locale !== 'zh-cn' && quickWriteModeSel) {
         const confirmOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="confirm"]');
         const autoOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="auto"]');
+        const autoReviewOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="auto_review"]');
+        const fullOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="full"]');
         if (confirmOption) confirmOption.textContent = 'Confirm';
         if (autoOption) autoOption.textContent = 'Auto';
+        if (autoReviewOption) autoReviewOption.textContent = 'Auto approve';
+        if (fullOption) fullOption.textContent = 'Full access';
         quickWriteModeSel.title = 'Write mode';
         quickWriteModeSel.setAttribute('aria-label', 'Write mode');
     }
@@ -2285,8 +2333,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     if (settingsPage) {
         settingsPage.addEventListener('input', () => { if (settingsPage.classList.contains('active')) refreshSettingsOverview(); });
         settingsPage.addEventListener('change', event => {
-            if ((event.target as HTMLElement | null)?.id === 'agentWriteMode') {
-                updateQuickWriteModeSelector((event.target as HTMLSelectElement).value);
+            const targetId = (event.target as HTMLElement | null)?.id;
+            if ((targetId === 'agentWriteMode' || targetId === 'approvalsAutoReview') && !settingsSandboxDisabled) {
+                // While the 'full' tier is active the ladder is the only exit — the page
+                // controls don't persist the sandbox flag, so they must not repaint the tier.
+                const writeSel = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
+                const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
+                const base = writeSel?.value || 'confirm';
+                updateQuickWriteModeSelector(base === 'auto' && autoReviewEl?.checked ? 'auto_review' : base);
             }
             if (settingsPage.classList.contains('active')) refreshSettingsOverview();
         });
@@ -5173,7 +5227,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
                 updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
-                updateQuickWriteModeSelector(msg.current?.agentFileWriteMode || 'confirm');
+                updateQuickWriteModeSelector(deriveWriteTier(msg.current));
                 {
                     const managerSettingsVisible = isManagerShell()
                         && document.body.dataset.managerActiveTab === 'settings'
@@ -5927,7 +5981,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 inlineEnabled: !!inlineEnabled?.checked,
                 inlineProviderName,
                 mcpCount: document.querySelectorAll('#mcpServersList .mcp-server-block').length,
-                writeMode: agentModeSel?.value || 'confirm',
+                writeMode: (() => {
+                    if (settingsSandboxDisabled) return 'full';
+                    const base = agentModeSel?.value || 'confirm';
+                    const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
+                    return base === 'auto' && autoReviewEl?.checked ? 'auto_review' : base;
+                })(),
                 reasoningEffort: reasoningSel?.value || 'high',
             }, chatI18n),
         );
@@ -5941,7 +6000,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         for (const p of providers || []) settingsProviderEndpoints[p.id] = p.userEndpoint || '';
         if (current?.provider && current.endpoint) settingsProviderEndpoints[current.provider] = current.endpoint;
         updateQuickModelSelector(providers, current, ollamaModels);
-        updateQuickWriteModeSelector(current.agentFileWriteMode || 'confirm');
+        updateQuickWriteModeSelector(deriveWriteTier(current));
         const settingsPageSignature = JSON.stringify({
             providers: (providers || []).map((p: any) => ({
                 id: p.id,
@@ -5993,7 +6052,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         (document.getElementById('inlineRequestTimeout') as HTMLInputElement).value = String(current.inlineCompletion?.requestTimeoutMs ?? 1500);
         (document.getElementById('inlineMcpCacheTtl') as HTMLInputElement).value = String(current.inlineCompletion?.mcpCacheTtlMs ?? 30000);
         (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'confirm';
-        updateQuickWriteModeSelector(current.agentFileWriteMode || 'confirm');
+        updateQuickWriteModeSelector(deriveWriteTier(current));
+        const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
+        if (autoReviewEl) autoReviewEl.checked = current.approvals?.reviewer === 'auto_review';
         // Brave Search API key — show masked placeholder if already set
         const braveKeyEl = document.getElementById('braveSearchApiKey') as HTMLInputElement | null;
         if (braveKeyEl) braveKeyEl.value = current.braveSearchApiKey || '';
@@ -6497,6 +6558,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 customApiFormat: getCustomApiFormat(),
                 maxContextTokens: parseInt((document.getElementById('settingsCtx') as HTMLInputElement).value) || 0,
                 agentFileWriteMode: (document.getElementById('agentWriteMode') as HTMLSelectElement).value,
+                approvals: {
+                    reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
+                },
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 braveSearchApiKey: ((document.getElementById('braveSearchApiKey') as HTMLInputElement | null)?.value || '').trim(),
                 exaApiKey: ((document.getElementById('exaApiKey') as HTMLInputElement | null)?.value || '').trim(),

@@ -1,6 +1,73 @@
 import { getProjectWorkspaceRoot } from '../workspacePaths';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
 
+// Inline-eval flags: prefix matching cannot bound the code payload, so these never learn rules.
+const INLINE_EVAL_FLAGS = new Set(['-c', '-e', '-p', '--eval', '-command', '-encodedcommand']);
+
+// Base-command-specific eval/subshell flags (kept off the global set to avoid false positives like `grep -r`).
+const BASE_COMMAND_EVAL_FLAGS: Record<string, Set<string>> = {
+    cmd: new Set(['/c', '/k']),
+    php: new Set(['-r']),
+    node: new Set(['--print']),
+    nodejs: new Set(['--print']),
+    deno: new Set(['eval']),
+};
+
+/** Normalize a flag token: strip leading/trailing quotes independently, cut at '=', lowercase. */
+function normalizeFlagToken(rawToken: string): string {
+    let t = rawToken.trim().replace(/^['"]+/, '').replace(/['"]+$/, '').trim().toLowerCase();
+    const eq = t.indexOf('=');
+    if (eq > 0) t = t.slice(0, eq);
+    return t;
+}
+
+/** Reduce an executable token to its base name (drop path and .exe/.cmd). */
+function normalizeBaseCommand(rawToken: string): string {
+    let t = rawToken.trim().replace(/^['"]+/, '').replace(/['"]+$/, '').trim().toLowerCase();
+    const slash = Math.max(t.lastIndexOf('/'), t.lastIndexOf('\\'));
+    if (slash >= 0) t = t.slice(slash + 1);
+    return t.replace(/\.(exe|cmd|bat|com)$/, '');
+}
+
+function isInlineEvalToken(rawToken: string): boolean {
+    const t = normalizeFlagToken(rawToken);
+    if (INLINE_EVAL_FLAGS.has(t)) return true;
+    // PowerShell accepts unambiguous parameter prefixes: -enc/-enco/... and -com/-comm/...
+    return t.length >= 4 && t.startsWith('-')
+        && ('-encodedcommand'.startsWith(t) || '-command'.startsWith(t));
+}
+
+// Node clusters single-char flags: -pe / -ep / -pte all carry -p (print) or -e (eval).
+function isNodeEvalCluster(rawToken: string): boolean {
+    const t = normalizeFlagToken(rawToken);
+    return /^-[a-z]+$/.test(t) && (t.includes('e') || t.includes('p'));
+}
+
+export function hasInlineEvalPayload(command: string): boolean {
+    const tokens = command.trim().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+    if (tokens.length <= 1) return false;
+    if (tokens.some(isInlineEvalToken)) return true;
+    const base = normalizeBaseCommand(tokens[0]!);
+    const baseEvalFlags = BASE_COMMAND_EVAL_FLAGS[base];
+    if (baseEvalFlags && tokens.slice(1).some(tok => baseEvalFlags.has(normalizeFlagToken(tok)))) return true;
+    if ((base === 'node' || base === 'nodejs') && tokens.slice(1).some(isNodeEvalCluster)) return true;
+    return false;
+}
+
+/**
+ * Derive a learned-rule prefix from an approved command.
+ * Two tokens by default ('npm test'); three when the second is a flag
+ * ('python -m pytest'). Inline-eval / subshell commands return [] — they
+ * may be approved once but must never become rules.
+ */
+export function deriveCommandPrefix(command: string): string[] {
+    const tokens = command.trim().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+    if (tokens.length <= 1) return tokens;
+    if (hasInlineEvalPayload(command)) return [];
+    if (tokens[1]!.startsWith('-') && tokens.length >= 3) return tokens.slice(0, 3);
+    return tokens.slice(0, 2);
+}
+
 export interface PermissionRule {
     id: string;
     tool: string;
@@ -38,6 +105,8 @@ export class PermissionPolicyStore {
      * Add a permission rule
      */
     public addRule(rule: Omit<PermissionRule, 'id' | 'createdAt'>): PermissionRule {
+        const existing = this.findEquivalent(rule);
+        if (existing) return existing;
         const newRule: PermissionRule = {
             ...rule,
             id: `rule_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -45,6 +114,38 @@ export class PermissionPolicyStore {
         };
         this.rules.push(newRule);
         return newRule;
+    }
+
+    /** Snapshot active rules for checkpoint persistence. */
+    public serialize(): PermissionRule[] {
+        return this.getRules();
+    }
+
+    /** Restore rules from a checkpoint; skips expired and duplicate entries. */
+    public restore(rules: PermissionRule[] | undefined): number {
+        if (!Array.isArray(rules)) return 0;
+        const now = Date.now();
+        let restored = 0;
+        for (const rule of rules) {
+            if (!rule || typeof rule.tool !== 'string' || typeof rule.cwdScope !== 'string') continue;
+            if (rule.expiresAt && rule.expiresAt <= now) continue;
+            if (this.findEquivalent(rule)) continue;
+            this.rules.push({ ...rule });
+            restored++;
+        }
+        return restored;
+    }
+
+    private findEquivalent(rule: Pick<PermissionRule, 'tool' | 'cwdScope' | 'riskMax' | 'commandPrefix'>): PermissionRule | undefined {
+        const samePrefix = (a?: string[], b?: string[]): boolean => {
+            const x = a ?? [];
+            const y = b ?? [];
+            return x.length === y.length && x.every((v, i) => v === y[i]);
+        };
+        return this.rules.find(r => r.tool === rule.tool
+            && r.cwdScope === rule.cwdScope
+            && r.riskMax === rule.riskMax
+            && samePrefix(r.commandPrefix, rule.commandPrefix));
     }
 
     /**

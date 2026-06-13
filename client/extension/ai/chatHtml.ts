@@ -191,6 +191,8 @@ ${stylesheetLinks}
             <select class="hidden-composer-select" id="quickWriteModeSelect" title="写入模式" aria-hidden="true" tabindex="-1">
                 <option value="confirm">确认写入</option>
                 <option value="auto">自动写入</option>
+                <option value="auto_review">自动审批</option>
+                <option value="full">完全放行</option>
             </select>
             <button class="composer-model-trigger composer-write-mode-trigger" id="quickWriteModeTrigger" title="写入模式" aria-haspopup="listbox" aria-expanded="false">
                 <span id="quickWriteModeLabel">确认写入</span>
@@ -356,6 +358,11 @@ ${stylesheetLinks}
                         <option value="auto">自动模式 — 直接写入（高级）</option>
                     </select>
                 </div>
+                <div class="settings-row" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                    <span class="settings-toggle-label">自动审批评审 (Auto-review)</span>
+                    <label class="toggle-switch"><input type="checkbox" id="approvalsAutoReview"><span class="toggle-track"></span></label>
+                </div>
+                <div class="settings-hint">开启后由只读评审模型先行审批大部分命令；拿不准、升级请求或破坏性操作仍会询问用户。</div>
                 <div class="settings-group">
                     <label class="settings-label">${svgIcon('search')} Brave Search API Key <span style="opacity:0.5;font-weight:400">(可选)</span></label>
                     <div class="settings-key-row">

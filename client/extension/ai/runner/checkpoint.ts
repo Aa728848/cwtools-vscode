@@ -3,6 +3,7 @@ import * as pathModule from 'path';
 import { getProjectWorkspaceRoot, getTopicStorageDir, getTopicStorageDirCandidates } from '../workspacePaths';
 import type { AgentResumeState, ChatMessage, AgentMode } from '../types';
 import type { AgentToolExecutor } from '../agentTools';
+import { PermissionPolicyStore } from './permissionPolicy';
 
 export const RESUME_TAIL_MESSAGE_LIMIT = 24;
 const RESUME_SUMMARY_CHAR_LIMIT = 12000;
@@ -201,6 +202,7 @@ export async function saveResumeState(
             lastStableEventId: 'evt_latest',
             tailMessageCount: compactedMessages.length,
             compacted: true,
+            permissionRules: PermissionPolicyStore.getInstance().serialize(),
         };
 
         fs.writeFileSync(
@@ -227,6 +229,8 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
         const raw = JSON.parse(fs.readFileSync(resumePath, 'utf-8'));
         if (!raw || !raw.messages || !Array.isArray(raw.messages)) return null;
         raw.messages = prepareMessagesForResume(raw.messages);
+        // Re-arm learned approval rules so resumed runs do not re-prompt.
+        PermissionPolicyStore.getInstance().restore(raw.permissionRules);
         return raw as AgentResumeState;
     } catch {
         return null;

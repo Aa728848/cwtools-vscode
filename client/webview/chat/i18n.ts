@@ -37,6 +37,8 @@ export interface ChatI18nText {
         inlineOff: string;
         writeAuto: string;
         writeConfirm: string;
+        writeAutoReview: string;
+        writeFull: string;
         contextPrefix: string;
         mcpUnit: string;
         providerChip: string;
@@ -217,6 +219,8 @@ const EN: ChatI18nText = {
         inlineOff: 'Inline: off',
         writeAuto: 'Auto write',
         writeConfirm: 'Confirm writes',
+        writeAutoReview: 'Auto approve',
+        writeFull: 'Full access',
         contextPrefix: 'context',
         mcpUnit: 'MCP',
         providerChip: 'Provider',
@@ -433,6 +437,8 @@ const ZH_CN: ChatI18nText = {
         inlineOff: '补全: 关闭',
         writeAuto: '写入自动',
         writeConfirm: '写入确认',
+        writeAutoReview: '自动审批',
+        writeFull: '完全放行',
         contextPrefix: '上下文',
         mcpUnit: 'MCP',
         providerChip: 'Provider',

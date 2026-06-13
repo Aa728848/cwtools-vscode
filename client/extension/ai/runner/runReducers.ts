@@ -366,6 +366,62 @@ export function reduceCacheStats(events: AgentRunEvent[]): CacheStatsSnapshot {
     };
 }
 
+// ─── Policy / approval activity ──────────────────────────────────────────────
+
+export interface PolicyActivitySnapshot {
+    policyResolvedCount: number;
+    actionCounts: { allow: number; ask: number; deny: number };
+    approvalsRequested: number;
+    approvalsAllowed: number;
+    approvalsDenied: number;
+    rulesCreated: Array<{ ruleId?: string; tool?: string; commandPrefix?: string[]; createdBy?: string }>;
+    reviewerDecisions: { approved: number; denied: number; askUser: number; cacheHits: number };
+    sandboxDenials: number;
+}
+
+export function reducePolicyActivity(events: AgentRunEvent[]): PolicyActivitySnapshot {
+    const snap: PolicyActivitySnapshot = {
+        policyResolvedCount: 0,
+        actionCounts: { allow: 0, ask: 0, deny: 0 },
+        approvalsRequested: 0,
+        approvalsAllowed: 0,
+        approvalsDenied: 0,
+        rulesCreated: [],
+        reviewerDecisions: { approved: 0, denied: 0, askUser: 0, cacheHits: 0 },
+        sandboxDenials: 0,
+    };
+    for (const ev of events) {
+        const p = (ev.payload as Record<string, any>) ?? {};
+        switch (ev.type) {
+            case 'policy_resolved':
+                snap.policyResolvedCount++;
+                if (p.action === 'allow' || p.action === 'ask' || p.action === 'deny') snap.actionCounts[p.action as 'allow' | 'ask' | 'deny']++;
+                break;
+            case 'permission_requested':
+                snap.approvalsRequested++;
+                break;
+            case 'permission_resolved':
+                if (p.allowed) snap.approvalsAllowed++;
+                else snap.approvalsDenied++;
+                break;
+            case 'approval_rule_created':
+                snap.rulesCreated.push({ ruleId: p.ruleId, tool: p.tool, commandPrefix: p.commandPrefix, createdBy: p.createdBy });
+                break;
+            case 'reviewer_decision':
+                if (p.fromCache) snap.reviewerDecisions.cacheHits++;
+                if (p.verdict === 'deny') snap.reviewerDecisions.denied++;
+                else if (p.verdict === 'ask_user') snap.reviewerDecisions.askUser++;
+                else snap.reviewerDecisions.approved++;
+                break;
+            case 'sandbox_denied':
+            case 'subagent_refused':
+                snap.sandboxDenials++;
+                break;
+        }
+    }
+    return snap;
+}
+
 // ─── Aggregate snapshot (one-shot helper for broadcasters) ───────────────────
 
 export interface RunReducerSnapshot {
@@ -373,6 +429,7 @@ export interface RunReducerSnapshot {
     toolTimeline: ToolTimelineSnapshot;
     agentGraph: AgentGraphSnapshot;
     cacheStats: CacheStatsSnapshot;
+    policy: PolicyActivitySnapshot;
 }
 
 export function reduceAll(events: AgentRunEvent[]): RunReducerSnapshot {
@@ -381,6 +438,7 @@ export function reduceAll(events: AgentRunEvent[]): RunReducerSnapshot {
         toolTimeline: reduceToolTimeline(events),
         agentGraph: reduceAgentGraph(events),
         cacheStats: reduceCacheStats(events),
+        policy: reducePolicyActivity(events),
     };
 }
 

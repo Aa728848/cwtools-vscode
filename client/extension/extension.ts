@@ -125,6 +125,50 @@ function countRuleFiles(folder?: string): number {
 	return count;
 }
 
+const RULE_WORKSPACE_SCAN_IGNORED_DIRS = new Set([
+	'.git',
+	'.vscode',
+	'.vscode-test',
+	'.cwtools-ai',
+	'node_modules',
+	'bin',
+	'obj',
+	'out',
+	'output',
+	'release',
+	'runs',
+	'artifacts',
+	'.tmp-test',
+]);
+
+function hasAtLeastRuleFiles(folder: string, threshold: number): boolean {
+	if (threshold <= 0) return true;
+	if (!fs.existsSync(folder)) return false;
+	let count = 0;
+	const visit = (dir: string): boolean => {
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return false;
+		}
+		for (const entry of entries) {
+			const fullPath = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				if (RULE_WORKSPACE_SCAN_IGNORED_DIRS.has(entry.name)) continue;
+				if (visit(fullPath)) return true;
+			} else {
+				const ext = path.extname(entry.name).toLowerCase();
+				if ((ext === '.cwt' || ext === '.log') && ++count >= threshold) {
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+	return visit(folder);
+}
+
 function firstWorkspacePath(): string | undefined {
 	return workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
@@ -411,8 +455,7 @@ function isCwtRuleWorkspace(rootPath: string): boolean {
 		if (fs.existsSync(path.join(rootPath, 'descriptor.mod'))) {
 			return false;
 		}
-		// countRuleFiles counts the number of .cwt files recursively
-		return countRuleFiles(rootPath) > 5;
+		return hasAtLeastRuleFiles(rootPath, 6);
 	} catch {
 		return false;
 	}
@@ -1917,7 +1960,7 @@ export async function activate(context: ExtensionContext) {
 
 	let languageId: string;
 	const getLanguageIdFallback = async function () {
-		const markerFiles = await workspace.findFiles("**/*.txt", null, 1);
+		const markerFiles = await workspace.findFiles("**/*.txt", '**/{node_modules,.git,.vscode,.vscode-test,.cwtools-ai}/**', 2);
 		if (markerFiles.length == 1) {
 			 
 			return (await workspace.openTextDocument(markerFiles[0]!)).languageId;
@@ -1944,20 +1987,27 @@ export async function activate(context: ExtensionContext) {
 			return [];
 		}
 
-		 
-		const root = workspace.workspaceFolders[0]!;
+		const root = workspace.workspaceFolders[0]!.uri.fsPath;
 		const isWin = os.platform() === "win32";
-		const ext = isWin ? "*.exe" : "*";
-		const prefix = binariesPrefix ? "binaries/" : "";
-		const names = [gameExeName, gameExeName.toUpperCase(), gameExeName.toLowerCase()];
-		const patterns = names.map(name => new vs.RelativePattern(root, `${prefix}${name}${ext}`));
+		const targetDir = binariesPrefix ? path.join(root, "binaries") : root;
+		const needle = gameExeName.toLowerCase();
+		let entries: fs.Dirent[];
+		try {
+			entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
+		} catch {
+			return [];
+		}
 
-		const results = await Promise.all(patterns.map(p => workspace.findFiles(p)));
-		const allFiles = results.flat();
+		const candidates = entries
+			.filter(entry => {
+				if (!entry.isFile()) return false;
+				const name = entry.name.toLowerCase();
+				return name.startsWith(needle) && (!isWin || name.endsWith(".exe"));
+			})
+			.map(entry => path.join(targetDir, entry.name));
 
-		// Proper async filter
 		const validFiles = await Promise.all(
-			allFiles.map(async (v) => (await exe.existAndIsExe(v.fsPath)) ? v : null)
+			candidates.map(async candidate => (await exe.existAndIsExe(candidate)) ? vs.Uri.file(candidate) : null)
 		).then(arr => arr.filter(Boolean));
 
 		return validFiles;
@@ -1995,7 +2045,9 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	// ── Auto-detect localization language when user hasn't explicitly configured it ──
-	await autoDetectLocLanguage();
+	if (isKnownGameLanguageId(languageId)) {
+		await autoDetectLocLanguage();
+	}
 
 	// ── Mod folder target game selection guidance and auto-association ──
 	if (workspace.workspaceFolders && workspace.workspaceFolders.length > 0) {
@@ -2082,17 +2134,21 @@ async function autoDetectLocLanguage(): Promise<void> {
 		const wsRoot = wsFolders[0]!;
 		const counts = new Map<string, number>();
 
-		// Count YML files for each language in parallel
-		const promises = langTagMap.map(async ([settingName, fileTag]) => {
-			const pattern = new vs.RelativePattern(
-				wsRoot,
-				`**/{localisation,localisation_synced,localization}/**/*l_${fileTag}.yml`
-			);
-			const files = await workspace.findFiles(pattern, '**/node_modules/**', 500);
-			counts.set(settingName, files.length);
-		});
-
-		await Promise.all(promises);
+		for (const [settingName] of langTagMap) counts.set(settingName, 0);
+		const pattern = new vs.RelativePattern(
+			wsRoot,
+			'**/{localisation,localisation_synced,localization}/**/*l_*.yml'
+		);
+		const files = await workspace.findFiles(pattern, '**/{node_modules,.git,.vscode,.vscode-test,.cwtools-ai}/**', 5000);
+		for (const file of files) {
+			const basename = path.basename(file.fsPath).toLowerCase();
+			for (const [settingName, fileTag] of langTagMap) {
+				if (basename.endsWith(`l_${fileTag}.yml`)) {
+					counts.set(settingName, (counts.get(settingName) ?? 0) + 1);
+					break;
+				}
+			}
+		}
 
 		// Find the language with the most files
 		let bestLang = 'English';

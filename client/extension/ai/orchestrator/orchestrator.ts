@@ -353,6 +353,18 @@ export class Orchestrator {
         const workspaceRoot = this.agentRunner.toolExecutor?.workspaceRoot || process.cwd();
         const { buildSubAgentSandbox } = require('./subAgentSandbox');
         const sandbox = buildSubAgentSandbox(taskNode, workspaceRoot);
+        {
+            const latestRunId = RunLedger.getLatestActiveRunId();
+            if (latestRunId) {
+                runLedger.appendEvent(latestRunId, 'subagent_policy_derived', {
+                    agentId: taskNode.id,
+                    role: taskNode.agentType,
+                    mode: profile.mode,
+                    writeScope: sandbox.writeScope,
+                    rejectedScopes: sandbox.rejectedScopes,
+                }, { agentId: taskNode.id }).catch(() => {});
+            }
+        }
         const plannedFiles = Array.isArray(taskNode.plannedFiles) ? taskNode.plannedFiles : [];
         const onlyLocalisationYmlWrites = plannedFiles.length > 0 && plannedFiles.every(isLocalisationYmlPath);
         const excludedTools = [

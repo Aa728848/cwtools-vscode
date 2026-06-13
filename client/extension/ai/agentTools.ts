@@ -27,7 +27,7 @@ import { LspToolHandler } from './tools/lspTools';
 import { ExternalToolHandler } from './tools/externalTools';
 import { MemoryToolHandler } from './tools/memoryTools';
 import type { IndexService } from '../indexing/indexService';
-import { validateToolAccess } from './tools/permissions';
+import { validateToolAccess, evaluateMcpPermission } from './tools/permissions';
 import { runLedger } from './runner/runLedger';
 import { queryProjectProfile } from './projectProfile';
 import { loadSkill } from './skills';
@@ -363,15 +363,12 @@ export class AgentToolExecutor {
         }
         const mode = context?.runnerOptions?.mode ?? 
             ((['dispatch_agents', 'merge_results', 'query_blackboard'].includes(toolName)) ? 'orchestrator' : 'build');
-        const isDynamicMcpTool = toolName.startsWith('mcp_') && toolName !== 'mcp_call';
-        if (!isDynamicMcpTool) {
-            const access = validateToolAccess(toolName, { mode, isSubAgent });
-            if (!access.allowed) {
-                return {
-                    success: false,
-                    error: access.reason
-                };
-            }
+        const access = validateToolAccess(toolName, { mode, isSubAgent });
+        if (!access.allowed) {
+            return {
+                success: false,
+                error: access.reason
+            };
         }
 
         if (mode === 'plan') {
@@ -1278,6 +1275,59 @@ export class AgentToolExecutor {
         }
     }
 
+    private dynamicMcpToolCache?: { at: number; defs: import('./types').ToolDefinition[] };
+    /** Reverse map for registered dynamic names — avoids ambiguous parsing when server names contain '_'. */
+    private dynamicMcpToolNames = new Map<string, { server: string; tool: string }>();
+    private static readonly MCP_TOOL_CACHE_TTL_MS = 300_000;
+
+    /** List configured MCP servers' tools as mcp_<server>_<tool> definitions. Opt-in; metadata is untrusted. */
+    async getDynamicMcpToolDefinitions(mode: import('./types').AgentMode): Promise<import('./types').ToolDefinition[]> {
+        const cfg = vs.workspace.getConfiguration('cwtools.ai');
+        if (cfg.get<boolean>('mcp.registerDynamicTools', false) !== true) return [];
+        const { isToolAllowedForMode } = require('./tools/permissions') as typeof import('./tools/permissions');
+        if (!isToolAllowedForMode('mcp_call', mode)) return [];
+
+        if (this.dynamicMcpToolCache && Date.now() - this.dynamicMcpToolCache.at < AgentToolExecutor.MCP_TOOL_CACHE_TTL_MS) {
+            return this.dynamicMcpToolCache.defs;
+        }
+        const servers = cfg.get<any[]>('mcp.servers') || [];
+        const defs: import('./types').ToolDefinition[] = [];
+        const nameMap = new Map<string, { server: string; tool: string }>();
+        for (const server of servers) {
+            const serverName = server?.name;
+            if (!serverName || server?.enabled === false) continue;
+            try {
+                const client = await this.getMcpClient(serverName);
+                const listed = await Promise.race([
+                    client.listTools(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('listTools timeout')), 8000)),
+                ]) as any;
+                for (const tool of listed?.tools ?? []) {
+                    if (!tool?.name) continue;
+                    const description = String(tool.description ?? '').replace(/\s+/g, ' ').slice(0, 300);
+                    const dynamicName = `mcp_${serverName}_${tool.name}`;
+                    nameMap.set(dynamicName, { server: serverName, tool: tool.name });
+                    defs.push({
+                        type: 'function',
+                        function: {
+                            name: dynamicName,
+                            description: `[MCP:${serverName}] ${description}`,
+                            parameters: (tool.inputSchema && typeof tool.inputSchema === 'object')
+                                ? tool.inputSchema
+                                : { type: 'object', properties: {} },
+                        },
+                    } as import('./types').ToolDefinition);
+                }
+            } catch (e) {
+                const { ErrorReporter } = require('./errorReporter') as typeof import('./errorReporter');
+                ErrorReporter.debug('mcp', `Dynamic tool listing failed for server '${serverName}'`, e);
+            }
+        }
+        this.dynamicMcpToolNames = nameMap;
+        this.dynamicMcpToolCache = { at: Date.now(), defs };
+        return defs;
+    }
+
     // - MCP Tool Execution -
 
     /**
@@ -1295,13 +1345,21 @@ export class AgentToolExecutor {
     }, context?: import('./types').AgentToolContext): Promise<{ success: boolean; result?: unknown; error?: string }> {
         let serverName = args.server;
         let toolName = args.tool;
+        let isDynamicNameCall = false;
 
-        // Parse from mcp_<server>_<tool> pattern
+        // Resolve mcp_<server>_<tool>: registered map first, regex as fallback.
         if (!serverName && args._toolName) {
-            const match = args._toolName.match(/^mcp_(.+?)_(.+)$/);
-            if (match) {
-                serverName = match[1];
-                toolName = match[2];
+            isDynamicNameCall = true;
+            const mapped = this.dynamicMcpToolNames.get(args._toolName);
+            if (mapped) {
+                serverName = mapped.server;
+                toolName = mapped.tool;
+            } else {
+                const match = args._toolName.match(/^mcp_(.+?)_(.+)$/);
+                if (match) {
+                    serverName = match[1];
+                    toolName = match[2];
+                }
             }
         }
 
@@ -1309,12 +1367,33 @@ export class AgentToolExecutor {
             return { success: false, error: 'Missing server or tool name. Use mcp_call with server and tool args.' };
         }
 
+        // Dynamic-name calls carry MCP arguments at the top level; mcp_call nests them under `arguments`.
+        let callArgs: Record<string, unknown> = (args.arguments && typeof args.arguments === 'object')
+            ? args.arguments as Record<string, unknown>
+            : {};
+        if (isDynamicNameCall && (!args.arguments || typeof args.arguments !== 'object')) {
+            const { _toolName: _t, server: _s, tool: _tl, arguments: _a, ...rest } = args;
+            callArgs = rest as Record<string, unknown>;
+        }
+
+        // Single policy chokepoint for both generic mcp_call and dynamic mcp_* names.
+        // Sub-agents are denied by default unless an explicit allow pattern matches.
+        const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
+        let mcpRules: Record<string, string> | undefined;
+        try {
+            mcpRules = vs.workspace.getConfiguration('cwtools.ai').get<{ mcp?: Record<string, string> }>('permissions')?.mcp;
+        } catch { /* configuration unavailable (tests) — fall back to defaults */ }
+        const permission = evaluateMcpPermission(serverName, toolName, { isSubAgent, rules: mcpRules });
+        if (!permission.allowed) {
+            return { success: false, error: permission.reason };
+        }
+
         const CONNECTION_ERRORS = /ECONNREFUSED|EPIPE|disconnect|not connected|ECONNRESET/i;
         const abortSignal = context?.runnerOptions?.abortSignal;
 
         try {
             const client = await this.getMcpClient(serverName!, abortSignal);
-            const result = await client.callTool(toolName!, (args.arguments || {}) as Record<string, unknown>, abortSignal);
+            const result = await client.callTool(toolName!, callArgs, abortSignal);
             return { success: true, result };
         } catch (e) {
             const errMsg = e instanceof Error ? e.message : String(e);
@@ -1323,7 +1402,7 @@ export class AgentToolExecutor {
                 this.evictMcpClient(serverName!);
                 try {
                     const client = await this.getMcpClient(serverName!, abortSignal);
-                    const result = await client.callTool(toolName!, (args.arguments || {}) as Record<string, unknown>, abortSignal);
+                    const result = await client.callTool(toolName!, callArgs, abortSignal);
                     return { success: true, result };
                 } catch (retryErr) {
                     return { success: false, error: `MCP tool call failed after reconnect: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}` };
@@ -1403,6 +1482,21 @@ export class AgentToolExecutor {
             };
         }
         const normalizedTasks = tasks.map(task => normalizeDispatchTaskForLocalisationYml(task));
+
+        // Phase 3: reject over-privileged child tasks at dispatch time.
+        {
+            const { clampWriteScopeToRoots } = require('./runner/policyEngine') as typeof import('./runner/policyEngine');
+            for (const task of normalizedTasks) {
+                if (!Array.isArray(task.plannedFiles) || task.plannedFiles.length === 0) continue;
+                const { rejected } = clampWriteScopeToRoots(task.plannedFiles, [this.workspaceRoot], this.workspaceRoot);
+                if (rejected.length > 0) {
+                    return {
+                        success: false,
+                        error: `Task '${task.id}' plans writes outside the workspace sandbox: ${rejected.join(', ')}. Sub-agents cannot exceed the parent's writable roots — re-plan those files inside the workspace, or drop them from plannedFiles.`,
+                    };
+                }
+            }
+        }
 
         // Make sure there is a parentAgentRunner (the Orchestrator needs it to schedule child Agents)
         if (!this.parentAgentRunner) {

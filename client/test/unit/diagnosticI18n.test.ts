@@ -60,8 +60,14 @@ describe('diagnostic i18n enrichment', () => {
             expect(gotOnly).to.include('sprite').and.to.include('GFX_missing');
         });
 
-        it('translates brace/parse recovery errors', () => {
-            expect(zh("Missing '}' for '{' opened at line 12 col 4", 'CW001_MISSING_CLOSE_BRACE'))
+        it('translates the CW274D call-site definition hint', () => {
+            const hint = zh('This scripted_effect my_effect results in an error when expanded at a call site', 'CW274D');
+            expect(hint).to.include('my_effect');
+            expect(hint).to.include('调用点');
+            expect(hint).to.include('CW274');
+        });
+
+        it('translates brace/parse recovery errors', () => {            expect(zh("Missing '}' for '{' opened at line 12 col 4", 'CW001_MISSING_CLOSE_BRACE'))
                 .to.include('12');
             expect(zh("Unmatched '}' - no matching '{' found", 'CW001_UNMATCHED_CLOSE_BRACE'))
                 .to.include('多余');

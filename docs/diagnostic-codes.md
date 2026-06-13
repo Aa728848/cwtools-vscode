@@ -581,12 +581,40 @@ script file.
 
 `inline_script` 展开后产生错误。查看诊断的"相关信息"定位脚本文件内部的实际出错位置。
 
+## CW274D
+
+**Definition causes call-site error (I)** — this scripted definition
+(`scripted_trigger` / `scripted_effect` / script value / `inline_script`)
+expands cleanly on its own, but produces an error when expanded at a call site.
+This informational hint is placed on the definition; see the related-information
+entry for the call site, and `CW274` for the error reported there.
+
+该脚本定义(`scripted_trigger` / `scripted_effect` / 脚本值 / `inline_script`)
+本身没有问题,但在某个调用点展开后会报错。此提示标在定义处,
+查看诊断的"相关信息"定位出错的调用点,实际错误见 `CW274`。
+
 ## CW275
 
 **Loc key unexpected characters (W)** — the localisation key contains
 characters that may not render correctly.
 
 本地化键含有异常字符(如全角符号、不可见字符),可能无法正常显示。
+
+## CW276
+
+**Unknown type key (rule check)** — the CWT rules reference a type key that is
+not defined. Follow the message text; this is usually a CWT rules file problem
+rather than your script.
+
+CWT 规则引用了未定义的类型键(type key)。按报错原文处理,
+通常是 CWT 规则文件的问题而非脚本本身。
+
+## CW277
+
+**Obsolete type key (rule check)** — the referenced type key is obsolete and
+should no longer be used. Follow the message text for the replacement.
+
+引用的类型键(type key)已过时,不应再使用。按报错原文中的提示改用新写法。
 
 ## CW998
 

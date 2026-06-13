@@ -374,6 +374,12 @@ const RULES: DiagnosticRule[] = [
         en: () => 'Check the related information entries for the actual error location inside the inline script.',
     },
     {
+        codes: ['CW274D'],
+        pattern: /^This (.+?) (\S+) results in an error when expanded at a call site/,
+        zh: m => `${m[1]} "${m[2]}" 本身没问题,但在调用点展开后会报错:查看"相关信息"定位出错的调用点,实际错误见 CW274。`,
+        en: () => 'This definition expands cleanly on its own; see the related information entry for the call site where it errors.',
+    },
+    {
         codes: ['CW220', 'CW221'],
         pattern: /require the event target\(s\) (\S+) but they (?:are|may) not/,
         zh: m => `事件目标 ${m[1]} 在到达此处的事件链中未必已通过 save_event_target_as 设置,使用前先确保已保存。`,

@@ -13,6 +13,7 @@
 3. Webview 沙盒 UI：`client/webview/`
 4. .NET/F# 语言服务器：`src/LSP/` 与 `src/Main/`
 5. 共享平台能力：`client/extension/gameProfiles.ts` 与 `client/extension/indexing/`
+6. 通用 MCP 服务：`packages/cwtools-shared/` 与 `packages/cwtools-mcp/`（随插件分发的只读语义服务，供 Codex / Claude Code 等外部 Agent 调用，见「通用 MCP 服务」一节）
 
 ```mermaid
 flowchart TD
@@ -23,6 +24,8 @@ flowchart TD
     WV["Webview Sandbox\nclient/webview"]
     LSP["CWTools Server\nsrc/Main + src/LSP"]
     CW["CWTools F# library\nsubmodules/cwtools"]
+    MCP["MCP Server (read-only)\npackages/cwtools-mcp"]
+    EXT["External Agents\nCodex / Claude Code"]
 
     VS --> GP
     VS --> IDX
@@ -31,6 +34,8 @@ flowchart TD
     VS <-->|LSP JSON-RPC over stdio| LSP
     AI --> IDX
     LSP --> CW
+    EXT <-->|MCP stdio| MCP
+    MCP -->|spawns / LSP JSON-RPC| LSP
 ```
 
 Webviews 只能通过 `postMessage` 与 Extension Host 通信，不能直接访问 `vscode`、Node.js、`fs`、`path` 或 `require()`。
@@ -360,6 +365,38 @@ Reducers 无副作用，可在单元测试和 JSONL 回放中独立运行。新�
 
 `tools/schemaFlatten.ts` 为弱工具调用能力的 Provider 自动展平深层嵌套的 tool schema（深度 > 2 或叶子 > 10 时触发），执行工具前由 `nestArguments()` 反向还原为嵌套结构。
 
+## 通用 MCP 服务
+
+`packages/cwtools-shared/` 与 `packages/cwtools-mcp/` 是两个 npm workspace 子包，构成一个**只读**的 Model Context Protocol 服务，把本项目的 PDX 语义能力（类型/规则/作用域/诊断/定义引用/补全/深层语义）平台化输出给 Codex、Claude Code 等外部 Agent。文件写入不由 MCP 负责，交给宿主 Agent 自带环境。
+
+### 分层与边界
+
+- `cwtools-shared`（无 VS Code 依赖的核心）：生成式工具 schema、`HostServices` 接口、路径/规则安全、vanilla 缓存与加载就绪（readiness）标注、游戏知识。它不 import `vscode`、`vscode-languageclient`、webview 或 extension context。
+- `cwtools-mcp`（薄适配层）：CLI、stdio/HTTP transport、`NodeHostServices`、`LspProcessHost`（拉起 `CWTools Server` 并走 LSP JSON-RPC）、`vscodeCache.ts`（探测已安装插件的 server 二进制、解压规则与 globalStorage 原版缓存）。经 esbuild 打成单文件自包含 `cwtools-mcp.cjs`。
+
+### 工具集与单一事实源
+
+- 首期工具为 **21 个只读工具**（`cwtools-shared/src/tools/names.ts`）：`query_types`/`query_rules`/`query_scope`/`get_diagnostics`/`analyze_diagnostic_error`/`query_project_profile`/`query_workspace_index`/`query_localisation_index`/`get_pdx_block`/`get_completion_at`/`document_symbols`/`workspace_symbols`/`query_definition`/`query_definition_by_name`/`query_references`，以及深层语义 `query_scripted_effects`/`query_scripted_triggers`/`query_enums`/`query_static_modifiers`/`query_variables`/`get_entity_info`。
+- schema 由 `tools/generate-mcp-schema.cjs` 从上游 `definitions.ts` + `registry.ts` 生成到 `cwtools-shared/src/generated/mcpTools.ts`，**不手写**；白名单同时存在于 `names.ts` 与生成脚本，须保持一致，contract 测试检测漂移。
+- 共享 dispatcher（`tools/toolHandlers.ts`）把每个工具路由到对应 `cwtools.ai.*` LSP 命令或 host 调用。新增语义能力必须先在 `src/LSP`/`src/Main` 增加 `cwtools.ai.*` 命令（只读命令同时登记到 `LanguageServer.fs` 的 `isReadCmd`），再在 dispatcher 接线，不在 MCP 内重写 CWTools 语义。
+
+### 只读、结果标注与自描述
+
+- `cwtools-mcp` 的 `createToolCallHandler` 对任何非白名单（写）工具返回 `tool_not_available`，确保纯只读面。
+- 受 vanilla 影响的工具结果附 `vanillaCache`（`available`/`source`/`reason`），缺原版缓存时带 warning；依赖 game 加载的工具在加载未完成时返回 `status: "loading"` + `readiness.ready=false`，避免把"尚未加载"误读成"查无此物"。
+- 连接时下发 server `instructions`（`server.ts`），引导模型在 Paradox/群星项目里优先用工具验证 ID、查语法、查诊断。
+
+### 后端、规则与缓存依赖
+
+- 全工作区诊断由新增的 `cwtools.ai.getAllDiagnostics` 命令聚合 server 端 `fileDiagnosticStates`（`get_diagnostics` 不带文件时走它，而非只返回 freshness）。
+- 规则源优先级：`--rules <dir|zip>` > 已装插件解压规则 > dev 仓库 `submodules/…/config` > 打包 `*-rules.zip`（zip 自动解压复用）。
+- 原版缓存：`--cache <dir>` 显式指定，或自动探测插件 globalStorage 的 `<game>.cwb`；缺失时可用 `--game-path` 让 server 首次构建。
+
+### 分发与版本跟随
+
+- `package.ps1` 把 MCP bundle 打到 `release/bin/mcp/cwtools-mcp.cjs` 并随 VSIX 分发；`extension.ts` 激活时把它复制到**版本无关稳定路径** `globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs`，外部 Agent 指向该路径即自动跟随插件更新。
+- VS Code 对同版本号 `--force` 重装不替换文件；交付 MCP 改动需升版本号（根 `package.json` + `release/package.json` + CHANGELOG 同步）。
+
 ## Webview 层
 
 `client/webview/` 编译为浏览器端脚本。Rollup 打包 7 个入口：
@@ -404,7 +441,8 @@ Webview 维护规则：
 - **客户端诊断增强**：`client/extension/diagnosticI18n.ts` 在 LSP middleware 中把英文校验消息替换为中文翻译 + 修复建议（非中文环境追加英文 💡 建议行），由 `cwtools.ai.enhancedDiagnostics` 开关控制；ignore-list 匹配在增强之前针对原始服务端消息执行。
 - **动态参数诊断延迟**：动态参数类诊断可延迟到工作区加载完成后批量预热再重发，由 `cwtools.diagnostics.deferDynamicParameterDiagnostics` / `dynamicPreflightTimeoutMs` / `dynamicPreflightMaxEntities` 配置。
 - **文档格式化**：服务端实现 `DocumentFormatting`——`.yml` 本地化文件归一化缩进并保留 BOM/换行风格，PDX 脚本经 `CKPrinter` 整文档格式化。
-- **补全锁降级**：`src/LSP/LanguageServer.fs` 对 Completion 请求使用 `TryEnterReadLock`（默认 350ms 超时），超时后从 stale-completion 缓存返回降级结果，避免长校验阻塞补全。
+- **补全锁降级**：`src/LSP/LanguageServer.fs` 对 Completion 请求使用 `TryEnterReadLock`（默认 350ms 超时），超时后从 stale-completion 缓存返回降级结果，避免长校验阻塞补全。`LanguageServer.fs` 的 `isReadCmd` 列表登记所有只读 `cwtools.ai.*` 命令（含 `getCompletionContext`、`getAllDiagnostics`），未登记的命令会被当成写命令做锁路由。
+- **全工作区诊断聚合**：`cwtools.ai.getAllDiagnostics` 遍历 server 端 `fileDiagnosticStates`，按 severity 过滤 + limit 聚合返回整个工作区的真实诊断（供 MCP 的全项目 `get_diagnostics` 使用），区别于只返回 freshness 的 `getValidationStatus`。
 - **RevalidateRequest**：编辑 `inline_scripts/` 定义文件保存后，绕过防抖立即重新校验其调用方文件。
 - **自定义 scripted 类型增量刷新**：编辑/保存 `common/scripted_triggers/`、`common/scripted_effects/`、`common/script_values/` 下的定义文件时，绕开整库全量 `RefreshCaches`，改走增量类型补丁——`IGame.RefreshScriptedTypes` 经 `RulesManager.RefreshScriptedTypes` 按 `range.FileName` 滤除旧 `typeDefInfo` 条目、对改动实体单趟 `getTypesFromDefinitions`、并复用 `buildServices` 重建补全/校验/Info 三服务；删除文件走 `IGame.RemoveScriptedTypes`（含 `ResourceManager.RemoveFile`）。调用方重校验复用类型引用反向索引（`TypeReferenceIndex` / `FindAllRefsByType`），并把当前打开的其它文件排入重校验队列。该路径由 `experimental` 开关门控、在 `gameStateLock` 写锁内执行，遇异常/非白名单类型/连续 25 次后回退全量；`inline_scripts`（非 `type[...]` 叶子类型）不进增量白名单，仍走全量 + 调用方重校验（见上一条）。
 
@@ -441,6 +479,9 @@ Shader 支持覆盖 `.shader` 和 `.fxh`，涉及：
 | `npm run test` | 编译后运行 VS Code 集成测试 |
 | `npm run check:release` | 发布前质量门 |
 | `npm run verify` | `lint + compile + unit + release gate` 综合验证 |
+| `npm run build:shared` / `build:mcp` | 构建 MCP 子包（`packages/cwtools-shared` / `cwtools-mcp`） |
+| `npm run generate:mcp-schema` | 从上游 `definitions.ts`+`registry.ts` 重生成 MCP 工具 schema |
+| `npm run test:contracts` | MCP 合约测试（schema 漂移、只读策略、工具路由、深层工具） |
 
 规则同步脚本（`tools/rules-sync/`）：
 
@@ -467,6 +508,8 @@ npx @vscode/vsce package
 ```
 
 打包前需要准备 TypeScript/Webview 输出和三平台服务端输出。推荐在根目录下运行 `package.ps1` 脚本（或使用快捷指令 `npm run pack:install` / `npm run pack:quick`），可一键自动化执行所有环境的编译、静态资源复制、包体打包及本地强制升级安装。
+
+打包流程还会构建并用 esbuild 把 MCP 打成单文件 `release/bin/mcp/cwtools-mcp.cjs` 随 VSIX 分发；插件激活时再复制到 globalStorage 稳定路径（见「通用 MCP 服务」）。注意 VS Code 对**同版本号**重装不替换已装文件，交付改动须升版本号（`npm run pack:install -- -Version <x>`，并同步根/release `package.json` 与 CHANGELOG）。
 
 打包时会将 `submodules/cwtools-stellaris-config/config/` 压缩为 `release/rules/stellaris-rules.zip` 作为 fallback 规则（正常情况下通过 GitHub 拉取规则，仅在网络不可用时启用此 fallback）。F# 服务端使用 `System.IO.Compression.ZipFile` 直接从内存读取 ZIP 内容，无需解压到磁盘。
 
@@ -624,14 +667,22 @@ cwtools-vscode/
   submodules/
     cwtools/
     cwtools-stellaris-config/
+  packages/
+    cwtools-shared/           MCP 只读核心：生成式 schema、HostServices、安全、
+                              vanilla/readiness 标注、游戏知识（无 VS Code 依赖）
+    cwtools-mcp/              MCP stdio/HTTP server：CLI、NodeHostServices、
+                              LspProcessHost、vscodeCache 探测、esbuild 单文件 bundle
   .agents/
     rules/                    coding-guidelines.md
     workflows/                package.md
   tools/
     check-release.js
+    generate-mcp-schema.cjs   从上游 definitions/registry 生成 MCP 工具 schema
     rules-sync/               规则 scan/check/update/report 工具（report.ts 生成 HTML 对比报告）
   release/
     bin/
+      server/                 三平台 CWTools Server（self-contained）
+      mcp/                    cwtools-mcp.cjs（esbuild 单文件 MCP，随 VSIX 分发）
     rules/
       stellaris-rules.zip       Fallback 规则压缩包
     syntaxes/                 TextMate 语法（paradox, stellaris, pdxshader）

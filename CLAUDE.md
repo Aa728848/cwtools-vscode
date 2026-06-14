@@ -18,6 +18,10 @@ The main runtime layers are:
 - `client/webview/`: browser-sandboxed Webview UIs bundled by Rollup.
 - `src/LSP/` and `src/Main/`: .NET 9 / F# language server protocol layer and
   `CWTools Server` executable.
+- `packages/cwtools-shared/` and `packages/cwtools-mcp/`: standalone, read-only
+  **MCP server** (npm workspaces) that re-exports the PDX semantic tools to
+  external agents (Codex / Claude Code). Shipped inside the extension. See the
+  `MCP Server` section below.
 - `submodules/cwtools/`: upstream CWTools F# library, including shared game and
   shader parsing code.
 
@@ -49,6 +53,10 @@ npm run test:unit
 npm run test
 npm run check:release
 npm run verify
+npm run build:shared        # MCP shared core (packages/cwtools-shared)
+npm run build:mcp           # MCP server (packages/cwtools-mcp)
+npm run generate:mcp-schema # regenerate MCP tool schema from upstream definitions
+npm run test:contracts      # MCP contract tests (schema drift, read-only, routing)
 dotnet build src/LSP/
 dotnet build src/Main/
 ```
@@ -288,6 +296,45 @@ Important constraints:
 The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and
 `merge_results`. Do not revive older `spawn_sub_agents` naming.
 
+## MCP Server (`packages/`)
+
+A standalone, **read-only** MCP server ships inside the extension so external
+agents (Codex / Claude Code) get the same PDX semantic tools. Two npm-workspace
+packages:
+
+| Path | Purpose |
+| --- | --- |
+| `packages/cwtools-shared/` | No-VS-Code-dependency core: generated tool schema, `HostServices` interface, path/rules safety, vanilla-cache + readiness annotation, game knowledge |
+| `packages/cwtools-shared/src/tools/names.ts` | The 21 read-only MCP tool names (source of truth #1) |
+| `packages/cwtools-shared/src/tools/toolHandlers.ts` | Shared dispatcher: routes each tool to a `cwtools.ai.*` LSP command / host call |
+| `packages/cwtools-shared/src/host/vanillaCache.ts` / `readiness.ts` | Vanilla-cache + load-readiness provenance attached to load-dependent results |
+| `packages/cwtools-mcp/` | Thin stdio/HTTP server, CLI, `NodeHostServices`, `LspProcessHost` (spawns `CWTools Server`), `vscodeCache.ts` (auto-detects installed extension server/rules/vanilla cache) |
+| `tools/generate-mcp-schema.cjs` | Generates `cwtools-shared/src/generated/mcpTools.ts` from upstream `definitions.ts` + `registry.ts` (source of truth #2 — the whitelist) |
+
+Constraints:
+
+- Schema is **generated, not hand-written**. The first-party tool whitelist lives
+  in BOTH `tools/names.ts` and `tools/generate-mcp-schema.cjs` — keep them in sync.
+  Run `npm run generate:mcp-schema` after tool changes; contract tests fail on drift.
+- **Read-only by design**: no write tools are exposed; `cwtools-mcp`'s
+  `createToolCallHandler` rejects any non-whitelisted (write) tool with
+  `tool_not_available`. File writes are the host agent's job.
+- New semantic capability must land as a `cwtools.ai.*` LSP command first, then be
+  wired in the shared dispatcher — do not reimplement CWTools semantics in the MCP.
+  Whole-workspace diagnostics use `cwtools.ai.getAllDiagnostics`; deep game
+  semantics reuse `queryScriptedEffects`/`queryScriptedTriggers`/`queryEnums`/
+  `queryStaticModifiers`/`queryVariables`/`getEntityInfo`.
+- Any read-only `cwtools.ai.*` command must also be added to `LanguageServer.fs`
+  `isReadCmd` or it is lock-routed as a write.
+- The MCP server sends `instructions` (server.ts) telling the model when to use the
+  tools; `--rules <dir|zip>` overrides the rules source (zip auto-extracted).
+- Packaging: `package.ps1` step bundles the MCP to `release/bin/mcp/cwtools-mcp.cjs`
+  (esbuild single file); `extension.ts` copies it to a version-independent stable
+  path `globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs` on activation.
+- **Same-version reinstall does NOT replace installed files** — to deliver MCP
+  changes to the installed extension, bump the version (root + `release/package.json`
+  + CHANGELOG) and `npm run pack:install -- -Version <x>`.
+
 ## AI Runtime Notes
 
 - `runner/runLedger.ts` records each run as an `AgentRunRecord` plus append-only
@@ -499,4 +546,7 @@ Use the narrowest validation that matches the change:
 - Webview changes: `npm run compile`; inspect the relevant panel in an Extension
   Development Host when UI behavior changes.
 - F# LSP changes: `dotnet build src/LSP/` or `dotnet build src/Main/`.
+- MCP server/shared changes (`packages/`): `npm run generate:mcp-schema` (if tools
+  changed) then `npm run test:contracts`; for a real check, run the bundled
+  `release/bin/mcp/cwtools-mcp.cjs` against a mod with a built vanilla cache.
 - Packaging: follow `.agents/workflows/package.md`, or run `package.ps1` (or npm run pack:install) to build and install locally.

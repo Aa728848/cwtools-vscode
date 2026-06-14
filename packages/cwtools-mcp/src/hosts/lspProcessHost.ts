@@ -142,6 +142,13 @@ export class LspProcessHost implements LspHost {
     }
 
     const rootUri = pathToFileUri(this.options.workspaceRoot);
+    const game = this.options.game ?? 'stellaris';
+    const rulesCacheRoot = resolveRulesCacheRoot(this.options);
+    const rulesFolder = materializeRulesPath(
+      this.options.bundledRulesPath ?? resolveBundledRulesPath(game, rulesCacheRoot),
+      rulesCacheRoot,
+      game,
+    );
     await this.connection.sendRequest('initialize', {
       processId: process.pid,
       rootPath: this.options.workspaceRoot,
@@ -164,15 +171,11 @@ export class LspProcessHost implements LspHost {
         },
       },
       initializationOptions: {
-        language: this.options.game ?? 'stellaris',
+        language: game,
         uiLanguage: 'en',
         isVanillaFolder: false,
-        rulesCache: resolveRulesCacheRoot(this.options),
-        bundledRulesPath: materializeRulesPath(
-          this.options.bundledRulesPath ?? resolveBundledRulesPath(this.options.game ?? 'stellaris', resolveRulesCacheRoot(this.options)),
-          resolveRulesCacheRoot(this.options),
-          this.options.game ?? 'stellaris',
-        ),
+        rulesCache: rulesCacheRoot,
+        bundledRulesPath: rulesFolder,
         rules_version: 'manual',
         repoPath: '',
         diagnosticLogging: false,
@@ -182,7 +185,7 @@ export class LspProcessHost implements LspHost {
     this.connection.sendNotification('initialized', {});
     this.connection.sendNotification('workspace/didChangeConfiguration', {
       settings: {
-        cwtools: buildCwtoolsConfiguration(this.options.game ?? 'stellaris', this.options.gamePath, resolveRulesCacheRoot(this.options)),
+        cwtools: buildCwtoolsConfiguration(game, this.options.gamePath, rulesFolder),
       },
     });
     await this.waitForExecuteCommandsReady(20_000);
@@ -226,7 +229,7 @@ export class LspProcessHost implements LspHost {
   }
 }
 
-function buildCwtoolsConfiguration(game: string, gamePath?: string, cacheDir?: string): Record<string, unknown> {
+function buildCwtoolsConfiguration(game: string, gamePath: string | undefined, rulesFolder: string): Record<string, unknown> {
   // `cache.<game>` is the vanilla install/data dir (the server reads vanilla data
   // from here and serializes the .cwb cache). Empty string => no vanilla data.
   const vanillaDir = gamePath ?? '';
@@ -258,7 +261,7 @@ function buildCwtoolsConfiguration(game: string, gamePath?: string, cacheDir?: s
       eu5: '',
       [game]: vanillaDir,
     },
-    rules_folder: resolveBundledRulesPath(game, cacheDir),
+    rules_folder: rulesFolder,
     showInlineText: false,
     maxFileSize: 2,
     diagnostics: {

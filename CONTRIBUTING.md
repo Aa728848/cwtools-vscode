@@ -51,6 +51,9 @@ git submodule update --init --recursive
 | `npm run test` | 编译后运行 VS Code 集成测试 |
 | `npm run check:release` | 检查发布包元数据和必要产物 |
 | `npm run verify` | 本地综合验证：lint、compile、unit、release gate |
+| `npm run build:shared` / `build:mcp` | 构建 MCP 子包（`packages/cwtools-shared` / `cwtools-mcp`） |
+| `npm run generate:mcp-schema` | 从上游 `definitions.ts`+`registry.ts` 重生成 MCP 工具 schema |
+| `npm run test:contracts` | MCP 合约测试（schema 漂移、只读策略、工具路由、深层工具） |
 | `dotnet build src/LSP/` | 构建 LSP 协议/解析层 |
 | `dotnet build src/Main/` | 构建 `CWTools Server` |
 
@@ -164,8 +167,15 @@ src/
 docs/
   diagnostic-codes.md         CWxxx diagnostic code reference (codeDescription targets)
 
+packages/
+  cwtools-shared/             Read-only MCP core: generated schema, HostServices,
+                              path/rules safety, vanilla-cache + readiness, knowledge
+  cwtools-mcp/                MCP stdio/HTTP server: CLI, NodeHostServices,
+                              LspProcessHost, vscodeCache detection, esbuild bundle
+
 tools/
   rules-sync/                 Stellaris rules scan/check/update/report tooling
+  generate-mcp-schema.cjs     Generates MCP tool schema from upstream definitions
 
 submodules/
   cwtools/                    Upstream CWTools F# library
@@ -250,6 +260,17 @@ Webview 运行在浏览器沙盒中：
 - Custom Provider 通过 `cwtools.ai.customApiFormat` 支持四种线协议（`openai-chat-completions`、`openai-responses`、`anthropic-messages`、`gemini-generate-content`）；endpoint 按 Provider 存储在 `cwtools.ai.providerEndpoints`，旧的全局 `cwtools.ai.endpoint` 由 `migrateLegacyEndpoint()` 自动迁移，不要重新引入。
 - `usageTracker.ts` 跨会话持久化累计 token 用量、成本和缓存统计数据。
 
+### 通用 MCP 服务（`packages/`）
+
+`packages/cwtools-shared` 与 `packages/cwtools-mcp` 是随插件分发的**只读** MCP 服务，供 Codex / Claude Code 等外部 Agent 调用。开发约定：
+
+- 工具 schema **不手写**：由 `tools/generate-mcp-schema.cjs` 从上游 `definitions.ts` + `registry.ts` 生成到 `cwtools-shared/src/generated/mcpTools.ts`。首期工具白名单同时存在于 `cwtools-shared/src/tools/names.ts` 与生成脚本，两处必须一致。改动后运行 `npm run generate:mcp-schema`，并用 `npm run test:contracts` 验证无漂移。
+- **保持只读**：不要在 MCP 暴露写工具；`cwtools-mcp` 的 `createToolCallHandler` 会对任何非白名单工具返回 `tool_not_available`。文件写入交给宿主 Agent。
+- 新语义能力先在 `src/LSP`/`src/Main` 增加 `cwtools.ai.*` 命令（只读命令同时加入 `LanguageServer.fs` 的 `isReadCmd`），再在 `cwtools-shared/src/tools/toolHandlers.ts` 的 dispatcher 接线，不要在 MCP 内重写 CWTools 语义。
+- `cwtools-shared` 禁止 import `vscode`/`vscode-languageclient`/webview/extension context；宿主能力经 `HostServices` 注入。
+- 受 vanilla / 加载状态影响的工具结果须经 `host/vanillaCache.ts`、`host/readiness.ts` 标注；新增此类工具时把它加入对应依赖集。
+- 交付到已装插件需升版本号（VS Code 同版本号重装不替换文件）：同步根 `package.json`、`release/package.json`、`release/CHANGELOG.md`，再 `npm run pack:install -- -Version <x>`。
+
 ### F#、Shader 和 Vanilla Compare
 
 - Shader 支持涉及 `src/Main/Program.fs`、`src/Main/GameLoader.fs` 和 `submodules/cwtools/CWTools/Game/PdxShaderFeatures.fs`。
@@ -272,6 +293,7 @@ Webview 运行在浏览器沙盒中：
 | AI Tool Execution (replacer/arg repair) | `editFileReplacer.test.ts`、`argRepair.test.ts`、`toolInvocation.test.ts` |
 | 诊断 i18n / ReadTracker / 命令安全 | `diagnosticI18n.test.ts`、`readTracker.test.ts`、`runCommandReadonly.test.ts`、`commandPreflight.test.ts` |
 | Project Profile / `/init` | `projectProfile.test.ts` |
+| 通用 MCP 服务 (`packages/`) | `npm run generate:mcp-schema`（如改工具）+ `npm run test:contracts`；真实验证跑 `release/bin/mcp/cwtools-mcp.cjs` |
 | IndexService / GameProfile | 相关单测 + `npm run test:unit` |
 | Webview | `npm run compile`，在开发宿主中打开对应面板检查控制台 |
 | F# LSP | `dotnet build src/LSP/` |
@@ -290,6 +312,7 @@ Webview 运行在浏览器沙盒中：
 - [ ] Webview 变更没有引入 Node.js 或 VS Code API 直接访问。
 - [ ] 新 AI 工具同步更新了 schema、类型、registry 和 dispatch。
 - [ ] 新 AI 工具设置了正确的 `effect` / `riskLevel` / `concurrencyClass`。
+- [ ] 改动 MCP 工具集后运行了 `npm run generate:mcp-schema`，且 `names.ts` 与生成脚本白名单一致、`npm run test:contracts` 通过；MCP 保持只读。
 - [ ] 文件写入逻辑没有绕过 `PartitionedWriteQueue`。
 - [ ] 本地化写入使用 `write_localisation`。
 - [ ] 新的游戏差异优先进入 `gameProfiles.ts`。

@@ -32,7 +32,8 @@
   - **Review 模式**：独立安全的只读审查环境，禁用任何写入特权，专为强制校验代码规范、防御逻辑漏洞和越界覆盖而设计。
 - **Sub-Agent 并行编排 (DAG)**：底层推理流基于拓扑排序任务图，通过 `Promise.allSettled` 并行调度多个专职子 Agent（如 Explorer, Builder, LocWriter, Reviewer），在**共享黑板 (Blackboard)** 上协同编写复杂的功能，速度相比单链 Agent 提升数倍。
 - **防循环与智能压缩 (Context Smart Windowing)**：内置两阶段 "Doom-Loop" 循环调用防御机制；当长对话 Token 消耗接近上限的 70% 时，将自动触发 LLM 级别的结构化记忆压缩，并对孤儿 Tool Call 智能补齐，确保长任务的高成功率。
-- **MCP & 全工作区本地化索引**：集成 **Model Context Protocol**（同时支持 stdio 与 SSE 传输），全工作区本地化 YML 文本基于后台 `FileSystemWatcher` 异步实时增量索引，为大模型源源不断地输送稳定、精准的项目上下文。
+- **MCP 双向集成（消费 + 输出）**：作为 **MCP 客户端**集成 Model Context Protocol（stdio 与 SSE），让内置 Agent 调用外部 MCP 工具；同时**对外输出一个随插件分发的只读 MCP 服务**（`packages/cwtools-mcp`），把本项目的 PDX 语义能力（类型/规则/作用域/诊断/定义引用/补全/深层语义共 21 个只读工具）开放给 **Codex / Claude Code** 等外部 Agent 复用——详见下方功能指引第 7 节。
+- **全工作区本地化索引**：全工作区本地化 YML 文本基于后台 `FileSystemWatcher` 异步实时增量索引，为大模型源源不断地输送稳定、精准的项目上下文。
 
 ### 📂 4. 原版对比与极速迁移通道 (Vanilla Compare & Sync)
 处理巨型 Mod 升级与适配 Paradox 官方版本更新的利器。
@@ -157,6 +158,19 @@ flowchart LR
   - 完美解析绑定的骨骼节点树，支持在右侧控制台中实时挑选、播放不同的骨骼动画序列（如移动、待机、战斗）。
   - 支持材质属性（如漫反射、高光强度）在侧边栏面板上的动态滑块调节与实时重绘调试。
 
+### 🔌 7. 通用 MCP 服务（供 Codex / Claude Code 调用）
+本插件随包分发一个**只读**的 MCP 服务，把 CWTools 的 PDX 语义能力（验证 ID、查语法、查作用域、全项目诊断、定义/引用、补全、scripted effects/triggers/enums/modifiers/variables、实体信息，共 21 个只读工具）开放给任意 MCP 客户端。文件写入仍由你的 Agent 自带环境完成。
+
+* **零配置自动探测**：MCP 自动发现已安装插件的 LSP server、解压规则与 globalStorage 原版缓存——无需手填路径。连接时还会下发工作流 `instructions`，引导模型在 Paradox 项目里优先用工具核实而非凭记忆。
+* **版本无关稳定路径**：插件激活时把 MCP 同步到 `globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs`（不含版本号），配置指向它即可**自动跟随插件更新**。
+* **在 Codex 中一键安装**（也可直接让 Codex 自己运行这条命令）：
+
+```sh
+codex mcp add cwtools -- node "%APPDATA%/Code/User/globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs" --game stellaris --stdio
+```
+
+  macOS/Linux 把路径换成对应的 `globalStorage` 位置。等价的 `~/.codex/config.toml` 手写配置、`--rules`/`--cache`/`--game-path` 高级选项与 Claude Code 接入方式，详见 [packages/cwtools-mcp/README.md](packages/cwtools-mcp/README.md)。
+
 ---
 
 ## 🛠️ 开发者指南 (Developer Hub)
@@ -185,6 +199,11 @@ dotnet build src/Main/
 
 # 6. 一键全面质量检查 (Lint + Compile + Unit Test + Release Gate)
 npm run verify
+
+# 7. 构建并校验随插件分发的 MCP 服务（packages/）
+npm run build:mcp            # 构建 MCP 子包
+npm run generate:mcp-schema  # 从上游工具定义重生成 MCP schema
+npm run test:contracts       # MCP 合约测试（schema 漂移 / 只读 / 路由）
 ```
 
 ### 📦 插件打包

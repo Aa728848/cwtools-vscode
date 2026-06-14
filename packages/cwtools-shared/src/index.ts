@@ -4,6 +4,7 @@ export * from './host/filesystem';
 export * from './host/hostServices';
 export * from './host/indexing';
 export * from './host/lsp';
+export * from './host/readiness';
 export * from './host/vanillaCache';
 export * from './host/vsCodeHostServices';
 export * from './knowledge/diagnosticRouting';

@@ -21,6 +21,7 @@ import {
 } from 'cwtools-shared';
 import type { CwtoolsMcpConfig } from '../config';
 import { createLspProcessHost, pathToFileUri, resolveRulesCacheRoot, type LspProcessHost } from './lspProcessHost';
+import { detectExtensionCacheDir } from './vscodeCache';
 
 export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
   const workspaceRoot = path.resolve(config.workspaceRoot);
@@ -28,13 +29,22 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     ? new Set(config.allowedTools)
     : new Set<string>(MCP_WRITE_TOOL_NAMES);
   const filesystem = new NodeFilesystemHost(workspaceRoot, config.enableWrites);
+  // Fall back to the VS Code cwtools extension's globalStorage cache when --cache
+  // is omitted, so the MCP reuses the vanilla cache the extension already built.
+  const autoCache = config.cachePath ?? detectExtensionCacheDir(config.game);
   const lsp = createLspProcessHost({
     workspaceRoot,
     game: config.game,
     serverPath: config.serverPath,
-    cachePath: config.cachePath,
+    cachePath: autoCache,
     gamePath: config.gamePath,
   });
+  if (!config.cachePath && autoCache) {
+    console.error(`[cwtools-mcp] info: auto-detected VS Code extension cache at ${autoCache}`);
+  }
+  // Surface the resolved workspace so it's clear which mod is analysed — when
+  // --workspace is omitted this is the process cwd Codex launched the server in.
+  console.error(`[cwtools-mcp] info: workspace = ${workspaceRoot}${config.workspaceRoot === process.cwd() ? ' (inherited cwd)' : ''}`);
   return {
     workspaceRoot,
     readonlyMode: !config.enableWrites,
@@ -44,7 +54,7 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     diagnostics: new LspDiagnosticsHost(lsp, workspaceRoot),
     filesystem,
     indexing: new ThinNodeIndexHost(workspaceRoot),
-    vanillaCache: probeVanillaCache(workspaceRoot, config),
+    vanillaCache: probeVanillaCache(workspaceRoot, { ...config, cachePath: autoCache }),
     now: () => Date.now(),
     log: (level, message, data) => {
       if (level === 'debug') return;
@@ -87,7 +97,7 @@ function probeVanillaCache(workspaceRoot: string, config: CwtoolsMcpConfig): Van
 class LspDiagnosticsHost implements DiagnosticsHost {
   constructor(private readonly lsp: LspProcessHost, private readonly workspaceRoot: string) {}
 
-  async getDiagnostics(filter: { file?: string } = {}): Promise<DiagnosticsQueryResult> {
+  async getDiagnostics(filter: { file?: string; severity?: string; limit?: number } = {}): Promise<DiagnosticsQueryResult> {
     const file = filter.file;
     if (file) {
       const resolution = resolveWorkspacePath(this.workspaceRoot, file);
@@ -100,24 +110,29 @@ class LspDiagnosticsHost implements DiagnosticsHost {
       return normalizeDiagnosticsFresh(raw);
     }
 
+    // Whole-workspace: aggregate cached per-file diagnostics from the server. The
+    // server populated these for every file during load; getValidationStatus alone
+    // only reports freshness, never the diagnostics themselves.
+    const severity = filter.severity === 'information' ? 'info' : filter.severity ?? 'all';
+    const limit = typeof filter.limit === 'number' ? filter.limit : 1000;
     const raw = asRecord(await this.lsp.executeCommand<unknown>(
-      'cwtools.ai.getValidationStatus',
-      [],
-      { timeoutMs: 20_000 },
+      'cwtools.ai.getAllDiagnostics',
+      [severity, limit],
+      { timeoutMs: 30_000 },
     ));
     if (raw.ok === false || raw.status === 'unavailable') {
       return unavailableDiagnostics(raw);
     }
-    const freshness = String(raw.freshness ?? 'unavailable') as DiagnosticsQueryResult['status'];
     return {
       ok: true,
-      status: freshness,
-      diagnostics: [],
+      status: 'fresh',
+      diagnostics: Array.isArray(raw.diagnostics) ? raw.diagnostics.map(normalizeDiagnosticRecord) : [],
+      totalCount: numberOrUndefined(raw.totalCount),
+      truncated: raw.truncated === true,
       freshness: {
-        value: freshness,
-        pendingKinds: asStringArray(raw.pendingGlobalKinds),
+        value: 'fresh',
+        pendingKinds: [],
         epoch: numberOrUndefined(raw.epoch),
-        updatedAt: numberOrUndefined(raw.lastGlobalRefreshAtUnixMs),
       },
     };
   }

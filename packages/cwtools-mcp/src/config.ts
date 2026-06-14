@@ -124,8 +124,10 @@ export function helpText(): string {
     '  cwtools-mcp --workspace <path> --enable-writes --allow-tool write_localisation --allow-tool edit_pdx_block',
     '',
     'Vanilla data (needed for vanilla IDs and correct mod-vs-vanilla diagnostics):',
+    '  (auto)              If neither flag is given, the VS Code cwtools extension cache',
+    '                      in globalStorage is auto-detected and reused.',
     '  --game-path <dir>   Vanilla install/data dir; the server builds the cache from it (slow first run).',
-    '  --cache <dir>       Dir holding a pre-built <game>.cwb cache (e.g. the VS Code extension globalStorage),',
-    '                      loaded directly instead of rebuilding. Without either, results are mod-only.',
+    '  --cache <dir>       Dir holding a pre-built <game>.cwb cache (overrides auto-detection),',
+    '                      loaded directly instead of rebuilding. Without any, results are mod-only.',
   ].join('\n');
 }

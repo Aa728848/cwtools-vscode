@@ -33,9 +33,45 @@ cwtools-mcp --workspace /path/to/mod --game stellaris --game-path "/path/to/Stel
 cwtools-mcp --workspace /path/to/mod --game stellaris --cache "/path/to/.cwtools"
 ```
 
-When neither is supplied, vanilla-dependent tool results carry
+`--cache` alone is sufficient when the dir holds both the `<game>.cwb` cache and the
+extracted rules (as the VS Code extension globalStorage does); `--game-path` is only
+needed to build the cache from scratch.
+
+If neither flag is given, the MCP **auto-detects the VS Code cwtools extension cache**
+in globalStorage (`Code`/`Code - Insiders`/`VSCodium`/`Cursor`) and reuses it — so once
+you've opened the project in the extension at least once, no cache flag is needed.
+
+When no cache can be found, vanilla-dependent tool results carry
 `vanillaCache.available = false` plus a warning so clients never treat a mod-only
 answer as complete.
+
+## Using from Codex
+
+Codex CLI reads MCP servers from `~/.codex/config.toml` (`[mcp_servers.<name>]`,
+shared with the Codex IDE extension). With the VS Code extension cache present,
+no cache flag is needed:
+
+```toml
+[mcp_servers.cwtools]
+command = "node"
+args = [
+  "C:/Users/A/Documents/cwtools-vscode/packages/cwtools-mcp/dist/cli.js",
+  "--workspace", "C:/path/to/your/mod",
+  "--game", "stellaris",
+  "--stdio",
+]
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+```
+
+Use forward slashes in TOML (Node accepts them on Windows) to avoid escaping. Start a
+Codex session and run `/mcp` to confirm the server and its tools are connected. Add
+`--game-path "C:/.../Stellaris"` only if you have never built the cache via the extension.
+
+Load-dependent results (type/scope/rule/definition/diagnostics queries) carry a
+`readiness` field. While the project is still loading they come back with
+`status: "loading"` and `readiness.ready = false` instead of a misleading empty
+answer — poll until `readiness.ready` is true (a few seconds with a pre-built cache).
 
 Write tools are disabled by default. To enable controlled writes:
 

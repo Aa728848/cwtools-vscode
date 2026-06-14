@@ -16,12 +16,16 @@ export interface DiagnosticRecord {
 export interface DiagnosticsFilter {
   file?: string;
   severity?: DiagnosticSeverity;
+  limit?: number;
 }
 
 export interface DiagnosticsQueryResult {
   ok: boolean;
   status: DiagnosticsFreshness;
   diagnostics: DiagnosticRecord[];
+  // For whole-workspace queries: total matched vs returned (when capped by limit).
+  totalCount?: number;
+  truncated?: boolean;
   freshness?: {
     value: DiagnosticsFreshness;
     pendingKinds: string[];

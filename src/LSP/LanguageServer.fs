@@ -333,6 +333,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "cwtools.ai.queryStaticModifiers"
                 | "cwtools.ai.queryVariables"
                 | "cwtools.ai.getDiagnosticsFresh"
+                | "cwtools.ai.getAllDiagnostics"
                 | "cwtools.ai.waitDiagnosticsFresh"
                 | "cwtools.ai.getValidationStatus"
                 | "cwtools.ai.parseFragment"

@@ -131,6 +131,14 @@ export class LspProcessHost implements LspHost {
     );
     this.connection.listen();
 
+    // Forward server log/diagnostics to stderr when CWTOOLS_MCP_DEBUG is set, so
+    // load/cache problems are visible (the server logs via window/logMessage).
+    if (process.env.CWTOOLS_MCP_DEBUG) {
+      this.connection.onNotification('window/logMessage', (p: { message?: string } = {}) => {
+        if (p.message) process.stderr.write(`[cwtools-lsp] ${String(p.message).slice(0, 240)}\n`);
+      });
+    }
+
     const rootUri = pathToFileUri(this.options.workspaceRoot);
     await this.connection.sendRequest('initialize', {
       processId: process.pid,
@@ -281,15 +289,18 @@ export function resolveDefaultServerPath(): string | undefined {
 
 function resolveBundledRulesPath(game: string): string {
   const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+  // Prefer an extracted rules DIRECTORY; the server cannot load rules from the
+  // packaged .zip directly (the extension extracts it first). The zip is a last
+  // resort only so a path is always returned.
   const candidates = [
-    path.join(process.cwd(), 'release', 'rules', `${game}-rules.zip`),
     path.join(process.cwd(), 'release', 'rules', game, 'config'),
     path.join(process.cwd(), 'submodules', `cwtools-${game}-config`, 'config'),
     game === 'stellaris' ? path.join(process.cwd(), 'submodules', 'cwtools-stellaris-config', 'config') : '',
-    path.join(repoRoot, 'release', 'rules', `${game}-rules.zip`),
     path.join(repoRoot, 'release', 'rules', game, 'config'),
     path.join(repoRoot, 'submodules', `cwtools-${game}-config`, 'config'),
     game === 'stellaris' ? path.join(repoRoot, 'submodules', 'cwtools-stellaris-config', 'config') : '',
+    path.join(process.cwd(), 'release', 'rules', `${game}-rules.zip`),
+    path.join(repoRoot, 'release', 'rules', `${game}-rules.zip`),
   ].filter(Boolean);
   return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0]!;
 }

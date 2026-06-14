@@ -6379,6 +6379,66 @@ type Server(client: ILanguageClient) =
                                            "warningCount", JsonValue.Number 0m |]
                             Some result
 
+                        // - cwtools.ai.getAllDiagnostics -
+                        // Aggregate cached diagnostics across the whole workspace (every analysed
+                        // file). Optional args: [severity ("error"|"warning"|"info"|"hint"|"all"); limit].
+                        | { command = "cwtools.ai.getAllDiagnostics"
+                            arguments = allDiagArgs } ->
+                            let severityArg =
+                                allDiagArgs |> List.tryItem 0
+                                |> Option.bind (function JsonValue.String s when s <> "" -> Some(s.ToLowerInvariant()) | _ -> None)
+                            let limitVal =
+                                allDiagArgs |> List.tryItem 1
+                                |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
+                                |> Option.defaultValue 1000
+                            let sevName (s: DiagnosticSeverity option) =
+                                match s with
+                                | Some DiagnosticSeverity.Error -> "error"
+                                | Some DiagnosticSeverity.Warning -> "warning"
+                                | Some DiagnosticSeverity.Information -> "info"
+                                | Some DiagnosticSeverity.Hint -> "hint"
+                                | _ -> "info"
+                            // Severity is a minimum threshold: "warning" => errors + warnings, etc.
+                            let severityOk sev =
+                                match severityArg with
+                                | None | Some "all" | Some "hint" -> true
+                                | Some "error" -> sev = "error"
+                                | Some "warning" -> sev = "error" || sev = "warning"
+                                | Some "info" -> sev = "error" || sev = "warning" || sev = "info"
+                                | Some other -> sev = other
+                            let mutable totalErrors = 0
+                            let mutable totalWarnings = 0
+                            let mutable matched = 0
+                            let collected = System.Collections.Generic.List<JsonValue>()
+                            for kvp in fileDiagnosticStates do
+                                let filePath = kvp.Key.Replace('\\', '/')
+                                for d in kvp.Value.diagnostics do
+                                    let sev = sevName d.severity
+                                    if sev = "error" then totalErrors <- totalErrors + 1
+                                    elif sev = "warning" then totalWarnings <- totalWarnings + 1
+                                    if severityOk sev then
+                                        matched <- matched + 1
+                                        if collected.Count < limitVal then
+                                            collected.Add(
+                                                JsonValue.Record
+                                                    [| "file",     JsonValue.String filePath
+                                                       "code",     JsonValue.String (d.code |> Option.defaultValue "")
+                                                       "message",  JsonValue.String d.message
+                                                       "severity", JsonValue.String sev
+                                                       "line",     JsonValue.Number(decimal d.range.start.line)
+                                                       "column",   JsonValue.Number(decimal d.range.start.character) |])
+                            let result =
+                                JsonValue.Record
+                                    [| "ok",            JsonValue.Boolean true
+                                       "totalFiles",    JsonValue.Number(decimal fileDiagnosticStates.Count)
+                                       "totalCount",    JsonValue.Number(decimal matched)
+                                       "returnedCount", JsonValue.Number(decimal collected.Count)
+                                       "truncated",     JsonValue.Boolean(matched > collected.Count)
+                                       "errorCount",    JsonValue.Number(decimal totalErrors)
+                                       "warningCount",  JsonValue.Number(decimal totalWarnings)
+                                       "diagnostics",   JsonValue.Array(collected.ToArray()) |]
+                            Some result
+
                         // waitDiagnosticsFresh is kept as a non-blocking compatibility alias.
                         // Actual waiting stays client-side to avoid holding an LSP read lock.
 

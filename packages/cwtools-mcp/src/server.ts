@@ -36,10 +36,18 @@ const SERVER_INSTRUCTIONS = [
   're-check with get_diagnostics.',
 ].join('\n');
 
+const DISABLED_INSTRUCTIONS = [
+  'CWTools is a Paradox / Stellaris mod service, but the current workspace was not',
+  'detected as a Paradox mod (no descriptor.mod),',
+  'so its tools are disabled here. Do not call CWTools tools for this project.',
+].join('\n');
+
 export function createCwtoolsMcpServer(
   host: HostServices,
   options: { dispatcher?: SharedToolDispatcher } = {},
 ): Server {
+  // Undefined => treat as supported (e.g. the in-extension host never sets it).
+  const supported = host.projectSupported !== false;
   const server = new Server(
     {
       name: 'cwtools-mcp',
@@ -50,13 +58,15 @@ export function createCwtoolsMcpServer(
         resources: {},
         tools: {},
       },
-      instructions: SERVER_INSTRUCTIONS,
+      instructions: supported ? SERVER_INSTRUCTIONS : DISABLED_INSTRUCTIONS,
     },
   );
   const callTool = createToolCallHandler(host, options.dispatcher);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: listRegisteredTools(),
+    // Hide the toolset entirely on unsupported workspaces so clients never offer
+    // (and the model never calls) tools that would spin up CWTools Server.
+    tools: supported ? listRegisteredTools() : [],
   }));
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -68,6 +78,21 @@ export function createCwtoolsMcpServer(
   );
 
   server.setRequestHandler(CallToolRequestSchema, async request => {
+    // Defensive: even if a client ignores the empty tools/list, never dispatch
+    // (which would lazily spawn the language server) on an unsupported workspace.
+    if (!supported) {
+      return toMcpCallToolResult({
+        ok: false,
+        status: 'denied',
+        source: 'cwtools-mcp',
+        error: {
+          code: 'project_not_supported',
+          message: host.projectSupportReason
+            ? `CWTools is disabled for this workspace: ${host.projectSupportReason}`
+            : 'CWTools is disabled: the current workspace is not a Paradox/Stellaris mod.',
+        },
+      });
+    }
     const args = request.params.arguments && typeof request.params.arguments === 'object'
       ? request.params.arguments as Record<string, unknown>
       : {};

@@ -12,6 +12,8 @@ import {
   type IndexQueryResult,
   type LocalisationIndexEntry,
   type LocalisationIndexQuery,
+  createUnavailableLspHost,
+  type LspHost,
   MCP_WRITE_TOOL_NAMES,
   resolveWorkspacePath,
   type VanillaCacheStatus,
@@ -21,6 +23,7 @@ import {
 } from 'cwtools-shared';
 import type { CwtoolsMcpConfig } from '../config';
 import { createLspProcessHost, pathToFileUri, resolveRulesCacheRoot, type LspProcessHost } from './lspProcessHost';
+import { detectProjectSupport } from './projectDetect';
 import { detectExtensionCacheDir } from './vscodeCache';
 
 export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
@@ -29,18 +32,29 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     ? new Set(config.allowedTools)
     : new Set<string>(MCP_WRITE_TOOL_NAMES);
   const filesystem = new NodeFilesystemHost(workspaceRoot, config.enableWrites);
+  const support = detectProjectSupport(workspaceRoot);
+  const enabled = support.supported || config.forceStart;
   // Fall back to the VS Code cwtools extension's globalStorage cache when --cache
   // is omitted, so the MCP reuses the vanilla cache the extension already built.
   const autoCache = config.cachePath ?? detectExtensionCacheDir(config.game);
-  const lsp = createLspProcessHost({
-    workspaceRoot,
-    game: config.game,
-    serverPath: config.serverPath,
-    cachePath: autoCache,
-    gamePath: config.gamePath,
-    bundledRulesPath: config.rulesPath,
-  });
-  if (!config.cachePath && autoCache) {
+  const lspProcess: LspProcessHost | undefined = enabled
+    ? createLspProcessHost({
+        workspaceRoot,
+        game: config.game,
+        serverPath: config.serverPath,
+        cachePath: autoCache,
+        gamePath: config.gamePath,
+        bundledRulesPath: config.rulesPath,
+      })
+    : undefined;
+  const lsp: LspHost = lspProcess
+    ?? createUnavailableLspHost('Workspace is not a recognised Paradox/Stellaris mod; CWTools is disabled here.');
+  if (!enabled) {
+    console.error(`[cwtools-mcp] info: CWTools tools disabled — ${support.reason} (pass --force-start to override)`);
+  } else if (!support.supported) {
+    console.error(`[cwtools-mcp] info: --force-start set; starting despite: ${support.reason}`);
+  }
+  if (enabled && !config.cachePath && autoCache) {
     console.error(`[cwtools-mcp] info: auto-detected VS Code extension cache at ${autoCache}`);
   }
   // Surface the resolved workspace so it's clear which mod is analysed — when
@@ -51,6 +65,8 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     readonlyMode: !config.enableWrites,
     writesEnabled: config.enableWrites,
     allowedWriteTools: allowlist,
+    projectSupported: enabled,
+    projectSupportReason: support.reason,
     lsp,
     diagnostics: new LspDiagnosticsHost(lsp, workspaceRoot),
     filesystem,
@@ -62,6 +78,7 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
       const suffix = data === undefined ? '' : ` ${JSON.stringify(data)}`;
       console.error(`[cwtools-mcp] ${level}: ${message}${suffix}`);
     },
+    dispose: () => lspProcess?.dispose(),
   };
 }
 
@@ -96,7 +113,7 @@ function probeVanillaCache(workspaceRoot: string, config: CwtoolsMcpConfig): Van
 }
 
 class LspDiagnosticsHost implements DiagnosticsHost {
-  constructor(private readonly lsp: LspProcessHost, private readonly workspaceRoot: string) {}
+  constructor(private readonly lsp: LspHost, private readonly workspaceRoot: string) {}
 
   async getDiagnostics(filter: { file?: string; severity?: string; limit?: number } = {}): Promise<DiagnosticsQueryResult> {
     const file = filter.file;

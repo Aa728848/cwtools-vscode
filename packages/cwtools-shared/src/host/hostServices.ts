@@ -32,9 +32,10 @@ export interface HostServices {
   projectProfile?: ProjectProfileHost;
   knowledge?: GameKnowledgeHost;
   completion?: CompletionHost;
-  // Vanilla game-cache availability; consumed by the MCP adapter to annotate
-  // vanilla-dependent tool results. Undefined hosts skip the annotation.
   vanillaCache?: VanillaCacheStatus;
+  projectSupported?: boolean;
+  projectSupportReason?: string;
   now(): number;
   log(level: HostLogLevel, message: string, data?: unknown): void;
+  dispose?(): void;
 }

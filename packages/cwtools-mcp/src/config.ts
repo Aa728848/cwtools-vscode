@@ -18,6 +18,7 @@ export interface CwtoolsMcpConfig {
   port: number;
   enableWrites: boolean;
   allowedTools: string[];
+  forceStart: boolean;
 }
 
 export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
@@ -29,6 +30,7 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
     port: 3000,
     enableWrites: false,
     allowedTools: [],
+    forceStart: false,
   };
 
   for (let index = 0; index < argv.length; index++) {
@@ -68,6 +70,9 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
         break;
       case '--enable-writes':
         config.enableWrites = true;
+        break;
+      case '--force-start':
+        config.forceStart = true;
         break;
       case '--allow-tool':
         config.allowedTools.push(readValue(argv, ++index, arg));
@@ -139,5 +144,10 @@ export function helpText(): string {
     '',
     'Rules source (priority: --rules > installed extension > dev checkout > bundled zip):',
     '  --rules <dir|zip>   Explicit CWT rules dir, or a *-rules.zip (extracted automatically).',
+    '',
+    'Project gate:',
+    '  (default)           Tools are exposed and the language server starts only when the',
+    '                      workspace looks like a Paradox mod (descriptor.mod). Otherwise tools are hidden and no server spawns.',
+    '  --force-start       Start even without mod markers (escape hatch for unusual layouts).',
   ].join('\n');
 }

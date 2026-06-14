@@ -84,15 +84,25 @@ export class LspProcessHost implements LspHost {
   }
 
   dispose(): void {
-    try {
-      this.connection?.dispose();
-    } catch {
-      // ignore disposal failures
-    }
-    this.process?.kill();
+    const proc = this.process;
+    const connection = this.connection;
+    // Null fields first so a second dispose() (e.g. from the process 'exit'
+    // safety net) is a no-op and never double-kills.
     this.connection = undefined;
     this.process = undefined;
     this.startPromise = undefined;
+    try {
+      connection?.dispose();
+    } catch {
+      // ignore disposal failures
+    }
+    // Kill only the child WE spawned. On its stdin closing the F# server also
+    // self-exits on EOF, but an explicit kill is the hard guarantee.
+    try {
+      proc?.kill();
+    } catch {
+      // process may already be gone
+    }
   }
 
   private async ensureStarted(timeoutMs = 30_000): Promise<void> {

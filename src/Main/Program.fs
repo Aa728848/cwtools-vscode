@@ -67,6 +67,12 @@ let private localisationCollapsedWhitespacePattern =
         @"\s+",
         System.Text.RegularExpressions.RegexOptions.Compiled)
 
+// Name-list sequence/roman-numeral spec e.g. (100?:(| C CC ...); 10?:(...); 1?:(...)) — handles one nesting level
+let private localisationSequenceFormatPattern =
+    System.Text.RegularExpressions.Regex(
+        @"\(\s*\d+\?:(?:[^()]|\([^()]*\))*\)",
+        System.Text.RegularExpressions.RegexOptions.Compiled)
+
 let private scriptedParamRegex =
     System.Text.RegularExpressions.Regex(
         @"\$([A-Za-z_][A-Za-z0-9_]*)\$",
@@ -4656,6 +4662,7 @@ type Server(client: ILanguageClient) =
                                     let clean = desc.Replace("\r\n", " ").Replace("\n", " ").Replace("\\n", " ").Trim()
                                     let clean = stripLocQuotes clean
                                     let clean = resolveLocRefs clean 0
+                                    let clean = localisationSequenceFormatPattern.Replace(clean, "")
                                     let clean = localisationIconPattern.Replace(clean, "")
                                     let clean = localisationWhitespaceMarkerPattern.Replace(clean, " ")
                                     let clean = localisationStyleCodePattern.Replace(clean, "")

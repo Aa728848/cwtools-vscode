@@ -1233,6 +1233,14 @@ type Server(client: ILanguageClient) =
             clearCompletionListCacheForFile key
         typeReferenceResultCache.Clear()
 
+    let clearFileCachesPreservingSemanticTokens (filePath: string) =
+        let fullPath = try FileInfo(filePath).FullName with _ -> filePath
+        for key in [ filePath; fullPath ] do
+            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
+            (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
+            clearCompletionListCacheForFile key
+        typeReferenceResultCache.Clear()
+
     /// Clear the type index related cache (called after the type-defining file changes)
     let clearTypeCaches () =
         clearTypeIndexCache ()
@@ -1913,6 +1921,19 @@ type Server(client: ILanguageClient) =
         let normalised = path.Replace('\\', '/').ToLowerInvariant()
         dynamicDefinitionPathMarkers |> Array.exists normalised.Contains
 
+    let inlineScriptPathMarker = "common/inline_scripts/"
+
+    let tryInlineScriptNameFromPath (path: string) =
+        let normalised = path.Replace('\\', '/').ToLowerInvariant()
+        let markerIdx = normalised.IndexOf(inlineScriptPathMarker, StringComparison.Ordinal)
+        if markerIdx >= 0 then
+            Some(normalised.Substring(markerIdx + inlineScriptPathMarker.Length))
+        else
+            None
+
+    let isInlineScriptDefinitionPath (path: string) =
+        tryInlineScriptNameFromPath path |> Option.isSome
+
     let scriptedTypeKeys =
         [ "scripted_trigger"; "scripted_effect"; "script_value" ]
 
@@ -1989,13 +2010,9 @@ type Server(client: ILanguageClient) =
         |> List.distinctBy normaliseCachePath
 
     let mutable scheduleDeferredDynamicRevalidationImpl: string list -> unit = fun _ -> ()
-    let mutable scheduleOpenFileScriptedRevalidationImpl: string -> unit = fun _ -> ()
 
     let scheduleDeferredDynamicRevalidation files =
         scheduleDeferredDynamicRevalidationImpl files
-
-    let scheduleOpenFileScriptedRevalidation file =
-        scheduleOpenFileScriptedRevalidationImpl file
 
     //-Lightweight bracket scanner -
     // Provide precise bracket error location when parser fails
@@ -2202,7 +2219,6 @@ type Server(client: ILanguageClient) =
                                         |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath name)
                                     if not priorRevalidateFiles.IsEmpty then
                                         scheduleDeferredDynamicRevalidation priorRevalidateFiles
-                                    scheduleOpenFileScriptedRevalidation name
                                     monitorLog Refresh $"RefreshScriptedTypes file={name} patches={incrementalScriptedPatchCount}"
 
                                     if incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
@@ -2377,12 +2393,37 @@ type Server(client: ILanguageClient) =
             else
                 []
 
+        let refreshedInlineCallFiles =
+            if isEditAction && isInlineScriptDefinitionPath defFile then
+                match gameObj, tryInlineScriptNameFromPath defFile with
+                | Some game, Some scriptName ->
+                    try
+                        gameStateLock.EnterWriteLock()
+                        let refreshed =
+                            try game.RefreshInlineScriptCallers [ scriptName ]
+                            finally gameStateLock.ExitWriteLock()
+
+                        for file in refreshed do
+                            clearFileCaches file
+                            markFileStale file "types"
+
+                        if not refreshed.IsEmpty then
+                            logDiag $"Refreshed {refreshed.Length} inline_script caller(s) for {defFile}"
+                        refreshed
+                    with e ->
+                        logDiag $"Inline_script caller refresh failed for {defFile}: {e.Message}"
+                        []
+                | _ -> []
+            else
+                []
+
         let callFiles =
             (priorDiagnostics
              |> List.filter (fun (d: Diagnostic) -> d.code = Some "CW274D")
              |> List.collect (fun d -> d.relatedInformation)
              |> List.map (fun ri -> getPathFromDoc ri.location.uri))
             @ indexedCallFiles
+            @ refreshedInlineCallFiles
             |> List.distinctBy normaliseCachePath
         if not callFiles.IsEmpty then
             logDiag $"Refreshing {callFiles.Length} call-site file(s) for definition {defFile}"
@@ -2731,13 +2772,6 @@ type Server(client: ILanguageClient) =
                 }
 
             loop false Map.empty)
-
-    do
-        scheduleOpenFileScriptedRevalidationImpl <- fun changedFile ->
-            let changed = normaliseCachePath changedFile
-            for doc in docs.OpenFiles() do
-                if normaliseCachePath doc.FullName <> changed then
-                    lintAgent.Post(RevalidateRequest({ uri = Uri(doc.FullName); version = 0 }))
 
     /// Debounce agent for DidChangeTextDocument lintAgent.
     /// Waits 1.5 seconds of inactivity before forwarding the lint request.
@@ -3857,7 +3891,10 @@ type Server(client: ILanguageClient) =
             async {
                 docs.Change p
                 let path = getPathFromDoc p.textDocument.uri
-                forgetFileCaches path
+                if isDynamicDefinitionPath path then
+                    clearFileCachesPreservingSemanticTokens path
+                else
+                    forgetFileCaches path
                 // Clear the deep validation cache for this file to ensure that shallow lint does not return the old errors before the fix
                 match gameObj with
                 | Some game -> game.InvalidateFileCache path
@@ -3893,19 +3930,6 @@ type Server(client: ILanguageClient) =
                         true
                     )
                 )
-
-                let savedPath = (getPathFromDoc p.textDocument.uri).Replace('\\', '/').ToLowerInvariant()
-                let marker = "/common/inline_scripts/"
-                let markerIdx = savedPath.IndexOf(marker, StringComparison.Ordinal)
-                if markerIdx >= 0 then
-                    match gameObj with
-                    | Some game ->
-                        try
-                            let scriptName = savedPath.Substring(markerIdx + marker.Length)
-                            for caller in game.GetInlineScriptCallers scriptName do
-                                lintAgent.Post(RevalidateRequest({ uri = diagnosticUri caller; version = 0 }))
-                        with e -> logDiag $"inline_script caller re-lint failed: {e.Message}"
-                    | None -> ()
             }
 
         member this.DidCloseTextDocument(p: DidCloseTextDocumentParams) = async { 
@@ -4842,6 +4866,8 @@ type Server(client: ILanguageClient) =
                         // File modified! We want to cancel semantic updates until it is reopened.
                         // Returning None translates to [[CANCEL]] error so VS Code shifts tokens natively.
                         None
+                    | false, _ when isDynamicDefinitionPath filePath && isCompletionActive () ->
+                        None
                     | false, _ ->
                         let dataArray = computeTokensForFile game filePath fileText
                         if dataArray.Length = 0 then
@@ -4871,38 +4897,46 @@ type Server(client: ILanguageClient) =
                     match semanticTokensCache.TryGetValue(filePath) with
                     | true, (cachedHash, cachedData, cachedResultId) when cachedHash = hash ->
                         if p.previousResultId = cachedResultId then
-                            Choice2Of2 { resultId = cachedResultId; edits = [] }
+                            Some(Choice2Of2 { resultId = cachedResultId; edits = [] })
                         else
-                            Choice1Of2 { data = Array.toList cachedData; resultId = Some cachedResultId }
+                            Some(Choice1Of2 { data = Array.toList cachedData; resultId = Some cachedResultId })
+                    | true, _ when isDynamicDefinitionPath filePath ->
+                        // Dynamic definition files are completion-heavy. After each
+                        // accepted suggestion, VS Code immediately asks for semantic
+                        // token deltas; recomputing them walks the old game AST and
+                        // can delay the next completion. Cancel and let VS Code shift
+                        // existing tokens until the next stable full refresh.
+                        None
+                    | _ when isDynamicDefinitionPath filePath && isCompletionActive () ->
+                        None
                     | true, (_, oldDataArray, oldResultId) ->
                         let newDataArray = computeTokensForFile game filePath fileText
                         if newDataArray.Length = 0 then
-                            Choice1Of2 { data = []; resultId = None }
+                            Some(Choice1Of2 { data = []; resultId = None })
                         else
                             let newResultId = Guid.NewGuid().ToString()
                             cachePut semanticTokensCache filePath (hash, newDataArray, newResultId)
                             evictIfNeeded semanticTokensCache
                             if p.previousResultId = oldResultId then
                                 let edit = computeDelta oldDataArray newDataArray
-                                Choice2Of2 { resultId = newResultId; edits = [ edit ] }
+                                Some(Choice2Of2 { resultId = newResultId; edits = [ edit ] })
                             else
-                                Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId }
+                                Some(Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId })
                     | _ ->
                         let newDataArray = computeTokensForFile game filePath fileText
                         if newDataArray.Length = 0 then
-                            Choice1Of2 { data = []; resultId = None }
+                            Some(Choice1Of2 { data = []; resultId = None })
                         else
                             let newResultId = Guid.NewGuid().ToString()
                             cachePut semanticTokensCache filePath (hash, newDataArray, newResultId)
                             evictIfNeeded semanticTokensCache
-                            Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId }
+                            Some(Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId })
                 let visitor =
                     { new IGameVisitor<_> with
                         member this.Visit game = semanticTokensFullDeltaFunction game }
                 return
                     gameDispatcher.Dispatch visitor
-                    |> Option.map (fun c -> Some c)
-                    |> Option.defaultValue None
+                    |> Option.flatten
             }
             |> catchError None
 

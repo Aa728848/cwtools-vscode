@@ -4,6 +4,12 @@ export interface CwtoolsMcpConfig {
   workspaceRoot: string;
   game?: string;
   serverPath?: string;
+  // Vanilla install/data dir, forwarded to the LSP `cache.<game>` setting so the
+  // server can build (or locate) the vanilla cache. Without it, results are mod-only.
+  gamePath?: string;
+  // Pre-built cache dir (overrides the default rules-cache root), so the server
+  // loads an existing `.cwb` instead of rebuilding — e.g. the extension's globalStorage.
+  cachePath?: string;
   stdio: boolean;
   http: boolean;
   host: string;
@@ -34,6 +40,12 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
         break;
       case '--server-path':
         config.serverPath = path.resolve(readValue(argv, ++index, arg));
+        break;
+      case '--game-path':
+        config.gamePath = path.resolve(readValue(argv, ++index, arg));
+        break;
+      case '--cache':
+        config.cachePath = path.resolve(readValue(argv, ++index, arg));
         break;
       case '--stdio':
         config.stdio = true;
@@ -67,6 +79,10 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
           config.game = arg.slice('--game='.length);
         } else if (arg?.startsWith('--server-path=')) {
           config.serverPath = path.resolve(arg.slice('--server-path='.length));
+        } else if (arg?.startsWith('--game-path=')) {
+          config.gamePath = path.resolve(arg.slice('--game-path='.length));
+        } else if (arg?.startsWith('--cache=')) {
+          config.cachePath = path.resolve(arg.slice('--cache='.length));
         } else if (arg?.startsWith('--host=')) {
           config.host = arg.slice('--host='.length);
         } else if (arg?.startsWith('--port=')) {
@@ -106,5 +122,10 @@ export function helpText(): string {
     '  cwtools-mcp --workspace <path> --http [--host 127.0.0.1] [--port 3000]',
     '  cwtools-mcp --workspace <path> --enable-writes',
     '  cwtools-mcp --workspace <path> --enable-writes --allow-tool write_localisation --allow-tool edit_pdx_block',
+    '',
+    'Vanilla data (needed for vanilla IDs and correct mod-vs-vanilla diagnostics):',
+    '  --game-path <dir>   Vanilla install/data dir; the server builds the cache from it (slow first run).',
+    '  --cache <dir>       Dir holding a pre-built <game>.cwb cache (e.g. the VS Code extension globalStorage),',
+    '                      loaded directly instead of rebuilding. Without either, results are mod-only.',
   ].join('\n');
 }

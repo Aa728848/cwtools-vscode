@@ -2,6 +2,7 @@ import type { DiagnosticsHost } from './diagnostics';
 import type { FilesystemHost } from './filesystem';
 import type { IndexHost } from './indexing';
 import type { LspHost } from './lsp';
+import type { VanillaCacheStatus } from './vanillaCache';
 
 export type HostLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -31,6 +32,9 @@ export interface HostServices {
   projectProfile?: ProjectProfileHost;
   knowledge?: GameKnowledgeHost;
   completion?: CompletionHost;
+  // Vanilla game-cache availability; consumed by the MCP adapter to annotate
+  // vanilla-dependent tool results. Undefined hosts skip the annotation.
+  vanillaCache?: VanillaCacheStatus;
   now(): number;
   log(level: HostLogLevel, message: string, data?: unknown): void;
 }

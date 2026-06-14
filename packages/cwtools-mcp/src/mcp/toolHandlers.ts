@@ -1,4 +1,5 @@
 import {
+  annotateVanillaCache,
   defaultSharedToolDispatcher,
   type HostServices,
   type SharedToolDispatcher,
@@ -9,7 +10,12 @@ export function createToolCallHandler(
   host: HostServices,
   dispatcher: SharedToolDispatcher = defaultSharedToolDispatcher,
 ): (name: string, args?: Record<string, unknown>) => Promise<SharedToolResult> {
-  return async (name, args = {}) => dispatcher(host, name, args);
+  return async (name, args = {}) => {
+    const result = await dispatcher(host, name, args);
+    // Tag vanilla-dependent results with cache provenance so clients never read a
+    // mod-only answer as complete.
+    return annotateVanillaCache(name, result, host.vanillaCache);
+  };
 }
 
 export function toMcpCallToolResult(result: SharedToolResult): {

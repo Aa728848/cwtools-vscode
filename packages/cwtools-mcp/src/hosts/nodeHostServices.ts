@@ -14,11 +14,13 @@ import {
   type LocalisationIndexQuery,
   MCP_WRITE_TOOL_NAMES,
   resolveWorkspacePath,
+  type VanillaCacheStatus,
+  vanillaCacheFileName,
   type WorkspaceIndexEntry,
   type WorkspaceIndexQuery,
 } from 'cwtools-shared';
 import type { CwtoolsMcpConfig } from '../config';
-import { createLspProcessHost, pathToFileUri, type LspProcessHost } from './lspProcessHost';
+import { createLspProcessHost, pathToFileUri, resolveRulesCacheRoot, type LspProcessHost } from './lspProcessHost';
 
 export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
   const workspaceRoot = path.resolve(config.workspaceRoot);
@@ -30,6 +32,8 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     workspaceRoot,
     game: config.game,
     serverPath: config.serverPath,
+    cachePath: config.cachePath,
+    gamePath: config.gamePath,
   });
   return {
     workspaceRoot,
@@ -40,12 +44,43 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     diagnostics: new LspDiagnosticsHost(lsp, workspaceRoot),
     filesystem,
     indexing: new ThinNodeIndexHost(workspaceRoot),
+    vanillaCache: probeVanillaCache(workspaceRoot, config),
     now: () => Date.now(),
     log: (level, message, data) => {
       if (level === 'debug') return;
       const suffix = data === undefined ? '' : ` ${JSON.stringify(data)}`;
       console.error(`[cwtools-mcp] ${level}: ${message}${suffix}`);
     },
+  };
+}
+
+// Resolve vanilla-cache availability up front: a pre-built <game>.cwb under the
+// rules-cache root means vanilla data loads; a valid --game-path means the server
+// can build it; otherwise results are mod-only. Mirrors GameLoader.getCachedFiles
+// (cache file lives at the rules-cache root) and Program.fs cache.<game> handling.
+function probeVanillaCache(workspaceRoot: string, config: CwtoolsMcpConfig): VanillaCacheStatus {
+  const cacheFileName = vanillaCacheFileName(config.game);
+  const rulesCacheRoot = resolveRulesCacheRoot({ cachePath: config.cachePath, workspaceRoot });
+  const cacheFile = cacheFileName ? path.join(rulesCacheRoot, cacheFileName) : undefined;
+  const cacheExists = !!cacheFile && fssync.existsSync(cacheFile);
+  const gamePathValid = !!config.gamePath && fssync.existsSync(config.gamePath);
+  if (cacheExists) {
+    return { available: true, source: 'mod_plus_vanilla', cacheFile, reason: 'Loaded a pre-built vanilla cache.' };
+  }
+  if (gamePathValid) {
+    return {
+      available: true,
+      source: 'mod_plus_vanilla',
+      cacheFile,
+      gamePath: config.gamePath,
+      reason: 'No pre-built cache; the server will build one from --game-path on first load (slow).',
+    };
+  }
+  return {
+    available: false,
+    source: 'mod_only',
+    cacheFile,
+    reason: 'No vanilla cache and no --game-path/--cache; results reflect mod files only.',
   };
 }
 

@@ -35,6 +35,9 @@ export interface SharedToolResult<T = unknown> {
   error?: SharedToolError;
   warnings?: string[];
   nextSteps?: string[];
+  // Vanilla game-cache provenance attached by the MCP adapter for
+  // vanilla-dependent tools (see host/vanillaCache.ts). Optional and additive.
+  vanillaCache?: import('../host/vanillaCache').VanillaCacheStatus;
 }
 
 export function toolUnavailable(tool: string, message: string, nextSteps: string[] = []): SharedToolResult {

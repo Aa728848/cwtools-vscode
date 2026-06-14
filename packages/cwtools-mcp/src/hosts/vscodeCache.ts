@@ -35,3 +35,50 @@ export function detectExtensionCacheDir(game: string | undefined): string | unde
   }
   return undefined;
 }
+
+// Installed-extension roots (`~/.vscode/extensions` and variants), where the
+// packaged CWTools server binary lives — so the MCP rides on the same server the
+// user already installed, with no dev checkout required.
+function extensionInstallRoots(): string[] {
+  const home = os.homedir();
+  return ['.vscode', '.vscode-insiders', '.vscode-oss', '.cursor', '.vscode-server'].map(d =>
+    path.join(home, d, 'extensions'),
+  );
+}
+
+// Newest installed eddy.eddy-stellaris-cwt-<version> extension dir, else undefined.
+export function detectInstalledExtensionDir(): string | undefined {
+  let best: { dir: string; version: string } | undefined;
+  for (const root of extensionInstallRoots()) {
+    if (!fs.existsSync(root)) continue;
+    for (const name of fs.readdirSync(root)) {
+      if (!name.startsWith(`${EXTENSION_DIR}-`)) continue;
+      const version = name.slice(EXTENSION_DIR.length + 1);
+      // String compare is enough to pick the highest semver-ish folder name.
+      if (!best || version > best.version) best = { dir: path.join(root, name), version };
+    }
+  }
+  return best?.dir;
+}
+
+// The packaged server binary inside the installed extension, else undefined.
+export function detectExtensionServerPath(): string | undefined {
+  const ext = detectInstalledExtensionDir();
+  if (!ext) return undefined;
+  const platform = os.platform();
+  const exe = platform === 'win32'
+    ? path.join('win-x64', 'CWTools Server.exe')
+    : platform === 'darwin'
+      ? path.join('osx-x64', 'CWTools Server')
+      : path.join('linux-x64', 'CWTools Server');
+  const candidate = path.join(ext, 'bin', 'server', exe);
+  return fs.existsSync(candidate) ? candidate : undefined;
+}
+
+// The rules directory the extension extracted into globalStorage (the server
+// loads rules from an extracted dir, not the packaged .zip).
+export function detectExtensionRulesDir(cacheDir: string | undefined, game: string | undefined): string | undefined {
+  if (!cacheDir) return undefined;
+  const dir = path.join(cacheDir, (game ?? 'stellaris').toLowerCase(), 'config');
+  return fs.existsSync(dir) ? dir : undefined;
+}

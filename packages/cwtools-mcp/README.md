@@ -2,9 +2,21 @@
 
 MCP server for CWTools semantic modding assistance.
 
+## Shipped inside the VS Code extension
+
+The packaged build is bundled into the extension as a single self-contained file at:
+
+```
+<vscode-extensions>/eddy.eddy-stellaris-cwt-<version>/bin/mcp/cwtools-mcp.cjs
+```
+
+External agents run it with `node`. It auto-detects the installed extension's
+server binary (`bin/server/<platform>/CWTools Server`), the extracted rules, and
+the vanilla cache in globalStorage — so no dev checkout or extra flags are needed.
+
 ## Usage
 
-Stdio transport:
+Stdio transport (dev checkout):
 
 ```sh
 cwtools-mcp --workspace /path/to/mod --game stellaris --stdio
@@ -48,15 +60,14 @@ answer as complete.
 ## Using from Codex
 
 Codex CLI reads MCP servers from `~/.codex/config.toml` (`[mcp_servers.<name>]`,
-shared with the Codex IDE extension). With the VS Code extension cache present,
-no cache flag is needed:
+shared with the Codex IDE extension). Point it at the bundled MCP inside the
+installed extension; it auto-detects the server, rules and vanilla cache:
 
 ```toml
 [mcp_servers.cwtools]
 command = "node"
 args = [
-  "C:/Users/A/Documents/cwtools-vscode/packages/cwtools-mcp/dist/cli.js",
-  "--workspace", "C:/path/to/your/mod",
+  "C:/Users/<you>/.vscode/extensions/eddy.eddy-stellaris-cwt-<version>/bin/mcp/cwtools-mcp.cjs",
   "--game", "stellaris",
   "--stdio",
 ]
@@ -64,9 +75,10 @@ startup_timeout_sec = 30
 tool_timeout_sec = 120
 ```
 
-Use forward slashes in TOML (Node accepts them on Windows) to avoid escaping. Start a
-Codex session and run `/mcp` to confirm the server and its tools are connected. Add
-`--game-path "C:/.../Stellaris"` only if you have never built the cache via the extension.
+Omit `--workspace` to analyse the directory Codex launches the server in (its
+cwd); leave the GUI "working directory" blank so it follows the open project.
+Use forward slashes in TOML. Start a Codex session and run `/mcp` to confirm the
+server and its tools are connected.
 
 Load-dependent results (type/scope/rule/definition/diagnostics queries) carry a
 `readiness` field. While the project is still loading they come back with

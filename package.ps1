@@ -57,7 +57,7 @@ if ($Version) {
 
 # 2. Compile F# Server (win-x64, linux-x64, osx-x64)
 if (-not $SkipServer) {
-    Write-Host "[1/5] Compiling F# server (3 platforms, sequentially)..." -ForegroundColor Yellow
+    Write-Host "[1/6] Compiling F# server (3 platforms, sequentially)..." -ForegroundColor Yellow
     
     # win-x64 (ReadyToRun optimization)
     Write-Host ">>> Publishing win-x64 (ReadyToRun=true)..." -ForegroundColor Cyan
@@ -86,12 +86,12 @@ if (-not $SkipServer) {
     }
     Write-Host "[OK] osx-x64 server published successfully." -ForegroundColor Green
 } else {
-    Write-Host "[1/5] (SKIPPED) Skip F# server compilation." -ForegroundColor Gray
+    Write-Host "[1/6] (SKIPPED) Skip F# server compilation." -ForegroundColor Gray
 }
 
 # 3. Compile Client TypeScript
 if (-not $SkipClient) {
-    Write-Host "[2/5] Compiling client TypeScript extension host..." -ForegroundColor Yellow
+    Write-Host "[2/6] Compiling client TypeScript extension host..." -ForegroundColor Yellow
     npx tsc -p .config/tsconfig.extension.json
     if ($LASTEXITCODE -ne 0) {
         Write-Error "TypeScript compilation failed!"
@@ -99,12 +99,12 @@ if (-not $SkipClient) {
     }
     Write-Host "[OK] Client TypeScript compiled successfully." -ForegroundColor Green
 } else {
-    Write-Host "[2/5] (SKIPPED) Skip client TypeScript compilation." -ForegroundColor Gray
+    Write-Host "[2/6] (SKIPPED) Skip client TypeScript compilation." -ForegroundColor Gray
 }
 
 # 4. Compile Webview and Copy CSS Assets
 if (-not $SkipClient) {
-    Write-Host "[3/5] Bundling Webview scripts (Rollup)..." -ForegroundColor Yellow
+    Write-Host "[3/6] Bundling Webview scripts (Rollup)..." -ForegroundColor Yellow
     npx rollup -c
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Rollup bundling failed!"
@@ -112,7 +112,7 @@ if (-not $SkipClient) {
     }
     Write-Host "[OK] Webview bundling completed successfully." -ForegroundColor Green
 
-    Write-Host "[4/5] Copying static webview assets and bundled rules..." -ForegroundColor Yellow
+    Write-Host "[4/6] Copying static webview assets and bundled rules..." -ForegroundColor Yellow
     $DestCssDir = Join-Path $PSScriptRoot "release/bin/client/webview"
     if (-not (Test-Path $DestCssDir)) {
         New-Item -ItemType Directory -Path $DestCssDir -Force | Out-Null
@@ -137,11 +137,34 @@ if (-not $SkipClient) {
     Write-Host "[OK] Bundled Stellaris rules compressed to ZIP successfully." -ForegroundColor Green
     Write-Host "[OK] Static CSS assets copied successfully." -ForegroundColor Green
 } else {
-    Write-Host "[3/5 & 4/5] (SKIPPED) Skip Webview compilation and asset copying." -ForegroundColor Gray
+    Write-Host "[3/6 & 4/6] (SKIPPED) Skip Webview compilation and asset copying." -ForegroundColor Gray
 }
 
-# 5. Package VSIX Universal Bundle
-Write-Host "[5/5] Packaging universal VSIX bundle..." -ForegroundColor Yellow
+# 5. Build and bundle the MCP server (shipped inside the extension at bin/mcp)
+if (-not $SkipClient) {
+    Write-Host "[5/6] Building and bundling MCP server (bin/mcp)..." -ForegroundColor Yellow
+    npm run build:mcp
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "MCP TypeScript build failed!"
+        exit $LASTEXITCODE
+    }
+    $McpOut = Join-Path $PSScriptRoot "release/bin/mcp/cwtools-mcp.cjs"
+    $McpOutDir = Split-Path $McpOut -Parent
+    if (-not (Test-Path $McpOutDir)) {
+        New-Item -ItemType Directory -Path $McpOutDir -Force | Out-Null
+    }
+    npx esbuild packages/cwtools-mcp/dist/cli.js --bundle --platform=node --format=cjs --target=node18 --outfile=$McpOut
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "MCP bundling failed!"
+        exit $LASTEXITCODE
+    }
+    Write-Host "[OK] MCP server bundled to release/bin/mcp/cwtools-mcp.cjs" -ForegroundColor Green
+} else {
+    Write-Host "[5/6] (SKIPPED) Skip MCP build and bundling." -ForegroundColor Gray
+}
+
+# 6. Package VSIX Universal Bundle
+Write-Host "[6/6] Packaging universal VSIX bundle..." -ForegroundColor Yellow
 Push-Location release
 npx @vscode/vsce package
 $VsceExitCode = $LASTEXITCODE

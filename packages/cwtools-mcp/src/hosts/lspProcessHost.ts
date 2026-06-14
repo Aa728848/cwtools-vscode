@@ -9,6 +9,7 @@ import {
   type MessageConnection,
 } from 'vscode-jsonrpc/node';
 import type { LspHost } from 'cwtools-shared';
+import { detectExtensionServerPath, detectExtensionRulesDir } from './vscodeCache';
 
 export interface LspProcessHostOptions {
   workspaceRoot: string;
@@ -166,7 +167,7 @@ export class LspProcessHost implements LspHost {
         uiLanguage: 'en',
         isVanillaFolder: false,
         rulesCache: resolveRulesCacheRoot(this.options),
-        bundledRulesPath: this.options.bundledRulesPath ?? resolveBundledRulesPath(this.options.game ?? 'stellaris'),
+        bundledRulesPath: this.options.bundledRulesPath ?? resolveBundledRulesPath(this.options.game ?? 'stellaris', resolveRulesCacheRoot(this.options)),
         rules_version: 'manual',
         repoPath: '',
         diagnosticLogging: false,
@@ -176,7 +177,7 @@ export class LspProcessHost implements LspHost {
     this.connection.sendNotification('initialized', {});
     this.connection.sendNotification('workspace/didChangeConfiguration', {
       settings: {
-        cwtools: buildCwtoolsConfiguration(this.options.game ?? 'stellaris', this.options.gamePath),
+        cwtools: buildCwtoolsConfiguration(this.options.game ?? 'stellaris', this.options.gamePath, resolveRulesCacheRoot(this.options)),
       },
     });
     await this.waitForExecuteCommandsReady(20_000);
@@ -220,7 +221,7 @@ export class LspProcessHost implements LspHost {
   }
 }
 
-function buildCwtoolsConfiguration(game: string, gamePath?: string): Record<string, unknown> {
+function buildCwtoolsConfiguration(game: string, gamePath?: string, cacheDir?: string): Record<string, unknown> {
   // `cache.<game>` is the vanilla install/data dir (the server reads vanilla data
   // from here and serializes the .cwb cache). Empty string => no vanilla data.
   const vanillaDir = gamePath ?? '';
@@ -252,7 +253,7 @@ function buildCwtoolsConfiguration(game: string, gamePath?: string): Record<stri
       eu5: '',
       [game]: vanillaDir,
     },
-    rules_folder: resolveBundledRulesPath(game),
+    rules_folder: resolveBundledRulesPath(game, cacheDir),
     showInlineText: false,
     maxFileSize: 2,
     diagnostics: {
@@ -277,7 +278,11 @@ export function resolveDefaultServerPath(): string | undefined {
       : path.join('linux-x64', 'CWTools Server');
 
   const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+  // Prefer the server inside the installed VS Code extension so a user with no dev
+  // checkout still gets a working server; fall back to dev-build locations.
+  const installed = detectExtensionServerPath();
   const candidates = [
+    ...(installed ? [installed] : []),
     path.join(process.cwd(), 'release', 'bin', 'server', executable),
     path.join(process.cwd(), 'bin', 'server', executable),
     path.join(repoRoot, 'release', 'bin', 'server', executable),
@@ -287,11 +292,13 @@ export function resolveDefaultServerPath(): string | undefined {
   return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0];
 }
 
-function resolveBundledRulesPath(game: string): string {
+function resolveBundledRulesPath(game: string, cacheDir?: string): string {
+  // Prefer the rules the installed extension already extracted into globalStorage
+  // (a real directory the server can load); the packaged .zip cannot be loaded
+  // directly. Fall back to dev-checkout dirs, then the zip as a last resort.
+  const extracted = detectExtensionRulesDir(cacheDir, game);
+  if (extracted) return extracted;
   const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
-  // Prefer an extracted rules DIRECTORY; the server cannot load rules from the
-  // packaged .zip directly (the extension extracts it first). The zip is a last
-  // resort only so a path is always returned.
   const candidates = [
     path.join(process.cwd(), 'release', 'rules', game, 'config'),
     path.join(process.cwd(), 'submodules', `cwtools-${game}-config`, 'config'),

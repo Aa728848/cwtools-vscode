@@ -186,6 +186,54 @@ export const defaultSharedToolDispatcher: SharedToolDispatcher = async (host, na
         scope: typeof args.scope === 'string' ? args.scope : undefined,
       });
 
+    case 'query_scripted_effects':
+      return executeLspTool(
+        host,
+        'cwtools.ai.queryScriptedEffects',
+        [args.filter ?? '', args.limit ?? 50],
+        'Start the CWTools LSP process or connect this host to an existing language server.',
+      );
+
+    case 'query_scripted_triggers':
+      return executeLspTool(
+        host,
+        'cwtools.ai.queryScriptedTriggers',
+        [args.filter ?? '', args.limit ?? 50],
+        'Start the CWTools LSP process or connect this host to an existing language server.',
+      );
+
+    case 'query_enums':
+      return executeLspTool(
+        host,
+        'cwtools.ai.queryEnums',
+        [args.enumName ?? '', args.limit ?? 500],
+        'Start the CWTools LSP process or connect this host to an existing language server.',
+      );
+
+    case 'query_static_modifiers':
+      return executeLspTool(
+        host,
+        'cwtools.ai.queryStaticModifiers',
+        [args.filter ?? '', args.limit ?? 300],
+        'Start the CWTools LSP process or connect this host to an existing language server.',
+      );
+
+    case 'query_variables':
+      return executeLspTool(
+        host,
+        'cwtools.ai.queryVariables',
+        [args.filter ?? ''],
+        'Start the CWTools LSP process or connect this host to an existing language server.',
+      );
+
+    case 'get_entity_info':
+      return executeLspTool(
+        host,
+        'cwtools.ai.getEntityInfo',
+        [toFileUri(String(args.file ?? ''), host.workspaceRoot)],
+        'Start the CWTools LSP process or connect this host to an existing language server.',
+      );
+
     case 'get_pdx_block':
       return getPdxBlockWithHost(host, {
         file: String(args.file ?? ''),

@@ -1051,6 +1051,24 @@ export async function activate(context: ExtensionContext) {
 		}
 	}, 5000);
 
+	// Sync the bundled MCP server to a version-independent globalStorage path so
+	// external agents (Codex / Claude Code) can point at a stable location that
+	// keeps following extension updates instead of a versioned extension path.
+	const stableMcpDir = path.join(context.globalStorageUri.fsPath, 'mcp');
+	const stableMcpPath = path.join(stableMcpDir, 'cwtools-mcp.cjs');
+	setTimeout(async () => {
+		try {
+			const bundledMcp = path.join(context.extensionPath, 'bin', 'mcp', 'cwtools-mcp.cjs');
+			if (fs.existsSync(bundledMcp)) {
+				await fs.promises.mkdir(stableMcpDir, { recursive: true });
+				await fs.promises.copyFile(bundledMcp, stableMcpPath);
+				ErrorReporter.debug('Extension', `Synced MCP server to stable path ${stableMcpPath}`);
+			}
+		} catch (e) {
+			ErrorReporter.debug('Extension', 'Failed to sync MCP server to globalStorage', e);
+		}
+	}, 2000);
+
 	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
 	const aiService = new AIService(context);
 	// Retire the legacy global endpoint into the per-provider map early so quick-switching

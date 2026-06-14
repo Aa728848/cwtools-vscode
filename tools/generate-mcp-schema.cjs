@@ -21,8 +21,12 @@ const mcpToolNames = [
   'query_definition',
   'query_definition_by_name',
   'query_references',
-  'write_localisation',
-  'edit_pdx_block',
+  'query_scripted_effects',
+  'query_scripted_triggers',
+  'query_enums',
+  'query_static_modifiers',
+  'query_variables',
+  'get_entity_info',
 ];
 
 require.extensions['.ts'] = function loadTypeScript(module, filename) {

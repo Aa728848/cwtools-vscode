@@ -2,6 +2,7 @@ import {
   annotateReadiness,
   annotateVanillaCache,
   defaultSharedToolDispatcher,
+  isMcpToolName,
   LOAD_DEPENDENT_TOOLS,
   parseReadiness,
   type HostServices,
@@ -29,6 +30,19 @@ export function createToolCallHandler(
   };
 
   return async (name, args = {}) => {
+    // Read-only surface: reject anything outside the registered (read-only) tools,
+    // including any write tool called directly. Writes go through the host agent.
+    if (!isMcpToolName(name)) {
+      return {
+        ok: false,
+        status: 'denied',
+        source: 'cwtools-mcp',
+        error: {
+          code: 'tool_not_available',
+          message: `Tool '${name}' is not available: this MCP server is read-only. Perform file writes through your own environment.`,
+        },
+      };
+    }
     const result = await dispatcher(host, name, args);
     // Tag vanilla-dependent results with cache provenance so clients never read a
     // mod-only answer as complete.

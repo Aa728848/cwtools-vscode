@@ -10,6 +10,8 @@ export interface CwtoolsMcpConfig {
   // Pre-built cache dir (overrides the default rules-cache root), so the server
   // loads an existing `.cwb` instead of rebuilding — e.g. the extension's globalStorage.
   cachePath?: string;
+  // Explicit CWT rules source (directory or .zip) overriding auto-detection.
+  rulesPath?: string;
   stdio: boolean;
   http: boolean;
   host: string;
@@ -47,6 +49,9 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
       case '--cache':
         config.cachePath = path.resolve(readValue(argv, ++index, arg));
         break;
+      case '--rules':
+        config.rulesPath = path.resolve(readValue(argv, ++index, arg));
+        break;
       case '--stdio':
         config.stdio = true;
         config.http = false;
@@ -83,6 +88,8 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
           config.gamePath = path.resolve(arg.slice('--game-path='.length));
         } else if (arg?.startsWith('--cache=')) {
           config.cachePath = path.resolve(arg.slice('--cache='.length));
+        } else if (arg?.startsWith('--rules=')) {
+          config.rulesPath = path.resolve(arg.slice('--rules='.length));
         } else if (arg?.startsWith('--host=')) {
           config.host = arg.slice('--host='.length);
         } else if (arg?.startsWith('--port=')) {
@@ -129,5 +136,8 @@ export function helpText(): string {
     '  --game-path <dir>   Vanilla install/data dir; the server builds the cache from it (slow first run).',
     '  --cache <dir>       Dir holding a pre-built <game>.cwb cache (overrides auto-detection),',
     '                      loaded directly instead of rebuilding. Without any, results are mod-only.',
+    '',
+    'Rules source (priority: --rules > installed extension > dev checkout > bundled zip):',
+    '  --rules <dir|zip>   Explicit CWT rules dir, or a *-rules.zip (extracted automatically).',
   ].join('\n');
 }

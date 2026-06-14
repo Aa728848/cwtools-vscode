@@ -597,99 +597,164 @@ export const GENERATED_MCP_TOOLS = [
   },
   {
     "tool": {
-      "name": "write_localisation",
-      "description": "MANDATORY for all .yml localisation file operations. Safely write PDXScript localisation entries. filePath MUST be a real localisation path under localisation/, localisation_synced/, or localization/; never write localisation YAML into .cwtools-ai scratch/topic folders. This tool handles BOM encoding, key formatting, and correct insertion/update automatically. For new files, creates them with proper BOM + language header. For existing files, appends new keys and updates existing ones by exact key match. NEVER use edit_file, replace_lines, or write_file for .yml localisation files - ALWAYS use this tool instead.",
+      "name": "query_scripted_effects",
+      "description": "Warning: MANDATORY before using any scripted_effect. Lists all scripted effects with name, scope constraints, and type. PDXscript effect names are frequently hallucinated - always verify here first.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "filePath": {
+          "filter": {
             "type": "string",
-            "description": "Path to the real .yml localisation file (absolute or relative to workspace), under localisation/, localisation_synced/, or localization/. Do not use .cwtools-ai paths."
+            "description": "Optional substring filter on effect name. Without filter, results are limited to 50; with filter, up to 200."
           },
-          "language": {
-            "type": "string",
-            "description": "Language header, e.g. \"l_english\", \"l_simp_chinese\", \"l_braz_por\". Used when creating a new file."
-          },
-          "entries": {
-            "type": "array",
-            "description": "List of localisation key-value pairs to write",
-            "items": {
-              "type": "object",
-              "properties": {
-                "key": {
-                  "type": "string",
-                  "description": "Localisation key, e.g. \"my_event.1.title\""
-                },
-                "value": {
-                  "type": "string",
-                  "description": "Localisation value text. Use \\n for in-game line breaks. Do NOT include surrounding quotes."
-                },
-                "number": {
-                  "type": "integer",
-                  "description": "Version number after the colon (default: 0). Usually 0."
-                },
-                "comment": {
-                  "type": "string",
-                  "description": "Optional section header comment to insert before this entry, e.g. \"### Site 1 Events ###\""
-                }
-              },
-              "required": [
-                "key",
-                "value"
-              ]
-            }
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 50 without filter, 200 with filter)"
           }
         },
-        "required": [
-          "filePath",
-          "language",
-          "entries"
-        ]
+        "required": []
       }
     },
     "registry": {
-      "name": "write_localisation",
-      "isWrite": true,
-      "isReadOnly": false,
-      "effect": "workspace_write",
-      "riskLevel": 2,
-      "concurrencyClass": "per-file-write"
+      "name": "query_scripted_effects",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "parallel"
     }
   },
   {
     "tool": {
-      "name": "edit_pdx_block",
-      "description": "ZERO-READ EDIT: Replace a specific PDX AST block entirely by its symbol name, without needing to read the file first. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Uses LSP to find block boundaries automatically. newContent must keep the full outer block and PDX brace structure intact; unsafe brace-breaking writes are rejected before the file changes. If the symbol is not found, the error response includes a full list of available symbols so you can retry immediately. Warning: on_actions files may have DUPLICATE top-level names (e.g. multiple \"on_entering_battle\") - only the FIRST match will be edited. For duplicates, use replaceLines with explicit line ranges instead.",
+      "name": "query_scripted_triggers",
+      "description": "Warning: MANDATORY before using any scripted_trigger. Lists all scripted triggers with name, scope constraints, and type. Trigger names are frequently hallucinated - always verify here first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "Optional substring filter on trigger name. Without filter, results are limited to 50; with filter, up to 200."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 50 without filter, 200 with filter)"
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "query_scripted_triggers",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "parallel"
+    }
+  },
+  {
+    "tool": {
+      "name": "query_enums",
+      "description": "Warning: MANDATORY before using any enum field. Query enum values from CWTools rules. Call with no enumName to list all enums, then query specific enum for values. Always verify - enum values are domain-specific.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "enumName": {
+            "type": "string",
+            "description": "Enum name to query (e.g. \"anomaly_category\"). Leave empty to list all enum names."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max values to return (default 500)"
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "query_enums",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "parallel"
+    }
+  },
+  {
+    "tool": {
+      "name": "query_static_modifiers",
+      "description": "Warning: MANDATORY before using add_modifier. Lists static modifiers with categories. Modifier names are domain-specific - always verify. Dynamic/engine modifiers may not appear here - use query_rules(category=\"modifier\") as fallback.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "Optional substring filter on modifier tag"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 300)"
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "query_static_modifiers",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "parallel"
+    }
+  },
+  {
+    "tool": {
+      "name": "query_variables",
+      "description": "List all scripted variables (@variable_name = value) defined across the mod and vanilla. Use this to look up numeric constant values defined with @-prefix before using them in generated code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "description": "Optional substring filter on variable name"
+          }
+        },
+        "required": []
+      }
+    },
+    "registry": {
+      "name": "query_variables",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "parallel"
+    }
+  },
+  {
+    "tool": {
+      "name": "get_entity_info",
+      "description": "Get deep structural info from CWTools cache: referenced types, scripted variables, effect/trigger blocks, and saved event_targets. Use to understand file dependencies before modification.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "file": {
             "type": "string",
-            "description": "Absolute file path"
-          },
-          "symbol": {
-            "type": "string",
-            "description": "Symbol name varies by file type: events -> \"namespace.id\" (e.g. \"anomaly.1\"); common types -> top-level identifier (e.g. \"tech_kuat_reactor\"); section_templates -> key value; .gui -> containerWindowType name; .gfx -> pdxmesh name. If unsure, just try - the error lists all available symbols."
-          },
-          "newContent": {
-            "type": "string",
-            "description": "The completely new code block to replace the old one. Must include the outer block definition (e.g. \"my_trigger = { ... }\", not just the inner content)."
+            "description": "Absolute file path (must be a parsed mod file)"
           }
         },
         "required": [
-          "file",
-          "symbol",
-          "newContent"
+          "file"
         ]
       }
     },
     "registry": {
-      "name": "edit_pdx_block",
-      "isWrite": true,
-      "isReadOnly": false,
-      "effect": "workspace_write",
-      "riskLevel": 2,
-      "concurrencyClass": "per-file-write"
+      "name": "get_entity_info",
+      "isWrite": false,
+      "isReadOnly": true,
+      "effect": "workspace_read",
+      "riskLevel": 0,
+      "concurrencyClass": "parallel"
     }
   }
 ] as const satisfies readonly GeneratedMcpTool[];

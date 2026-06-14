@@ -10,6 +10,32 @@ import { listRegisteredTools } from './mcp/toolRegistrar';
 import { createToolCallHandler, toMcpCallToolResult } from './mcp/toolHandlers';
 import { listResources, readResource } from './mcp/resources';
 
+// Server-level guidance surfaced to the model at connect time (MCP `instructions`).
+// Tells a Paradox/Stellaris coding agent to ground every claim in these tools.
+const SERVER_INSTRUCTIONS = [
+  'CWTools is a read-only semantic service for Paradox / Stellaris mods. Ground every',
+  'claim about the mod in these tools instead of memory — PDX identifiers and syntax',
+  'are routinely hallucinated.',
+  '',
+  'Use it whenever working in a Paradox mod (common/, events/, localisation/, gfx/, …):',
+  '- Before using ANY game ID, verify it exists: query_types for typed entities;',
+  '  query_scripted_effects / query_scripted_triggers / query_static_modifiers /',
+  '  query_enums / query_variables for those kinds.',
+  '- Check trigger/effect/scope-change/modifier syntax with query_rules; check the scope',
+  '  valid at a position with query_scope.',
+  '- Before declaring code correct, review get_diagnostics (whole project). Honor the',
+  '  readiness/freshness fields: if readiness.ready is false the project is still loading —',
+  '  retry; an empty result then is not authoritative.',
+  '- Navigate with query_definition / query_definition_by_name / query_references /',
+  '  document_symbols / workspace_symbols; read structured blocks with get_pdx_block',
+  '  instead of reading whole files. get_entity_info gives a file\'s referenced types/vars.',
+  '- Results carry vanillaCache metadata: if available is false, vanilla IDs are missing',
+  '  and references to them may show as false errors.',
+  '',
+  'This server never writes files — perform edits with your own environment, then',
+  're-check with get_diagnostics.',
+].join('\n');
+
 export function createCwtoolsMcpServer(
   host: HostServices,
   options: { dispatcher?: SharedToolDispatcher } = {},
@@ -24,6 +50,7 @@ export function createCwtoolsMcpServer(
         resources: {},
         tools: {},
       },
+      instructions: SERVER_INSTRUCTIONS,
     },
   );
   const callTool = createToolCallHandler(host, options.dispatcher);

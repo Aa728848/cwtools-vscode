@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import AdmZip from 'adm-zip';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import {
   createMessageConnection,
@@ -167,7 +168,11 @@ export class LspProcessHost implements LspHost {
         uiLanguage: 'en',
         isVanillaFolder: false,
         rulesCache: resolveRulesCacheRoot(this.options),
-        bundledRulesPath: this.options.bundledRulesPath ?? resolveBundledRulesPath(this.options.game ?? 'stellaris', resolveRulesCacheRoot(this.options)),
+        bundledRulesPath: materializeRulesPath(
+          this.options.bundledRulesPath ?? resolveBundledRulesPath(this.options.game ?? 'stellaris', resolveRulesCacheRoot(this.options)),
+          resolveRulesCacheRoot(this.options),
+          this.options.game ?? 'stellaris',
+        ),
         rules_version: 'manual',
         repoPath: '',
         diagnosticLogging: false,
@@ -290,6 +295,35 @@ export function resolveDefaultServerPath(): string | undefined {
     path.join(repoRoot, 'src', 'Main', 'output', platform === 'win32' ? 'CWTools Server.exe' : 'CWTools Server'),
   ];
   return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0];
+}
+
+// The server loads rules from a directory, not a .zip. If the resolved rules path
+// is a zip, extract it once into a stable dir under the rules cache and reuse it.
+function materializeRulesPath(rulesPath: string, rulesCacheRoot: string, game: string): string {
+  if (!rulesPath || !rulesPath.toLowerCase().endsWith('.zip') || !fs.existsSync(rulesPath)) {
+    return rulesPath;
+  }
+  const outDir = path.join(rulesCacheRoot, '_rules_extracted', game);
+  const marker = path.join(outDir, '.source');
+  try {
+    if (fs.existsSync(marker) && fs.readFileSync(marker, 'utf8') === rulesPath) {
+      return rulesConfigDir(outDir);
+    }
+    fs.rmSync(outDir, { recursive: true, force: true });
+    fs.mkdirSync(outDir, { recursive: true });
+    new AdmZip(rulesPath).extractAllTo(outDir, true);
+    fs.writeFileSync(marker, rulesPath, 'utf8');
+    return rulesConfigDir(outDir);
+  } catch {
+    return rulesPath; // fall back to the raw path on extraction failure
+  }
+}
+
+// Some rule bundles nest the .cwt files under a config/ subdir; the server wants
+// the directory that directly contains the rule files.
+function rulesConfigDir(dir: string): string {
+  const config = path.join(dir, 'config');
+  return fs.existsSync(config) ? config : dir;
 }
 
 function resolveBundledRulesPath(game: string, cacheDir?: string): string {

@@ -2,48 +2,47 @@ import { expect } from 'chai';
 import {
   createUnavailableDiagnosticsHost,
   createUnavailableLspHost,
+  isMcpToolName,
+  MCP_TOOL_NAMES,
   type HostServices,
 } from 'cwtools-shared';
 import { createToolCallHandler } from '../mcp/toolHandlers';
 
-describe('MCP readonly policy contract', () => {
-  it('fails closed for write_localisation in default read-only mode', async () => {
-    const host = createTestHost({ readonlyMode: true, writesEnabled: false });
-    const callTool = createToolCallHandler(host);
-
-    const result = await callTool('write_localisation', {
-      filePath: 'localisation/english/test_l_english.yml',
-      language: 'l_english',
-      entries: [{ key: 'blocked', value: 'Blocked' }],
-    });
-
-    expect(result.ok).to.equal(false);
-    expect(result.status).to.equal('denied');
-    expect(result.error?.code).to.equal('read_only');
+describe('MCP read-only surface contract', () => {
+  it('does not register any write tool', () => {
+    expect(isMcpToolName('write_localisation')).to.equal(false);
+    expect(isMcpToolName('edit_pdx_block')).to.equal(false);
+    expect((MCP_TOOL_NAMES as readonly string[])).to.not.include('write_localisation');
+    expect((MCP_TOOL_NAMES as readonly string[])).to.not.include('edit_pdx_block');
   });
 
-  it('fails closed for edit_pdx_block in default read-only mode', async () => {
-    const host = createTestHost({ readonlyMode: true, writesEnabled: false });
-    const callTool = createToolCallHandler(host);
+  it('rejects write_localisation as not available (read-only server)', async () => {
+    const result = await createToolCallHandler(createTestHost())('write_localisation', {
+      filePath: 'localisation/english/test_l_english.yml',
+      entries: [{ key: 'blocked', value: 'Blocked' }],
+    });
+    expect(result.ok).to.equal(false);
+    expect(result.status).to.equal('denied');
+    expect(result.error?.code).to.equal('tool_not_available');
+  });
 
-    const result = await callTool('edit_pdx_block', {
+  it('rejects edit_pdx_block as not available (read-only server)', async () => {
+    const result = await createToolCallHandler(createTestHost())('edit_pdx_block', {
       file: 'events/test.txt',
       symbol: 'test.1',
       newContent: 'country_event = { id = test.1 }',
     });
-
     expect(result.ok).to.equal(false);
     expect(result.status).to.equal('denied');
-    expect(result.error?.code).to.equal('read_only');
+    expect(result.error?.code).to.equal('tool_not_available');
   });
 });
 
-function createTestHost(options: { readonlyMode: boolean; writesEnabled: boolean }): HostServices {
+function createTestHost(): HostServices {
   return {
     workspaceRoot: process.cwd(),
-    readonlyMode: options.readonlyMode,
-    writesEnabled: options.writesEnabled,
-    allowedWriteTools: new Set(['write_localisation', 'edit_pdx_block']),
+    readonlyMode: true,
+    writesEnabled: false,
     lsp: createUnavailableLspHost(),
     diagnostics: createUnavailableDiagnosticsHost(),
     filesystem: {

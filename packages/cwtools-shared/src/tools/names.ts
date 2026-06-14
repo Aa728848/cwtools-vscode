@@ -14,21 +14,21 @@ export const MCP_TOOL_NAMES = [
   'query_definition',
   'query_definition_by_name',
   'query_references',
-  'write_localisation',
-  'edit_pdx_block',
+  'query_scripted_effects',
+  'query_scripted_triggers',
+  'query_enums',
+  'query_static_modifiers',
+  'query_variables',
+  'get_entity_info',
 ] as const;
 
 export type McpToolName = typeof MCP_TOOL_NAMES[number];
 
-export const MCP_WRITE_TOOL_NAMES = [
-  'write_localisation',
-  'edit_pdx_block',
-] as const satisfies readonly McpToolName[];
+// The MCP surface is read-only by design: file writes go through the host agent's
+// own environment (Codex / Claude Code), not through this server.
+export const MCP_WRITE_TOOL_NAMES = [] as const satisfies readonly McpToolName[];
 
-export const MCP_READONLY_TOOL_NAMES = MCP_TOOL_NAMES.filter(
-  (name): name is Exclude<McpToolName, typeof MCP_WRITE_TOOL_NAMES[number]> =>
-    !(MCP_WRITE_TOOL_NAMES as readonly string[]).includes(name),
-);
+export const MCP_READONLY_TOOL_NAMES = MCP_TOOL_NAMES;
 
 export function isMcpToolName(value: string): value is McpToolName {
   return (MCP_TOOL_NAMES as readonly string[]).includes(value);

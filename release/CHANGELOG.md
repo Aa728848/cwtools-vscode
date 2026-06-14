@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.5.2] - 2026-06-14
+
+### 🔌 MCP 易用性与覆盖
+- **[功能] Server 自描述指令**：MCP 在连接时下发工作流 `instructions`，引导 Agent 在 Paradox/群星项目中优先用工具验证 ID、查语法、查诊断，而非凭记忆。
+- **[功能] 规则源可选**：新增 `--rules <dir|zip>` 显式指定 CWT 规则（zip 自动解压）；优先级 `--rules` > 已装插件解压 > dev 目录 > 打包 zip。
+- **[功能] 版本无关稳定路径**：插件激活时把 MCP 同步到 `globalStorage/mcp/cwtools-mcp.cjs`，外部 Agent 指向该稳定路径即自动跟随插件更新，无需随版本号改配置。
+
+## [2.5.1] - 2026-06-14
+
+### 🔌 通用 MCP 服务（随插件分发）
+- **[功能] MCP 打包进插件**：`bin/mcp/cwtools-mcp.cjs` 单文件自包含，供 Codex / Claude Code 等外部 Agent 调用，自动探测已安装插件的 LSP server、解压规则与 globalStorage 原版缓存。
+- **[功能] 全项目诊断**：新增 `cwtools.ai.getAllDiagnostics` LSP 命令，MCP 的 `get_diagnostics`（不带文件）现返回全工作区真实诊断，而非仅 freshness。
+- **[功能] 深层语义工具**：MCP 暴露 `query_scripted_effects`/`query_scripted_triggers`/`query_enums`/`query_static_modifiers`/`query_variables`/`get_entity_info`。
+- **[安全] 纯只读面**：MCP 不再暴露写工具，文件写入交由宿主 Agent 环境；非白名单工具一律拒绝。
+- **[修复] `getCompletionContext` 只读分类**：补入 `LanguageServer.fs` 的 `isReadCmd`，避免只读补全查询被当成写命令做锁路由。
+
 ## [2.5.0] - 2026-06-13
 > 本条目汇总自 2.2.3 以来的主要能力演进（按主题归并，非逐提交流水）。
 

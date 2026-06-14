@@ -38,6 +38,7 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     serverPath: config.serverPath,
     cachePath: autoCache,
     gamePath: config.gamePath,
+    bundledRulesPath: config.rulesPath,
   });
   if (!config.cachePath && autoCache) {
     console.error(`[cwtools-mcp] info: auto-detected VS Code extension cache at ${autoCache}`);

@@ -43,6 +43,12 @@ export const VANILLA_DEPENDENT_TOOLS: ReadonlySet<string> = new Set([
   'query_definition_by_name',
   'query_references',
   'get_diagnostics',
+  'query_scripted_effects',
+  'query_scripted_triggers',
+  'query_enums',
+  'query_static_modifiers',
+  'query_variables',
+  'get_entity_info',
 ]);
 
 export const VANILLA_UNAVAILABLE_WARNING =

@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../.."
+  },
+  "include": [
+    "src/**/*.ts",
+    "../../client/extension/ai/tools/definitions.ts",
+    "../../client/extension/ai/tools/registry.ts",
+    "../../client/extension/ai/tools/schemaFlatten.ts",
+    "../../client/extension/ai/types.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}

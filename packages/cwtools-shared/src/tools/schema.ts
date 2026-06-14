@@ -1,0 +1,57 @@
+import type { ToolRegistryMetadata } from './registry';
+
+export type JsonObject = Record<string, unknown>;
+
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: JsonObject;
+  };
+}
+
+export interface McpToolSchema {
+  name: string;
+  description: string;
+  inputSchema: JsonObject;
+}
+
+export interface GeneratedMcpTool {
+  tool: McpToolSchema;
+  registry: ToolRegistryMetadata;
+}
+
+export interface SharedToolError {
+  code: string;
+  message: string;
+}
+
+export interface SharedToolResult<T = unknown> {
+  ok: boolean;
+  status: 'ready' | 'success' | 'denied' | 'loading' | 'stale' | 'unavailable' | 'error';
+  source: string;
+  data?: T;
+  error?: SharedToolError;
+  warnings?: string[];
+  nextSteps?: string[];
+}
+
+export function toolUnavailable(tool: string, message: string, nextSteps: string[] = []): SharedToolResult {
+  return {
+    ok: false,
+    status: 'unavailable',
+    source: 'cwtools-shared',
+    error: { code: 'unavailable', message },
+    nextSteps,
+  };
+}
+
+export function toolDenied(code: string, message: string): SharedToolResult {
+  return {
+    ok: false,
+    status: 'denied',
+    source: 'cwtools-shared',
+    error: { code, message },
+  };
+}

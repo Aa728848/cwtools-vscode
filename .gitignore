@@ -1,7 +1,9 @@
 bin/
 obj/
 out/
-packages/
+packages/*/dist/
+packages/*/coverage/
+packages/*/node_modules/
 node_modules/
 .idea/
 *.vsix
@@ -16,6 +18,7 @@ nupkgs/
 .vscode-test/
 .rules-sync/
 .codex-smoke/
+.tmp-npm-cache/
 .cwtools-ai/
 runs/
 .fake

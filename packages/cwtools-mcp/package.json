@@ -1,0 +1,25 @@
+{
+  "name": "cwtools-mcp",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "cwtools-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "package.json"
+  ],
+  "scripts": {
+    "prebuild": "npm run build -w cwtools-shared",
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test:contracts": "ts-mocha -p tsconfig.test.json \"src/test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "cwtools-shared": "0.1.0",
+    "vscode-jsonrpc": "^8.2.0"
+  }
+}

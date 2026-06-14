@@ -159,24 +159,21 @@ let private formatLocalisationYaml (options: DocumentFormattingOptions) (text: s
                         let trimmedStart = trimmedRight.TrimStart()
 
                         if trimmedStart.StartsWith("#") then
-                            let existingIndent = trimmedRight.Substring(0, trimmedRight.Length - trimmedStart.Length)
-                            let lineIndent = if existingIndent.Length = 0 then indent else existingIndent
-                            lineIndent + trimmedStart
+                            // Loc YAML is flat: every line under the header sits at one level.
+                            indent + trimmedStart
                         else
                             let entryMatch = localisationEntryPattern.Match(trimmedRight)
 
                             if entryMatch.Success then
-                                let existingIndent = entryMatch.Groups.[1].Value
-                                let lineIndent = if existingIndent.Length = 0 then indent else existingIndent
                                 let key = entryMatch.Groups.[2].Value
                                 let version = entryMatch.Groups.[3].Value
                                 let value = entryMatch.Groups.[4].Value.Trim()
                                 let prefix = if String.IsNullOrEmpty version then key + ":" else key + ":" + version
 
                                 if String.IsNullOrEmpty value then
-                                    lineIndent + prefix
+                                    indent + prefix
                                 else
-                                    lineIndent + prefix + " " + value
+                                    indent + prefix + " " + value
                             else
                                 trimmedRight
                 else

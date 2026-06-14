@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { braceDeltaOf, reindentLines } from './pdxIndent';
+import { braceDeltaOf, lineIndentDelta, reindentLines } from './pdxIndent';
 
 /** 应用本缩进适配的 PDX 语言 ID（pdx-shader 不在此列）。 */
 const PDX_LANGUAGE_IDS = [
@@ -35,9 +35,9 @@ class PdxIndentFormatter implements vscode.DocumentRangeFormattingEditProvider {
 			originals.push(document.lineAt(l).text);
 		}
 
-		// 若跳过了首行，其括号也要计入后续行的起始深度。
+		// 若跳过了首行，其括号也要计入后续行的起始深度（同样按每行至多一级）。
 		const effectiveBase = skipFirstLine
-			? Math.max(0, baseDepth + braceDeltaOf(firstLineText))
+			? Math.max(0, baseDepth + lineIndentDelta(firstLineText))
 			: baseDepth;
 
 		const reindented = reindentLines(originals, effectiveBase, indentUnit);

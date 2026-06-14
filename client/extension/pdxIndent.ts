@@ -23,6 +23,11 @@ export function braceDeltaOf(text: string): number {
 	return depth;
 }
 
+export function lineIndentDelta(text: string): number {
+	const delta = braceDeltaOf(text);
+	return delta > 0 ? 1 : delta < 0 ? -1 : 0;
+}
+
 /**
  * 按括号层级重排每行缩进。
  *
@@ -44,7 +49,7 @@ export function reindentLines(lines: string[], baseDepth: number, indentUnit: st
 		const effectiveDepth = trimmed[0] === '}' ? depth - 1 : depth;
 		const indent = indentUnit.repeat(Math.max(0, effectiveDepth));
 		out.push(indent + trimmed);
-		depth += braceDeltaOf(line);
+		depth += lineIndentDelta(line);
 	}
 	return out;
 }

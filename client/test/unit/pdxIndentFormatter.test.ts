@@ -58,6 +58,31 @@ describe('PDX indent formatter — reindentLines', () => {
 		const out = reindentLines(lines, 0, TAB);
 		expect(out).to.deep.equal(['}', 'a = 1']);
 	});
+
+	it('indents one level per line for compressed multi-brace lines', () => {
+		// `x = { y = {` opens two braces on one line but should only add one
+		// indent level (matching VS Code built-in indentationRules + hand style);
+		// `} }` closes both but dedents only one level.
+		const lines = [
+			'event_target:Foo = {',
+			'solar_system = { spawn_megastructure = {',
+			'type = Bar',
+			'planet = star owner = space_owner',
+			'} }',
+			'remove_megastructure = this',
+			'}',
+		];
+		const out = reindentLines(lines, 1, TAB);
+		expect(out).to.deep.equal([
+			'\tevent_target:Foo = {',
+			'\t\tsolar_system = { spawn_megastructure = {',
+			'\t\t\ttype = Bar',
+			'\t\t\tplanet = star owner = space_owner',
+			'\t\t} }',
+			'\t\tremove_megastructure = this',
+			'\t}',
+		]);
+	});
 });
 
 describe('PDX indent formatter — braceDeltaOf', () => {

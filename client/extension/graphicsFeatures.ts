@@ -650,6 +650,28 @@ class RoomDefinitionProvider implements vs.DefinitionProvider {
     }
 }
 
+class RoomHoverProvider implements vs.HoverProvider {
+    async provideHover(document: vs.TextDocument, position: vs.Position): Promise<vs.Hover | null> {
+        const lineText = document.lineAt(position).text;
+        const roomMatch = /\broom\s*=\s*["']?([A-Za-z0-9_]+)["']?/.exec(lineText);
+        if (!roomMatch) return null;
+
+        const fullMatchStart = roomMatch.index;
+        const valueInFullMatch = roomMatch[0]!.indexOf(roomMatch[1]!);
+        const valueStart = fullMatchStart + valueInFullMatch;
+        const valueEnd = valueStart + roomMatch[1]!.length;
+        if (position.character < valueStart || position.character > valueEnd) return null;
+
+        const word = roomMatch[1]!;
+        const rooms = await getRoomEntries();
+        const entry = rooms.find(r => r.name === word);
+        if (!entry) return null;
+
+        const range = new vs.Range(position.line, valueStart, position.line, valueEnd);
+        return createImageHover(entry.uri.fsPath, `gfx/portraits/city_sets/${path.basename(entry.uri.fsPath)}`, range, word);
+    }
+}
+
 // ─── Path Resolution Helpers ───────────────────────────────────────────────
 
 /**
@@ -842,10 +864,11 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
         vs.languages.registerHoverProvider(gfxSelector, new IconHoverProvider()),
     );
 
-    // 4. Room completion + definition
+    // 4. Room completion + definition + hover preview
     context.subscriptions.push(
         vs.languages.registerCompletionItemProvider(gfxSelector, new RoomCompletionProvider()),
         vs.languages.registerDefinitionProvider(gfxSelector, new RoomDefinitionProvider()),
+        vs.languages.registerHoverProvider(gfxSelector, new RoomHoverProvider()),
     );
 
     // File system watchers for incremental updates

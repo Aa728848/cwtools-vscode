@@ -51,9 +51,11 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
   const lsp: LspHost = lspProcess
     ?? createUnavailableLspHost('Workspace is not a recognised Paradox/Stellaris mod; CWTools is disabled here.');
   if (!enabled) {
-    console.error(`[cwtools-mcp] info: CWTools tools disabled — ${support.reason} (pass --force-start to override)`);
+    console.error(`[cwtools-mcp] info: tool calls will be rejected (no language server) — ${support.reason} (pass --force-start to override)`);
   } else if (!support.supported) {
     console.error(`[cwtools-mcp] info: --force-start set; starting despite: ${support.reason}`);
+  } else if (support.matchedAt && support.matchedAt !== workspaceRoot) {
+    console.error(`[cwtools-mcp] info: mod detected at ${support.matchedAt} (workspace = ${workspaceRoot})`);
   }
   if (enabled && !config.cachePath && autoCache) {
     console.error(`[cwtools-mcp] info: auto-detected VS Code extension cache at ${autoCache}`);

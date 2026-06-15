@@ -146,8 +146,10 @@ export function helpText(): string {
     '  --rules <dir|zip>   Explicit CWT rules dir, or a *-rules.zip (extracted automatically).',
     '',
     'Project gate:',
-    '  (default)           Tools are exposed and the language server starts only when the',
-    '                      workspace looks like a Paradox mod (descriptor.mod). Otherwise tools are hidden and no server spawns.',
-    '  --force-start       Start even without mod markers (escape hatch for unusual layouts).',
+    '  (default)           Tools are always listed. The language server starts only when the',
+    '                      workspace is (or sits in/above) a Paradox mod (descriptor.mod, common/,',
+    '                      events/, localisation/, .cwtools-ai/). On other workspaces tool calls are',
+    '                      rejected with a reason and no server spawns.',
+    '  --force-start       Treat the workspace as supported even without mod markers.',
   ].join('\n');
 }

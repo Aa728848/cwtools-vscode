@@ -36,12 +36,6 @@ const SERVER_INSTRUCTIONS = [
   're-check with get_diagnostics.',
 ].join('\n');
 
-const DISABLED_INSTRUCTIONS = [
-  'CWTools is a Paradox / Stellaris mod service, but the current workspace was not',
-  'detected as a Paradox mod (no descriptor.mod),',
-  'so its tools are disabled here. Do not call CWTools tools for this project.',
-].join('\n');
-
 export function createCwtoolsMcpServer(
   host: HostServices,
   options: { dispatcher?: SharedToolDispatcher } = {},
@@ -58,15 +52,16 @@ export function createCwtoolsMcpServer(
         resources: {},
         tools: {},
       },
-      instructions: supported ? SERVER_INSTRUCTIONS : DISABLED_INSTRUCTIONS,
+      instructions: SERVER_INSTRUCTIONS,
     },
   );
   const callTool = createToolCallHandler(host, options.dispatcher);
 
+  // Tools stay listed even on unsupported workspaces so the model can always see
+  // CWTools exists (instead of falling back to hunting for a CLI). The heavy work
+  // is gated at call time below, not by hiding the toolset.
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    // Hide the toolset entirely on unsupported workspaces so clients never offer
-    // (and the model never calls) tools that would spin up CWTools Server.
-    tools: supported ? listRegisteredTools() : [],
+    tools: listRegisteredTools(),
   }));
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -78,8 +73,9 @@ export function createCwtoolsMcpServer(
   );
 
   server.setRequestHandler(CallToolRequestSchema, async request => {
-    // Defensive: even if a client ignores the empty tools/list, never dispatch
-    // (which would lazily spawn the language server) on an unsupported workspace.
+    // On an unsupported workspace, reject before dispatch so the language server
+    // is never spawned (memory). The message is actionable: the resolved
+    // workspace is almost always the cause when this fires on a real mod.
     if (!supported) {
       return toMcpCallToolResult({
         ok: false,
@@ -87,9 +83,9 @@ export function createCwtoolsMcpServer(
         source: 'cwtools-mcp',
         error: {
           code: 'project_not_supported',
-          message: host.projectSupportReason
-            ? `CWTools is disabled for this workspace: ${host.projectSupportReason}`
-            : 'CWTools is disabled: the current workspace is not a Paradox/Stellaris mod.',
+          message:
+            `CWTools is disabled for this workspace (${host.workspaceRoot}): ${host.projectSupportReason ?? 'not a Paradox/Stellaris mod.'} ` +
+            'If this IS a mod, point the server at the mod root — set the working directory (or pass --workspace <mod>) — or pass --force-start to override.',
         },
       });
     }

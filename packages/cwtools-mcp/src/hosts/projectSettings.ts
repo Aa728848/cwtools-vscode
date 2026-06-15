@@ -1,7 +1,44 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import type { DiagnosticsQueryResult } from 'cwtools-shared';
+
+function parseJsonc(text: string): unknown {
+  const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  let out = '';
+  let i = 0;
+  const n = s.length;
+  let pendingCommaAt = -1; // index in `out` of a comma that may be trailing
+  const dropPendingIfClosing = (ch: string): void => {
+    if (pendingCommaAt >= 0) {
+      if (ch === '}' || ch === ']') out = out.slice(0, pendingCommaAt) + out.slice(pendingCommaAt + 1);
+      pendingCommaAt = -1;
+    }
+  };
+  while (i < n) {
+    const c = s[i] as string;
+    if (c === '"') {
+      dropPendingIfClosing(c);
+      out += c;
+      i++;
+      while (i < n) {
+        const d = s[i];
+        out += d;
+        i++;
+        if (d === '\\') { out += s[i] ?? ''; i++; continue; }
+        if (d === '"') break;
+      }
+      continue;
+    }
+    if (c === '/' && s[i + 1] === '/') { i += 2; while (i < n && s[i] !== '\n') i++; continue; }
+    if (c === '/' && s[i + 1] === '*') { i += 2; while (i < n && !(s[i] === '*' && s[i + 1] === '/')) i++; i += 2; continue; }
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\n') { out += c; i++; continue; }
+    if (c === ',') { pendingCommaAt = out.length; out += c; i++; continue; }
+    dropPendingIfClosing(c);
+    out += c;
+    i++;
+  }
+  return JSON.parse(out);
+}
 
 // Mirrors the in-extension whitelist key written by `cwtools.ai.ignoredDiagnostics`
 // (VS Code stores workspace-folder settings as a flat dotted key).
@@ -28,9 +65,7 @@ export function readIgnoredDiagnostics(workspaceRoot: string): string[] {
 
   let ignored: string[] = [];
   try {
-    const errors: ParseError[] = [];
-    const json = parseJsonc(fs.readFileSync(file, 'utf8'), errors, { allowTrailingComma: true });
-    const value = readIgnoreValue(json);
+    const value = readIgnoreValue(parseJsonc(fs.readFileSync(file, 'utf8')));
     if (Array.isArray(value)) {
       ignored = value.filter((v): v is string => typeof v === 'string' && v.length > 0);
     }

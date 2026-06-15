@@ -11,6 +11,7 @@ import {
 } from 'vscode-jsonrpc/node';
 import type { LspHost } from 'cwtools-shared';
 import { detectExtensionServerPath, detectExtensionRulesDir } from './vscodeCache';
+import { resolveLocalisationLanguages, resolveGeneratedStrings, resolveExperimental } from './projectSettings';
 
 export interface LspProcessHostOptions {
   workspaceRoot: string;
@@ -46,8 +47,15 @@ export class LspProcessHost implements LspHost {
   private connection?: MessageConnection;
   private startPromise?: Promise<void>;
   private startError?: string;
+  // Epoch (ms) when the server finished loading/initial validation. Files modified
+  // after this are candidates for on-demand revalidation.
+  private startedAtMs?: number;
 
   constructor(private readonly options: LspProcessHostOptions) {}
+
+  get readyAtMs(): number | undefined {
+    return this.startedAtMs;
+  }
 
   async executeCommand<T = unknown>(command: string, args: unknown[] = [], options?: { timeoutMs?: number }): Promise<T> {
     try {
@@ -192,13 +200,19 @@ export class LspProcessHost implements LspHost {
       },
       trace: 'off',
     });
-    this.connection.sendNotification('initialized', {});
-    this.connection.sendNotification('workspace/didChangeConfiguration', {
+    void this.connection.sendNotification('initialized', {});
+    const loc = resolveLocalisationLanguages(this.options.workspaceRoot);
+    process.stderr.write(`[cwtools-mcp] info: localisation languages = [${loc.languages.join(', ')}] (${loc.source})\n`);
+    void this.connection.sendNotification('workspace/didChangeConfiguration', {
       settings: {
-        cwtools: buildCwtoolsConfiguration(game, this.options.gamePath, rulesFolder),
+        cwtools: buildCwtoolsConfiguration(game, this.options.gamePath, rulesFolder, {
+          languages: loc.languages,
+          generatedStrings: resolveGeneratedStrings(this.options.workspaceRoot),
+        }, resolveExperimental(this.options.workspaceRoot)),
       },
     });
     await this.waitForExecuteCommandsReady(20_000);
+    this.startedAtMs = Date.now();
   }
 
   private unavailable(message: string): LspErrorResult {
@@ -239,21 +253,29 @@ export class LspProcessHost implements LspHost {
   }
 }
 
-function buildCwtoolsConfiguration(game: string, gamePath: string | undefined, rulesFolder: string): Record<string, unknown> {
+function buildCwtoolsConfiguration(
+  game: string,
+  gamePath: string | undefined,
+  rulesFolder: string,
+  localisation: { languages: string[]; generatedStrings: string },
+  experimental: boolean,
+): Record<string, unknown> {
   // `cache.<game>` is the vanilla install/data dir (the server reads vanilla data
   // from here and serializes the .cwb cache). Empty string => no vanilla data.
   const vanillaDir = gamePath ?? '';
   return {
     localisation: {
-      languages: ['English'],
-      generated_strings: 'replace',
+      languages: localisation.languages,
+      generated_strings: localisation.generatedStrings,
     },
     errors: {
       vanilla: false,
       ignore: [],
       ignorefiles: [],
     },
-    experimental: false,
+    // On by default: enables incremental scripted-type refresh so revalidating a
+    // scripted_trigger/effect/value patches the type index fast instead of a full reload.
+    experimental,
     debug_mode: false,
     ignore_patterns: [],
     trace: {

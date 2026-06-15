@@ -40,56 +40,155 @@ function parseJsonc(text: string): unknown {
   return JSON.parse(out);
 }
 
-// Mirrors the in-extension whitelist key written by `cwtools.ai.ignoredDiagnostics`
-// (VS Code stores workspace-folder settings as a flat dotted key).
-const FLAT_KEY = 'cwtools.ai.ignoredDiagnostics';
-
 interface CachedSettings {
   mtimeMs: number;
-  ignored: string[];
+  settings: Record<string, unknown> | undefined;
 }
 
 const cache = new Map<string, CachedSettings>();
 
-export function readIgnoredDiagnostics(workspaceRoot: string): string[] {
+function readSettingsObject(workspaceRoot: string): Record<string, unknown> | undefined {
   const file = path.join(workspaceRoot, '.vscode', 'settings.json');
   let mtimeMs: number;
   try {
     mtimeMs = fs.statSync(file).mtimeMs;
   } catch {
     cache.delete(file);
-    return [];
+    return undefined;
   }
   const cached = cache.get(file);
-  if (cached && cached.mtimeMs === mtimeMs) return cached.ignored;
+  if (cached && cached.mtimeMs === mtimeMs) return cached.settings;
 
-  let ignored: string[] = [];
+  let settings: Record<string, unknown> | undefined;
   try {
-    const value = readIgnoreValue(parseJsonc(fs.readFileSync(file, 'utf8')));
-    if (Array.isArray(value)) {
-      ignored = value.filter((v): v is string => typeof v === 'string' && v.length > 0);
-    }
+    const parsed = parseJsonc(fs.readFileSync(file, 'utf8'));
+    settings = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : undefined;
   } catch {
-    ignored = [];
+    settings = undefined;
   }
-  cache.set(file, { mtimeMs, ignored });
-  return ignored;
+  cache.set(file, { mtimeMs, settings });
+  return settings;
 }
 
-function readIgnoreValue(json: unknown): unknown {
-  if (!json || typeof json !== 'object') return undefined;
-  const obj = json as Record<string, unknown>;
-  if (FLAT_KEY in obj) return obj[FLAT_KEY];
-  const ai = obj['cwtools.ai'];
-  if (ai && typeof ai === 'object' && 'ignoredDiagnostics' in (ai as Record<string, unknown>)) {
-    return (ai as Record<string, unknown>).ignoredDiagnostics;
-  }
-  const cwtools = obj['cwtools'];
-  const nestedAi = cwtools && typeof cwtools === 'object' ? (cwtools as Record<string, unknown>).ai : undefined;
-  if (nestedAi && typeof nestedAi === 'object') {
-    return (nestedAi as Record<string, unknown>).ignoredDiagnostics;
+
+function resolveDotted(obj: Record<string, unknown>, fullKey: string): unknown {
+  if (fullKey in obj) return obj[fullKey];
+  const segs = fullKey.split('.');
+  for (let i = 1; i < segs.length; i++) {
+    const head = segs.slice(0, i).join('.');
+    if (head in obj) {
+      const child = obj[head];
+      if (child && typeof child === 'object') {
+        const r = resolveDotted(child as Record<string, unknown>, segs.slice(i).join('.'));
+        if (r !== undefined) return r;
+      }
+    }
   }
   return undefined;
+}
+
+
+export function getCwtoolsSetting(workspaceRoot: string, subKey: string): unknown {
+  const settings = readSettingsObject(workspaceRoot);
+  if (!settings) return undefined;
+  return resolveDotted(settings, `cwtools.${subKey}`);
+}
+
+function asNonEmptyStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string' && v.length > 0)
+    : [];
+}
+
+export function readIgnoredDiagnostics(workspaceRoot: string): string[] {
+  return asNonEmptyStringArray(getCwtoolsSetting(workspaceRoot, 'ai.ignoredDiagnostics'));
+}
+
+
+const LANG_TAG_MAP: ReadonlyArray<readonly [string, string]> = [
+  ['English', 'english'],
+  ['French', 'french'],
+  ['German', 'german'],
+  ['Spanish', 'spanish'],
+  ['Russian', 'russian'],
+  ['Braz_Por', 'braz_por'],
+  ['Polish', 'polish'],
+  ['Chinese', 'simp_chinese'],
+  ['Korean', 'korean'],
+  ['Japanese', 'japanese'],
+  ['Turkish', 'turkish'],
+];
+
+const LOC_DIRS = ['localisation', 'localisation_synced', 'localization'];
+const MAX_LOC_FILES = 5000;
+
+// Count localisation files by language tag and return the dominant non-English
+// language, or undefined (English is the server default). Bounded recursive scan.
+function detectLocalisationLanguage(workspaceRoot: string): string | undefined {
+  const counts = new Map<string, number>();
+  let scanned = 0;
+  const visit = (dir: string): void => {
+    if (scanned >= MAX_LOC_FILES) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (scanned >= MAX_LOC_FILES) return;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        visit(full);
+      } else if (e.isFile() && e.name.toLowerCase().endsWith('.yml')) {
+        scanned++;
+        const base = e.name.toLowerCase();
+        for (const [name, tag] of LANG_TAG_MAP) {
+          if (base.endsWith(`l_${tag}.yml`)) {
+            counts.set(name, (counts.get(name) ?? 0) + 1);
+            break;
+          }
+        }
+      }
+    }
+  };
+  for (const d of LOC_DIRS) visit(path.join(workspaceRoot, d));
+
+  let best: string | undefined;
+  let bestCount = 0;
+  for (const [name, count] of counts) {
+    if (count > bestCount) { bestCount = count; best = name; }
+  }
+  return best && best !== 'English' ? best : undefined;
+}
+
+export interface LocalisationConfig {
+  languages: string[];
+  source: 'settings' | 'detected' | 'default';
+}
+
+export function resolveLocalisationLanguages(workspaceRoot: string): LocalisationConfig {
+  const fromSettings = asNonEmptyStringArray(getCwtoolsSetting(workspaceRoot, 'localisation.languages'));
+  if (fromSettings.length > 0) return { languages: fromSettings, source: 'settings' };
+
+  const detected = detectLocalisationLanguage(workspaceRoot);
+  if (detected) return { languages: [detected], source: 'detected' };
+
+  return { languages: ['English'], source: 'default' };
+}
+
+export function resolveGeneratedStrings(workspaceRoot: string): string {
+  const v = getCwtoolsSetting(workspaceRoot, 'localisation.generated_strings');
+  return typeof v === 'string' && v.length > 0 ? v : 'replace';
+}
+
+// `cwtools.experimental` setting. Defaults ON for the MCP: it gates the incremental
+// scripted-type refresh, which lets revalidation of scripted_triggers/effects/values
+// patch the type index in milliseconds instead of triggering a full reload — so
+// definition-file edits don't mis-report references. Honor an explicit opt-out.
+export function resolveExperimental(workspaceRoot: string): boolean {
+  const v = getCwtoolsSetting(workspaceRoot, 'experimental');
+  return typeof v === 'boolean' ? v : true;
 }
 
 export function applyDiagnosticIgnoreList(

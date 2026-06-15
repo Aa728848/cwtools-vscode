@@ -1491,8 +1491,23 @@ export class FileToolHandler {
         return null;
     }
 
-    /** 
-* The client side polls getDiagnosticsFresh and waits for epoch > minEpoch (i.e. the new lint has completed). 
+    private async requestRevalidateFromDisk(filePath: string): Promise<boolean> {
+        try {
+            const client = (this.ctx as any).client;
+            if (!client) return false;
+            const uri = vs.Uri.file(filePath);
+            const res = await client.sendRequest('workspace/executeCommand', {
+                command: 'cwtools.ai.revalidateFiles',
+                arguments: [[uri.toString()]],
+            }) as Record<string, unknown> | null;
+            return !!(res && typeof res === 'object' && res.ok === true);
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+* The client side polls getDiagnosticsFresh and waits for epoch > minEpoch (i.e. the new lint has completed).
 * Does not hold any server-side locks to avoid deadlocks. Wait at most timeoutMs (default 3000ms). 
 * 
 * @param minEpoch epoch value before writing, waiting for epoch > minEpoch means lint has processed this write 
@@ -1507,7 +1522,10 @@ export class FileToolHandler {
         const timeoutMs = 3000;
         const pollIntervalMs = 100;
         const uri = vs.Uri.file(filePath);
-        try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
+        const triggered = await this.requestRevalidateFromDisk(filePath);
+        if (!triggered) {
+            try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
+        }
 
         //Client-side polling getDiagnosticsFresh (returns immediately, does not hold a lock)
         let elapsed = 0;

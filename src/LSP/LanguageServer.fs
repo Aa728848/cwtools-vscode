@@ -336,6 +336,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "cwtools.ai.getAllDiagnostics"
                 | "cwtools.ai.waitDiagnosticsFresh"
                 | "cwtools.ai.getValidationStatus"
+                | "cwtools.ai.revalidateFiles"
                 | "cwtools.ai.parseFragment"
                 | "cwtools.exportTypes"
                 | "typeGraphInfo"

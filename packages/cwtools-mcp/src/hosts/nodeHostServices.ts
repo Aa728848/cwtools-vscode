@@ -25,6 +25,7 @@ import type { CwtoolsMcpConfig } from '../config';
 import { createLspProcessHost, pathToFileUri, resolveRulesCacheRoot, type LspProcessHost } from './lspProcessHost';
 import { detectProjectSupport } from './projectDetect';
 import { readIgnoredDiagnostics, applyDiagnosticIgnoreList } from './projectSettings';
+import { RevalidationCoordinator } from './revalidation';
 import { detectExtensionCacheDir } from './vscodeCache';
 
 export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
@@ -71,7 +72,11 @@ export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
     projectSupported: enabled,
     projectSupportReason: support.reason,
     lsp,
-    diagnostics: new LspDiagnosticsHost(lsp, workspaceRoot),
+    diagnostics: new LspDiagnosticsHost(
+      lsp,
+      workspaceRoot,
+      lspProcess ? new RevalidationCoordinator(lsp, workspaceRoot, () => lspProcess.readyAtMs) : undefined,
+    ),
     filesystem,
     indexing: new ThinNodeIndexHost(workspaceRoot),
     vanillaCache: probeVanillaCache(workspaceRoot, { ...config, cachePath: autoCache }),
@@ -116,9 +121,19 @@ function probeVanillaCache(workspaceRoot: string, config: CwtoolsMcpConfig): Van
 }
 
 class LspDiagnosticsHost implements DiagnosticsHost {
-  constructor(private readonly lsp: LspHost, private readonly workspaceRoot: string) {}
+  constructor(
+    private readonly lsp: LspHost,
+    private readonly workspaceRoot: string,
+    private readonly revalidation?: RevalidationCoordinator,
+  ) {}
 
   async getDiagnostics(filter: { file?: string; severity?: string; limit?: number } = {}): Promise<DiagnosticsQueryResult> {
+    if (this.revalidation) {
+      const absFile = filter.file
+        ? resolveWorkspacePath(this.workspaceRoot, filter.file).resolvedPath ?? undefined
+        : undefined;
+      await this.revalidation.ensureFresh(absFile);
+    }
     return this.applyIgnoreList(await this.queryDiagnostics(filter));
   }
 

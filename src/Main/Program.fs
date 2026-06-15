@@ -2147,7 +2147,11 @@ type Server(client: ILanguageClient) =
             // Optimization: only obtain the file text once to avoid repeated GetText calls
             let filetext =
                 if forceDisk then None
-                else docs.GetText(FileInfo(doc.LocalPath))
+                else
+                    match docs.GetText(FileInfo(doc.LocalPath)) with
+                    | Some t -> Some t
+                    | None ->
+                        try Some(File.ReadAllText doc.LocalPath) with _ -> None
 
             let getRange (start: Position) (endp: Position) =
                 mkRange
@@ -6527,6 +6531,40 @@ type Server(client: ILanguageClient) =
                                        "memory",            getMemorySnapshotJson ()
                                        "caches",            getCacheSnapshotJson () |]
                             Some result
+
+                        | { command = "cwtools.ai.revalidateFiles"
+                            arguments = revalArgs } ->
+                            let uris =
+                                match revalArgs with
+                                | (JsonValue.Array arr) :: _ ->
+                                    arr |> Array.choose (function JsonValue.String s -> Some s | _ -> None) |> Array.toList
+                                | _ ->
+                                    revalArgs |> List.choose (function JsonValue.String s -> Some s | _ -> None)
+                            let capped = uris |> List.truncate 200
+                            let files =
+                                capped
+                                |> List.map (fun raw ->
+                                    let uri = Uri(raw)
+                                    let filePath = getPathFromDoc uri
+                                    let priorEpoch =
+                                        match fileDiagnosticStates.TryGetValue(filePath) with
+                                        | true, st -> decimal st.epoch
+                                        | _ -> 0m
+                                    if isTypeDefiningPath filePath then
+                                        lintAgent.Post(UpdateRequest({ uri = uri; version = 0 }, true))
+                                    else
+                                        lintAgent.Post(RevalidateRequest({ uri = uri; version = 0 }))
+                                    JsonValue.Record
+                                        [| "file",       JsonValue.String(filePath.Replace('\\', '/'))
+                                           "priorEpoch", JsonValue.Number priorEpoch |])
+                                |> Array.ofList
+                            Some(
+                                JsonValue.Record
+                                    [| "ok",            JsonValue.Boolean true
+                                       "baselineEpoch", JsonValue.Number(decimal diagnosticEpoch.Value)
+                                       "requested",     JsonValue.Number(decimal capped.Length)
+                                       "truncated",     JsonValue.Boolean(uris.Length > capped.Length)
+                                       "files",         JsonValue.Array files |])
 
                         // - cwtools.ai.parseFragment -
                         // Fragment parsing: accepts code fragment text and returns syntax error (does not write to file)

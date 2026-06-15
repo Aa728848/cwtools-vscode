@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { DiagnosticsQueryResult } from 'cwtools-shared';
-import { applyDiagnosticIgnoreList, readIgnoredDiagnostics } from '../hosts/projectSettings';
+import { applyDiagnosticIgnoreList, readIgnoredDiagnostics, resolveLocalisationLanguages } from '../hosts/projectSettings';
 
 function tmpWorkspace(settings?: string): string {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'cwt-ws-'));
@@ -59,5 +59,45 @@ describe('MCP diagnostic ignore whitelist contract', () => {
     const result: DiagnosticsQueryResult = { ok: true, status: 'fresh', diagnostics: [diag('CW123')] };
     expect(applyDiagnosticIgnoreList(result, [])).to.equal(result);
     expect(applyDiagnosticIgnoreList(result, ['nope'])).to.equal(result);
+  });
+});
+
+describe('MCP localisation language contract', () => {
+  function locFile(ws: string, tag: string): void {
+    const dir = path.join(ws, 'localisation');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `mymod_l_${tag}.yml`), `l_${tag}:\n`);
+  }
+
+  it('uses the explicit cwtools.localisation.languages setting', () => {
+    const ws = tmpWorkspace(JSON.stringify({ 'cwtools.localisation.languages': ['Chinese'] }));
+    const r = resolveLocalisationLanguages(ws);
+    expect(r.languages).to.deep.equal(['Chinese']);
+    expect(r.source).to.equal('settings');
+  });
+
+  it('auto-detects the dominant language from localisation file names when unset', () => {
+    const ws = tmpWorkspace();
+    locFile(ws, 'simp_chinese');
+    locFile(ws, 'simp_chinese'); // second file via different name
+    fs.writeFileSync(path.join(ws, 'localisation', 'b_l_simp_chinese.yml'), 'l_simp_chinese:\n');
+    fs.writeFileSync(path.join(ws, 'localisation', 'a_l_english.yml'), 'l_english:\n');
+    const r = resolveLocalisationLanguages(ws);
+    expect(r.languages).to.deep.equal(['Chinese']);
+    expect(r.source).to.equal('detected');
+  });
+
+  it('defaults to English when there is no setting and no localisation files', () => {
+    const r = resolveLocalisationLanguages(tmpWorkspace());
+    expect(r.languages).to.deep.equal(['English']);
+    expect(r.source).to.equal('default');
+  });
+
+  it('does not override English-dominant projects via detection', () => {
+    const ws = tmpWorkspace();
+    locFile(ws, 'english');
+    const r = resolveLocalisationLanguages(ws);
+    expect(r.languages).to.deep.equal(['English']);
+    expect(r.source).to.equal('default');
   });
 });

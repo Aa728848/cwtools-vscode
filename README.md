@@ -17,6 +17,7 @@
 - **极致的并发性能**：重构了 `LanguageServer` 读写锁机制，只读请求（如悬浮预览、自动补全、跳转定义）多线程共享并发执行；变更写入操作（如文件修改）持独占锁串行执行，彻底告别慢查询导致的死锁或界面卡顿。
 - **O(1) 定位查找**：`DocumentStore` 摒弃了传统的 $O(N)$ 遍历，采用**惰性重建行偏移缓存**技术，将 Hover 和 Go-To-Definition 的查找时间直接压缩至 $O(1)$，对拥有数十万行代码的超大型 Mod 文件实现即时定位。
 - **语义校验与宏求值**：支持深度语法分析，甚至能对复杂的宏表达式 `@[...]` 以及 `value:xxx|` 进行实时求值，在编辑器行内无缝显示本地化文本（CodeLens）及 `inline_script` 文件悬浮预览。
+- **增量类型索引刷新**：编辑保存 `scripted_triggers` / `scripted_effects` / `script_values` 等自定义脚本定义时，告别旧版「必须重新加载项目」的 15–25 秒卡顿——后端按文件名精确替换受影响的类型条目、仅重建变更类型的索引（其余类型零开销复用），保存后诊断与补全即时刷新（`experimental` 开关启用）。
 
 ### 🎨 2. 沙盒化多维 Webview 可视化引擎 (Rich Visualization)
 本项目深度利用了 VS Code Webview 隔离沙盒，基于现代 Web 渲染技术（Canvas / Cytoscape.js / Three.js），为 Mod 开发者带来了前所未有的所见即所得体验。
@@ -104,7 +105,7 @@ flowchart LR
 
 ### 运行要求
 - **操作系统**：Windows / macOS / Linux
-- **VS Code 版本**：1.85.0 或更高版本
+- **VS Code 版本**：1.90.0 或更高版本
 - **.NET 运行时**：本地开发编译需要安装 [.NET 9.0 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
 
 ### 安装步骤

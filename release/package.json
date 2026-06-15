@@ -15,7 +15,7 @@
                    },
     "homepage":  "https://github.com/cwtools/cwtools-vscode",
     "engines":  {
-                    "vscode":  "^1.83.0"
+                    "vscode":  "^1.90.0"
                 },
     "categories":  [
                        "Programming Languages",

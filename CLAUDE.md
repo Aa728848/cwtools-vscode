@@ -520,10 +520,13 @@ server flag.
   goes through `IGame.RemoveScriptedTypes`.
 - Upstream impl (`submodules/cwtools`): `RulesManager.RefreshScriptedTypes` drops
   old `typeDefInfo` entries by `range.FileName`, runs a single
-  `getTypesFromDefinitions` pass over just the changed entities, and reuses
-  `buildServices` to rebuild the three services (`RuleValidationService` /
-  `InfoService` / `CompletionService`); `ResourceManager.RemoveFile` removes a file
-  from the VFS.
+  `getTypesFromDefinitions` pass over just the changed entities, patches
+  `tempTypeMap` per changed typeKey (rebuilding only those types' `createStringSet`
+  tries and reusing every other type's existing set, instead of rebuilding the
+  whole map via `typeMapFromTypeDefInfo`), and reuses `buildServices` to rebuild
+  the three services (`RuleValidationService` / `InfoService` /
+  `CompletionService`); `ResourceManager.RemoveFile` removes a file from the VFS.
+  Per-key construction is identical to the full path, so output is byte-equivalent.
 - Must run inside the `gameStateLock` write lock. Falls back to a full refresh on
   `false`/exception, on non-whitelisted types, or after 25 consecutive patches.
 - `isDynamicDefinitionPath` (4 dirs, incl. `inline_scripts/`) drives call-site

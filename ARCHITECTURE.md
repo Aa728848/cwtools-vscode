@@ -168,6 +168,9 @@ sequenceDiagram
 | `toolInvocation.ts` | 把模型 tool call 包装为带风险元数据和稳定 ID 的 `ToolInvocation` |
 | `commandPreflight.ts` | `run_command` 命令分词与风险分级 |
 | `permissionPolicy.ts` | 低风险预批准规则和 `cwdScope` 校验 |
+| `policyEngine.ts` | 分层权限 profile 解析、类型化规则匹配与可执行拒绝（shadow 模式） |
+| `autoReviewer.ts` | 只读 LLM 审批 reviewer：决策缓存、fail-open 到 ask_user，绝不放宽沙盒 |
+| `shellEnv.ts` | Shell 环境变量白名单构建（按平台基线 + 用户追加） |
 | `runLedger.ts` | 运行账本、事件 JSONL 和前端 `runSnapshot` 数据源 |
 | `runReducers.ts` | 纯事件投影 reducer：run 状态、工具时间线、Agent 拓扑图、缓存统计 |
 | `runReplay.ts` | 运行回放引擎 — 模式 A (recorded-tool) 从 ledger 回答工具调用 |
@@ -256,6 +259,7 @@ Runner 会在模式工具集基础上应用 workflow tool policy，并把 workfl
 | `conflictDetector.ts` | 基于黑板的写意图和实体注册冲突检测 |
 | `qualityGate.ts` | 审查和自动修复流程 |
 | `subAgentSandbox.ts` | 由 `TaskNode` + agent profile 构造 `SubAgentSandbox`，并通过 `enforceSubAgentSafety` 拦截越权工具和越界写入 |
+| `worktreeManager.ts` | 可选的每 Agent git worktree 隔离：创建 / `--binary` diff / 应用 / 保留清理 |
 
 已注册角色包括 `explorer`、`architect`、`builder`、`locWriter`、`reviewer`、`assetGen`、`guiExpert` 和 `locTranslator`。
 
@@ -441,10 +445,10 @@ Webview 维护规则：
 - **客户端诊断增强**：`client/extension/diagnosticI18n.ts` 在 LSP middleware 中把英文校验消息替换为中文翻译 + 修复建议（非中文环境追加英文 💡 建议行），由 `cwtools.ai.enhancedDiagnostics` 开关控制；ignore-list 匹配在增强之前针对原始服务端消息执行。
 - **动态参数诊断延迟**：动态参数类诊断可延迟到工作区加载完成后批量预热再重发，由 `cwtools.diagnostics.deferDynamicParameterDiagnostics` / `dynamicPreflightTimeoutMs` / `dynamicPreflightMaxEntities` 配置。
 - **文档格式化**：服务端实现 `DocumentFormatting`——`.yml` 本地化文件归一化缩进并保留 BOM/换行风格，PDX 脚本经 `CKPrinter` 整文档格式化。
-- **补全锁降级**：`src/LSP/LanguageServer.fs` 对 Completion 请求使用 `TryEnterReadLock`（默认 350ms 超时），超时后从 stale-completion 缓存返回降级结果，避免长校验阻塞补全。`LanguageServer.fs` 的 `isReadCmd` 列表登记所有只读 `cwtools.ai.*` 命令（含 `getCompletionContext`、`getAllDiagnostics`），未登记的命令会被当成写命令做锁路由。
+- **补全锁降级**：`src/LSP/LanguageServer.fs` 对 Completion 请求使用 `TryEnterReadLock`（默认 `completionLockTimeoutMs = 150` 毫秒超时），超时后从 stale-completion 缓存返回降级结果，避免长校验阻塞补全。`LanguageServer.fs` 的 `isReadCmd` 列表登记只读 `cwtools.ai.*` 命令（含 `getAllDiagnostics`、`getDiagnosticsFresh`、`waitDiagnosticsFresh`、`getValidationStatus`、`revalidateFiles`、`parseFragment` 等），未登记的命令会被当成写命令做锁路由。
 - **全工作区诊断聚合**：`cwtools.ai.getAllDiagnostics` 遍历 server 端 `fileDiagnosticStates`，按 severity 过滤 + limit 聚合返回整个工作区的真实诊断（供 MCP 的全项目 `get_diagnostics` 使用），区别于只返回 freshness 的 `getValidationStatus`。
 - **RevalidateRequest**：编辑 `inline_scripts/` 定义文件保存后，绕过防抖立即重新校验其调用方文件。
-- **自定义 scripted 类型增量刷新**：编辑/保存 `common/scripted_triggers/`、`common/scripted_effects/`、`common/script_values/` 下的定义文件时，绕开整库全量 `RefreshCaches`，改走增量类型补丁——`IGame.RefreshScriptedTypes` 经 `RulesManager.RefreshScriptedTypes` 按 `range.FileName` 滤除旧 `typeDefInfo` 条目、对改动实体单趟 `getTypesFromDefinitions`、并复用 `buildServices` 重建补全/校验/Info 三服务；删除文件走 `IGame.RemoveScriptedTypes`（含 `ResourceManager.RemoveFile`）。调用方重校验复用类型引用反向索引（`TypeReferenceIndex` / `FindAllRefsByType`），并把当前打开的其它文件排入重校验队列。该路径由 `experimental` 开关门控、在 `gameStateLock` 写锁内执行，遇异常/非白名单类型/连续 25 次后回退全量；`inline_scripts`（非 `type[...]` 叶子类型）不进增量白名单，仍走全量 + 调用方重校验（见上一条）。
+- **自定义 scripted 类型增量刷新**：编辑/保存 `common/scripted_triggers/`、`common/scripted_effects/`、`common/script_values/` 下的定义文件时，绕开整库全量 `RefreshCaches`，改走增量类型补丁——`IGame.RefreshScriptedTypes` 经 `RulesManager.RefreshScriptedTypes` 按 `range.FileName` 滤除旧 `typeDefInfo` 条目、对改动实体单趟 `getTypesFromDefinitions`、仅对改动的 typeKey 增量重建 `tempTypeMap`（只重建这些类型的 `createStringSet` trie，其余类型复用已有 StringSet，不再整表 `typeMapFromTypeDefInfo`，逐键语义与全量一致），并复用 `buildServices` 重建补全/校验/Info 三服务；删除文件走 `IGame.RemoveScriptedTypes`（含 `ResourceManager.RemoveFile`）。调用方重校验复用类型引用反向索引（`TypeReferenceIndex` / `FindAllRefsByType`），并把当前打开的其它文件排入重校验队列。该路径由 `experimental` 开关门控、在 `gameStateLock` 写锁内执行，遇异常/非白名单类型/连续 25 次后回退全量；`inline_scripts`（非 `type[...]` 叶子类型）不进增量白名单，仍走全量 + 调用方重校验（见上一条）。
 
 ### Shader 支持
 
@@ -655,7 +659,7 @@ cwtools-vscode/
       techTreePreview.ts
       entityPreview.ts
     test/
-      unit/                   53 个单元测试文件
+      unit/                   58 个单元测试文件
       suite/
   docs/
     diagnostic-codes.md       CWxxx 诊断码中英双语参考（codeDescription 链接目标）

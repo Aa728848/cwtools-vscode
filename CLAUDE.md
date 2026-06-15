@@ -327,7 +327,9 @@ Constraints:
 - Any read-only `cwtools.ai.*` command must also be added to `LanguageServer.fs`
   `isReadCmd` or it is lock-routed as a write.
 - The MCP server sends `instructions` (server.ts) telling the model when to use the
-  tools; `--rules <dir|zip>` overrides the rules source (zip auto-extracted).
+  tools; rules come only from a real directory — the extension's pulled rules in
+  globalStorage or `--rules <dir>` (a `.zip` is rejected). No bundled zip, no
+  extraction.
 - Packaging: `package.ps1` step bundles the MCP to `release/bin/mcp/cwtools-mcp.cjs`
   (esbuild single file); `extension.ts` copies it to a version-independent stable
   path `globalStorage/eddy.eddy-stellaris-cwt/mcp/cwtools-mcp.cjs` on activation.

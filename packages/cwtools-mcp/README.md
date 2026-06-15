@@ -64,15 +64,15 @@ cwtools-mcp --workspace /path/to/mod --game stellaris --cache "/path/to/.cwtools
 
 ## 规则来源
 
-默认情况下，MCP 使用已安装扩展解压到 globalStorage 中的规则。若要覆盖，请传入 `--rules`：
+默认情况下，MCP 直接读取已安装扩展拉取到 globalStorage 中的规则目录。若要覆盖，请用 `--rules` 指向一个规则**目录**：
 
 ```sh
 cwtools-mcp --workspace /path/to/mod --game stellaris --rules /path/to/rules-dir --stdio
-cwtools-mcp --workspace /path/to/mod --game stellaris --rules /path/to/stellaris-rules.zip --stdio
 ```
 
-优先级：`--rules` > 已安装扩展解压出的规则 > 开发环境检出（`submodules/…/config`）
-> 捆绑的 `*-rules.zip`（自动解压）。`.zip` 会被解压一次到规则缓存中并复用。
+优先级：`--rules <目录>` > 已安装扩展拉取的规则 > 开发环境检出（`submodules/…/config`）。
+
+MCP 不使用捆绑的 `*-rules.zip`，也不会解压任何东西——规则必须是真实目录。`--rules` 传入 `.zip` 会直接报错。若以上来源都没有，校验能力将受限（请安装扩展或传 `--rules`）。
 
 ## 在 Codex 中使用
 

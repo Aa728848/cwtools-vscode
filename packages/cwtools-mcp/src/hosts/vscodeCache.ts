@@ -75,10 +75,26 @@ export function detectExtensionServerPath(): string | undefined {
   return fs.existsSync(candidate) ? candidate : undefined;
 }
 
-// The rules directory the extension extracted into globalStorage (the server
-// loads rules from an extracted dir, not the packaged .zip).
+// True when dir holds at least one .cwt rule file at its top level.
+function containsRuleFiles(dir: string): boolean {
+  try {
+    return fs.readdirSync(dir).some(name => name.toLowerCase().endsWith('.cwt'));
+  } catch {
+    return false;
+  }
+}
+
 export function detectExtensionRulesDir(cacheDir: string | undefined, game: string | undefined): string | undefined {
-  if (!cacheDir) return undefined;
-  const dir = path.join(cacheDir, (game ?? 'stellaris').toLowerCase(), 'config');
-  return fs.existsSync(dir) ? dir : undefined;
+  const g = (game ?? 'stellaris').toLowerCase();
+  const roots = [
+    ...(cacheDir ? [cacheDir] : []),
+    ...globalStorageBases().map(base => path.join(base, EXTENSION_DIR, '.cwtools')),
+  ];
+  for (const root of roots) {
+    const config = path.join(root, g, 'config');
+    if (containsRuleFiles(config)) return config;
+    const bare = path.join(root, g);
+    if (containsRuleFiles(bare)) return bare;
+  }
+  return undefined;
 }

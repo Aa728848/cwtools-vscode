@@ -21,6 +21,12 @@ describe('MCP vanilla cache contract', () => {
     expect(b.cachePath).to.match(/\.cwtools$/);
   });
 
+  it('accepts --rules as a directory but rejects a .zip (both forms)', () => {
+    expect(parseCliArgs(['--workspace', '.', '--rules', '/r/stellaris']).rulesPath).to.match(/stellaris$/);
+    expect(() => parseCliArgs(['--workspace', '.', '--rules', '/r/stellaris-rules.zip'])).to.throw(/must be a directory/);
+    expect(() => parseCliArgs(['--workspace=.', '--rules=/r/stellaris-rules.ZIP'])).to.throw(/must be a directory/);
+  });
+
   it('annotates vanilla-dependent results with the host cache status and a warning when mod-only', async () => {
     const status: VanillaCacheStatus = { available: false, source: 'mod_only', reason: 'no cache' };
     const dispatcher: SharedToolDispatcher = async () => ({ ok: true, status: 'ready', source: 'test', data: {} });

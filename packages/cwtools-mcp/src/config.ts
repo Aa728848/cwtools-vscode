@@ -10,7 +10,8 @@ export interface CwtoolsMcpConfig {
   // Pre-built cache dir (overrides the default rules-cache root), so the server
   // loads an existing `.cwb` instead of rebuilding — e.g. the extension's globalStorage.
   cachePath?: string;
-  // Explicit CWT rules source (directory or .zip) overriding auto-detection.
+  // Explicit CWT rules *directory* overriding auto-detection. Must be a directory
+  // (a .zip is rejected) — the server loads rules from a folder, not an archive.
   rulesPath?: string;
   stdio: boolean;
   http: boolean;
@@ -52,7 +53,7 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
         config.cachePath = path.resolve(readValue(argv, ++index, arg));
         break;
       case '--rules':
-        config.rulesPath = path.resolve(readValue(argv, ++index, arg));
+        config.rulesPath = resolveRulesPath(readValue(argv, ++index, arg));
         break;
       case '--stdio':
         config.stdio = true;
@@ -94,7 +95,7 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
         } else if (arg?.startsWith('--cache=')) {
           config.cachePath = path.resolve(arg.slice('--cache='.length));
         } else if (arg?.startsWith('--rules=')) {
-          config.rulesPath = path.resolve(arg.slice('--rules='.length));
+          config.rulesPath = resolveRulesPath(arg.slice('--rules='.length));
         } else if (arg?.startsWith('--host=')) {
           config.host = arg.slice('--host='.length);
         } else if (arg?.startsWith('--port=')) {
@@ -109,6 +110,14 @@ export function parseCliArgs(argv: string[]): CwtoolsMcpConfig {
   }
 
   return config;
+}
+
+function resolveRulesPath(value: string): string {
+  const resolved = path.resolve(value);
+  if (resolved.toLowerCase().endsWith('.zip')) {
+    throw new Error('--rules must be a directory, not a .zip archive');
+  }
+  return resolved;
 }
 
 function readPort(value: string): number {
@@ -142,8 +151,9 @@ export function helpText(): string {
     '  --cache <dir>       Dir holding a pre-built <game>.cwb cache (overrides auto-detection),',
     '                      loaded directly instead of rebuilding. Without any, results are mod-only.',
     '',
-    'Rules source (priority: --rules > installed extension > dev checkout > bundled zip):',
-    '  --rules <dir|zip>   Explicit CWT rules dir, or a *-rules.zip (extracted automatically).',
+    'Rules source (priority: --rules > installed extension > dev checkout):',
+    '  --rules <dir>       Explicit CWT rules directory (a .zip is rejected). When omitted, the',
+    '                      rules the installed VS Code extension pulled into globalStorage are used.',
     '',
     'Project gate:',
     '  (default)           Tools are always listed. The language server starts only when the',

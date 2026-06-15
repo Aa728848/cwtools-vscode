@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import AdmZip from 'adm-zip';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import {
   createMessageConnection,
@@ -162,11 +161,10 @@ export class LspProcessHost implements LspHost {
     const rootUri = pathToFileUri(this.options.workspaceRoot);
     const game = this.options.game ?? 'stellaris';
     const rulesCacheRoot = resolveRulesCacheRoot(this.options);
-    const rulesFolder = materializeRulesPath(
-      this.options.bundledRulesPath ?? resolveBundledRulesPath(game, rulesCacheRoot),
-      rulesCacheRoot,
-      game,
-    );
+    const rulesFolder = this.options.bundledRulesPath ?? resolveBundledRulesPath(game, rulesCacheRoot);
+    if (!rulesFolder) {
+      process.stderr.write('[cwtools-mcp] warning: no CWT rules found — install the VS Code extension or pass --rules <dir>; validation will be limited\n');
+    }
     await this.connection.sendRequest('initialize', {
       processId: process.pid,
       rootPath: this.options.workspaceRoot,
@@ -193,7 +191,7 @@ export class LspProcessHost implements LspHost {
         uiLanguage: 'en',
         isVanillaFolder: false,
         rulesCache: rulesCacheRoot,
-        bundledRulesPath: rulesFolder,
+        bundledRulesPath: rulesFolder ?? '',
         rules_version: 'manual',
         repoPath: '',
         diagnosticLogging: false,
@@ -205,7 +203,7 @@ export class LspProcessHost implements LspHost {
     process.stderr.write(`[cwtools-mcp] info: localisation languages = [${loc.languages.join(', ')}] (${loc.source})\n`);
     void this.connection.sendNotification('workspace/didChangeConfiguration', {
       settings: {
-        cwtools: buildCwtoolsConfiguration(game, this.options.gamePath, rulesFolder, {
+        cwtools: buildCwtoolsConfiguration(game, this.options.gamePath, rulesFolder ?? '', {
           languages: loc.languages,
           generatedStrings: resolveGeneratedStrings(this.options.workspaceRoot),
         }, resolveExperimental(this.options.workspaceRoot)),
@@ -332,39 +330,11 @@ export function resolveDefaultServerPath(): string | undefined {
   return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0];
 }
 
-// The server loads rules from a directory, not a .zip. If the resolved rules path
-// is a zip, extract it once into a stable dir under the rules cache and reuse it.
-function materializeRulesPath(rulesPath: string, rulesCacheRoot: string, game: string): string {
-  if (!rulesPath || !rulesPath.toLowerCase().endsWith('.zip') || !fs.existsSync(rulesPath)) {
-    return rulesPath;
-  }
-  const outDir = path.join(rulesCacheRoot, '_rules_extracted', game);
-  const marker = path.join(outDir, '.source');
-  try {
-    if (fs.existsSync(marker) && fs.readFileSync(marker, 'utf8') === rulesPath) {
-      return rulesConfigDir(outDir);
-    }
-    fs.rmSync(outDir, { recursive: true, force: true });
-    fs.mkdirSync(outDir, { recursive: true });
-    new AdmZip(rulesPath).extractAllTo(outDir, true);
-    fs.writeFileSync(marker, rulesPath, 'utf8');
-    return rulesConfigDir(outDir);
-  } catch {
-    return rulesPath; // fall back to the raw path on extraction failure
-  }
-}
-
-// Some rule bundles nest the .cwt files under a config/ subdir; the server wants
-// the directory that directly contains the rule files.
-function rulesConfigDir(dir: string): string {
-  const config = path.join(dir, 'config');
-  return fs.existsSync(config) ? config : dir;
-}
-
-function resolveBundledRulesPath(game: string, cacheDir?: string): string {
-  // Prefer the rules the installed extension already extracted into globalStorage
-  // (a real directory the server can load); the packaged .zip cannot be loaded
-  // directly. Fall back to dev-checkout dirs, then the zip as a last resort.
+// Resolve a rules *directory* the server can load. Priority: the rules the
+// installed extension pulled into globalStorage, then a dev checkout. No bundled
+// .zip and no extraction — the only zip-free sources. Returns undefined when none
+// is found (the caller warns; --rules is the explicit override).
+function resolveBundledRulesPath(game: string, cacheDir?: string): string | undefined {
   const extracted = detectExtensionRulesDir(cacheDir, game);
   if (extracted) return extracted;
   const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
@@ -375,10 +345,8 @@ function resolveBundledRulesPath(game: string, cacheDir?: string): string {
     path.join(repoRoot, 'release', 'rules', game, 'config'),
     path.join(repoRoot, 'submodules', `cwtools-${game}-config`, 'config'),
     game === 'stellaris' ? path.join(repoRoot, 'submodules', 'cwtools-stellaris-config', 'config') : '',
-    path.join(process.cwd(), 'release', 'rules', `${game}-rules.zip`),
-    path.join(repoRoot, 'release', 'rules', `${game}-rules.zip`),
   ].filter(Boolean);
-  return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0]!;
+  return candidates.find(candidate => fs.existsSync(candidate));
 }
 
 export function pathToFileUri(filePath: string): string {

@@ -24,6 +24,7 @@ import {
 import type { CwtoolsMcpConfig } from '../config';
 import { createLspProcessHost, pathToFileUri, resolveRulesCacheRoot, type LspProcessHost } from './lspProcessHost';
 import { detectProjectSupport } from './projectDetect';
+import { readIgnoredDiagnostics, applyDiagnosticIgnoreList } from './projectSettings';
 import { detectExtensionCacheDir } from './vscodeCache';
 
 export function createNodeHostServices(config: CwtoolsMcpConfig): HostServices {
@@ -116,6 +117,15 @@ class LspDiagnosticsHost implements DiagnosticsHost {
   constructor(private readonly lsp: LspHost, private readonly workspaceRoot: string) {}
 
   async getDiagnostics(filter: { file?: string; severity?: string; limit?: number } = {}): Promise<DiagnosticsQueryResult> {
+    return this.applyIgnoreList(await this.queryDiagnostics(filter));
+  }
+
+  private applyIgnoreList(result: DiagnosticsQueryResult): DiagnosticsQueryResult {
+    if (!result.ok || result.diagnostics.length === 0) return result;
+    return applyDiagnosticIgnoreList(result, readIgnoredDiagnostics(this.workspaceRoot));
+  }
+
+  private async queryDiagnostics(filter: { file?: string; severity?: string; limit?: number }): Promise<DiagnosticsQueryResult> {
     const file = filter.file;
     if (file) {
       const resolution = resolveWorkspacePath(this.workspaceRoot, file);

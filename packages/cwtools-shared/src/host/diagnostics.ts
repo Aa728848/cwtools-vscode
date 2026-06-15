@@ -23,9 +23,9 @@ export interface DiagnosticsQueryResult {
   ok: boolean;
   status: DiagnosticsFreshness;
   diagnostics: DiagnosticRecord[];
-  // For whole-workspace queries: total matched vs returned (when capped by limit).
   totalCount?: number;
   truncated?: boolean;
+  suppressedCount?: number;
   freshness?: {
     value: DiagnosticsFreshness;
     pendingKinds: string[];

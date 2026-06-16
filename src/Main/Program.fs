@@ -1924,6 +1924,9 @@ type Server(client: ILanguageClient) =
         let normalised = path.Replace('\\', '/').ToLowerInvariant()
         dynamicDefinitionPathMarkers |> Array.exists normalised.Contains
 
+    let isCompletionHeavyEditPath (path: string) =
+        isDynamicDefinitionPath path || isTypeDefiningPath path
+
     let inlineScriptPathMarker = "common/inline_scripts/"
 
     let tryInlineScriptNameFromPath (path: string) =
@@ -3898,7 +3901,7 @@ type Server(client: ILanguageClient) =
             async {
                 docs.Change p
                 let path = getPathFromDoc p.textDocument.uri
-                if isDynamicDefinitionPath path then
+                if isCompletionHeavyEditPath path then
                     clearFileCachesPreservingSemanticTokens path
                 else
                     forgetFileCaches path
@@ -4874,7 +4877,7 @@ type Server(client: ILanguageClient) =
                         // File modified! We want to cancel semantic updates until it is reopened.
                         // Returning None translates to [[CANCEL]] error so VS Code shifts tokens natively.
                         None
-                    | false, _ when isDynamicDefinitionPath filePath && isCompletionActive () ->
+                    | false, _ when isCompletionHeavyEditPath filePath && isCompletionActive () ->
                         None
                     | false, _ ->
                         let dataArray = computeTokensForFile game filePath fileText
@@ -4908,14 +4911,14 @@ type Server(client: ILanguageClient) =
                             Some(Choice2Of2 { resultId = cachedResultId; edits = [] })
                         else
                             Some(Choice1Of2 { data = Array.toList cachedData; resultId = Some cachedResultId })
-                    | true, _ when isDynamicDefinitionPath filePath ->
+                    | true, _ when isCompletionHeavyEditPath filePath ->
                         // Dynamic definition files are completion-heavy. After each
                         // accepted suggestion, VS Code immediately asks for semantic
                         // token deltas; recomputing them walks the old game AST and
                         // can delay the next completion. Cancel and let VS Code shift
                         // existing tokens until the next stable full refresh.
                         None
-                    | _ when isDynamicDefinitionPath filePath && isCompletionActive () ->
+                    | _ when isCompletionHeavyEditPath filePath && isCompletionActive () ->
                         None
                     | true, (_, oldDataArray, oldResultId) ->
                         let newDataArray = computeTokensForFile game filePath fileText

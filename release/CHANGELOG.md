@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.5.3] - 2026-06-14
+## [2.5.4] - 2026-06-16
 
 ### 🐞 MCP 规则源修复
 - **[修复] `--rules` 自定义规则现在真正生效**：此前 `--rules` 只写入被忽略的 initOption，而 `rules_version: manual` 下 server 实际只读 `rules_folder`（之前硬编码为 globalStorage 公开规则），导致自定义规则被旧公开规则覆盖。现统一解析一次规则路径并同时用于 `bundledRulesPath` 与 `rules_folder`，优先级 `--rules` > 已装插件解压 > dev 目录 > 打包 zip。实测空规则目录→0 类型、真实目录→全类型，证明 `--rules` 为唯一规则源。

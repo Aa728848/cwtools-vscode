@@ -9,6 +9,7 @@
  */
 
 import * as vs from 'vscode';
+import * as path from 'path';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import type {
     AnalyzeDiagnosticErrorResult,
@@ -325,6 +326,70 @@ export class AgentToolExecutor {
         this.lspHandler.invalidateCacheForFile(filePath);
     }
 
+    private extractResultWrittenFiles(result: unknown): string[] {
+        if (!result || typeof result !== 'object') return [];
+        const record = result as Record<string, unknown>;
+        const rawValues = [
+            record.writtenFiles,
+            record.changedFiles,
+            record.filesChanged,
+            record.filesWritten,
+        ];
+        const files: string[] = [];
+        const add = (value: unknown) => {
+            if (typeof value === 'string' && value.trim()) {
+                files.push(value.trim());
+            } else if (Array.isArray(value)) {
+                for (const item of value) add(item);
+            }
+        };
+        for (const value of rawValues) add(value);
+        return Array.from(new Set(files.map(file => {
+            const isWinAbs = /^[a-zA-Z]:[\\/]/.test(file) || file.startsWith('\\\\');
+            const isPosixAbs = file.startsWith('/');
+            return (isWinAbs || isPosixAbs) ? path.resolve(file) : path.resolve(this.workspaceRoot, file);
+        })));
+    }
+
+    private isDiagnosticRelevantFile(filePath: string): boolean {
+        const ext = path.extname(filePath).toLowerCase();
+        return ['.txt', '.gui', '.yml', '.gfx', '.asset', '.cwt', '.entity'].includes(ext);
+    }
+
+    private async requestRevalidateFiles(files: string[]): Promise<Record<string, unknown> | undefined> {
+        const targets = Array.from(new Set(files.filter(file => this.isDiagnosticRelevantFile(file)))).slice(0, 200);
+        if (targets.length === 0) return undefined;
+        try {
+            const client = this.client;
+            if (!client || typeof (client as any).sendRequest !== 'function') {
+                return { ok: false, requested: targets.length, error: 'LSP client unavailable' };
+            }
+            const request = client.sendRequest('workspace/executeCommand', {
+                command: 'cwtools.ai.revalidateFiles',
+                arguments: [targets.map(file => vs.Uri.file(file).toString())],
+            }) as Promise<Record<string, unknown>>;
+            const timeout = new Promise<Record<string, unknown>>(resolve => {
+                setTimeout(() => resolve({
+                    ok: false,
+                    requested: targets.length,
+                    error: 'Timed out requesting CWTools revalidation',
+                }), 2000);
+            });
+            const response = await Promise.race([request, timeout]);
+            return {
+                ok: response?.ok === true,
+                requested: targets.length,
+                response,
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                requested: targets.length,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+
     /** Reset per-file edit failure counters; called at the start of each agent run. */
     resetEditFailureTracking(): void {
         this.fileHandler.resetEditFailureTracking();
@@ -496,10 +561,13 @@ export class AgentToolExecutor {
 
             try {
                 const result = await Promise.race(racePromises);
+                const writtenFiles = this.extractResultWrittenFiles(result);
 
                 // ReadTracker read/write synchronization and Blackboard invalidation cascade (T2.2 & B3)
                 if (readTracker) {
-                    const path = require('path');
+                    for (const file of writtenFiles) {
+                        readTracker.invalidate(file);
+                    }
                     // Multi-agent cascade invalidation (B3)
                     if (toolName === 'merge_results' && result && typeof result === 'object') {
                         const writtenFiles = (result as any).writtenFiles;
@@ -507,6 +575,17 @@ export class AgentToolExecutor {
                             for (const file of writtenFiles) {
                                 readTracker.invalidate(path.resolve(this.workspaceRoot, file));
                             }
+                        }
+                    }
+                }
+                if (writtenFiles.length > 0) {
+                    for (const file of writtenFiles) {
+                        this.invalidateCacheForFile(file);
+                    }
+                    if (result && typeof result === 'object') {
+                        const revalidation = await this.requestRevalidateFiles(writtenFiles);
+                        if (revalidation) {
+                            (result as Record<string, unknown>).revalidation = revalidation;
                         }
                     }
                 }

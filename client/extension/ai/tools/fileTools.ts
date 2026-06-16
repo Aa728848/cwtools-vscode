@@ -2133,7 +2133,7 @@ export class FileToolHandler {
      * Execute safe git operations: status, diff, checkout (revert file to HEAD).
      * Only works when the workspace has a git repository.
      */
-    async gitOps(args: { action: 'status' | 'diff' | 'checkout'; file?: string }): Promise<{ success: boolean; message: string; output?: string }> {
+    async gitOps(args: { action: 'status' | 'diff' | 'checkout'; file?: string }): Promise<{ success: boolean; message: string; output?: string; writtenFiles?: string[] }> {
         const { execSync } = await import('child_process');
         const wsRoot = this.ctx.workspaceRoot;
 
@@ -2196,6 +2196,7 @@ export class FileToolHandler {
                     return {
                         success: true,
                         message: `Successfully reverted ${relPath} to last committed state (HEAD).`,
+                        writtenFiles: [absPath],
                     };
                 }
                 default:

@@ -193,6 +193,12 @@ export class RunLedger {
             if (!run.writtenFiles.includes(storedPayload.filePath)) {
                 run.writtenFiles.push(storedPayload.filePath);
             }
+        } else if (type === 'tool_call_end' && Array.isArray(storedPayload?.writtenFiles)) {
+            for (const filePath of storedPayload.writtenFiles) {
+                if (typeof filePath === 'string' && filePath && !run.writtenFiles.includes(filePath)) {
+                    run.writtenFiles.push(filePath);
+                }
+            }
         } else if (type === 'subagent_end' && Array.isArray(storedPayload?.filesWritten)) {
             for (const filePath of storedPayload.filesWritten) {
                 if (typeof filePath === 'string' && filePath && !run.writtenFiles.includes(filePath)) {

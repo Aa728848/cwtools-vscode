@@ -1148,6 +1148,10 @@ export class AgentRunner {
         const skipped = !!resultRecord?.skipped;
         const resultRef = resultRecord?.resultRef || resultRecord?.fullResultLocalPath;
         const previewSource = typeof resultRecord?.preview === 'string' ? resultRecord.preview : strContent;
+        const rawWrittenFiles = resultRecord?.writtenFiles ?? resultRecord?.changedFiles ?? resultRecord?.filesWritten ?? resultRecord?.filesChanged;
+        const writtenFiles = Array.isArray(rawWrittenFiles)
+            ? rawWrittenFiles.filter((file: unknown): file is string => typeof file === 'string' && file.length > 0)
+            : [];
         return {
             toolName,
             success: !error && !skipped && resultRecord?.success !== false,
@@ -1156,7 +1160,8 @@ export class AgentRunner {
             truncated: !!resultRecord?.truncated,
             resultRef,
             resultSize: strContent.length,
-            preview: previewSource.substring(0, 1000)
+            preview: previewSource.substring(0, 1000),
+            ...(writtenFiles.length > 0 ? { writtenFiles } : {}),
         };
     }
 

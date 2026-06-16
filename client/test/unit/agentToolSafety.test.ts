@@ -1290,6 +1290,41 @@ describe('agent tool topic artifacts', () => {
         }
         expect(fs.readFileSync(targetPath, 'utf8')).to.equal('after\n');
         expect(snapshots).to.deep.include({ filePath: targetPath, previousContent: 'before\n' });
+        expect(result.changedFiles).to.deep.include(targetPath);
+        expect(result.writtenFiles).to.deep.include(targetPath);
+    });
+
+    it('returns command-written files even when no diff snapshot callback is configured', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const scriptDir = path.join(workspaceRoot, 'tools');
+        const scriptPath = path.join(scriptDir, 'change-file-no-callback.js');
+        const targetPath = path.join(workspaceRoot, 'events', 'scripted_change.txt');
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.mkdirSync(scriptDir, { recursive: true });
+        fs.writeFileSync(targetPath, 'before\n', 'utf8');
+        fs.writeFileSync(scriptPath, [
+            "const fs = require('fs');",
+            "fs.writeFileSync('events/scripted_change.txt', 'after\\n', 'utf8');",
+        ].join('\n'), 'utf8');
+
+        const result = await handler.runCommand({
+            command: 'node "tools/change-file-no-callback.js"',
+            timeoutMs: 10000,
+        }, {
+            runnerOptions: {
+                mode: 'utility',
+                topicId: 'media-topic',
+                abortSignal: new AbortController().signal,
+            },
+            onPermissionRequest: async () => true,
+        } as any);
+
+        if (result.exitCode !== 0) {
+            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        }
+        expect(result.changedFiles).to.deep.include(targetPath);
+        expect(result.writtenFiles).to.deep.include(targetPath);
+        expect(result.recordedSnapshots).to.equal(0);
     });
 
     it('omits temporary helper scripts from command-recorded workspace changes', async () => {
@@ -1328,6 +1363,8 @@ describe('agent tool topic artifacts', () => {
         expect(fs.existsSync(helperPath)).to.equal(true);
         expect(snapshots).to.deep.include({ filePath: targetPath, previousContent: 'before\n' });
         expect(snapshots.some(snapshot => snapshot.filePath === helperPath)).to.equal(false);
+        expect(result.changedFiles).to.deep.include(targetPath);
+        expect(result.changedFiles ?? []).to.not.include(helperPath);
     });
 
     it('still records edits to existing project scripts with helper-like names', async () => {
@@ -1362,6 +1399,25 @@ describe('agent tool topic artifacts', () => {
             throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
         }
         expect(snapshots).to.deep.include({ filePath: helperPath, previousContent: 'print("before")\n' });
+    });
+
+    it('returns deployed asset paths as written files for downstream refresh', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const sourcePath = path.join(workspaceRoot, '.cwtools-ai', 'media-topic', 'media', 'generated.asset');
+        const targetRelativePath = 'interface/generated.asset';
+        const targetPath = path.join(workspaceRoot, targetRelativePath);
+        fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+        fs.writeFileSync(sourcePath, 'sound = { name = test }\n', 'utf8');
+
+        const result = await handler.deployModAsset({
+            sourcePath,
+            targetRelativePath,
+            overwrite: true,
+        }, makeContext('media-topic'));
+
+        expect(result.success).to.equal(true);
+        expect(result.finalPath).to.equal(targetPath);
+        expect(result.writtenFiles).to.deep.equal([targetPath]);
     });
 
     it('rejects media deployment targets outside the workspace boundary', async () => {
@@ -1401,6 +1457,38 @@ describe('agent tool progress and aborts', () => {
         } as any;
         return new AgentToolExecutor(client, workspaceRoot);
     }
+
+    it('requests CWTools revalidation for files reported by tool results', async () => {
+        const changedFile = path.join(workspaceRoot, 'events', 'scripted_change.txt');
+        fs.mkdirSync(path.dirname(changedFile), { recursive: true });
+        fs.writeFileSync(changedFile, 'namespace = test\n', 'utf8');
+
+        const sendRequest = sinon.stub().resolves({ ok: true, requested: 1 });
+        const client = {
+            onNotification: () => undefined,
+            sendNotification: () => undefined,
+            sendRequest,
+        } as any;
+        const executor = new AgentToolExecutor(client, workspaceRoot);
+        sinon.stub(executor as any, 'executeInternal').resolves({
+            stdout: '',
+            stderr: '',
+            exitCode: 0,
+            writtenFiles: [changedFile],
+        });
+        const invalidate = sinon.spy();
+
+        const result = await executor.execute('git_ops', { action: 'checkout', file: 'events/scripted_change.txt' }, {
+            runnerOptions: { mode: 'build' },
+            agentRunner: { readTracker: { invalidate } },
+        } as any) as any;
+
+        expect(invalidate.calledWith(changedFile)).to.equal(true);
+        expect(sendRequest.calledOnce).to.equal(true);
+        expect(sendRequest.firstCall.args[0]).to.equal('workspace/executeCommand');
+        expect(sendRequest.firstCall.args[1].command).to.equal('cwtools.ai.revalidateFiles');
+        expect(result.revalidation.ok).to.equal(true);
+    });
 
     it('emits heartbeat progress while a tool is still running and stops after abort', async () => {
         const clock = sinon.useFakeTimers();

@@ -51,6 +51,11 @@ interface CommandFileState {
     hadBom?: boolean;
 }
 
+interface CommandFileChangeResult {
+    changedFiles: string[];
+    recordedSnapshots: number;
+}
+
 // ─── Context type ────────────────────────────────────────────────────────────
 
 /** Structural type for the properties ExternalToolHandler reads from the executor. */
@@ -347,7 +352,7 @@ export class ExternalToolHandler {
 
                 let previousContent: string | null | undefined;
                 let contentCaptured = false;
-                let hadBom = false;
+                let hadBom: boolean | undefined;
                 if (captureContent
                     && stat.size <= COMMAND_SNAPSHOT_MAX_FILE_BYTES
                     && capturedBytes + stat.size <= COMMAND_SNAPSHOT_MAX_TOTAL_BYTES) {
@@ -362,6 +367,19 @@ export class ExternalToolHandler {
                         }
                     } catch {
                         previousContent = undefined;
+                    }
+                } else {
+                    try {
+                        const handle = await fs.promises.open(fullPath, 'r');
+                        try {
+                            const bomBuffer = Buffer.alloc(3);
+                            const read = await handle.read(bomBuffer, 0, 3, 0);
+                            hadBom = read.bytesRead >= 3 && bomBuffer[0] === 0xEF && bomBuffer[1] === 0xBB && bomBuffer[2] === 0xBF;
+                        } finally {
+                            await handle.close();
+                        }
+                    } catch {
+                        hadBom = undefined;
                     }
                 }
 
@@ -393,12 +411,18 @@ export class ExternalToolHandler {
     private async recordCommandFileChanges(
         before: Map<string, CommandFileState> | undefined,
         context?: import('../types').AgentToolContext
-    ): Promise<number> {
-        if (!before) return 0;
+    ): Promise<CommandFileChangeResult> {
+        if (!before) return { changedFiles: [], recordedSnapshots: 0 };
         const record = this.getCommandSnapshotCallback(context);
-        if (!record) return 0;
-
         const after = await this.collectCommandFileState(false);
+        const changedFiles: string[] = [];
+        const changedKeys = new Set<string>();
+        const addChangedFile = (filePath: string) => {
+            const key = this.commandSnapshotKey(filePath);
+            if (changedKeys.has(key)) return;
+            changedKeys.add(key);
+            changedFiles.push(filePath);
+        };
 
         // ─── 自动纠正变动文件的编码格式 (主动防御机制) ───
         for (const [key, afterState] of after) {
@@ -419,7 +443,7 @@ export class ExternalToolHandler {
         // 刷新 after 状态，因为前面执行的自动编码修复可能会改变 after 文件的大小和修改时间
         const refreshedAfter = await this.collectCommandFileState(false);
 
-        let recorded = 0;
+        let recordedSnapshots = 0;
 
         for (const [key, beforeState] of before) {
             if (this.shouldIgnoreCommandChange(beforeState.filePath)) {
@@ -427,9 +451,10 @@ export class ExternalToolHandler {
             }
             const afterState = refreshedAfter.get(key);
             if (!afterState) {
-                if (beforeState.contentCaptured && beforeState.previousContent !== undefined) {
+                addChangedFile(beforeState.filePath);
+                if (record && beforeState.contentCaptured && beforeState.previousContent !== undefined) {
                     record(beforeState.filePath, beforeState.previousContent);
-                    recorded++;
+                    recordedSnapshots++;
                 }
                 continue;
             }
@@ -438,34 +463,48 @@ export class ExternalToolHandler {
                 && Math.abs(beforeState.mtimeMs - afterState.mtimeMs) < 1) {
                 continue;
             }
-            if (!beforeState.contentCaptured || beforeState.previousContent === undefined) {
-                continue;
-            }
 
-            try {
-                if (afterState.size <= COMMAND_SNAPSHOT_MAX_FILE_BYTES) {
-                    const current = await fs.promises.readFile(afterState.filePath, 'utf-8');
-                    if (current === beforeState.previousContent) {
-                        continue;
+            if (beforeState.contentCaptured && beforeState.previousContent !== undefined) {
+                try {
+                    if (afterState.size <= COMMAND_SNAPSHOT_MAX_FILE_BYTES) {
+                        const current = await fs.promises.readFile(afterState.filePath, 'utf-8');
+                        if (current === beforeState.previousContent) {
+                            continue;
+                        }
                     }
+                } catch {
+                    // If the file changed but cannot be read now, still keep the old snapshot.
                 }
-            } catch {
-                // If the file changed but cannot be read now, still keep the old snapshot.
             }
 
-            record(beforeState.filePath, beforeState.previousContent);
-            recorded++;
+            addChangedFile(beforeState.filePath);
+            if (record && beforeState.contentCaptured && beforeState.previousContent !== undefined) {
+                try {
+                    if (afterState.size <= COMMAND_SNAPSHOT_MAX_FILE_BYTES) {
+                        const current = await fs.promises.readFile(afterState.filePath, 'utf-8');
+                        if (current === beforeState.previousContent) {
+                            continue;
+                        }
+                    }
+                } catch {
+                    // If the file changed but cannot be read now, still keep the old snapshot.
+                }
+                record(beforeState.filePath, beforeState.previousContent);
+                recordedSnapshots++;
+            }
         }
 
         for (const [key, afterState] of refreshedAfter) {
             if (before.has(key)) continue;
             if (this.shouldIgnoreCommandChange(afterState.filePath, true)) continue;
-            if (afterState.size > COMMAND_SNAPSHOT_MAX_FILE_BYTES) continue;
-            record(afterState.filePath, null);
-            recorded++;
+            addChangedFile(afterState.filePath);
+            if (record && afterState.size <= COMMAND_SNAPSHOT_MAX_FILE_BYTES) {
+                record(afterState.filePath, null);
+                recordedSnapshots++;
+            }
         }
 
-        return recorded;
+        return { changedFiles, recordedSnapshots };
     }
 
     private async ensureCorrectEncodingAfterCommand(
@@ -834,6 +873,9 @@ export class ExternalToolHandler {
         stderr: string;
         exitCode: number;
         timedOut?: boolean;
+        changedFiles?: string[];
+        writtenFiles?: string[];
+        recordedSnapshots?: number;
     }> {
         // Safety: deny obviously dangerous commands and shell control operators.
         // Approval behavior is mode-agnostic: every mode shares the same
@@ -1068,10 +1110,10 @@ export class ExternalToolHandler {
         let stderrBuf = '';
         const MAX_OUTPUT = 4000;
         let commandChangeBaseline: Map<string, CommandFileState> | undefined;
-        if (this.getCommandSnapshotCallback(context)
-            && !(isAutoApproveSafeCommand && !hasShellControlOperator)) {
+        const shouldTrackCommandChanges = !(isAutoApproveSafeCommand && !hasShellControlOperator);
+        if (shouldTrackCommandChanges) {
             try {
-                commandChangeBaseline = await this.collectCommandFileState(true);
+                commandChangeBaseline = await this.collectCommandFileState(!!this.getCommandSnapshotCallback(context));
             } catch {
                 commandChangeBaseline = undefined;
             }
@@ -1198,12 +1240,13 @@ export class ExternalToolHandler {
             });
         });
 
+        let commandChanges: CommandFileChangeResult = { changedFiles: [], recordedSnapshots: 0 };
         try {
-            const recordedChanges = await this.recordCommandFileChanges(commandChangeBaseline, context);
-            if (recordedChanges > 0) {
+            commandChanges = await this.recordCommandFileChanges(commandChangeBaseline, context);
+            if (commandChanges.changedFiles.length > 0) {
                 context?.onStep?.({
                     type: 'thinking',
-                    content: `run_command recorded ${recordedChanges} file change(s) for the workspace panel.`,
+                    content: `run_command recorded ${commandChanges.changedFiles.length} workspace file change(s).`,
                     timestamp: Date.now(),
                 });
             }
@@ -1211,6 +1254,14 @@ export class ExternalToolHandler {
             // File-change capture is best-effort; command output remains authoritative.
         }
 
+        if (commandChanges.changedFiles.length > 0) {
+            return {
+                ...commandResult,
+                changedFiles: commandChanges.changedFiles,
+                writtenFiles: commandChanges.changedFiles,
+                recordedSnapshots: commandChanges.recordedSnapshots,
+            };
+        }
         return commandResult;
     }
 
@@ -1682,7 +1733,7 @@ export class ExternalToolHandler {
         sourcePath: string;
         targetRelativePath: string;
         overwrite?: boolean;
-    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; finalPath?: string }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; finalPath?: string; writtenFiles?: string[] }> {
         const sourcePath = this.resolveWorkspacePath(args.sourcePath);
         if (!this.isWithinAnyWorkspace(sourcePath)) {
             return { success: false, message: `Source file must be within the workspace: ${args.sourcePath}` };
@@ -1746,6 +1797,7 @@ export class ExternalToolHandler {
                 success: true,
                 message: `Asset deployed: ${args.targetRelativePath}`,
                 finalPath: targetPath,
+                writtenFiles: [targetPath],
             };
         } catch (e) {
             return {

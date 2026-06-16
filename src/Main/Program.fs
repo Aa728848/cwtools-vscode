@@ -2193,60 +2193,87 @@ type Server(client: ILanguageClient) =
                 match gameObj with
                 | None -> parserErrors @ locErrors
                 | Some game ->
-                    gameStateLock.EnterWriteLock()
                     let allocBeforeUpdate = GC.GetTotalAllocatedBytes(false)
-                    let astErrors =
+
+                    gameStateLock.EnterWriteLock()
+                    let updateErrors, priorScriptedCallFiles, gameRefAtUpdate =
                         try
-                            let priorScriptedCallFiles =
+                            let prior =
                                 if isEditAction && not shallowAnalyze && canTryIncrementalScriptedRefresh then
-                                    let definitions = scriptedDefinitionsForFiles game [ name ]
-                                    referenceFilesForDefinitions game definitions
+                                    referenceFilesForDefinitions game (scriptedDefinitionsForFiles game [ name ])
                                 else
                                     []
+                            let errs = game.UpdateFile shallowAnalyze name filetext
+                            errs, prior, (match gameObj with Some g -> g | None -> game)
+                        finally
+                            gameStateLock.ExitWriteLock()
 
-                            let updateErrors = game.UpdateFile shallowAnalyze name filetext
+                    let staged =
+                        if isEditAction && not shallowAnalyze && canTryIncrementalScriptedRefresh then
+                            gameStateLock.EnterReadLock()
+                            try
+                                try game.PrepareScriptedTypes [ name ]
+                                with e ->
+                                    logDiag $"Incremental scripted prepare failed for {name}: {e.Message}"
+                                    None
+                            finally
+                                gameStateLock.ExitReadLock()
+                        else
+                            None
 
-                            if isEditAction && not shallowAnalyze && canTryIncrementalScriptedRefresh then
-                                let handled =
-                                    try game.RefreshScriptedTypes [ name ]
-                                    with e ->
-                                        logDiag $"Incremental scripted refresh failed for {name}: {e.Message}"
-                                        false
-
-                                if handled then
-                                    incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
-                                    clearTypeCaches ()
-                                    markFileStale name "types"
-                                    (try
-                                        locCache.Clear()
-                                        for fileName, errors in
-                                            game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
-                                            locCache.[fileName] <- errors
-                                        evictIfNeeded locCache
-                                     with e -> logDiag $"Incremental loc-error refresh failed for {name}: {e.Message}")
-                                    let priorRevalidateFiles =
-                                        priorScriptedCallFiles
-                                        |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath name)
-                                    if not priorRevalidateFiles.IsEmpty then
-                                        scheduleDeferredDynamicRevalidation priorRevalidateFiles
-                                    monitorLog Refresh $"RefreshScriptedTypes file={name} patches={incrementalScriptedPatchCount}"
-
-                                    if incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
-                                        needsTypeRefresh <- true
-                                        lastTypeRefreshRequestAt <- DateTime.UtcNow
-                                        addPendingRefreshDomains [ "types"; "rules" ]
-                                        incrementalScriptedPatchCount <- 0
+                    if isEditAction && not shallowAnalyze && canTryIncrementalScriptedRefresh then
+                        gameStateLock.EnterWriteLock()
+                        try
+                            let gameStillCurrent =
+                                match gameObj with
+                                | Some g -> System.Object.ReferenceEquals(g, gameRefAtUpdate)
+                                | None -> false
+                            let committed =
+                                if not gameStillCurrent then false
                                 else
+                                    match staged with
+                                    | Some s ->
+                                        (try game.CommitScriptedTypes s
+                                         with e ->
+                                             logDiag $"Incremental scripted commit failed for {name}: {e.Message}"
+                                             false)
+                                    | None -> false
+
+                            if committed then
+                                incrementalScriptedPatchCount <- incrementalScriptedPatchCount + 1
+                                clearTypeCaches ()
+                                markFileStale name "types"
+                                (try
+                                    locCache.Clear()
+                                    for fileName, errors in
+                                        game.LocalisationErrors(true, false) |> List.groupBy _.range.FileName do
+                                        locCache.[fileName] <- errors
+                                    evictIfNeeded locCache
+                                 with e -> logDiag $"Incremental loc-error refresh failed for {name}: {e.Message}")
+                                let priorRevalidateFiles =
+                                    priorScriptedCallFiles
+                                    |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath name)
+                                if not priorRevalidateFiles.IsEmpty then
+                                    scheduleDeferredDynamicRevalidation priorRevalidateFiles
+                                monitorLog Refresh $"RefreshScriptedTypes file={name} patches={incrementalScriptedPatchCount}"
+
+                                if incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
                                     needsTypeRefresh <- true
                                     lastTypeRefreshRequestAt <- DateTime.UtcNow
                                     addPendingRefreshDomains [ "types"; "rules" ]
-                                    clearTypeCaches ()
-                                    markFileStale name "types"
                                     incrementalScriptedPatchCount <- 0
-
-                            updateErrors
+                            else
+                                needsTypeRefresh <- true
+                                lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                addPendingRefreshDomains [ "types"; "rules" ]
+                                clearTypeCaches ()
+                                markFileStale name "types"
+                                incrementalScriptedPatchCount <- 0
                         finally
                             gameStateLock.ExitWriteLock()
+
+                    let astErrors =
+                        updateErrors
                         |> List.map (fun e ->
                             (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
                     let allocAfterUpdate = GC.GetTotalAllocatedBytes(false)

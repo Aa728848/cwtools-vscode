@@ -15,7 +15,8 @@ export const STELLARIS_KNOWLEDGE = `
 - Key-value pairs: \`key = value\`
 - Code blocks: \`key = { ... }\`
 - Boolean values: ONLY \`yes\` or \`no\` (NEVER \`true\`/\`false\`)
-- Comparison operators in triggers: \`>\`, \`<\`, \`>=\`, \`<=\`, \`==\`, \`!=\` (use \`==\` not \`=\` for comparison)
+- Numeric/quantity comparison operators in triggers: \`>\`, \`<\`, \`>=\`, \`<=\`, \`==\`, \`!=\`. Treat \`!=\` like \`>=\`: it belongs to numeric/amount/value comparisons only, not general inequality for IDs, enums, booleans, strings, flags, scopes, or event targets.
+- For non-quantity negation, wrap the normal trigger in \`NOT = { ... }\` instead of writing \`key != value\` unless the rule schema explicitly permits that operator.
 - Comments: \`#\` for line comments
 - Strings: use double quotes \`"like this"\`
 - Variables: prefixed with \`@\` (e.g. \`@my_variable\`)
@@ -34,6 +35,11 @@ export const STELLARIS_KNOWLEDGE = `
   \`\`\`
 - **NEVER suggest adding \`;\` between statements** — this will break the code.
 - Multiple key-value pairs on the same line are common and intentional in PDXScript.
+
+### Execution Order (CRITICAL)
+- Executable PDXScript commands/effects in the same file and block are processed **top-to-bottom in textual order**.
+- Do not assume a later command has already run for an earlier command. For example, \`save_event_target_as\`, flag/variable setup, or scope preparation must appear before the command that uses it.
+- When repairing diagnostics, preserve meaningful statement order; do not sort, hoist, or move commands across setup/use boundaries unless you have verified the gameplay semantics.
 
 ## Override & Load-Order Semantics (CRITICAL — DO NOT ASSUME "LAST FILE WINS")
 **The single most common misconception is that every file/entry is overridden by the last one loaded.** This is FALSE. Stellaris resolves conflicts differently **per folder, and sometimes per entry**. Mods load AFTER vanilla, and later mods after earlier ones (alphabetically by filename within a folder, then by mod load order). Whether "your version" wins depends on the folder's resolution mode:
@@ -87,6 +93,7 @@ Treat common logical scope links as plausible hardcoded native links, then verif
 
 ### Optional Scope Operator \`scope?\` (NEW syntax — DO NOT flag as an error)
 Recent Stellaris versions support the **optional / null-safe scope operator**: a trailing \`?\` on a scope link. \`scope? = { ... }\` is shorthand for "enter \`scope\` only if it exists" — it folds an existence guard into the scope change itself.
+- It is valid in trigger/effect code only when the left-hand key is a real, single scope-link target. This includes saved targets such as \`event_target:my_target? = { ... }\`; the \`?\` is an existence operator, **not part of the target key**. Do not save or search for \`my_target?\`.
 - These two forms are **equivalent**:
   \`\`\`
   # Old form — explicit existence guard:
@@ -100,6 +107,10 @@ Recent Stellaris versions support the **optional / null-safe scope operator**: a
 - **NEVER flag \`scope?\` as a syntax error or suggest removing the \`?\`.** It is valid modern PDXScript.
 - When the target scope may be null/absent, prefer \`scope? = { ... }\` over a separate \`exists = scope\` line — it is more concise and avoids the scope being entered on a non-existent target.
 - Still verify the underlying scope link is real (via \`query_scope\` / completions); the \`?\` only changes existence handling, not whether the link itself is valid.
+- Do **not** use optional scope syntax in \`prescripted_countries/\`; that directory does not support this form.
+- Do **not** append \`?\` to selector/iterator families: \`every_*\`, \`random_*\`, \`any_*\`, \`ordered_*\`, or \`last_*\` (for example, use \`random_owned_planet = { ... }\`, not \`random_owned_planet? = { ... }\`). If the selection needs guarding, use the normal trigger/effect-specific \`limit\`, \`exists\`, or availability checks.
+- Do **not** append \`?\` to value assignment keys such as \`type = country\`, \`scope = <value>\`, or other \`key = value\` fields. These are not scope changes.
+- Do **not** append \`?\` to structural code-block keywords such as \`trigger = { }\`, \`option = { }\`, \`immediate = { }\`, \`after = { }\`, \`limit = { }\`, \`effect = { }\`, or \`hidden_effect = { }\`. These blocks define code structure; they are not scope links.
 
 ## Vanilla Game Cache — Query Strategy
 The CWTools language server has already indexed the entire vanilla game.

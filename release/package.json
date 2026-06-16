@@ -699,12 +699,46 @@
                                                                                                        "default":  "confirm",
                                                                                                        "description":  "%configuration.cwtools.ai.agentFileWriteMode.description%"
                                                                                                    },
+                                                                 "cwtools.ai.approvals.reviewer":  {
+                                                                                                       "scope":  "window",
+                                                                                                       "type":  "string",
+                                                                                                       "enum":  [
+                                                                                                                    "user",
+                                                                                                                    "auto_review"
+                                                                                                                ],
+                                                                                                       "enumDescriptions":  [
+                                                                                                                                "%configuration.cwtools.ai.approvals.reviewer.enum.user%",
+                                                                                                                                "%configuration.cwtools.ai.approvals.reviewer.enum.auto_review%"
+                                                                                                                            ],
+                                                                                                       "default":  "user",
+                                                                                                       "description":  "%configuration.cwtools.ai.approvals.reviewer.description%"
+                                                                                                   },
                                                                  "cwtools.ai.developer.disableSecuritySandbox":  {
                                                                                                                      "scope":  "window",
                                                                                                                      "type":  "boolean",
                                                                                                                      "default":  false,
                                                                                                                      "description":  "%configuration.cwtools.ai.developer.disableSecuritySandbox.description%"
                                                                                                                  },
+                                                                 "cwtools.ai.policy.preset":  {
+                                                                                                "scope":  "window",
+                                                                                                "type":  "string",
+                                                                                                "enum":  [
+                                                                                                             "read-only",
+                                                                                                             "workspace-auto",
+                                                                                                             "workspace-auto-review",
+                                                                                                             "trusted-automation",
+                                                                                                             "full-access"
+                                                                                                         ],
+                                                                                                "enumDescriptions":  [
+                                                                                                                         "%configuration.cwtools.ai.policy.preset.enum.read-only%",
+                                                                                                                         "%configuration.cwtools.ai.policy.preset.enum.workspace-auto%",
+                                                                                                                         "%configuration.cwtools.ai.policy.preset.enum.workspace-auto-review%",
+                                                                                                                         "%configuration.cwtools.ai.policy.preset.enum.trusted-automation%",
+                                                                                                                         "%configuration.cwtools.ai.policy.preset.enum.full-access%"
+                                                                                                                     ],
+                                                                                                "default":  "workspace-auto",
+                                                                                                "description":  "%configuration.cwtools.ai.policy.preset.description%"
+                                                                                            },
                                                                  "cwtools.ai.maxRetries":  {
                                                                                                "scope":  "window",
                                                                                                "type":  "integer",

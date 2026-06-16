@@ -116,6 +116,48 @@ describe('autoReviewer', () => {
         expect(called).to.equal(0);
     });
 
+    it('approves non-inline topic scratch python helpers without an LLM call', async () => {
+        let called = 0;
+        const reviewer = new AutoReviewer(async () => { called++; return '{"verdict":"ask_user","rationale":"unsure"}'; });
+        const decision = await reviewer.review({
+            ...baseRequest,
+            riskLevel: 2,
+            command: 'python ".cwtools-ai\\topic_123\\scratch\\agent_helper.py" --dry-run',
+            classification: ['interpreter'],
+        });
+
+        expect(decision.verdict).to.equal('approve_with_rule');
+        expect(called).to.equal(0);
+    });
+
+    it('keeps arbitrary python scripts under the reviewer decision path', async () => {
+        let called = 0;
+        const reviewer = new AutoReviewer(async () => { called++; return '{"verdict":"deny","rationale":"not a scratch helper"}'; });
+        const decision = await reviewer.review({
+            ...baseRequest,
+            riskLevel: 2,
+            command: 'python scripts/build.py',
+            classification: ['interpreter'],
+        });
+
+        expect(decision.verdict).to.equal('deny');
+        expect(called).to.equal(1);
+    });
+
+    it('does not bypass the reviewer for scratch-looking absolute paths outside cwd', async () => {
+        let called = 0;
+        const reviewer = new AutoReviewer(async () => { called++; return '{"verdict":"deny","rationale":"outside cwd"}'; });
+        const decision = await reviewer.review({
+            ...baseRequest,
+            riskLevel: 2,
+            command: 'python "D:\\other\\.cwtools-ai\\topic_123\\scratch\\agent_helper.py"',
+            classification: ['interpreter'],
+        });
+
+        expect(decision.verdict).to.equal('deny');
+        expect(called).to.equal(1);
+    });
+
     it('caches decisions by command prefix and invalidates on rule changes', async () => {
         let called = 0;
         const reviewer = new AutoReviewer(async () => { called++; return '{"verdict":"approve_once","rationale":"ok"}'; });

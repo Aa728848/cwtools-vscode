@@ -64,6 +64,50 @@ function parseVerdict(raw: string): ReviewerDecision | undefined {
     }
 }
 
+function tokenizeCommandPrefix(command: string, maxTokens = 4): string[] {
+    const tokens: string[] = [];
+    const tokenPattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+    let match: RegExpExecArray | null;
+    while (tokens.length < maxTokens && (match = tokenPattern.exec(command)) !== null) {
+        tokens.push(match[1] ?? match[2] ?? match[3] ?? '');
+    }
+    return tokens;
+}
+
+function normalizeExecutable(rawToken: string): string {
+    const normalized = rawToken.trim().replace(/\\/g, '/').toLowerCase();
+    const slash = normalized.lastIndexOf('/');
+    const base = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+    return base.replace(/\.(exe|cmd|bat|com)$/, '');
+}
+
+function isAgentScratchPythonHelper(req: ApprovalReviewRequest): boolean {
+    if (req.toolName !== 'run_command' || !req.command || req.inlineEval || req.riskLevel > 2) {
+        return false;
+    }
+
+    const tokens = tokenizeCommandPrefix(req.command);
+    const executable = normalizeExecutable(tokens[0] ?? '');
+    if (executable !== 'python' && executable !== 'python3' && executable !== 'py') {
+        return false;
+    }
+
+    const scriptPath = tokens[1];
+    if (!scriptPath || scriptPath.startsWith('-')) {
+        return false;
+    }
+
+    const normalizedPath = scriptPath.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+    const isAbsolutePath = /^[a-z]:\//i.test(normalizedPath) || normalizedPath.startsWith('/');
+    if (isAbsolutePath) {
+        const normalizedCwd = req.cwd?.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+        if (!normalizedCwd || !normalizedPath.startsWith(`${normalizedCwd}/`)) {
+            return false;
+        }
+    }
+    return /(?:^|\/)\.cwtools-ai\/(?:[^/]+\/)?scratch\/agent_helper\.py$/.test(normalizedPath);
+}
+
 export class AutoReviewer {
     private cache = new Map<string, ReviewerDecision>();
 
@@ -83,6 +127,9 @@ export class AutoReviewer {
         // Escalations and top-risk calls always go to the user.
         if (req.escalation || req.riskLevel >= 3) {
             return { verdict: 'ask_user', rationale: 'Escalation or destructive risk level requires the user.' };
+        }
+        if (isAgentScratchPythonHelper(req)) {
+            return { verdict: 'approve_with_rule', rationale: 'Trusted non-inline agent scratch helper script.' };
         }
         const key = this.cacheKey(req);
         if (!req.inlineEval) {
